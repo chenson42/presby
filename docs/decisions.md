@@ -4,6 +4,100 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-043: Tenant administration lives inside `(org)`; `(admin)` and `src/lib/permissions.ts` stay platform-only
+
+**Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P9)
+
+Church, presbytery, and synod administration are **one surface** at `/o/<slug>/admin/...`, gated by tenant permissions from `presby_effective_permissions()` — not three route trees, and not the inherited `(admin)` shell. Which sections render is a function of `(organization_type, effective permissions)`, matching how `section_type` already models org-type variation as data. Putting a church administrator in `(admin)` would make one shell's access depend on two incompatible axes — Edge `FEATURES.*` claims and in-transaction per-org permissions — which is DECISION-035's prohibition relocated into a route group; it is also the "platform admin is above a national admin" error wearing a nav bar. Reuse happens at the component layer: P0.5 extracts shared admin chrome into `src/components/shared/`. New pipeline **P9 — Tenant administration surface**, depends on P1, own Phase 1.
+
+---
+
+## DECISION-042: Staff and employment are their own domain module, not an extension of `officer_terms`
+
+**Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P8)
+
+"Staff" exists today only as a visibility level and a data-source enum. New module `src/lib/db/domain/staff.ts` — ordination is lifelong, service is termed, employment is neither, and a minister's terms of call is a third thing again. **Absence does not block P1**: portal access runs on `memberships` + `role_grants`, both of which exist (DECISION-039); do not invent a staff-based access axis, which would be a second tenancy relation competing with the one the schema is keyed on. **Absence does block P7**, and the public staff block must **not** be derived from `officer_terms` — that would publish every ruling elder to the open internet by virtue of election, violating the public-publication consent G10 requires. Compensation and terms of call are tier 2. New pipeline **P8**, depends on P1, blocks P7.
+
+---
+
+## DECISION-041: The public site lives at `/site/<slug>` under a new `(public)` route group; the verified custom domain is canonical
+
+**Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P3)
+
+Organization-type-neutral (presbyteries and synods get sites too), unambiguous against `/o/`, and it pairs with the editor: `/o/<slug>/site` edits what `/site/<slug>` serves. `(public)` is unauthenticated by contract: reads only through the narrow SECURITY DEFINER published-content reader, `getPlatformDb()` forbidden, no server-side session read in the page body, no `dangerouslySetInnerHTML`. Canonicalisation: a verified custom domain is canonical and self-referencing; `<slug>.presby.app` 301s to it while verification holds and **becomes self-canonical during a lapse** — the S6 fail-soft interlock, because a canonical tag pointing at broken DNS would de-index the congregation at the worst possible moment; `presby.app/site/<slug>` is never canonical, always `noindex`, an internal rewrite target that 308s on a direct hit. **Rule: canonical always points at the host currently serving verified content.**
+
+---
+
+## DECISION-040: An unauthorized org deep-link names the organization; `platform_status` is what stays indistinguishable
+
+**Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P0)
+
+Supersedes the identical-404 ruling recorded in the original Phase 2 section. Four cases: active membership → enter; ended membership → named and dated; **slug resolves in the public org tree with no membership → 403 naming the organization, byte-identical across `managed` / `invited` / `unmanaged`**; slug resolves to nothing → 404. Naming the org leaks only the org tree, which is already public (§17) and which P2 is building a public search over. What must not leak is **which congregations are tenants** — commercial and pastoral information PC(USA) does not publish. The 403's org name comes from a narrow public-tree read returning name and type only, never from `presby_user_organizations`. **"Request access" is P1, not P0**: it needs a pending-request table and a notification target, and no tenant permission catalog exists to name a recipient until P1. Its Phase 1 must treat a request button behind a public org list as a mass-notification vector against every congregation in the denomination.
+
+---
+
+## DECISION-039: `memberships` is the universal relationship anchor; a position never grants access without one
+
+**Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P0)
+
+S10 required no query change: `officer_terms` and `role_grants` both composite-FK into `memberships(person_id, organization_id)` (`drizzle/0008_presby_domain.sql:524`, `:546`), so a position at an org is **structurally impossible** without a membership row there, and `presby_available_organizations` — which joins `memberships` with **no `current_roll` filter** — already returns the presbytery for a ruling elder on a presbytery committee. Roll status is a *column on the relationship*, not its meaning. The real defect is that the FK does not constrain `ended_on`: an active officer term can outlive its membership, silently stranding a seated officer on a date with no corresponding write (F29's shape applied to office). Fix is a trigger — **ending a membership while an open term or role grant exists at that org fails loudly, naming the term**; it never auto-ends the term, because ending a term is a minuted act. Chooser cards therefore carry **no membership language**. Stewardship still grants nothing: the card query joins `memberships` and must never join `organizations.path` or `parent_id`.
+
+---
+
+## DECISION-038: A custom domain gets its own org-scoped session; the platform origin remains the sole identity provider
+
+**Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P10)
+
+S2 is overridden by S9 — but **not** by making NextAuth multi-origin. `src/auth.ts` and `src/lib/auth/config.ts` are unmodified and continue to serve exactly one origin; all credential entry, OAuth, and TOTP stay on the platform origin, which avoids an N-entry Google redirect allowlist entirely. A verified church host receives a separate, `__Host-`-prefixed, org-scoped cookie minted from a single-use handoff token.
+
+**The isolation boundary:** a session minted on a third-party-controlled host is scoped to one organization, carries no platform authority, and cannot be exchanged for a session on any other origin. The context switcher and platform-admin route are links back to the platform origin, not surfaces served on the church's host.
+
+The token must prove: issuer (key distinct from the session secret); audience bound to the exact host and its verified org; subject + auth time + `amr`; single use with atomic `jti` consume; TTL ≤ 60s; non-transitivity (no reverse token). Threats answered: post-verification DNS repointing (audience binding + single use), cookie tossing from a sibling host such as `mail.firstpres.org` (`__Host-` prefix, which NextAuth's default cookie name lacks), 2FA downgrade (`amr` carry-forward, challenge on the platform origin before minting). `trustHost: true` becomes a verified-host allowlist riding P5's Edge host map. **Prerequisite: `next-auth` beta.31 → beta.32 (GHSA-x445-f3h2-j279, OAuth cookies not provider-bound) ships first** — building a multi-origin handoff on a library with an open advisory about cookies not being bound to their issuer is indefensible. Own pipeline (**P10**), depends on P5, last in the program, running-server e2e gate mandatory.
+
+---
+
+## DECISION-037: `twoFactorRequired` stays a session-level most-restrictive-wins boolean; the Edge 2FA gate extends to `/o/*` now
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** `2026-08-18-backbone-and-org-sites` (P0)
+
+`presby_two_factor_required()` already ORs across the user's orgs, so the current claim over-enforces rather than under-enforces, and `twoFactorVerified` is legitimately session-level because possession of a factor does not become unproven on switching congregations. Per-org refinement can therefore only ever relax the gate — the safe direction to defer in. When P1 wants it, the shape is an **additive** JWT claim (`twoFactorRequiredOrgIds`) alongside the unchanged boolean: no table changes, no migration, and `projectJWTOntoSession`'s conservative default already covers in-flight sessions. The gate move is pulled forward from P1 to P0 (one line in `src/proxy.ts`) so no tier-2 org page can ever ship ahead of it; safe because `/totp` already walks an un-enrolled user into `/account/2fa` rather than stranding them.
+
+---
+
+## DECISION-036: shadcn/ui is initialised properly as a P0 prerequisite, at zero new runtime dependencies; migrating existing surfaces is a separate pipeline
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** `2026-08-18-backbone-and-org-sites` (P0)
+
+`class-variance-authority`, `clsx`, `tailwind-merge`, `@radix-ui/react-slot` and `lucide-react` are already installed but `src/lib/utils.ts` and `cn()` do not exist and `components.json` was never created — the design system was paid for and never taken delivery of. P0 adds `cn()`, `components.json`, exactly three generated primitives (`button`, `card`, `badge`, all server-safe), and expands `globals.css` from 6 tokens to the shadcn set while keeping every existing token name working. Blocking for P0 because the chooser is the first new user-facing page in a program explicitly asked to be consistent, and shipping the ninth hand-rolled copy of the same button string is the wrong call. The rest — 7 hand-rolled tables, 8 hand-rolled buttons, regenerating `alert-dialog.tsx`, dark-mode strategy, reconciling the 562-line `docs/ui-standards.md` with real primitives — is **P0.5 — Design foundation**, a parallel pipeline that must land before P3. `@radix-ui/react-alert-dialog` and `tw-animate-css` are pre-approved for P0.5; `next-themes` is deferred pending the dark-mode ruling.
+
+---
+
+## DECISION-035: Org membership is authorized in the RSC layer, never at the Edge; the org list is read per request and never cached in the JWT
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** `2026-08-18-backbone-and-org-sites` (P0)
+
+`src/proxy.ts` enforces authentication, active status, and 2FA for `/o/*` and stops there — no `PROTECTION_RULES` entry, because `FEATURES.*` is the platform axis and org membership is the tenant axis. `resolveOrgContext(userId, slug)` resolves the slug *within the user's own membership set* and feeds `withOrgContext`, which re-checks inside the transaction. `presby_available_organizations` is dropped and recreated as `presby_user_organizations`, returning `platform_status` and `ended_on` and filtering neither — policy moves to two TypeScript wrappers, which lets one function answer "which orgs can I enter," "is my church still being set up," and "did my access end," and makes an enumeration-safe three-way response possible. Free to change today: the function has exactly one wrapper and zero call sites. The list is read per request, matching the precedent set by `developer/guard.ts` reading `is_platform_admin` live, because a JWT-cached membership list is the stale-authorization bug and buys nothing on a gate path that re-checks in-transaction anyway.
+
+**Consequence, stated so nobody "optimizes" it back:** the Edge cannot pre-filter `/o/<slug>` by membership. That is correct, not a limitation.
+
+---
+
+## DECISION-034: Post-login routing splits into `/launch`, `/orgs`, and `/no-organization`; `/` stays anonymous; org URLs are `/o/<slug>` under a new `(org)` route group
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** `2026-08-18-backbone-and-org-sites` (P0)
+
+`src/app/page.tsx` never redirects a signed-in user — it stays the anonymous backbone page, because P2 wants it static and P5 makes the meaning of `/` host-dependent. `/launch` is the single post-authentication target and holds the nine-case destination matrix as a pure, unit-tested function; `/orgs` is the chooser and never auto-forwards, so a zero-org platform admin can still reach the Developer card; `/no-organization` is the zero-org page. The org segment is the **slug**, not the id: the org tree is already public, and P5 needs the same token as the platform subdomain label. The slug is therefore **immutable** — renaming a congregation changes `name`, never `slug` — enforced by a DNS-label CHECK constraint and a column comment; a future `organization_slug_aliases` table serving 301s is the escape hatch. New route group `(org)`: auth-only and org-scoped, `withOrgContext` only, `getPlatformDb()` forbidden in the subtree, no page may assume the user arrived via the chooser. The public site tree (P3/P5) must **not** live under `/o/` — two trust surfaces must not share a URL prefix. Requires CLAUDE.md updates to Project Layout, the route-group rules, and a new `Post-Login Landing` section, which is referenced by the agent instructions today but does not exist.
+
+---
+
 ## DECISION-033: The 2FA requirement is per-congregation, resolved at sign-in by a SECURITY DEFINER function
 
 **Status:** Resolved

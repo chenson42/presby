@@ -66,11 +66,13 @@ describe("GET /api/cron/maintenance — auth", () => {
 
   it("returns 200 with numeric deleted counts on a correct bearer token", async () => {
     vi.stubEnv("CRON_SECRET", "test-secret");
-    // Simulate: 2 expired pwd-reset rows, 1 email-verify row, 0 totp rows.
+    // Simulate: 2 expired pwd-reset rows, 1 email-verify row, 0 totp rows,
+    // then the roll reconcile rolling 4 memberships forward.
     mockExecute
       .mockResolvedValueOnce({ rows: [{ id: "a" }, { id: "b" }] }) // pwd_reset
       .mockResolvedValueOnce({ rows: [{ id: "c" }] }) // email_verify
-      .mockResolvedValueOnce({ rows: [] }); // totp_pending
+      .mockResolvedValueOnce({ rows: [] }) // totp_pending
+      .mockResolvedValueOnce({ rows: [{ fixed: 4 }] }); // roll reconcile
 
     const res = await GET(makeRequest("Bearer test-secret"));
 
@@ -81,15 +83,22 @@ describe("GET /api/cron/maintenance — auth", () => {
       deletedPwdReset: 2,
       deletedEmailVerify: 1,
       deletedTotpPending: 0,
+      rollCacheRolledForward: 4,
     });
   });
 
-  it("calls db.execute three times in parallel for a valid request", async () => {
+  it("runs the roll-cache reconcile as the fourth statement", async () => {
     vi.stubEnv("CRON_SECRET", "test-secret");
 
     await GET(makeRequest("Bearer test-secret"));
 
-    // All three DELETE statements must fire (Promise.all — not short-circuited).
-    expect(mockExecute).toHaveBeenCalledTimes(3);
+    // Three DELETEs must fire (Promise.all — not short-circuited), plus the
+    // F29 reconcile: future-dated roll actions take effect on a day with no
+    // corresponding write, so nothing but this daily call fixes the cache.
+    // Assert what the fourth statement IS, not just that there are four — a
+    // bare count goes stale the next time this route grows a statement.
+    expect(mockExecute).toHaveBeenCalledTimes(4);
+    const fourth = mockExecute.mock.calls[3][0];
+    expect(JSON.stringify(fourth)).toContain("presby_reconcile_current_roll");
   });
 });

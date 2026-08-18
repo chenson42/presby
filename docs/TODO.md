@@ -43,7 +43,7 @@ detail lives in the linked doc, not here.
 - [ ] Extract duplicated recovery-codes helpers (`(admin)/admin/2fa/actions.ts` ↔ `(account)/account/2fa/actions.ts`) into `src/lib/` — carried since 05-17; longer-term, consider consolidating the two 2FA surfaces into one implementation (product decision) — code + security 2026-07-11
 - [ ] Batch-bump routine low-risk deps (Radix, Tailwind patch, React types, Resend, otplib, lucide, tsx, Playwright, Vitest) in one PR — deps 2026-07-11
 - [ ] Watch for `drizzle-kit@1.0.0` stable (resolves esbuild GHSA-67mh-4wv8-2f99; treat as major-version project with Neon branch smoke) — deps 2026-07-11; Next 16.3.0 taken 2026-08-09 (resolved the bundled-postcss CVEs; 48/48 e2e)
-- [ ] Consider a `db.transaction(`-with-neon-http grep tripwire (mirror of check:sql-date) — the BUG-1 class; retro 2026-07-11 #2
+- [ ] Consider a `db.transaction(`-with-neon-http grep tripwire (mirror of check:sql-date) — the BUG-1 class; retro 2026-07-11 #2. **Largely moot for the app connection since the F28 driver switch** (neon-serverless supports transactions); close deliberately or re-scope to any remaining neon-http call sites — `docs/work-log/2026-08-18-stale-test-guards.md`
 - [ ] Schema comment on `emailQueue` pointing at `RawQueueRow`/`fromRaw()` in `src/lib/email/queue.ts` so future columns don't silently skip the atomic-claim path — code 2026-07-11
 - [ ] ADR for the "text, not pgEnum" status-column convention (or add DB CHECK constraints) — security 2026-07-11 (observational)
 - [ ] Next release slot: run a standalone test-coverage sweep (don't rely on incidental Phase 5 numbers) — retro 2026-07-11 #6
@@ -61,6 +61,7 @@ detail lives in the linked doc, not here.
 
 ## Done
 
+- [x] 2026-08-18 — Stale test guards repaired: deleted the obsolete neon-http `db.transaction()` guard (moot since the F28 driver switch) and re-pointed the cron-maintenance assertion at the F29 roll reconcile instead of a bare call count; suite green again at 424 — SHIP IT — `docs/work-log/2026-08-18-stale-test-guards.md`
 - [x] 2026-08-09 — Enforcement batch from the Fable external review: CI runs both tripwires + `npm audit` + commit-grammar job; dependabot; e2e-in-CI on ephemeral Neon branch + playwright `webServer`; cadence-check SessionStart hook; pre-push PreToolUse gate (Rule 5 mechanized); `Work-Log:` commit trailer (required on feat/fix); `AGENTS.md` shim; opt-in Claude PR review — `docs/work-log/2026-08-09-enforcement-batch.md`
 - [x] 2026-07-13 — PR #3 closed as superseded (its skill copy was the pre-generalization fork variant; main's port from 20fb316 stands); contribution kit landed as `docs/starter-contributions/README.md` with a live-status banner (stale "dormant" caveat + top-down PR order removed); fork-sync skills + kit added to the functionality map
 - [x] 2026-07-12 — Functionality map harvested from huddleup.health: `docs/product/functionality-map.md` + SessionStart index hook + Workflow Rule 14 + release-notes/personalize-starter wiring — `docs/work-log/2026-07-12-functionality-map.md`
@@ -111,13 +112,20 @@ Full context in `docs/STATE.md`. Findings referenced as F<n> live in
 - [ ] Seed derived groups at org creation (F16) — the officer trigger raises
       until this exists
 - [ ] Remove the `ADMIN_ROLE` wildcard (invariant 6). Bounded, not removed
-- [ ] Object-storage adapter for `people.photo_key` (F13)
+- [ ] Photo storage service + database-backed blob table for `people.photo_key`
+      (DECISION-030): tenant-scoped blob table with the composite key, an
+      adapter interface, and a review rule that no page/action reads the blob
+      table directly. Cloud-storage adapter deferred until scale demands it (F13
+      accepted knowingly)
 - [ ] Household-grouped transfer claim flow (F20)
 
 ### Decisions open for the user
-- [ ] The name. `/personalize-starter` is un-run; files still say `presby`
-- [ ] D9 sequencing — should Phase 2 partly precede Phase 1, given a presbytery's
-      launch-day job is holding records about non-tenant churches?
+- [ ] The name. `/personalize-starter` is un-run; the DB role, SQL functions and
+      migrations say `presby`, `package.json` still says `claudecode-nextjs-starter`
+- [ ] D9 sequencing — **deferred 2026-08-18: congregation (Phase 1) and
+      presbytery (Phase 2) are both important; neither is subordinate.** Nothing
+      is live yet, so there is no forcing function. Revisit when the Roll UI has
+      to pick an audience — that is the first build that cannot stay neutral
 - [ ] A separate private repo for versioned private material. `private/` is
       untracked scratch only
 

@@ -50,9 +50,9 @@ declare
   t text;
   tenant_tables text[] := array[
     'organization_settings', 'org_units',
-    'households', 'people', 'addresses', 'contact_methods',
+    'households', 'person_profiles', 'addresses', 'contact_methods',
     'person_relationships',
-    'custom_field_definitions', 'person_custom_values', 'tags', 'person_tags',
+    'tags', 'person_tags',
     'person_milestones', 'person_notes', 'follow_ups',
     'talent_types', 'person_talents', 'background_checks', 'person_medical',
     'roll_actions',
@@ -83,21 +83,28 @@ end $$;
 -- in organization_settings, which carries the standard policy above.
 grant select on organizations to presby_app;
 
--- person_links is the one deliberate seam between orgs (D1). It cannot use the
--- standard predicate. Either side sees that a link exists and the counterpart's
--- id — for a certificate of transfer both congregations already know this, so
--- the disclosure is correct rather than merely tolerated. The counterpart's
--- person row stays protected by people's own policy.
-alter table person_links enable row level security;
-alter table person_links force  row level security;
-drop policy if exists link_visible_to_either_side on person_links;
-create policy link_visible_to_either_side on person_links
+-- `people` is GLOBAL (D1). It carries no organization_id, so it cannot use the
+-- standard predicate: a person row is visible when the current org holds a
+-- profile for them.
+--
+-- This is the highest-consequence policy in the schema. `people` is the one
+-- table where a bug leaks identity across congregations, so it is deliberately
+-- the narrowest possible predicate and nothing else may be added to it.
+--
+-- Duplicate detection genuinely needs to look at rows the caller cannot read
+-- ("is this person already in the system?"). That does NOT relax this policy.
+-- It runs through a SECURITY DEFINER matcher that returns a match token and
+-- minimal disclosure, never a row — the same shape as transfer_certificates.
+alter table people enable row level security;
+alter table people force  row level security;
+drop policy if exists person_visible_via_profile on people;
+create policy person_visible_via_profile on people
   using (exists (
-    select 1 from people p
-     where p.id in (person_links.person_a_id, person_links.person_b_id)
-       and p.organization_id = presby_current_org()
+    select 1 from person_profiles pp
+     where pp.person_id = people.id
+       and pp.organization_id = presby_current_org()
   ));
-grant select, insert, delete on person_links to presby_app;
+grant select, insert, update on people to presby_app;
 
 -- transfer_certificates spans two orgs by design: the losing church issues and
 -- the receiving church claims by token.
@@ -156,6 +163,11 @@ create trigger roll_actions_freeze
 
 -- Invariant 7: a person row is never hard-deleted. Use people.merged_into_id.
 revoke delete on people from presby_app;
+
+-- Supports the person_visible_via_profile policy's EXISTS. Without it, every
+-- read of `people` degrades to a scan of person_profiles.
+create index if not exists person_profiles_person_org_idx
+  on person_profiles (person_id, organization_id);
 
 -- ---------------------------------------------------------------------------
 -- Invariant 5: session and diaconate membership is derived, never edited

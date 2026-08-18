@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations, organizationType } from "./org";
-import { people } from "./people";
+import { personProfiles } from "./people";
 import { groups } from "./groups";
 import { users } from "../schema";
 
@@ -132,7 +132,7 @@ export const roleGrants = pgTable(
     ),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [people.id, people.organizationId],
+      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
       name: "role_grants_person_fk",
     }),
     foreignKey({

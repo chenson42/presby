@@ -5,10 +5,13 @@
 Ledger, giving, events, worship, and check-in are excluded pending their own requirements pass.
 Sites and tickets are sketched because their shape constrains Phase 0 decisions.
 
-**Revision 2 changes:** roll approval is a status on the action row, not a meetings module (§7);
-the person model is driven by congregational practice rather than by the SASR, and now covers
-everything fpcw's `members` table carries plus the common field set across Planning Center, Breeze,
-Rock, and ChurchCRM (§5, §6).
+**Revision 2:** roll approval is a status on the action row, not a meetings module; the person model
+is driven by congregational practice rather than by the SASR, and covers everything fpcw's `members`
+table carries plus the common field set across Planning Center, Breeze, Rock, and ChurchCRM.
+
+**Revision 3:** **D1 reversed — `people` is global** (§6). Custom fields removed; tags are the only
+tenant-extensible attribute (D8). `person_links` deleted. Implemented in `src/lib/db/domain/`, with
+generated ER diagrams in §4 and a live reference at `/developer`.
 
 ---
 
@@ -36,7 +39,7 @@ Rock, and ChurchCRM (§5, §6).
 
 | # | Decision | Choice | If we change it |
 |---|---|---|---|
-| D1 | Person scope | **Org-scoped `people` + explicit `person_links`** | Global `people` makes transfers trivial but `people` becomes a shared PII table and RLS stops being a simple org predicate. Highest-cost reversal here. |
+| D1 | Person scope | **Global `people` + org-scoped `person_profiles`** | *Reversed after review.* Decided on polity, not convenience: ministers of Word and Sacrament are members of the **presbytery** (G-2.0502, G-2.0503) while ruling elders are members of the **congregation**, so one human's roll and service routinely sit at different orgs. Org-scoped people forced two rows per pastor and minted a duplicate on every transfer. Cost: `people` is a cross-tenant surface and its policy is an EXISTS, not a column compare. |
 | D2 | Event primitive | **Shared column contract across tables**, not one polymorphic table | Polymorphic loses foreign keys and typed columns. |
 | D3 | Roll approval | **Status on `roll_actions`** (`pending → approved`), free-text minute reference. Meetings/agenda automation deferred (§16). | Full meetings module gives a real FK and serves minutes review, but is not worth putting on the Phase 1 critical path. |
 | D4 | Demographics | **Per-person, tier 3**; disability behind per-church opt-in | Aggregate-only removes consent machinery but the SASR can no longer self-generate. |
@@ -103,21 +106,19 @@ erDiagram
 erDiagram
   organizations ||--o{ addresses : "organization_id"
   households |o--o{ addresses : "household_id"
-  people |o--o{ addresses : "person_id"
+  person_profiles |o--o{ addresses : "person_id"
   organizations ||--o{ contact_methods : "organization_id"
-  people ||--o{ contact_methods : "person_id"
+  person_profiles ||--o{ contact_methods : "person_id"
   organizations ||--o{ households : "organization_id"
   org_units |o--o{ households : "org_unit_id"
-  organizations ||--o{ people : "organization_id"
   users |o--o{ people : "user_id"
-  households |o--o{ people : "household_id"
-  org_units |o--o{ people : "org_unit_id"
-  people ||--o{ person_links : "person_a_id"
-  people ||--o{ person_links : "person_b_id"
-  users |o--o{ person_links : "established_by"
+  organizations ||--o{ person_profiles : "organization_id"
+  people ||--o{ person_profiles : "person_id"
+  households |o--o{ person_profiles : "household_id"
+  org_units |o--o{ person_profiles : "org_unit_id"
   organizations ||--o{ person_relationships : "organization_id"
-  people ||--o{ person_relationships : "person_id"
-  people |o--o{ person_relationships : "related_person_id"
+  person_profiles ||--o{ person_relationships : "person_id"
+  person_profiles |o--o{ person_relationships : "related_person_id"
 ```
 
 ### C. Person extensions
@@ -126,25 +127,25 @@ erDiagram
 erDiagram
   organizations ||--o{ background_checks : "organization_id"
   users |o--o{ background_checks : "recorded_by"
-  people ||--o{ background_checks : "person_id"
+  person_profiles ||--o{ background_checks : "person_id"
   organizations ||--o{ follow_ups : "organization_id"
-  people ||--o{ follow_ups : "person_id"
-  people |o--o{ follow_ups : "assigned_to_person_id"
+  person_profiles ||--o{ follow_ups : "person_id"
+  person_profiles |o--o{ follow_ups : "assigned_to_person_id"
   organizations ||--o{ person_medical : "organization_id"
-  people ||--o{ person_medical : "person_id"
+  person_profiles ||--o{ person_medical : "person_id"
   organizations ||--o{ person_milestones : "organization_id"
   organizations |o--o{ person_milestones : "performed_by_org_id"
   roll_actions |o--o{ person_milestones : "roll_action_id"
-  people ||--o{ person_milestones : "person_id"
-  people |o--o{ person_milestones : "officiant_person_id"
+  person_profiles ||--o{ person_milestones : "person_id"
+  person_profiles |o--o{ person_milestones : "officiant_person_id"
   organizations ||--o{ person_notes : "organization_id"
   users ||--o{ person_notes : "author_user_id"
-  people ||--o{ person_notes : "person_id"
+  person_profiles ||--o{ person_notes : "person_id"
   organizations ||--o{ person_tags : "organization_id"
-  people ||--o{ person_tags : "person_id"
+  person_profiles ||--o{ person_tags : "person_id"
   tags ||--o{ person_tags : "tag_id"
   organizations ||--o{ person_talents : "organization_id"
-  people ||--o{ person_talents : "person_id"
+  person_profiles ||--o{ person_talents : "person_id"
   talent_types ||--o{ person_talents : "talent_type_id"
   organizations ||--o{ tags : "organization_id"
   organizations ||--o{ talent_types : "organization_id"
@@ -156,16 +157,14 @@ erDiagram
 erDiagram
   organizations ||--o{ roll_actions : "organization_id"
   users |o--o{ roll_actions : "approved_by"
-  person_links |o--o{ roll_actions : "counterpart_link_id"
   users ||--o{ roll_actions : "proposed_by"
-  people ||--o{ roll_actions : "person_id"
+  person_profiles ||--o{ roll_actions : "person_id"
   organizations ||--o{ transfer_certificates : "issuing_org_id"
   people ||--o{ transfer_certificates : "issuing_person_id"
   households |o--o{ transfer_certificates : "issuing_household_id"
   organizations |o--o{ transfer_certificates : "receiving_org_id"
   roll_actions |o--o{ transfer_certificates : "dismissal_action_id"
   roll_actions |o--o{ transfer_certificates : "reception_action_id"
-  person_links |o--o{ transfer_certificates : "person_link_id"
 ```
 
 ### E. Officers
@@ -174,10 +173,10 @@ erDiagram
 erDiagram
   organizations ||--o{ officer_terms : "organization_id"
   users ||--o{ officer_terms : "recorded_by"
-  people ||--o{ officer_terms : "person_id"
+  person_profiles ||--o{ officer_terms : "person_id"
   organizations ||--o{ ordinations : "organization_id"
   organizations |o--o{ ordinations : "ordaining_org_id"
-  people ||--o{ ordinations : "person_id"
+  person_profiles ||--o{ ordinations : "person_id"
 ```
 
 ### F. Groups
@@ -186,7 +185,7 @@ erDiagram
 erDiagram
   organizations ||--o{ group_memberships : "organization_id"
   groups ||--o{ group_memberships : "group_id"
-  people ||--o{ group_memberships : "person_id"
+  person_profiles ||--o{ group_memberships : "person_id"
   organizations |o--o{ group_types : "organization_id"
   organizations ||--o{ groups : "organization_id"
   group_types ||--o{ groups : "group_type_id"
@@ -208,7 +207,7 @@ erDiagram
   organizations ||--o{ role_grants : "organization_id"
   app_roles ||--o{ role_grants : "role_id"
   users |o--o{ role_grants : "granted_by"
-  people |o--o{ role_grants : "person_id"
+  person_profiles |o--o{ role_grants : "person_id"
   groups |o--o{ role_grants : "group_id"
 ```
 
@@ -218,14 +217,14 @@ erDiagram
 erDiagram
   organizations ||--o{ consents : "organization_id"
   users |o--o{ consents : "recorded_by"
-  people ||--o{ consents : "person_id"
-  people |o--o{ consents : "granted_by_person_id"
+  person_profiles ||--o{ consents : "person_id"
+  person_profiles |o--o{ consents : "granted_by_person_id"
   organizations ||--o{ person_demographics : "organization_id"
-  people ||--o{ person_demographics : "person_id"
+  person_profiles ||--o{ person_demographics : "person_id"
   organizations ||--o{ person_disabilities : "organization_id"
-  people ||--o{ person_disabilities : "person_id"
+  person_profiles ||--o{ person_disabilities : "person_id"
   organizations ||--o{ person_privacy : "organization_id"
-  people ||--o{ person_privacy : "person_id"
+  person_profiles ||--o{ person_privacy : "person_id"
 ```
 
 ### J. Reporting
@@ -278,6 +277,64 @@ create table org_units (
 ## 5. Section B — People and households
 
 Superset of fpcw's `members` plus the common field set across the surveyed ChMS tools.
+
+**The D1 split.** `people` is global and holds identity only. `person_profiles` is org-scoped and
+holds everything a particular organization knows.
+
+```sql
+create table people (                 -- GLOBAL. No organization_id.
+  id, user_id, title, first_name, preferred_name, middle_name, last_name,
+  suffix, former_name, date_of_birth, birth_year_only, date_of_death,
+  merged_into_id
+);
+
+create table person_profiles (        -- org-scoped
+  id, organization_id, person_id,
+  org_unit_id, household_id, household_role,
+  marital_status, anniversary_date, occupation, employer, school, grade,
+  primary_language, photo_key,
+  engagement_status, first_visit_date, how_heard,
+  current_roll, current_roll_since,
+  external_ids, mailchimp_status,
+  unique (person_id, organization_id)   -- the composite-FK target
+);
+```
+
+`people` is deliberately thin. It is the one surface shared across tenants, so every column on it is
+a column one church can see because another church entered it. Anything a specific congregation
+knows lives on the profile.
+
+**F2 survives the reversal.** Child tables still declare composite foreign keys; only the target
+moved:
+
+```sql
+foreign key (person_id, organization_id)
+  references person_profiles (person_id, organization_id)
+```
+
+A row in org B can therefore still only reference a person who has a profile in org B. The
+guarantee is unchanged.
+
+**`people`'s RLS policy is the highest-consequence one in the schema**, since it is the only table
+where a bug leaks identity between congregations:
+
+```sql
+create policy person_visible_via_profile on people
+  using (exists (select 1 from person_profiles pp
+                  where pp.person_id = people.id
+                    and pp.organization_id = presby_current_org()));
+```
+
+Duplicate detection genuinely needs to read rows the caller cannot see ("is this person already in
+the system?"). That does **not** relax the policy: it runs through a `security definer` matcher
+returning a match token and minimal disclosure, never a row, which is the same shape as
+`transfer_certificates`.
+
+**`person_links` is deleted.** Its only job was joining org-scoped duplicates of one human. With
+global `people` there are no duplicates, so the table, its bespoke cross-tenant policy, and the
+disclosure it leaked all disappear. `transfer_certificates` remains, because authorizing a
+dismissal/reception pair was always a separate job.
+
 
 ```sql
 create table people (

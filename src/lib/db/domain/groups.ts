@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
-import { people } from "./people";
+import { personProfiles } from "./people";
 
 /**
  * Groups. See docs/schema-design.md section F.
@@ -75,10 +75,11 @@ export const groups = pgTable(
 );
 
 /**
- * Group membership is org-scoped independently of the person's home org: a
- * ruling elder from a congregation serving on a presbytery committee has a
- * `people` row at the presbytery, joined by personLinks to their congregational
- * record.
+ * Group membership is org-scoped independently of where a person's membership
+ * roll sits. A ruling elder whose roll is at a congregation but who serves on a
+ * presbytery committee simply holds a person_profile at each — one global
+ * `people` row, two profiles. This is also how an installed pastor works, since
+ * ministers of Word and Sacrament are members of the presbytery (G-2.0502).
  *
  * Rows with source = 'derived' are owned by the officerTerms trigger. The
  * derived roster is MATERIALIZED here rather than exposed as a view, because
@@ -115,7 +116,7 @@ export const groupMemberships = pgTable(
     }),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [people.id, people.organizationId],
+      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
       name: "group_memberships_person_fk",
     }),
   ],

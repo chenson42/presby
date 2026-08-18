@@ -76,9 +76,7 @@ CREATE TABLE "households" (
 --> statement-breakpoint
 CREATE TABLE "people" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"organization_id" uuid NOT NULL,
 	"user_id" uuid,
-	"org_unit_id" uuid,
 	"title" text,
 	"first_name" text NOT NULL,
 	"preferred_name" text,
@@ -89,6 +87,18 @@ CREATE TABLE "people" (
 	"date_of_birth" date,
 	"birth_year_only" boolean DEFAULT false NOT NULL,
 	"date_of_death" date,
+	"merged_into_id" uuid,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "person_profiles" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"organization_id" uuid NOT NULL,
+	"person_id" uuid NOT NULL,
+	"org_unit_id" uuid,
+	"household_id" uuid,
+	"household_role" text,
 	"marital_status" text,
 	"anniversary_date" date,
 	"occupation" text,
@@ -96,8 +106,6 @@ CREATE TABLE "people" (
 	"school" text,
 	"grade" text,
 	"primary_language" text,
-	"household_id" uuid,
-	"household_role" text,
 	"photo_key" text,
 	"photo_updated_at" timestamp with time zone,
 	"engagement_status" text DEFAULT 'visitor' NOT NULL,
@@ -108,21 +116,10 @@ CREATE TABLE "people" (
 	"external_ids" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"mailchimp_status" text,
 	"mailchimp_synced_at" timestamp with time zone,
-	"merged_into_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "people_id_org_key" UNIQUE("id","organization_id")
-);
---> statement-breakpoint
-CREATE TABLE "person_links" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"person_a_id" uuid NOT NULL,
-	"person_b_id" uuid NOT NULL,
-	"link_reason" text NOT NULL,
-	"established_by" uuid,
-	"established_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "person_links_pair_key" UNIQUE("person_a_id","person_b_id"),
-	CONSTRAINT "person_links_order_check" CHECK ("person_links"."person_a_id" < "person_links"."person_b_id")
+	CONSTRAINT "person_profiles_person_org_key" UNIQUE("person_id","organization_id"),
+	CONSTRAINT "person_profiles_id_org_key" UNIQUE("id","organization_id")
 );
 --> statement-breakpoint
 CREATE TABLE "person_relationships" (
@@ -248,7 +245,6 @@ CREATE TABLE "roll_actions" (
 	"approved_on" date,
 	"approved_by" uuid,
 	"denial_reason" text,
-	"counterpart_link_id" uuid,
 	"voids_action_id" uuid,
 	"proposed_by" uuid NOT NULL,
 	"recorded_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -268,7 +264,6 @@ CREATE TABLE "transfer_certificates" (
 	"dismissal_action_id" uuid,
 	"claimed_at" timestamp with time zone,
 	"reception_action_id" uuid,
-	"person_link_id" uuid,
 	"status" text DEFAULT 'issued' NOT NULL,
 	CONSTRAINT "transfer_certificates_claim_token_unique" UNIQUE("claim_token")
 );
@@ -466,68 +461,64 @@ ALTER TABLE "organization_settings" ADD CONSTRAINT "organization_settings_organi
 ALTER TABLE "organizations" ADD CONSTRAINT "organizations_parent_id_organizations_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "addresses" ADD CONSTRAINT "addresses_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "addresses" ADD CONSTRAINT "addresses_household_fk" FOREIGN KEY ("household_id","organization_id") REFERENCES "public"."households"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "addresses" ADD CONSTRAINT "addresses_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "addresses" ADD CONSTRAINT "addresses_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "contact_methods" ADD CONSTRAINT "contact_methods_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "contact_methods" ADD CONSTRAINT "contact_methods_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contact_methods" ADD CONSTRAINT "contact_methods_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "households" ADD CONSTRAINT "households_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "households" ADD CONSTRAINT "households_org_unit_fk" FOREIGN KEY ("org_unit_id","organization_id") REFERENCES "public"."org_units"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "people" ADD CONSTRAINT "people_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "people" ADD CONSTRAINT "people_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "people" ADD CONSTRAINT "people_merged_into_id_people_id_fk" FOREIGN KEY ("merged_into_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "people" ADD CONSTRAINT "people_household_fk" FOREIGN KEY ("household_id","organization_id") REFERENCES "public"."households"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "people" ADD CONSTRAINT "people_org_unit_fk" FOREIGN KEY ("org_unit_id","organization_id") REFERENCES "public"."org_units"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_links" ADD CONSTRAINT "person_links_person_a_id_people_id_fk" FOREIGN KEY ("person_a_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_links" ADD CONSTRAINT "person_links_person_b_id_people_id_fk" FOREIGN KEY ("person_b_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_links" ADD CONSTRAINT "person_links_established_by_users_id_fk" FOREIGN KEY ("established_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_profiles" ADD CONSTRAINT "person_profiles_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_profiles" ADD CONSTRAINT "person_profiles_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_profiles" ADD CONSTRAINT "person_profiles_household_fk" FOREIGN KEY ("household_id","organization_id") REFERENCES "public"."households"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_profiles" ADD CONSTRAINT "person_profiles_org_unit_fk" FOREIGN KEY ("org_unit_id","organization_id") REFERENCES "public"."org_units"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_relationships" ADD CONSTRAINT "person_relationships_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_relationships" ADD CONSTRAINT "person_relationships_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_relationships" ADD CONSTRAINT "person_relationships_related_fk" FOREIGN KEY ("related_person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_relationships" ADD CONSTRAINT "person_relationships_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_relationships" ADD CONSTRAINT "person_relationships_related_fk" FOREIGN KEY ("related_person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "background_checks" ADD CONSTRAINT "background_checks_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "background_checks" ADD CONSTRAINT "background_checks_recorded_by_users_id_fk" FOREIGN KEY ("recorded_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "background_checks" ADD CONSTRAINT "background_checks_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "background_checks" ADD CONSTRAINT "background_checks_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "follow_ups" ADD CONSTRAINT "follow_ups_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "follow_ups" ADD CONSTRAINT "follow_ups_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "follow_ups" ADD CONSTRAINT "follow_ups_assignee_fk" FOREIGN KEY ("assigned_to_person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "follow_ups" ADD CONSTRAINT "follow_ups_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "follow_ups" ADD CONSTRAINT "follow_ups_assignee_fk" FOREIGN KEY ("assigned_to_person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_medical" ADD CONSTRAINT "person_medical_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_medical" ADD CONSTRAINT "person_medical_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_medical" ADD CONSTRAINT "person_medical_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_milestones" ADD CONSTRAINT "person_milestones_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_milestones" ADD CONSTRAINT "person_milestones_performed_by_org_id_organizations_id_fk" FOREIGN KEY ("performed_by_org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_milestones" ADD CONSTRAINT "person_milestones_roll_action_id_roll_actions_id_fk" FOREIGN KEY ("roll_action_id") REFERENCES "public"."roll_actions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_milestones" ADD CONSTRAINT "person_milestones_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_milestones" ADD CONSTRAINT "person_milestones_officiant_fk" FOREIGN KEY ("officiant_person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_milestones" ADD CONSTRAINT "person_milestones_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_milestones" ADD CONSTRAINT "person_milestones_officiant_fk" FOREIGN KEY ("officiant_person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_notes" ADD CONSTRAINT "person_notes_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_notes" ADD CONSTRAINT "person_notes_author_user_id_users_id_fk" FOREIGN KEY ("author_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_notes" ADD CONSTRAINT "person_notes_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_notes" ADD CONSTRAINT "person_notes_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_tags" ADD CONSTRAINT "person_tags_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_tags" ADD CONSTRAINT "person_tags_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_tags" ADD CONSTRAINT "person_tags_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_tags" ADD CONSTRAINT "person_tags_tag_fk" FOREIGN KEY ("tag_id","organization_id") REFERENCES "public"."tags"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_talents" ADD CONSTRAINT "person_talents_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_talents" ADD CONSTRAINT "person_talents_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_talents" ADD CONSTRAINT "person_talents_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_talents" ADD CONSTRAINT "person_talents_type_fk" FOREIGN KEY ("talent_type_id","organization_id") REFERENCES "public"."talent_types"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tags" ADD CONSTRAINT "tags_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "talent_types" ADD CONSTRAINT "talent_types_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "roll_actions" ADD CONSTRAINT "roll_actions_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "roll_actions" ADD CONSTRAINT "roll_actions_approved_by_users_id_fk" FOREIGN KEY ("approved_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "roll_actions" ADD CONSTRAINT "roll_actions_counterpart_link_id_person_links_id_fk" FOREIGN KEY ("counterpart_link_id") REFERENCES "public"."person_links"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "roll_actions" ADD CONSTRAINT "roll_actions_voids_action_id_roll_actions_id_fk" FOREIGN KEY ("voids_action_id") REFERENCES "public"."roll_actions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "roll_actions" ADD CONSTRAINT "roll_actions_proposed_by_users_id_fk" FOREIGN KEY ("proposed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "roll_actions" ADD CONSTRAINT "roll_actions_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "roll_actions" ADD CONSTRAINT "roll_actions_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_certificates" ADD CONSTRAINT "transfer_certificates_issuing_org_id_organizations_id_fk" FOREIGN KEY ("issuing_org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_certificates" ADD CONSTRAINT "transfer_certificates_issuing_person_id_people_id_fk" FOREIGN KEY ("issuing_person_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_certificates" ADD CONSTRAINT "transfer_certificates_issuing_household_id_households_id_fk" FOREIGN KEY ("issuing_household_id") REFERENCES "public"."households"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_certificates" ADD CONSTRAINT "transfer_certificates_receiving_org_id_organizations_id_fk" FOREIGN KEY ("receiving_org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_certificates" ADD CONSTRAINT "transfer_certificates_dismissal_action_id_roll_actions_id_fk" FOREIGN KEY ("dismissal_action_id") REFERENCES "public"."roll_actions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_certificates" ADD CONSTRAINT "transfer_certificates_reception_action_id_roll_actions_id_fk" FOREIGN KEY ("reception_action_id") REFERENCES "public"."roll_actions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "transfer_certificates" ADD CONSTRAINT "transfer_certificates_person_link_id_person_links_id_fk" FOREIGN KEY ("person_link_id") REFERENCES "public"."person_links"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "officer_terms" ADD CONSTRAINT "officer_terms_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "officer_terms" ADD CONSTRAINT "officer_terms_recorded_by_users_id_fk" FOREIGN KEY ("recorded_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "officer_terms" ADD CONSTRAINT "officer_terms_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "officer_terms" ADD CONSTRAINT "officer_terms_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ordinations" ADD CONSTRAINT "ordinations_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ordinations" ADD CONSTRAINT "ordinations_ordaining_org_id_organizations_id_fk" FOREIGN KEY ("ordaining_org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "ordinations" ADD CONSTRAINT "ordinations_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ordinations" ADD CONSTRAINT "ordinations_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "group_memberships" ADD CONSTRAINT "group_memberships_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "group_memberships" ADD CONSTRAINT "group_memberships_group_fk" FOREIGN KEY ("group_id","organization_id") REFERENCES "public"."groups"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "group_memberships" ADD CONSTRAINT "group_memberships_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "group_memberships" ADD CONSTRAINT "group_memberships_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "group_types" ADD CONSTRAINT "group_types_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "groups" ADD CONSTRAINT "groups_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "groups" ADD CONSTRAINT "groups_group_type_id_group_types_id_fk" FOREIGN KEY ("group_type_id") REFERENCES "public"."group_types"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -543,18 +534,18 @@ ALTER TABLE "org_delegations" ADD CONSTRAINT "org_delegations_role_id_app_roles_
 ALTER TABLE "role_grants" ADD CONSTRAINT "role_grants_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "role_grants" ADD CONSTRAINT "role_grants_role_id_app_roles_id_fk" FOREIGN KEY ("role_id") REFERENCES "public"."app_roles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "role_grants" ADD CONSTRAINT "role_grants_granted_by_users_id_fk" FOREIGN KEY ("granted_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "role_grants" ADD CONSTRAINT "role_grants_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "role_grants" ADD CONSTRAINT "role_grants_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "role_grants" ADD CONSTRAINT "role_grants_group_fk" FOREIGN KEY ("group_id","organization_id") REFERENCES "public"."groups"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "consents" ADD CONSTRAINT "consents_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "consents" ADD CONSTRAINT "consents_recorded_by_users_id_fk" FOREIGN KEY ("recorded_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "consents" ADD CONSTRAINT "consents_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "consents" ADD CONSTRAINT "consents_guardian_fk" FOREIGN KEY ("granted_by_person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "consents" ADD CONSTRAINT "consents_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "consents" ADD CONSTRAINT "consents_guardian_fk" FOREIGN KEY ("granted_by_person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_demographics" ADD CONSTRAINT "person_demographics_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_demographics" ADD CONSTRAINT "person_demographics_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_demographics" ADD CONSTRAINT "person_demographics_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_disabilities" ADD CONSTRAINT "person_disabilities_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_disabilities" ADD CONSTRAINT "person_disabilities_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_disabilities" ADD CONSTRAINT "person_disabilities_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_privacy" ADD CONSTRAINT "person_privacy_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "person_privacy" ADD CONSTRAINT "person_privacy_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."people"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_privacy" ADD CONSTRAINT "person_privacy_person_fk" FOREIGN KEY ("person_id","organization_id") REFERENCES "public"."person_profiles"("person_id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sasr_reports" ADD CONSTRAINT "sasr_reports_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "org_units_org_idx" ON "org_units" USING btree ("organization_id","unit_type");--> statement-breakpoint
 CREATE INDEX "organizations_parent_idx" ON "organizations" USING btree ("parent_id");--> statement-breakpoint
@@ -564,11 +555,11 @@ CREATE INDEX "addresses_org_person_idx" ON "addresses" USING btree ("organizatio
 CREATE INDEX "contact_methods_org_person_idx" ON "contact_methods" USING btree ("organization_id","person_id");--> statement-breakpoint
 CREATE INDEX "contact_methods_org_value_idx" ON "contact_methods" USING btree ("organization_id",lower("value"));--> statement-breakpoint
 CREATE INDEX "households_org_name_idx" ON "households" USING btree ("organization_id","name");--> statement-breakpoint
-CREATE INDEX "people_org_name_idx" ON "people" USING btree ("organization_id","last_name","first_name");--> statement-breakpoint
-CREATE INDEX "people_org_roll_idx" ON "people" USING btree ("organization_id","current_roll");--> statement-breakpoint
-CREATE INDEX "people_org_household_idx" ON "people" USING btree ("organization_id","household_id");--> statement-breakpoint
-CREATE INDEX "people_org_engagement_idx" ON "people" USING btree ("organization_id","engagement_status");--> statement-breakpoint
-CREATE INDEX "people_org_user_idx" ON "people" USING btree ("organization_id","user_id");--> statement-breakpoint
+CREATE INDEX "people_name_idx" ON "people" USING btree ("last_name","first_name");--> statement-breakpoint
+CREATE INDEX "people_user_idx" ON "people" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "person_profiles_org_roll_idx" ON "person_profiles" USING btree ("organization_id","current_roll");--> statement-breakpoint
+CREATE INDEX "person_profiles_org_household_idx" ON "person_profiles" USING btree ("organization_id","household_id");--> statement-breakpoint
+CREATE INDEX "person_profiles_org_engagement_idx" ON "person_profiles" USING btree ("organization_id","engagement_status");--> statement-breakpoint
 CREATE INDEX "person_relationships_org_person_idx" ON "person_relationships" USING btree ("organization_id","person_id");--> statement-breakpoint
 CREATE INDEX "background_checks_expiry_idx" ON "background_checks" USING btree ("organization_id","expires_on","status");--> statement-breakpoint
 CREATE INDEX "background_checks_org_person_idx" ON "background_checks" USING btree ("organization_id","person_id");--> statement-breakpoint

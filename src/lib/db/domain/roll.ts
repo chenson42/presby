@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
-import { people, households, personLinks } from "./people";
+import { people, personProfiles, households } from "./people";
 import { users } from "../schema";
 
 /**
@@ -86,9 +86,6 @@ export const rollActions = pgTable(
     approvedBy: uuid("approved_by").references(() => users.id),
     denialReason: text("denial_reason"),
 
-    counterpartLinkId: uuid("counterpart_link_id").references(
-      () => personLinks.id,
-    ),
     voidsActionId: uuid("voids_action_id").references(
       (): AnyPgColumn => rollActions.id,
     ),
@@ -116,7 +113,7 @@ export const rollActions = pgTable(
     unique("roll_actions_id_org_key").on(t.id, t.organizationId),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [people.id, people.organizationId],
+      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
       name: "roll_actions_person_fk",
     }),
   ],
@@ -128,6 +125,14 @@ export const rollActions = pgTable(
  * receiving one — which is how certificates actually work.
  *
  * Off-platform churches simply never claim, and the certificate expires.
+ *
+ * Simplified by the D1 reversal. With global `people` a transfer no longer
+ * creates a second person row to reconcile: the human is already the same row,
+ * so claiming a certificate just adds a person_profile at the receiving org.
+ * issuingPersonId therefore points at global `people`, not at a profile — the
+ * receiving org has no profile until it claims.
+ *
+ * The dismissal/reception action pair IS the linkage; person_links is gone.
  */
 export const transferCertificates = pgTable(
   "transfer_certificates",
@@ -157,7 +162,6 @@ export const transferCertificates = pgTable(
     receptionActionId: uuid("reception_action_id").references(
       () => rollActions.id,
     ),
-    personLinkId: uuid("person_link_id").references(() => personLinks.id),
     status: text("status").notNull().default("issued"),
   },
   (t) => [

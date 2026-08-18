@@ -1,5 +1,5 @@
 {
-  "id": "b64242ab-c69b-49b3-99db-981c1d6acd07",
+  "id": "7fb8c1b8-54df-4f0b-be23-c07d20af0446",
   "prevId": "1c179c2a-c37a-4506-9931-2658e6dd7c64",
   "version": "7",
   "dialect": "postgresql",
@@ -2090,13 +2090,13 @@
         "addresses_person_fk": {
           "name": "addresses_person_fk",
           "tableFrom": "addresses",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -2237,13 +2237,13 @@
         "contact_methods_person_fk": {
           "name": "contact_methods_person_fk",
           "tableFrom": "contact_methods",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -2391,20 +2391,8 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
         "user_id": {
           "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "org_unit_id": {
-          "name": "org_unit_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -2470,6 +2458,140 @@
           "primaryKey": false,
           "notNull": false
         },
+        "merged_into_id": {
+          "name": "merged_into_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "people_name_idx": {
+          "name": "people_name_idx",
+          "columns": [
+            {
+              "expression": "last_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "first_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "people_user_idx": {
+          "name": "people_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "people_user_id_users_id_fk": {
+          "name": "people_user_id_users_id_fk",
+          "tableFrom": "people",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "people_merged_into_id_people_id_fk": {
+          "name": "people_merged_into_id_people_id_fk",
+          "tableFrom": "people",
+          "tableTo": "people",
+          "columnsFrom": [
+            "merged_into_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.person_profiles": {
+      "name": "person_profiles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "org_unit_id": {
+          "name": "org_unit_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "household_id": {
+          "name": "household_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "household_role": {
+          "name": "household_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "marital_status": {
           "name": "marital_status",
           "type": "text",
@@ -2508,18 +2630,6 @@
         },
         "primary_language": {
           "name": "primary_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "household_id": {
-          "name": "household_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "household_role": {
-          "name": "household_role",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -2586,12 +2696,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "merged_into_id": {
-          "name": "merged_into_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2608,35 +2712,8 @@
         }
       },
       "indexes": {
-        "people_org_name_idx": {
-          "name": "people_org_name_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "last_name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "first_name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "people_org_roll_idx": {
-          "name": "people_org_roll_idx",
+        "person_profiles_org_roll_idx": {
+          "name": "person_profiles_org_roll_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -2656,8 +2733,8 @@
           "method": "btree",
           "with": {}
         },
-        "people_org_household_idx": {
-          "name": "people_org_household_idx",
+        "person_profiles_org_household_idx": {
+          "name": "person_profiles_org_household_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -2677,8 +2754,8 @@
           "method": "btree",
           "with": {}
         },
-        "people_org_engagement_idx": {
-          "name": "people_org_engagement_idx",
+        "person_profiles_org_engagement_idx": {
+          "name": "person_profiles_org_engagement_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -2697,33 +2774,12 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "people_org_user_idx": {
-          "name": "people_org_user_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
-        "people_organization_id_organizations_id_fk": {
-          "name": "people_organization_id_organizations_id_fk",
-          "tableFrom": "people",
+        "person_profiles_organization_id_organizations_id_fk": {
+          "name": "person_profiles_organization_id_organizations_id_fk",
+          "tableFrom": "person_profiles",
           "tableTo": "organizations",
           "columnsFrom": [
             "organization_id"
@@ -2734,35 +2790,22 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "people_user_id_users_id_fk": {
-          "name": "people_user_id_users_id_fk",
-          "tableFrom": "people",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "people_merged_into_id_people_id_fk": {
-          "name": "people_merged_into_id_people_id_fk",
-          "tableFrom": "people",
+        "person_profiles_person_id_people_id_fk": {
+          "name": "person_profiles_person_id_people_id_fk",
+          "tableFrom": "person_profiles",
           "tableTo": "people",
           "columnsFrom": [
-            "merged_into_id"
+            "person_id"
           ],
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "people_household_fk": {
-          "name": "people_household_fk",
-          "tableFrom": "people",
+        "person_profiles_household_fk": {
+          "name": "person_profiles_household_fk",
+          "tableFrom": "person_profiles",
           "tableTo": "households",
           "columnsFrom": [
             "household_id",
@@ -2775,9 +2818,9 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "people_org_unit_fk": {
-          "name": "people_org_unit_fk",
-          "tableFrom": "people",
+        "person_profiles_org_unit_fk": {
+          "name": "person_profiles_org_unit_fk",
+          "tableFrom": "person_profiles",
           "tableTo": "org_units",
           "columnsFrom": [
             "org_unit_id",
@@ -2793,8 +2836,16 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "people_id_org_key": {
-          "name": "people_id_org_key",
+        "person_profiles_person_org_key": {
+          "name": "person_profiles_person_org_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "person_id",
+            "organization_id"
+          ]
+        },
+        "person_profiles_id_org_key": {
+          "name": "person_profiles_id_org_key",
           "nullsNotDistinct": false,
           "columns": [
             "id",
@@ -2804,111 +2855,6 @@
       },
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.person_links": {
-      "name": "person_links",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "person_a_id": {
-          "name": "person_a_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "person_b_id": {
-          "name": "person_b_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "link_reason": {
-          "name": "link_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "established_by": {
-          "name": "established_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "established_at": {
-          "name": "established_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "person_links_person_a_id_people_id_fk": {
-          "name": "person_links_person_a_id_people_id_fk",
-          "tableFrom": "person_links",
-          "tableTo": "people",
-          "columnsFrom": [
-            "person_a_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "person_links_person_b_id_people_id_fk": {
-          "name": "person_links_person_b_id_people_id_fk",
-          "tableFrom": "person_links",
-          "tableTo": "people",
-          "columnsFrom": [
-            "person_b_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "person_links_established_by_users_id_fk": {
-          "name": "person_links_established_by_users_id_fk",
-          "tableFrom": "person_links",
-          "tableTo": "users",
-          "columnsFrom": [
-            "established_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "person_links_pair_key": {
-          "name": "person_links_pair_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "person_a_id",
-            "person_b_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "person_links_order_check": {
-          "name": "person_links_order_check",
-          "value": "\"person_links\".\"person_a_id\" < \"person_links\".\"person_b_id\""
-        }
-      },
       "isRLSEnabled": false
     },
     "public.person_relationships": {
@@ -3006,13 +2952,13 @@
         "person_relationships_person_fk": {
           "name": "person_relationships_person_fk",
           "tableFrom": "person_relationships",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3021,13 +2967,13 @@
         "person_relationships_related_fk": {
           "name": "person_relationships_related_fk",
           "tableFrom": "person_relationships",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "related_person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3191,13 +3137,13 @@
         "background_checks_person_fk": {
           "name": "background_checks_person_fk",
           "tableFrom": "background_checks",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3329,13 +3275,13 @@
         "follow_ups_person_fk": {
           "name": "follow_ups_person_fk",
           "tableFrom": "follow_ups",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3344,13 +3290,13 @@
         "follow_ups_assignee_fk": {
           "name": "follow_ups_assignee_fk",
           "tableFrom": "follow_ups",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "assigned_to_person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3429,13 +3375,13 @@
         "person_medical_person_fk": {
           "name": "person_medical_person_fk",
           "tableFrom": "person_medical",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3619,13 +3565,13 @@
         "person_milestones_person_fk": {
           "name": "person_milestones_person_fk",
           "tableFrom": "person_milestones",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3634,13 +3580,13 @@
         "person_milestones_officiant_fk": {
           "name": "person_milestones_officiant_fk",
           "tableFrom": "person_milestones",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "officiant_person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3775,13 +3721,13 @@
         "person_notes_person_fk": {
           "name": "person_notes_person_fk",
           "tableFrom": "person_notes",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3864,13 +3810,13 @@
         "person_tags_person_fk": {
           "name": "person_tags_person_fk",
           "tableFrom": "person_tags",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -3961,13 +3907,13 @@
         "person_talents_person_fk": {
           "name": "person_talents_person_fk",
           "tableFrom": "person_talents",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -4219,12 +4165,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "counterpart_link_id": {
-          "name": "counterpart_link_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "voids_action_id": {
           "name": "voids_action_id",
           "type": "uuid",
@@ -4351,19 +4291,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "roll_actions_counterpart_link_id_person_links_id_fk": {
-          "name": "roll_actions_counterpart_link_id_person_links_id_fk",
-          "tableFrom": "roll_actions",
-          "tableTo": "person_links",
-          "columnsFrom": [
-            "counterpart_link_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "roll_actions_voids_action_id_roll_actions_id_fk": {
           "name": "roll_actions_voids_action_id_roll_actions_id_fk",
           "tableFrom": "roll_actions",
@@ -4393,13 +4320,13 @@
         "roll_actions_person_fk": {
           "name": "roll_actions_person_fk",
           "tableFrom": "roll_actions",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -4494,12 +4421,6 @@
         },
         "reception_action_id": {
           "name": "reception_action_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "person_link_id": {
-          "name": "person_link_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -4628,19 +4549,6 @@
           "tableTo": "roll_actions",
           "columnsFrom": [
             "reception_action_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "transfer_certificates_person_link_id_person_links_id_fk": {
-          "name": "transfer_certificates_person_link_id_person_links_id_fk",
-          "tableFrom": "transfer_certificates",
-          "tableTo": "person_links",
-          "columnsFrom": [
-            "person_link_id"
           ],
           "columnsTo": [
             "id"
@@ -4834,13 +4742,13 @@
         "officer_terms_person_fk": {
           "name": "officer_terms_person_fk",
           "tableFrom": "officer_terms",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -5004,13 +4912,13 @@
         "ordinations_person_fk": {
           "name": "ordinations_person_fk",
           "tableFrom": "ordinations",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -5177,13 +5085,13 @@
         "group_memberships_person_fk": {
           "name": "group_memberships_person_fk",
           "tableFrom": "group_memberships",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -6099,13 +6007,13 @@
         "role_grants_person_fk": {
           "name": "role_grants_person_fk",
           "tableFrom": "role_grants",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -6276,13 +6184,13 @@
         "consents_person_fk": {
           "name": "consents_person_fk",
           "tableFrom": "consents",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -6291,13 +6199,13 @@
         "consents_guardian_fk": {
           "name": "consents_guardian_fk",
           "tableFrom": "consents",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "granted_by_person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -6371,13 +6279,13 @@
         "person_demographics_person_fk": {
           "name": "person_demographics_person_fk",
           "tableFrom": "person_demographics",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -6438,13 +6346,13 @@
         "person_disabilities_person_fk": {
           "name": "person_disabilities_person_fk",
           "tableFrom": "person_disabilities",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",
@@ -6557,13 +6465,13 @@
         "person_privacy_person_fk": {
           "name": "person_privacy_person_fk",
           "tableFrom": "person_privacy",
-          "tableTo": "people",
+          "tableTo": "person_profiles",
           "columnsFrom": [
             "person_id",
             "organization_id"
           ],
           "columnsTo": [
-            "id",
+            "person_id",
             "organization_id"
           ],
           "onDelete": "no action",

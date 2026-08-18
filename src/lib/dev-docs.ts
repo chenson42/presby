@@ -56,7 +56,7 @@ const MODULES: Record<string, string> = {
   addresses: "B. People",
   contact_methods: "B. People",
   person_relationships: "B. People",
-  person_links: "B. People",
+  person_profiles: "B. People",
   tags: "C. Person extensions",
   person_tags: "C. Person extensions",
   person_milestones: "C. Person extensions",
@@ -95,8 +95,8 @@ const MODULES: Record<string, string> = {
 const BESPOKE_POLICIES: Record<string, string> = {
   organizations:
     "Not tenant-isolated. The org tree is public information; PC(USA) publishes congregation and presbytery lists. Sensitive data lives in organization_settings.",
-  person_links:
-    "Cross-tenant by design (D1). Visible when the current org owns either side. Both congregations in a transfer already know the link exists.",
+  people:
+    "GLOBAL, no organization_id (D1). A person is one human: ministers of Word and Sacrament are members of the presbytery while ruling elders are members of the congregation, so one human's roll and service routinely sit at different orgs. Visible when the current org holds a profile for them.",
   transfer_certificates:
     "Spans two orgs by design (F9). The losing church issues; the receiving church claims by token.",
   administrative_commissions:
@@ -108,8 +108,12 @@ const BESPOKE_POLICIES: Record<string, string> = {
 
 const TABLE_NOTES: Record<string, string[]> = {
   people: [
-    "current_roll is a CACHE maintained by trigger from approved roll_actions. It cannot answer historical questions — reports replay via rollAsOf(). See F6.",
+    "Identity only, deliberately thin. It is the one surface shared across tenants, so every column here is a column one church can see because another church entered it.",
     "delete is revoked from presby_app. Invariant 7: a person row is never hard-deleted.",
+  ],
+  person_profiles: [
+    "THE composite-FK target for every child table. unique(person_id, organization_id) is how F2's guarantee survives people going global: a row in org B can only reference a person who has a profile in org B.",
+    "current_roll is a CACHE maintained by trigger from approved roll_actions. It cannot answer historical questions — reports replay via rollAsOf(). See F6.",
   ],
   roll_actions: [
     "Pending rows are mutable working state; a trigger freezes the row on approval. Invariant 4 covers approved rows only.",

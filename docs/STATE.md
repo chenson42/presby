@@ -133,8 +133,13 @@ security problems**. Three UI bugs were also phone-only and invisible to
    removed: platform and tenant authorization are now separate scopes
    (`src/lib/permissions.ts` is frozen; `src/lib/authz.ts` governs church-facing).
 
-Open for the user: the name · D9 sequencing · whether versioned private material
-gets its own repo (`private/` is untracked scratch only).
+Open for the user: the name · whether versioned private material gets its own
+repo (`private/` is untracked scratch only).
+
+**D9 sequencing — answered 2026-08-18, deferred deliberately.** Congregation
+(Phase 1) and presbytery (Phase 2) are both important; neither is subordinate to
+the other. Nothing is live, so no forcing function exists yet. The decision comes
+due at the Roll UI, which is the first build that has to pick an audience.
 
 ---
 

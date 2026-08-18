@@ -1,6 +1,6 @@
 {
   "name": "claudecode-nextjs-starter",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "Fork-and-go Next.js + Neon + NextAuth starter with admin, roles/permissions, TOTP 2FA, feature flags, and release notes. Authored as a Claude Code training artifact.",
   "engines": {

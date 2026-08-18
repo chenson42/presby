@@ -4,6 +4,53 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-030: Person photos live in the database for now, behind a pluggable storage service
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** open question §18.4 / finding F13
+
+### Decision
+
+Store person photo bytes **in Postgres for now**, but reach them only through a
+storage service interface — never by querying the blob table directly from a
+page, an action, or a component. Moving to object storage later must be a change
+of one adapter, not a change of every call site.
+
+`people.photo_key` stays as it is: an opaque key, not a URL and not bytes. The
+adapter resolves a key to a stream or a URL. A database adapter returns bytes
+from a blob table; a cloud adapter returns a signed URL. Callers cannot tell the
+difference, and that is the whole point.
+
+### Rationale
+
+The operator's call: nothing is live, no congregation has uploaded a photo, and
+provisioning a bucket now buys nothing except a second system to configure and
+secure before there is anything to put in it. Database storage also inherits
+tenant isolation for free — a blob table is a tenant table, so RLS covers it,
+where an object store needs its own path-scoping scheme that RLS cannot enforce.
+
+**This deliberately overrides F13**, which said to move to object storage
+*before* Phase 1 ships, not after, on the grounds that `bytea` bloats the
+database and every backup (`../fpcw-directory` already carries base64-in-text and
+it is a known smell). That cost is real and is accepted knowingly. The service
+boundary is the mitigation: F13's warning was about being *unable* to move
+cheaply, and an adapter is what makes the move cheap.
+
+### Impact
+
+- A blob table is required (photo bytes keyed by `photo_key`, tenant-scoped with
+  the composite key every tenant table carries) plus the service interface. Both
+  are unbuilt — tracked in `docs/TODO.md`.
+- Any code that reads a photo goes through the service. A direct query against
+  the blob table from a page or action is a review failure, because it is
+  precisely what makes the eventual migration expensive.
+- Revisit when photo bytes are a measurable share of database size or backup
+  time, or when the first tenant with a full directory of photos lands —
+  whichever comes first.
+
+---
+
 ## DECISION-029: Periodic reviews consolidated into two recurring slots; work-log template is the single handoff format
 
 **Status:** Resolved

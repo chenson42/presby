@@ -20,10 +20,11 @@ worked partly by AI.
 Open source. **No real congregation, person, or credential ever enters the
 repository** — see Key Invariants → No Real Data.
 
-**The project is not named yet**, so every identifier still says `presby` —
-package name, database roles (`presby_app`), SQL functions (`presby_roll_as_of`),
-migration filenames. That is deliberate placeholder, not a naming decision; don't
-"fix" it. Candidates are tracked in `docs/STATE.md`.
+**The project is not named yet**, so `presby` is threaded through the database
+role (`presby_app`), the SQL functions (`presby_roll_as_of`), and the migration
+filenames — while `package.json` still carries the starter's name
+(`claudecode-nextjs-starter`). Both are deliberate placeholders, not naming
+decisions; don't "fix" either one piecemeal. Candidates are in `docs/STATE.md`.
 
 Seeded from `chenson42/claudecode-nextjs-starter`, which is why the platform
 shell (auth, flags, audit, feedback, what's-new) arrived pre-built and the

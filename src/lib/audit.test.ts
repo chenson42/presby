@@ -70,6 +70,7 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   USER_ROLE_REMOVED: "user.role.removed",
   USER_2FA_REQUIRED_CHANGED: "user.2fa_required.changed",
   USER_2FA_FORCE_RESET: "user.2fa_force_reset",
+  ORG_2FA_POLICY_CHANGED: "org.2fa_policy.changed",
   // Account self-serve actions (added with /account page feature)
   USER_PROFILE_UPDATED: "user.profile_updated",
   USER_EMAIL_CHANGE_REQUESTED: "user.email_change_requested",

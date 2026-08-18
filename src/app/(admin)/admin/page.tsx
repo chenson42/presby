@@ -49,8 +49,9 @@ export default async function AdminDashboard() {
     },
     {
       href: "/admin/2fa",
-      title: "Your 2FA",
-      blurb: "Enroll or rotate your authenticator.",
+      title: "2FA policy",
+      blurb:
+        "Choose which congregations require two-factor, and see who is required but not enrolled.",
     },
   ];
 

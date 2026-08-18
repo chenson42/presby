@@ -4,6 +4,62 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-033: The 2FA requirement is per-congregation, resolved at sign-in by a SECURITY DEFINER function
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** `2026-08-18-two-factor-policy`
+
+### Decision
+
+Whether a member must use two-factor authentication is decided by
+`organization_settings.require_two_factor`, per congregation, default **false**.
+A user is required if **their own `users.two_factor_required` column is set OR
+any organization they hold an active membership in requires it** —
+most-restrictive wins. Both remain subject to the install-wide `auth.require_2fa`
+master switch.
+
+The organization arm is resolved at sign-in by
+`presby_two_factor_required(uuid)`, which is **`SECURITY DEFINER`**, and must
+stay that way.
+
+### Rationale
+
+**Why not a feature flag.** `feature_flags` has no `organization_id` and should
+not grow one. A flag is an environment toggle; a congregation's security policy
+is tenant state (DECISION-003).
+
+**Why `organization_settings` and not `organizations`.** `organizations` is
+deliberately not tenant-isolated — the PC(USA) org tree is public information —
+and per-org configuration already lives in settings. A typed column rather than a
+key in the `settings` jsonb, because it is read on the sign-in path.
+
+**Why most-restrictive wins.** A person can hold memberships in several
+organizations; a minister of Word and Sacrament is a member of the presbytery
+while serving a congregation (G-2.0502). The requirement is resolved *before* any
+organization is selected — sign-in precedes the org switcher — so there is no
+"current org" to consult.
+
+**Why SECURITY DEFINER is load-bearing.** This is finding F26 in a new place. The
+lookup runs on the RLS-enforced connection with no org GUC set, and none can be
+set, because choosing an organization happens after authentication. A plain join
+is filtered to zero rows and returns false *for exactly the users the policy
+protects* — it fails silently, looks correct, and disables the feature. Measured
+as `presby_app` with no GUC: the function returns **true** where the equivalent
+naive join sees **0 rows**. Both are permanent assertions in
+`scripts/test-rls.sql`.
+
+### Impact
+
+- Rewriting the org arm as a Drizzle join silently disables per-church 2FA. The
+  isolation suite fails if anyone tries.
+- A DB error resolving the org arm returns false — it never *newly imposes* a
+  challenge on someone who has not enrolled, matching DECISION-026's posture.
+- The toggle lives in the platform admin shell only because no church-facing
+  admin UI exists yet.
+
+---
+
 ## DECISION-032: The e2e suite owns its test users; no environment variables
 
 **Status:** Resolved

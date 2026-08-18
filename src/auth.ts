@@ -291,12 +291,15 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         return {};
       }
       token.isActive = dbUser.isActive;
-      // Effective twoFactorRequired: raw column value AND the org-level
-      // auth.require_2fa master switch. Short-circuits when column is false
-      // (no flag read needed). Falls back to raw column on DB error so a DB
-      // blip does not accidentally ungate TOTP-required users. See DECISION-026.
+      // Effective twoFactorRequired: (this user's column OR any congregation
+      // they belong to requiring it) AND the auth.require_2fa master switch.
+      // The per-church arm goes through a SECURITY DEFINER function — no org
+      // GUC exists at sign-in, so a plain query would be filtered to zero rows
+      // for exactly the users it protects (F26). Falls back on DB error so a
+      // blip neither ungates nor strands anyone. See DECISION-026.
       token.twoFactorRequired = await computeEffectiveTwoFactor(
         dbUser.twoFactorRequired,
+        userId,
       );
       if (dbUser.email) token.email = dbUser.email;
 

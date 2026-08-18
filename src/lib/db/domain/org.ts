@@ -1,6 +1,7 @@
 import {
   pgTable,
   pgEnum,
+  boolean,
   text,
   uuid,
   timestamp,
@@ -78,6 +79,16 @@ export const organizationSettings = pgTable("organization_settings", {
   pcusaPin: text("pcusa_pin"),
   // Includes sessionServesAsTrustees, hasDeacons, trackDisabilityPerPerson.
   settings: jsonb("settings").notNull().default({}),
+  // Per-congregation 2FA policy. NOT a feature flag: a flag is an environment
+  // toggle, this is tenant state (DECISION-003). A typed column rather than a
+  // key in `settings` above, because it is read on the sign-in path and a
+  // boolean deciding whether 2FA is enforced belongs to the database, not to
+  // whatever last wrote the blob.
+  //
+  // Resolved at sign-in by presby_two_factor_required() and projected into the
+  // session — the Edge gate reads the claim and cannot reach the database.
+  // Default false, so every existing congregation keeps today's behavior.
+  requireTwoFactor: boolean("require_two_factor").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow()

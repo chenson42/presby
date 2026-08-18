@@ -23,7 +23,6 @@ import {
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import type { ActionResult } from "@/types/actions";
 
-const PENDING_TTL_MINUTES = 10;
 const FRESH_COOKIE_TTL_SECONDS = 300; // 5 minutes — enough to copy/paste
 
 async function setFreshRecoveryCodesCookie(codes: string[]) {
@@ -64,33 +63,6 @@ export async function clearFreshCodesCookieAction() {
   // A deletion sent without the matching Path attribute targets a different cookie
   // entry in the browser jar and silently fails.
   jar.delete({ name: FRESH_RECOVERY_CODES_COOKIE, path: "/account/2fa" });
-}
-
-// ---------------------------------------------------------------------------
-// prepareEnrollment — called server-side from the page, not a client action.
-// Returns the otpauth URI and plaintext secret for QR display.
-// ---------------------------------------------------------------------------
-
-export async function prepareEnrollment(
-  userId: string,
-  email: string,
-): Promise<{ uri: string; secret: string }> {
-  const secret = generateSecret();
-  const ciphertext = encryptSecret(secret);
-  const expiresAt = new Date(
-    Date.now() + PENDING_TTL_MINUTES * 60 * 1000,
-  );
-
-  await db
-    .insert(userTotpPendingEnrollments)
-    .values({ userId, secretCiphertext: ciphertext, expiresAt })
-    .onConflictDoUpdate({
-      target: userTotpPendingEnrollments.userId,
-      set: { secretCiphertext: ciphertext, expiresAt, createdAt: new Date() },
-    });
-
-  const uri = otpauthUrl(email, secret);
-  return { uri, secret };
 }
 
 // ---------------------------------------------------------------------------

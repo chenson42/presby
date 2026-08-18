@@ -34,7 +34,7 @@ test.describe("Admin sign-in", () => {
     // Each admin section appears twice on the dashboard — once in the
     // sidebar nav and once as a card. `.first()` keeps the assertion strict
     // about visibility without caring which instance we're checking.
-    for (const linkName of [/users & roles/i, /feature flags/i, /release notes/i, /your 2fa/i]) {
+    for (const linkName of [/users & roles/i, /feature flags/i, /release notes/i, /2fa policy/i]) {
       await expect(page.getByRole("link", { name: linkName }).first()).toBeVisible();
     }
   });
@@ -79,7 +79,7 @@ test.describe("Admin sign-in", () => {
       { path: "/admin/users", heading: /^users$/i },
       { path: "/admin/flags", heading: /feature flags/i },
       { path: "/admin/docs", heading: /release notes/i },
-      { path: "/admin/2fa", heading: /two-factor|2fa/i },
+      { path: "/admin/2fa", heading: /two-factor policy/i },
     ];
 
     for (const { path, heading } of subpages) {
@@ -91,5 +91,22 @@ test.describe("Admin sign-in", () => {
         `${path} should render its main heading`,
       ).toBeVisible();
     }
+  });
+
+  test("2FA policy page renders the congregation list, not the permission-denied card", async ({ page }) => {
+    await page.goto("/signin");
+    await page.locator('input[name="email"]').fill(ADMIN.email);
+    await page.locator('input[name="password"]').fill(ADMIN.password);
+    await page.getByRole("button", { name: /sign in with email/i }).click();
+    await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
+
+    await page.goto("/admin/2fa");
+
+    // The denial card shares the h1, so the heading alone proves nothing about
+    // the admin.two_factor gate. The Congregations table only renders past it.
+    await expect(
+      page.getByRole("heading", { name: /congregations/i }),
+    ).toBeVisible();
+    await expect(page.getByText(/required, but not enrolled/i)).toBeVisible();
   });
 });

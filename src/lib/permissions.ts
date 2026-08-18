@@ -15,6 +15,7 @@ export const FEATURES = {
   ADMIN_AUDIT: "admin.audit",
   ADMIN_EMAIL_QUEUE: "admin.email_queue",
   ADMIN_WHATS_NEW: "admin.whats_new",
+  ADMIN_TWO_FACTOR: "admin.two_factor",
 } as const;
 
 export type FeatureKey = (typeof FEATURES)[keyof typeof FEATURES];
@@ -29,6 +30,13 @@ export const FEATURE_CATALOG: Array<{
     key: FEATURES.ADMIN_DASHBOARD,
     name: "Admin dashboard",
     description: "Access the /admin landing page.",
+    category: "admin",
+  },
+  {
+    key: FEATURES.ADMIN_TWO_FACTOR,
+    name: "Manage two-factor policy",
+    description:
+      "Set which congregations require two-factor authentication, and see who is required but not yet enrolled.",
     category: "admin",
   },
   {

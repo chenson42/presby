@@ -22,6 +22,24 @@ function key(): Buffer {
   return buf;
 }
 
+/**
+ * Is the TOTP encryption key present and well-formed?
+ *
+ * Every other optional integration in this codebase degrades: Turnstile no-ops
+ * without keys, Resend logs to stdout. TOTP did not — a missing
+ * AUTH_TOTP_ENCRYPTION_KEY threw out of key() mid-render and took the whole
+ * page down with an unhandled runtime error, which tells the user nothing and
+ * the operator very little. Call this first and show a configuration notice.
+ */
+export function isTotpConfigured(): boolean {
+  try {
+    key();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function encryptSecret(plain: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGO, key(), iv);

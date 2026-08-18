@@ -7,7 +7,10 @@ import {
   userTotp,
   userTotpRecoveryCodes,
 } from "@/lib/db/schema";
-import { FRESH_RECOVERY_CODES_COOKIE } from "@/lib/two-factor";
+import {
+  FRESH_RECOVERY_CODES_COOKIE,
+  isTotpConfigured,
+} from "@/lib/two-factor";
 import {
   getOrCreatePendingEnrollment,
   PENDING_TTL_MINUTES,
@@ -81,6 +84,29 @@ export default async function AccountTwoFactorPage({
             (of {totalCodes} total).
           </p>
           <RegenerateCodesForm />
+        </div>
+      </div>
+    );
+  }
+
+  // Enrolment needs the encryption key. Without it, getOrCreatePendingEnrollment
+  // throws out of key() mid-render and the page dies with an unhandled runtime
+  // error that tells the member nothing. Say what is wrong instead.
+  if (!isTotpConfigured()) {
+    return (
+      <div className="max-w-xl">
+        <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
+        <div className="mt-4 rounded-md border border-border bg-muted/40 p-4">
+          <p className="text-sm font-medium">Not available right now</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Two-factor enrolment isn&apos;t configured on this deployment.
+            Please contact an administrator — no action is needed from you.
+          </p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Administrators: set <code>AUTH_TOTP_ENCRYPTION_KEY</code> (32 bytes,
+            base64) and restart. Rotating it invalidates every existing
+            enrolment.
+          </p>
         </div>
       </div>
     );

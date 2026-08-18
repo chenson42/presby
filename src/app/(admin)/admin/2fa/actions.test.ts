@@ -1,153 +1,146 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
-// ---------------------------------------------------------------------------
-// Module mocks — vi.mock() calls are hoisted by Vitest's module transformer.
-// ---------------------------------------------------------------------------
+/**
+ * setOrganizationTwoFactorAction — the per-congregation 2FA policy write.
+ *
+ * This file replaces the old admin/2fa cookie tests. Those guarded BUG-2 for a
+ * copy of the self-enrolment flow that no longer exists here; the identical
+ * regression lives in (account)/account/2fa/actions.test.ts, next to the one
+ * remaining implementation.
+ *
+ * What matters now: the action is gated (security finding M5 was four ungated
+ * exports on this exact route), validates its input, uses the platform
+ * connection deliberately, and writes an audit event.
+ */
 
-vi.mock("next/headers", () => ({
-  cookies: vi.fn(),
-}));
-
-vi.mock("next/cache", () => ({
-  revalidatePath: vi.fn(),
-}));
-
-vi.mock("next/navigation", () => ({
-  redirect: vi.fn(),
-}));
-
-vi.mock("@/auth", () => ({
-  auth: vi.fn(),
-  unstable_update: vi.fn(),
-}));
-
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn(),
-}));
-
-vi.mock("@/lib/db", () => ({
-  db: {
-    query: {
-      userTotp: { findFirst: vi.fn() },
-      userTotpPendingEnrollments: { findFirst: vi.fn() },
-    },
-    insert: vi.fn(() => ({
-      values: vi.fn(() => ({ onConflictDoUpdate: vi.fn() })),
-    })),
-    delete: vi.fn(() => ({ where: vi.fn() })),
-  },
-}));
-
-vi.mock("@/lib/db/schema", () => ({
-  auditEvents: { _: "audit_events" },
-  userTotp: { _: "user_totp" },
-  userTotpPendingEnrollments: { _: "user_totp_pending" },
-  userTotpRecoveryCodes: { _: "user_totp_recovery_codes" },
-}));
-
-vi.mock("@/lib/two-factor", () => ({
-  FRESH_RECOVERY_CODES_COOKIE: "claudecode_fresh_recovery_codes",
-  decryptSecret: vi.fn(),
-  encryptSecret: vi.fn(),
-  generateRecoveryCodes: vi.fn(() => ["CODE-0001"]),
-  hashRecoveryCode: vi.fn((c: string) => `hash(${c})`),
-  verifyToken: vi.fn(() => false),
-  otpauthUrl: vi.fn(() => "otpauth://"),
-  generateSecret: vi.fn(() => "FAKESECRET"),
-}));
-
-vi.mock("@/lib/audit", () => ({
-  AUDIT_ACTIONS: {
-    TOTP_ENROLLED: "totp.enrolled",
-    TOTP_RECOVERY_CODES_REGENERATED: "totp.recovery_codes.regenerated",
-    TOTP_RESET: "totp.reset",
-  },
-}));
-
-import { cookies } from "next/headers";
-import { FRESH_RECOVERY_CODES_COOKIE } from "@/lib/two-factor";
-import { clearFreshCodesCookieAction } from "./actions";
-
-// ---------------------------------------------------------------------------
-// clearFreshCodesCookieAction (admin) — regression for BUG-2
-//
-// Mirror of the account surface test. The admin cookie is path-scoped to
-// "/admin/2fa" — a different scope from "/account/2fa". Both must use the
-// exact matching path when deleting; otherwise the path-scoped cookie in the
-// browser jar would not be cleared.
-// ---------------------------------------------------------------------------
-
-describe(
-  "clearFreshCodesCookieAction (admin) — regression for BUG-2: cookie not cleared in server action",
-  () => {
-    let mockDelete: ReturnType<typeof vi.fn>;
-
-    beforeEach(() => {
-      mockDelete = vi.fn();
-      vi.mocked(cookies).mockResolvedValue({
-        delete: mockDelete,
-      } as unknown as Awaited<ReturnType<typeof cookies>>);
-    });
-
-    it("calls jar.delete with the correct cookie name", async () => {
-      // Act
-      await clearFreshCodesCookieAction();
-
-      // Assert
-      expect(mockDelete).toHaveBeenCalledTimes(1);
-      const [arg] = mockDelete.mock.calls[0];
-      expect(arg.name).toBe(FRESH_RECOVERY_CODES_COOKIE);
-    });
-
-    it("calls jar.delete with path '/admin/2fa' — regression for wrong path silently failing", async () => {
-      // Act
-      await clearFreshCodesCookieAction();
-
-      // Assert — admin surface uses '/admin/2fa', not '/account/2fa'
-      const [arg] = mockDelete.mock.calls[0];
-      expect(arg.path).toBe("/admin/2fa");
-    });
-
-    it("calls jar.delete with the exact { name, path } object shape — combined regression", async () => {
-      // Act
-      await clearFreshCodesCookieAction();
-
-      // Assert
-      expect(mockDelete).toHaveBeenCalledWith({
-        name: FRESH_RECOVERY_CODES_COOKIE,
-        path: "/admin/2fa",
-      });
-    });
-  },
+const mockAuth = vi.hoisted(() => vi.fn());
+const mockExecute = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ rows: [{ organization_id: "org-1" }] }),
+);
+const mockRecordAudit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockGetPlatformDb = vi.hoisted(() =>
+  vi.fn(() => ({ execute: mockExecute })),
 );
 
-// ---------------------------------------------------------------------------
-// Static assertion — (admin)/admin/2fa/page.tsx must not contain jar.delete.
-//
-// FAIL-BEFORE evidence: before the fix, running
-//   grep "jar.delete" src/app/(admin)/admin/2fa/page.tsx
-// produced:
-//   src/app/(admin)/admin/2fa/page.tsx:32:  jar.delete(FRESH_RECOVERY_CODES_COOKIE);
-//
-// This test now PASSES because the fix removed the illegal mutation.
-// ---------------------------------------------------------------------------
+vi.mock("server-only", () => ({}));
+vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/db", () => ({ getPlatformDb: mockGetPlatformDb }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/lib/audit", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/audit")>("@/lib/audit");
+  return { AUDIT_ACTIONS: actual.AUDIT_ACTIONS, recordAudit: mockRecordAudit };
+});
 
-describe(
-  "(admin)/admin/2fa/page.tsx static analysis — regression for RSC cookie mutation",
-  () => {
-    const pageSource = readFileSync(
-      resolve(__dirname, "page.tsx"),
-      "utf-8",
+import { setOrganizationTwoFactorAction } from "./actions";
+import { AUDIT_ACTIONS } from "@/lib/audit";
+import { FEATURES } from "@/lib/permissions";
+
+const VALID_ORG = "11111111-2222-3333-4444-555555555555";
+
+function formData(fields: Record<string, string>): FormData {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  return fd;
+}
+
+function sessionWith(features: string[]) {
+  return { user: { id: "user-1", features } };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockExecute.mockResolvedValue({ rows: [{ organization_id: VALID_ORG }] });
+});
+
+describe("setOrganizationTwoFactorAction — authorization", () => {
+  it("rejects an unauthenticated caller without touching the database", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    const result = await setOrganizationTwoFactorAction(
+      formData({ organizationId: VALID_ORG, required: "true" }),
     );
 
-    it("page.tsx does not contain jar.delete — illegal RSC cookie mutation removed", () => {
-      expect(pageSource).not.toContain("jar.delete");
-    });
+    expect(result).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
 
-    it("page.tsx does not define consumeFreshCodesCookie — helper that contained the illegal delete", () => {
-      expect(pageSource).not.toContain("consumeFreshCodesCookie");
+  it("rejects a signed-in user lacking admin.two_factor — regression for M5", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+
+    const result = await setOrganizationTwoFactorAction(
+      formData({ organizationId: VALID_ORG, required: "true" }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockExecute).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("setOrganizationTwoFactorAction — input validation", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_TWO_FACTOR]));
+  });
+
+  it.each([
+    ["missing", ""],
+    ["not a uuid", "org-1"],
+    ["sql-ish", "' OR 1=1 --"],
+  ])("rejects an organizationId that is %s", async (_label, value) => {
+    const result = await setOrganizationTwoFactorAction(
+      formData({ organizationId: value, required: "true" }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
+  it("reports a miss rather than claiming success when no row comes back", async () => {
+    mockExecute.mockResolvedValue({ rows: [] });
+
+    const result = await setOrganizationTwoFactorAction(
+      formData({ organizationId: VALID_ORG, required: "true" }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "Organization not found." });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("setOrganizationTwoFactorAction — the write", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_TWO_FACTOR]));
+  });
+
+  it("uses the platform connection — the tenant connection would see zero orgs", async () => {
+    await setOrganizationTwoFactorAction(
+      formData({ organizationId: VALID_ORG, required: "true" }),
+    );
+
+    expect(mockGetPlatformDb).toHaveBeenCalled();
+  });
+
+  it("audits the change with the new value", async () => {
+    await setOrganizationTwoFactorAction(
+      formData({ organizationId: VALID_ORG, required: "true" }),
+    );
+
+    expect(mockRecordAudit).toHaveBeenCalledWith({
+      action: AUDIT_ACTIONS.ORG_2FA_POLICY_CHANGED,
+      resourceType: "organization",
+      resourceId: VALID_ORG,
+      metadata: { requireTwoFactor: true },
     });
-  },
-);
+  });
+
+  it("treats anything other than the string 'true' as turning the policy off", async () => {
+    await setOrganizationTwoFactorAction(
+      formData({ organizationId: VALID_ORG, required: "false" }),
+    );
+
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { requireTwoFactor: false } }),
+    );
+  });
+});

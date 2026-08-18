@@ -16,6 +16,7 @@
 \set PRESBY  '\'11111111-1111-1111-1111-111111111111\''
 \set PASTOR  '\'c0000000-0000-0000-0000-000000000006\''
 \set ELDER   '\'c0000000-0000-0000-0000-000000000001\''
+\set ELDERUSER '\'e0000000-0000-0000-0000-0000000000f2\''
 
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
@@ -296,3 +297,41 @@ begin;
        from presby_roll_counts_as_of(:ALDER)),
     'roll: total adherents excludes affiliate members');
 commit;
+
+-- ---------------------------------------------------------------------------
+-- 11. The per-congregation 2FA policy is readable at sign-in
+-- ---------------------------------------------------------------------------
+-- presby_two_factor_required() answers "does any church this user belongs to
+-- require 2FA?" during authentication — when NO org GUC is set and none can be,
+-- because picking an organization happens after you sign in.
+--
+-- This is finding F26 wearing a different hat. A plain join here is filtered to
+-- zero rows by the very policies it complements, so it would return false for
+-- exactly the users the policy protects: failing silently, looking like it
+-- worked, and disabling the feature. The function must be SECURITY DEFINER, and
+-- the pair of assertions below is what proves it — the function sees the
+-- fixture's requirement, a naive join sees nothing at all.
+--
+-- The fixture seeds require_two_factor = true on Alder and false on Bramble.
+-- Nothing here writes: presby_app cannot write organization_settings without an
+-- org context, which is itself the point.
+--
+-- NOTE: deliberately NOT inside an org context. Setting one would hide the bug.
+begin;
+  select assert_eq(
+    (select presby_two_factor_required(:ELDERUSER)::int),
+    1, '2fa policy: definer function sees the requirement with no org GUC set');
+
+  -- The same question asked the naive way. If this ever stops returning 0, RLS
+  -- has been weakened and the definer function is no longer load-bearing.
+  select assert_eq(
+    (select count(*) from memberships m
+       join organization_settings s on s.organization_id = m.organization_id
+      where s.require_two_factor),
+    0, '2fa policy: a naive join sees nothing — this is why F26 needs DEFINER');
+
+  -- A user with no linked person is nobody's member and is never required.
+  select assert_eq(
+    (select presby_two_factor_required('00000000-0000-0000-0000-0000000000ff')::int),
+    0, '2fa policy: an unlinked user is not required by any congregation');
+rollback;

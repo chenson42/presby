@@ -23,6 +23,9 @@ vi.mock("@/lib/db", () => ({
         findFirst: vi.fn(),
       },
     },
+    // computeEffectiveTwoFactor's per-church arm calls
+    // presby_two_factor_required() through db.execute().
+    execute: vi.fn(),
   },
 }));
 
@@ -36,6 +39,12 @@ import { db } from "@/lib/db";
 import { isFlagEnabled } from "@/lib/flags";
 
 const findFirst = db.query.featureFlags.findFirst as ReturnType<typeof vi.fn>;
+const mockExecute = db.execute as unknown as ReturnType<typeof vi.fn>;
+
+/** presby_two_factor_required() result shape. */
+function orgRequires(required: boolean) {
+  return { rows: [{ required }] };
+}
 const mockIsFlagEnabled = isFlagEnabled as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -94,6 +103,7 @@ describe("isLocalLoginEnabled", () => {
 
 describe("computeEffectiveTwoFactor", () => {
   it("rawRequired = false → false without reading the flag (short-circuit)", async () => {
+    mockExecute.mockResolvedValue(orgRequires(false));
     const result = await computeEffectiveTwoFactor(false);
 
     expect(result).toBe(false);
@@ -137,5 +147,70 @@ describe("computeEffectiveTwoFactor", () => {
     const result = await computeEffectiveTwoFactor(true);
 
     expect(result).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeEffectiveTwoFactor — the per-church arm
+//
+// This is the arm F26 predicts will fail silently: presby_two_factor_required()
+// runs at sign-in with no org GUC set, so if it were ever rewritten as a plain
+// query, RLS would filter it to zero rows and it would return false for exactly
+// the users it protects. These tests pin the behavior, not the SQL.
+// ---------------------------------------------------------------------------
+
+describe("computeEffectiveTwoFactor — per-congregation policy", () => {
+  it("requires 2FA when the user's own column is false but their church requires it", async () => {
+    mockExecute.mockResolvedValue(orgRequires(true));
+    mockIsFlagEnabled.mockResolvedValue(true);
+
+    const result = await computeEffectiveTwoFactor(false, "user-1");
+
+    expect(result).toBe(true);
+  });
+
+  it("does not require 2FA when neither the user nor any church requires it", async () => {
+    mockExecute.mockResolvedValue(orgRequires(false));
+
+    const result = await computeEffectiveTwoFactor(false, "user-1");
+
+    expect(result).toBe(false);
+    // Master switch is irrelevant when nothing requires 2FA — don't read it.
+    expect(mockIsFlagEnabled).not.toHaveBeenCalled();
+  });
+
+  it("skips the church lookup entirely when the user's own column already requires it", async () => {
+    mockIsFlagEnabled.mockResolvedValue(true);
+
+    const result = await computeEffectiveTwoFactor(true, "user-1");
+
+    expect(result).toBe(true);
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
+  it("the master switch still turns off a church-imposed requirement", async () => {
+    mockExecute.mockResolvedValue(orgRequires(true));
+    mockIsFlagEnabled.mockResolvedValue(false);
+
+    const result = await computeEffectiveTwoFactor(false, "user-1");
+
+    expect(result).toBe(false);
+  });
+
+  it("a database error does not newly impose 2FA — nobody gets stranded by a blip", async () => {
+    mockExecute.mockRejectedValue(new Error("connection reset"));
+
+    const result = await computeEffectiveTwoFactor(false, "user-1");
+
+    expect(result).toBe(false);
+  });
+
+  it("without a userId, behaves exactly as before the per-church feature", async () => {
+    mockIsFlagEnabled.mockResolvedValue(true);
+
+    const result = await computeEffectiveTwoFactor(true);
+
+    expect(result).toBe(true);
+    expect(mockExecute).not.toHaveBeenCalled();
   });
 });

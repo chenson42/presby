@@ -22,7 +22,7 @@ export default async function AdminLayout({
     { href: "/admin/audit", label: "Audit Log" },
     { href: "/admin/email-queue", label: "Email queue" },
     { href: "/admin/whats-new", label: "What's new" },
-    { href: "/admin/2fa", label: "Your 2FA" },
+    { href: "/admin/2fa", label: "2FA policy" },
   ];
 
   return (

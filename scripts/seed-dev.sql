@@ -37,9 +37,13 @@ insert into organizations (id, parent_id, organization_type, name, slug, path, p
    'congregation', 'Quillhaven Presbyterian Church', 'quillhaven',
    'northern_reach.quillhaven', 'unmanaged');
 
-insert into organization_settings (organization_id, settings) values
-  ('22222222-2222-2222-2222-222222222222', '{"hasDeacons": true, "sessionServesAsTrustees": false}'),
-  ('33333333-3333-3333-3333-333333333333', '{"hasDeacons": false, "sessionServesAsTrustees": true}');
+-- require_two_factor differs between the two congregations on purpose: the
+-- isolation suite asserts that presby_two_factor_required() reads the policy
+-- at sign-in with no org GUC set (the F26 shape), and it can only prove that
+-- if one church requires 2FA and another does not.
+insert into organization_settings (organization_id, require_two_factor, settings) values
+  ('22222222-2222-2222-2222-222222222222', true,  '{"hasDeacons": true, "sessionServesAsTrustees": false}'),
+  ('33333333-3333-3333-3333-333333333333', false, '{"hasDeacons": false, "sessionServesAsTrustees": true}');
 
 -- ---------------------------------------------------------------------------
 -- F16: derived groups must exist before any officer term is recorded, or the
@@ -233,5 +237,27 @@ insert into sasr_reports (organization_id, report_year, official_beginning_balan
   -- D9: unmanaged org has no roll, so computed_beginning_balance is NULL.
   -- The projection must render "not derived", never 0.
   ('44444444-4444-4444-4444-444444444444', 2025, 41, null, 39, 'submitted');
+
+-- ---------------------------------------------------------------------------
+-- A platform user linked to a fixture person.
+--
+-- Exists so the isolation suite can assert presby_two_factor_required(), which
+-- resolves the per-congregation 2FA policy at SIGN-IN — with no org GUC set,
+-- because choosing an organization happens after authentication. That is the
+-- F26 shape exactly: without SECURITY DEFINER the function is filtered to zero
+-- rows and quietly returns false for the users it protects. An assertion needs
+-- a user_id link to catch that, so the fixture provides one.
+--
+-- Synthetic, inactive-by-omission (no password, so it cannot sign in) and on
+-- the reserved example.invalid domain.
+-- ---------------------------------------------------------------------------
+insert into users (id, email, name, email_verified)
+values ('e0000000-0000-0000-0000-0000000000f2', 'elder.fixture@example.invalid',
+        'Fixture Elder', now())
+on conflict (id) do nothing;
+
+update people
+   set user_id = 'e0000000-0000-0000-0000-0000000000f2'
+ where id = 'c0000000-0000-0000-0000-000000000001';
 
 commit;

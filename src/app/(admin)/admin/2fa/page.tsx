@@ -1,162 +1,212 @@
-import { eq } from "drizzle-orm";
-import { cookies } from "next/headers";
-import QRCode from "qrcode";
+import Link from "next/link";
+import { sql } from "drizzle-orm";
 import { auth } from "@/auth";
-import { db } from "@/lib/db";
-import {
-  userTotp,
-  userTotpRecoveryCodes,
-} from "@/lib/db/schema";
-import { FRESH_RECOVERY_CODES_COOKIE } from "@/lib/two-factor";
-import {
-  getOrCreatePendingEnrollment,
-  PENDING_TTL_MINUTES,
-} from "@/lib/totp-pending";
-import {
-  clearFreshCodesCookieAction,
-  confirmEnrollmentAction,
-  regenerateRecoveryCodesAction,
-  resetEnrollmentAction,
-} from "./actions";
-import { FormattedDate } from "@/components/shared/formatted-date";
-import { FreshRecoveryCodes } from "@/components/shared/fresh-recovery-codes";
+import { getPlatformDb } from "@/lib/db";
+import { FEATURES, hasFeature } from "@/lib/permissions";
+import { TwoFactorPolicyToggle } from "./policy-toggle";
 
-export default async function TwoFactorPage() {
+/**
+ * Two-factor policy.
+ *
+ * This route used to be a second copy of /account/2fa — enrol yourself,
+ * regenerate your own recovery codes — sitting in the admin section under the
+ * label "Your 2FA". Self-enrolment now lives in exactly one place, and this
+ * route answers the question an administrator actually has: which congregations
+ * require two-factor, and who has not enrolled yet.
+ *
+ * Reads go through getPlatformDb() because listing every organization on the
+ * RLS-enforced connection returns zero rows — there is no org context on an
+ * admin page, which is precisely what the second connection is for.
+ */
+
+type OrgRow = {
+  id: string;
+  name: string;
+  organization_type: string;
+  require_two_factor: boolean;
+  member_count: number;
+};
+
+type StrandedRow = {
+  id: string;
+  email: string;
+  name: string | null;
+  source: string;
+};
+
+export default async function TwoFactorPolicyPage() {
   const session = await auth();
-  if (!session?.user) return null;
-
-  const existing = await db.query.userTotp.findFirst({
-    where: eq(userTotp.userId, session.user.id),
-  });
-
-  if (existing) {
-    const recoveryRows = await db.query.userTotpRecoveryCodes.findMany({
-      where: eq(userTotpRecoveryCodes.userId, session.user.id),
-    });
-    const totalCodes = recoveryRows.length;
-    const unusedCount = recoveryRows.filter((c) => !c.usedAt).length;
-
-    const jar = await cookies();
-    const rawFreshCodes = jar.get(FRESH_RECOVERY_CODES_COOKIE)?.value ?? null;
-    let freshCodes: string[] | null = null;
-    if (rawFreshCodes) {
-      try {
-        const parsed = JSON.parse(rawFreshCodes);
-        freshCodes = Array.isArray(parsed)
-          ? parsed.filter((s): s is string => typeof s === "string")
-          : null;
-      } catch {
-        freshCodes = null;
-      }
-    }
-
+  if (!hasFeature(session?.user?.features, FEATURES.ADMIN_TWO_FACTOR)) {
     return (
-      <div className="max-w-xl">
-        <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          You enrolled on{" "}
-          <FormattedDate value={existing.enrolledAt} mode="date" />.
-          {existing.lastUsedAt && (
-            <> Last used: <FormattedDate value={existing.lastUsedAt} mode="datetime" />.</>
-          )}
+      <div>
+        <h1 className="text-2xl font-semibold">Two-factor policy</h1>
+        <p className="mt-3 text-sm text-muted-foreground">
+          You don&apos;t have permission to manage two-factor policy.
         </p>
-
-        {freshCodes && (
-          <FreshRecoveryCodes
-            codes={freshCodes}
-            onDisplayed={clearFreshCodesCookieAction}
-          />
-        )}
-
-        <div className="mt-6 rounded-md border border-border p-4">
-          <h2 className="text-sm font-semibold">Recovery codes</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {unusedCount} unused code{unusedCount === 1 ? "" : "s"} remaining
-            (of {totalCodes} total). Each code can be used once if you lose
-            your authenticator.
-          </p>
-          <form action={regenerateRecoveryCodesAction} className="mt-3">
-            <button
-              type="submit"
-              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
-            >
-              Regenerate recovery codes
-            </button>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Replaces every existing code. The new set is shown once — save
-              them before leaving the page.
-            </p>
-          </form>
-        </div>
-
-        <form action={resetEnrollmentAction} className="mt-6">
-          <button
-            type="submit"
-            className="rounded-md border border-red-500/40 px-3 py-1.5 text-sm text-red-600 hover:bg-red-500/10"
-          >
-            Reset 2FA enrollment
-          </button>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Deletes your TOTP secret and recovery codes. You&apos;ll re-scan
-            the QR code on your next visit.
-          </p>
-        </form>
       </div>
     );
   }
 
-  // Not enrolled — reuse the pending row if it's still valid, otherwise mint
-  // a new one.  Reusing the row means the QR code stays stable across page
-  // reloads within the TTL window, so the secret the user scanned matches the
-  // one the confirm action will verify.
-  const { secret, uri: otpUrl } = await getOrCreatePendingEnrollment(
-    session.user.id,
-    session.user.email ?? "user@example.com",
-  );
-  const qrDataUrl = await QRCode.toDataURL(otpUrl);
+  const platformDb = getPlatformDb();
+
+  const orgs = await platformDb.execute(sql`
+    SELECT o.id,
+           o.name,
+           o.organization_type::text          AS organization_type,
+           coalesce(s.require_two_factor, false) AS require_two_factor,
+           count(m.id) FILTER (WHERE m.ended_on IS NULL)::int AS member_count
+      FROM organizations o
+      LEFT JOIN organization_settings s ON s.organization_id = o.id
+      LEFT JOIN memberships m           ON m.organization_id = o.id
+     GROUP BY o.id, o.name, o.organization_type, s.require_two_factor
+     ORDER BY o.organization_type, o.name
+  `);
+
+  // Required but not enrolled. These are the people who will hit the challenge
+  // and cannot answer it — the stranded-member case, which is the whole reason
+  // an administrator opens this page. `source` says WHY they are required, so
+  // it is obvious whether to flip a congregation's policy or the user's own row.
+  const stranded = await platformDb.execute(sql`
+    SELECT u.id,
+           u.email,
+           u.name,
+           CASE WHEN u.two_factor_required THEN 'this user' ELSE 'congregation' END AS source
+      FROM users u
+     WHERE u.is_active
+       AND NOT EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = u.id)
+       AND (
+             u.two_factor_required
+             OR EXISTS (
+               SELECT 1
+                 FROM people p
+                 JOIN memberships m           ON m.person_id = p.id AND m.ended_on IS NULL
+                 JOIN organization_settings s ON s.organization_id = m.organization_id
+                WHERE p.user_id = u.id
+                  AND p.merged_into_id IS NULL
+                  AND s.require_two_factor
+             )
+           )
+     ORDER BY u.email
+     LIMIT 50
+  `);
+
+  const orgRows = orgs.rows as unknown as OrgRow[];
+  const strandedRows = stranded.rows as unknown as StrandedRow[];
 
   return (
-    <div className="max-w-xl">
-      <h1 className="text-2xl font-semibold">Enroll in 2FA</h1>
-      <ol className="mt-4 space-y-2 text-sm">
-        <li>1. Install an authenticator app (Google Authenticator, 1Password, Authy).</li>
-        <li>2. Scan this QR code:</li>
-      </ol>
-      {/* QR code is a data: URL generated server-side; `next/image` would add */}
-      {/* a remote-loader round-trip and a layout-shift placeholder for no win. */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={qrDataUrl}
-        alt="TOTP QR code"
-        className="mt-4 h-48 w-48 rounded border border-border bg-white p-2"
-      />
-      <details className="mt-3 text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Can&apos;t scan? Enter manually</summary>
-        <pre className="mt-2 rounded bg-muted p-2 font-mono">{secret}</pre>
-      </details>
-      <p className="mt-3 text-xs text-muted-foreground">
-        This QR code expires in {PENDING_TTL_MINUTES} minutes. Reload the page
-        for a fresh one.
+    <div>
+      <h1 className="text-2xl font-semibold">Two-factor policy</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Two-factor is opt-in per congregation. A member is required if their own
+        record requires it <em>or</em> any congregation they belong to does —
+        the stricter setting wins, because the requirement is resolved at
+        sign-in, before anyone has chosen an organization.
       </p>
-      <form action={confirmEnrollmentAction} className="mt-6 space-y-3">
-        <label className="block text-sm font-medium">
-          Enter the 6-digit code from your app
-        </label>
-        <input
-          name="token"
-          inputMode="numeric"
-          pattern="[0-9]{6}"
-          required
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-base tracking-widest"
-          placeholder="123456"
-        />
-        <button
-          type="submit"
-          className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
-        >
-          Confirm enrollment
-        </button>
-      </form>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Enrolling in two-factor for your own account is at{" "}
+        <Link href="/account/2fa" className="underline">
+          Account → Two-factor
+        </Link>
+        . Resetting someone else&apos;s is on their user page.
+      </p>
+
+      <h2 className="mt-8 text-sm font-semibold">Congregations</h2>
+      <table className="mt-2 w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            <th className="py-2">Organization</th>
+            <th>Type</th>
+            <th>Members</th>
+            <th>Requires 2FA</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {orgRows.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="py-6 text-muted-foreground">
+                No organizations yet.
+              </td>
+            </tr>
+          ) : (
+            orgRows.map((o) => (
+              <tr key={o.id} className="border-b border-border">
+                <td className="py-3">{o.name}</td>
+                <td className="text-xs text-muted-foreground">
+                  {o.organization_type.replace(/_/g, " ")}
+                </td>
+                <td className="text-xs text-muted-foreground">
+                  {o.member_count}
+                </td>
+                <td>
+                  <span
+                    className={
+                      o.require_two_factor
+                        ? "rounded-full bg-green-500/15 px-2 py-0.5 text-xs text-green-700 dark:text-green-300"
+                        : "rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                    }
+                  >
+                    {o.require_two_factor ? "required" : "optional"}
+                  </span>
+                </td>
+                <td className="text-right">
+                  <TwoFactorPolicyToggle
+                    organizationId={o.id}
+                    organizationName={o.name}
+                    required={o.require_two_factor}
+                  />
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+
+      <h2 className="mt-10 text-sm font-semibold">
+        Required, but not enrolled
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        These accounts will be asked for a code they cannot produce. Reset or
+        exempt them from their user page before they are locked out of admin
+        routes.
+      </p>
+      <table className="mt-2 w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            <th className="py-2">Email</th>
+            <th>Name</th>
+            <th>Required by</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {strandedRows.length === 0 ? (
+            <tr>
+              <td colSpan={4} className="py-6 text-muted-foreground">
+                Nobody is required without being enrolled.
+              </td>
+            </tr>
+          ) : (
+            strandedRows.map((u) => (
+              <tr key={u.id} className="border-b border-border">
+                <td className="py-3">{u.email}</td>
+                <td className="text-xs text-muted-foreground">
+                  {u.name ?? "—"}
+                </td>
+                <td className="text-xs text-muted-foreground">{u.source}</td>
+                <td className="text-right">
+                  <Link
+                    href={`/admin/users/${u.id}`}
+                    className="text-xs underline"
+                  >
+                    Manage
+                  </Link>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

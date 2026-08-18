@@ -1,7 +1,7 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.8.2` · surveyed 2026-08-18.**
+knows what exists without re-reconning. **Version `0.9.0` · surveyed 2026-08-18.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
 a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries
@@ -14,18 +14,18 @@ inherited from the starter.
 
 - **presby: schema** — 37 domain tables in `src/lib/db/domain/`: organizations (hierarchy, `platform_status`), people + memberships + identifiers, roll actions + transfer certificates, ordinations + officer terms, groups (derived session/diaconate), authorization (permissions, roles, grants, commissions, delegations), privacy/consent/demographics, SASR scaffold.
 - **presby: isolation** — `presby_app` NOBYPASSRLS + FORCE RLS on every tenant table; bespoke policies for the global person tables; `withOrgContext()` verifies membership before setting the org GUC; two connections (`db` vs `getPlatformDb()`).
-- **presby: authorization** — `presby_effective_permissions(person, org, as_of)` with four arms and provenance; `presby_available_organizations()` for the org switcher; `src/lib/authz.ts`.
+- **presby: authorization** — `presby_effective_permissions(person, org, as_of)` with four arms and provenance; `presby_available_organizations()` for the org switcher; `presby_two_factor_required()` for per-church 2FA at sign-in (all SECURITY DEFINER, F26); `src/lib/authz.ts`.
 - **presby: roll** — `presby_roll_as_of`, `_counts_as_of`, `_changes`, `presby_reconcile_current_roll`, `presby_roll_cache_drift`; officer registers `presby_officer_roster` / `_history`.
 - **presby: developer reference** — `/developer` index, `/developer/tables/<name>`, `/developer/erd/<module>`, `/developer/schema.json`. Generated from the schema + Postgres `COMMENT ON`.
 - **presby: NOT built** — no UI for any of the above; ledger/giving, events, worship, check-in, sites, tickets not designed.
 - **Public / Auth** — landing page, sign-in (Google OAuth + credentials, Turnstile-guarded, lockout-aware), TOTP 2FA verify + trusted device, forgot/reset password, email-change verify landing, access-pending.
 - **Member** — post-login `/home` (greeting, roles/features, what's-new card, daily feedback prompt), `/whats-new` full list, feedback submit/snooze/opt-out actions.
 - **Account (self-serve)** — profile name, email change + re-verification, password change, per-user TOTP enrolment/manage at `/account/2fa`, delete-account skeleton, permanent feedback form.
-- **Admin (`/admin`)** — users + roles (+ lock badge/unlock), feature flags, release-notes docs viewer, org 2FA tools, audit viewer, feedback triage, what's-new CRUD, email-queue viewer + retry.
+- **Admin (`/admin`)** — users + roles (+ lock badge/unlock, 2FA reset), feature flags, release-notes docs viewer, per-congregation 2FA policy, audit viewer, feedback triage, what's-new CRUD, email-queue viewer + retry.
 - **Auth backend** — NextAuth 5 config, cached session, safe callbackUrl, lockout, sign-in gate, local-login flag, session projection; edge gate `src/proxy.ts` (admin + 2FA).
 - **Platform lib** — permissions (`FEATURES` + `hasFeature`), flags (`isFlagEnabled`, cached), `recordAudit()`, TOTP crypto + pending enrolment, rate limiting, request-ip, Turnstile, email queue (persist-first + retry + Resend webhook) with `escapeHtml`.
 - **API / Cron** — NextAuth routes, Resend delivery webhook, `CRON_SECRET`-gated email-queue worker + daily maintenance (token GC).
-- **Flags** — `demo.new_dashboard`, `auth.local_login` (OAuth-only switch), `auth.require_2fa` (org 2FA switch) — both auth flags fail-open.
+- **Flags** — `demo.new_dashboard`, `auth.local_login` (OAuth-only switch), `auth.require_2fa` (install-wide 2FA master switch; per-congregation policy is `organization_settings.require_two_factor`, not a flag) — both auth flags fail-open.
 - **Dev-loop tooling** — SessionStart hooks (feedback count, functionality-map index, cadence check), pre-push PreToolUse gate, commit-msg hook (+ `Work-Log:` trailer) + escape-rate stats, `check:audit` + `check:sql-date` tripwires, CI (typecheck/build/tests/commit-grammar + secret-gated Neon-branch e2e + opt-in Claude PR review + dependabot), seed script, 11 e2e suites, fork-sync skills (`/upstream-sync` + `/downstream-sync`) + contribution-kit specs, `AGENTS.md` shim.
 
 ---
@@ -56,7 +56,7 @@ inherited from the starter.
 - Users — list + role assignment, lock badge + unlock (audited). `admin/users/page.tsx`, `users/[id]/page.tsx`, both `actions.ts`
 - Feature flags — toggle + rollout percent. `admin/flags/page.tsx`, `actions.ts`
 - Docs — release-notes markdown viewer (`docs/release-notes/vX.Y.md`). `admin/docs/page.tsx`
-- Org 2FA tools — enrolment reset etc. (relies on proxy edge gate — see 2026-07-11 security M5). `admin/2fa/page.tsx`, `actions.ts`
+- 2FA policy — per-congregation `require_two_factor` toggles + "required but not enrolled" list; platform connection (RLS hides orgs from the tenant connection); gated on `admin.two_factor` (DECISION-033). `admin/2fa/page.tsx`, `actions.ts`, `policy-toggle.tsx`
 - Audit viewer — filter by action/actor, pure RSC. `admin/audit/page.tsx`; helpers `src/lib/audit-page-helpers.ts`
 - Feedback triage — status new→triaged→done/declined; renders bodies as plain text (hostile-content invariant). `admin/feedback/page.tsx`, `actions.ts`
 - What's-new CRUD — list+create, edit, delete; HTML-reject validation. `admin/whats-new/page.tsx`, `[id]/page.tsx`, `actions.ts`

@@ -1,19 +1,14 @@
 import { test, expect } from "@playwright/test";
+import { E2E_USERS } from "./support/users";
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL;
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
+const ADMIN = E2E_USERS.admin;
 
 test.describe("Admin sign-in", () => {
-  test.skip(
-    !ADMIN_EMAIL || !ADMIN_PASSWORD,
-    "SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD must be set in .env.local",
-  );
-
   test("seeded admin reaches the admin dashboard, not /access-pending", async ({ page }) => {
     await page.goto("/signin");
 
-    await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
-    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD!);
+    await page.locator('input[name="email"]').fill(ADMIN.email);
+    await page.locator('input[name="password"]').fill(ADMIN.password);
     await page.getByRole("button", { name: /sign in with email/i }).click();
 
     // Wait for the sign-in form's post to complete (URL leaves /signin).
@@ -53,8 +48,8 @@ test.describe("Admin sign-in", () => {
     await expect(page.getByText(/welcome back/i)).toHaveCount(0);
 
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
-    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD!);
+    await page.locator('input[name="email"]').fill(ADMIN.email);
+    await page.locator('input[name="password"]').fill(ADMIN.password);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 
@@ -71,8 +66,8 @@ test.describe("Admin sign-in", () => {
 
   test("admin can open every linked subpage without a runtime error", async ({ page }) => {
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
-    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD!);
+    await page.locator('input[name="email"]').fill(ADMIN.email);
+    await page.locator('input[name="password"]').fill(ADMIN.password);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 

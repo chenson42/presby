@@ -9,18 +9,8 @@
  */
 
 import { test, expect } from "@playwright/test";
-import path from "node:path";
+import { storageStatePath } from "./support/users";
 
-function storageStatePath(role: "admin" | "member"): string {
-  return path.resolve(__dirname, "support", ".auth", `${role}.json`);
-}
-
-const HAVE_ADMIN = !!(
-  process.env.SEED_ADMIN_EMAIL && process.env.SEED_ADMIN_PASSWORD
-);
-const HAVE_MEMBER = !!(
-  process.env.SEED_MEMBER_EMAIL && process.env.SEED_MEMBER_PASSWORD
-);
 
 // ---------------------------------------------------------------------------
 // Member submits feedback from /account (permanent form — no daily-prompt gating)
@@ -29,8 +19,6 @@ test.describe("Member submits feedback from /account", () => {
   test.use({ storageState: storageStatePath("member") });
 
   test("shows feedback form and submits successfully", async ({ page }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
-
     await page.goto("/account");
 
     // The "Send feedback" section should be visible
@@ -63,8 +51,6 @@ test.describe("Admin views /admin/feedback", () => {
   test.use({ storageState: storageStatePath("admin") });
 
   test("admin can reach the feedback triage page", async ({ page }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/feedback");
 
     // Page should show the feedback heading (not a 403 or redirect)
@@ -76,8 +62,6 @@ test.describe("Admin views /admin/feedback", () => {
   test("feedback page shows empty state or submission rows", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/feedback");
 
     // Either the empty state or at least one table row should be present

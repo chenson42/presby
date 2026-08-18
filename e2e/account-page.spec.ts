@@ -1,22 +1,18 @@
 import { test, expect, type Page } from "@playwright/test";
+import { E2E_USERS } from "./support/users";
 
 // Smoke test for the /account surface — verifies that a signed-in admin can
 // reach the page and that the expected UI sections render. Does NOT submit any
 // form or mutate data (the seeded admin row must remain clean for CI).
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL;
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
+const ADMIN_EMAIL = E2E_USERS.admin.email;
+const ADMIN_PASSWORD = E2E_USERS.admin.password;
 
 test.describe("Account page (/account)", () => {
-  test.skip(
-    !ADMIN_EMAIL || !ADMIN_PASSWORD,
-    "SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD must be set in .env.local",
-  );
-
   async function signIn(page: Page) {
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
-    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD!);
+    await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
+    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
   }

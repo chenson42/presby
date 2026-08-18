@@ -1,7 +1,7 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.8.1` · surveyed 2026-08-18.**
+knows what exists without re-reconning. **Version `0.8.2` · surveyed 2026-08-18.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
 a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries
@@ -105,7 +105,7 @@ inherited from the starter.
 - CI — typecheck/lint/build/tripwires/`npm audit`/unit tests + commit-grammar job on PRs; e2e on an ephemeral Neon branch (secret-gated); opt-in Claude PR review (secret-gated); dependabot grouped updates. `.github/workflows/ci.yml`, `e2e.yml`, `claude-review.yml`, `.github/dependabot.yml`
 - Cross-tool shim — `AGENTS.md` points non-Claude agents (Cursor/Codex/Jules) at CLAUDE.md and the must-honor rules. `AGENTS.md`
 - Seed — roles, `FEATURE_CATALOG`, demo + auth flags, seed users (admin / member / MFA-admin). `scripts/seed.ts`
-- E2E — 11 Playwright suites (auth, admin, member, security headers, TZ dates) with cached storageState + DB isolation guard. `e2e/`
+- E2E — 11 Playwright suites (auth, admin, member, security headers, TZ dates). Fixture users are hardcoded in `e2e/support/users.ts` and provisioned by globalSetup (DECISION-032) — no env vars, no conditional skips; cached storageState + DB isolation guard + rate-limiter precondition. `e2e/`
 - Fork sync — `/upstream-sync` pulls starter changes into a fork (14 d cadence); `/downstream-sync` surfaces fork improvements to contribute back (30 d; self-detects the canonical repo and exits). `.claude/skills/upstream-sync/`, `.claude/skills/downstream-sync/`
 - Contribution kit — ~40 origin→fix→verification specs contributed by the huddleup.health fork (PR #3); live status in the 2026-07-01 triage review. `docs/starter-contributions/README.md`
 

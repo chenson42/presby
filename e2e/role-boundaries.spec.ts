@@ -13,25 +13,13 @@
  * (twoFactorRequired=true, twoFactorVerified=false). Use it ONLY to assert
  * the /totp redirect fires. Do not use it to test /admin page content.
  *
- * Delete e2e/support/.auth/ after changing any SEED_*_EMAIL env var.
+ * Fixture identities live in e2e/support/users.ts; globalSetup provisions them.
+ * Delete e2e/support/.auth/ if a fixture email ever changes.
  */
 
 import { test, expect } from "@playwright/test";
-import path from "node:path";
+import { storageStatePath } from "./support/users";
 
-function storageStatePath(role: "admin" | "member" | "mfa-admin"): string {
-  return path.resolve(__dirname, "support", ".auth", `${role}.json`);
-}
-
-const HAVE_ADMIN = !!(
-  process.env.SEED_ADMIN_EMAIL && process.env.SEED_ADMIN_PASSWORD
-);
-const HAVE_MEMBER = !!(
-  process.env.SEED_MEMBER_EMAIL && process.env.SEED_MEMBER_PASSWORD
-);
-const HAVE_MFA_ADMIN = !!(
-  process.env.SEED_MFA_ADMIN_EMAIL && process.env.SEED_MFA_ADMIN_PASSWORD
-);
 
 // Test 1 — Unauthenticated: /home redirects to /signin
 test("unauthenticated visit to /home redirects to /signin with callbackUrl", async ({
@@ -50,7 +38,6 @@ test.describe("Member — /admin blocked", () => {
   test("member navigating to /admin is redirected to /access-pending with from param", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/access-pending/);
     const url = new URL(page.url());
@@ -71,7 +58,6 @@ test.describe("MFA-admin — two-hop redirect gate", () => {
   test("mfa-admin navigating to /admin is redirected to /account/2fa with callbackUrl (proxy → /totp → /account/2fa)", async ({
     page,
   }) => {
-    test.skip(!HAVE_MFA_ADMIN, "SEED_MFA_ADMIN_EMAIL/PASSWORD not set");
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/account\/2fa/);
     const url = new URL(page.url());
@@ -86,7 +72,6 @@ test.describe("Admin — positive gate", () => {
   test("admin navigating to /admin reaches the admin dashboard", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
     await page.goto("/admin");
     expect(page.url()).toMatch(/\/admin/);
   });
@@ -99,7 +84,6 @@ test.describe("Feedback admin gate — member cannot access /admin/feedback", ()
   test("member navigating to /admin/feedback is redirected to /access-pending", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
     await page.goto("/admin/feedback");
     // proxy.ts gates all /admin/* routes behind admin.dashboard; members
     // without that feature are sent to /access-pending before the page-level

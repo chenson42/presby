@@ -1,14 +1,15 @@
 import { test, expect, type Page } from "@playwright/test";
+import { E2E_USERS } from "./support/users";
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL;
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
+const ADMIN_EMAIL = E2E_USERS.admin.email;
+const ADMIN_PASSWORD = E2E_USERS.admin.password;
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
 async function signInAdmin(page: Page) {
   await page.goto("/signin");
-  await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
-  await page.locator('input[name="password"]').fill(ADMIN_PASSWORD!);
+  await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
+  await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: /sign in with email/i }).click();
   await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 }
@@ -32,11 +33,6 @@ async function waitForFormattedDateHydration(page: Page) {
 }
 
 test.describe("Timezone-safe dates", () => {
-  test.skip(
-    !ADMIN_EMAIL || !ADMIN_PASSWORD,
-    "SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD must be set in .env.local",
-  );
-
   test("FormattedDate renders <time dateTime> + hydrates without hydration warnings", async ({
     page,
   }) => {

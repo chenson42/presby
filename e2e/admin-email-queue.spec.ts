@@ -15,18 +15,8 @@
  */
 
 import { test, expect } from "@playwright/test";
-import path from "node:path";
+import { storageStatePath } from "./support/users";
 
-function storageStatePath(role: "admin" | "member"): string {
-  return path.resolve(__dirname, "support", ".auth", `${role}.json`);
-}
-
-const HAVE_ADMIN = !!(
-  process.env.SEED_ADMIN_EMAIL && process.env.SEED_ADMIN_PASSWORD
-);
-const HAVE_MEMBER = !!(
-  process.env.SEED_MEMBER_EMAIL && process.env.SEED_MEMBER_PASSWORD
-);
 
 // ---------------------------------------------------------------------------
 // Test 1 — Admin sees the email queue page
@@ -38,8 +28,6 @@ test.describe("Admin — /admin/email-queue", () => {
   test("admin reaches the email queue page and sees the heading", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     const response = await page.goto("/admin/email-queue");
     expect(
       response?.status(),
@@ -56,8 +44,6 @@ test.describe("Admin — /admin/email-queue", () => {
   });
 
   test("Email queue nav link is present in the sidebar", async ({ page }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/email-queue");
 
     await expect(
@@ -76,8 +62,6 @@ test.describe("Admin — email queue page content smoke", () => {
   test("page renders either count strip or empty-state message without a server error", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     const response = await page.goto("/admin/email-queue");
     expect(
       response?.status(),
@@ -92,8 +76,6 @@ test.describe("Admin — email queue page content smoke", () => {
   });
 
   test("status filter links are present", async ({ page }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/email-queue");
 
     // The filter tab for "All" should always render.
@@ -113,8 +95,6 @@ test.describe("Member — /admin/email-queue blocked by proxy", () => {
   test("member navigating to /admin/email-queue is redirected to /access-pending", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
-
     // The proxy's /^\/admin/ catch-all requires admin.dashboard.
     // The seeded member has no admin features → redirect to /access-pending.
     await page.goto("/admin/email-queue");

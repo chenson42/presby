@@ -1,14 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { E2E_USERS } from "./support/users";
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL;
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
-const MEMBER_EMAIL = process.env.SEED_MEMBER_EMAIL;
-const MEMBER_PASSWORD = process.env.SEED_MEMBER_PASSWORD;
-const MFA_ADMIN_EMAIL = process.env.SEED_MFA_ADMIN_EMAIL;
-const MFA_ADMIN_PASSWORD = process.env.SEED_MFA_ADMIN_PASSWORD;
-
-const hasMemberCreds = !!MEMBER_EMAIL && !!MEMBER_PASSWORD;
-const hasMfaAdminCreds = !!MFA_ADMIN_EMAIL && !!MFA_ADMIN_PASSWORD;
+const ADMIN_EMAIL = E2E_USERS.admin.email;
+const ADMIN_PASSWORD = E2E_USERS.admin.password;
+const MEMBER_EMAIL = E2E_USERS.member.email;
+const MEMBER_PASSWORD = E2E_USERS.member.password;
+const MFA_ADMIN_EMAIL = E2E_USERS["mfa-admin"].email;
+const MFA_ADMIN_PASSWORD = E2E_USERS["mfa-admin"].password;
 
 test.describe("Member home and routing invariants", () => {
   // test 1: unauthenticated redirect — no seeded users needed
@@ -24,11 +22,9 @@ test.describe("Member home and routing invariants", () => {
 
   // test 2: admin signs in and lands on /home
   test("seeded admin signs in and lands on /home", async ({ page }) => {
-    test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, "SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD must be set");
-
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
-    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD!);
+    await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
+    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 
@@ -37,11 +33,9 @@ test.describe("Member home and routing invariants", () => {
 
   // test 3: admin sees Admin link and Account link in global nav
   test("admin sees Admin link and Account link in global nav", async ({ page }) => {
-    test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, "SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD must be set");
-
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
-    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD!);
+    await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
+    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 
@@ -57,11 +51,9 @@ test.describe("Member home and routing invariants", () => {
 
   // test 4: member signs in and lands on /home, no Admin link
   test("seeded member user signs in and lands on /home, no Admin link visible", async ({ page }) => {
-    test.skip(!hasMemberCreds, "SEED_MEMBER_EMAIL / SEED_MEMBER_PASSWORD must be set");
-
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(MEMBER_EMAIL!);
-    await page.locator('input[name="password"]').fill(MEMBER_PASSWORD!);
+    await page.locator('input[name="email"]').fill(MEMBER_EMAIL);
+    await page.locator('input[name="password"]').fill(MEMBER_PASSWORD);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 
@@ -74,11 +66,9 @@ test.describe("Member home and routing invariants", () => {
 
   // test 5: member navigating directly to /admin is redirected to /access-pending
   test("member navigating directly to /admin is redirected to /access-pending", async ({ page }) => {
-    test.skip(!hasMemberCreds, "SEED_MEMBER_EMAIL / SEED_MEMBER_PASSWORD must be set");
-
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(MEMBER_EMAIL!);
-    await page.locator('input[name="password"]').fill(MEMBER_PASSWORD!);
+    await page.locator('input[name="email"]').fill(MEMBER_EMAIL);
+    await page.locator('input[name="password"]').fill(MEMBER_PASSWORD);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 
@@ -92,11 +82,9 @@ test.describe("Member home and routing invariants", () => {
   // test 6: user with twoFactorRequired=true and no enrollment navigating to /admin
   // is redirected through the two-hop chain: proxy → /totp → /account/2fa
   test("user with twoFactorRequired=true navigating to /admin is redirected to /account/2fa via two-hop chain", async ({ page }) => {
-    test.skip(!hasMfaAdminCreds, "SEED_MFA_ADMIN_EMAIL / SEED_MFA_ADMIN_PASSWORD must be set");
-
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(MFA_ADMIN_EMAIL!);
-    await page.locator('input[name="password"]').fill(MFA_ADMIN_PASSWORD!);
+    await page.locator('input[name="email"]').fill(MFA_ADMIN_EMAIL);
+    await page.locator('input[name="password"]').fill(MFA_ADMIN_PASSWORD);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 
@@ -120,11 +108,9 @@ test.describe("Member home and routing invariants", () => {
 
   // test 7: access-pending page has a Back to home link
   test("access-pending page has a Back to home link", async ({ page }) => {
-    test.skip(!hasMemberCreds, "SEED_MEMBER_EMAIL / SEED_MEMBER_PASSWORD must be set");
-
     await page.goto("/signin");
-    await page.locator('input[name="email"]').fill(MEMBER_EMAIL!);
-    await page.locator('input[name="password"]').fill(MEMBER_PASSWORD!);
+    await page.locator('input[name="email"]').fill(MEMBER_EMAIL);
+    await page.locator('input[name="password"]').fill(MEMBER_PASSWORD);
     await page.getByRole("button", { name: /sign in with email/i }).click();
     await page.waitForURL((u) => u.pathname !== "/signin", { timeout: 10_000 });
 

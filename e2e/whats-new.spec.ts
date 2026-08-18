@@ -13,18 +13,8 @@
  */
 
 import { test, expect } from "@playwright/test";
-import path from "node:path";
+import { storageStatePath } from "./support/users";
 
-function storageStatePath(role: "admin" | "member"): string {
-  return path.resolve(__dirname, "support", ".auth", `${role}.json`);
-}
-
-const HAVE_ADMIN = !!(
-  process.env.SEED_ADMIN_EMAIL && process.env.SEED_ADMIN_PASSWORD
-);
-const HAVE_MEMBER = !!(
-  process.env.SEED_MEMBER_EMAIL && process.env.SEED_MEMBER_PASSWORD
-);
 
 // ---------------------------------------------------------------------------
 // Test 1 — Unauthenticated redirect
@@ -50,8 +40,6 @@ test.describe("Member — /whats-new", () => {
   test("member reaches /whats-new and page renders without error", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
-
     const response = await page.goto("/whats-new");
     expect(
       response?.status(),
@@ -70,8 +58,6 @@ test.describe("Member — /whats-new", () => {
   test("member /whats-new shows empty state or entry list (no server error)", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
-
     const response = await page.goto("/whats-new");
     expect(
       response?.status(),
@@ -94,8 +80,6 @@ test.describe("Member — /admin/whats-new blocked by proxy", () => {
   test("member navigating to /admin/whats-new is redirected to /access-pending", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/whats-new");
     await expect(page).toHaveURL(/\/access-pending/, { timeout: 10_000 });
   });
@@ -111,8 +95,6 @@ test.describe("Admin — /admin/whats-new list and create form", () => {
   test("admin reaches the whats-new admin page and sees the heading", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     const response = await page.goto("/admin/whats-new");
     expect(
       response?.status(),
@@ -131,8 +113,6 @@ test.describe("Admin — /admin/whats-new list and create form", () => {
   test("What's new nav link is present in the admin sidebar", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/whats-new");
     await expect(
       page.getByRole("link", { name: /what.s new/i }).first(),
@@ -140,8 +120,6 @@ test.describe("Admin — /admin/whats-new list and create form", () => {
   });
 
   test("create form fields are present", async ({ page }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/whats-new");
 
     // Title field
@@ -169,8 +147,6 @@ test.describe("Admin — CRUD smoke: create a what's-new entry", () => {
   test("admin creates a what's-new entry and it appears in the list", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     const uniqueTitle = `E2E test entry ${Date.now()}`;
     const uniqueBody = "This entry was created by the Playwright e2e suite.";
 
@@ -198,8 +174,6 @@ test.describe("Member — home page What's-new card", () => {
   test("member home page renders without error (What's-new card shown when entries exist)", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
-
     const response = await page.goto("/home");
     expect(
       response?.status(),

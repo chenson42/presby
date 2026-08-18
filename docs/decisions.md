@@ -4,6 +4,60 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-032: The e2e suite owns its test users; no environment variables
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** `2026-08-18-e2e-owns-its-users`
+
+### Decision
+
+E2E fixture users are **hardcoded** in `e2e/support/users.ts` and provisioned by
+`globalSetup` on every run. No `SEED_*` environment variables, and **no
+`test.skip()` for missing configuration anywhere in `e2e/`**.
+
+The dividing line: **test users are fixture data and the suite owns them; roles
+and features are application catalog data and stay with `scripts/seed.ts`.** The
+seeder binds users to roles that must already exist and fails loudly if they do
+not. A fixture that invented its own permission catalog could pass a spec against
+permissions that do not match production.
+
+### Rationale
+
+The env-driven arrangement had a failure mode worse than the inconvenience it
+avoided: with the variables unset, `globalSetup` skipped session acquisition,
+every authenticated spec skipped itself, and Playwright exited **0**. Measured
+2026-08-18: `6 passed, 42 skipped` — a green suite that ran 12% of itself.
+
+CLAUDE.md's Phase 5 gate requires e2e against a real dev server with an
+MFA-enrolled user for any auth-touching change, and says a deferred check is
+`BLOCKED`, never `PASS`. A suite that silently shrinks lets that gate be
+satisfied by a run in which the auth specs never executed. The v0.7.0 notes cite
+"48/48" for a command that today yields 6.
+
+### Safety of a committed test password
+
+The fixture password is not a secret and cannot become one:
+
+- every fixture email ends in `@example.invalid`, a reserved TLD (RFC 2606) that
+  can never resolve
+- `seed-users.ts` **refuses** to provision any user whose email lacks that
+  suffix, so the code cannot touch a real account even pointed at the wrong database
+- the DB isolation guard still runs first
+
+### Impact
+
+- `npm run test:e2e` works from a clean checkout with a database and
+  `npm run db:seed`; nothing else to configure.
+- Prerequisites that remain now **fail loudly**: absent role catalog, and
+  `RATE_LIMIT_DISABLED` (sign-in is capped at 5/min per `ip:email`, and a blocked
+  attempt renders as "Wrong email or password" with `failed_login_attempts` at 0
+  — indistinguishable from a bad password without this check).
+- `scripts/seed.ts` keeps its `SEED_ADMIN_*` path for a human wanting a local
+  login. It is no longer load-bearing for tests.
+
+---
+
 ## DECISION-031: The training deck is removed from presby
 
 **Status:** Resolved

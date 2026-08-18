@@ -17,18 +17,8 @@
  */
 
 import { test, expect } from "@playwright/test";
-import path from "node:path";
+import { storageStatePath } from "./support/users";
 
-function storageStatePath(role: "admin" | "member"): string {
-  return path.resolve(__dirname, "support", ".auth", `${role}.json`);
-}
-
-const HAVE_ADMIN = !!(
-  process.env.SEED_ADMIN_EMAIL && process.env.SEED_ADMIN_PASSWORD
-);
-const HAVE_MEMBER = !!(
-  process.env.SEED_MEMBER_EMAIL && process.env.SEED_MEMBER_PASSWORD
-);
 
 // ---------------------------------------------------------------------------
 // Test 1 — Admin sees the audit log page
@@ -40,8 +30,6 @@ test.describe("Admin — /admin/audit", () => {
   test("admin reaches the audit log page and sees the heading", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     const response = await page.goto("/admin/audit");
     expect(response?.status(), "/admin/audit should respond 2xx").toBeLessThan(
       400,
@@ -57,8 +45,6 @@ test.describe("Admin — /admin/audit", () => {
   });
 
   test("Audit Log nav link is present in the sidebar", async ({ page }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     await page.goto("/admin/audit");
 
     await expect(
@@ -77,8 +63,6 @@ test.describe("Member — /admin/audit blocked by proxy", () => {
   test("member navigating to /admin/audit is redirected to /access-pending", async ({
     page,
   }) => {
-    test.skip(!HAVE_MEMBER, "SEED_MEMBER_EMAIL/PASSWORD not set");
-
     // The proxy's /^\/admin/ catch-all gate requires admin.dashboard.
     // The seeded member has no admin features, so the proxy redirects them
     // to /access-pending before the page-level hasFeature(ADMIN_AUDIT) check
@@ -98,8 +82,6 @@ test.describe("Admin — audit filter smoke", () => {
   test("filtered URL renders without server error (may show zero rows)", async ({
     page,
   }) => {
-    test.skip(!HAVE_ADMIN, "SEED_ADMIN_EMAIL/PASSWORD not set");
-
     const response = await page.goto(
       "/admin/audit?action=feature_flag.toggled",
     );

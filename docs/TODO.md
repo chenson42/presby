@@ -19,7 +19,7 @@ detail lives in the linked doc, not here.
 ## Next Up
 
 - [ ] **URGENT — next-auth `5.0.0-beta.31` → `beta.32`** via a proper auth pipeline (full e2e gate, MFA user): clears 2 critical + 1 high Auth.js advisories in `@auth/core` (GHSA-xmf8-cvqr-rfgj uncaught exception on malformed Bearer header, GHSA-7rqj-j65f-68wh email-normalizer homoglyph bypass, GHSA-x445-f3h2-j279 OAuth state/nonce/PKCE cookies not provider-bound). Outside the pinned range, so `npm audit fix` can't take it. Then remove `continue-on-error` from the CI audit step — found during 2026-08-09 pre-push
-- [ ] **Local e2e silently skips 42 of 48 specs and still exits green** when `SEED_ADMIN_EMAIL` / `SEED_MEMBER_EMAIL` / `SEED_MFA_ADMIN_EMAIL` are unset — `globalSetup` logs three "Skipping" lines and Playwright reports a pass. Either fail loudly when no storageState could be acquired, or print a summary banner naming what was skipped. Prior "48/48" claims came from a configured session — found during the 2026-08-18 identity pass
+- [ ] **`/account/2fa` and `/admin/2fa` crash with an unhandled runtime error when `AUTH_TOTP_ENCRYPTION_KEY` is unset** — every other optional integration degrades gracefully (Turnstile no-ops, Resend logs to stdout); this one takes the page down. Render a configuration-error card, or fail at startup instead of at request time — found during 2026-08-18 e2e work
 - [ ] Public-readiness furniture before flipping the repo open: `SECURITY.md` (vulnerability reporting), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` — none exist; LICENSE (MIT) does
 - [ ] Configure `NEON_API_KEY` + `NEON_PROJECT_ID` repo secrets to activate e2e CI (optional: `ANTHROPIC_API_KEY` for Claude PR review); watch the first live run of both workflows (pinned Neon action versions unverified until then) — enforcement batch residual
 
@@ -62,6 +62,7 @@ detail lives in the linked doc, not here.
 
 ## Done
 
+- [x] 2026-08-18 — E2E owns its test users (DECISION-032): fixtures hardcoded in `e2e/support/users.ts` and provisioned by globalSetup; all `SEED_*` vars and every `test.skip()` credential guard deleted; **48/48 now run with zero configuration** (was 6 passed / 42 silently skipped) — SHIP IT — `docs/work-log/2026-08-18-e2e-owns-its-users.md`
 - [x] 2026-08-18 — Deck removed (DECISION-031, supersedes D005): `deck/` deleted with its four npm scripts, the CLAUDE.md re-render rule, and the `/pre-push` staleness check — SHIP IT — `docs/work-log/2026-08-18-remove-deck.md`
 - [x] 2026-08-18 — Identity pass: README rewritten for presby; landing page, global nav, admin shell, email From, and TOTP issuer de-startered; `.env.example` gained the three missing required connection strings + `DEV_ALLOWED_ORIGINS`; 9 agent files re-pointed — SHIP IT — `docs/work-log/2026-08-18-identity-pass.md`
 - [x] 2026-08-18 — Stale test guards repaired: deleted the obsolete neon-http `db.transaction()` guard (moot since the F28 driver switch) and re-pointed the cron-maintenance assertion at the F29 roll reconcile instead of a bare call count; suite green again at 424 — SHIP IT — `docs/work-log/2026-08-18-stale-test-guards.md`

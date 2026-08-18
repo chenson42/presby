@@ -78,12 +78,9 @@ jobs:
             echo "AUTH_TRUST_HOST=true"
             echo "AUTH_TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
             echo "RATE_LIMIT_DISABLED=true"
-            echo "SEED_ADMIN_EMAIL=e2e-admin@example.test"
-            echo "SEED_ADMIN_PASSWORD=$(openssl rand -hex 16)"
-            echo "SEED_MEMBER_EMAIL=e2e-member@example.test"
-            echo "SEED_MEMBER_PASSWORD=$(openssl rand -hex 16)"
-            echo "SEED_MFA_ADMIN_EMAIL=e2e-mfa-admin@example.test"
-            echo "SEED_MFA_ADMIN_PASSWORD=$(openssl rand -hex 16)"
+            # No SEED_* users here: the e2e suite provisions its own fixture
+            # users from e2e/support/users.ts. Generating them per-run was how
+            # a missing variable turned into 42 silently skipped specs.
           } >> .env.local
 
       - name: Push schema + seed

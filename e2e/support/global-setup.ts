@@ -1,25 +1,32 @@
 /**
- * global-setup.ts — Playwright globalSetup for cached per-role storageState.
+ * global-setup.ts — provisions the fixture users, then caches a session per role.
  *
- * Acquires sessions for admin, member, and mfa-admin via the NextAuth
- * credentials API (GET /api/auth/csrf → POST /api/auth/callback/credentials
- * → GET /api/auth/session), then writes storageState to e2e/support/.auth/.
+ * Provisions the roster in e2e/support/users.ts, then acquires a session for
+ * each via the NextAuth credentials API (GET /api/auth/csrf → POST
+ * /api/auth/callback/credentials → GET /api/auth/session) and writes
+ * storageState to e2e/support/.auth/.
  *
- * IMPORTANT: Delete e2e/support/.auth/ after changing any SEED_*_EMAIL env
- * var. The 12h TTL check skips re-acquisition for fresh files, so a stale
- * storageState carrying the old email's JWT will be reused silently. Just
- * `rm -rf e2e/support/.auth/` and re-run.
+ * NOTHING HERE IS CONDITIONAL. This setup used to read six SEED_* environment
+ * variables and log "Skipping <role>: env vars not set" when they were absent,
+ * at which point every authenticated spec skipped itself and Playwright exited
+ * 0 — a suite reporting success having run 6 of 48 specs. The fixture now owns
+ * its users, so a failure to provision or sign in is a thrown error and a red
+ * run. See docs/work-log/2026-08-18-e2e-owns-its-users.md.
  *
- * RATE_LIMIT_DISABLED=true must be set in .env.local and in CI secrets.
- * Without it, a globalSetup retry for the same email within the in-memory
- * rate-limit window will be blocked and globalSetup will throw a misleading
- * credentials error.
+ * If a fixture email ever changes, delete e2e/support/.auth/ — the 12h freshness
+ * check would otherwise reuse a storageState carrying the old email's JWT.
+ *
+ * RATE_LIMIT_DISABLED=true must be set in .env.local and in CI secrets. Without
+ * it, three consecutive sign-ins can trip the in-memory limiter and this file
+ * throws a misleading credentials error.
  */
 
 import { chromium, type FullConfig } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { neon } from "@neondatabase/serverless";
+import { E2E_EMAILS, E2E_USER_LIST } from "./users";
+import { seedE2EUsers } from "./seed-users";
 
 const AUTH_DIR = path.resolve(__dirname, ".auth");
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -70,20 +77,14 @@ function runDbIsolationGuard(): void {
 }
 
 async function cleanupTestFeedback(dbUrl: string): Promise<void> {
-  const emails = [
-    process.env.SEED_ADMIN_EMAIL,
-    process.env.SEED_MEMBER_EMAIL,
-    process.env.SEED_MFA_ADMIN_EMAIL,
-  ].filter((e): e is string => typeof e === "string" && e.length > 0);
-
-  if (emails.length === 0 || !dbUrl) return;
+  if (!dbUrl) return;
 
   try {
     const sql = neon(dbUrl);
     const deleted = await sql`
       DELETE FROM feedback
       WHERE user_id IN (
-        SELECT id FROM users WHERE email = ANY(${emails})
+        SELECT id FROM users WHERE email = ANY(${E2E_EMAILS})
       )
       RETURNING id
     `;
@@ -176,54 +177,64 @@ async function signInAndSave(
   }
 }
 
-export default async function globalSetup(config: FullConfig): Promise<void> {
-  // DB isolation guard runs first — before any browser launch
-  runDbIsolationGuard();
+/**
+ * Credentials sign-in is limited to 5/min per ip:email (src/auth.ts). This
+ * suite signs the same fixture in many more times than that, and a rate-limited
+ * attempt returns null — which the UI renders as "Wrong email or password"
+ * while leaving failed_login_attempts at 0. It reads exactly like a wrong
+ * password, and it is not.
+ *
+ * `.env.local` is the one place that fixes both processes at once: Next reads it
+ * for the dev server, and Playwright injects it into this one. So checking this
+ * process is a good proxy for the server — with one exception, a dev server that
+ * was already running before the variable was added, which is why the message
+ * says to restart it.
+ */
+function assertRateLimiterDisabled(): void {
+  if (process.env.RATE_LIMIT_DISABLED === "true") return;
 
-  await cleanupTestFeedback(
-    process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL ?? ""
+  throw new Error(
+    '[globalSetup] RATE_LIMIT_DISABLED is not set to "true".\n' +
+      "Credentials sign-in is capped at 5/min per ip:email, and this suite\n" +
+      "exceeds that for a single fixture user. A blocked attempt returns null and\n" +
+      'the UI renders "Wrong email or password" while failed_login_attempts stays\n' +
+      "at 0 — it reads exactly like a bad password, and it is not.\n" +
+      "\n" +
+      "Fix: add RATE_LIMIT_DISABLED=true to .env.local, then restart the dev\n" +
+      "server so it picks the variable up. Dev/test only — never in production.",
   );
+}
+
+export default async function globalSetup(config: FullConfig): Promise<void> {
+  // DB isolation guard runs first — before any browser launch, and before we
+  // write anything. It matters more now that this setup provisions users.
+  runDbIsolationGuard();
+  assertRateLimiterDisabled();
+
+  const dbUrl = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
+
+  // The suite owns its users. Any failure here throws — see the file header.
+  await seedE2EUsers(dbUrl);
+  await cleanupTestFeedback(dbUrl);
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-  const roles = [
-    {
-      role: "admin",
-      email: process.env.SEED_ADMIN_EMAIL,
-      password: process.env.SEED_ADMIN_PASSWORD,
-    },
-    {
-      role: "member",
-      email: process.env.SEED_MEMBER_EMAIL,
-      password: process.env.SEED_MEMBER_PASSWORD,
-    },
-    {
-      // mfa-admin storageState is intentionally NOT TOTP-verified
-      // (twoFactorRequired=true, twoFactorVerified=false).
-      // Use it ONLY to assert the /totp redirect gate fires.
-      // Do NOT use it to test /admin page content or admin server actions.
-      role: "mfa-admin",
-      email: process.env.SEED_MFA_ADMIN_EMAIL,
-      password: process.env.SEED_MFA_ADMIN_PASSWORD,
-    },
-  ];
-
-  for (const { role, email, password } of roles) {
-    if (!email || !password) {
-      console.warn(`[globalSetup] Skipping "${role}": env vars not set.`);
-      continue;
-    }
-    const filePath = path.join(AUTH_DIR, `${role}.json`);
+  for (const user of E2E_USER_LIST) {
+    const filePath = path.join(AUTH_DIR, `${user.role}.json`);
     if (isStorageStateFresh(filePath)) {
       console.log(
-        `[globalSetup] "${role}": storageState is fresh (<12h), skipping sign-in.`
+        `[globalSetup] "${user.role}": storageState is fresh (<12h), reusing.`
       );
       continue;
     }
     console.log(
-      `[globalSetup] "${role}": acquiring storageState for ${email}...`
+      `[globalSetup] "${user.role}": acquiring storageState for ${user.email}...`
     );
-    await signInAndSave(config, email, password, filePath);
-    console.log(`[globalSetup] "${role}": saved to ${filePath}`);
+    // The mfa-admin session is intentionally NOT TOTP-verified
+    // (twoFactorRequired=true, twoFactorVerified=false). Use it ONLY to assert
+    // the /totp redirect gate fires — never for /admin page content or admin
+    // server actions.
+    await signInAndSave(config, user.email, user.password, filePath);
+    console.log(`[globalSetup] "${user.role}": saved to ${filePath}`);
   }
 }

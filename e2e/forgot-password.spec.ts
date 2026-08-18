@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
+import { E2E_USERS } from "./support/users";
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL;
+const ADMIN_EMAIL = E2E_USERS.admin.email;
 
 /**
  * E2E for the forgot-password request flow. We stop at the "check your email"
@@ -9,8 +10,6 @@ const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL;
  * unit tests in `password-reset-actions.test.ts` cover the consumption logic.
  */
 test.describe("Forgot password", () => {
-  test.skip(!ADMIN_EMAIL, "SEED_ADMIN_EMAIL must be set in .env.local");
-
   test("link on /signin leads to /forgot-password and submit shows success card", async ({ page }) => {
     await page.goto("/signin");
 
@@ -21,7 +20,7 @@ test.describe("Forgot password", () => {
     await expect(page).toHaveURL(/\/forgot-password$/);
     await expect(page.getByRole("heading", { name: /forgot password/i })).toBeVisible();
 
-    await page.locator('input[name="email"]').fill(ADMIN_EMAIL!);
+    await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
     await page.getByRole("button", { name: /send reset link/i }).click();
 
     // Enumeration guard: same success card regardless of whether the email

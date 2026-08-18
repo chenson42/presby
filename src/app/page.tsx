@@ -8,11 +8,14 @@ export default async function Home() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-24">
-      <h1 className="text-4xl font-bold tracking-tight">Claude Code Starter</h1>
+      <h1 className="text-4xl font-bold tracking-tight">presby</h1>
       <p className="mt-4 text-lg text-muted-foreground">
-        A fork-and-go Next.js + Neon + NextAuth starter with admin, roles &amp;
-        permissions, TOTP 2FA, feature flags, and release notes. Designed as a
-        teaching artifact for Claude Code workflows.
+        Church and council management for Presbyterian congregations,
+        presbyteries, and synods — the roll, officers, and directory, kept the
+        way the Book of Order says they must be kept.
+      </p>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Pre-release. Nothing here is a live congregation.
       </p>
 
       {signedIn && (

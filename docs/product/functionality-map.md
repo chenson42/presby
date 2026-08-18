@@ -1,11 +1,12 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.8.0` · surveyed 2026-08-18.**
+knows what exists without re-reconning. **Version `0.8.1` · surveyed 2026-08-18.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
-a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Forks: this
-map describes the features you inherited; extend it as you build on top.
+a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries
+marked **presby:** are this project's own domain; the rest is the platform shell
+inherited from the starter.
 
 ---
 

@@ -1,8 +1,8 @@
 # UI Standards
 
-Conventions for building consistent, accessible UI across the Claude Code Starter. Every rule below is checkable by reading a diff.
+Conventions for building consistent, accessible UI across presby. Every rule below is checkable by reading a diff.
 
-**Scope:** All pages under `src/app/` — auth, account, admin, and anything a fork adds. Exceptions are noted inline.
+**Scope:** All pages under `src/app/` — auth, account, admin, developer, and the church-facing surfaces as they land. Exceptions are noted inline.
 
 ---
 

@@ -30,7 +30,7 @@ export default async function AdminLayout({
       <aside className="border-b border-border bg-muted/40 p-4 md:border-b-0 md:border-r">
         <div className="mb-6">
           <Link href="/" className="text-sm font-semibold">
-            ← Claude Code Starter
+            ← presby
           </Link>
         </div>
         <nav className="space-y-1">

@@ -46,10 +46,14 @@ export function generateSecret(): string {
   return otpGenerateSecret();
 }
 
+// The issuer is the name the user sees in Google Authenticator / 1Password, and
+// it is baked into the otpauth:// URL at ENROLMENT time. Changing it does not
+// invalidate an existing secret and does not re-label an existing enrolment —
+// anyone already enrolled keeps the old name until they re-enrol.
 export function otpauthUrl(
   email: string,
   secret: string,
-  issuer = "Claude Code Starter",
+  issuer = "presby",
 ): string {
   return generateURI({ issuer, label: email, secret });
 }

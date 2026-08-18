@@ -19,6 +19,9 @@ detail lives in the linked doc, not here.
 ## Next Up
 
 - [ ] **URGENT — next-auth `5.0.0-beta.31` → `beta.32`** via a proper auth pipeline (full e2e gate, MFA user): clears 2 critical + 1 high Auth.js advisories in `@auth/core` (GHSA-xmf8-cvqr-rfgj uncaught exception on malformed Bearer header, GHSA-7rqj-j65f-68wh email-normalizer homoglyph bypass, GHSA-x445-f3h2-j279 OAuth state/nonce/PKCE cookies not provider-bound). Outside the pinned range, so `npm audit fix` can't take it. Then remove `continue-on-error` from the CI audit step — found during 2026-08-09 pre-push
+- [ ] **Local e2e silently skips 42 of 48 specs and still exits green** when `SEED_ADMIN_EMAIL` / `SEED_MEMBER_EMAIL` / `SEED_MFA_ADMIN_EMAIL` are unset — `globalSetup` logs three "Skipping" lines and Playwright reports a pass. Either fail loudly when no storageState could be acquired, or print a summary banner naming what was skipped. Prior "48/48" claims came from a configured session — found during the 2026-08-18 identity pass
+- [ ] Open question for the operator: does `deck/` belong in presby? `deck/slides.md` is a Claude Code *training* deck (header "Working with Claude Code", footer pointing at the canonical starter repo). Deliberately left unrenamed during the identity pass because its subject genuinely is the starter workflow — but it is committed here, and CLAUDE.md carries a re-render rule for it
+- [ ] Public-readiness furniture before flipping the repo open: `SECURITY.md` (vulnerability reporting), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` — none exist; LICENSE (MIT) does
 - [ ] Configure `NEON_API_KEY` + `NEON_PROJECT_ID` repo secrets to activate e2e CI (optional: `ANTHROPIC_API_KEY` for Claude PR review); watch the first live run of both workflows (pinned Neon action versions unverified until then) — enforcement batch residual
 
 - [ ] Fable review D1: `src/instrumentation.ts` + Sentry (free-tier) stub + thin `src/lib/log.ts` wrapper, in teaching-comment style — `docs/reviews/2026-08-09-fable-external-review.md`
@@ -61,6 +64,7 @@ detail lives in the linked doc, not here.
 
 ## Done
 
+- [x] 2026-08-18 — Identity pass: README rewritten for presby; landing page, global nav, admin shell, email From, and TOTP issuer de-startered; `.env.example` gained the three missing required connection strings + `DEV_ALLOWED_ORIGINS`; 9 agent files re-pointed — SHIP IT — `docs/work-log/2026-08-18-identity-pass.md`
 - [x] 2026-08-18 — Stale test guards repaired: deleted the obsolete neon-http `db.transaction()` guard (moot since the F28 driver switch) and re-pointed the cron-maintenance assertion at the F29 roll reconcile instead of a bare call count; suite green again at 424 — SHIP IT — `docs/work-log/2026-08-18-stale-test-guards.md`
 - [x] 2026-08-09 — Enforcement batch from the Fable external review: CI runs both tripwires + `npm audit` + commit-grammar job; dependabot; e2e-in-CI on ephemeral Neon branch + playwright `webServer`; cadence-check SessionStart hook; pre-push PreToolUse gate (Rule 5 mechanized); `Work-Log:` commit trailer (required on feat/fix); `AGENTS.md` shim; opt-in Claude PR review — `docs/work-log/2026-08-09-enforcement-batch.md`
 - [x] 2026-07-13 — PR #3 closed as superseded (its skill copy was the pre-generalization fork variant; main's port from 20fb316 stands); contribution kit landed as `docs/starter-contributions/README.md` with a live-status banner (stale "dormant" caveat + top-down PR order removed); fork-sync skills + kit added to the functionality map

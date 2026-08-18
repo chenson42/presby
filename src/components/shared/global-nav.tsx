@@ -16,7 +16,7 @@ export function GlobalNav({ session }: { session: Session }) {
     <header className="border-b border-border bg-background">
       <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3 sm:px-6">
         <Link href="/" className="text-sm font-semibold">
-          Claude Code Starter
+          presby
         </Link>
         <nav className="flex items-center gap-4">
           <Link

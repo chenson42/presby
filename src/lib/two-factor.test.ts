@@ -229,8 +229,11 @@ describe("otpauthUrl", () => {
     // Act
     const url = otpauthUrl("user@example.com", secret);
 
-    // Assert
-    expect(url).toContain("Claude%20Code%20Starter");
+    // Assert — the default issuer is what the user sees in their authenticator
+    // app, so assert it in both places the otpauth URL carries it: the label
+    // prefix and the issuer parameter.
+    expect(url).toContain("issuer=presby");
+    expect(url).toMatch(/^otpauth:\/\/totp\/presby:/);
   });
 });
 

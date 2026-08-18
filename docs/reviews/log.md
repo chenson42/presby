@@ -14,7 +14,7 @@ Review types and their slots (consolidated 2026-07-11, DECISION-029):
 
 - **Release slot** (cadence: 14 days, or each release if sooner): `test-coverage`, `retrospective`
 - **Monthly health-check** (cadence: 30 days, run as one bundled session): `code`, `documentation`, `security`, `agent-instruction`, `dependencies`
-- **Fork-only** (N/A in the canonical starter): `upstream-sync` (14 days), `downstream-sync` (30 days)
+- **Starter syncs**: `upstream-sync` (14 days — pull starter fixes into presby), `downstream-sync` (30 days — surface presby work that is starter-generic)
 
 For substantial reviews, also write `docs/reviews/YYYY-MM-DD-<type>.md` with the details and link it:
 

@@ -4,7 +4,7 @@ import { Resend } from "resend";
 
 const apiKey = process.env.RESEND_API_KEY;
 const fromDefault =
-  process.env.RESEND_FROM_EMAIL ?? "Claude Code Starter <noreply@example.com>";
+  process.env.RESEND_FROM_EMAIL ?? "presby <noreply@example.com>";
 
 const client = apiKey ? new Resend(apiKey) : null;
 

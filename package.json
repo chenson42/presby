@@ -1,8 +1,13 @@
 {
-  "name": "claudecode-nextjs-starter",
-  "version": "0.8.0",
+  "name": "presby",
+  "version": "0.8.1",
   "private": true,
-  "description": "Fork-and-go Next.js + Neon + NextAuth starter with admin, roles/permissions, TOTP 2FA, feature flags, and release notes. Authored as a Claude Code training artifact.",
+  "description": "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods: rolls, officers, directory, and council operations. Pre-release.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chenson42/presby.git"
+  },
+  "license": "MIT",
   "engines": {
     "node": ">=20.9.0"
   },

@@ -16,6 +16,8 @@ detail lives in the linked doc, not here.
 
 ## In Flight
 
+- [ ] **P0 — post-login router and org context** (`/launch`, `/orgs`, `/no-organization`, `/o/[slug]`, `presby_user_organizations`, slug CHECK, membership/position guard, shadcn init) — Phase 3 complete 2026-08-18, three implementation slices named — `docs/work-log/2026-08-18-backbone-and-org-sites.md`
+
 ## Next Up
 
 - [ ] **URGENT — next-auth `5.0.0-beta.31` → `beta.32`** via a proper auth pipeline (full e2e gate, MFA user): clears 2 critical + 1 high Auth.js advisories in `@auth/core` (GHSA-xmf8-cvqr-rfgj uncaught exception on malformed Bearer header, GHSA-7rqj-j65f-68wh email-normalizer homoglyph bypass, GHSA-x445-f3h2-j279 OAuth state/nonce/PKCE cookies not provider-bound). Outside the pinned range, so `npm audit fix` can't take it. Then remove `continue-on-error` from the CI audit step — found during 2026-08-09 pre-push

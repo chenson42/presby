@@ -4,6 +4,20 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-044: The destination matrix reads two platform predicates, not one; the membership/position guard is bidirectional; the 403 renders at 200 until `forbidden()` stabilises
+
+**Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P0) · **Class:** implementation
+
+Three implementation rulings taken in P0's technical design.
+
+**(1) `canAccessAdmin` and `isPlatformAdmin` are separate inputs to `computeDestination`.** Phase 1's matrix has one column labelled `is_platform_admin`; it is two. `canAccessAdmin` (session claims: `ADMIN_ROLE` or `FEATURES.ADMIN_DASHBOARD`) is what the Edge enforces on `/admin`; `isPlatformAdmin` (`users.is_platform_admin`, read live) is the developer-portal predicate per S5/DECISION-034. Nothing seeds `is_platform_admin` today, so they are held by the same people by accident. Routing on the wrong one ships a bug either way: sending an `is_platform_admin` holder to `/admin` bounces them to `/access-pending`, and sending a `canAccessAdmin` holder straight to `/admin` makes the Developer card the operator asked for permanently unreachable. Rule: **zero orgs + `canAccessAdmin` + not `isPlatformAdmin` → `/admin`; any `isPlatformAdmin` → `/orgs`**, which satisfies both halves of the brief ("only a super admin goes straight in"; "a developer has a card").
+
+**(2) The DECISION-039 guard is two triggers, not one.** Ending a membership under an open officer term or role grant fails loudly (the architect's ruling), **and** opening a position at an organization whose membership has already ended fails loudly — an integrity guard enforceable in one direction only is a paper invariant in the other, and the hole is reached by simply reordering the two writes. Only positions still **open** when the membership ended are constrained, so importing a congregation's historical session records for someone who has since left keeps working. Neither function is `SECURITY DEFINER`, deliberately: both read rows at the same organization as the row being written, and any write that reaches them already carries that org's `app.current_org_id`. That is the opposite case from `presby_guard_membership_insert`, which probes across orgs and must be DEFINER (F26) — the migration comment says so, or the next reader adds DEFINER as cargo cult.
+
+**(3) The unauthorized-org page renders at HTTP 200.** DECISION-040 specifies a 403; Next's `forbidden()` is still behind `experimental.authInterrupts` (verified 2026-08-18, canary only) and enabling an experimental flag is an architect-scope config change P0 is not taking. The property DECISION-040 exists to protect — one response, byte-identical across `managed`/`invited`/`unmanaged` — is fully satisfied by the rendered page; `not-found` keeps a real 404 via `notFound()`. Revisit when the API stabilises; tracked in `docs/TODO.md`.
+
+---
+
 ## DECISION-043: Tenant administration lives inside `(org)`; `(admin)` and `src/lib/permissions.ts` stay platform-only
 
 **Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P9)

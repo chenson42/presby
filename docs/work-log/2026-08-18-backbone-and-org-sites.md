@@ -89,8 +89,8 @@ Still open, deferred to the pipeline that needs them: OQ4 (agent spend ceiling),
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES (scoped to P0) | 2026-08-18 |
 | 2 — Architectural review | architect (agent) | Complete (revised) | Approved with suggestions — revised after operator playback | 2026-08-18 |
-| 3 — Technical design | tech-lead | Pending | — | — |
-| 4 — Implementation | TBD | Pending | — | — |
+| 3 — Technical design | tech-lead | Complete | Design complete (scoped to P0), implementers named | 2026-08-18 |
+| 4 — Implementation | database-admin → api-developer → ux-developer (3 slices) | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -813,3 +813,1052 @@ What changed for P0 specifically:
 2. **Item 3 replaces P0's miss-case response** — four cases, not three. No pending-request table.
 3. **Item 4 names `/site/<slug>` and the `(public)` group** — unblocks P3, does not touch P0's code.
 4. **Items 1 and 5 do not touch P0 at all.** P10, P8, P9 are new pipelines with dependencies stated.
+
+---
+
+# Phase 3 — Technical Design (tech-lead), 2026-08-18
+
+**Scope: P0 only** — the post-login router and org context. P0.5 and P1–P10 are
+out. Carries both Phase 2 sections; **where they conflict the Revision wins**,
+and the three places that happens are named inline (§Miss response, §Card copy,
+§Item-2 trigger).
+
+## Summary
+
+Today every authenticated path lands on `/home`, a platform-shell page that
+knows about roles and features and nothing about congregations. P0 replaces that
+with a routing layer: `/launch` is the single post-authentication target and
+holds the nine-case destination matrix as a pure function; `/orgs` is the card
+chooser and never auto-forwards; `/no-organization` is the honest end of the
+funnel for someone with no congregation; `/o/[slug]` opens the `(org)` tree
+under a contract that every future org page inherits. Underneath, the
+already-built-and-unwired `presby_available_organizations` is dropped and
+recreated as `presby_user_organizations` — wider, filtering nothing, with policy
+moved into two TypeScript wrappers — the slug becomes a checked, immutable URL
+contract, and the missing integrity guard behind DECISION-039 lands as a pair of
+triggers. shadcn is initialised at last (zero new runtime dependencies) so the
+chooser is the first page built on primitives rather than the ninth copy of a
+hand-rolled button. Nothing in P0 writes tenant data; the risk is concentrated
+entirely in the login path, which is why the running-server e2e gate applies and
+why the work lands in three separately revertible slices.
+
+## Permissions & Flags
+
+- **New `FEATURES.*` key(s): none.** `src/lib/permissions.ts` stays FROZEN and
+  untouched. No `PROTECTION_RULES` entry for `/o/`.
+- **New tenant permission keys: none.** The tenant catalog is P1. P0 must not
+  acquire a dependency on a permission system that does not exist (Phase 2, (d),
+  on `invited` orgs).
+- **Default role bindings: none.**
+- **Feature flag: not needed, and deliberately so.** A half-routed login is
+  worse than either state — analyst and architect both said it, and I am
+  endorsing it a third time so nobody adds one "for safety." Rollback is a
+  revert of slice C, which is why slice C is one commit.
+- **`users.is_platform_admin`** is neither a permission nor a flag; it is a
+  column read live from the database (D7, S5, and the `developer/guard.ts`
+  precedent). Never cached in the JWT.
+- **Audit events: none in P0, deliberately.** See Edge Cases R7 — auditing the
+  403 would hand any signed-in user a slug-guessing loop that writes rows into
+  every congregation's access log.
+
+### The predicate the matrix actually needs — a refinement, not a restatement
+
+Phase 1's matrix has one column labelled `is_platform_admin`. **It is two
+columns**, and conflating them ships a bug on day one:
+
+| Predicate | Source | What it gates today |
+|---|---|---|
+| `canAccessAdmin` | session claims — `roles` includes `ADMIN_ROLE`, or `features` includes `FEATURES.ADMIN_DASHBOARD` (`src/proxy.ts:20, 53`) | whether the Edge lets you into `/admin` |
+| `isPlatformAdmin` | `users.is_platform_admin`, read live (S5) | the Developer portal (`developer/guard.ts:22-28`) |
+
+They are held by roughly the same people **by accident**. Nothing seeds
+`is_platform_admin` — grep-verified: no writer exists in `scripts/`, `src/`, or
+`e2e/`. So a routing rule that sends `is_platform_admin` holders to `/admin`
+would send them to a page the Edge bounces to `/access-pending`, and a rule that
+sends `canAccessAdmin` holders straight to `/admin` would make the Developer
+card the operator asked for permanently unreachable for anyone who holds both.
+
+Resolution, and it satisfies both sentences of the brief:
+
+- **`canAccessAdmin && !isPlatformAdmin && 0 orgs` → `/admin`.** "If you are
+  only a super admin you would go straight into the admin page."
+- **`isPlatformAdmin` (any org count) → `/orgs`.** "If you are a developer then
+  you would have a card." The chooser is the only place that card can live.
+
+## API Contract
+
+No HTTP routes and no server actions. P0's contract is five function signatures
+and their exact return shapes. Implementers follow these literally.
+
+### 1. `computeDestination` — the matrix, pure
+
+**File:** `src/app/launch/destination.ts` (+ `destination.test.ts` beside it).
+
+Colocated with its only consumer rather than in a new `src/lib/` subdirectory —
+matches the `src/app/(member)/feedback/actions.test.ts` precedent and avoids
+inventing a directory the architect did not rule on. It imports nothing: no
+`server-only`, no `@/lib/db`, no `next/navigation`.
+
+```ts
+export interface DestinationInput {
+  /** Managed + active organizations, de-duplicated by organization id. */
+  enterableOrgs: ReadonlyArray<{ slug: string }>;
+  /** users.is_platform_admin, read live from the database. */
+  isPlatformAdmin: boolean;
+  /** Would the Edge admit this user to /admin? roles∋ADMIN_ROLE || features∋ADMIN_DASHBOARD. */
+  canAccessAdmin: boolean;
+  /** Already passed through sanitizeCallbackUrl(). null when absent. */
+  requestedPath: string | null;
+}
+
+export type DestinationReason =
+  | "requested-path"
+  | "single-org"
+  | "platform-admin-only"
+  | "chooser"
+  | "no-organization";
+
+export interface Destination {
+  path: string;
+  reason: DestinationReason;
+}
+
+export function computeDestination(input: DestinationInput): Destination;
+```
+
+Returning `{ path, reason }` rather than the architect's bare `string`: the
+reason is what makes nine unit tests assert the *rule* that fired rather than a
+string that two rules happen to share, and it costs nothing.
+
+**Rules, in order. First match wins.**
+
+1. `requestedPath` is non-null **and** its pathname is not `/launch` (loop
+   guard) **and** — if it starts with `/o/` — its slug is in `enterableOrgs`
+   → `{ path: requestedPath, reason: "requested-path" }`.
+   A `/o/` path whose slug is *not* enterable falls through to rule 2; it is not
+   an error. **This is UX, not security** (Note 4): the security is the
+   independent resolve at `/o/<slug>`, and the open-redirect class is handled by
+   `sanitizeCallbackUrl` alone.
+2. `enterableOrgs.length === 1 && !canAccessAdmin && !isPlatformAdmin`
+   → `{ path: "/o/" + slug, reason: "single-org" }`.
+3. `enterableOrgs.length === 0 && !canAccessAdmin && !isPlatformAdmin`
+   → `{ path: "/no-organization", reason: "no-organization" }`.
+4. `enterableOrgs.length === 0 && canAccessAdmin && !isPlatformAdmin`
+   → `{ path: "/admin", reason: "platform-admin-only" }`.
+5. otherwise → `{ path: "/orgs", reason: "chooser" }`.
+
+Slug extraction, exactly:
+
+```ts
+function orgSlugFromPath(path: string): string | null {
+  const [pathname] = path.split(/[?#]/);
+  const parts = pathname.split("/").filter(Boolean);   // "/o/alder-creek/x" → ["o","alder-creek","x"]
+  return parts[0] === "o" && parts[1] ? parts[1] : null;
+}
+```
+
+**Two rows of the matrix are deliberately absent from this function and must
+stay absent:**
+
+- *2FA required and unverified.* Handled by the Edge on the **destination**, not
+  here. `/launch` is not 2FA-gated; `/admin` and `/o/*` are. So the chain is
+  `/launch` → `redirect("/o/alder-creek")` → proxy → `/totp?callbackUrl=/o/alder-creek`
+  → verify → `/o/alder-creek`. One mechanism, correct `callbackUrl`, zero code.
+- *`isActive === false`.* Handled at `src/proxy.ts:36-40`, before `/launch`
+  renders.
+
+- *DB unreachable* is also not a `Destination`. It is handled in the page before
+  this function is called, which is what keeps the function total.
+
+### 2. `presby_user_organizations` wrappers — `src/lib/authz.ts`
+
+```ts
+export type OrganizationType =
+  | "general_assembly" | "synod" | "presbytery"
+  | "congregation" | "new_worshiping_community";
+
+export type PlatformStatus = "managed" | "unmanaged" | "invited";
+
+export interface UserOrganization {
+  organizationId: string;
+  personId: string;
+  membershipId: string;
+  name: string;
+  organizationType: OrganizationType;
+  slug: string;
+  platformStatus: PlatformStatus;
+  /** 'YYYY-MM-DD', or null when the relationship is current. */
+  endedOn: string | null;
+  /** ISO timestamp. Ordering input only; never rendered. */
+  membershipCreatedAt: string;
+}
+
+/** Everything, unfiltered, de-duplicated by organizationId. */
+export async function userOrganizations(userId: string): Promise<UserOrganization[]>;
+
+/** What the chooser renders: endedOn === null && platformStatus === "managed". */
+export async function availableOrganizations(userId: string): Promise<UserOrganization[]>;
+```
+
+- `endedOn` is a **string**, not a `Date`. `npm run check:sql-date` bans
+  `sql<Date>`; raw-SQL dates arrive as `'YYYY-MM-DD'`. Format for display with
+  the existing `FormattedDate` component (`mode="date"`), which already owns the
+  timezone-safe rendering.
+- **De-duplication (Note 6), deterministic.** The SQL orders
+  `organization_type, name, (ended_on is not null), created_at, id`, so the
+  wrapper de-dups by *taking the first row per `organizationId`* and nothing
+  more. Note the tiebreaker is **not** `started_on` — `memberships` has no such
+  column (verified: `src/lib/db/domain/people.ts:214-290`). Note also that
+  `memberships_person_org_key` is unique on `(person_id, organization_id)`, so
+  **the only reachable duplicate vector is two non-tombstoned `people` rows
+  carrying the same `user_id`** — which is exactly what the dedup fixture seeds.
+- `availableOrganizations` is defined as a filter over `userOrganizations`, one
+  DB round trip, so the two can never disagree.
+- Neither swallows errors. A DB failure propagates; the caller decides. (Note 3.)
+
+### 3. `resolveOrgContext` — `src/lib/authz.ts`
+
+```ts
+export interface OrgContext {
+  organizationId: string;
+  personId: string;
+  name: string;
+  organizationType: OrganizationType;
+  slug: string;
+  platformStatus: PlatformStatus;
+}
+
+export type OrgResolution =
+  | { kind: "ok"; org: OrgContext }
+  | { kind: "ended"; name: string; endedOn: string }
+  | { kind: "forbidden"; name: string; organizationType: OrganizationType }
+  | { kind: "not-found" };
+
+export async function resolveOrgContext(
+  userId: string,
+  slug: string,
+): Promise<OrgResolution>;
+```
+
+**Algorithm. The order is the security property and must not be inverted.**
+
+1. `const rows = await userOrganizations(userId)` — de-duplicated, ordered.
+2. `const match = rows.find(r => r.slug === slug)`.
+3. `match && match.endedOn !== null` → `"ended"`. **Checked before the
+   `platform_status` test**, so an ended relationship at an `unmanaged` org is
+   still named and dated — that discloses nothing about tenancy.
+4. `match && match.platformStatus === "managed"` → `"ok"`.
+5. `match` (i.e. active at an `invited` or `unmanaged` org) → `"forbidden"`,
+   using the org name from `match`.
+6. no `match` → `await publicOrgSummary(slug)`; found → `"forbidden"`, else
+   `"not-found"`.
+
+Never look `organizations` up by slug and hand the id to `withOrgContext` —
+`organizations` is not tenant-isolated, so that lookup succeeds for every org on
+the platform and turns "not a member" into a 500 from `src/lib/authz.ts:63-68`.
+Resolve inside the membership set, then set context.
+
+### 4. `publicOrgSummary` — `src/lib/authz.ts`
+
+```ts
+/** Public org tree only: name and type. Never platform_status. */
+export async function publicOrgSummary(
+  slug: string,
+): Promise<{ name: string; organizationType: OrganizationType } | null>;
+```
+
+Plain Drizzle select on `organizations` through the **RLS-enforced `db`
+connection with no org context** — legal because `organizations` carries a bare
+`grant select ... to presby_app` and no policy (`drizzle/0009_presby_rls.sql:90-93`).
+`getPlatformDb()` is forbidden. It selects `name` and `organizationType` and
+**must not select `platformStatus`** — Revision Note 12: one careless prop-drill
+turns the humane 403 into the leak it was designed to avoid. Add a
+`scripts/test-rls.sql` assertion that `select count(*) from organizations` with
+no GUC set returns the full tree, because that read is now load-bearing for a
+user-facing page and would otherwise be verified by nothing.
+
+### 5. Small server helpers
+
+```ts
+// src/lib/platform-admin.ts   — new file, `import "server-only"`
+export async function readIsPlatformAdmin(userId: string): Promise<boolean>;
+
+// src/lib/authz.ts — exercises the real gate without reading any tenant data
+export async function assertOrgAccess(personId: string, organizationId: string): Promise<void>;
+
+// src/lib/authz.ts — replaces the bare throw at src/lib/authz.ts:63-68
+export class OrgAccessError extends Error {
+  readonly personId: string;
+  readonly organizationId: string;
+}
+```
+
+`readIsPlatformAdmin` is the third copy of the same four-line select
+(`developer/guard.ts:22-26`, `developer/schema.json/route.ts:30-35`); extracting
+it now stops the fourth. Both existing call sites should adopt it — their
+`redirect("/home")` targets stay as they are (Phase 2: the four hard-coded
+`/home` references remain valid).
+
+`assertOrgAccess` wraps `withOrgContext(personId, orgId, async () => {})`. The
+`/o/[slug]` stub calls it and reads nothing else, so P0 proves the
+in-transaction membership re-check and the `OrgAccessError` path end-to-end
+while exposing zero tenant data.
+
+## Data Model
+
+One hand-written migration: **`drizzle/0014_presby_org_router.sql`**. Drizzle Kit
+emits none of it. Add the matching `drizzle/meta/_journal.json` entry in the same
+shape as `0013_presby_two_factor_policy`.
+
+**Do not edit `drizzle/0013_presby_two_factor_policy.sql:49`.** The architect's
+Note 7 asks for the stale `presby_available_organizations()` reference to be
+corrected there; I am overruling that on mechanics — every hand-written
+migration **is** in `_journal.json`, so `db:migrate` compares file hashes and an
+edit to an applied file makes it look unapplied. Put the forwarding note in
+0014's header instead ("supersedes the function named in 0013's comment"). The
+docs that *do* get corrected are listed under Files to modify.
+
+### 1. `organizations.slug` becomes a URL contract
+
+```sql
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'organizations_slug_format') then
+    alter table organizations
+      add constraint organizations_slug_format
+      check (slug ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$');
+  end if;
+end $$;
+
+comment on column organizations.slug is
+  'DNS-label-shaped public identifier, and the URL segment in /o/<slug>. IMMUTABLE: renaming a congregation changes name, never slug. The slug lives in bookmarks, in printed bulletin inserts, and (P5) in the platform subdomain label <slug>.presby.app, so a slug that follows the name breaks all three at once. If one genuinely must change - merger, schism, a typo at onboarding - the answer is a future organization_slug_aliases table serving 301s, not an UPDATE.';
+```
+
+All four seed slugs already conform, so this is free today and never again. The
+constraint is **also declared in `src/lib/db/domain/org.ts`** with the identical
+name, via Drizzle's `check()`, because CLAUDE.md requires `schema.ts` to match
+what the migration does and a CHECK is expressible in Drizzle. After applying
+0014, run `npm run db:push` and confirm it proposes **no** changes — that is the
+proof the two agree.
+
+### 2. The org-list function: dropped, widened, renamed
+
+```sql
+drop function if exists presby_available_organizations(uuid);
+
+create function presby_user_organizations(p_user_id uuid)
+returns table (
+  organization_id       uuid,
+  person_id             uuid,
+  membership_id         uuid,
+  name                  text,
+  organization_type     text,
+  slug                  text,
+  platform_status       text,
+  ended_on              date,
+  membership_created_at timestamptz
+)
+language sql stable security definer as $$
+  select o.id, p.id, m.id, o.name, o.organization_type::text, o.slug,
+         o.platform_status, m.ended_on, m.created_at
+    from people p
+    join memberships m   on m.person_id = p.id
+    join organizations o on o.id = m.organization_id
+   where p.user_id = p_user_id
+     and p.merged_into_id is null
+   order by o.organization_type,
+            o.name,
+            (m.ended_on is not null),   -- current relationships first
+            m.created_at,
+            m.id;
+$$;
+
+revoke all on function presby_user_organizations(uuid) from public;
+grant execute on function presby_user_organizations(uuid) to presby_app;
+```
+
+Three changes from the original, each with a reason to record in
+`comment on function`:
+
+1. **`ended_on is null` is gone from the WHERE.** It is now a returned column.
+   That is what makes the named-and-dated "your access ended" response possible
+   without a second query.
+2. **`platform_status` is returned and not filtered.** Policy lives in the two
+   TypeScript wrappers, where it is unit-testable and shows up in a diff.
+3. **Renamed.** Once it returns ended and non-tenant relationships, "available"
+   is a lie. Free today: one wrapper, zero call sites.
+
+The `comment on function` must carry, in the voice of the existing one:
+
+- **The security boundary is `p.user_id = p_user_id and p.merged_into_id is null`.
+  Widening the columns must never touch that predicate** — it is the entire
+  reason SECURITY DEFINER is safe here.
+- **`memberships` is the universal relationship anchor.** Roll status is a
+  *column on it*, not its meaning; there is deliberately no `current_roll`
+  filter, which is why the presbytery-committee elder, the secretary who
+  worships elsewhere, and the installed pastor all appear (DECISION-039).
+- **Never join `organizations.path` or `parent_id` here.** A presbytery
+  stewarding forty non-tenant congregations gets exactly one card. Stewardship
+  in the card list is downward inheritance through the back door, and it would
+  arrive looking like a helpful feature.
+- The ORDER BY is a contract: the caller de-dups by taking the first row per
+  `organization_id`.
+
+### 3. The membership ↔ open-position integrity guard (Revision Item 2)
+
+The FK constrains `(person_id, organization_id)` and says nothing about
+`ended_on`, so a membership can end under a seated, minuted office — silently,
+on a date with no corresponding write. Two triggers, because a guard enforceable
+in one direction only is a paper invariant in the other (my addition to the
+architect's single trigger; the reachable hole is simply reordering the writes).
+
+```sql
+-- Direction 1: ending a membership under an open position fails loudly.
+create or replace function presby_guard_membership_end()
+returns trigger language plpgsql as $$
+declare v_what text;
+begin
+  select 'the ' || ot.office || ' term beginning ' || ot.starts_on into v_what
+    from officer_terms ot
+   where ot.person_id = new.person_id
+     and ot.organization_id = new.organization_id
+     and ot.starts_on <= new.ended_on
+     and (ot.ends_on is null or ot.ends_on > new.ended_on)
+   order by ot.starts_on limit 1;
+
+  if v_what is null then
+    select 'a role grant beginning ' || rg.starts_on into v_what
+      from role_grants rg
+     where rg.person_id = new.person_id
+       and rg.organization_id = new.organization_id
+       and rg.starts_on <= new.ended_on
+       and (rg.ends_on is null or rg.ends_on > new.ended_on)
+     order by rg.starts_on limit 1;
+  end if;
+
+  if v_what is not null then
+    raise exception
+      'memberships: cannot end this relationship on % - % is still open at this organization',
+      new.ended_on, v_what
+      using errcode = 'check_violation',
+            hint = 'End the term first, with an end_reason and a minute reference. Ending a term is a minuted act; the platform will not do it silently to satisfy a cache.';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists memberships_guard_end on memberships;
+create trigger memberships_guard_end
+  before update of ended_on on memberships
+  for each row
+  when (new.ended_on is not null and old.ended_on is distinct from new.ended_on)
+  execute function presby_guard_membership_end();
+
+-- Direction 2: opening a position at an org whose membership already ended.
+create or replace function presby_guard_position_needs_membership()
+returns trigger language plpgsql as $$
+declare v_ended date;
+begin
+  if new.person_id is null then return new; end if;   -- role_grants: group grant
+
+  select m.ended_on into v_ended from memberships m
+   where m.person_id = new.person_id
+     and m.organization_id = new.organization_id;
+
+  -- Only positions still OPEN when the membership ended are constrained.
+  -- Importing twenty years of session history for someone who has since left is
+  -- legitimate and must keep working: a term that closed before the membership
+  -- did is history, not access.
+  if v_ended is not null and (new.ends_on is null or new.ends_on > v_ended) then
+    raise exception
+      '%: cannot open a position at an organization where the membership ended on %',
+      tg_table_name, v_ended
+      using errcode = 'check_violation',
+            hint = 'Restore the membership first, or record the position as already ended.';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists officer_terms_needs_membership on officer_terms;
+create trigger officer_terms_needs_membership
+  before insert or update of person_id, ends_on on officer_terms
+  for each row execute function presby_guard_position_needs_membership();
+
+drop trigger if exists role_grants_needs_membership on role_grants;
+create trigger role_grants_needs_membership
+  before insert or update of person_id, ends_on on role_grants
+  for each row execute function presby_guard_position_needs_membership();
+```
+
+**Neither function is SECURITY DEFINER, and the migration comment must say
+why** — otherwise the next reader adds it as cargo cult and the F26 boundary
+stops being legible. Both read only rows *at the same organization* as the row
+being written, and any write that reaches them already has that org's
+`app.current_org_id` set, so RLS shows them exactly what they need. This is the
+opposite case from `presby_guard_membership_insert`
+(`drizzle/0009_presby_rls.sql:164`), which probes **across** orgs and therefore
+must be DEFINER.
+
+### 4. Seed fixtures — `scripts/seed-dev.sql`
+
+**Do not add fixtures at Alder Creek or Bramblewood.** `scripts/test-rls.sql`
+asserts exact counts there (`alder: sees own memberships` = 6, `bramblewood:
+sees no alder memberships` = 0, and the roll/SASR sections). New rows in either
+org turn a fixture addition into a suite-wide count edit, which is how a
+deliberate change becomes a green-tests chore.
+
+Two new organizations instead, so every assertion that sets a specific org GUC
+is blind to them:
+
+| id | name | slug | type | parent | platform_status |
+|---|---|---|---|---|---|
+| `55555555-…` | Fernwood Presbyterian Church | `fernwood` | congregation | Northern Reach | `managed` |
+| `66666666-…` | Marrowbone Presbyterian Church | `marrowbone` | congregation | Northern Reach | `invited` |
+
+Give neither an `organization_settings` row (or `require_two_factor = false`),
+so section 11's assertions are untouched.
+
+Then six `users` rows on `example.invalid`, all password-less like
+`elder.fixture` (they cannot sign in; they exist for `test-rls.sql` and for
+manual browser verification with a dev session):
+
+| Fixture | Shape | Destination it proves |
+|---|---|---|
+| `router.none@` | user row, **no `people` row** | `/no-organization`, zero-rows branch |
+| `router.unmanaged@` | person + membership at `quillhaven` only | `/no-organization`, "in our records through the presbytery" branch |
+| `router.invited@` | person + membership at `marrowbone` | `/no-organization`, "being set up" branch |
+| `router.mixed@` | one person, memberships at `fernwood` **and** `quillhaven` | one card, not two — `platform_status` filtering |
+| `router.ended@` | person + **ended** membership at `fernwood` | `resolveOrgContext` → `"ended"` |
+| `router.dup@` | **two** `people` rows sharing the `user_id`, each with a membership at `fernwood` | de-duplication (Note 6) — one card |
+
+`router.mixed@`'s second membership trips the F21 guard
+(`drizzle/0009_presby_rls.sql:164-187`); do it the way the file already does for
+the pastor at line 114 —
+`select set_config('app.person_claim_authorized', '<person-id>', true);` in the
+same transaction. `router.dup@`'s two person rows each hold their *first*
+membership, so the guard does not fire and no flag is needed.
+
+The Item-3 guard fixture the architect asked for (ended membership + open term)
+**cannot be seeded** — the triggers exist precisely to make that state
+unreachable. The correct fixture is the *precondition*, and it already exists:
+`c0000000-…-002` holds an active membership at Alder Creek and an open
+`clerk_of_session` term (`scripts/seed-dev.sql:143-144`). The assertions attempt
+the end and catch the raise.
+
+### 5. Isolation-suite assertions — `scripts/test-rls.sql`
+
+Six, appended as a new numbered section:
+
+1. `presby_user_organizations` returns the unmanaged row for `router.unmanaged@`
+   (the function filters nothing).
+2. …and the ended row for `router.ended@` with a non-null `ended_on`.
+3. …and **two rows for `router.dup@`, both at `fernwood`** — proving the dedup
+   is genuinely the TypeScript wrapper's job and not accidentally free.
+4. Ending `c0000000-…-002`'s Alder Creek membership **raises** (wrap in
+   `do $$ … exception when check_violation then null; end $$` and raise a
+   distinct error if the update succeeds).
+5. Ending a membership with no open position **succeeds** — the positive
+   control, without which assertion 4 could pass on a broken trigger that
+   rejects everything.
+6. `select count(*) from organizations` with **no** org GUC returns the whole
+   tree — the `publicOrgSummary` read the 403 depends on.
+
+Plus the mirror: inserting an open term at an org with an ended membership
+raises; inserting an already-closed historical term at the same org succeeds.
+
+## Component / Page Plan
+
+### Pages to create
+
+| Path | File | Group | Notes |
+|---|---|---|---|
+| `/launch` | `src/app/launch/page.tsx` | none | Decides. Usually redirects; renders only the DB-unreachable state. |
+| `/orgs` | `src/app/(member)/orgs/page.tsx` | `(member)` | The chooser. Never auto-forwards. Gets `GlobalNav` from the existing layout. |
+| `/no-organization` | `src/app/no-organization/page.tsx` | none | G1. |
+| `/o/[slug]` | `src/app/(org)/o/[slug]/page.tsx` | `(org)` **new** | Stub + the four-way miss response. |
+| — | `src/app/(org)/layout.tsx` | `(org)` | Chrome + the contract comment. **No auth logic** — see below. |
+| — | `src/app/(org)/o/[slug]/error.tsx` | `(org)` | `"use client"` — mandatory, see R2. |
+| — | `src/app/(org)/o/[slug]/not-found.tsx` | `(org)` | Rendered by `notFound()`. |
+
+**`/launch/page.tsx`, structurally — this shape is the design, not a sketch:**
+
+```tsx
+const session = await cachedAuth();
+if (!session?.user) redirect("/signin?callbackUrl=/launch");
+
+const raw = sp.next ?? sp.callbackUrl ?? null;
+let requestedPath = raw ? sanitizeCallbackUrl(raw) : null;
+if (requestedPath?.split(/[?#]/)[0] === "/launch") requestedPath = null;   // loop guard
+
+let orgs: UserOrganization[];
+let isPlatformAdmin: boolean;
+try {
+  [orgs, isPlatformAdmin] = await Promise.all([
+    userOrganizations(session.user.id),
+    readIsPlatformAdmin(session.user.id),
+  ]);
+} catch (error) {
+  return <LaunchUnavailable />;      // renders. Does NOT redirect.
+}
+
+const dest = computeDestination({ … });
+redirect(dest.path);                 // OUTSIDE the try. Non-negotiable.
+```
+
+**Note 2, made structural rather than remembered.** `redirect()` throws
+`NEXT_REDIRECT`; a try/catch around it swallows every successful route and
+serves a blank page. The catch branch here `return`s JSX, so the redirect
+physically cannot be moved inside the try without a type error. Say this in a
+comment above the try.
+
+**`LaunchUnavailable`** (Note 3): "We can't reach your congregations right now.
+Try again in a moment." plus a `Button` linking back to `/launch` as the retry.
+It must not fall through to a zero-card chooser or to `/home` — both read to the
+user as "your access was revoked."
+
+**`/orgs`** renders, in order:
+
+1. **Your organizations** — a `Card` per `availableOrganizations()` entry: org
+   name as the heading, an org-type `Badge`, the whole card a link to
+   `/o/<slug>`. **No membership language** (Revision Note 13) — the elder's
+   presbytery card and the secretary's congregation card are relationships, not
+   roll status, and "Member of" is both wrong and, for someone who worships
+   elsewhere, mildly insulting. Type labels: General Assembly / Synod /
+   Presbytery / Congregation / New Worshiping Community.
+   The whole section, heading included, is **omitted** when the list is empty
+   (G12) — never an empty "Your organizations" heading.
+2. **Platform** — rendered when `canAccessAdmin || isPlatformAdmin`. An "Admin"
+   card → `/admin` when `canAccessAdmin`; a "Developer" card → `/developer` when
+   `isPlatformAdmin`.
+3. **Pending organizations notice** — a muted line per `invited` membership
+   ("Marrowbone is being set up. We'll email you when it's ready."). No card, no
+   link. Safe because the user is a member there.
+4. If **all three** would be empty: a single card pointing at
+   `/no-organization`. `/orgs` still never auto-forwards — Phase 2's rule is
+   literal.
+5. On DB error: the same `LaunchUnavailable` state, not an empty grid.
+
+Grid: `grid gap-4 sm:grid-cols-2 lg:grid-cols-3`, single column at 360px (G13).
+
+**`/no-organization`** reads `userOrganizations()` unfiltered and picks one
+message:
+
+| State | Copy |
+|---|---|
+| has ≥1 enterable org (arrived by URL) | "You have access to N organizations." + link to `/orgs`. No redirect. |
+| ≥1 `invited` | "Marrowbone is being set up. We'll email you when it's ready." |
+| only `unmanaged` | "Your congregation is in our records through its presbytery, but isn't set up on presby yet." |
+| only ended | "Your access to Fernwood Presbyterian Church ended on 12 June 2026." |
+| zero rows | "You're signed in, but you're not connected to a congregation yet." |
+
+Plus two doors, both **static copy in P0**: "Ask your church administrator to
+add you" (there is no request table — DECISION-040 puts `org_access_requests` in
+P1) and "Is your church not on presby?" linking to `/` until P2 builds the
+onboarding request. File the P2 replacement in `docs/TODO.md` in the same commit.
+
+**`/o/[slug]/page.tsx`:**
+
+```tsx
+const session = await cachedAuth();
+if (!session?.user) redirect(`/signin?callbackUrl=${encodeURIComponent("/o/" + slug)}`);
+
+const resolved = await resolveOrgContext(session.user.id, slug);
+switch (resolved.kind) {
+  case "not-found": notFound();
+  case "forbidden": return <OrgAccessDenied name={resolved.name} />;
+  case "ended":     return <OrgAccessEnded name={resolved.name} endedOn={resolved.endedOn} />;
+  case "ok":        break;
+}
+await assertOrgAccess(resolved.org.personId, resolved.org.organizationId);
+return <OrgPortalStub org={resolved.org} />;
+```
+
+The auth check lives in the **page, not the layout** — deliberately, and this
+resolves D1 rather than repeating it. `(member)/layout.tsx:13` hard-codes
+`callbackUrl=/home` because a layout cannot see the pathname; the page has
+`params.slug` and can build the correct deep link. So `(org)/layout.tsx` carries
+chrome and the contract comment only, and the contract sentence "every page
+resolves its `[slug]` through `resolveOrgContext()`" becomes literally true
+instead of a layout's implicit promise.
+
+`OrgAccessDenied` copy: "You don't have access to **{name}**." plus a path
+forward ("If you should have access, ask an administrator at that organization
+to add you.") and a link to `/orgs`. **One string, byte-identical for `managed`,
+`invited`, and `unmanaged`** — no "not set up yet" variant, no status-dependent
+wording, no status-dependent branch that could vary response time. That is
+DECISION-040's whole point.
+
+`OrgPortalStub`: name, type badge, "The organization portal lands in P1," link
+back to `/orgs`. Reads no tenant data.
+
+### Components to create
+
+- `src/lib/utils.ts` — `cn()` (clsx + tailwind-merge). Not `server-only`.
+- `components.json` — shadcn init: `"rsc": true`, `"tsx": true`,
+  `"cssVariables": true`, css `src/app/globals.css`, aliases `@/components`,
+  `@/components/ui`, `@/lib`, `@/lib/utils`.
+- `src/components/ui/button.tsx`, `card.tsx`, `badge.tsx` — generated, exactly
+  these three, all server-safe. If the CLI wants to install `tw-animate-css` or
+  `next-themes`, **stop and hand-copy the three files instead** — DECISION-036
+  pre-approves those two for P0.5 only, and "zero new runtime dependencies in
+  P0" is a claim we should still be able to make at Phase 5. None of the three
+  needs an animation utility; strip the import if it appears.
+- Page-local components colocated with their routes: `LaunchUnavailable`,
+  `OrgCard`, `PlatformBlock`, `PendingOrgsNotice`, `OrgAccessDenied`,
+  `OrgAccessEnded`, `OrgPortalStub`.
+
+### `globals.css` token expansion
+
+Restructure to the Tailwind-v4 shadcn shape, which is also what makes a later
+`.dark` class a pure addition rather than a re-authoring (DECISION-036):
+
+```css
+:root { --background: …; --foreground: …; --primary: …; --radius: 0.5rem; … }
+@media (prefers-color-scheme: dark) { :root { … } }
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-primary: var(--primary);
+  /* …the rest of the shadcn set… */
+}
+```
+
+**Every one of the six existing token names keeps working and keeps its current
+value** — `--color-background`, `--color-foreground`, `--color-muted`,
+`--color-muted-foreground`, `--color-border` are unchanged, so no existing page
+shifts. The one to watch is `--color-accent`: shadcn's `accent` is a subtle
+hover background, not the current brand blue `hsl(217 91% 60%)`. Grep-verified
+that **no component uses `accent` today** (`src/app/globals.css` defines it;
+nothing consumes it), so it is safe to take shadcn's semantic and move the brand
+blue to `--color-primary`. `src/app/(admin)/developer/developer.css` has its own
+palette and is untouched. P0 keeps `prefers-color-scheme`; no `next-themes`.
+
+### Files to modify
+
+| File | Change |
+|---|---|
+| `src/lib/auth/safe-callback.ts` | fallback `/home` → `/launch`, both branches + the docblock |
+| `src/lib/auth/safe-callback.test.ts` | six assertions `/home` → `/launch` |
+| `src/app/(auth)/totp/actions.test.ts` | **delete.** It tests a private copy of the pre-extraction function still asserting the `/admin` fallback — already filed in `docs/TODO.md` as a stale replica, and leaving it while changing the real fallback makes it actively misleading. `safe-callback.test.ts` is the coverage. Close the TODO line in the same commit. |
+| `src/app/(account)/account/2fa/totp-enroll-form.tsx:81` | `?? "/home"` → `?? "/launch"` |
+| `src/proxy.ts:42` | `pathname.startsWith("/admin") \|\| pathname.startsWith("/o/")` + the comment block below |
+| `src/proxy.ts:78` | fall-through comment lists the new auth-only routes |
+| `src/lib/authz.ts` | `OrgAccessError`; the two wrappers; `resolveOrgContext`; `publicOrgSummary`; `assertOrgAccess` |
+| `src/lib/db/domain/org.ts` | the `organizations_slug_format` check |
+| `src/app/page.tsx:50-57` | signed-in "Go to home" → "Continue" → `/launch` |
+| `src/components/shared/global-nav.tsx` | add an "Organizations" link → `/orgs` for every signed-in user, so the chooser is reachable without typing a URL |
+| `scripts/seed-dev.sql`, `scripts/test-rls.sql` | fixtures + assertions above |
+| `e2e/support/global-setup.ts:137` | `callbackUrl: ${baseURL}/home` → `/launch` (cosmetic — `maxRedirects: 0`) |
+| `docs/product/functionality-map.md:17` | rename `presby_available_organizations()` → `presby_user_organizations()`; add the router surface (Workflow Rule 14, at ship time) |
+| `docs/TODO.md` | close the stale-replica line; open the P2 onboarding-link and `forbidden()`-status lines |
+| `CLAUDE.md` | Project Layout + new **Post-Login Landing** section (below) |
+| `.claude/agents/architect.md` | one line in Route Group Rules: `(org)` → pointer to CLAUDE.md → Post-Login Landing |
+
+Historical documents are **not** rewritten: `docs/release-notes/v0.8.md:90`
+names the old function and correctly describes what shipped then.
+
+### The `src/proxy.ts` comment — required, not optional
+
+The file's shape actively invites the wrong fix. Write it in the voice of the
+existing fall-through block at `proxy.ts:67-79`:
+
+> `/o/*` gets authentication, active-status, and 2FA at the Edge and **nothing
+> else**. Do **not** add a `PROTECTION_RULES` entry for it: `FEATURES.*` is the
+> **platform** axis and org membership is the **tenant** axis
+> (`src/lib/authz.ts:8-22`), and the Edge cannot reach the database to check
+> membership anyway. Authorization is `resolveOrgContext()` + `withOrgContext()`
+> in the RSC layer, per DECISION-035. Note `"/orgs".startsWith("/o/") === false`
+> — the chooser is deliberately outside this gate.
+
+### CLAUDE.md → Post-Login Landing (new section)
+
+Referenced by `.claude/agents/architect.md:17` today and **does not exist**.
+P0 gives it content, placed after Key Invariants:
+
+- `/launch` is the single post-authentication target. `sanitizeCallbackUrl`
+  falls back to it.
+- The nine-row destination matrix, with the `canAccessAdmin` vs
+  `isPlatformAdmin` split spelled out.
+- `/` never redirects a signed-in user (DECISION-034).
+- `/orgs` never auto-forwards; `/home` survives as the platform-shell page that
+  carries what's-new and the feedback prompt, and is no longer a landing target.
+- The `(org)` contract, verbatim from Phase 2: auth-only **and** org-scoped;
+  every page resolves `[slug]` through `resolveOrgContext()` and reads through
+  `withOrgContext()` on the RLS-enforced connection; **`getPlatformDb()` is
+  forbidden in the subtree**; no page may assume the user came via the chooser;
+  the Edge enforces auth, active status, and 2FA for `/o/*` and never membership.
+
+## Implementation Order
+
+**One work-log — this one. Three commits, in this order, each of which
+typechecks, builds, and is revertible on its own.** That is my answer to the
+sequencing question: splitting the *work-log* would break Phase 5/6 tracking for
+a single pipeline, but splitting the *commits* is worth doing because it takes
+the two inert pieces out of the blast radius of the one risky piece. If slice C
+has to be reverted at 9pm, A and B stay.
+
+### Slice A — schema and fixtures (`database-admin`)
+
+`feat(db): widen the org-list function and guard membership against open positions`
+
+1. `drizzle/0014_presby_org_router.sql` — slug CHECK + comment; drop/create
+   `presby_user_organizations`; the two integrity triggers. Journal entry added.
+2. `src/lib/db/domain/org.ts` — matching `check()`. Verify `npm run db:push`
+   proposes nothing.
+3. `scripts/seed-dev.sql` — the two orgs and six fixture users.
+4. `scripts/test-rls.sql` — the new section. **Run it as `presby_app`**, not as
+   the owner (F1), and paste the output into the Phase 4 notes.
+5. `src/lib/authz.ts` — the wrappers, `UserOrganization`, `OrgAccessError`,
+   `assertOrgAccess`, `resolveOrgContext`, `publicOrgSummary`. *(Server code in
+   the database-admin's slice on purpose: it is the direct TypeScript face of
+   the function being changed, and splitting it from the migration means whoever
+   writes the wrapper has to re-derive the column contract. The api-developer
+   consumes it and does not re-litigate it.)*
+
+**Why this is independently shippable:** nothing calls any of it. The old
+wrapper had zero call sites (architect verified); the new ones have zero until
+slice C. Applied, it changes no user-visible behavior. Revert = a migration
+recreating the old function.
+
+### Slice B — design foundation (`ux-developer`)
+
+`chore(ui): initialise shadcn and expand the token set`
+
+`cn()`, `components.json`, `button`/`card`/`badge`, the `globals.css`
+restructure. **Zero behavior change.** Verification is visual: load `/`,
+`/signin`, `/home`, `/admin`, `/developer` in a browser at 360px and 1280px and
+confirm nothing moved. Revert = delete four files and restore one.
+
+### Slice C — the router (`api-developer`, then `ux-developer`)
+
+`feat(auth): route post-login through /launch and the org chooser`
+
+One commit, written by two agents, because a partial landing is the half-routed
+login nobody wants. `Work-Log: 2026-08-18-backbone-and-org-sites`.
+
+**C1 — api-developer:** `computeDestination` + its nine unit tests;
+`readIsPlatformAdmin` (+ adopt it in `developer/guard.ts` and
+`developer/schema.json/route.ts`); `proxy.ts` 2FA extension and both comments;
+`safe-callback.ts` fallback + its tests; delete the stale replica; the
+`OrgAccessError` swap at `src/lib/authz.ts:63-68`.
+
+**C2 — ux-developer:** the four pages, `(org)/layout.tsx`, `error.tsx`,
+`not-found.tsx`, all page-local components, the `page.tsx` and `GlobalNav`
+links.
+
+**C3 — either:** e2e fixtures and specs (below), CLAUDE.md, the architect agent
+line, `docs/TODO.md`, `docs/product/functionality-map.md`.
+
+**Not applicable from the template:** no `FEATURE_CATALOG` entry, no seed
+binding, no audit events, no `check:audit` surface (P0 has no `actions.ts`).
+Release notes at Phase 6 via `/release-notes`, with a `whats_new_entries`
+entry — "where you land after signing in" is exactly the member-visible change
+Workflow Rule 13 is asking about.
+
+## Implementer
+
+**`database-admin` (A) → `ux-developer` (B) → `api-developer` (C1) →
+`ux-developer` (C2/C3) → `qa`.**
+
+I am taking the architect's suggested split rather than collapsing to
+`full-stack-developer`, and the reason is specific rather than a preference for
+ceremony: P0 puts a change to the SECURITY DEFINER function that *is* the
+cross-org read boundary, a change to the Edge auth path, and four new pages in
+one pipeline. Handed to one agent, the migration is the piece that gets the
+least attention — it is the least visible and the hardest to eyeball — and it is
+also the only piece where a mistake is a data-isolation defect rather than a
+routing annoyance. The slice boundaries here coincide with commit boundaries and
+with agent expertise, so the handoff cost is a work-log read, not a mid-file
+split.
+
+The one place I diverge from the architect's suggestion is putting the
+`src/lib/authz.ts` wrappers in the **database-admin's** slice rather than the
+api-developer's: the column contract and the de-dup ordering are the same
+decision expressed twice, and separating them is how the ORDER BY and the
+"take the first row" rule drift apart.
+
+If the operator wants fewer handoffs, B + C2 + C3 collapse into one
+`full-stack-developer` invocation cleanly. Slice A stays with `database-admin`
+either way.
+
+## Edge Cases & Risks
+
+**R1 — `redirect()` inside a try/catch.** The single most likely way to ship a
+blank `/launch`. Mitigated structurally (the catch returns JSX) and by comment.
+
+**R2 — `error.tsx` must be `"use client"`, contradicting Phase 2's "there is no
+`'use client'` in this pipeline."** Next requires error boundaries to be client
+components; this is a framework mandate, not a choice. Phase 2's sentence is
+right about *pages* and wrong about the boundary. Second-order consequence the
+design has to absorb: in production Next replaces the error message with a
+digest, so `error.tsx` **cannot** render the org name. Its copy is generic —
+"Your access to this organization has ended or was removed." + a link to
+`/orgs`. The named-and-dated message comes from `resolveOrgContext`'s `"ended"`
+branch, which is the common path; `error.tsx` only catches the genuine race
+where membership disappears between the resolve and the transaction.
+
+**R3 — the 403 is rendered at HTTP 200, and DECISION-040 says 403.** Next's
+`forbidden()` is still behind `experimental.authInterrupts` (verified 2026-08-18,
+canary-only), and enabling an experimental flag is an architect-scope config
+change I am not taking inside P0. The property DECISION-040 actually protects —
+**one response, byte-identical across `managed` / `invited` / `unmanaged`** — is
+fully satisfied by the rendered page. `not-found` keeps a real 404 via
+`notFound()`. Logged in `docs/TODO.md`: adopt `forbidden()` when it stabilises.
+
+**R4 — the e2e fixtures have no organizations, so four of the nine rows are
+unreachable in a browser.** `E2E_USERS` are platform users with no `people`
+rows, and `scripts/seed-dev.sql`'s people have no passwords. Without new
+fixtures the chooser, the single-org forward, the 403 and the 404 ship verified
+by unit tests only — which is precisely the "returns 200 is not the same as
+works" invariant. Required: a new `e2e/support/seed-orgs.ts`, provisioned by
+`globalSetup` alongside `seed-users.ts`, owning four `e2e-`-prefixed orgs
+(`e2e-presbytery` managed, `e2e-alpha` managed, `e2e-beta` managed, `e2e-gamma`
+unmanaged) and linking three new fixture users: `org-single` (1 managed),
+`org-multi` (`e2e-alpha` + `e2e-presbytery`), `org-unmanaged` (`e2e-gamma`
+only), all `roleName: null`. Two mechanics the implementer must not rediscover:
+it needs `E2E_PLATFORM_DATABASE_URL ?? PLATFORM_DATABASE_URL` (the existing
+seeder's `DATABASE_URL` is `presby_app`, which has no INSERT on `organizations`
+and is RLS-blocked on `people`/`memberships`), and `org-multi`'s second
+membership must set `app.person_claim_authorized` inside a single statement —
+issue the inserts as one `do $$ … $$` block, since the neon HTTP driver has no
+multi-statement transaction. `organizations.path` is supplied explicitly, ltree
+labels only (`e2e_presbytery.e2e_alpha`). Same `example.invalid` guard and
+cleanup sweep as `seed-users.ts`.
+
+**R5 — adding fixtures to Alder Creek or Bramblewood silently rewrites
+`test-rls.sql`.** Mitigated by the two new orgs. Called out because the
+tempting, cheapest move is to add a membership at Alder and then "fix" four
+count assertions.
+
+**R6 — editing `drizzle/0013` breaks `db:migrate`.** Every hand-written
+migration is in `_journal.json`, so the migrator hashes it. The architect's
+Note 7 asked for the stale comment to be corrected in place; do not. Forwarding
+note in 0014's header instead.
+
+**R7 — auditing the 403 would be a mass-notification vector.** F18 says a
+platform action against a tenant carries that tenant's `organization_id`, so an
+audited denial would let any signed-in user write rows into any congregation's
+access log by looping over a **public** slug list. P0 writes no audit event on
+the miss path. Carry this forward: P1's `org_access_requests` Phase 1 faces the
+identical vector with a bigger payload, and the architect already flagged it.
+
+**R8 — the requested-path branch is defensive and low-traffic, and its rules
+must not be mistaken for the gate.** A signed-out deep link to `/o/alder-creek`
+never touches `/launch` at all: the proxy sends `/signin?callbackUrl=/o/alder-creek`
+and NextAuth redirects straight there. So rule 1 fires only when something
+explicitly routes *through* `/launch` with a `next`. Its job is not to authorize
+— `/o/<slug>` does that independently (A4) — it is to avoid dumping a user with
+a stale bookmark on a 403 when the chooser is the kinder answer.
+
+**R9 — `sanitizeCallbackUrl` must stay a pure string function** (Note 4). It
+does not learn about org slugs, does not import anything, and returns `/launch`
+for absent/invalid input. The slug check lives in `computeDestination`.
+
+**R10 — `/launch` as the fallback creates a redirect loop if `/launch` itself is
+ever reached with `?next=/launch`.** One line, easy to forget, invisible until
+someone bookmarks it: drop `requestedPath` when its pathname is `/launch`. Unit
+test it.
+
+**R11 — MFA-enrolled users now meet the 2FA gate immediately after sign-in.**
+The `mfa-admin` fixture (0 orgs, `canAccessAdmin`) previously landed on `/home`;
+after P0 it routes to `/admin`, the Edge gates it, `/totp` sees no enrolment and
+walks it to `/account/2fa`. That is correct and it is why DECISION-037 pulled
+the gate forward — but it is a visible behavior change on the first screen after
+sign-in for exactly the users the policy protects, and it must be asserted
+deliberately, not discovered.
+
+**R12 — the dedup rule is load-bearing and its input is a schema accident.**
+Two `people` rows sharing a `user_id` is reachable (`people_user_idx` is not
+unique) and produces two identical cards plus a non-deterministic
+`resolveOrgContext`. The fixture and the `test-rls.sql` assertion exist so the
+wrapper's `find`-first behavior is proven rather than assumed.
+
+**R13 — the shadcn CLI may want to rewrite `globals.css` or install
+`tw-animate-css`/`next-themes`.** Review its diff before accepting; hand-copy
+the three components if it insists. DECISION-036 pre-approves those two deps for
+**P0.5 only**.
+
+### E2E blast radius — existing specs that encode the old `/home` contract
+
+Per the 2026-07-11 retro: this is the list of *existing* assertions this change
+alters, not just the new tests needed. Each is a deliberate contract update.
+
+| Spec | Today | After P0 | Action |
+|---|---|---|---|
+| `e2e/member-home.spec.ts:24-32` | admin signs in → `/home` | → `/admin` (0 orgs, `canAccessAdmin`, not `isPlatformAdmin`) | **Rewrite** the assertion |
+| `e2e/member-home.spec.ts:35-50` | signs in, asserts `GlobalNav` links on the landing page | lands on `/admin`, which has its own sidebar and no `GlobalNav` | **Add an explicit `page.goto("/home")`** before the assertions — otherwise it fails for a reason unrelated to what it tests |
+| `e2e/member-home.spec.ts:53-65` | member signs in → `/home`, no Admin link | → `/no-organization` | **Rewrite** the landing assertion; `goto("/home")` for the nav assertion |
+| `e2e/member-home.spec.ts:84-107` | mfa-admin signs in → `/home`, *then* `/admin` triggers the two-hop | signs in → `/admin` → `/totp` → `/account/2fa` immediately | **Rewrite.** This is R11 and it is the most interesting assertion in the file after P0 — keep the two-hop chain, drop the "2FA does not apply to `/home`" framing |
+| `e2e/admin-login.spec.ts:42-44` | comment: "signing in without a callbackUrl redirects to `/home`" | stale | **Update the comment.** The test itself navigates explicitly and still passes |
+| `e2e/member-home.spec.ts:13-21`, `role-boundaries.spec.ts:25-32` | unauthenticated `/home` → `/signin?callbackUrl=/home` | unchanged — `/home` survives | **No change.** Phase 2 Note 9 flagged `role-boundaries.spec.ts:25-31` as needing an update; it does not, because `/home` is not deleted. Correcting that here so nobody edits a passing spec |
+| `e2e/whats-new.spec.ts:177`, `feedback.spec.ts`, `account-page.spec.ts` | navigate explicitly | unchanged | **No change** — verified by grep |
+| `e2e/support/global-setup.ts:137` | posts `callbackUrl=${baseURL}/home` | cosmetic (`maxRedirects: 0`) | Update to `/launch` for honesty |
+
+### New e2e specs — `e2e/post-login-routing.spec.ts`
+
+Required before Phase 5 opens. P0 touches `src/lib/auth/safe-callback.ts` and
+`src/proxy.ts`, so CLAUDE.md's Phase 4 gate applies in full and **QA returns
+`BLOCKED`, not `PASS`, if any of this is deferred** — a deferred advisory is not
+a green light.
+
+*Mandatory (the auth-path smoke):*
+
+1. `admin` signs in with no `callbackUrl` → lands on `/admin`.
+2. `member` signs in → lands on `/no-organization`.
+3. **`mfa-admin` signs in → `/admin` → `/totp` → `/account/2fa` with
+   `callbackUrl=/admin`.** This is the MFA-enrolled leg the gate names.
+4. Signed-out `/o/e2e-alpha` → `/signin?callbackUrl=%2Fo%2Fe2e-alpha`; sign in;
+   land on `/o/e2e-alpha`. The deep link survives the round trip.
+5. `/launch?next=https://evil.com/steal` → does not leave the origin.
+
+*Required for the feature to count as verified in a browser:*
+
+6. `org-single` signs in → auto-forwarded to `/o/e2e-alpha`.
+7. `org-multi` signs in → `/orgs`, exactly two cards, no membership language,
+   both links resolve.
+8. `org-unmanaged` signs in → `/no-organization`, not `/orgs`.
+9. `org-single` visits `/o/e2e-beta` → the access-denied page naming
+   *e2e-beta*; visits `/o/e2e-gamma` (unmanaged) → **byte-identical** copy;
+   visits `/o/no-such-slug` → 404.
+10. `org-single` visits `/orgs` → renders, does not auto-forward (A4 made
+    observable).
+
+*Unit (vitest), not e2e:* all nine matrix rows against `computeDestination`,
+plus the `/launch` loop guard and the `/o/`-slug-not-enterable fall-through.
+
+## Out of Scope (confirm)
+
+Named so they are not quietly absorbed, per Phase 2 Note 10 and Revision Note 15:
+
+- The org switcher UI (dropdown) and the org portal shell's content — P1.
+- Tenant permission keys, `presby_effective_permissions()` wiring, `invited`-org
+  entry, `org_access_requests` / "Request access" as a button — P1.
+- Migrating what's-new and the feedback prompt off `/home`; retiring `/home`'s
+  "Your roles / Your features" debug sections — P1.
+- Per-org 2FA claim refinement (`twoFactorRequiredOrgIds`) — P1, additive.
+- The existing-page design migration, the 7 tables and 8 buttons,
+  `alert-dialog.tsx` regeneration, dark-mode strategy, reconciling
+  `docs/ui-standards.md` — **P0.5**, must land before P3.
+- `organization_slug_aliases` and 301s — the named escape hatch, built only when
+  a slug genuinely must change.
+- Anything under `/site/<slug>`, the `(public)` group, custom domains, satellite
+  sessions — P3/P5/P10.
+
+## Handoff
+
+**Next: `database-admin` (Phase 4, slice A).** Everything it needs is in
+§Data Model — the migration is written out, the fixture table is explicit, and
+the six assertions are enumerated. Two things it must not do: edit
+`drizzle/0013`, and add fixtures at Alder Creek or Bramblewood.
+
+Then `ux-developer` (slice B), `api-developer` (C1), `ux-developer` (C2/C3), and
+`qa` — who should read §E2E blast radius before running anything, because four
+currently-green specs are *supposed* to change and one of them (`member-home`
+test 3) will fail for a reason that has nothing to do with what it asserts.
+
+Open questions OQ4–OQ7 remain open and are not P0's business. S9's P10, the
+staff model's P8, and tenant administration's P9 each need their own Phase 1
+before they reach the architect again.

@@ -134,3 +134,36 @@ $$;
 
 revoke all on function presby_has_permission(uuid, uuid, text, date) from public;
 grant execute on function presby_has_permission(uuid, uuid, text, date) to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- The org switcher's data source
+-- ---------------------------------------------------------------------------
+-- A signed-in user may act in several organizations: an installed pastor holds
+-- membership at the presbytery and service at a congregation, and a ruling
+-- elder may sit on a presbytery committee.
+--
+-- This is a genuine cross-org read, so it cannot run under a single org
+-- context — with none set, RLS correctly returns nothing, and with one set it
+-- would only ever return that one. SECURITY DEFINER, narrowly scoped to the
+-- caller's OWN person rows, so it reveals nothing but where the user already
+-- belongs.
+create or replace function presby_available_organizations(p_user_id uuid)
+returns table (
+  organization_id   uuid,
+  person_id         uuid,
+  name              text,
+  organization_type text,
+  slug              text
+)
+language sql stable security definer as $$
+  select o.id, p.id, o.name, o.organization_type::text, o.slug
+    from people p
+    join memberships m   on m.person_id = p.id and m.ended_on is null
+    join organizations o on o.id = m.organization_id
+   where p.user_id = p_user_id
+     and p.merged_into_id is null
+   order by o.organization_type, o.name;
+$$;
+
+revoke all on function presby_available_organizations(uuid) from public;
+grant execute on function presby_available_organizations(uuid) to presby_app;

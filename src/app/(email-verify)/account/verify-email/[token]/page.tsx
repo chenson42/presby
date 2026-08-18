@@ -71,23 +71,28 @@ export default async function VerifyEmailPage({ params }: Props) {
   // requestEmailChange check). Catch it and return a friendly ErrorCard instead
   // of an unhandled 500. Any other error is re-thrown.
   try {
-    await db.batch([
-      db
+    // A real transaction, not db.batch(): batch was a neon-http affordance and
+    // this driver is the WebSocket pool now (the GUC-based RLS model needs a
+    // session). The upgrade is in our favour — batch pipelined statements
+    // without atomicity, so a failure midway could leave the email changed and
+    // the token un-consumed.
+    await db.transaction(async (tx) => {
+      await tx
         .update(users)
         .set({ email: newEmail })
-        .where(eq(users.id, tokenRow.userId)),
-      db
+        .where(eq(users.id, tokenRow.userId));
+      await tx
         .delete(emailVerificationTokens)
-        .where(eq(emailVerificationTokens.id, tokenRow.id)),
-      db.insert(auditEvents).values({
+        .where(eq(emailVerificationTokens.id, tokenRow.id));
+      await tx.insert(auditEvents).values({
         actorUserId: tokenRow.userId,
         actorEmail: newEmail,
         action: AUDIT_ACTIONS.USER_EMAIL_CHANGED,
         resourceType: "user",
         resourceId: tokenRow.userId,
         metadata: { oldEmail, newEmail },
-      }),
-    ] as unknown as Parameters<typeof db.batch>[0]);
+      });
+    });
   } catch (err: unknown) {
     if (isUniqueViolation(err)) {
       return (

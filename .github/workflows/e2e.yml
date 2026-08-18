@@ -1,0 +1,116 @@
+# E2E on an ephemeral Neon branch.
+#
+# Why this exists: the 2026-07-11 retrospective found the running-server e2e
+# suite is the SOLE defense for the dominant bug class (runtime/framework
+# defects invisible to unit tests) — yet it never ran in CI. This job closes
+# that gap using the stack's own advertised capability: Neon branching.
+#
+# Required repository secrets (skips cleanly when absent, so forks work out of
+# the box before wiring Neon):
+#   NEON_API_KEY      — console.neon.tech → Account settings → API keys
+#   NEON_PROJECT_ID   — Neon project → Settings → General
+# Optional:
+#   NEON_DB_USERNAME  — DB role name if not the default "neondb_owner"
+#
+# Everything else (AUTH_SECRET, TOTP key, seeded-user credentials) is generated
+# per-run — the branch is created fresh and deleted afterward, so no live
+# credentials are involved. Free-tier friendly: one branch per run, deleted in
+# an always() step.
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-secrets:
+    name: neon secrets present?
+    runs-on: ubuntu-latest
+    outputs:
+      has-neon: ${{ steps.check.outputs.has-neon }}
+    steps:
+      - id: check
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -n "$NEON_API_KEY" ]; then
+            echo "has-neon=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-neon=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NEON_API_KEY not configured — e2e skipped. See workflow header for setup."
+          fi
+
+  e2e:
+    name: playwright on neon branch
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-neon == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create ephemeral Neon branch
+        id: neon-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch_name: e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          username: ${{ secrets.NEON_DB_USERNAME || 'neondb_owner' }}
+
+      - name: Write .env.local (per-run credentials, ephemeral DB)
+        run: |
+          {
+            echo "DATABASE_URL=${{ steps.neon-branch.outputs.db_url_with_pooler }}"
+            echo "E2E_DATABASE_URL=${{ steps.neon-branch.outputs.db_url_with_pooler }}"
+            echo "AUTH_SECRET=$(openssl rand -base64 32)"
+            echo "AUTH_URL=http://localhost:3000"
+            echo "AUTH_TRUST_HOST=true"
+            echo "AUTH_TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+            echo "RATE_LIMIT_DISABLED=true"
+            echo "SEED_ADMIN_EMAIL=e2e-admin@example.test"
+            echo "SEED_ADMIN_PASSWORD=$(openssl rand -hex 16)"
+            echo "SEED_MEMBER_EMAIL=e2e-member@example.test"
+            echo "SEED_MEMBER_PASSWORD=$(openssl rand -hex 16)"
+            echo "SEED_MFA_ADMIN_EMAIL=e2e-mfa-admin@example.test"
+            echo "SEED_MFA_ADMIN_PASSWORD=$(openssl rand -hex 16)"
+          } >> .env.local
+
+      - name: Push schema + seed
+        run: |
+          npm run db:push
+          npm run db:seed
+
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e suite
+        run: npm run test:e2e
+        env:
+          CI: "true"
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+
+      - name: Delete Neon branch
+        if: always()
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch: e2e-${{ github.run_id }}-${{ github.run_attempt }}

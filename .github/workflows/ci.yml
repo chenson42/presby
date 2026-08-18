@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build needs these to resolve, but no live data is hit.
+          DATABASE_URL: "postgres://ci:ci@localhost:5432/ci"
+          AUTH_SECRET: "ci-secret-do-not-use-in-prod"
+          AUTH_URL: "http://localhost:3000"
+          AUTH_TOTP_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+      - name: Tripwire checks (audit-log invariant + sql-date)
+        run: npm run check
+
+      # ADVISORY until the next-auth beta.32 bump lands: @auth/core in the pinned
+      # beta.31 carries 2 critical advisories whose fix is an auth-core upgrade
+      # that must go through an e2e-gated pipeline, not a lockfile patch (see
+      # docs/TODO.md Next Up). Remove continue-on-error once that ships.
+      - name: Dependency audit (production deps, high+)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+      - name: Unit tests
+        run: npm test
+
+  # The commit-msg hook only runs where `npm install` has installed it — GitHub
+  # web edits and fresh clones bypass it silently. This job re-validates every
+  # PR commit with the same exported validator the hook uses.
+  commit-grammar:
+    name: commit grammar
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Validate commit messages
+        run: node scripts/validate-commit-range.mjs "origin/${{ github.base_ref }}..HEAD"

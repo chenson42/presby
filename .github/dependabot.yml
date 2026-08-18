@@ -1,0 +1,24 @@
+# Automated dependency-update PRs. This complements (does not replace) the
+# monthly `dependencies` review in the health-check slot — dependabot surfaces
+# the patch; the review still owns judgment calls like the pinned NextAuth beta.
+# Grouping keeps PR noise low for a small-team/nonprofit maintenance budget.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    # Majors and the NextAuth beta line need human judgment — leave them to the
+    # dependencies review rather than auto-PRing breaking bumps.
+    ignore:
+      - dependency-name: "next-auth"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

@@ -1,0 +1,8 @@
+# Default robots.txt for the Claude Code Starter.
+# Tighten this for production deployments — most internal/admin apps want
+# `Disallow: /` to keep crawlers off entirely.
+
+User-agent: *
+Allow: /
+
+# Sitemap: https://your-domain.example.com/sitemap.xml

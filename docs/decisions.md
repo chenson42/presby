@@ -4,6 +4,41 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-031: The training deck is removed from presby
+
+**Status:** Resolved
+**Date:** 2026-08-18
+**Feature:** `2026-08-18-remove-deck`
+
+### Decision
+
+`deck/` is deleted, along with the four `deck:*` npm scripts, the CLAUDE.md
+re-render rule, and the `/pre-push` deck-staleness check. **DECISION-005
+(committing the rendered PDF) is superseded** — there is no deck to render.
+
+### Rationale
+
+The deck is a *Claude Code training* artifact inherited from the starter — its
+own frontmatter reads header "Working with Claude Code", footer
+`github.com/chenson42/claudecode-nextjs-starter`. presby is a church platform.
+Carrying a presentation about a different subject meant carrying a behavior rule,
+a pre-push check, four scripts, and ~10 MB of committed binaries for something
+this project does not present.
+
+Operator decision, following the open question raised by the identity pass.
+
+### Impact
+
+- Git history retains the deck blobs. No history rewrite: the repo is already
+  pushed, nothing in the deck is sensitive, and rewriting shared history to
+  reclaim ~10 MB is a bad trade.
+- `/personalize-starter` still has a "keep the deck?" step; it deletes a
+  directory that is already gone, which is a harmless no-op.
+- If presby ever wants a deck of its own, it starts from a blank file about
+  presbyteries — not from an edit of this one.
+
+---
+
 ## DECISION-030: Person photos live in the database for now, behind a pluggable storage service
 
 **Status:** Resolved
@@ -1072,7 +1107,7 @@ Four sub-decisions bundled because they are interdependent:
 
 ## DECISION-005: Rendered deck PDF is committed to the repo
 
-**Status:** Resolved
+**Status:** Superseded by [DECISION-031](#decision-031-the-training-deck-is-removed-from-presby) (2026-08-18) — presby has no deck
 **Date:** 2026-05-16
 
 **Decision:** `deck/slides.pdf` is checked into git and re-committed every time `deck/slides.md` changes. `deck/slides.pptx` stays gitignored.

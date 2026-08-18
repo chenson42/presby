@@ -50,7 +50,6 @@ that overlaps one:
 - **Wait for explicit approval before committing or pushing.** Skipped permissions are not permission to skip the user's review of the diff. Pre-commit and pre-push are user gestures, not background tasks.
 - **Never push without going through `/pre-push`.** The checklist exists so the agent doesn't ship broken builds.
 - **Verify UI in a browser, on a phone viewport.** See Key Invariants → Verify in a Browser. `next build` passing is not evidence a page works.
-- **Re-render the deck whenever `deck/slides.md` changes.** Run `npm run deck` to refresh both outputs. `deck/slides.pdf` IS committed (so viewers can download it without installing Marp) — re-render *and re-commit it* in the same change as the source edit. `deck/slides.pptx` stays gitignored. If the render fails, fix the cause; don't leave stale outputs behind.
 
 ## Stack
 
@@ -301,10 +300,6 @@ npm run check:sql-date # Tripwire: bans unannotated sql<Date> (the Neon driver r
 npm run check        # Both tripwires in sequence
 npm run stats:escape # 30-day escape-rate report (per-channel fix breakdown for the retrospective)
 npm run docs:erd     # Regenerate the /developer ER diagrams from the schema
-npm run deck         # Render deck/slides.md → slides.pptx + slides.pdf
-npm run deck:pptx    # PowerPoint only
-npm run deck:pdf     # PDF only
-npm run deck:html    # Live-reload HTML preview
 ```
 
 Generate an `AUTH_SECRET` with `openssl rand -base64 32`.

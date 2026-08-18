@@ -26,7 +26,7 @@ inherited from the starter.
 - **Platform lib** — permissions (`FEATURES` + `hasFeature`), flags (`isFlagEnabled`, cached), `recordAudit()`, TOTP crypto + pending enrolment, rate limiting, request-ip, Turnstile, email queue (persist-first + retry + Resend webhook) with `escapeHtml`.
 - **API / Cron** — NextAuth routes, Resend delivery webhook, `CRON_SECRET`-gated email-queue worker + daily maintenance (token GC).
 - **Flags** — `demo.new_dashboard`, `auth.local_login` (OAuth-only switch), `auth.require_2fa` (org 2FA switch) — both auth flags fail-open.
-- **Dev-loop tooling** — SessionStart hooks (feedback count, functionality-map index, cadence check), pre-push PreToolUse gate, commit-msg hook (+ `Work-Log:` trailer) + escape-rate stats, `check:audit` + `check:sql-date` tripwires, CI (typecheck/build/tests/commit-grammar + secret-gated Neon-branch e2e + opt-in Claude PR review + dependabot), seed script, Marp deck, 11 e2e suites, fork-sync skills (`/upstream-sync` + `/downstream-sync`) + contribution-kit specs, `AGENTS.md` shim.
+- **Dev-loop tooling** — SessionStart hooks (feedback count, functionality-map index, cadence check), pre-push PreToolUse gate, commit-msg hook (+ `Work-Log:` trailer) + escape-rate stats, `check:audit` + `check:sql-date` tripwires, CI (typecheck/build/tests/commit-grammar + secret-gated Neon-branch e2e + opt-in Claude PR review + dependabot), seed script, 11 e2e suites, fork-sync skills (`/upstream-sync` + `/downstream-sync`) + contribution-kit specs, `AGENTS.md` shim.
 
 ---
 
@@ -105,7 +105,6 @@ inherited from the starter.
 - CI — typecheck/lint/build/tripwires/`npm audit`/unit tests + commit-grammar job on PRs; e2e on an ephemeral Neon branch (secret-gated); opt-in Claude PR review (secret-gated); dependabot grouped updates. `.github/workflows/ci.yml`, `e2e.yml`, `claude-review.yml`, `.github/dependabot.yml`
 - Cross-tool shim — `AGENTS.md` points non-Claude agents (Cursor/Codex/Jules) at CLAUDE.md and the must-honor rules. `AGENTS.md`
 - Seed — roles, `FEATURE_CATALOG`, demo + auth flags, seed users (admin / member / MFA-admin). `scripts/seed.ts`
-- Training deck — Marp source → committed PDF. `deck/slides.md`
 - E2E — 11 Playwright suites (auth, admin, member, security headers, TZ dates) with cached storageState + DB isolation guard. `e2e/`
 - Fork sync — `/upstream-sync` pulls starter changes into a fork (14 d cadence); `/downstream-sync` surfaces fork improvements to contribute back (30 d; self-detects the canonical repo and exits). `.claude/skills/upstream-sync/`, `.claude/skills/downstream-sync/`
 - Contribution kit — ~40 origin→fix→verification specs contributed by the huddleup.health fork (PR #3); live status in the 2026-07-01 triage review. `docs/starter-contributions/README.md`

@@ -20,11 +20,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Rendered deck output (slides.md is the source of truth)
-# slides.pdf IS committed so viewers can grab it without a Marp install
-deck/slides.pptx
-deck/slides.html
-
 # Test output
 coverage/
 /test-results/

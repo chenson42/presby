@@ -163,10 +163,6 @@ Treat these as advisory warnings, not hard blockers (unless the user decides oth
   ```bash
   git diff --name-only | grep -E "\.env"
   ```
-- **Deck re-rendered?** If `deck/slides.md` changed in this branch, `deck/slides.pdf` must change with it (CLAUDE.md → "Re-render the deck"):
-  ```bash
-  git diff main...HEAD --name-only | grep -q "deck/slides.md" && { git diff main...HEAD --name-only | grep -q "deck/slides.pdf" || echo "WARN: deck/slides.md changed but slides.pdf was not re-rendered — run npm run deck and commit the PDF"; }
-  ```
 
 ## Step 7b: Dependency CVE Audit
 

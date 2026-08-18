@@ -29,10 +29,6 @@
     "check:audit": "node scripts/check-audit-coverage.mjs",
     "check:sql-date": "node scripts/check-sql-date.mjs",
     "check": "npm run check:audit && npm run check:sql-date",
-    "deck": "npm run deck:pptx && npm run deck:pdf",
-    "deck:pptx": "npx --yes @marp-team/marp-cli deck/slides.md --pptx --allow-local-files",
-    "deck:pdf": "npx --yes @marp-team/marp-cli deck/slides.md --pdf --allow-local-files",
-    "deck:html": "npx --yes @marp-team/marp-cli deck/slides.md --html --watch --allow-local-files",
     "docs:erd": "tsx scripts/generate-erd.ts"
   },
   "dependencies": {

@@ -89,6 +89,16 @@ docs/ui-standards.md   — UI conventions; read before building a page or form
 
 Agents live in `.claude/agents/`. Spawn the right one for the phase.
 
+**Judgment agents cannot write.** `analyst`, `architect`, and `qa` declare a
+read-only `tools:` grant (`Read`, `Bash`, and web lookup for the architect). An
+agent that can edit the thing it is judging is not a check — a QA agent holding
+`Edit` can make a failing test pass instead of reporting FAIL, and the work-log
+still reads clean. They return their phase section; the orchestrator writes it
+in. Implementers and `tech-lead` keep write access: they produce artifacts, not
+verdicts on their own work. (`Bash` can technically write a file — the grant
+narrows the ergonomic path and makes any violation conspicuous; it is not a
+sandbox.)
+
 | Agent | Pipeline phase | When to invoke |
 |-------|---------------|---------------|
 | **analyst** | Phase 1 & 6 | Functional refinement before design; shipped-vs-intent review after QA. |
@@ -99,11 +109,11 @@ Agents live in `.claude/agents/`. Spawn the right one for the phase.
 | **ux-developer** | Phase 4 (client) | React components, admin pages, forms. |
 | **full-stack-developer** | Phase 4 (small/coupled) | Features small enough that splitting adds overhead. |
 | **deployment-engineer** | Pre-deploy | Production build verification, env vars, build failures. |
-| **qa** | Phase 5 | Test verification, typecheck, regression tests. |
+| **qa** | Phase 5 | Runs the suites and the feature-gate audit; verifies regression coverage exists. Read-only — it authors no tests. |
 
 **Every feature flows through the six-phase pipeline below. Work is not complete until analyst issues SHIP IT in Phase 6.**
 
-When handing off between phases, preserve the prior phase's full output in the work-log. Do not summarize away the analyst's gaps or the architect's invariant rulings.
+When handing off between phases, preserve the prior phase's full output in the work-log. Do not summarize away the analyst's gaps or the architect's invariant rulings — that applies with extra force now that the judgment agents hand their section back as text rather than writing it themselves.
 
 ## Development Pipeline
 
@@ -155,13 +165,13 @@ Phases run 1 → 2 → 3 → 4 → 5 → 6. Loop-backs are expected, and a loop-
 | React components, pages, forms | **ux-developer** |
 | Spans server + client and is small | **full-stack-developer** |
 
-**Gate:** Typecheck and build pass. `npm run check:audit` reports zero violations. No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
+**Gate:** Tests for the change are written *by the implementer* (QA runs them, and does not write them). Typecheck and build pass. `npm run check:audit` reports zero violations. No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
 **Loop-back:** Design unbuildable returns to Phase 3. Architectural problem discovered returns to Phase 2.
 
 ### Phase 5 — Test Verification (qa)
 
 **Trigger:** Implementer reports Phase 4 complete.
-**Output:** Verification report in the work-log (format: `docs/work-log/_template.md` Phase 5 section).
+**Output:** Verification report returned as text (format: `docs/work-log/_template.md` Phase 5 section); the orchestrator records it in the work-log. **QA is verification-only** — it authors no tests and edits no files, so a FAIL cannot be self-resolved. Missing coverage is a FAIL naming the gap; the implementer writes the test.
 **Gate:** Verdict must be `PASS` or `BLOCKED`. **On auth-touching features (see Phase 4 gate), `PASS` requires the e2e suite ran against a real dev server with an MFA-enrolled seeded user. A deferred or skipped e2e check produces `BLOCKED`, not `PASS` — a deferred advisory is not a green light.**
 **Loop-back:** `FAIL` returns to the implementer (Phase 4) with failing tests cited `file:line`. `BLOCKED` returns to the user with the unmet prerequisite named. If a failure reveals a design flaw, escalate to Phase 3.
 
@@ -187,7 +197,7 @@ Phases run 1 → 2 → 3 → 4 → 5 → 6. Loop-backs are expected, and a loop-
 
 ### Per-Feature Tracking
 
-Every piece of work gets a work-log file at `docs/work-log/YYYY-MM-DD-<slug>.md` (date the work started), created from `docs/work-log/_template.md`. **The template's per-phase sections are the canonical handoff format** — agents fill in their phase's section and update the Per-Phase Status table; they do not invent parallel formats. The work-log is the source of truth for pipeline state — Claude reads it at session start to determine where the work stands and which agent to invoke next.
+Every piece of work gets a work-log file at `docs/work-log/YYYY-MM-DD-<slug>.md` (date the work started), created from `docs/work-log/_template.md`. **The template's per-phase sections are the canonical handoff format** — nobody invents a parallel one. Implementers and `tech-lead` write their section directly; `analyst`, `architect`, and `qa` are read-only and return theirs for the orchestrator to record, along with their Per-Phase Status row. The work-log is the source of truth for pipeline state — Claude reads it at session start to determine where the work stands and which agent to invoke next.
 
 ## Periodic Reviews
 

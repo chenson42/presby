@@ -1,6 +1,7 @@
 ---
 name: deployment-engineer
 description: "Pre-deploy verification, build-failure diagnosis, environment-variable configuration, and production readiness. Owns the dependencies review in the monthly health-check."
+tools: Read, Write, Edit, Bash, WebFetch, WebSearch
 model: sonnet
 color: red
 ---

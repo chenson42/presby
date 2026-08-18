@@ -1,6 +1,6 @@
 # Functionality Map
 
-A scannable inventory of everything built in the Claude Code Starter, so a session
+A scannable inventory of everything built, so a session
 knows what exists without re-reconning. **Version `0.7.0` · surveyed 2026-08-09.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
@@ -11,6 +11,12 @@ map describes the features you inherited; extend it as you build on top.
 
 ## Index (short — for the session hook)
 
+- **presby: schema** — 37 domain tables in `src/lib/db/domain/`: organizations (hierarchy, `platform_status`), people + memberships + identifiers, roll actions + transfer certificates, ordinations + officer terms, groups (derived session/diaconate), authorization (permissions, roles, grants, commissions, delegations), privacy/consent/demographics, SASR scaffold.
+- **presby: isolation** — `presby_app` NOBYPASSRLS + FORCE RLS on every tenant table; bespoke policies for the global person tables; `withOrgContext()` verifies membership before setting the org GUC; two connections (`db` vs `getPlatformDb()`).
+- **presby: authorization** — `presby_effective_permissions(person, org, as_of)` with four arms and provenance; `presby_available_organizations()` for the org switcher; `src/lib/authz.ts`.
+- **presby: roll** — `presby_roll_as_of`, `_counts_as_of`, `_changes`, `presby_reconcile_current_roll`, `presby_roll_cache_drift`; officer registers `presby_officer_roster` / `_history`.
+- **presby: developer reference** — `/developer` index, `/developer/tables/<name>`, `/developer/erd/<module>`, `/developer/schema.json`. Generated from the schema + Postgres `COMMENT ON`.
+- **presby: NOT built** — no UI for any of the above; ledger/giving, events, worship, check-in, sites, tickets not designed.
 - **Public / Auth** — landing page, sign-in (Google OAuth + credentials, Turnstile-guarded, lockout-aware), TOTP 2FA verify + trusted device, forgot/reset password, email-change verify landing, access-pending.
 - **Member** — post-login `/home` (greeting, roles/features, what's-new card, daily feedback prompt), `/whats-new` full list, feedback submit/snooze/opt-out actions.
 - **Account (self-serve)** — profile name, email change + re-verification, password change, per-user TOTP enrolment/manage at `/account/2fa`, delete-account skeleton, permanent feedback form.

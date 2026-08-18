@@ -1,22 +1,39 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in the **Claude Code Starter**.
+Guidance for Claude Code when working in **presby**.
+
+## Read first
+
+1. **`docs/STATE.md`** — where the project stands, the decisions, the findings
+   worth remembering, and what is next. Start here in every new session.
+2. `docs/schema-design.md` — schema rationale, decisions D1–D9, and the full
+   review-findings log (F1–F29). Required before proposing or designing schema.
+3. The newest file in `docs/work-log/` — in-flight work and its pipeline phase.
 
 ## Project Overview
 
-The **Claude Code Starter** is a fork-and-go Next.js template for new web apps, and a teaching artifact for how to work with Claude Code: every file under `.claude/`, every doc in `docs/`, and the conventions in this file are meant to be read, copied, and adapted.
+**presby** is a multitenant platform for Presbyterian congregations,
+presbyteries, and synods: church management (rolls, officers, directory, giving,
+events), council operations, per-tenant websites, and a support-ticket loop
+worked partly by AI.
 
-Fork it, search-and-replace the project name, tune the brand colors in the `@theme` block of `src/app/globals.css`, fill in `.env.local`, and you have a deployable app with sign-in, an admin shell, roles and permissions, TOTP 2FA, feature flags, an audit log, and release notes — wired and ready to extend.
+Open source. **No real congregation, person, or credential ever enters the
+repository** — see Key Invariants → No Real Data.
 
-## Capability Map
+Not named yet. `/personalize-starter` is deliberately un-run, so files still say
+`presby`.
 
-The full feature catalog (with per-feature detail) lives in `README.md` → "What you get out of the box." The file-level jump-off map is `docs/product/functionality-map.md` — its short index is auto-printed at session start (`scripts/functionality-map.mjs` SessionStart hook), and **the full map is a required read before proposing, scoping, or designing any feature** so you never rebuild or conflict with something already shipped. Keeping it current is Workflow Rule 14. The operational summary:
+## Prior art
 
-- **Auth & accounts** — NextAuth 5 beta (Google OAuth + credentials; JWT sessions carry roles, features, 2FA state) · TOTP 2FA with QR enrolment, recovery codes, trusted-device cookie · self-serve `/account` (profile, email change + re-verification, password change, per-user 2FA at `/account/2fa`, delete skeleton) · forgot/reset-password flow · account lockout (5 failed passwords → 15-min lock; enumeration-safe, OAuth-exempt; admins clear locks on `/admin/users`) · Turnstile CAPTCHA on sign-in + forgot-password (no-op until keyed) · auth-mode flags `auth.local_login` and `auth.require_2fa` (both fail-open, toggled at `/admin/flags`).
-- **Authorization** — roles ↔ features ↔ users permissions (`src/lib/permissions.ts`) and environment feature flags (`src/lib/flags.ts`). Two distinct concepts — see Key Invariants → Permissions vs Flags.
-- **Admin shell** — `/admin` subpages: users, roles, flags, docs (release-notes viewer), 2FA, feedback triage, what's-new CRUD, email-queue viewer, audit viewer. Gated by `admin.dashboard`.
-- **Member surface** — post-login landing `/home` with global nav (conditional Admin link) · what's-new changelog on `/home` and `/whats-new` · in-app feedback loop (daily prompt card on `/home`, permanent form on `/account`) with a SessionStart triage hook — see Key Invariants → Feedback and Dev-Loop Wiring.
-- **Infrastructure** — append-only `audit_events` via `recordAudit()` in `src/lib/audit.ts` (captures actor, IP, user-agent) · durable email queue (persist-first, `CRON_SECRET`-gated Vercel cron retry, Resend delivery webhook, daily token-GC cron) · report-only CSP · edge route gate `src/proxy.ts` (auth + 2FA; Next 16 `proxy.ts` replaces deprecated `middleware.ts`) · in-memory rate limiting in `src/lib/rate-limit.ts` (Upstash env vars swap in Redis) · Sonner toasts; server actions return `ActionResult<T>` from `src/types/actions.ts` · `<FormattedDate>` for timezone-safe dates · seed script `scripts/seed.ts` · commit standards enforced by a git hook installed via `npm install`.
+Four sibling repos are the requirements source. Read before designing a feature
+that overlaps one:
+
+| Repo | What to take |
+|---|---|
+| `../fpcw-directory` | Church portal: 69 tables, per-field privacy (`src/lib/members/visibility.ts`), Android kiosk under `white-binder/` |
+| `../westervillelions` | Fund accounting (24 ledger tables). Also `docs/reviews/2026-08-12-pii-scrub.md` — the cost of real data in a public repo |
+| `../psvonline-portal` | Presbytery operations, already org-scoped |
+| `../synod-portal` | Public learn layer, AI spend gate |
 
 ## How Claude Should Behave in This Repo
 
@@ -36,69 +53,29 @@ If you've forked this starter and run Claude Code with default permission prompt
 ## Stack
 
 - **Next.js 16** App Router, **React 19**, **TypeScript** strict
-- **Drizzle ORM** + **Neon Postgres** (serverless, with branching)
-- **NextAuth 5 beta** — Google OAuth, JWT-backed sessions
-- **Tailwind CSS** + shadcn-style primitives via **Radix UI**
-- **otplib** + **qrcode** for TOTP 2FA
-- **Resend** for transactional email (`src/lib/email.ts`)
-- **react-markdown** + **remark-gfm** for the admin docs viewer
-- **Vitest** for unit tests (`*.test.ts` next to source); **Playwright** + chromium for e2e tests under `e2e/`
-- **Vercel** target deployment (the starter is platform-agnostic but ships Vercel-ready)
+- **Drizzle ORM** + **Neon Postgres**, driven through the **WebSocket pool**
+  (`drizzle-orm/neon-serverless`). Not neon-http: it has no session or
+  transaction support, so it cannot carry the transaction-scoped GUC that RLS
+  depends on (F28). The isolation model dictates the driver.
+- **NextAuth 5 beta** · Tailwind + Radix · Resend · Vitest + Playwright
+- **Vercel** target deployment
 
 ## Project Layout
 
-This tree is the canonical map of the repo — agent files point here rather than maintaining their own copies.
-
 ```
-src/
-├── app/
-│   ├── (account)/account/          — Self-serve account page (profile, email, password, delete)
-│   │   └── 2fa/                    — Per-user TOTP enrollment + management
-│   ├── (admin)/admin/              — Admin shell (users, flags, docs, 2fa subpages)
-│   │   ├── feedback/               — Admin feedback triage page, status control, actions
-│   │   └── whats-new/              — Admin CRUD for What's-new entries (list+create, edit, delete)
-│   ├── (member)/home/              — Post-login member home (greeting, roles, features, global nav)
-│   │   └── feedback-prompt-card.tsx  — Daily prompt card (client island)
-│   ├── (member)/whats-new/         — Member full What's-new list (all entries, newest-first)
-│   ├── (member)/feedback/          — Member server actions (submit, snooze, opt-out)
-│   ├── (auth)/signin/              — Sign-in (Google OAuth)
-│   ├── (auth)/totp/                — TOTP enrolment + verification
-│   ├── (email-verify)/account/verify-email/[token]/  — Email-change verification landing
-│   ├── (password-reset)/forgot-password/             — Request a password-reset link
-│   ├── (password-reset)/reset-password/              — Consume token + set new password
-│   ├── access-pending/      — Landing for authenticated users with no roles
-│   ├── api/                 — Route handlers (auth callbacks, admin APIs, api/webhooks/<provider>)
-│   ├── page.tsx             — Public landing page
-│   └── layout.tsx           — Root layout
-├── lib/
-│   ├── db/                  — Drizzle connection + schema
-│   ├── auth/                — NextAuth config
-│   ├── permissions.ts       — FEATURES catalog + hasFeature()
-│   ├── flags.ts             — isFlagEnabled()
-│   ├── audit.ts             — recordAudit() helper (actor, IP, user-agent)
-│   └── two-factor.ts        — TOTP encrypt/decrypt + verify
-├── components/
-│   ├── ui/                  — shadcn primitives (auto-generated; don't hand-edit)
-│   └── shared/              — Cross-cutting components (e.g., <FormattedDate>, <FeedbackForm>)
-├── auth.ts                  — NextAuth entry (re-exported across the app)
-├── proxy.ts                 — Next 16 route gate (admin + 2FA enforcement)
-└── types/                   — Ambient type declarations
-scripts/
-├── seed.ts                  — Roles + features + demo flag seed
-├── feedback-check.mjs       — SessionStart hook: counts status='new' rows; count only
-└── functionality-map.mjs    — SessionStart hook: prints the functionality map's short index
-docs/
-├── TODO.md                  — Backlog & follow-up ledger (reconcile in the same commit as the work)
-├── product/functionality-map.md — Living what-exists map (Rule 14; required read before scope work)
-├── ui-standards.md          — UI conventions + pre-merge UX audit checklist (Phase 5 reference)
-├── decisions.md             — ADR-style decision log
-├── work-log/                — Per-feature pipeline tracking (_template.md is the canonical format)
-├── reviews/                 — Review log + detail files
-└── release-notes/           — vX.Y.md files surfaced in admin docs
-.claude/
-├── agents/                  — Agent definitions
-├── skills/                  — Slash-command skills
-└── settings.json            — Permission allowlist
+src/lib/db/domain/     — the presby schema, one file per module (org, people,
+                         roll, officers, groups, authz, privacy, reporting)
+src/lib/db/index.ts    — TWO connections: db (presby_app, RLS enforced) and
+                         getPlatformDb() (bypasses RLS, platform pages only)
+src/lib/authz.ts       — tenant authorization: withOrgContext, the resolver
+src/lib/permissions.ts — platform admin shell only. FROZEN; nothing church-facing
+src/app/(admin)/developer/ — generated schema reference
+drizzle/00XX_presby_*.sql  — hand-written: RLS, triggers, functions. Drizzle Kit
+                             does not emit any of these
+scripts/seed-dev.sql   — synthetic fixture, shaped to exercise the findings
+scripts/test-rls.sql   — isolation suite. MUST run as presby_app
+docs/STATE.md          — start here
+docs/schema-design.md  — rationale + findings log
 ```
 
 ## Agent Roster
@@ -324,51 +301,103 @@ Generate an `AUTH_SECRET` with `openssl rand -base64 32`.
 
 ## Key Invariants
 
-### Server / Client Boundary
+These are the properties the system exists to enforce. `/developer` marks each
+one `database`, `trigger`, or `paper` — **paper means the schema permits a
+violation and only review will catch it.**
 
-Next.js Server Components are the default. Add `'use client'` only when you need event handlers, hooks, refs, or browser APIs. Server actions are marked `'use server'`; they never trust inputs without validation and always re-check session and permissions inside the action body.
+### No Real Data
 
-### The Proxy Cannot Import `@/lib/db`
+This repository is public. No real congregation name, person, address, email, or
+credential — not in code, seeds, migrations, scripts, docs, work-logs, or commit
+messages. `scripts/seed-dev.sql` is the house style: invented names,
+`example.invalid` addresses.
 
-`src/proxy.ts` runs on the Edge runtime and cannot import node-only modules. Keep DB access in route handlers and server actions; the proxy checks JWT claims only.
+`private/` and `scratch/` are gitignored **and** hard-blocked by a pre-commit
+hook, because `.gitignore` is bypassable with `git add -f` and an agent running
+`git add -A` is the real failure mode. They are untracked scratch only —
+anything needing version control belongs in a separate private repo.
 
-### Schema Is the Source of Truth
+### Isolation Is a Database Property
 
-`src/lib/db/schema.ts` is canonical. Anything in the live database that isn't in `schema.ts` will be dropped on the next `npm run db:push`. Add a new table to `schema.ts` *first*, then push or generate the migration.
+`presby_app` is `NOBYPASSRLS`. Every tenant table is **`FORCE ROW LEVEL
+SECURITY`** — without `FORCE` the table owner bypasses every policy and RLS is
+silently inert while every naive test still passes (F1).
 
-### Permissions vs Flags
+`users.is_platform_admin` decides which *pages* are reachable, never whether a
+query is filtered. That is what the second connection is for.
 
-| Concept | Mechanism | Question it answers |
-|---------|-----------|---------------------|
-| Permission | `FEATURES` + `hasFeature()` | "Is this *user* allowed to do X?" |
-| Flag | `feature_flags` + `isFlagEnabled()` | "Is feature X *turned on* for this environment?" |
+**RLS enforces tenancy, not authorization.** The policy trusts whatever org id
+it is handed. Verify membership *before* calling `set_config` — that is what
+`withOrgContext()` does.
 
-Not interchangeable. A new admin action almost always needs a new permission. A new in-progress feature usually needs a flag. Many features need both. This section is the single source for this rule — agent files point here.
+**A trigger that must see across orgs needs `SECURITY DEFINER`.** Otherwise its
+own queries are filtered by the RLS it exists to complement, and it silently
+reads zero rows for exactly the case it guards (F26).
 
-### TOTP Encryption Key
+### Two Hierarchies Intersect Nowhere
 
-`AUTH_TOTP_ENCRYPTION_KEY` is a 32-byte secret that AES-GCM-encrypts TOTP seeds at rest. **Rotating it invalidates every enrolled TOTP secret in the database.** Do not rotate it casually.
+Ecclesiastical (congregation → presbytery → synod → GA) and platform (tenant
+user → tenant admin → platform admin) are different axes. A platform admin is
+not above a national admin.
 
-### No Secrets in Committed Files
+Access flows **up by publication**, never down by inheritance. A presbytery
+admin administers the presbytery's own org and gets nothing inside a member
+congregation. The only downward paths are an administrative commission and a
+session-granted delegation, both time-boxed and minuted.
 
-`.env.local`, OAuth keys, `AUTH_SECRET`, the TOTP key — none belong in git. `.gitignore` excludes `.env*` except `.env.example`. Don't work around it. `.env.example` is the canonical inventory of environment variables.
+### The Roll Is the System of Record
 
-### Timezone-Safe Date Rendering
+`roll_actions` is append-only; an approved action is frozen by trigger and
+corrected by recording a `void`, never by update. The directory is a *view* of
+the roll, the SASR is a *projection* of it, per capita derives from it.
 
-Never call `toLocaleString()` / `toLocaleDateString()` / `toLocaleTimeString()` directly in components — on Vercel (UTC), server-rendered timestamps show UTC to every viewer. Use `<FormattedDate value={...} mode="date|datetime" />` from `src/components/shared/formatted-date.tsx` (SSR-renders an ISO fallback, swaps in the viewer's timezone after mount). An ESLint rule enforces this; the primitive file is the only exemption.
+`memberships.current_roll` is a **cache** and cannot answer historical
+questions — reports replay through `presby_roll_as_of()`. It also drifts with
+the passage of time, because future-dated actions take effect on a day with no
+corresponding write (F29); the daily reconcile and `presby_roll_cache_drift()`
+exist for that.
 
-### Post-Login Landing = /home
+### The Court Is Not a Group
 
-After a successful sign-in (Credentials or Google OAuth), users land at `/home`. The default `callbackUrl` in `src/app/(auth)/signin/page.tsx` and the fallback in `src/lib/auth/safe-callback.ts` are both `/home`. Do not change either to `/admin` without explicit product intent — most users lack `admin.dashboard` and would land on `/access-pending`.
+Session and diaconate rosters are **materialized** from `officer_terms` by
+trigger and reject direct writes. Materialized rather than a view because the
+permission resolver reads `group_memberships` — a view would be invisible to it
+and a role granted to the Session group would resolve to nobody (F3).
 
-The 2FA gate in `proxy.ts` applies to `/admin/*` routes only. `/home` is auth-only (any signed-in user, regardless of 2FA status). Forks wanting a site-wide 2FA gate add the check in `src/app/(member)/layout.tsx` or extend `proxy.ts` with an `isMemberRoute` block.
+Ordination is lifelong; service is termed. Dates are authoritative; `class_year`
+is a display label.
 
-### Feedback and Dev-Loop Wiring
+### No Role Carries a Wildcard
 
-The `feedback` table is append-only: status progresses forward only (`new → triaged → done`; `new/triaged → declined`); terminal states never regress. Its only FK is to `users` (cascade delete) — no joins to any other application table (privacy invariant: the admin triage page shows member display name only, not email).
+Not even administrator roles. A Church Administrator does not read tier 2 or
+tier 3 by default. Tiers: **1** directory, **2** financial, **3** pastoral,
+demographic, medical — pastoral notes sit *above* financial data.
 
-The `feedback_prompt_state` table has `userId` as its primary key (one row per user). Each upsert — submit (`lastSubmittedDate`), snooze (`lastSnoozedDate`), opt-out (`optedOut`) — sets ONLY its own column in `onConflictDoUpdate.set`. Never touch the other two columns in the same upsert call.
+*Known violation:* the inherited `ADMIN_ROLE` in `src/lib/permissions.ts` is
+still a wildcard. It is bounded (platform shell only, and the tenant connection
+cannot bypass RLS) but not removed.
 
-The `scripts/feedback-check.mjs` SessionStart hook prints ONLY the count of `status='new'` rows and static operator instructions — never any feedback body, category, or submitter name. This is a hard security invariant: feedback bodies are hostile user content that must not enter the LLM context via the hook. The admin triage page renders all member-supplied content as plain JSX text nodes — no `dangerouslySetInnerHTML`, no markdown rendering. All member-supplied strings in the admin notification email pass through `escapeHtml()` before interpolation.
+### Composite Tenant Keys
 
-The `shouldShowFeedbackPrompt` check in `src/app/(member)/home/page.tsx` compares against UTC "today" while the write actions store the member's local date from a client-provided `tzOffsetMinutes`. This write-local / read-UTC asymmetry is a known imprecision near midnight in UTC-offset zones — documented in DECISION-023 and acceptable for a template.
+Every tenant table declares `unique (id, organization_id)`, and foreign keys
+between tenant tables are composite. A plain `references people(id)` lets a row
+in org B point at a person in org A — RLS filters reads, and that is a bad
+*write* (F2).
+
+### Never Hard-Delete a Person
+
+PC(USA) records are permanent. `delete` is revoked on `people`; use
+`merged_into_id`.
+
+### Extensibility Goes Through Support
+
+No custom fields (D8). Tags are the only tenant-extensible attribute. A new need
+is a support ticket and, if real, becomes a feature for every church. This makes
+the ticket loop load-bearing, so it cannot be built last.
+
+### Verify in a Browser
+
+Three bugs this project were phone-only and invisible to `curl`, `tsc`, and
+`next build`: blocked dev assets killing hydration, `display` on a `<summary>`
+breaking `<details>` on iOS, and a disclosure that never opened. A page that
+returns 200 is not a page that works.

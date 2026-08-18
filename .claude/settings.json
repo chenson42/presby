@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/feedback-check.mjs"
+            "command": "echo 'presby \u2014 read docs/STATE.md first (project state, decisions, findings, next steps).'"
           },
           {
             "type": "command",

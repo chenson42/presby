@@ -97,3 +97,32 @@ detail lives in the linked doc, not here.
 - [x] 2026-07-01 — Opportunistic expired-token GC (daily /api/cron/maintenance; passwordResetTokens + emailVerificationTokens + userTotpPendingEnrollments) — SHIP IT — `docs/work-log/2026-07-01-token-gc.md`
 - [x] 2026-07-01 — cache()-wrap isFlagEnabled + cachedAuth (Scope 1+2; eliminates 2× Tier-A SELECT per request; corrects false framework comment) — SHIP IT — `docs/work-log/2026-07-01-flag-caching.md`
 - [x] 2026-07-01 — auth.local_login + auth.require_2fa admin flags (OAuth-only endpoint gate, org 2FA master switch, fail-open postures, e2e green) — SHIP IT — `docs/work-log/2026-07-01-auth-mode-flags.md`
+
+## presby — In Flight
+
+Full context in `docs/STATE.md`. Findings referenced as F<n> live in
+`docs/schema-design.md` §17–19.
+
+### Next
+- [ ] Roll UI — the read path is complete and nothing surfaces it
+- [ ] Playwright in the loop — three bugs were phone-only and invisible to
+      `curl` + `tsc` + `next build`
+- [ ] `ltree` on `organizations.path` (still `text`) + ancestry trigger
+- [ ] Seed derived groups at org creation (F16) — the officer trigger raises
+      until this exists
+- [ ] Remove the `ADMIN_ROLE` wildcard (invariant 6). Bounded, not removed
+- [ ] Object-storage adapter for `people.photo_key` (F13)
+- [ ] Household-grouped transfer claim flow (F20)
+
+### Decisions open for the user
+- [ ] The name. `/personalize-starter` is un-run; files still say `presby`
+- [ ] D9 sequencing — should Phase 2 partly precede Phase 1, given a presbytery's
+      launch-day job is holding records about non-tenant churches?
+- [ ] A separate private repo for versioned private material. `private/` is
+      untracked scratch only
+
+### Not designed yet
+Ledger and giving (requirements pass needed — `../westervillelions` is the
+starting point, not the answer), events, worship, check-in, sites, tickets.
+Meetings/dockets/minutes deferred (D3); `minute_reference` is free text until
+then.

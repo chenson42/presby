@@ -34,6 +34,16 @@ end $$;
 -- Belt and braces: even if the role is created elsewhere, it must not bypass.
 alter role presby_app nobypassrls;
 
+-- F25: table grants alone are not enough. Without USAGE on the schema the role
+-- cannot reference any object in it, and every query fails with "permission
+-- denied for schema public" before RLS is ever consulted.
+grant usage on schema public to presby_app, presby_platform;
+
+-- The platform connection deliberately bypasses RLS, so it needs table access
+-- but is never used by a tenant-facing route.
+grant select, insert, update, delete on all tables in schema public to presby_platform;
+grant usage, select on all sequences in schema public to presby_app, presby_platform;
+
 -- ---------------------------------------------------------------------------
 -- Standard tenant policy
 -- ---------------------------------------------------------------------------
@@ -133,11 +143,26 @@ grant delete on addresses, contact_methods, person_relationships to presby_app;
 -- A membership insert is allowed when EITHER:
 --   (a) the person has no membership anywhere - this org is creating them, so
 --       there is nothing to disclose; or
---   (b) an authorized claim set app.person_claim_authorized for this
---       transaction. presby_claim_person() is the only thing that sets it, and
---       it requires a claimable transfer certificate.
+--   (b) an authorized link set app.person_claim_authorized for this
+--       transaction. presby_link_person() is the only thing that sets it.
+--
+-- F23: the first version of this guard allowed only (b) via a transfer
+-- certificate, which blocked the case D1 exists to support - a minister whose
+-- membership is at the presbytery (G-2.0502) taking up service at one of its
+-- congregations. That is not a transfer and has no certificate. Linking an
+-- existing person therefore has SEVERAL legitimate reasons, and the guard
+-- checks the reason rather than assuming one.
+-- F26: SECURITY DEFINER is load-bearing, not decoration.
+--
+-- Without it the trigger body runs under the INSERTING org's RLS, so its
+-- "does this person exist elsewhere?" probe reads zero rows for exactly the
+-- person it is supposed to protect — the guard is defeated by the policy it
+-- exists to complement, and any org can enumerate identity one insert at a
+-- time. Caught by scripts/test-rls.sql, not by review.
+--
+-- It leaks nothing: the function returns a decision, never a row.
 create or replace function presby_guard_membership_insert()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql security definer as $$
 declare
   existing int;
 begin
@@ -161,40 +186,75 @@ create trigger memberships_guard_insert
   before insert on memberships
   for each row execute function presby_guard_membership_insert();
 
--- Claims a person into the current org against a valid transfer certificate.
--- SECURITY DEFINER so it can read certificates and people across orgs; it
--- returns nothing about the person that the certificate did not already carry.
-create or replace function presby_claim_person(p_claim_token text)
+-- Authorizes linking an EXISTING person into the current org. SECURITY DEFINER
+-- so it can verify evidence that spans orgs; it discloses nothing the evidence
+-- did not already carry.
+--
+-- Reasons:
+--   transfer_certificate  p_evidence is a claim token. The losing church issued
+--                         it; claiming it is the reception half of the pair.
+--   self_service          the person is signing themselves in. Requires that
+--                         people.user_id match the acting user.
+--   installation          a call/installation certificate, issued by the
+--                         presbytery that holds the minister's membership.
+--                         Same two-sided shape as a transfer, because a
+--                         presbytery still cannot write into a congregation.
+create or replace function presby_link_person(
+  p_reason text,
+  p_evidence text default null,
+  p_person_id uuid default null,
+  p_acting_user_id uuid default null
+)
 returns uuid
 language plpgsql security definer as $$
 declare
-  cert transfer_certificates%rowtype;
-  org  uuid := presby_current_org();
+  cert   transfer_certificates%rowtype;
+  org    uuid := presby_current_org();
+  target uuid;
 begin
   if org is null then
-    raise exception 'presby_claim_person: no org context' using errcode = 'insufficient_privilege';
+    raise exception 'presby_link_person: no org context' using errcode = 'insufficient_privilege';
   end if;
 
-  select * into cert from transfer_certificates
-   where claim_token = p_claim_token
-     and status = 'issued'
-     and (expires_on is null or expires_on >= current_date);
+  if p_reason in ('transfer_certificate', 'installation') then
+    select * into cert from transfer_certificates
+     where claim_token = p_evidence
+       and status = 'issued'
+       and (expires_on is null or expires_on >= current_date);
 
-  if cert.id is null then
-    raise exception 'presby_claim_person: no claimable certificate' using errcode = 'no_data_found';
+    if cert.id is null then
+      raise exception 'presby_link_person: no claimable certificate for %', p_reason
+        using errcode = 'no_data_found';
+    end if;
+
+    target := cert.issuing_person_id;
+
+    update transfer_certificates
+       set receiving_org_id = org, claimed_at = now(), status = 'claimed'
+     where id = cert.id;
+
+  elsif p_reason = 'self_service' then
+    -- The person links themselves. Nothing is disclosed that they do not
+    -- already know about themselves.
+    select p.id into target from people p
+     where p.id = p_person_id and p.user_id = p_acting_user_id;
+
+    if target is null then
+      raise exception 'presby_link_person: self_service requires the acting user to own the person row'
+        using errcode = 'insufficient_privilege';
+    end if;
+
+  else
+    raise exception 'presby_link_person: unknown reason %', p_reason
+      using errcode = 'invalid_parameter_value';
   end if;
 
-  perform set_config('app.person_claim_authorized', cert.issuing_person_id::text, true);
-
-  update transfer_certificates
-     set receiving_org_id = org, claimed_at = now(), status = 'claimed'
-   where id = cert.id;
-
-  return cert.issuing_person_id;
+  perform set_config('app.person_claim_authorized', target::text, true);
+  return target;
 end $$;
 
-revoke all on function presby_claim_person(text) from public;
-grant execute on function presby_claim_person(text) to presby_app;
+revoke all on function presby_link_person(text, text, uuid, uuid) from public;
+grant execute on function presby_link_person(text, text, uuid, uuid) to presby_app;
 
 -- Duplicate-detection matcher. Returns a confidence band and certificate-style
 -- minimal disclosure, never a person row.

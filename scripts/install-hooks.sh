@@ -38,5 +38,17 @@ HOOK
 # Step 4 — Make it executable
 chmod +x "$HOOK_TARGET"
 
-# Step 5 — Confirm
+# Step 5 — pre-commit guard: nothing under private/ may reach a public repo
+PRE_COMMIT="$HOOKS_DIR/pre-commit"
+if [ -f "$PRE_COMMIT" ]; then
+  cp "$PRE_COMMIT" "$HOOKS_DIR/pre-commit.bak"
+fi
+cat > "$PRE_COMMIT" << 'HOOK'
+#!/bin/sh
+node "$(git rev-parse --show-toplevel)/scripts/pre-commit-private.mjs"
+HOOK
+chmod +x "$PRE_COMMIT"
+
+# Step 6 — Confirm
 echo "commit-msg hook installed."
+echo "pre-commit hook installed (blocks private/, scratch/, and secret files)."

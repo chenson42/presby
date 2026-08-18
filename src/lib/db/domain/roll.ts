@@ -89,9 +89,9 @@ export const rollActions = pgTable(
     voidsActionId: uuid("voids_action_id").references(
       (): AnyPgColumn => rollActions.id,
     ),
-    proposedBy: uuid("proposed_by")
-      .notNull()
-      .references(() => users.id),
+    // Nullable for the same reason as officer_terms.recorded_by (F24):
+    // opening_balance and imported actions predate the platform.
+    proposedBy: uuid("proposed_by").references(() => users.id),
     recordedAt: timestamp("recorded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

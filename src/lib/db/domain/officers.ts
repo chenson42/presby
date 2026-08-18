@@ -97,9 +97,10 @@ export const officerTerms = pgTable(
     endsOn: date("ends_on"),
     endReason: text("end_reason"), // completed | resigned | removed | deceased
     minuteReference: text("minute_reference"),
-    recordedBy: uuid("recorded_by")
-      .notNull()
-      .references(() => users.id),
+    // Nullable: imported historical terms have no acting user (F24). A church
+    // arriving with twenty years of session history cannot invent one, and
+    // requiring it would push importers to attribute records to a fake account.
+    recordedBy: uuid("recorded_by").references(() => users.id),
     recordedAt: timestamp("recorded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

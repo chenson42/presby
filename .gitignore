@@ -35,3 +35,9 @@ e2e/support/.auth/
 
 # Pre-push gate marker (scripts/pre-push-gate.mjs --stamp) — per-machine, never committed
 .claude/pre-push-ok.json
+
+# Real congregation data, exports, credentials. NEVER committed.
+# Also hard-blocked by scripts/pre-commit-private.mjs — belt and braces,
+# because .gitignore is bypassable with `git add -f`.
+private/
+scratch/

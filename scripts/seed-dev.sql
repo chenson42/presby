@@ -1,0 +1,160 @@
+-- Synthetic development seed. NOT production data.
+--
+-- Every name here is invented. No real congregation, presbytery, or person
+-- appears in this file: this repo is public, and westervillelions'
+-- docs/reviews/2026-08-12-pii-scrub.md is the cautionary tale for what it costs
+-- to remove real names after the fact.
+--
+-- The fixture is deliberately shaped to exercise the cases that review found by
+-- reasoning rather than by running anything:
+--
+--   D1  a pastor whose MEMBERSHIP is at the presbytery and whose SERVICE is at
+--       a congregation - the case org-scoped people could not represent
+--   D9  an unmanaged congregation the presbytery holds records about
+--   F16 derived groups seeded at org creation, so the officer_terms trigger
+--       has somewhere to project into
+--   F22 an elder with two NON-CONSECUTIVE session terms, which is what the old
+--       trigger silently collapsed
+--   plus the one-active-roll constraint and the other-participants roll
+
+begin;
+
+-- ---------------------------------------------------------------------------
+-- Organizations
+-- ---------------------------------------------------------------------------
+insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status) values
+  ('11111111-1111-1111-1111-111111111111', null,
+   'presbytery', 'Presbytery of the Northern Reach', 'northern-reach',
+   'northern_reach', 'managed'),
+  ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111',
+   'congregation', 'Alder Creek Presbyterian Church', 'alder-creek',
+   'northern_reach.alder_creek', 'managed'),
+  ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111',
+   'congregation', 'Bramblewood Presbyterian Church', 'bramblewood',
+   'northern_reach.bramblewood', 'managed'),
+  -- D9: in the hierarchy, not a tenant. The presbytery stewards its records.
+  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111',
+   'congregation', 'Quillhaven Presbyterian Church', 'quillhaven',
+   'northern_reach.quillhaven', 'unmanaged');
+
+insert into organization_settings (organization_id, settings) values
+  ('22222222-2222-2222-2222-222222222222', '{"hasDeacons": true, "sessionServesAsTrustees": false}'),
+  ('33333333-3333-3333-3333-333333333333', '{"hasDeacons": false, "sessionServesAsTrustees": true}');
+
+-- ---------------------------------------------------------------------------
+-- F16: derived groups must exist before any officer term is recorded, or the
+-- sync trigger raises. Seeding them at org creation is the real fix.
+-- ---------------------------------------------------------------------------
+insert into group_types (id, organization_id, key, name) values
+  ('a0000000-0000-0000-0000-000000000001', null, 'court', 'Court'),
+  ('a0000000-0000-0000-0000-000000000002', null, 'committee', 'Committee');
+
+insert into groups (id, organization_id, group_type_id, name, membership_source, derived_from, is_protected) values
+  ('b0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
+   'a0000000-0000-0000-0000-000000000001', 'Session', 'derived', 'session', true),
+  ('b0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222',
+   'a0000000-0000-0000-0000-000000000001', 'Board of Deacons', 'derived', 'diaconate', true),
+  ('b0000000-0000-0000-0000-000000000003', '33333333-3333-3333-3333-333333333333',
+   'a0000000-0000-0000-0000-000000000001', 'Session', 'derived', 'session', true),
+  -- A managed group, for contrast: staff edit this roster freely.
+  ('b0000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222',
+   'a0000000-0000-0000-0000-000000000002', 'Property Committee', 'managed', null, false);
+
+-- ---------------------------------------------------------------------------
+-- People (global) - invented names
+-- ---------------------------------------------------------------------------
+insert into people (id, first_name, last_name, date_of_birth) values
+  ('c0000000-0000-0000-0000-000000000001', 'Marguerite', 'Ashcombe',  '1958-04-11'),
+  ('c0000000-0000-0000-0000-000000000002', 'Tobias',     'Renwick',   '1971-09-02'),
+  ('c0000000-0000-0000-0000-000000000003', 'Priya',      'Balakrishnan','1984-01-27'),
+  ('c0000000-0000-0000-0000-000000000004', 'Desmond',    'Okonkwo',   '1992-06-15'),
+  ('c0000000-0000-0000-0000-000000000005', 'Hallie',     'Vandermeer','2011-03-08'),
+  -- The pastor. D1's whole justification.
+  ('c0000000-0000-0000-0000-000000000006', 'Rowan',      'Thistlewood','1969-11-30');
+
+insert into person_identifiers (person_id, kind, value_normalized, is_verified, is_shared, source) values
+  ('c0000000-0000-0000-0000-000000000001', 'email', 'm.ashcombe@example.invalid',  true,  false, 'self_service'),
+  ('c0000000-0000-0000-0000-000000000006', 'email', 'r.thistlewood@example.invalid', true, false, 'self_service'),
+  -- The shared household address every church has. is_shared opts out of the
+  -- partial unique index; without it these two rows would collide.
+  ('c0000000-0000-0000-0000-000000000002', 'email', 'renwick.house@example.invalid', true, true, 'import'),
+  ('c0000000-0000-0000-0000-000000000003', 'email', 'renwick.house@example.invalid', true, true, 'import');
+
+insert into households (id, organization_id, name, is_giving_unit) values
+  ('d0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'The Renwick Family', true),
+  ('d0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'Marguerite Ashcombe', true);
+
+-- ---------------------------------------------------------------------------
+-- Memberships. The pastor holds TWO: membership at the presbytery
+-- (G-2.0502) and service at the congregation.
+-- ---------------------------------------------------------------------------
+insert into memberships (organization_id, person_id, household_id, household_role, engagement_status, current_roll, current_roll_since) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000002', 'head', 'regular', 'active', '1996-05-12'),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000001', 'head', 'regular', 'active', '2004-10-03'),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000001', 'spouse', 'regular', 'active', '2004-10-03'),
+  -- Not a member. On the other-participants roll, and fully in the directory.
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000004', null, null, 'regular', 'other_participant', '2023-02-19'),
+  -- A baptized member: baptized, enrolled, has not professed faith.
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000001', 'child', 'regular', 'baptized', '2011-06-05'),
+  -- The pastor: membership at the PRESBYTERY (G-2.0502).
+  ('11111111-1111-1111-1111-111111111111', 'c0000000-0000-0000-0000-000000000006', null, null, 'regular', 'active', '2015-08-01');
+
+-- The pastor also serves a congregation. This is a SECOND membership for a
+-- person who already exists elsewhere, so the F21 guard blocks it unless a link
+-- is authorized. In the app that authorization is presby_link_person() with
+-- reason 'installation'; a seed runs as owner and sets the flag directly.
+--
+-- F23 was found exactly here: the guard originally accepted only transfer
+-- certificates, which made the minister case - the one D1 exists to support -
+-- impossible to represent.
+select set_config('app.person_claim_authorized', 'c0000000-0000-0000-0000-000000000006', true);
+
+insert into memberships (organization_id, person_id, household_id, household_role, engagement_status, current_roll, current_roll_since) values
+  -- Service at the congregation. NO active roll here: their membership is at
+  -- the presbytery, which is also why the one-active-roll index is satisfied.
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000006', null, null, 'regular', null, null);
+
+-- ---------------------------------------------------------------------------
+-- Ordinations and officer terms
+-- ---------------------------------------------------------------------------
+insert into ordinations (organization_id, person_id, ministry, ordained_on) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000001', 'ruling_elder', '2005-01-09'),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000002', 'ruling_elder', '2016-01-10'),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000003', 'deacon',       '2019-01-13'),
+  ('11111111-1111-1111-1111-111111111111', 'c0000000-0000-0000-0000-000000000006', 'minister_of_word_and_sacrament', '1998-06-21');
+
+-- F22: two NON-CONSECUTIVE session terms for one person. The old trigger
+-- collapsed these, rewriting the 2005 term's end date and destroying the
+-- record of who served when.
+insert into officer_terms (id, organization_id, person_id, office, class_year, starts_on, ends_on, end_reason, recorded_by) values
+  ('e0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000001', 'ruling_elder', 2008, '2005-01-09', '2008-01-13', 'completed', null),
+  ('e0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000001', 'ruling_elder', 2027, '2024-01-14', '2027-01-10', null, null),
+  ('e0000000-0000-0000-0000-000000000003', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000002', 'ruling_elder', 2026, '2023-01-08', '2026-01-11', null, null),
+  ('e0000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000003', 'deacon',       2025, '2022-01-09', '2025-01-12', null, null),
+  -- Open-ended office: no class, no end date.
+  ('e0000000-0000-0000-0000-000000000005', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000002', 'clerk_of_session', null, '2023-01-08', null, null, null);
+
+-- ---------------------------------------------------------------------------
+-- Roll actions. approval_status='approved' rows are frozen by trigger.
+-- ---------------------------------------------------------------------------
+insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, age_at_action, approval_status, minute_reference, approved_on, proposed_by) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000001', 'opening_balance', '2020-01-01', 'active', 61, 'approved', 'Imported baseline', '2020-01-01', null),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000002', 'opening_balance', '2020-01-01', 'active', 48, 'approved', 'Imported baseline', '2020-01-01', null),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000003', 'opening_balance', '2020-01-01', 'active', 35, 'approved', 'Imported baseline', '2020-01-01', null),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000005', 'baptized_member_enrolled', '2011-06-05', 'baptized', 0, 'approved', 'Session 2011-06-05, item 4', '2011-06-05', null),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000004', 'other_participant_enrolled', '2023-02-19', 'other_participant', 30, 'approved', 'Ratified 2023 annual roll review', '2023-12-10', null),
+  -- Still pending: this is the clerk's session-agenda worklist.
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000004', 'profession_of_faith', '2026-09-13', 'active', 34, 'pending', null, null, null);
+
+insert into sasr_reports (organization_id, report_year, official_beginning_balance, computed_beginning_balance, ending_active, status) values
+  ('22222222-2222-2222-2222-222222222222', 2025, 118, 116, 115, 'submitted'),
+  -- D9: unmanaged org has no roll, so computed_beginning_balance is NULL.
+  -- The projection must render "not derived", never 0.
+  ('44444444-4444-4444-4444-444444444444', 2025, 41, null, 39, 'submitted');
+
+commit;

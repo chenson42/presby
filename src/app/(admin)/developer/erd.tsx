@@ -5,20 +5,18 @@ import { useEffect, useRef, useState } from "react";
 /**
  * Renders a mermaid ER diagram.
  *
- * Mermaid is imported dynamically and only when the diagram is actually opened.
- * It is a large dependency and this is a developer-only page — no other route
- * should pay for it, and most visits to this one never expand a diagram.
+ * Mermaid is imported dynamically so no other route pays for a large
+ * dependency that only this one needs.
  *
  * The source stays available underneath: a reviewer copying it into a doc or a
- * PR comment is a real use, and it is also the fallback if rendering fails.
+ * PR comment is a real use, and it is the fallback if rendering fails.
  */
 export function Erd({ chart, id }: { chart: string; id: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<"idle" | "ready" | "error">("idle");
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!open || state !== "idle") return;
+    if (state !== "idle") return;
     let cancelled = false;
 
     (async () => {
@@ -65,30 +63,19 @@ export function Erd({ chart, id }: { chart: string; id: string }) {
     return () => {
       cancelled = true;
     };
-  }, [open, state, chart, id]);
+  }, [state, chart, id]);
 
   return (
-    <details
-      className="reg__body"
-      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
-    >
-      <summary>
-        <span className="reg__name">Entity diagram</span>
-        <span className="reg__meta">
-          {state === "error" ? "source only" : "relationships"}
-        </span>
-      </summary>
-
-      <div className="reg__erd" ref={hostRef} aria-hidden={state !== "ready"} />
-
-      <details className="reg__erdSource">
-        <summary>
-          <span className="reg__meta">mermaid source</span>
-        </summary>
-        <pre className="reg__diagram">
-          <code>{chart}</code>
-        </pre>
-      </details>
-    </details>
+    <div>
+      <div className="reg__erd" ref={hostRef} data-state={state} />
+      {state === "error" && (
+        <p className="reg__note">
+          The diagram could not be rendered. The source below is the same graph.
+        </p>
+      )}
+      <pre className="reg__diagram">
+        <code>{chart}</code>
+      </pre>
+    </div>
   );
 }

@@ -1,18 +1,15 @@
-import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
-import { cachedAuth } from "@/lib/auth/cached-auth";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import Link from "next/link";
 import {
   buildSchemaDocs,
   buildPermissionDocs,
-  buildErd,
   loadDescriptions,
+  moduleSlug,
+  summarize,
   INVARIANTS,
   type TableDoc,
 } from "@/lib/dev-docs";
+import { requirePlatformAdmin } from "./guard";
 import { TableFilter } from "./table-filter";
-import { Erd } from "./erd";
 import "./developer.css";
 
 export const metadata = {
@@ -21,32 +18,22 @@ export const metadata = {
 };
 
 /**
- * /developer — the technical reference, for developers reviewing the system.
+ * /developer — an index, not a document.
  *
- * Generated on every request from the Drizzle schema and from Postgres COMMENT
- * ON, so it cannot drift from what is actually deployed.
+ * The first version buried everything behind disclosures and led with long
+ * descriptions, which made it something to read rather than something to
+ * navigate. The job is finding a table or a diagram to review, so this is a
+ * dense scannable list where every row is a link. Detail lives at
+ * /developer/tables/<name>, diagrams at /developer/erd/<module>.
  *
- * Set as a register, because that is what the system keeps: description leads,
- * columns follow, rules separate entries, and the margin column stamps how each
- * guarantee is enforced. The distinction between a rule the database enforces
- * and one that only review catches is the single most useful thing a reviewer
- * can learn here, so it is the one thing given colour.
+ * No <details> anywhere. Disclosure widgets failed to toggle twice on the phone
+ * this gets reviewed from, and real routes are linkable, shareable, and cannot
+ * silently refuse to open.
  */
-export default async function DeveloperPage() {
-  const session = await cachedAuth();
-  if (!session?.user) redirect("/signin?callbackUrl=/developer");
+export default async function DeveloperIndex() {
+  await requirePlatformAdmin("/developer");
 
-  // Read from the database rather than the session so revoking platform admin
-  // takes effect immediately instead of at the next token refresh.
-  const [me] = await db
-    .select({ isPlatformAdmin: users.isPlatformAdmin })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
-  if (!me?.isPlatformAdmin) redirect("/home");
-
-  const descriptions = await loadDescriptions();
-  const tables = buildSchemaDocs(descriptions);
+  const tables = buildSchemaDocs(await loadDescriptions());
   const permissions = buildPermissionDocs();
 
   const modules = tables.reduce<Record<string, TableDoc[]>>((acc, t) => {
@@ -55,7 +42,12 @@ export default async function DeveloperPage() {
   }, {});
 
   const tenantCount = tables.filter((t) => t.tenantScoped).length;
-  const documented = tables.filter((t) => t.description).length;
+  const undocumented = tables.filter(
+    (t) => !t.description && t.module !== "platform (from starter)",
+  ).length;
+  const onPaper = INVARIANTS.filter(
+    (i) => i.enforcement === "documented",
+  ).length;
 
   return (
     <div className="reg">
@@ -65,9 +57,9 @@ export default async function DeveloperPage() {
           <h1 className="reg__title">The data model</h1>
           <p className="reg__standfirst">
             Generated on each request from <code>src/lib/db/schema</code> and
-            from Postgres <code>COMMENT ON</code>. Nothing here is written by
-            hand, so it cannot drift from what is deployed. Design rationale and
-            the review-findings log live in <code>docs/schema-design.md</code>.
+            Postgres <code>COMMENT ON</code>, so it cannot drift from what is
+            deployed. Rationale and the review-findings log live in{" "}
+            <code>docs/schema-design.md</code>.
           </p>
           <p className="reg__counts">
             <span>
@@ -77,226 +69,139 @@ export default async function DeveloperPage() {
               <b>{tenantCount}</b> tenant-scoped
             </span>
             <span>
-              <b>{documented}</b> described
+              <b>{onPaper}</b> rules unenforced
             </span>
+            {undocumented > 0 && (
+              <span>
+                <b>{undocumented}</b> undescribed
+              </span>
+            )}
             <span>
               <a href="/developer/schema.json">schema.json</a>
             </span>
           </p>
         </header>
 
-        <section className="reg__section" aria-labelledby="inv">
-          <div className="reg__sectionHead">
-            <span className="reg__cite">§ I</span>
-            <h2 className="reg__sectionTitle" id="inv">
-              What the schema guarantees
-            </h2>
-          </div>
-          <p className="reg__desc" style={{ padding: "1rem 0 0" }}>
-            Each rule below is either enforced by the database, enforced by a
-            trigger, or <strong>only written down</strong>. The last kind is the
-            one worth your attention: the schema permits a violation and nothing
-            but review will catch it.
-          </p>
-          {INVARIANTS.map((inv) => (
-            <div className="reg__entry" key={inv.title}>
-              <div className="reg__margin">
-                <span
-                  className={`reg__stamp ${
-                    inv.enforcement === "documented"
-                      ? "reg__stamp--paper"
-                      : "reg__stamp--machine"
-                  }`}
-                >
-                  {inv.enforcement}
+        <TableFilter total={tables.length} />
+
+        {Object.entries(modules).map(([module, moduleTables]) => {
+          const slug = moduleSlug(module);
+          const isPlatform = module === "platform (from starter)";
+          return (
+            <section className="reg__module" data-section key={module}>
+              <div className="reg__moduleHead">
+                <h2 className="reg__moduleTitle">{module}</h2>
+                <span className="reg__moduleMeta">
+                  {moduleTables.length} tables
                 </span>
+                {!isPlatform && (
+                  <Link
+                    className="reg__diagramLink"
+                    href={`/developer/erd/${slug}`}
+                  >
+                    Diagram →
+                  </Link>
+                )}
               </div>
-              <div>
-                <p className="reg__name" style={{ fontFamily: "inherit" }}>
-                  {inv.title}
-                </p>
-                <p className="reg__desc">{inv.detail}</p>
-              </div>
-            </div>
-          ))}
+
+              <ul className="reg__list">
+                {moduleTables.map((t) => (
+                  <li
+                    key={t.name}
+                    data-haystack={`${t.name} ${t.description ?? ""} ${t.columns
+                      .map((c) => `${c.name} ${c.description ?? ""}`)
+                      .join(" ")}`.toLowerCase()}
+                  >
+                    <Link
+                      className="reg__row"
+                      href={`/developer/tables/${t.name}`}
+                    >
+                      <span className="reg__rowName">{t.name}</span>
+                      <span className="reg__rowSummary">
+                        {summarize(t.description) || <em>No description</em>}
+                      </span>
+                      <span className="reg__rowMeta">
+                        {t.columns.length} col
+                        <span
+                          className={`reg__dot ${
+                            t.tenantScoped
+                              ? "reg__dot--rls"
+                              : "reg__dot--global"
+                          }`}
+                          title={
+                            t.tenantScoped
+                              ? "Tenant-scoped: row-level security applies"
+                              : "Global: not tenant-isolated"
+                          }
+                        />
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+
+        <section className="reg__module">
+          <div className="reg__moduleHead">
+            <h2 className="reg__moduleTitle">What the schema guarantees</h2>
+            <span className="reg__moduleMeta">{INVARIANTS.length} rules</span>
+          </div>
+          <p className="reg__note">
+            Rules marked <span className="reg__tag reg__tag--paper">paper</span>{" "}
+            are the ones to watch: the schema permits a violation and only
+            review will catch it.
+          </p>
+          <ul className="reg__list">
+            {INVARIANTS.map((inv) => (
+              <li key={inv.title}>
+                <div className="reg__row reg__row--static">
+                  <span className="reg__rowName reg__rowName--prose">
+                    {inv.title}
+                  </span>
+                  <span className="reg__rowSummary">{inv.detail}</span>
+                  <span className="reg__rowMeta">
+                    <span
+                      className={`reg__tag ${
+                        inv.enforcement === "documented"
+                          ? "reg__tag--paper"
+                          : "reg__tag--machine"
+                      }`}
+                    >
+                      {inv.enforcement === "documented"
+                        ? "paper"
+                        : inv.enforcement}
+                    </span>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
         </section>
 
-        <section className="reg__section" aria-labelledby="sch">
-          <div className="reg__sectionHead">
-            <span className="reg__cite">§ II</span>
-            <h2 className="reg__sectionTitle" id="sch">
-              Tables
-            </h2>
+        <section className="reg__module">
+          <div className="reg__moduleHead">
+            <h2 className="reg__moduleTitle">Platform permissions</h2>
+            <span className="reg__moduleMeta">{permissions.length} keys</span>
           </div>
-          <TableFilter total={tables.length} />
-
-          {Object.entries(modules).map(([module, moduleTables], i) => (
-            <div key={module} data-section className="reg__module">
-              <div className="reg__sectionHead" style={{ marginTop: "2.5rem" }}>
-                <span className="reg__cite">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <h3 className="reg__sectionTitle" style={{ fontSize: "1.1rem" }}>
-                  {module}
-                </h3>
-              </div>
-
-              {module !== "platform (from starter)" && (
-                <div className="reg__entry">
-                  <div className="reg__margin">relations</div>
-                  <Erd
-                    chart={buildErd(tables, module)}
-                    id={module.replace(/[^a-z0-9]/gi, "")}
-                  />
-                </div>
-              )}
-
-              {moduleTables.map((t) => (
-                <div
-                  className="reg__entry"
-                  key={t.name}
-                  data-haystack={`${t.name} ${t.description ?? ""} ${t.columns
-                    .map((c) => `${c.name} ${c.description ?? ""}`)
-                    .join(" ")}`.toLowerCase()}
-                >
-                  <div className="reg__margin">
-                    {t.tenantScoped ? (
-                      <span className="reg__stamp reg__stamp--machine">
-                        rls
-                      </span>
-                    ) : (
-                      <span className="reg__stamp reg__stamp--paper">
-                        global
-                      </span>
-                    )}
-                  </div>
-
-                  <div>
-                    {/* Name and description stay visible when collapsed: the
-                        register is meant to be read straight down, and a
-                        description you have to open is a description nobody
-                        reads. Only the column table folds away. */}
-                    <p className="reg__head">
-                      <span className="reg__name">{t.name}</span>
-                      <span className="reg__meta">
-                        {t.columns.length} columns
-                        {t.foreignKeys.length > 0 &&
-                          ` · ${t.foreignKeys.length} refs`}
-                      </span>
-                    </p>
-
-                    {t.description ? (
-                      <p className="reg__desc">{t.description}</p>
-                    ) : (
-                      <p className="reg__desc">
-                        <em>
-                          No description. Add one with{" "}
-                          <code>COMMENT ON TABLE {t.name}</code>.
-                        </em>
-                      </p>
-                    )}
-
-                    {t.isolationNote && (
-                      <div className="reg__isolation">
-                        <b>Isolation exception</b>
-                        {t.isolationNote}
-                      </div>
-                    )}
-
-                    {t.notes.map((n) => (
-                      <div className="reg__isolation" key={n}>
-                        <b>Note</b>
-                        {n}
-                      </div>
-                    ))}
-
-                    <details className="reg__body reg__cols-toggle">
-                    <summary>
-                      <span className="reg__meta">
-                        Columns and relations
-                      </span>
-                    </summary>
-                    <div className="reg__cols">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Column</th>
-                            <th>Type</th>
-                            <th>Rules</th>
-                            <th>What it is for</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {t.columns.map((c) => (
-                            <tr key={c.name}>
-                              <td
-                                className={`reg__colName ${
-                                  c.primaryKey ? "reg__pk" : ""
-                                }`}
-                              >
-                                {c.name}
-                              </td>
-                              <td className="reg__colType">{c.type}</td>
-                              <td className="reg__colFlags">
-                                {[
-                                  c.primaryKey && "pk",
-                                  c.notNull && "required",
-                                  c.hasDefault && "default",
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ") || "—"}
-                              </td>
-                              <td className="reg__colDesc">
-                                {c.description ?? ""}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {t.foreignKeys.length > 0 && (
-                      <p className="reg__rel">
-                        {t.foreignKeys.map((fk) => (
-                          <span key={fk.name}>
-                            {fk.columns.join(", ")} → <b>{fk.foreignTable}</b>
-                            {"   "}
-                          </span>
-                        ))}
-                      </p>
-                    )}
-                    </details>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
-        </section>
-
-        <section className="reg__section" aria-labelledby="perm">
-          <div className="reg__sectionHead">
-            <span className="reg__cite">§ III</span>
-            <h2 className="reg__sectionTitle" id="perm">
-              Platform permissions
-            </h2>
-          </div>
-          <p className="reg__desc" style={{ padding: "1rem 0 0" }}>
-            The catalog below governs the <code>/admin</code> shell only, and is
-            frozen. Church-facing authorization is resolved per organization and
-            per date by <code>presby_effective_permissions()</code>, which is a
-            separate scope on purpose: holding every platform feature grants
-            nothing inside a congregation, because the tenant connection cannot
-            bypass row-level security.
+          <p className="reg__note">
+            Governs the <code>/admin</code> shell only, and is frozen.
+            Church-facing authorization is a separate scope, resolved per
+            organization and per date by{" "}
+            <code>presby_effective_permissions()</code>.
           </p>
-          {permissions.map((p) => (
-            <div className="reg__entry" key={p.key}>
-              <div className="reg__margin">{p.category}</div>
-              <div>
-                <p className="reg__name">{p.key}</p>
-                <p className="reg__desc">{p.description}</p>
-              </div>
-            </div>
-          ))}
+          <ul className="reg__list">
+            {permissions.map((p) => (
+              <li key={p.key}>
+                <div className="reg__row reg__row--static">
+                  <span className="reg__rowName">{p.key}</span>
+                  <span className="reg__rowSummary">{p.description}</span>
+                  <span className="reg__rowMeta">{p.category}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
         </section>
       </div>
     </div>

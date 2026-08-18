@@ -283,6 +283,22 @@ export function buildErd(tables: TableDoc[], module?: string): string {
   return lines.join("\n");
 }
 
+/** URL-safe slug for a module heading, e.g. "B. People" -> "b-people". */
+export function moduleSlug(module: string): string {
+  return module
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/** First sentence of a description, for the scannable index. */
+export function summarize(text: string | undefined, max = 150): string {
+  if (!text) return "";
+  const firstStop = text.search(/\.\s/);
+  const s = firstStop > 30 ? text.slice(0, firstStop + 1) : text;
+  return s.length > max ? s.slice(0, max).trimEnd() + "…" : s;
+}
+
 export function buildPermissionDocs() {
   return FEATURE_CATALOG.map((f) => ({
     key: f.key,

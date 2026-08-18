@@ -116,6 +116,20 @@ run. Everything below depends on that.
 8. **`ADMIN_ROLE` is still a wildcard** in `src/lib/permissions.ts`, violating
    invariant 6.
 
+## Recorded, not built
+
+**D9 — partial adoption.** A presbytery will join with most of its congregations *not* on the
+platform, so its launch-day job is managing data about non-tenants. `organizations.platform_status`
+(`managed` / `unmanaged` / `invited`) is the only part implemented. Deferred: the stewardship model
+and its lapse-on-adoption rule, presbytery-side entry for unmanaged orgs, and the tokenized request
+flow. Full note in `docs/schema-design.md` §17.
+
+Two things to carry forward from it:
+- **The request flow is the adoption funnel**, not a throwaway form. Worth building well.
+- **Null is not zero.** An unmanaged org has no roll, so report generation must render "not derived"
+  rather than 0, or a presbytery-entered SASR becomes a fabricated decline in GA statistics.
+- It raises a live sequencing question: Phase 2 may need to partly precede Phase 1. Not decided.
+
 ## Open findings carried forward
 
 - **F13** photos: resolved to object storage (`people.photo_key`), no storage

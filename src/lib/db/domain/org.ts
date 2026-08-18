@@ -38,6 +38,22 @@ export const organizations = pgTable(
     // recursive CTE on every request.
     path: text("path").notNull(),
     status: text("status").notNull().default("active"),
+    // D9. Most congregations in a presbytery will NOT be tenants, so the
+    // presbytery's launch-day job is managing data about churches that are not
+    // on the platform.
+    //
+    //   managed    a real tenant. Invariant 2 applies in full: the parent
+    //              council gets nothing from inside except by publication,
+    //              commission, or session-granted delegation.
+    //   unmanaged  in the hierarchy but not a tenant. Records are STEWARDED by
+    //              the parent council, because there is no session on the
+    //              platform to grant anything.
+    //   invited    onboarding; stewarded pending handover.
+    //
+    // Stewardship must LAPSE when an org becomes managed. A presbytery still
+    // writing into a church's records after that church joins is precisely the
+    // trust failure publish-upward exists to prevent.
+    platformStatus: text("platform_status").notNull().default("unmanaged"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -25,6 +25,7 @@ CREATE TABLE "organizations" (
 	"slug" text NOT NULL,
 	"path" text NOT NULL,
 	"status" text DEFAULT 'active' NOT NULL,
+	"platform_status" text DEFAULT 'unmanaged' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "organizations_slug_unique" UNIQUE("slug"),
 	CONSTRAINT "organizations_id_key" UNIQUE("id")

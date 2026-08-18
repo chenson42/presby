@@ -46,6 +46,7 @@ generated ER diagrams in §4 and a live reference at `/developer`.
 | D5 | Other participants roll | **Staff enrolls, session ratifies annually** | Session-act enrollment is cleaner but the roll goes stale. |
 | D6 | Polity | **PC(USA) only**; vocabulary in seed data where cheap | Pluggable polity pushes roll actions and org types into configuration. |
 | D7 | Platform admin | **Boolean on `users` + separate DB connection**; no elevation machinery yet | Break-glass elevation lands in Phase 5 with the AI worker. |
+| D9 | Partial adoption | **A presbytery's congregations are mostly NOT on the platform.** Orgs carry `platform_status` (`managed` / `unmanaged` / `invited`); an unmanaged org's records are *stewarded* by its parent council until it adopts. | Assuming congregation-first adoption would make the presbytery's launch-day experience mostly empty. See §17. |
 | D8 | Extensibility | **No custom fields. Tags only; everything else is a support ticket.** | *Reversed after review.* Custom fields are what every surveyed ChMS does, but a per-church field nobody designed has no validation, no reporting, and no enforced sensitivity tier, and it fragments the schema the reusable-component thesis depends on. Consequence: the ticket loop becomes the sole extensibility path, so it cannot be the last thing built. |
 
 ---

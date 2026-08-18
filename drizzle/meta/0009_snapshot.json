@@ -1,5 +1,5 @@
 {
-  "id": "be14237d-4d7a-44bc-b95e-f01928804892",
+  "id": "ac268532-ca99-44ca-94bb-05a0c2a7b2f4",
   "prevId": "1c179c2a-c37a-4506-9931-2658e6dd7c64",
   "version": "7",
   "dialect": "postgresql",
@@ -1833,6 +1833,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'active'"
+        },
+        "platform_status": {
+          "name": "platform_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unmanaged'"
         },
         "created_at": {
           "name": "created_at",

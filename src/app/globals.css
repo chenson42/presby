@@ -1,28 +1,147 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-@theme {
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222 47% 11%);
-  --color-muted: hsl(210 40% 96%);
-  --color-muted-foreground: hsl(215 16% 47%);
-  --color-border: hsl(214 32% 91%);
-  --color-accent: hsl(217 91% 60%);
+/*
+ * Design tokens.
+ *
+ * Two layers on purpose:
+ *   1. `:root` holds the raw values. Overriding them is how theming happens.
+ *   2. `@theme inline` maps them onto Tailwind's `--color-*` namespace, so
+ *      `bg-background`, `text-muted-foreground`, `border-border`, etc. resolve
+ *      through the raw token rather than baking a literal colour into the
+ *      utility. That indirection is what lets a colour-scheme override work.
+ *
+ * Dark mode is `prefers-color-scheme` only, deliberately (DECISION-036 defers
+ * the `.dark` class strategy to P0.5). Adding it later is a pure addition —
+ * declare `@custom-variant dark (&:is(.dark *))` and copy the dark block into
+ * `.dark { … }`. No token below has to be re-authored for that.
+ *
+ * Every token name that existed before shadcn was initialised
+ * (`--color-background`, `--color-foreground`, `--color-muted`,
+ * `--color-muted-foreground`, `--color-border`, `--color-accent`) still
+ * resolves, and the first five keep their exact previous values. `accent`
+ * takes shadcn's semantic — a subtle hover surface, not the brand colour —
+ * because nothing consumed it; the brand colour now lives in `primary`.
+ */
+
+:root {
+  --radius: 0.5rem;
+
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(222 47% 11%);
+
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222 47% 11%);
+
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222 47% 11%);
+
+  /* Brand. One accent colour; forks rebrand here. */
+  --primary: hsl(221 83% 53%);
+  --primary-foreground: hsl(0 0% 100%);
+
+  --secondary: hsl(210 40% 96%);
+  --secondary-foreground: hsl(222 47% 11%);
+
+  --muted: hsl(210 40% 96%);
+  --muted-foreground: hsl(215 16% 47%);
+
+  /* Subtle hover/active surface — not the brand colour. */
+  --accent: hsl(210 40% 96%);
+  --accent-foreground: hsl(222 47% 11%);
+
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(0 0% 100%);
+
+  --border: hsl(214 32% 91%);
+  --input: hsl(214 32% 91%);
+  --ring: hsl(221 83% 53%);
 }
 
 @media (prefers-color-scheme: dark) {
-  @theme {
-    --color-background: hsl(222 47% 11%);
-    --color-foreground: hsl(210 40% 98%);
-    --color-muted: hsl(217 33% 17%);
-    --color-muted-foreground: hsl(215 20% 65%);
-    --color-border: hsl(217 33% 22%);
-    --color-accent: hsl(217 91% 60%);
+  :root {
+    --background: hsl(222 47% 11%);
+    --foreground: hsl(210 40% 98%);
+
+    --card: hsl(217 33% 17%);
+    --card-foreground: hsl(210 40% 98%);
+
+    --popover: hsl(217 33% 17%);
+    --popover-foreground: hsl(210 40% 98%);
+
+    --primary: hsl(217 91% 60%);
+    --primary-foreground: hsl(222 47% 11%);
+
+    --secondary: hsl(217 33% 17%);
+    --secondary-foreground: hsl(210 40% 98%);
+
+    --muted: hsl(217 33% 17%);
+    --muted-foreground: hsl(215 20% 65%);
+
+    --accent: hsl(217 33% 17%);
+    --accent-foreground: hsl(210 40% 98%);
+
+    --destructive: hsl(0 84% 60%);
+    --destructive-foreground: hsl(210 40% 98%);
+
+    --border: hsl(217 33% 22%);
+    --input: hsl(217 33% 22%);
+    --ring: hsl(217 91% 60%);
   }
 }
 
-html,
-body {
-  background: var(--color-background);
-  color: var(--color-foreground);
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+/*
+ * Tailwind's own radius scale (`rounded-sm`/`md`/`lg`/`xl`) is deliberately NOT
+ * remapped onto `--radius`. Doing so would resize every existing page's corners
+ * — this slice is a zero-visual-change slice. `--radius` is available to
+ * primitives that want it; revisit the remap in P0.5.
+ */
+
+@layer base {
+  /*
+   * Tailwind's preflight defaults `border-color` to `currentColor`; shadcn
+   * primitives write a bare `border` and expect the token. Verified no existing
+   * markup uses `border` without an explicit colour, so this is inert today.
+   */
+  *,
+  ::after,
+  ::before {
+    border-color: var(--border);
+  }
+
+  html,
+  body {
+    background: var(--background);
+    color: var(--foreground);
+  }
 }

@@ -39,9 +39,28 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  const isAdminRoute = pathname.startsWith("/admin");
+  // /o/* — THE ORG PORTAL. Authentication, active status, and 2FA at the Edge
+  // and NOTHING ELSE.
+  //
+  // DO NOT add a PROTECTION_RULES entry for it. That is the obvious-looking
+  // move and it is wrong twice: FEATURES.* is the PLATFORM axis and org
+  // membership is the TENANT axis (see the two scopes documented at
+  // src/lib/authz.ts), and the Edge cannot reach the database to check
+  // membership anyway. Authorization is resolveOrgContext() + withOrgContext()
+  // in the RSC layer, per DECISION-035 — the Edge not being able to pre-filter
+  // /o/<slug> by membership is correct, not a limitation.
+  //
+  // The 2FA gate covers /o/* from the start (DECISION-037) so no tier-2 org
+  // page can ever ship ahead of it. Safe because /totp walks a user with no
+  // enrolment into /account/2fa rather than stranding them.
+  //
+  // Note "/orgs".startsWith("/o/") === false — the chooser is deliberately
+  // outside this gate, and it must stay outside: it renders no tenant data and
+  // it is the one page a user with a lost or pending organization can reach.
+  const isTwoFactorGated =
+    pathname.startsWith("/admin") || pathname.startsWith("/o/");
   if (
-    isAdminRoute &&
+    isTwoFactorGated &&
     session.user.twoFactorRequired &&
     !session.user.twoFactorVerified
   ) {
@@ -75,7 +94,9 @@ export async function proxy(req: NextRequest) {
   // swallow /account/* routes. If you add a new route family that needs its own
   // access control, add an explicit rule to PROTECTION_RULES above.
   //
-  // Auth-only routes (no feature gate): /home, /account, /account/2fa
+  // Auth-only routes (no feature gate): /home, /account, /account/2fa,
+  // /launch, /orgs, /no-organization, /o/* (the last one additionally 2FA-gated
+  // above, and authorized per-organization in the RSC layer — never here).
   return NextResponse.next();
 }
 

@@ -72,8 +72,14 @@ src/lib/db/index.ts    — TWO connections: db (presby_app, RLS enforced) and
                          getPlatformDb() (bypasses RLS, platform pages only)
 src/lib/authz.ts       — tenant authorization: withOrgContext, the resolver
 src/lib/permissions.ts — platform admin shell only. FROZEN; nothing church-facing
-src/proxy.ts           — Edge gate (admin + 2FA). Edge runtime: never import
-                         @/lib/db here
+src/proxy.ts           — Edge gate (admin + 2FA on /admin and /o/*). Edge
+                         runtime: never import @/lib/db here
+src/app/launch/        — the post-login router. destination.ts holds the matrix
+                         as a pure function; the page gathers inputs and
+                         redirects. See Post-Login Landing below
+src/app/(org)/o/[slug]/ — org-scoped tree. The slug is the URL identifier and is
+                         immutable; withOrgContext() only, getPlatformDb()
+                         forbidden. See the (org) contract below
 src/app/(admin)/developer/ — generated schema reference
 drizzle/00XX_presby_*.sql  — hand-written: RLS, triggers, functions. Drizzle Kit
                              does not emit any of these
@@ -437,3 +443,86 @@ Three bugs in this project were phone-only and invisible to `curl`, `tsc`, and
 `next build`: blocked dev assets killing hydration, `display` on a `<summary>`
 breaking `<details>` on iOS, and a disclosure that never opened. A page that
 returns 200 is not a page that works.
+
+## Post-Login Landing
+
+Referenced by `.claude/agents/architect.md`'s route-group rules. This section is
+the source of truth for where an authenticated person ends up.
+
+**`/launch` is the single post-authentication target.** `sanitizeCallbackUrl()`
+falls back to it, the sign-in form posts it, and `/totp` returns to it. It has no
+UI on the happy path: it reads the session, the user's organizations and
+`users.is_platform_admin`, calls `computeDestination()` and redirects.
+
+**The matrix lives in `src/app/launch/destination.ts` as a pure function**, not
+inlined in the page. It is the highest-value test target in the router and every
+subsequent pipeline will edit it; a page-embedded copy would be verifiable only
+through a browser.
+
+| Enterable orgs | `canAccessAdmin` | `isPlatformAdmin` | Destination |
+|---|---|---|---|
+| any | any | any | the sanitized `?next=`, if its slug is enterable |
+| 1 | no | no | `/o/<slug>` |
+| 0 | no | no | `/no-organization` |
+| 0 | yes | no | `/admin` |
+| everything else | | | `/orgs` |
+
+Absent from the table on purpose, because they are enforced elsewhere: an
+unverified 2FA challenge fires at the Edge on the **destination** (`/admin`,
+`/o/*`), and a deactivated account is bounced by `src/proxy.ts` before `/launch`
+renders. A database failure is not a destination either — `/launch` renders "we
+can't reach your congregations" rather than redirecting, because a fall-through
+to a zero-card chooser or to `/home` reads to the user as revoked access.
+
+**Two platform predicates, never one** (DECISION-044). `canAccessAdmin` is a
+session claim (`ADMIN_ROLE` or `FEATURES.ADMIN_DASHBOARD`) and is what the Edge
+enforces on `/admin`; `isPlatformAdmin` is `users.is_platform_admin`, read live,
+and gates the Developer portal. Routing on either alone ships a bug in opposite
+directions.
+
+**`/orgs` is the chooser and never auto-forwards**, even for a one-organization
+user — otherwise a platform admin with no congregations could never reach the
+Developer card. Deep links to `/o/<slug>` must work without it, so the chooser is
+a convenience and every org route authorizes itself. Cards carry **no membership
+language** (DECISION-039): organization name and type only.
+
+**`/` never redirects a signed-in user** (DECISION-034). They are entitled to
+read the front page, P2 wants it static, and P5 makes the meaning of `/`
+host-dependent.
+
+**`/home` survives** as the platform-shell page carrying what's-new and the
+feedback prompt. It is no longer a landing target. `(member)` stays auth-only
+with no 2FA gate; it renders no tenant data.
+
+### The `(org)` contract
+
+> `(org)` — auth-only **and** org-scoped. Every page resolves its `[slug]`
+> through `resolveOrgContext()` and reads exclusively through `withOrgContext()`
+> on the RLS-enforced `db` connection. **`getPlatformDb()` is forbidden in this
+> subtree.** No page may assume the user arrived via the chooser. The Edge
+> enforces authentication, active status, and 2FA for `/o/*`; it does **not**
+> enforce membership, and it cannot — `FEATURES.*` is the platform axis, org
+> membership is the tenant axis, and the Edge cannot reach the database
+> (DECISION-035).
+
+The auth check lives in the **page**, not the layout: a layout cannot see the
+pathname, so it has to guess a `callbackUrl` and loses the deep link.
+
+**The slug is immutable.** Renaming a congregation changes `organizations.name`,
+never `slug` — the slug is in bookmarks, in printed bulletin inserts, and (P5) in
+the platform subdomain label. A DNS-label CHECK constraint and a column comment
+say so. If one genuinely must change, the answer is a future
+`organization_slug_aliases` table serving 301s, not an UPDATE.
+
+**The four-way miss response** (DECISION-040): active relationship → enter;
+**ended** → named and dated; the slug is in the public org tree but there is no
+relationship → access denied **naming the organization, in one string that is
+byte-identical for `managed`, `invited` and `unmanaged`**; the slug is nothing →
+404. The org tree is public, so naming leaks nothing; which congregations are
+tenants is not, so the copy may not vary — including its response time.
+
+**No `loading.tsx` on a segment whose job is to redirect or 404.** A
+`loading.tsx` opens a Suspense boundary, so Next flushes a 200 before the page
+resolves: `/launch` degrades from a 307 to a client-side redirect, and
+`notFound()` on `/o/<slug>` renders the 404 page at HTTP 200. Measured
+2026-08-18. Segments that always render (`/orgs`, `/no-organization`) keep theirs.

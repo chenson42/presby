@@ -48,11 +48,15 @@ export default async function Home() {
           </Link>
         )}
         {signedIn ? (
+          // /launch, not /home: it is the single post-authentication target and
+          // it works out where this particular user belongs. A signed-in user
+          // is entitled to read the front page, so this page never redirects
+          // them (DECISION-034) — it offers the way in and nothing more.
           <Link
-            href="/home"
+            href="/launch"
             className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
           >
-            Go to home
+            Continue
           </Link>
         ) : null}
       </div>

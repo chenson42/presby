@@ -16,6 +16,11 @@
 --   F22 an elder with two NON-CONSECUTIVE session terms, which is what the old
 --       trigger silently collapsed
 --   plus the one-active-roll constraint and the other-participants roll
+--
+-- The last section adds the post-login router fixture (P0): the destination
+-- matrix has nine rows and the fixture above can reach two of them, so it seeds
+-- the zero-org, unmanaged-only, invited-only, mixed, ended, and duplicate-person
+-- users that the rest are unverifiable without.
 
 begin;
 
@@ -259,5 +264,104 @@ on conflict (id) do nothing;
 update people
    set user_id = 'e0000000-0000-0000-0000-0000000000f2'
  where id = 'c0000000-0000-0000-0000-000000000001';
+
+-- ---------------------------------------------------------------------------
+-- The post-login router fixture (P0)
+-- ---------------------------------------------------------------------------
+-- Deliberately NOT at Alder Creek or Bramblewood. scripts/test-rls.sql asserts
+-- exact counts in both ('alder: sees own memberships' = 6, 'bramblewood: sees
+-- no alder memberships' = 0, and the whole roll/SASR section), so a row added
+-- there turns a fixture addition into a suite-wide count edit - which is how a
+-- deliberate change becomes a green-tests chore. Two new congregations instead,
+-- so every assertion that sets a specific org GUC is blind to them.
+--
+-- Neither gets an organization_settings row, so the 2FA-policy assertions in
+-- section 11 are untouched (absent row = not required).
+insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status) values
+  ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111',
+   'congregation', 'Fernwood Presbyterian Church', 'fernwood',
+   'northern_reach.fernwood', 'managed'),
+  -- Onboarding: stewarded by the presbytery pending handover. A membership here
+  -- yields no card and no portal — only different copy on /no-organization.
+  ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111',
+   'congregation', 'Marrowbone Presbyterian Church', 'marrowbone',
+   'northern_reach.marrowbone', 'invited');
+
+-- Six users, one per row of the destination matrix that the existing fixture
+-- cannot reach. All password-less like elder.fixture: they cannot sign in, and
+-- they exist for scripts/test-rls.sql and for manual browser verification with
+-- a dev session. Reserved example.invalid domain, invented names.
+insert into users (id, email, name, email_verified) values
+  ('e0000000-0000-0000-0000-0000000000a1', 'router.none@example.invalid',      'Fixture No-Org',    now()),
+  ('e0000000-0000-0000-0000-0000000000a2', 'router.unmanaged@example.invalid', 'Fixture Unmanaged', now()),
+  ('e0000000-0000-0000-0000-0000000000a3', 'router.invited@example.invalid',   'Fixture Invited',   now()),
+  ('e0000000-0000-0000-0000-0000000000a4', 'router.mixed@example.invalid',     'Fixture Mixed',     now()),
+  ('e0000000-0000-0000-0000-0000000000a5', 'router.ended@example.invalid',     'Fixture Ended',     now()),
+  ('e0000000-0000-0000-0000-0000000000a6', 'router.dup@example.invalid',       'Fixture Duplicate', now())
+on conflict (id) do nothing;
+
+-- router.none@ deliberately has NO people row. A person who signs up from the
+-- backbone marketing page and has never been added to a congregation is the
+-- zero-rows branch of /no-organization, and it is a funnel, not a bug.
+
+insert into people (id, user_id, first_name, last_name) values
+  ('c1000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-0000000000a2', 'Odalys',  'Winterbourne'),
+  ('c1000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-0000000000a3', 'Ptolemy', 'Gaddis'),
+  ('c1000000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-0000000000a4', 'Ines',    'Kirkbride'),
+  ('c1000000-0000-0000-0000-000000000004', 'e0000000-0000-0000-0000-0000000000a5', 'Emeric',  'Ravensworth'),
+  -- TWO person rows sharing one user_id. memberships_person_org_key already
+  -- makes two memberships for one person at one org impossible, so this is the
+  -- ONLY reachable way a user gets two rows for one congregation - and it is
+  -- why de-duplication is the TypeScript wrapper's job rather than a comment.
+  ('c1000000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-0000000000a6', 'Susanna', 'Delacroix-Peel'),
+  ('c1000000-0000-0000-0000-000000000006', 'e0000000-0000-0000-0000-0000000000a6', 'Susanna', 'Peel');
+
+-- current_roll is null on every row below on purpose. DECISION-039: memberships
+-- is the universal relationship anchor and roll status is a COLUMN on it, not
+-- its meaning. These six are relationships without a roll - which is exactly
+-- what the presbytery-committee elder and the secretary who worships elsewhere
+-- look like, and the router must return them.
+insert into memberships (organization_id, person_id, engagement_status, current_roll, ended_on) values
+  -- Only relationship is at an unmanaged org: no card, and /no-organization has
+  -- to say something truer than "you are not connected to a congregation".
+  ('44444444-4444-4444-4444-444444444444', 'c1000000-0000-0000-0000-000000000001', 'regular', null, null),
+  -- Only relationship is at an org still being set up.
+  ('66666666-6666-6666-6666-666666666666', 'c1000000-0000-0000-0000-000000000002', 'regular', null, null),
+  -- Managed + unmanaged. ONE card, not two.
+  ('55555555-5555-5555-5555-555555555555', 'c1000000-0000-0000-0000-000000000003', 'regular', null, null),
+  -- The relationship ended. presby_user_organizations still returns it, which
+  -- is what makes "your access to Fernwood ended on 31 March 2026" possible
+  -- without a second query.
+  ('55555555-5555-5555-5555-555555555555', 'c1000000-0000-0000-0000-000000000004', 'regular', null, '2026-03-31'),
+  ('55555555-5555-5555-5555-555555555555', 'c1000000-0000-0000-0000-000000000005', 'regular', null, null),
+  ('55555555-5555-5555-5555-555555555555', 'c1000000-0000-0000-0000-000000000006', 'regular', null, null);
+
+-- The mixed user's SECOND membership. The person already exists elsewhere, so
+-- the F21 guard blocks a plain insert; in the app that authorization is
+-- presby_link_person(), and a seed running as owner sets the flag directly.
+select set_config('app.person_claim_authorized', 'c1000000-0000-0000-0000-000000000003', true);
+
+insert into memberships (organization_id, person_id, engagement_status, current_roll) values
+  ('44444444-4444-4444-4444-444444444444', 'c1000000-0000-0000-0000-000000000003', 'regular', null);
+
+-- An open ROLE GRANT at Fernwood, so the DECISION-039 guard can be exercised on
+-- its second arm. The officer-term arm already has a precondition at Alder
+-- Creek (the open clerk_of_session term at scripts/seed-dev.sql, person ...002);
+-- without this one, half of each trigger would ship unverified.
+--
+-- The guarded state itself - an ended membership under an open position - is
+-- deliberately NOT seedable: the triggers exist to make it unreachable. The
+-- fixture is the PRECONDITION; scripts/test-rls.sql attempts the end and
+-- catches the raise.
+insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
+  ('f0000000-0000-0000-0000-000000000003', '55555555-5555-5555-5555-555555555555',
+   'fernwood_directory','Fernwood Directory Reader','custom', false);
+
+insert into app_role_permissions (role_id, permission_key) values
+  ('f0000000-0000-0000-0000-000000000003','directory.view');
+
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('55555555-5555-5555-5555-555555555555','f0000000-0000-0000-0000-000000000003',
+   'c1000000-0000-0000-0000-000000000003','2026-01-01');
 
 commit;

@@ -14,12 +14,13 @@ inherited from the starter.
 
 - **presby: schema** — 37 domain tables in `src/lib/db/domain/`: organizations (hierarchy, `platform_status`), people + memberships + identifiers, roll actions + transfer certificates, ordinations + officer terms, groups (derived session/diaconate), authorization (permissions, roles, grants, commissions, delegations), privacy/consent/demographics, SASR scaffold.
 - **presby: isolation** — `presby_app` NOBYPASSRLS + FORCE RLS on every tenant table; bespoke policies for the global person tables; `withOrgContext()` verifies membership before setting the org GUC; two connections (`db` vs `getPlatformDb()`).
-- **presby: authorization** — `presby_effective_permissions(person, org, as_of)` with four arms and provenance; `presby_available_organizations()` for the org switcher; `presby_two_factor_required()` for per-church 2FA at sign-in (all SECURITY DEFINER, F26); `src/lib/authz.ts`.
+- **presby: authorization** — `presby_effective_permissions(person, org, as_of)` with four arms and provenance; `presby_user_organizations()` for the org list (filters nothing — policy lives in the `userOrganizations` / `availableOrganizations` wrappers); `presby_membership_is_active()` for `withOrgContext`'s pre-context gate; `presby_two_factor_required()` for per-church 2FA at sign-in (all SECURITY DEFINER, F26); `src/lib/authz.ts`.
 - **presby: roll** — `presby_roll_as_of`, `_counts_as_of`, `_changes`, `presby_reconcile_current_roll`, `presby_roll_cache_drift`; officer registers `presby_officer_roster` / `_history`.
 - **presby: developer reference** — `/developer` index, `/developer/tables/<name>`, `/developer/erd/<module>`, `/developer/schema.json`. Generated from the schema + Postgres `COMMENT ON`.
 - **presby: NOT built** — no UI for any of the above; ledger/giving, events, worship, check-in, sites, tickets not designed.
 - **Public / Auth** — landing page, sign-in (Google OAuth + credentials, Turnstile-guarded, lockout-aware), TOTP 2FA verify + trusted device, forgot/reset password, email-change verify landing, access-pending.
-- **Member** — post-login `/home` (greeting, roles/features, what's-new card, daily feedback prompt), `/whats-new` full list, feedback submit/snooze/opt-out actions.
+- **presby: post-login router** — `/launch` decides and redirects (nine-row matrix as a pure function), `/orgs` chooser (org cards + Platform block, never auto-forwards), `/no-organization` zero-org funnel, `/o/<slug>` org landing stub in the new `(org)` group with the four-way miss response (enter / ended / denied / 404).
+- **Member** — `/home` platform shell (greeting, roles/features, what's-new card, daily feedback prompt) — no longer the landing target, `/whats-new` full list, feedback submit/snooze/opt-out actions.
 - **Account (self-serve)** — profile name, email change + re-verification, password change, per-user TOTP enrolment/manage at `/account/2fa`, delete-account skeleton, permanent feedback form.
 - **Admin (`/admin`)** — users + roles (+ lock badge/unlock, 2FA reset), feature flags, release-notes docs viewer, per-congregation 2FA policy, audit viewer, feedback triage, what's-new CRUD, email-queue viewer + retry.
 - **Auth backend** — NextAuth 5 config, cached session, safe callbackUrl, lockout, sign-in gate, local-login flag, session projection; edge gate `src/proxy.ts` (admin + 2FA).
@@ -33,15 +34,22 @@ inherited from the starter.
 ## Public / Auth
 
 - Landing page — public marketing stub. `src/app/page.tsx`
-- Sign-in — Google OAuth + credentials, Turnstile, lockout-aware, safe `callbackUrl` → `/home`. `src/app/(auth)/signin/page.tsx`, `actions.ts`
+- Sign-in — Google OAuth + credentials, Turnstile, lockout-aware, safe `callbackUrl` → `/launch`. `src/app/(auth)/signin/page.tsx`, `actions.ts`
 - TOTP verify — code entry + trusted-device cookie; enrolment redirect two-hop (proxy → `/totp` → `/account/2fa`). `src/app/(auth)/totp/page.tsx`, `actions.ts`
 - Forgot/reset password — request link + consume token (hashed at rest, enumeration-safe). `src/app/(password-reset)/forgot-password/page.tsx`, `reset-password/page.tsx`, `actions.ts`
 - Email-change verify — token landing with error boundary. `src/app/(email-verify)/account/verify-email/[token]/page.tsx`
 - Access-pending — authenticated, no roles; writes `ACCESS_DENIED` audit on bounce. `src/app/access-pending/page.tsx`
 
+## Post-Login router
+
+- `/launch` — the single post-authentication target. Reads the org list + `users.is_platform_admin`, calls `computeDestination()`, redirects; renders only the database-unreachable state. `src/app/launch/page.tsx`, `destination.ts`
+- `/orgs` — the chooser: one card per enterable organization (name + type, **no membership language**), a separate Platform block (Admin / Developer), a notice for organizations still being set up. Never auto-forwards. `src/app/(member)/orgs/page.tsx`
+- `/no-organization` — five-state zero-org funnel (already has access / being set up / not a tenant / access ended / never connected) plus two doors. `src/app/no-organization/page.tsx`
+- `/o/<slug>` — org landing stub + the four-way miss response; `resolveOrgContext()` then `assertOrgAccess()`. `src/app/(org)/o/[slug]/page.tsx`, `org-states.tsx`, `error.tsx`, `not-found.tsx`
+
 ## Member
 
-- Home — greeting, roles/features summary, global nav (conditional Admin link), what's-new card, daily feedback prompt card (UTC-read/local-write, DECISION-023). `src/app/(member)/home/page.tsx`, `feedback-prompt-card.tsx`
+- Home — the platform shell, no longer the post-login destination (see Post-Login router). Greeting, roles/features summary, global nav (conditional Admin link), what's-new card, daily feedback prompt card (UTC-read/local-write, DECISION-023). `src/app/(member)/home/page.tsx`, `feedback-prompt-card.tsx`
 - What's-new — full entry list, newest-first. `src/app/(member)/whats-new/page.tsx`
 - Feedback actions — submit / snooze / opt-out (rate-limited; per-user prompt state, one column per upsert). `src/app/(member)/feedback/actions.ts`
 
@@ -66,10 +74,10 @@ inherited from the starter.
 
 - NextAuth 5 config — Google OAuth + credentials, JWT sessions with roles/features/2FA claims. `src/auth.ts`, `src/lib/auth/config.ts`, `session-projection.ts`
 - Cached auth — `cache()`-wrapped `auth()`/flags (one SELECT per request). `src/lib/auth/cached-auth.ts`
-- Safe callback — same-origin path check, `/home` fallback. `src/lib/auth/safe-callback.ts`
+- Safe callback — same-origin path check, `/launch` fallback (pure string function; it does not learn about org slugs). `src/lib/auth/safe-callback.ts`
 - Lockout — 5 failures → 15-min DB lock, enumeration-safe, OAuth-exempt. `src/lib/auth/lockout.ts`
 - Sign-in gate + local-login flag — credentials gating incl. `auth.local_login` OAuth-only mode. `src/lib/auth/sign-in-gate.ts`, `local-login.ts`
-- Edge route gate — auth + 2FA on `/admin/*` (Edge runtime; must not import `@/lib/db`). `src/proxy.ts`
+- Edge route gate — auth + active status everywhere, 2FA on `/admin/*` and `/o/*`; deliberately no membership check on `/o/*` (DECISION-035). Edge runtime; must not import `@/lib/db`. `src/proxy.ts`
 
 ## Platform lib (`src/lib/`)
 

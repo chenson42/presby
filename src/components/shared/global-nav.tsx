@@ -19,6 +19,19 @@ export function GlobalNav({ session }: { session: Session }) {
           presby
         </Link>
         <nav className="flex items-center gap-4">
+          {/*
+           * The chooser has to be reachable without typing a URL. /launch only
+           * forwards you through it once, at sign-in, and a user with two
+           * congregations otherwise has no way back to the second one. The org
+           * switcher proper is P1; this is the link that keeps "the chooser is
+           * a convenience, never a gate" true in the meantime.
+           */}
+          <Link
+            href="/orgs"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Organizations
+          </Link>
           <Link
             href="/account"
             className="text-sm text-muted-foreground hover:text-foreground"

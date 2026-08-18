@@ -78,7 +78,7 @@ export function TotpEnrollForm({
           </ul>
         </div>
         <a
-          href={callbackUrl ?? "/home"}
+          href={callbackUrl ?? "/launch"}
           className="mt-6 inline-block text-sm underline underline-offset-2"
         >
           Continue

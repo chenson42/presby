@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import { readIsPlatformAdmin } from "@/lib/platform-admin";
 import {
   buildSchemaDocs,
   buildPermissionDocs,
@@ -26,13 +24,7 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const [me] = await db
-    .select({ isPlatformAdmin: users.isPlatformAdmin })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
-
-  if (!me?.isPlatformAdmin) {
+  if (!(await readIsPlatformAdmin(session.user.id))) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

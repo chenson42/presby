@@ -1,6 +1,7 @@
 import "server-only";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { organizations } from "@/lib/db/schema";
 
 /**
  * Tenant authorization.
@@ -22,6 +23,37 @@ import { db } from "@/lib/db";
  */
 
 export type PermissionSource = "direct" | "group" | "commission" | "delegation";
+
+/**
+ * Thrown by `withOrgContext` when the in-transaction membership check finds no
+ * active relationship.
+ *
+ * Typed rather than a bare `Error` so the `(org)` error boundary can tell "your
+ * access to this organization ended" apart from a genuine fault, and so a
+ * future logger can key on it.
+ *
+ * REACHING THIS IS THE RARE PATH, and that is by design. The common cases —
+ * bookmark, revoked access, a slug the user was never a member of — are caught
+ * by `resolveOrgContext()` returning `ended` / `forbidden` / `not-found`, which
+ * produce named, humane pages. This error is the genuine race: the membership
+ * disappears BETWEEN the resolve and the transaction. Next replaces an error
+ * message with a digest in production, so the boundary that catches it cannot
+ * render the organization name — the named message has to come from
+ * `resolveOrgContext`, not from here.
+ */
+export class OrgAccessError extends Error {
+  readonly personId: string;
+  readonly organizationId: string;
+
+  constructor(personId: string, organizationId: string) {
+    super(
+      `withOrgContext: person ${personId} holds no active membership at ${organizationId}`,
+    );
+    this.name = "OrgAccessError";
+    this.personId = personId;
+    this.organizationId = organizationId;
+  }
+}
 
 export interface EffectivePermission {
   permission_key: string;
@@ -52,18 +84,27 @@ export async function withOrgContext<T>(
   return db.transaction(async (tx) => {
     // Membership check runs BEFORE the context is set, so it cannot be
     // satisfied by the very context it is meant to authorize.
+    //
+    // IT GOES THROUGH A SECURITY DEFINER FUNCTION, AND THAT IS LOAD-BEARING.
+    // `memberships` is FORCE RLS on `organization_id = presby_current_org()`,
+    // and at this point no org GUC is set — deliberately. A plain SELECT here
+    // is therefore filtered to zero rows for EVERY person at EVERY
+    // organization, so the gate rejects the members it exists to admit:
+    // failing closed, looking correct, and taking the whole org portal with it.
+    // That was a real, measured defect (drizzle/0015_presby_membership_probe.sql
+    // records the numbers) and it is finding F26 in its purest form. Rewriting
+    // this as a Drizzle join re-breaks it silently; scripts/test-rls.sql
+    // section 13 is what fails if anyone does.
     const check = await tx.execute(sql`
-      select 1 from memberships
-       where person_id = ${personId}::uuid
-         and organization_id = ${organizationId}::uuid
-         and ended_on is null
-       limit 1
+      select presby_membership_is_active(
+               ${personId}::uuid,
+               ${organizationId}::uuid
+             ) as is_active
     `);
-    const rows = (check as unknown as { rows?: unknown[] }).rows ?? [];
-    if (rows.length === 0) {
-      throw new Error(
-        `withOrgContext: person ${personId} holds no active membership at ${organizationId}`,
-      );
+    const rows =
+      (check as unknown as { rows?: Array<{ is_active?: boolean }> }).rows ?? [];
+    if (rows[0]?.is_active !== true) {
+      throw new OrgAccessError(personId, organizationId);
     }
 
     await tx.execute(
@@ -128,24 +169,303 @@ export async function explainPermission(
   return perms.filter((p) => p.permission_key === permissionKey);
 }
 
+export type OrganizationType =
+  | "general_assembly"
+  | "synod"
+  | "presbytery"
+  | "congregation"
+  | "new_worshiping_community";
+
+export type PlatformStatus = "managed" | "unmanaged" | "invited";
+
 /**
- * Organizations this signed-in user can act in — the org switcher's data.
+ * One relationship between a user and an organization.
+ *
+ * NOT "one membership the user is on the roll of". DECISION-039: `memberships`
+ * is the universal relationship anchor and roll status is a COLUMN on it, not
+ * its meaning — the presbytery-committee elder, the secretary who worships
+ * elsewhere, and the installed pastor whose membership is at the presbytery all
+ * appear here. Anything rendered from this must therefore carry no membership
+ * language; the org name and type are the whole of it.
+ */
+export interface UserOrganization {
+  organizationId: string;
+  personId: string;
+  membershipId: string;
+  name: string;
+  organizationType: OrganizationType;
+  slug: string;
+  platformStatus: PlatformStatus;
+  /** 'YYYY-MM-DD', or null when the relationship is current. */
+  endedOn: string | null;
+  /** ISO-8601. Ordering input only; never rendered. */
+  membershipCreatedAt: string;
+}
+
+interface UserOrganizationRow {
+  organization_id: string;
+  person_id: string;
+  membership_id: string;
+  name: string;
+  organization_type: string;
+  slug: string;
+  platform_status: string;
+  ended_on: string | null;
+  membership_created_at: string;
+}
+
+/**
+ * Every organization this user holds a relationship with — ended ones and
+ * non-tenant ones included, filtered by nothing but the caller's own identity.
  *
  * A person routinely holds more than one: an installed pastor has membership at
  * the presbytery and service at a congregation, and a ruling elder may sit on a
  * presbytery committee. Assuming one org per user is the easiest thing to bake
  * into the first screen and the most annoying to unpick later.
+ *
+ * This is the unfiltered truth on purpose. `/no-organization` has to tell
+ * "you're not connected to a congregation" apart from "your only congregation
+ * is still being set up", and the org-lost path has to name and date the
+ * relationship that ended. A function that filtered would force a second one
+ * the first time either of those was written.
  */
-export async function availableOrganizations(userId: string) {
+export async function userOrganizations(
+  userId: string,
+): Promise<UserOrganization[]> {
   // Goes through a SECURITY DEFINER function, not a plain query. This is a
   // genuine cross-org read: with no org context RLS correctly returns nothing,
   // and with one set it would only ever return that single org. The function is
   // scoped to the caller's OWN person rows, so it reveals nothing but where the
   // user already belongs.
+  //
+  // The two casts are load-bearing, not tidiness. The Neon WebSocket driver
+  // parses `date` into a JS Date in the SERVER's local zone, so `ended_on`
+  // arrives as 2026-03-31T04:00:00Z for a 31 March relationship — a date that
+  // renders as the 30th for anyone west of the deployment. Casting in SQL keeps
+  // it the 'YYYY-MM-DD' string the schema actually means. Same reason for
+  // to_json() on the timestamp: one ISO-8601 string, no zone guessing.
   const result = await db.execute(sql`
-    select * from presby_available_organizations(${userId}::uuid)
+    select organization_id,
+           person_id,
+           membership_id,
+           name,
+           organization_type,
+           slug,
+           platform_status,
+           ended_on::text as ended_on,
+           to_json(membership_created_at) #>> '{}' as membership_created_at
+      from presby_user_organizations(${userId}::uuid)
   `);
-  return (
-    (result as unknown as { rows?: Array<Record<string, unknown>> }).rows ?? []
-  );
+  const rows =
+    (result as unknown as { rows?: UserOrganizationRow[] }).rows ?? [];
+
+  // De-duplicate by organization, taking the FIRST row per organization id.
+  //
+  // `memberships_person_org_key` already makes two memberships for one person
+  // at one org impossible, so the only reachable duplicate is two
+  // non-tombstoned `people` rows sharing a `user_id` — which happens after a
+  // botched merge and would otherwise render one congregation twice and make
+  // slug resolution non-deterministic.
+  //
+  // "First" is deterministic because the function's ORDER BY is part of its
+  // contract: organization_type, name, current-before-ended, created_at, id. So
+  // a live relationship always wins over an ended one, and two live ones
+  // resolve by age. Do not reorder here — reorder there.
+  const seen = new Map<string, UserOrganization>();
+  for (const row of rows) {
+    if (seen.has(row.organization_id)) continue;
+    seen.set(row.organization_id, {
+      organizationId: row.organization_id,
+      personId: row.person_id,
+      membershipId: row.membership_id,
+      name: row.name,
+      organizationType: row.organization_type as OrganizationType,
+      slug: row.slug,
+      platformStatus: row.platform_status as PlatformStatus,
+      endedOn: row.ended_on,
+      membershipCreatedAt: row.membership_created_at,
+    });
+  }
+  return [...seen.values()];
+}
+
+/**
+ * The subset a user can actually enter — the org chooser's data.
+ *
+ * Current relationships at `managed` organizations, and nothing else. An
+ * `unmanaged` org is in the hierarchy but is not a tenant, so it has no portal
+ * to enter; an `invited` one is still being set up and entering it needs a
+ * tenant permission that does not exist yet.
+ *
+ * Defined as a filter over `userOrganizations` rather than as a second query,
+ * so the two can never disagree about what the database said. The filter lives
+ * here rather than in the SQL deliberately: it is policy, it changes, and it
+ * should show up in a diff and in a unit test rather than inside a SECURITY
+ * DEFINER function whose WHERE clause is also a security boundary.
+ */
+export async function availableOrganizations(
+  userId: string,
+): Promise<UserOrganization[]> {
+  const all = await userOrganizations(userId);
+  return all.filter(isEnterableOrganization);
+}
+
+/**
+ * Is there a portal behind this relationship?
+ *
+ * The enterability policy as a pure predicate, exported because THE CHOOSER AND
+ * THE ROUTER MUST NOT DISAGREE. `/orgs` has to read the unfiltered list anyway —
+ * it names the organizations still being set up — so it would otherwise carry
+ * its own inline copy of this condition, and the day the two drift is the day
+ * `/launch` forwards a single-org user into `/o/<slug>` that the chooser refuses
+ * to show a card for. One definition, used by both.
+ */
+export function isEnterableOrganization(org: UserOrganization): boolean {
+  return org.endedOn === null && org.platformStatus === "managed";
+}
+
+/** The organization a request is scoped to, resolved from a URL slug. */
+export interface OrgContext {
+  organizationId: string;
+  personId: string;
+  name: string;
+  organizationType: OrganizationType;
+  slug: string;
+  platformStatus: PlatformStatus;
+}
+
+/**
+ * The four-way answer to "may this user open /o/<slug>" (DECISION-040).
+ *
+ * `forbidden` carries the organization NAME and nothing about its
+ * `platformStatus`, because what the response may not disclose is which
+ * congregations are tenants — commercial and pastoral information PC(USA) does
+ * not publish. The org tree itself is public (§17) and P2 is building a public
+ * search over it, so naming the organization leaks nothing.
+ */
+export type OrgResolution =
+  | { kind: "ok"; org: OrgContext }
+  | { kind: "ended"; name: string; endedOn: string }
+  | { kind: "forbidden"; name: string; organizationType: OrganizationType }
+  | { kind: "not-found" };
+
+/**
+ * Resolves a URL slug INSIDE THE USER'S OWN MEMBERSHIP SET.
+ *
+ * THE RESOLUTION ORDER IS THE SECURITY PROPERTY AND MUST NOT BE INVERTED.
+ * Never look `organizations` up by slug and hand the resulting id to
+ * `withOrgContext`: that table is deliberately not tenant-isolated, so the
+ * lookup succeeds for every organization on the platform, it turns "not a
+ * member" into an exception instead of a page, and it leaves an unauthorized
+ * organization id one refactor away from a `set_config`. Resolve first, then
+ * set context — DECISION-035.
+ *
+ * The single call to `userOrganizations` answers both halves at once: the
+ * function returns `person_id` beside `organization_id`, which is exactly the
+ * composite `(personId, organizationId)` pair `withOrgContext` needs. It must
+ * never be assembled from two queries (F2).
+ *
+ * This is a read OUTSIDE any transaction, so it is not the gate.
+ * `withOrgContext` re-checks membership inside the transaction, before the
+ * context is set, and that check is the authoritative one.
+ */
+export async function resolveOrgContext(
+  userId: string,
+  slug: string,
+): Promise<OrgResolution> {
+  const rows = await userOrganizations(userId);
+  const match = rows.find((row) => row.slug === slug);
+
+  if (match) {
+    // Ended is checked BEFORE platform status on purpose: an ended
+    // relationship at an `unmanaged` organization is still named and dated,
+    // which discloses nothing about tenancy — the user already knew the
+    // organization exists and that they were related to it.
+    if (match.endedOn !== null) {
+      return { kind: "ended", name: match.name, endedOn: match.endedOn };
+    }
+    if (match.platformStatus === "managed") {
+      return {
+        kind: "ok",
+        org: {
+          organizationId: match.organizationId,
+          personId: match.personId,
+          name: match.name,
+          organizationType: match.organizationType,
+          slug: match.slug,
+          platformStatus: match.platformStatus,
+        },
+      };
+    }
+    // Active at an `invited` or `unmanaged` organization: there is no portal
+    // behind it, and entering one needs a tenant permission that does not
+    // exist until P1. Same response as a non-member — see below.
+    return {
+      kind: "forbidden",
+      name: match.name,
+      organizationType: match.organizationType,
+    };
+  }
+
+  // No relationship at all. The organization may still exist in the public
+  // tree, and naming it is the humane answer (DECISION-040). The name comes
+  // from a narrow public read that CANNOT see platform_status, so the three
+  // `forbidden` branches above and below are indistinguishable by construction
+  // rather than by careful authorship.
+  const summary = await publicOrgSummary(slug);
+  if (!summary) return { kind: "not-found" };
+  return {
+    kind: "forbidden",
+    name: summary.name,
+    organizationType: summary.organizationType,
+  };
+}
+
+/**
+ * The public org tree, narrowed to what an access-denied page may say: name and
+ * type. Nothing else, and specifically NEVER `platform_status`.
+ *
+ * A separate function rather than a field on the membership read, because the
+ * leak DECISION-040 guards against is one careless prop-drill away: the moment
+ * this returns a row carrying `platform_status`, a page can vary its copy — or
+ * its response time — by whether a congregation is a customer.
+ *
+ * Legal on the RLS-enforced `db` connection with NO org context set:
+ * `organizations` carries a bare `grant select ... to presby_app` and no policy
+ * (`drizzle/0009_presby_rls.sql`), because the org tree is public information.
+ * `getPlatformDb()` is forbidden here, as everywhere on a user-facing path.
+ */
+export async function publicOrgSummary(
+  slug: string,
+): Promise<{ name: string; organizationType: OrganizationType } | null> {
+  const [row] = await db
+    .select({
+      name: organizations.name,
+      organizationType: organizations.organizationType,
+    })
+    .from(organizations)
+    .where(eq(organizations.slug, slug))
+    .limit(1);
+  if (!row) return null;
+  return { name: row.name, organizationType: row.organizationType };
+}
+
+/**
+ * Runs the authoritative gate and reads nothing.
+ *
+ * `resolveOrgContext` is a read outside the transaction; this is the
+ * in-transaction re-check, which is what makes the check unsatisfiable by the
+ * very context it authorizes. A page that renders no tenant data still calls it
+ * — otherwise the `(org)` contract ("every page reads through
+ * `withOrgContext`") is true only of the pages that happen to need data, and
+ * the first page that does not becomes the hole.
+ *
+ * Throws `OrgAccessError` when the relationship has gone between the resolve
+ * and the transaction.
+ */
+export async function assertOrgAccess(
+  personId: string,
+  organizationId: string,
+): Promise<void> {
+  await withOrgContext(personId, organizationId, async () => {});
 }

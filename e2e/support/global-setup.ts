@@ -27,6 +27,7 @@ import path from "node:path";
 import { neon } from "@neondatabase/serverless";
 import { E2E_EMAILS, E2E_USER_LIST } from "./users";
 import { seedE2EUsers } from "./seed-users";
+import { seedE2EOrgs } from "./seed-orgs";
 
 const AUTH_DIR = path.resolve(__dirname, ".auth");
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -134,7 +135,11 @@ async function signInAndSave(
           csrfToken,
           email,
           password,
-          callbackUrl: `${baseURL}/home`,
+          // Cosmetic: maxRedirects: 0 means we never follow it. /launch is the
+          // single post-authentication target after DECISION-034, and a
+          // fixture that still says /home is the next reader's wrong mental
+          // model of where sign-in lands.
+          callbackUrl: `${baseURL}/launch`,
         },
         // Playwright follows redirects by default; the 302 Location points at
         // AUTH_URL which may be a different host/port. Stop at the first response.
@@ -212,9 +217,17 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   assertRateLimiterDisabled();
 
   const dbUrl = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
+  // Organizations, people and memberships need the OWNER connection: dbUrl
+  // above is presby_app, which is NOBYPASSRLS and cannot write any of them.
+  // See the header of seed-orgs.ts.
+  const platformDbUrl =
+    process.env.E2E_PLATFORM_DATABASE_URL ??
+    process.env.PLATFORM_DATABASE_URL ??
+    "";
 
   // The suite owns its users. Any failure here throws — see the file header.
   await seedE2EUsers(dbUrl);
+  await seedE2EOrgs(platformDbUrl);
   await cleanupTestFeedback(dbUrl);
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });

@@ -142,6 +142,61 @@ describe("FormattedDate", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Calendar dates — regression for date-only string renders the day before
+  // -----------------------------------------------------------------------
+
+  describe("calendar dates ('YYYY-MM-DD') — regression for date-only string renders the day before", () => {
+    // A `date` column has no time and no zone. It arrives from the database as
+    // the string '2026-03-31' (src/lib/authz.ts casts it in SQL precisely so it
+    // is not a Date). `new Date("2026-03-31")` parses as UTC midnight, so
+    // toLocaleDateString() rendered it as 30 March for every viewer west of
+    // UTC — on the one page whose whole job is to state a date correctly.
+    const CALENDAR_DATE = "2026-03-31";
+
+    it("renders the date string itself as the SSR fallback, not a UTC-shifted slice", () => {
+      const markup = renderToStaticMarkup(
+        <FormattedDate value={CALENDAR_DATE} mode="date" />
+      );
+
+      expect(markup).toMatch(/>2026-03-31</);
+      expect(markup).toContain('dateTime="2026-03-31"');
+    });
+
+    it("renders the same calendar day after mount, in every timezone", async () => {
+      let container: HTMLElement;
+      await act(async () => {
+        const r = render(<FormattedDate value={CALENDAR_DATE} mode="date" />);
+        container = r.container;
+      });
+
+      const text = container!.querySelector("time")!.textContent!;
+      // Locale format varies; the day number does not. 2026-03-31 contains no
+      // "30" in any locale ordering — a "30" here means the date shifted back.
+      expect(text).toContain("31");
+      expect(text).not.toContain("30");
+    });
+
+    it("does not shift a calendar date when mode is left at the datetime default", async () => {
+      let container: HTMLElement;
+      await act(async () => {
+        const r = render(<FormattedDate value={CALENDAR_DATE} />);
+        container = r.container;
+      });
+
+      const text = container!.querySelector("time")!.textContent!;
+      expect(text).toContain("31");
+      expect(text).not.toContain("30");
+    });
+
+    it("still treats a full ISO timestamp as an instant, not a calendar date", () => {
+      const markup = renderToStaticMarkup(<FormattedDate value={FIXED_ISO} />);
+
+      // Unchanged behavior: the dateTime attribute is the full instant.
+      expect(markup).toContain(`dateTime="${FIXED_ISO}"`);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Invalid input — regression guard for the missing-guard bug
   // -----------------------------------------------------------------------
 

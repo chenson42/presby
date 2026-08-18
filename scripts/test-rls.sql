@@ -17,6 +17,18 @@
 \set PASTOR  '\'c0000000-0000-0000-0000-000000000006\''
 \set ELDER   '\'c0000000-0000-0000-0000-000000000001\''
 \set ELDERUSER '\'e0000000-0000-0000-0000-0000000000f2\''
+-- The post-login router fixture (section 12).
+--   555... Fernwood (managed)   666... Marrowbone (invited)
+\set FERNWOOD '\'55555555-5555-5555-5555-555555555555\''
+\set CLERK    '\'c0000000-0000-0000-0000-000000000002\''
+\set OTHERPART '\'c0000000-0000-0000-0000-000000000004\''
+\set GRANTEE  '\'c1000000-0000-0000-0000-000000000003\''
+\set DEPARTED '\'c1000000-0000-0000-0000-000000000004\''
+\set U_NONE      '\'e0000000-0000-0000-0000-0000000000a1\''
+\set U_UNMANAGED '\'e0000000-0000-0000-0000-0000000000a2\''
+\set U_MIXED     '\'e0000000-0000-0000-0000-0000000000a4\''
+\set U_ENDED     '\'e0000000-0000-0000-0000-0000000000a5\''
+\set U_DUP       '\'e0000000-0000-0000-0000-0000000000a6\''
 
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
@@ -334,4 +346,223 @@ begin;
   select assert_eq(
     (select presby_two_factor_required('00000000-0000-0000-0000-0000000000ff')::int),
     0, '2fa policy: an unlinked user is not required by any congregation');
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 12. The org list, and the guard that keeps a position anchored (P0)
+-- ---------------------------------------------------------------------------
+-- presby_user_organizations() answers "where does this user belong" and filters
+-- NOTHING. That is the point: policy lives in the TypeScript wrappers
+-- (availableOrganizations / userOrganizations), where it is unit-testable and
+-- shows up in a diff. These assertions exist so that "filters nothing" is a
+-- property of the database rather than a claim in a comment - the moment
+-- someone "helpfully" restores `ended_on is null` to the WHERE clause, the
+-- "your access ended" message loses its data source silently.
+--
+-- Deliberately NOT inside an org context, because that is how the router calls
+-- it: choosing an organization happens after the list is read.
+begin;
+  -- Renamed, not aliased. A surviving presby_available_organizations() would
+  -- mean two functions with the same job drifting apart.
+  select assert_eq(
+    (select count(*) from pg_proc where proname = 'presby_available_organizations'),
+    0, 'org list: the pre-P0 function name is gone, not shadowed');
+
+  -- An unmanaged-only relationship is RETURNED, not hidden. It yields no card,
+  -- but /no-organization needs it to say something truer than "you are not
+  -- connected to a congregation".
+  select assert_eq(
+    (select count(*) from presby_user_organizations(:U_UNMANAGED)
+      where platform_status = 'unmanaged'),
+    1, 'org list: an unmanaged relationship is returned, not filtered');
+
+  -- An ENDED relationship is returned WITH its date. This is what makes
+  -- "your access to Fernwood ended on 31 March 2026" possible in one query.
+  select assert_eq(
+    (select count(*) from presby_user_organizations(:U_ENDED)
+      where ended_on is not null),
+    1, 'org list: an ended relationship is returned with its ended_on');
+
+  -- Mixed: both rows come back and exactly one is enterable. The filtering is
+  -- the wrapper's job, and this assertion is what proves it is not free.
+  select assert_eq((select count(*) from presby_user_organizations(:U_MIXED)),
+                   2, 'org list: mixed user gets both relationships');
+  select assert_eq(
+    (select count(*) from presby_user_organizations(:U_MIXED)
+      where platform_status = 'managed' and ended_on is null),
+    1, 'org list: exactly one of the mixed user''s relationships is enterable');
+
+  -- TWO rows for one organization, because two non-tombstoned people rows share
+  -- the user_id. De-duplication is genuinely the wrapper's job.
+  select assert_eq(
+    (select count(*) from presby_user_organizations(:U_DUP) where slug = 'fernwood'),
+    2, 'org list: duplicate person rows produce two rows for one organization');
+
+  -- ...and the ORDER BY is a contract: the wrapper de-dups by taking the FIRST
+  -- row per organization_id, so a current relationship must never sort behind
+  -- an ended one.
+  select assert_eq(
+    (select count(*) from (
+       select ended_on, row_number() over () as rn
+         from presby_user_organizations(:U_MIXED)) o
+      where o.rn = 1 and o.ended_on is null),
+    1, 'org list: current relationships sort first');
+
+  -- A user with no people row is nobody's member. The zero-org page is a
+  -- funnel, not an error.
+  select assert_eq((select count(*) from presby_user_organizations(:U_NONE)),
+                   0, 'org list: a user with no person row gets nothing');
+
+  -- The public-tree read the humane 403 depends on. organizations is
+  -- deliberately not tenant-isolated, so it must resolve with NO org context -
+  -- and it must resolve managed, unmanaged, and invited orgs identically, which
+  -- is the whole of DECISION-040's indistinguishability property.
+  select assert_eq(
+    (select count(*) from organizations
+      where slug in ('alder-creek', 'quillhaven', 'marrowbone')),
+    3, 'public tree: every platform_status is readable with no org GUC set');
+rollback;
+
+-- DECISION-039, direction 1: a membership cannot end under an open position.
+-- The failure is LOUD and names the term. It never auto-ends it - ending a term
+-- is a minuted act with an end_reason, and a platform that quietly ends one to
+-- satisfy a cache is doing the exact class of silent correction the roll
+-- invariant forbids.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    update memberships set ended_on = current_date
+     where person_id = 'c0000000-0000-0000-0000-000000000002'
+       and organization_id = '22222222-2222-2222-2222-222222222222';
+    raise exception 'FAIL DECISION-039 — a membership ended under an open officer term';
+  exception when check_violation then
+    raise notice 'pass  DECISION-039: ending a membership under an open officer term rejected';
+  end $$;
+rollback;
+
+-- The same guard's second arm. Without this the role_grants half of the trigger
+-- would ship unverified, and a role grant strands a person just as quietly as a
+-- term does.
+begin;
+  select set_config('app.current_org_id', :FERNWOOD, true);
+  do $$
+  begin
+    update memberships set ended_on = current_date
+     where person_id = 'c1000000-0000-0000-0000-000000000003'
+       and organization_id = '55555555-5555-5555-5555-555555555555';
+    raise exception 'FAIL DECISION-039 — a membership ended under an open role grant';
+  exception when check_violation then
+    raise notice 'pass  DECISION-039: ending a membership under an open role grant rejected';
+  end $$;
+rollback;
+
+-- POSITIVE CONTROL. Without it the two assertions above would pass just as
+-- happily against a trigger that rejects every ending, and a church could never
+-- record a departure.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  update memberships set ended_on = current_date, ended_reason = 'moved away'
+   where person_id = :OTHERPART and organization_id = :ALDER;
+  select assert_eq(
+    (select count(*) from memberships
+      where person_id = :OTHERPART and organization_id = :ALDER and ended_on is not null),
+    1, 'DECISION-039: a membership with no open position still ends normally');
+rollback;
+
+-- Direction 2. A guard enforceable in one direction only is a paper invariant
+-- in the other, and the hole is reached by simply reordering the two writes.
+begin;
+  select set_config('app.current_org_id', :FERNWOOD, true);
+  do $$
+  begin
+    insert into officer_terms (organization_id, person_id, office, starts_on, ends_on)
+    values ('55555555-5555-5555-5555-555555555555',
+            'c1000000-0000-0000-0000-000000000004', 'trustee', current_date, null);
+    raise exception 'FAIL DECISION-039 — an open term was opened over an ended membership';
+  exception when check_violation then
+    raise notice 'pass  DECISION-039: opening a term where the membership ended rejected';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :FERNWOOD, true);
+  do $$
+  begin
+    insert into role_grants (organization_id, role_id, person_id, starts_on)
+    values ('55555555-5555-5555-5555-555555555555',
+            'f0000000-0000-0000-0000-000000000003',
+            'c1000000-0000-0000-0000-000000000004', current_date);
+    raise exception 'FAIL DECISION-039 — an open role grant was opened over an ended membership';
+  exception when check_violation then
+    raise notice 'pass  DECISION-039: opening a role grant where the membership ended rejected';
+  end $$;
+rollback;
+
+-- ...and the counterpart that must KEEP working: a term that closed before the
+-- membership did is history, not access. A congregation arriving with twenty
+-- years of session records for people who have since left must be able to
+-- import them.
+begin;
+  select set_config('app.current_org_id', :FERNWOOD, true);
+  insert into officer_terms (organization_id, person_id, office, starts_on, ends_on, end_reason)
+  values (:FERNWOOD, :DEPARTED, 'trustee', '2018-01-01', '2020-01-01', 'completed');
+  select assert_eq(
+    (select count(*) from officer_terms
+      where person_id = :DEPARTED and ends_on = '2020-01-01'),
+    1, 'DECISION-039: a term that closed before the membership did still imports');
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 13. The gate itself: withOrgContext()'s membership probe (P0)
+-- ---------------------------------------------------------------------------
+-- withOrgContext() asks "does this person hold a current relationship with this
+-- organization?" BEFORE it sets app.current_org_id — deliberately, so the check
+-- cannot be satisfied by the very context it authorizes.
+--
+-- That ordering is correct and it is also why the question cannot be asked with
+-- a plain query: `memberships` is FORCE RLS on
+-- `organization_id = presby_current_org()`, so with no GUC set the query is
+-- filtered to zero rows for EVERY person at EVERY organization and the gate
+-- rejects the members it exists to admit. Measured, not theorised: every
+-- authenticated visit to /o/<slug> landed on the error boundary until
+-- drizzle/0015_presby_membership_probe.sql. F26 in its purest form, and the
+-- third place this shape has appeared in this schema.
+--
+-- The pair below is what keeps the fix honest — the definer function sees the
+-- relationship with no org GUC set, and the naive query sees nothing at all.
+-- NOTE: deliberately NOT inside an org context. Setting one would hide the bug.
+begin;
+  select assert_eq(
+    (select presby_membership_is_active(:CLERK, :ALDER)::int),
+    1, 'gate: definer probe sees a current relationship with no org GUC set');
+
+  -- The same question asked the way withOrgContext used to ask it. If this ever
+  -- stops returning 0, RLS has been weakened and the definer function is no
+  -- longer load-bearing.
+  select assert_eq(
+    (select count(*) from memberships
+      where person_id = :CLERK and organization_id = :ALDER and ended_on is null),
+    0, 'gate: the naive query sees nothing — this is why F26 needs DEFINER');
+
+  -- A non-member is refused. Without this, a probe that returned true
+  -- unconditionally would pass the assertion above and open every organization.
+  select assert_eq(
+    (select presby_membership_is_active(:CLERK, :FERNWOOD)::int),
+    0, 'gate: a person with no relationship at that organization is refused');
+
+  -- An ENDED relationship is not a current one. This is the revoked-access path
+  -- and the reason the predicate says `ended_on is null` rather than `exists`.
+  select assert_eq(
+    (select presby_membership_is_active(:DEPARTED, :FERNWOOD)::int),
+    0, 'gate: an ended relationship does not open the organization');
+
+  -- ...while the same person IS returned by presby_user_organizations(), which
+  -- filters nothing. The two functions must disagree in exactly this way: one
+  -- says "you were related to Fernwood and it ended", the other says "you may
+  -- not enter". That is what makes the named-and-dated page possible.
+  select assert_eq(
+    (select count(*) from presby_user_organizations(:U_ENDED)
+      where organization_id = :FERNWOOD and ended_on is not null),
+    1, 'gate: the ended relationship is still visible to the org list');
 rollback;

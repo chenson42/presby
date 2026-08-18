@@ -39,9 +39,12 @@ test.describe("Admin sign-in", () => {
     }
   });
 
-  // NOTE: After this feature, signing in without a callbackUrl redirects to /home,
-  // not /admin. This test navigates to / explicitly after sign-in, so the assertion
-  // on the landing page still holds regardless of the post-login destination.
+  // NOTE: signing in without a callbackUrl now goes to /launch, which computes
+  // a destination from the user's organizations (DECISION-034) — for this
+  // fixture, /admin. This test navigates to / explicitly after sign-in, so the
+  // assertion on the landing page holds regardless of the post-login
+  // destination. `/` itself never redirects a signed-in user, deliberately:
+  // they are entitled to read the front page.
   test("landing page swaps Sign in for Sign out and greets the signed-in user", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("link", { name: /sign in/i })).toBeVisible();

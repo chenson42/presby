@@ -1,9 +1,7 @@
 import "server-only";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
 import { cachedAuth } from "@/lib/auth/cached-auth";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import { readIsPlatformAdmin } from "@/lib/platform-admin";
 
 /**
  * Gate for every /developer surface.
@@ -19,11 +17,5 @@ export async function requirePlatformAdmin(returnTo: string) {
   const session = await cachedAuth();
   if (!session?.user) redirect(`/signin?callbackUrl=${encodeURIComponent(returnTo)}`);
 
-  const [me] = await db
-    .select({ isPlatformAdmin: users.isPlatformAdmin })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
-
-  if (!me?.isPlatformAdmin) redirect("/home");
+  if (!(await readIsPlatformAdmin(session.user.id))) redirect("/home");
 }

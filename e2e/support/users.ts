@@ -20,7 +20,21 @@
 
 import path from "node:path";
 
-export type E2ERole = "admin" | "member" | "mfa-admin";
+export type E2ERole =
+  | "admin"
+  | "member"
+  | "mfa-admin"
+  /**
+   * The three organization fixtures. They carry NO platform role — that is the
+   * point: the post-login router's interesting rows are about congregations,
+   * not about `admin.*` features, and a fixture holding both cannot tell you
+   * which predicate did the routing. Their relationships are provisioned by
+   * seed-orgs.ts, which runs after this roster exists.
+   */
+  | "org-single"
+  | "org-multi"
+  | "org-unmanaged"
+  | "org-ended";
 
 export interface E2EUser {
   /** Fixture key — also the storageState filename. */
@@ -64,6 +78,47 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
     name: "E2E MFA Admin",
     roleName: "admin",
     twoFactorRequired: true,
+  },
+  // Exactly one enterable organization: /launch forwards this fixture straight
+  // into /o/e2e-alpha without showing the chooser.
+  "org-single": {
+    role: "org-single",
+    email: "e2e-org-single@example.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E One Organization",
+    roleName: null,
+    twoFactorRequired: false,
+  },
+  // A congregation AND the presbytery — the ruling elder on a presbytery
+  // committee, which is how PC(USA) service actually works. Two cards.
+  "org-multi": {
+    role: "org-multi",
+    email: "e2e-org-multi@example.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E Two Organizations",
+    roleName: null,
+    twoFactorRequired: false,
+  },
+  // A relationship at an `unmanaged` congregation only: in the presbytery's
+  // records, not a tenant, so there is no portal and no card.
+  "org-unmanaged": {
+    role: "org-unmanaged",
+    email: "e2e-org-unmanaged@example.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E Unmanaged Only",
+    roleName: null,
+    twoFactorRequired: false,
+  },
+  // A relationship that ENDED. The only fixture that reaches the one screen in
+  // P0 which renders a date, which is the screen a timezone bug ruins: "your
+  // access ended on 31 March" must say the 31st in every timezone.
+  "org-ended": {
+    role: "org-ended",
+    email: "e2e-org-ended@example.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E Ended Relationship",
+    roleName: null,
+    twoFactorRequired: false,
   },
 };
 

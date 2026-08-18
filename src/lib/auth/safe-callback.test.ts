@@ -10,27 +10,44 @@ describe("sanitizeCallbackUrl", () => {
     expect(sanitizeCallbackUrl("/admin/users")).toBe("/admin/users");
   });
 
-  it("rejects a protocol-relative URL (//evil.com) and returns /home", () => {
-    expect(sanitizeCallbackUrl("//evil.com")).toBe("/home");
+  it("passes through an org path untouched — it knows nothing about slugs", () => {
+    // Deliberate: this function is a pure string check. Whether the user can
+    // enter /o/alder-creek is computeDestination's question, and the gate is
+    // the independent resolve at /o/<slug>.
+    expect(sanitizeCallbackUrl("/o/alder-creek")).toBe("/o/alder-creek");
   });
 
-  it("rejects an absolute http URL and returns /home", () => {
-    expect(sanitizeCallbackUrl("https://evil.com/steal")).toBe("/home");
+  it("rejects a protocol-relative URL (//evil.com) and returns /launch", () => {
+    expect(sanitizeCallbackUrl("//evil.com")).toBe("/launch");
   });
 
-  it("rejects a non-slash-prefixed string and returns /home", () => {
-    expect(sanitizeCallbackUrl("evil.com/steal")).toBe("/home");
+  it("rejects an absolute http URL and returns /launch", () => {
+    expect(sanitizeCallbackUrl("https://evil.com/steal")).toBe("/launch");
   });
 
-  it("returns /home for null", () => {
-    expect(sanitizeCallbackUrl(null)).toBe("/home");
+  it("rejects a non-slash-prefixed string and returns /launch", () => {
+    expect(sanitizeCallbackUrl("evil.com/steal")).toBe("/launch");
   });
 
-  it("returns /home for undefined", () => {
-    expect(sanitizeCallbackUrl(undefined)).toBe("/home");
+  it("rejects a javascript: URI and returns /launch", () => {
+    expect(sanitizeCallbackUrl("javascript:alert(1)")).toBe("/launch");
   });
 
-  it("returns /home for an empty string", () => {
-    expect(sanitizeCallbackUrl("")).toBe("/home");
+  it("rejects a data: URI and returns /launch", () => {
+    expect(sanitizeCallbackUrl("data:text/html,<script>alert(1)</script>")).toBe(
+      "/launch",
+    );
+  });
+
+  it("returns /launch for null", () => {
+    expect(sanitizeCallbackUrl(null)).toBe("/launch");
+  });
+
+  it("returns /launch for undefined", () => {
+    expect(sanitizeCallbackUrl(undefined)).toBe("/launch");
+  });
+
+  it("returns /launch for an empty string", () => {
+    expect(sanitizeCallbackUrl("")).toBe("/launch");
   });
 });

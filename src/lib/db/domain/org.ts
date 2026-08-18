@@ -1,7 +1,9 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   pgEnum,
   boolean,
+  check,
   text,
   uuid,
   timestamp,
@@ -33,6 +35,13 @@ export const organizations = pgTable(
     parentId: uuid("parent_id").references((): AnyPgColumn => organizations.id),
     organizationType: organizationType("organization_type").notNull(),
     name: text("name").notNull(),
+    // The URL segment in /o/<slug>, and (P5) the platform subdomain label
+    // <slug>.presby.app. IMMUTABLE: renaming a congregation changes `name`,
+    // never `slug` — the slug lives in bookmarks, in printed bulletin inserts,
+    // and in a DNS record, so a slug that follows the name breaks all three at
+    // once. A slug that genuinely must change (merger, schism, a typo at
+    // onboarding) gets a future `organization_slug_aliases` table serving 301s,
+    // not an UPDATE. Format is constrained below.
     slug: text("slug").notNull().unique(),
     // Materialized ancestry, trigger-maintained. Migrated to `ltree` in SQL so
     // "every congregation under this presbytery" is an index scan, not a
@@ -64,6 +73,14 @@ export const organizations = pgTable(
     index("organizations_type_idx").on(t.organizationType),
     // Target of every composite tenant foreign key. See schema-design F2.
     unique("organizations_id_key").on(t.id),
+    // DNS-label shaped, ≤63 chars. Declared here as well as in
+    // drizzle/0014_presby_org_router.sql because schema.ts is the source of
+    // truth and a CHECK is expressible in Drizzle — the migration and this
+    // table must not disagree about a constraint that gates a URL.
+    check(
+      "organizations_slug_format",
+      sql`${t.slug} ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'`,
+    ),
   ],
 );
 

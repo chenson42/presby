@@ -1,5 +1,7 @@
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
+import { db } from "@/lib/db";
 import { FEATURE_CATALOG } from "@/lib/permissions";
 
 /**
@@ -30,7 +32,44 @@ export type ColumnDoc = {
   notNull: boolean;
   hasDefault: boolean;
   primaryKey: boolean;
+  description?: string;
 };
+
+/**
+ * Descriptions come from Postgres COMMENT ON, not from a map in this file.
+ *
+ * A registry here would rot exactly the way docs/database-schema.md rots in the
+ * sibling projects — which is why those repos carry workflow rules whose only
+ * job is keeping documentation in step. Comments live with the schema, survive
+ * dump/restore, show up in psql's \d+ and every GUI, and are readable by the AI
+ * support worker without a bespoke endpoint.
+ */
+export async function loadDescriptions() {
+  const result = await db.execute(sql`
+    select c.relname            as table_name,
+           coalesce(a.attname, '') as column_name,
+           d.description
+      from pg_description d
+      join pg_class c on c.oid = d.objoid
+      left join pg_attribute a
+        on a.attrelid = c.oid and a.attnum = d.objsubid and d.objsubid > 0
+      join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public'
+  `);
+  const rows =
+    (result as unknown as { rows?: Array<Record<string, string>> }).rows ?? [];
+
+  const tables = new Map<string, string>();
+  const columns = new Map<string, string>();
+  for (const r of rows) {
+    if (r.column_name) {
+      columns.set(`${r.table_name}.${r.column_name}`, r.description);
+    } else {
+      tables.set(r.table_name, r.description);
+    }
+  }
+  return { tables, columns };
+}
 
 export type TableDoc = {
   name: string;
@@ -40,6 +79,8 @@ export type TableDoc = {
   indexes: { name: string; columns: string[]; unique: boolean }[];
   foreignKeys: { name: string; columns: string[]; foreignTable: string }[];
   checks: string[];
+  description?: string;
+  isolationNote?: string;
   notes: string[];
 };
 
@@ -158,7 +199,9 @@ function isPgTable(value: unknown): value is PgTable {
   );
 }
 
-export function buildSchemaDocs(): TableDoc[] {
+export function buildSchemaDocs(
+  descriptions?: { tables: Map<string, string>; columns: Map<string, string> },
+): TableDoc[] {
   const docs: TableDoc[] = [];
 
   for (const exported of Object.values(schema)) {
@@ -171,6 +214,7 @@ export function buildSchemaDocs(): TableDoc[] {
       notNull: c.notNull,
       hasDefault: c.hasDefault,
       primaryKey: c.primary,
+      description: descriptions?.columns.get(`${config.name}.${c.name}`),
     }));
 
     docs.push({
@@ -194,12 +238,9 @@ export function buildSchemaDocs(): TableDoc[] {
         };
       }),
       checks: config.checks.map((c) => c.name),
-      notes: [
-        ...(BESPOKE_POLICIES[config.name]
-          ? [`ISOLATION: ${BESPOKE_POLICIES[config.name]}`]
-          : []),
-        ...(TABLE_NOTES[config.name] ?? []),
-      ],
+      description: descriptions?.tables.get(config.name),
+      isolationNote: BESPOKE_POLICIES[config.name],
+      notes: TABLE_NOTES[config.name] ?? [],
     });
   }
 

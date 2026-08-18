@@ -6,6 +6,7 @@ import { users } from "@/lib/db/schema";
 import {
   buildSchemaDocs,
   buildPermissionDocs,
+  loadDescriptions,
   INVARIANTS,
 } from "@/lib/dev-docs";
 
@@ -35,7 +36,9 @@ export async function GET() {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const tables = buildSchemaDocs();
+  // Same source as the HTML page, descriptions included, so the two cannot
+  // disagree about what the schema is.
+  const tables = buildSchemaDocs(await loadDescriptions());
 
   return NextResponse.json(
     {

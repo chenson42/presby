@@ -1,0 +1,449 @@
+/*
+ * The register.
+ *
+ * This page documents a system whose entire subject is registers — rolls,
+ * minutes, attested records kept by a clerk. So it is set as one: serif frames
+ * the structure, mono carries the content, rules separate entries instead of
+ * cards, and a margin column stamps how each guarantee is actually enforced.
+ *
+ * Palette is ink and paper with two accents drawn from church metalwork:
+ * verdigris for what the database enforces, oxblood — the seal colour — for
+ * what is only written down. Those two colours carry the page's one real
+ * argument, so nothing else is allowed to use them.
+ */
+
+.reg {
+  --paper: #fbfaf7;
+  --paper-sunk: #f3f1ec;
+  --ink: #17191c;
+  --iron: #5c6169;
+  --rule: #ddd9d0;
+  --rule-strong: #c3bdb1;
+  --verdigris: #2f5d54;
+  --verdigris-wash: #2f5d541a;
+  --oxblood: #7d2b2b;
+  --oxblood-wash: #7d2b2b14;
+
+  --measure: 74rem;
+  --margin-col: 8.5rem;
+
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reg {
+    --paper: #14161a;
+    --paper-sunk: #1a1d22;
+    --ink: #e8e6e1;
+    --iron: #9aa0a8;
+    --rule: #2b2f36;
+    --rule-strong: #3d434c;
+    --verdigris: #6fb3a3;
+    --verdigris-wash: #6fb3a31f;
+    --oxblood: #d08a8a;
+    --oxblood-wash: #d08a8a1a;
+  }
+}
+
+.reg__inner {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem 6rem;
+}
+
+/* ── Masthead ─────────────────────────────────────────────────────────── */
+
+.reg__masthead {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 1.25rem;
+  margin-bottom: 2.5rem;
+}
+
+.reg__eyebrow {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--iron);
+}
+
+.reg__title {
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  margin: 0.35rem 0 0.6rem;
+}
+
+.reg__standfirst {
+  max-width: 44rem;
+  color: var(--iron);
+}
+
+.reg__standfirst code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+  color: var(--ink);
+}
+
+.reg__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2rem;
+  margin-top: 1.25rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--iron);
+}
+
+.reg__counts b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.reg__counts a {
+  color: var(--verdigris);
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+
+/* ── Section headings ─────────────────────────────────────────────────── */
+
+.reg__section {
+  margin-top: 3.5rem;
+}
+
+.reg__sectionHead {
+  display: grid;
+  grid-template-columns: var(--margin-col) 1fr;
+  gap: 1.5rem;
+  align-items: baseline;
+  border-bottom: 1px solid var(--rule-strong);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0;
+}
+
+.reg__cite {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--iron);
+  text-align: right;
+}
+
+.reg__sectionTitle {
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+/* ── Entries: the register rows ───────────────────────────────────────── */
+
+.reg__entry {
+  display: grid;
+  grid-template-columns: var(--margin-col) 1fr;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 1.15rem 0;
+}
+
+.reg__entry:last-child {
+  border-bottom: none;
+}
+
+/* The margin column: where a clerk's attestation would go. */
+.reg__margin {
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--iron);
+  padding-top: 0.15rem;
+}
+
+.reg__body > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.reg__body > summary::-webkit-details-marker {
+  display: none;
+}
+
+.reg__name {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.reg__body[open] > summary .reg__name {
+  color: var(--verdigris);
+}
+
+.reg__meta {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--iron);
+  letter-spacing: 0.04em;
+}
+
+/* The description is the point of the redesign: it leads, the columns follow. */
+.reg__desc {
+  max-width: 52rem;
+  margin: 0.4rem 0 0;
+  color: var(--iron);
+}
+
+.reg__desc strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ── Stamps: how a guarantee is enforced ──────────────────────────────── */
+
+.reg__stamp {
+  display: inline-block;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.reg__stamp--machine {
+  color: var(--verdigris);
+  background: var(--verdigris-wash);
+}
+
+/* Oxblood is reserved for this: a guarantee nothing checks. */
+.reg__stamp--paper {
+  color: var(--oxblood);
+  background: var(--oxblood-wash);
+}
+
+.reg__isolation {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0 0.6rem 0.85rem;
+  border-left: 2px solid var(--oxblood);
+  color: var(--iron);
+  font-size: 0.88rem;
+  max-width: 52rem;
+}
+
+.reg__isolation b {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--oxblood);
+  display: block;
+  margin-bottom: 0.15rem;
+}
+
+/* ── Column table ─────────────────────────────────────────────────────── */
+
+.reg__cols {
+  margin-top: 1.1rem;
+  overflow-x: auto;
+}
+
+.reg__cols table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.reg__cols th {
+  text-align: left;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--iron);
+  font-weight: 500;
+  border-bottom: 1px solid var(--rule-strong);
+  padding: 0 1.25rem 0.35rem 0;
+}
+
+.reg__cols td {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.5rem 1.25rem 0.5rem 0;
+  vertical-align: top;
+}
+
+.reg__cols tr:last-child td {
+  border-bottom: none;
+}
+
+.reg__colName {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: nowrap;
+}
+
+.reg__colType {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--iron);
+  white-space: nowrap;
+}
+
+.reg__colFlags {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  color: var(--iron);
+  white-space: nowrap;
+}
+
+.reg__colDesc {
+  color: var(--iron);
+  min-width: 22rem;
+}
+
+.reg__pk {
+  color: var(--verdigris);
+  font-weight: 600;
+}
+
+/* ── Relations ────────────────────────────────────────────────────────── */
+
+.reg__rel {
+  margin-top: 0.9rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--iron);
+  line-height: 1.9;
+}
+
+.reg__rel span {
+  white-space: nowrap;
+}
+
+.reg__rel b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* ── Diagram ──────────────────────────────────────────────────────────── */
+
+.reg__diagram {
+  margin: 0.75rem 0 0;
+  padding: 1rem;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  overflow-x: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--iron);
+}
+
+/* ── Responsive: the margin column folds above the entry ──────────────── */
+
+@media (max-width: 46rem) {
+  .reg {
+    --margin-col: 1fr;
+  }
+
+  .reg__entry,
+  .reg__sectionHead {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
+
+  .reg__margin,
+  .reg__cite {
+    text-align: left;
+  }
+
+  .reg__colDesc {
+    min-width: 16rem;
+  }
+}
+
+/* Quality floor, not announced. */
+.reg :focus-visible {
+  outline: 2px solid var(--verdigris);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reg * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ── Filter ───────────────────────────────────────────────────────────── */
+
+.reg__filter {
+  display: grid;
+  grid-template-columns: var(--margin-col) 1fr auto;
+  gap: 1.5rem;
+  align-items: center;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.reg__filterLabel {
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--iron);
+}
+
+.reg__filterInput {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule-strong);
+  padding: 0.35rem 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.reg__filterInput::placeholder {
+  color: var(--iron);
+  opacity: 0.7;
+}
+
+.reg__filterInput:focus {
+  outline: none;
+  border-bottom-color: var(--verdigris);
+}
+
+.reg__filterCount {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--iron);
+  white-space: nowrap;
+}
+
+@media (max-width: 46rem) {
+  .reg__filter {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+  .reg__filterLabel {
+    text-align: left;
+  }
+}

@@ -171,13 +171,19 @@
   padding-top: 0.15rem;
 }
 
+/* NEVER set `display` on a <summary>.
+ *
+ * iOS Safari stops toggling <details> entirely when summary's display is
+ * changed from its default list-item — the markup is fine, the click just
+ * does nothing. Desktop Chrome toggles regardless, so this only shows up on a
+ * phone. Layout goes on the children instead. */
 .reg__body > summary {
   cursor: pointer;
   list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.6rem;
+}
+
+.reg__body > summary > * + * {
+  margin-left: 0.6rem;
 }
 
 .reg__body > summary::-webkit-details-marker {
@@ -462,16 +468,16 @@
   margin-top: 0.9rem;
 }
 
+/* Same rule as above: no `display` on summary. */
 .reg__cols-toggle > summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
   cursor: pointer;
   list-style: none;
   color: var(--iron);
-  border-bottom: 1px dotted var(--rule-strong);
   padding-bottom: 1px;
-  width: fit-content;
+}
+
+.reg__cols-toggle > summary .reg__meta {
+  border-bottom: 1px dotted var(--rule-strong);
 }
 
 .reg__cols-toggle > summary::-webkit-details-marker {
@@ -479,7 +485,7 @@
 }
 
 .reg__cols-toggle > summary::before {
-  content: "+";
+  content: "+ ";
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.8rem;
   color: var(--verdigris);
@@ -503,8 +509,11 @@
   overflow-x: auto;
 }
 
-.reg__erd:empty {
-  display: none;
+.reg__erd:empty::before {
+  content: "Rendering diagram…";
+  color: var(--iron);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.75rem;
 }
 
 .reg__erd svg {
@@ -519,7 +528,9 @@
 .reg__erdSource > summary {
   cursor: pointer;
   list-style: none;
-  width: fit-content;
+}
+
+.reg__erdSource > summary .reg__meta {
   border-bottom: 1px dotted var(--rule-strong);
 }
 

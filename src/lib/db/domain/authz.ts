@@ -163,6 +163,10 @@ export const administrativeCommissions = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     scope: text("scope").notNull(), // original_jurisdiction | limited
     roleId: uuid("role_id").references(() => appRoles.id),
+    // F27: a commission is a BODY of people, not just a role. Its members are a
+    // group at the parent org; without this the resolver has a role to grant and
+    // nobody to grant it to.
+    groupId: uuid("group_id").references(() => groups.id),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on"),
     minuteReference: text("minute_reference"),
@@ -199,6 +203,10 @@ export const orgDelegations = pgTable(
     roleId: uuid("role_id")
       .notNull()
       .references(() => appRoles.id),
+    // F27: which people at the grantee council actually hold the delegation.
+    // "The presbytery administers our portal" means a specific staff group, not
+    // everyone at the presbytery.
+    groupId: uuid("group_id").references(() => groups.id),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on"),
     minuteReference: text("minute_reference"),

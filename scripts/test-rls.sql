@@ -179,6 +179,64 @@ begin;
   end $$;
 rollback;
 
+-- ---------------------------------------------------------------------------
+-- 9. The resolver. Four arms, provenance, and time.
+-- ---------------------------------------------------------------------------
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+
+  -- F3's whole point: a role granted to the DERIVED Session group must resolve.
+  -- A view would be invisible to this join and the elder would get nothing.
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:ELDER, :ALDER)
+      where source_kind = 'group' and source_name = 'Session'),
+    2, 'resolver: derived Session group grant resolves');
+
+  -- The gap between her two terms. Term boundaries drop access on their own
+  -- because the resolver reads dates, not row existence.
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:ELDER, :ALDER, '2015-06-01')),
+    0, 'resolver: no permissions during the gap between terms');
+
+  -- F11: an administrative commission granted nothing until arm 3 existed.
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:PASTOR, :ALDER)
+      where source_kind = 'commission'),
+    2, 'resolver: administrative commission grants inside the congregation');
+
+  -- ...and stops the day it expires.
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:PASTOR, :ALDER, '2027-06-01')),
+    0, 'resolver: commission access lapses when the commission ends');
+
+  -- Provenance is part of the answer, not an afterthought.
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:ELDER, :ALDER)
+      where source_name is null or role_name is null),
+    0, 'resolver: every row carries provenance');
+
+  -- Tiering is exposed so a caller can refuse tier 2/3 without a second lookup.
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:ELDER, :ALDER)
+      where sensitivity_tier > 1),
+    0, 'resolver: a session member gets no tier 2 or 3 permission by default');
+commit;
+
+-- SECURITY DEFINER makes arms 3 and 4 work (F26's lesson), so it must not
+-- become a fishing tool for another council's role structure.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    perform * from presby_effective_permissions(
+      'c0000000-0000-0000-0000-000000000006',
+      '33333333-3333-3333-3333-333333333333');
+    raise exception 'FAIL — resolver answered for a foreign org';
+  exception when insufficient_privilege then
+    raise notice 'pass  resolver refuses to answer outside the current org context';
+  end $$;
+rollback;
+
 \echo ''
 \echo '======================================================'
 \echo ' RLS suite complete. Every assertion above must say'

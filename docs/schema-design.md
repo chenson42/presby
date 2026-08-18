@@ -778,7 +778,55 @@ trigger propagates `ends_on` into the derived `group_memberships` rows so sessio
 day the term does.
 
 **Six-year rule is a report, not a constraint.** G-2.0404 caps aggregate service at six years but
-allows presbytery exemption, so it warns rather than blocks.
+allows presbytery exemption, so it warns rather than blocks. `presby_officer_history()` returns
+years served per term to feed it.
+
+### Dates are authoritative; classes are a label
+
+`class_year` stays because churches talk in classes and nominating committees plan by them, but
+**every query reads `starts_on`/`ends_on`**: the derived roster, the permission resolver, the
+register, and the historical roster. A class is normally just the year `ends_on` falls in, and it is
+null for open-ended offices like clerk of session.
+
+### Repeat and non-consecutive service
+
+A person may serve on session, roll off, and return years later, and may move between session and the
+diaconate. What they may not do is hold two simultaneous terms in the same office, which is a data
+error rather than a polity question:
+
+```sql
+alter table officer_terms add constraint officer_terms_no_overlap
+  exclude using gist (
+    organization_id with =, person_id with =, office with =,
+    daterange(starts_on, coalesce(ends_on, 'infinity'::date), '[)') with &&
+  );
+```
+
+An exclusion constraint rather than a unique key, precisely so gaps are allowed. `'infinity'` makes
+open-ended terms overlap-checkable too.
+
+### Knowing who was on session when
+
+The historical roster is a projection, not a table — and it matters well beyond driving permissions.
+Minutes review, quorum validation for a past meeting, and confirming who was seated when an action
+was approved all need it, as does the register itself.
+
+```sql
+presby_officer_roster(organization_id, office, as_of default current_date)
+  -> person_id, term_id, class_year, starts_on, ends_on, is_current
+
+presby_officer_history(organization_id, person_id)
+  -> office, term_id, class_year, starts_on, ends_on, end_reason, years_served
+```
+
+Defaulting `as_of` to today gives the current roster for the roster screen; passing a past date
+answers "who was seated on this date."
+
+**F22 — the derived-group trigger was destroying this history.** It matched on
+`(organization_id, group_id, person_id, source='derived')` with no term discriminator, so a person's
+second, non-consecutive session term rewrote the *first* term's `ends_on`. `group_memberships` now
+carries `officer_term_id` with a unique constraint, giving one derived row per term, and the trigger
+upserts on it.
 
 **Registers are views.** Baptisms project from `person_milestones`; ruling elders and deacons from
 `officer_terms`; installed pastors from `officer_terms` where the ministry is teaching elder. Do not
@@ -1260,6 +1308,7 @@ changed enough to invalidate round 1.
 | **F17** | Isolation | **Custom field sensitivity was unenforced** — a church-defined tier-3 field would have been served to anyone with tier-1 access. **Dissolved by D8's reversal**: with custom fields removed, every column's tier is declared in code and there is no user-defined surface to leak through. | Dissolved |
 | **F18** | Isolation | **Tenants cannot see platform actions against them.** `audit_events.organization_id` is nullable for platform events, and the standard policy filters NULL out. Rule: a platform action *targeting a tenant* carries that tenant's org id; only genuinely global events get NULL. Otherwise the tenant-visible access log promised in §10 is impossible. | Applied §12 |
 | **F19** | Scenario | **Death does not terminate anything.** A `death` roll action sets the roll and `date_of_death`, but leaves `officer_terms`, `role_grants`, and `group_memberships` open. A deceased elder stays on session and keeps every permission indefinitely. Needs a trigger ending all three as of the effective date. | Applied §8 |
+| **F22** | Scenario | **The derived-group trigger destroyed officer history.** It matched on person and group with no term discriminator, so a second non-consecutive term on session silently rewrote the first term's end date. Found by walking "someone being on each at different times." `group_memberships.officer_term_id` now gives one derived row per term. | Applied §9, §11 |
 | **F21** | Isolation | **The `people` visibility policy self-grants.** Any church could insert a membership for an arbitrary person and immediately read their identity, address, and phone. Composite FKs never covered this — the guard belongs on the act of linking. Now trigger-enforced, with `presby_claim_person()` and `presby_match_person()` as the only controlled paths. | Applied §6, §11 |
 | **F20** | Scenario | **Household transfers are per-person.** A family of five moving to another congregation issues five certificates with no grouping, and the receiving church rebuilds the household by hand. Add an optional `household_id` to `transfer_certificates` so a household transfers as a unit. | Open |
 

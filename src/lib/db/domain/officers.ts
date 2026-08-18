@@ -83,8 +83,12 @@ export const officerTerms = pgTable(
     personId: uuid("person_id").notNull(),
     // ruling_elder | deacon | clerk_of_session | moderator | treasurer | trustee
     office: text("office").notNull(),
-    // The rotating class, e.g. 2028. Boards are divided into classes with one
-    // class elected each year.
+    // Display label only, e.g. "class of 2028". Boards are divided into three
+    // classes with one elected each year, and nominating committees plan by
+    // class, so churches want to see it. But DATES ARE AUTHORITATIVE: every
+    // query, the derived roster, the permission resolver, and the register all
+    // read startsOn/endsOn. A class is normally just the year endsOn falls in,
+    // and it is null for open-ended offices like clerk of session.
     classYear: integer("class_year"),
     electedOn: date("elected_on"),
     installedOn: date("installed_on"),
@@ -108,6 +112,12 @@ export const officerTerms = pgTable(
       t.endsOn,
     ),
     index("officer_terms_org_person_idx").on(t.organizationId, t.personId),
+    // Supports the historical roster query: who was on session on a given date.
+    index("officer_terms_roster_idx").on(
+      t.organizationId,
+      t.office,
+      t.startsOn,
+    ),
     unique("officer_terms_id_org_key").on(t.id, t.organizationId),
     foreignKey({
       columns: [t.personId, t.organizationId],

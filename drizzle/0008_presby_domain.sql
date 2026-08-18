@@ -315,8 +315,10 @@ CREATE TABLE "group_memberships" (
 	"person_id" uuid NOT NULL,
 	"group_role" text DEFAULT 'member' NOT NULL,
 	"source" text DEFAULT 'managed' NOT NULL,
+	"officer_term_id" uuid,
 	"starts_on" date DEFAULT now() NOT NULL,
-	"ends_on" date
+	"ends_on" date,
+	CONSTRAINT "group_memberships_officer_term_key" UNIQUE("officer_term_id")
 );
 --> statement-breakpoint
 CREATE TABLE "group_types" (
@@ -585,6 +587,7 @@ CREATE INDEX "transfer_certificates_issuing_idx" ON "transfer_certificates" USIN
 CREATE INDEX "transfer_certificates_receiving_idx" ON "transfer_certificates" USING btree ("receiving_org_id","status");--> statement-breakpoint
 CREATE INDEX "officer_terms_org_office_idx" ON "officer_terms" USING btree ("organization_id","office","starts_on","ends_on");--> statement-breakpoint
 CREATE INDEX "officer_terms_org_person_idx" ON "officer_terms" USING btree ("organization_id","person_id");--> statement-breakpoint
+CREATE INDEX "officer_terms_roster_idx" ON "officer_terms" USING btree ("organization_id","office","starts_on");--> statement-breakpoint
 CREATE INDEX "ordinations_org_person_idx" ON "ordinations" USING btree ("organization_id","person_id");--> statement-breakpoint
 CREATE INDEX "ordinations_org_ministry_idx" ON "ordinations" USING btree ("organization_id","ministry");--> statement-breakpoint
 CREATE INDEX "group_memberships_org_group_idx" ON "group_memberships" USING btree ("organization_id","group_id","starts_on","ends_on");--> statement-breakpoint

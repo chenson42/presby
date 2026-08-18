@@ -1,5 +1,5 @@
 {
-  "id": "26c5f10a-bc26-43f2-961b-248e48b62844",
+  "id": "be14237d-4d7a-44bc-b95e-f01928804892",
   "prevId": "1c179c2a-c37a-4506-9931-2658e6dd7c64",
   "version": "7",
   "dialect": "postgresql",
@@ -4762,6 +4762,33 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "officer_terms_roster_idx": {
+          "name": "officer_terms_roster_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "office",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "starts_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -5035,6 +5062,12 @@
           "notNull": true,
           "default": "'managed'"
         },
+        "officer_term_id": {
+          "name": "officer_term_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "starts_on": {
           "name": "starts_on",
           "type": "date",
@@ -5151,7 +5184,15 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "group_memberships_officer_term_key": {
+          "name": "group_memberships_officer_term_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "officer_term_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

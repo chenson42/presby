@@ -98,6 +98,11 @@ export const groupMemberships = pgTable(
     personId: uuid("person_id").notNull(),
     groupRole: text("group_role").notNull().default("member"), // chair | leader | member
     source: text("source").notNull().default("managed"), // managed | derived
+    // Derived rows map 1:1 to the officer term that produced them (F22).
+    // Without this the trigger cannot tell two non-consecutive terms apart and
+    // silently rewrites the earlier one's end date, destroying the history of
+    // who served when.
+    officerTermId: uuid("officer_term_id"),
     startsOn: date("starts_on").notNull().defaultNow(),
     endsOn: date("ends_on"),
   },
@@ -109,6 +114,7 @@ export const groupMemberships = pgTable(
       t.endsOn,
     ),
     index("group_memberships_org_person_idx").on(t.organizationId, t.personId),
+    unique("group_memberships_officer_term_key").on(t.officerTermId),
     foreignKey({
       columns: [t.groupId, t.organizationId],
       foreignColumns: [groups.id, groups.organizationId],

@@ -350,6 +350,14 @@ create trigger group_memberships_reject_derived
 -- Projects an officer term into the derived group roster. Fails loudly if the
 -- org was never seeded with its derived groups (F16) rather than silently
 -- skipping, which would leave elders with no session access and no error.
+--
+-- F22: keyed on officer_term_id, one derived membership row per term. The
+-- earlier version matched on (org, group, person) alone, so a second,
+-- non-consecutive term on session rewrote the FIRST term's end date. That
+-- silently destroyed the record of who served when — which the register
+-- required by G-3.0204(b) depends on, and which matters well beyond driving
+-- permissions: validating a past quorum, reviewing minutes, and confirming who
+-- was seated when an action was approved.
 create or replace function presby_sync_derived_group()
 returns trigger language plpgsql as $$
 declare
@@ -373,20 +381,14 @@ begin
   end if;
 
   insert into group_memberships
-    (organization_id, group_id, person_id, group_role, source, starts_on, ends_on)
+    (organization_id, group_id, person_id, group_role, source,
+     officer_term_id, starts_on, ends_on)
   values
     (new.organization_id, target_group, new.person_id, 'member', 'derived',
-     new.starts_on, new.ends_on)
-  on conflict do nothing;
-
-  -- F19: a term that ends must drop access the day it ends, whether it ended by
-  -- completion, resignation, removal, or death.
-  update group_memberships
-     set ends_on = new.ends_on
-   where organization_id = new.organization_id
-     and group_id = target_group
-     and person_id = new.person_id
-     and source = 'derived';
+     new.id, new.starts_on, new.ends_on)
+  on conflict (officer_term_id) do update
+    set starts_on = excluded.starts_on,
+        ends_on   = excluded.ends_on;
 
   return new;
 end $$;
@@ -395,3 +397,89 @@ drop trigger if exists officer_terms_sync_derived on officer_terms;
 create trigger officer_terms_sync_derived
   after insert or update on officer_terms
   for each row execute function presby_sync_derived_group();
+
+-- ---------------------------------------------------------------------------
+-- Officer terms: no overlap, full history
+-- ---------------------------------------------------------------------------
+-- A person cannot hold two simultaneous terms in the same office at the same
+-- org. They CAN serve repeatedly with gaps, and can move between session and
+-- the diaconate, which is why this is an exclusion constraint over date ranges
+-- rather than a unique key on (person, office).
+--
+-- ends_on null means open-ended (clerk of session, treasurer); 'infinity'
+-- makes those overlap-checkable too.
+create extension if not exists btree_gist;
+
+alter table officer_terms drop constraint if exists officer_terms_no_overlap;
+alter table officer_terms add constraint officer_terms_no_overlap
+  exclude using gist (
+    organization_id with =,
+    person_id       with =,
+    office          with =,
+    daterange(starts_on, coalesce(ends_on, 'infinity'::date), '[)') with &&
+  );
+
+-- Who was on session (or the diaconate) on a given date.
+--
+-- This is the register required by G-3.0204(b), and it is a projection, not a
+-- table. Defaulting p_as_of to today gives the current roster; passing a past
+-- date answers "who was seated when this was approved", which minutes review
+-- and quorum validation both need.
+create or replace function presby_officer_roster(
+  p_organization_id uuid,
+  p_office text,
+  p_as_of date default current_date
+)
+returns table (
+  person_id   uuid,
+  term_id     uuid,
+  class_year  integer,
+  starts_on   date,
+  ends_on     date,
+  is_current  boolean
+)
+language sql stable as $$
+  select ot.person_id,
+         ot.id,
+         ot.class_year,
+         ot.starts_on,
+         ot.ends_on,
+         (ot.ends_on is null or ot.ends_on > current_date)
+    from officer_terms ot
+   where ot.organization_id = p_organization_id
+     and ot.office = p_office
+     and ot.starts_on <= p_as_of
+     and (ot.ends_on is null or ot.ends_on > p_as_of)
+   order by ot.class_year nulls last, ot.starts_on;
+$$;
+
+-- Every term a person has ever served, across offices. Feeds the six-year
+-- aggregate-service warning (G-2.0404) and the person's own history panel.
+create or replace function presby_officer_history(
+  p_organization_id uuid,
+  p_person_id uuid
+)
+returns table (
+  office      text,
+  term_id     uuid,
+  class_year  integer,
+  starts_on   date,
+  ends_on     date,
+  end_reason  text,
+  years_served numeric
+)
+language sql stable as $$
+  select ot.office,
+         ot.id,
+         ot.class_year,
+         ot.starts_on,
+         ot.ends_on,
+         ot.end_reason,
+         round(
+           (coalesce(ot.ends_on, current_date) - ot.starts_on)::numeric / 365.25,
+           2)
+    from officer_terms ot
+   where ot.organization_id = p_organization_id
+     and ot.person_id = p_person_id
+   order by ot.starts_on desc;
+$$;

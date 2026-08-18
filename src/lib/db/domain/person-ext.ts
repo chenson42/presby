@@ -10,7 +10,7 @@ import {
   foreignKey,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./org";
-import { personProfiles } from "./people";
+import { memberships } from "./people";
 import { rollActions } from "./roll";
 import { users } from "../schema";
 
@@ -70,7 +70,7 @@ export const personTags = pgTable(
     index("person_tags_org_tag_idx").on(t.organizationId, t.tagId),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_tags_person_fk",
     }),
     foreignKey({
@@ -120,12 +120,12 @@ export const personMilestones = pgTable(
     ),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_milestones_person_fk",
     }),
     foreignKey({
       columns: [t.officiantPersonId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_milestones_officiant_fk",
     }),
   ],
@@ -166,7 +166,7 @@ export const personNotes = pgTable(
     ),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_notes_person_fk",
     }),
   ],
@@ -203,12 +203,12 @@ export const followUps = pgTable(
     ),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "follow_ups_person_fk",
     }),
     foreignKey({
       columns: [t.assignedToPersonId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "follow_ups_assignee_fk",
     }),
   ],
@@ -243,7 +243,7 @@ export const personTalents = pgTable(
     unique("person_talents_pk").on(t.personId, t.talentTypeId),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_talents_person_fk",
     }),
     foreignKey({
@@ -288,7 +288,7 @@ export const backgroundChecks = pgTable(
     index("background_checks_org_person_idx").on(t.organizationId, t.personId),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "background_checks_person_fk",
     }),
   ],
@@ -314,7 +314,7 @@ export const personMedical = pgTable(
   (t) => [
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_medical_person_fk",
     }),
   ],

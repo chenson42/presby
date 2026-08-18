@@ -50,8 +50,7 @@ declare
   t text;
   tenant_tables text[] := array[
     'organization_settings', 'org_units',
-    'households', 'person_profiles', 'addresses', 'contact_methods',
-    'person_relationships',
+    'households', 'memberships',
     'tags', 'person_tags',
     'person_milestones', 'person_notes', 'follow_ups',
     'talent_types', 'person_talents', 'background_checks', 'person_medical',
@@ -83,28 +82,138 @@ end $$;
 -- in organization_settings, which carries the standard policy above.
 grant select on organizations to presby_app;
 
--- `people` is GLOBAL (D1). It carries no organization_id, so it cannot use the
--- standard predicate: a person row is visible when the current org holds a
--- profile for them.
+-- ---------------------------------------------------------------------------
+-- Global person tables (D1)
+-- ---------------------------------------------------------------------------
+-- `people` and the person's own data carry no organization_id, so they cannot
+-- use the standard predicate: a row is visible when the current org holds a
+-- MEMBERSHIP for that person.
 --
--- This is the highest-consequence policy in the schema. `people` is the one
--- table where a bug leaks identity across congregations, so it is deliberately
--- the narrowest possible predicate and nothing else may be added to it.
+-- These are the highest-consequence policies in the schema — the only place a
+-- bug leaks identity between congregations. Keep the predicate narrow.
 --
--- Duplicate detection genuinely needs to look at rows the caller cannot read
--- ("is this person already in the system?"). That does NOT relax this policy.
--- It runs through a SECURITY DEFINER matcher that returns a match token and
--- minimal disclosure, never a row — the same shape as transfer_certificates.
-alter table people enable row level security;
-alter table people force  row level security;
-drop policy if exists person_visible_via_profile on people;
-create policy person_visible_via_profile on people
-  using (exists (
-    select 1 from person_profiles pp
-     where pp.person_id = people.id
-       and pp.organization_id = presby_current_org()
-  ));
-grant select, insert, update on people to presby_app;
+-- Duplicate detection genuinely needs to read rows the caller cannot see ("is
+-- this person already in the system?"). That does NOT relax these policies. It
+-- goes through presby_match_person() below, which returns a token and minimal
+-- disclosure, never a row.
+do $$
+declare
+  t text;
+  global_person_tables text[] := array[
+    'people', 'addresses', 'contact_methods', 'person_relationships'
+  ];
+  col text;
+begin
+  foreach t in array global_person_tables loop
+    col := case when t = 'people' then 'id' else 'person_id' end;
+    execute format('alter table %I enable row level security', t);
+    execute format('alter table %I force  row level security', t);
+    execute format('drop policy if exists visible_via_membership on %I', t);
+    execute format(
+      'create policy visible_via_membership on %I using (exists ('
+      '  select 1 from memberships m'
+      '   where m.person_id = %I.%I'
+      '     and m.organization_id = presby_current_org()))', t, t, col);
+    execute format('grant select, insert, update on %I to presby_app', t);
+  end loop;
+end $$;
+
+grant delete on addresses, contact_methods, person_relationships to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- F21: creating a membership must not self-grant visibility
+-- ---------------------------------------------------------------------------
+-- The policies above say "visible if you hold a membership." Left unguarded,
+-- any church could INSERT a membership for an arbitrary person_id and
+-- immediately read that person's name, birthdate, address, and phone. The
+-- composite foreign keys never protected against this; the check has to live on
+-- the act of linking.
+--
+-- A membership insert is allowed when EITHER:
+--   (a) the person has no membership anywhere - this org is creating them, so
+--       there is nothing to disclose; or
+--   (b) an authorized claim set app.person_claim_authorized for this
+--       transaction. presby_claim_person() is the only thing that sets it, and
+--       it requires a claimable transfer certificate.
+create or replace function presby_guard_membership_insert()
+returns trigger language plpgsql as $$
+declare
+  existing int;
+begin
+  if coalesce(current_setting('app.person_claim_authorized', true), '') = new.person_id::text then
+    return new;
+  end if;
+
+  select count(*) into existing from memberships m where m.person_id = new.person_id;
+  if existing > 0 then
+    raise exception
+      'memberships: person % already exists elsewhere; link through presby_claim_person()',
+      new.person_id
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists memberships_guard_insert on memberships;
+create trigger memberships_guard_insert
+  before insert on memberships
+  for each row execute function presby_guard_membership_insert();
+
+-- Claims a person into the current org against a valid transfer certificate.
+-- SECURITY DEFINER so it can read certificates and people across orgs; it
+-- returns nothing about the person that the certificate did not already carry.
+create or replace function presby_claim_person(p_claim_token text)
+returns uuid
+language plpgsql security definer as $$
+declare
+  cert transfer_certificates%rowtype;
+  org  uuid := presby_current_org();
+begin
+  if org is null then
+    raise exception 'presby_claim_person: no org context' using errcode = 'insufficient_privilege';
+  end if;
+
+  select * into cert from transfer_certificates
+   where claim_token = p_claim_token
+     and status = 'issued'
+     and (expires_on is null or expires_on >= current_date);
+
+  if cert.id is null then
+    raise exception 'presby_claim_person: no claimable certificate' using errcode = 'no_data_found';
+  end if;
+
+  perform set_config('app.person_claim_authorized', cert.issuing_person_id::text, true);
+
+  update transfer_certificates
+     set receiving_org_id = org, claimed_at = now(), status = 'claimed'
+   where id = cert.id;
+
+  return cert.issuing_person_id;
+end $$;
+
+revoke all on function presby_claim_person(text) from public;
+grant execute on function presby_claim_person(text) to presby_app;
+
+-- Duplicate-detection matcher. Returns a score and the certificate-style
+-- minimal disclosure, never a person row.
+create or replace function presby_match_person(
+  p_last_name text, p_first_name text, p_date_of_birth date)
+returns table (person_id uuid, display_name text, confidence text)
+language sql security definer as $$
+  select p.id,
+         left(p.first_name, 1) || '. ' || p.last_name,
+         case when p.date_of_birth is not distinct from p_date_of_birth
+              then 'high' else 'low' end
+    from people p
+   where lower(p.last_name) = lower(p_last_name)
+     and lower(p.first_name) = lower(p_first_name)
+     and p.merged_into_id is null
+   limit 10;
+$$;
+
+revoke all on function presby_match_person(text, text, date) from public;
+grant execute on function presby_match_person(text, text, date) to presby_app;
 
 -- transfer_certificates spans two orgs by design: the losing church issues and
 -- the receiving church claims by token.
@@ -164,10 +273,10 @@ create trigger roll_actions_freeze
 -- Invariant 7: a person row is never hard-deleted. Use people.merged_into_id.
 revoke delete on people from presby_app;
 
--- Supports the person_visible_via_profile policy's EXISTS. Without it, every
--- read of `people` degrades to a scan of person_profiles.
-create index if not exists person_profiles_person_org_idx
-  on person_profiles (person_id, organization_id);
+-- Supports the visible_via_membership policies' EXISTS. Without it, every read
+-- of a global person table degrades to a scan of memberships.
+create index if not exists memberships_person_org_idx
+  on memberships (person_id, organization_id);
 
 -- ---------------------------------------------------------------------------
 -- Invariant 5: session and diaconate membership is derived, never edited

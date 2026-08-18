@@ -11,7 +11,7 @@ import {
   foreignKey,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./org";
-import { personProfiles } from "./people";
+import { memberships } from "./people";
 import { users } from "../schema";
 
 /**
@@ -55,7 +55,7 @@ export const ordinations = pgTable(
     unique("ordinations_id_org_key").on(t.id, t.organizationId),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "ordinations_person_fk",
     }),
   ],
@@ -111,7 +111,7 @@ export const officerTerms = pgTable(
     unique("officer_terms_id_org_key").on(t.id, t.organizationId),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "officer_terms_person_fk",
     }),
   ],

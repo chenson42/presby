@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
-import { personProfiles } from "./people";
+import { memberships } from "./people";
 
 /**
  * Groups. See docs/schema-design.md section F.
@@ -116,7 +116,7 @@ export const groupMemberships = pgTable(
     }),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "group_memberships_person_fk",
     }),
   ],

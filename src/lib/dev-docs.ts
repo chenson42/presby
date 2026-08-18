@@ -56,7 +56,7 @@ const MODULES: Record<string, string> = {
   addresses: "B. People",
   contact_methods: "B. People",
   person_relationships: "B. People",
-  person_profiles: "B. People",
+  memberships: "B. People",
   tags: "C. Person extensions",
   person_tags: "C. Person extensions",
   person_milestones: "C. Person extensions",
@@ -96,7 +96,7 @@ const BESPOKE_POLICIES: Record<string, string> = {
   organizations:
     "Not tenant-isolated. The org tree is public information; PC(USA) publishes congregation and presbytery lists. Sensitive data lives in organization_settings.",
   people:
-    "GLOBAL, no organization_id (D1). A person is one human: ministers of Word and Sacrament are members of the presbytery while ruling elders are members of the congregation, so one human's roll and service routinely sit at different orgs. Visible when the current org holds a profile for them.",
+    "GLOBAL, no organization_id (D1). Holds the person's own data. Ministers of Word and Sacrament are members of the presbytery while ruling elders are members of the congregation, so one human's roll and service routinely sit at different orgs. Visible when the current org holds a membership for them.",
   transfer_certificates:
     "Spans two orgs by design (F9). The losing church issues; the receiving church claims by token.",
   administrative_commissions:
@@ -104,6 +104,12 @@ const BESPOKE_POLICIES: Record<string, string> = {
   org_delegations:
     "Visible to both parties. Granted by the session, never inherited.",
   permissions: "Global catalog. Readable by all, written only by migrations.",
+  addresses:
+    "GLOBAL. An address is the person's, not a congregation's record of it. Visible when the current org holds a membership for that person.",
+  contact_methods:
+    "GLOBAL, same rule as addresses. Not duplicated per org, so an installed pastor's phone cannot diverge between presbytery and congregation.",
+  person_relationships:
+    "GLOBAL. A parent is a parent regardless of which church is looking.",
 };
 
 const TABLE_NOTES: Record<string, string[]> = {
@@ -111,9 +117,11 @@ const TABLE_NOTES: Record<string, string[]> = {
     "Identity only, deliberately thin. It is the one surface shared across tenants, so every column here is a column one church can see because another church entered it.",
     "delete is revoked from presby_app. Invariant 7: a person row is never hard-deleted.",
   ],
-  person_profiles: [
-    "THE composite-FK target for every child table. unique(person_id, organization_id) is how F2's guarantee survives people going global: a row in org B can only reference a person who has a profile in org B.",
+  memberships: [
+    "THE LINK: a person's relationship with one organization, carrying their roll status there. A transfer ends the membership at the losing church and opens one at the receiving church against the same people row.",
+    "Composite-FK target for every org record ABOUT a person, which is how F2 survives people going global: a row in org B can only reference a person with a membership in org B.",
     "current_roll is a CACHE maintained by trigger from approved roll_actions. It cannot answer historical questions — reports replay via rollAsOf(). See F6.",
+    "F21: creating a membership for an EXISTING person must not be a plain INSERT — it self-grants visibility of that person's identity. Goes through the claim/match flow.",
   ],
   roll_actions: [
     "Pending rows are mutable working state; a trigger freezes the row on approval. Invariant 4 covers approved rows only.",

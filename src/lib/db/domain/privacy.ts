@@ -10,7 +10,7 @@ import {
   foreignKey,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./org";
-import { personProfiles } from "./people";
+import { memberships } from "./people";
 import { users } from "../schema";
 
 /**
@@ -44,7 +44,7 @@ export const personPrivacy = pgTable(
   (t) => [
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_privacy_person_fk",
     }),
   ],
@@ -81,12 +81,12 @@ export const consents = pgTable(
     ),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "consents_person_fk",
     }),
     foreignKey({
       columns: [t.grantedByPersonId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "consents_guardian_fk",
     }),
   ],
@@ -118,7 +118,7 @@ export const personDemographics = pgTable(
   (t) => [
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_demographics_person_fk",
     }),
   ],
@@ -149,7 +149,7 @@ export const personDisabilities = pgTable(
     unique("person_disabilities_pk").on(t.personId, t.category),
     foreignKey({
       columns: [t.personId, t.organizationId],
-      foreignColumns: [personProfiles.personId, personProfiles.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_disabilities_person_fk",
     }),
   ],

@@ -55,10 +55,21 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
     ],
   },
-  // Dev server only — allows cross-origin asset requests from Cloudflare tunnels used in local
-  // dev (`cloudflared tunnel --url localhost:3000`). Remove if your fork does not use Cloudflare
-  // tunnels.
-  allowedDevOrigins: ["*.trycloudflare.com"],
+  // Dev server only. Next blocks cross-origin requests for /_next/* assets, so
+  // reaching the dev server from anything other than localhost — a phone on the
+  // LAN, a Cloudflare tunnel — serves the server-rendered HTML but never the JS.
+  //
+  // The page then looks fine and is silently dead: no hydration means no
+  // onChange, so controlled inputs never update state and every submit button
+  // stays disabled forever. Worth knowing, because it presents as a broken form
+  // rather than as a network error.
+  //
+  // Set DEV_ALLOWED_ORIGINS to a comma-separated list (e.g. your LAN IP) rather
+  // than hardcoding a machine-specific address here.
+  allowedDevOrigins: [
+    "*.trycloudflare.com",
+    ...(process.env.DEV_ALLOWED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
+  ],
 };
 
 export default nextConfig;

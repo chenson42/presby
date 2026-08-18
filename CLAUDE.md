@@ -20,8 +20,15 @@ worked partly by AI.
 Open source. **No real congregation, person, or credential ever enters the
 repository** — see Key Invariants → No Real Data.
 
-Not named yet. `/personalize-starter` is deliberately un-run, so files still say
-`presby`.
+**The project is not named yet**, so every identifier still says `presby` —
+package name, database roles (`presby_app`), SQL functions (`presby_roll_as_of`),
+migration filenames. That is deliberate placeholder, not a naming decision; don't
+"fix" it. Candidates are tracked in `docs/STATE.md`.
+
+Seeded from `chenson42/claudecode-nextjs-starter`, which is why the platform
+shell (auth, flags, audit, feedback, what's-new) arrived pre-built and the
+church domain did not. `/upstream-sync` and `/downstream-sync` keep the two in
+touch — see Periodic Reviews.
 
 ## Prior art
 
@@ -37,18 +44,12 @@ that overlaps one:
 
 ## How Claude Should Behave in This Repo
 
-These rules apply regardless of who's forked the project or how they've configured Claude Code:
-
-- **Re-render the deck whenever `deck/slides.md` changes.** Run `npm run deck` to refresh both outputs. `deck/slides.pdf` IS committed (so viewers can download it without installing Marp) — re-render *and re-commit it* in the same change as the source edit. `deck/slides.pptx` stays gitignored. If the render fails, fix the cause; don't leave stale outputs behind.
+- **Run commands directly.** This repo is worked with `--dangerously-skip-permissions`, so dev servers, builds, typechecks, watchers, log tails, and db pushes are yours to run without asking. The exception is genuinely interactive commands (e.g. `gcloud auth login`), which bounce back to the user with the `! ` prefix hint.
 - **Be deliberate with destructive commands.** A wrong `git reset --hard` or `npm run db:push -- --force` is hard to undo. State what you're about to do before non-trivial commands so the user has a chance to interrupt.
-- **Wait for explicit approval before committing or pushing.** Pre-commit and pre-push are user gestures, not background tasks.
+- **Wait for explicit approval before committing or pushing.** Skipped permissions are not permission to skip the user's review of the diff. Pre-commit and pre-push are user gestures, not background tasks.
 - **Never push without going through `/pre-push`.** The checklist exists so the agent doesn't ship broken builds.
-
-## Original Author's Setup (informational)
-
-The author (`chenson42@gmail.com`) runs Claude Code with `--dangerously-skip-permissions` and expects Claude to **run frequent commands directly** — dev servers, builds, typechecks, watchers, log tails, db pushes. The exception is genuinely interactive commands (e.g. `gcloud auth login`), which bounce back to the user with the `! ` prefix hint.
-
-If you've forked this starter and run Claude Code with default permission prompts, ignore the above — prompt-before-acting is right for you. The "Behave in This Repo" rules are the universal ones.
+- **Verify UI in a browser, on a phone viewport.** See Key Invariants → Verify in a Browser. `next build` passing is not evidence a page works.
+- **Re-render the deck whenever `deck/slides.md` changes.** Run `npm run deck` to refresh both outputs. `deck/slides.pdf` IS committed (so viewers can download it without installing Marp) — re-render *and re-commit it* in the same change as the source edit. `deck/slides.pptx` stays gitignored. If the render fails, fix the cause; don't leave stale outputs behind.
 
 ## Stack
 
@@ -65,10 +66,14 @@ If you've forked this starter and run Claude Code with default permission prompt
 ```
 src/lib/db/domain/     — the presby schema, one file per module (org, people,
                          roll, officers, groups, authz, privacy, reporting)
+src/lib/db/schema.ts   — inherited platform tables (NextAuth adapter, roles,
+                         flags, audit, email queue). Church data does NOT go here
 src/lib/db/index.ts    — TWO connections: db (presby_app, RLS enforced) and
                          getPlatformDb() (bypasses RLS, platform pages only)
 src/lib/authz.ts       — tenant authorization: withOrgContext, the resolver
 src/lib/permissions.ts — platform admin shell only. FROZEN; nothing church-facing
+src/proxy.ts           — Edge gate (admin + 2FA). Edge runtime: never import
+                         @/lib/db here
 src/app/(admin)/developer/ — generated schema reference
 drizzle/00XX_presby_*.sql  — hand-written: RLS, triggers, functions. Drizzle Kit
                              does not emit any of these
@@ -76,6 +81,8 @@ scripts/seed-dev.sql   — synthetic fixture, shaped to exercise the findings
 scripts/test-rls.sql   — isolation suite. MUST run as presby_app
 docs/STATE.md          — start here
 docs/schema-design.md  — rationale + findings log
+docs/TODO.md           — the single backlog aggregator (Workflow Rule 10)
+docs/ui-standards.md   — UI conventions; read before building a page or form
 ```
 
 ## Agent Roster
@@ -184,13 +191,13 @@ Every piece of work gets a work-log file at `docs/work-log/YYYY-MM-DD-<slug>.md`
 
 ## Periodic Reviews
 
-Reviews are bundled into two recurring slots plus the fork-only syncs (consolidated 2026-07-11, DECISION-029 — eight weeks of history showed the previous eight independent cadences ran in batch sessions anyway). Each review type still gets its own line in `docs/reviews/log.md`, so per-type history is preserved. What each review covers is defined in the owner's agent file.
+Reviews are bundled into two recurring slots plus the starter syncs (consolidated 2026-07-11, DECISION-029 — eight weeks of history showed the previous eight independent cadences ran in batch sessions anyway). Each review type still gets its own line in `docs/reviews/log.md`, so per-type history is preserved. What each review covers is defined in the owner's agent file.
 
 | Slot | Cadence | Review types (log each separately) |
 |------|---------|------------------------------------|
 | **Release slot** | 14 d, or at each release if sooner | `test-coverage` (qa) · `retrospective` (tech-lead synthesizes all agents; opens with `npm run stats:escape`) |
 | **Monthly health-check** | 30 d, run as one bundled session | `code` (architect) · `documentation` (tech-lead) · `security` (api-developer + database-admin) · `agent-instruction` (tech-lead) · `dependencies` (deployment-engineer) |
-| **Fork-only syncs** | 14 d / 30 d | `upstream-sync` / `downstream-sync` via the skills (tech-lead). N/A in the canonical starter — the skills self-detect and exit. |
+| **Starter syncs** | 14 d / 30 d | `upstream-sync` (pull starter fixes into presby) / `downstream-sync` (surface presby work that's starter-generic, staged in `docs/starter-contributions/`), both via the skills (tech-lead). presby has no shared git history with the starter — the skills handle that scaffold case. |
 
 ### Cadence Check at Session Start
 
@@ -238,7 +245,7 @@ Slugs are short, lowercase, hyphenated, and stable. Don't rename them after the 
 6. **Permissions and flags stay separate.** See Key Invariants → Permissions vs Flags.
 7. **Audit security-sensitive mutations.** Role changes, flag toggles, TOTP enrolment/reset, deactivations write to `audit_events` (use `recordAudit()`).
 8. **No code before the work-log.** If you are about to call Edit, Write, or `git checkout -b` for a non-trivial request and there is no work-log entry for it, stop and run `/new-feature` first. The Classification table defines "non-trivial."
-9. **Use `/merge-pr` for any PR merged with `--delete-branch`.** Before deleting the head branch, the skill retargets open PRs based on that branch to `main` — otherwise GitHub auto-closes every downstream PR (this bit the npvitals fork twice in one session). Invoke once per PR, bottom-up, when merging a stack. Plain `gh pr merge` is only safe when the PR has no dependents *and* you're not deleting the branch.
+9. **Use `/merge-pr` for any PR merged with `--delete-branch`.** Before deleting the head branch, the skill retargets open PRs based on that branch to `main` — otherwise GitHub auto-closes every downstream PR (this bit a sibling repo twice in one session). Invoke once per PR, bottom-up, when merging a stack. Plain `gh pr merge` is only safe when the PR has no dependents *and* you're not deleting the branch.
 10. **Keep `docs/TODO.md` reconciled in the same commit as the work.** Shipping something? Move its line to Done (with date) in that commit. Deferring, discovering a follow-up, or accepting a review punch-list item? Add a line in that commit. Phase 6 `SHIP WITH NOTES` follow-ups land here, not just in the work-log. A commit that changes what's open without touching `docs/TODO.md` is incomplete — `/pre-push` flags it.
 11. **Never amend or force-push to diagnose an external-system failure.** When the same commit suddenly yields a different deploy or CI result, the external system changed — not your code. Get ground truth from the failing service's dashboard before touching git history.
 12. **Mark feedback rows at delivery.** When Phase 6 closes a feature that originated from in-app member feedback, update the `feedback` row from `triaged` to `done` (the work-log's Source block records the row UUID). Not before Phase 6 — the row stays `triaged` while in flight.
@@ -288,9 +295,11 @@ npm run db:generate  # Generate a versioned SQL migration in drizzle/ (use this 
 npm run db:migrate   # Apply committed SQL migrations (production-safe; use instead of db:push in staging/prod)
 npm run db:seed      # Seed roles, features, and the demo flag
 npm run check:audit  # Tripwire: every mutation in actions.ts files must reference an AUDIT_ACTIONS key
-npm run check:sql-date # Tripwire: bans sql<Date> typings (neon-http returns strings for raw-SQL dates)
+npm run check:sql-date # Tripwire: bans unannotated sql<Date> (the Neon driver returns computed
+                       # date expressions as STRINGS — no column OID to map against)
 npm run check        # Both tripwires in sequence
 npm run stats:escape # 30-day escape-rate report (per-channel fix breakdown for the retrospective)
+npm run docs:erd     # Regenerate the /developer ER diagrams from the schema
 npm run deck         # Render deck/slides.md → slides.pptx + slides.pdf
 npm run deck:pptx    # PowerPoint only
 npm run deck:pdf     # PDF only
@@ -377,6 +386,27 @@ demographic, medical — pastoral notes sit *above* financial data.
 still a wildcard. It is bounded (platform shell only, and the tenant connection
 cannot bypass RLS) but not removed.
 
+### Permissions vs Flags
+
+Two mechanisms, never merged (DECISION-003). A **permission** answers *may this
+user do this?* — `hasFeature(session.user.features, FEATURES.KEY)`, catalog in
+`src/lib/permissions.ts`. A **flag** answers *is this behavior on at all?* —
+`isFlagEnabled(key)` against `feature_flags`. A flag never grants access; a
+permission never stages a rollout. A gated feature asks both questions.
+
+`isFlagEnabled()` returns `false` on a missing row or a DB error — right for a
+toggle, wrong for a flag that gates an auth path, where `false` means "deny
+every sign-in during a DB blip." Auth-critical flags (`auth.local_login`,
+`auth.require_2fa`) go through named fail-open wrappers in `src/lib/auth/`
+(DECISION-026), never through the bare helper.
+
+### The Edge Gate Cannot Reach the Database
+
+`src/proxy.ts` runs on the Edge runtime. It imports `edgeAuth` and the
+permission constants and nothing else — importing `@/lib/db` (or anything that
+transitively pulls the Neon pool) breaks the build or the runtime, and the
+failure surfaces at request time, not at `tsc`.
+
 ### Composite Tenant Keys
 
 Every tenant table declares `unique (id, organization_id)`, and foreign keys
@@ -397,7 +427,7 @@ the ticket loop load-bearing, so it cannot be built last.
 
 ### Verify in a Browser
 
-Three bugs this project were phone-only and invisible to `curl`, `tsc`, and
+Three bugs in this project were phone-only and invisible to `curl`, `tsc`, and
 `next build`: blocked dev assets killing hydration, `display` on a `<summary>`
 breaking `<details>` on iOS, and a disclosure that never opened. A page that
 returns 200 is not a page that works.

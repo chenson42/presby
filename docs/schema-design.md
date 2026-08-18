@@ -113,6 +113,7 @@ erDiagram
   households |o--o{ memberships : "household_id"
   org_units |o--o{ memberships : "org_unit_id"
   users |o--o{ people : "user_id"
+  people ||--o{ person_identifiers : "person_id"
   people ||--o{ person_relationships : "person_id"
   people |o--o{ person_relationships : "related_person_id"
 ```
@@ -331,6 +332,56 @@ membership anywhere (this org is creating them, so there is nothing to disclose)
 Duplicate detection still needs to read rows the caller cannot see. `presby_match_person()` is
 `security definer` and returns a person id, an initial-plus-surname display string, and a confidence
 band — never a row.
+
+### Identity: no natural key, but deterministic where it is safe
+
+Email cannot be the unique key on `people`, and the evidence is in the sibling projects. fpcw stores
+`emails text[]` commented *"All emails as array for matching"*; westervillelions carries
+`SHARED_HOUSEHOLD_EMAIL` env vars because a real couple shares one address. Add children and older
+members with no email at all, and a natural key is null for a large share of any roll. Emails also
+change, and identity must not.
+
+So identity stays a surrogate uuid, and identifiers become **evidence** with uniqueness scoped to
+where it actually holds:
+
+```sql
+create table person_identifiers (      -- GLOBAL
+  id, person_id,
+  kind,              -- email | phone | church360 | pcusa_id | legacy
+  value_normalized,  -- lowercased/trimmed; phones reduced to digits
+  is_verified,       -- we proved this person controls it, not merely that a church typed it
+  is_shared,         -- the household address two spouses share
+  verified_at, source
+);
+
+create unique index person_identifiers_verified_unique_idx
+  on person_identifiers (kind, value_normalized)
+  where is_verified and not is_shared;   -- <- the whole design
+```
+
+The partial index is the point. A verified, unshared identifier is globally unique and matches
+deterministically. Everything else is a signal. Without the `is_shared` escape hatch, a shared
+household email would merge two spouses into one person.
+
+`presby_match_person()` ranks accordingly: `exact` (verified unshared identifier), `high` (name plus
+date of birth), `medium` (unverified or shared identifier), `low` (name only). Only `exact` is safe
+to act on without a human looking.
+
+### One active membership, enforced
+
+```sql
+create unique index memberships_one_active_roll_idx
+  on memberships (person_id)
+  where current_roll = 'active' and ended_on is null;
+```
+
+A person is an active member of exactly one congregation. The other three rolls may coexist
+elsewhere — an affiliate member is *by definition* an active member of another church (G-1.0403) —
+but two active memberships are constitutionally impossible.
+
+**Only the global `people` model can express this.** Under org-scoped people the two memberships
+lived in unrelated rows with no shared identity to constrain, so the rule was unenforceable and would
+have been discovered years later as duplicate per-capita billing.
 
 **`person_links` is deleted.** Its only job was joining org-scoped duplicates of one human. With
 global `people` there are none, so the table, its bespoke cross-tenant policy, and the disclosure it

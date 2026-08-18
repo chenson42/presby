@@ -57,6 +57,7 @@ const MODULES: Record<string, string> = {
   contact_methods: "B. People",
   person_relationships: "B. People",
   memberships: "B. People",
+  person_identifiers: "B. People",
   tags: "C. Person extensions",
   person_tags: "C. Person extensions",
   person_milestones: "C. Person extensions",
@@ -110,6 +111,8 @@ const BESPOKE_POLICIES: Record<string, string> = {
     "GLOBAL, same rule as addresses. Not duplicated per org, so an installed pastor's phone cannot diverge between presbytery and congregation.",
   person_relationships:
     "GLOBAL. A parent is a parent regardless of which church is looking.",
+  person_identifiers:
+    "GLOBAL. Unique only where uniqueness is safe: the partial index covers verified, non-shared identifiers. Shared household emails and unverified entries are matching signals, not keys.",
 };
 
 const TABLE_NOTES: Record<string, string[]> = {
@@ -122,6 +125,7 @@ const TABLE_NOTES: Record<string, string[]> = {
     "Composite-FK target for every org record ABOUT a person, which is how F2 survives people going global: a row in org B can only reference a person with a membership in org B.",
     "current_roll is a CACHE maintained by trigger from approved roll_actions. It cannot answer historical questions — reports replay via rollAsOf(). See F6.",
     "F21: creating a membership for an EXISTING person must not be a plain INSERT — it self-grants visibility of that person's identity. Goes through the claim/match flow.",
+    "Partial unique index enforces ONE active-roll membership per person. An affiliate member is by definition an active member of another church (G-1.0403), so the other rolls may coexist — two active memberships cannot. Only the global people model can express this.",
   ],
   roll_actions: [
     "Pending rows are mutable working state; a trigger freezes the row on approval. Invariant 4 covers approved rows only.",

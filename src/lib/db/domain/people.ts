@@ -9,6 +9,7 @@ import {
   jsonb,
   index,
   unique,
+  uniqueIndex,
   foreignKey,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -110,6 +111,59 @@ export const people = pgTable(
   ],
 );
 
+/**
+ * Deterministic identity. GLOBAL.
+ *
+ * Email cannot be the key on `people`, and the evidence is in the sibling
+ * projects: fpcw stores `emails text[]` commented "All emails as array for
+ * matching", and westervillelions carries SHARED_HOUSEHOLD_EMAIL env vars
+ * because a real couple shares one address. Add children and older members with
+ * no email at all, and a natural key is null for a large share of any roll.
+ *
+ * So identity stays a surrogate uuid and identifiers become evidence, with the
+ * uniqueness scoped to where it is actually safe:
+ *
+ *   VERIFIED and not shared  -> globally unique. Deterministic match.
+ *   unverified, or shared    -> not unique. A matching signal only.
+ *
+ * That partial constraint is the whole design. It gives exact matching for the
+ * cases that support it without breaking on the shared household address that
+ * every church has.
+ */
+export const personIdentifiers = pgTable(
+  "person_identifiers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    // email | phone | church360 | pcusa_id | legacy
+    kind: text("kind").notNull(),
+    // Lowercased, trimmed; phones reduced to digits. Match on this, display the
+    // original from contact_methods.
+    valueNormalized: text("value_normalized").notNull(),
+    // Verified means we proved this person controls it (clicked a link, signed
+    // in), not merely that a church typed it in.
+    isVerified: boolean("is_verified").notNull().default(false),
+    // The household address two spouses share. Explicitly opts out of
+    // uniqueness rather than silently colliding.
+    isShared: boolean("is_shared").notNull().default(false),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    source: text("source"), // self_service | import | staff_entry
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("person_identifiers_person_idx").on(t.personId),
+    index("person_identifiers_lookup_idx").on(t.kind, t.valueNormalized),
+    // Unique ONLY where uniqueness is actually safe.
+    uniqueIndex("person_identifiers_verified_unique_idx")
+      .on(t.kind, t.valueNormalized)
+      .where(sql`is_verified and not is_shared`),
+  ],
+);
+
 export const households = pgTable(
   "households",
   {
@@ -203,6 +257,17 @@ export const memberships = pgTable(
   (t) => [
     // THE composite-FK target for org records about a person.
     unique("memberships_person_org_key").on(t.personId, t.organizationId),
+    // A person is an ACTIVE member of exactly one congregation. The other three
+    // rolls may coexist elsewhere - an affiliate member is by definition an
+    // active member of another church (G-1.0403) - but two active memberships
+    // are constitutionally impossible.
+    //
+    // Only the global people model can express this. Under org-scoped people it
+    // was unenforceable, because the two memberships lived in different rows
+    // with no shared identity to constrain.
+    uniqueIndex("memberships_one_active_roll_idx")
+      .on(t.personId)
+      .where(sql`current_roll = 'active' and ended_on is null`),
     unique("memberships_id_org_key").on(t.id, t.organizationId),
     // Supports the person_visible_via_membership RLS policy's EXISTS.
     index("memberships_person_idx").on(t.personId),

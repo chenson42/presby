@@ -121,6 +121,18 @@ CREATE TABLE "people" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "person_identifiers" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"person_id" uuid NOT NULL,
+	"kind" text NOT NULL,
+	"value_normalized" text NOT NULL,
+	"is_verified" boolean DEFAULT false NOT NULL,
+	"is_shared" boolean DEFAULT false NOT NULL,
+	"verified_at" timestamp with time zone,
+	"source" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "person_relationships" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"person_id" uuid NOT NULL,
@@ -466,6 +478,7 @@ ALTER TABLE "memberships" ADD CONSTRAINT "memberships_household_fk" FOREIGN KEY 
 ALTER TABLE "memberships" ADD CONSTRAINT "memberships_org_unit_fk" FOREIGN KEY ("org_unit_id","organization_id") REFERENCES "public"."org_units"("id","organization_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "people" ADD CONSTRAINT "people_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "people" ADD CONSTRAINT "people_merged_into_id_people_id_fk" FOREIGN KEY ("merged_into_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "person_identifiers" ADD CONSTRAINT "person_identifiers_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_relationships" ADD CONSTRAINT "person_relationships_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_relationships" ADD CONSTRAINT "person_relationships_related_person_id_people_id_fk" FOREIGN KEY ("related_person_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "background_checks" ADD CONSTRAINT "background_checks_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -547,12 +560,16 @@ CREATE INDEX "addresses_person_idx" ON "addresses" USING btree ("person_id");-->
 CREATE INDEX "contact_methods_person_idx" ON "contact_methods" USING btree ("person_id");--> statement-breakpoint
 CREATE INDEX "contact_methods_value_idx" ON "contact_methods" USING btree (lower("value"));--> statement-breakpoint
 CREATE INDEX "households_org_name_idx" ON "households" USING btree ("organization_id","name");--> statement-breakpoint
+CREATE UNIQUE INDEX "memberships_one_active_roll_idx" ON "memberships" USING btree ("person_id") WHERE current_roll = 'active' and ended_on is null;--> statement-breakpoint
 CREATE INDEX "memberships_person_idx" ON "memberships" USING btree ("person_id");--> statement-breakpoint
 CREATE INDEX "memberships_org_roll_idx" ON "memberships" USING btree ("organization_id","current_roll");--> statement-breakpoint
 CREATE INDEX "memberships_org_household_idx" ON "memberships" USING btree ("organization_id","household_id");--> statement-breakpoint
 CREATE INDEX "memberships_org_engagement_idx" ON "memberships" USING btree ("organization_id","engagement_status");--> statement-breakpoint
 CREATE INDEX "people_name_idx" ON "people" USING btree ("last_name","first_name");--> statement-breakpoint
 CREATE INDEX "people_user_idx" ON "people" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "person_identifiers_person_idx" ON "person_identifiers" USING btree ("person_id");--> statement-breakpoint
+CREATE INDEX "person_identifiers_lookup_idx" ON "person_identifiers" USING btree ("kind","value_normalized");--> statement-breakpoint
+CREATE UNIQUE INDEX "person_identifiers_verified_unique_idx" ON "person_identifiers" USING btree ("kind","value_normalized") WHERE is_verified and not is_shared;--> statement-breakpoint
 CREATE INDEX "person_relationships_person_idx" ON "person_relationships" USING btree ("person_id");--> statement-breakpoint
 CREATE INDEX "background_checks_expiry_idx" ON "background_checks" USING btree ("organization_id","expires_on","status");--> statement-breakpoint
 CREATE INDEX "background_checks_org_person_idx" ON "background_checks" USING btree ("organization_id","person_id");--> statement-breakpoint

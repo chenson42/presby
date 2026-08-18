@@ -100,7 +100,8 @@ do $$
 declare
   t text;
   global_person_tables text[] := array[
-    'people', 'addresses', 'contact_methods', 'person_relationships'
+    'people', 'addresses', 'contact_methods', 'person_relationships',
+    'person_identifiers'
   ];
   col text;
 begin
@@ -195,25 +196,66 @@ end $$;
 revoke all on function presby_claim_person(text) from public;
 grant execute on function presby_claim_person(text) to presby_app;
 
--- Duplicate-detection matcher. Returns a score and the certificate-style
+-- Duplicate-detection matcher. Returns a confidence band and certificate-style
 -- minimal disclosure, never a person row.
+--
+-- Identifier evidence first, name evidence second. `exact` means a VERIFIED,
+-- non-shared identifier matched, which is the only case that can be trusted
+-- without a human looking: a shared household email would otherwise merge two
+-- spouses into one person.
 create or replace function presby_match_person(
-  p_last_name text, p_first_name text, p_date_of_birth date)
+  p_last_name text,
+  p_first_name text,
+  p_date_of_birth date,
+  p_identifiers jsonb default '[]'::jsonb   -- [{"kind":"email","value":"..."}]
+)
 returns table (person_id uuid, display_name text, confidence text)
 language sql security definer as $$
-  select p.id,
+  with candidates as (
+    -- Verified, unshared identifier: deterministic. Rank 1 is best.
+    select pi.person_id, 1 as rank
+      from person_identifiers pi
+      join jsonb_to_recordset(p_identifiers) as q(kind text, value text)
+        on q.kind = pi.kind and lower(q.value) = pi.value_normalized
+     where pi.is_verified and not pi.is_shared
+
+    union all
+
+    -- Unverified or shared identifier: a signal, never decisive.
+    select pi.person_id, 3
+      from person_identifiers pi
+      join jsonb_to_recordset(p_identifiers) as q(kind text, value text)
+        on q.kind = pi.kind and lower(q.value) = pi.value_normalized
+     where not (pi.is_verified and not pi.is_shared)
+
+    union all
+
+    -- Name plus date of birth.
+    select p.id,
+           case when p.date_of_birth is not distinct from p_date_of_birth
+                     and p_date_of_birth is not null
+                then 2 else 4 end
+      from people p
+     where lower(p.last_name) = lower(p_last_name)
+       and lower(p.first_name) = lower(p_first_name)
+  )
+  select c.person_id,
          left(p.first_name, 1) || '. ' || p.last_name,
-         case when p.date_of_birth is not distinct from p_date_of_birth
-              then 'high' else 'low' end
-    from people p
-   where lower(p.last_name) = lower(p_last_name)
-     and lower(p.first_name) = lower(p_first_name)
-     and p.merged_into_id is null
+         -- Explicit rank, not an alphabetical accident: 'low' must sort below
+         -- 'medium', which min() on the label would get backwards.
+         (array['exact','high','medium','low'])[min(c.rank)]
+    from candidates c
+    join people p on p.id = c.person_id
+   where p.merged_into_id is null
+   group by c.person_id, p.first_name, p.last_name
+   order by min(c.rank)
    limit 10;
 $$;
 
-revoke all on function presby_match_person(text, text, date) from public;
-grant execute on function presby_match_person(text, text, date) to presby_app;
+revoke all on function presby_match_person(text, text, date, jsonb) from public;
+grant execute on function presby_match_person(text, text, date, jsonb) to presby_app;
+
+
 
 -- transfer_certificates spans two orgs by design: the losing church issues and
 -- the receiving church claims by token.

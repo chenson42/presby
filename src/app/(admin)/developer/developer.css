@@ -447,3 +447,82 @@
     text-align: left;
   }
 }
+
+/* ── Table head: always visible, never behind a disclosure ────────────── */
+
+.reg__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.reg__cols-toggle {
+  margin-top: 0.9rem;
+}
+
+.reg__cols-toggle > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--iron);
+  border-bottom: 1px dotted var(--rule-strong);
+  padding-bottom: 1px;
+  width: fit-content;
+}
+
+.reg__cols-toggle > summary::-webkit-details-marker {
+  display: none;
+}
+
+.reg__cols-toggle > summary::before {
+  content: "+";
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--verdigris);
+}
+
+.reg__cols-toggle[open] > summary::before {
+  content: "−";
+}
+
+.reg__cols-toggle > summary:hover .reg__meta {
+  color: var(--ink);
+}
+
+/* ── Rendered diagram ─────────────────────────────────────────────────── */
+
+.reg__erd {
+  margin-top: 0.85rem;
+  padding: 1rem;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  overflow-x: auto;
+}
+
+.reg__erd:empty {
+  display: none;
+}
+
+.reg__erd svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.reg__erdSource {
+  margin-top: 0.6rem;
+}
+
+.reg__erdSource > summary {
+  cursor: pointer;
+  list-style: none;
+  width: fit-content;
+  border-bottom: 1px dotted var(--rule-strong);
+}
+
+.reg__erdSource > summary::-webkit-details-marker {
+  display: none;
+}

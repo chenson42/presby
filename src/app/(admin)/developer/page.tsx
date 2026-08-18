@@ -12,6 +12,7 @@ import {
   type TableDoc,
 } from "@/lib/dev-docs";
 import { TableFilter } from "./table-filter";
+import { Erd } from "./erd";
 import "./developer.css";
 
 export const metadata = {
@@ -143,15 +144,10 @@ export default async function DeveloperPage() {
               {module !== "platform (from starter)" && (
                 <div className="reg__entry">
                   <div className="reg__margin">relations</div>
-                  <details className="reg__body">
-                    <summary>
-                      <span className="reg__name">Entity diagram</span>
-                      <span className="reg__meta">mermaid</span>
-                    </summary>
-                    <pre className="reg__diagram">
-                      <code>{buildErd(tables, module)}</code>
-                    </pre>
-                  </details>
+                  <Erd
+                    chart={buildErd(tables, module)}
+                    id={module.replace(/[^a-z0-9]/gi, "")}
+                  />
                 </div>
               )}
 
@@ -175,15 +171,19 @@ export default async function DeveloperPage() {
                     )}
                   </div>
 
-                  <details className="reg__body">
-                    <summary>
+                  <div>
+                    {/* Name and description stay visible when collapsed: the
+                        register is meant to be read straight down, and a
+                        description you have to open is a description nobody
+                        reads. Only the column table folds away. */}
+                    <p className="reg__head">
                       <span className="reg__name">{t.name}</span>
                       <span className="reg__meta">
                         {t.columns.length} columns
                         {t.foreignKeys.length > 0 &&
                           ` · ${t.foreignKeys.length} refs`}
                       </span>
-                    </summary>
+                    </p>
 
                     {t.description ? (
                       <p className="reg__desc">{t.description}</p>
@@ -210,6 +210,12 @@ export default async function DeveloperPage() {
                       </div>
                     ))}
 
+                    <details className="reg__body reg__cols-toggle">
+                    <summary>
+                      <span className="reg__meta">
+                        Columns and relations
+                      </span>
+                    </summary>
                     <div className="reg__cols">
                       <table>
                         <thead>
@@ -259,7 +265,8 @@ export default async function DeveloperPage() {
                         ))}
                       </p>
                     )}
-                  </details>
+                    </details>
+                  </div>
                 </div>
               ))}
             </div>

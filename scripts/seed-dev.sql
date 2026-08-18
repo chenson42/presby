@@ -151,6 +151,83 @@ insert into roll_actions (organization_id, person_id, kind, effective_date, resu
   -- Still pending: this is the clerk's session-agenda worklist.
   ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000004', 'profession_of_faith', '2026-09-13', 'active', 34, 'pending', null, null, null);
 
+-- The pastor's membership at the PRESBYTERY needs an action behind it like any
+-- other. Caught by presby_roll_cache_drift(): the seed set a roll with no
+-- action to derive it from, which is exactly the inconsistency the detector
+-- exists to find.
+insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll,
+                          age_at_action, approval_status, minute_reference, approved_on)
+values ('11111111-1111-1111-1111-111111111111','c0000000-0000-0000-0000-000000000006',
+        'opening_balance','2015-08-01','active', 45,'approved','Imported baseline','2015-08-01');
+
+-- A dismissal recorded in error, then VOIDED. Invariant 4: corrections are new
+-- actions, never updates - so the read path has to exclude both the void and
+-- the action it cancels, and the report line must stay at zero.
+insert into roll_actions (id, organization_id, person_id, kind, effective_date, resulting_roll,
+                          age_at_action, approval_status, minute_reference, approved_on)
+values ('f1000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',
+        'c0000000-0000-0000-0000-000000000003','certificate_dismissed','2026-07-01', null,
+        42,'approved','Session 2026-07-05, item 2','2026-07-05');
+
+insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll,
+                          approval_status, minute_reference, approved_on, voids_action_id)
+values ('22222222-2222-2222-2222-222222222222','c0000000-0000-0000-0000-000000000003',
+        'void', '2026-08-09', null, 'approved',
+        'Session 2026-08-09, item 6 - recorded in error','2026-08-09',
+        'f1000000-0000-0000-0000-000000000001');
+
+-- ---------------------------------------------------------------------------
+-- Authorization fixture
+-- ---------------------------------------------------------------------------
+insert into permissions (key, module, description, sensitivity_tier) values
+  ('roll.propose','roll','Propose a roll action',1),
+  ('roll.approve','roll','Approve a roll action',1),
+  ('directory.view','directory','Browse the directory',1),
+  ('ledger.approve','ledger','Approve a disbursement',2),
+  ('pastoral.notes.view','pastoral','Read pastoral care notes',3)
+on conflict (key) do nothing;
+
+insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
+  ('f0000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',
+   'session_member','Session Member','constitutional',true),
+  ('f0000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222',
+   'property_chair','Property Committee Chair','custom',false);
+
+insert into app_role_permissions (role_id, permission_key) values
+  ('f0000000-0000-0000-0000-000000000001','roll.approve'),
+  ('f0000000-0000-0000-0000-000000000001','directory.view'),
+  ('f0000000-0000-0000-0000-000000000002','directory.view');
+
+-- Granted to the DERIVED Session group, not to a person. This is the F3 case:
+-- if the roster were a view rather than materialized rows, the resolver would
+-- find nobody here.
+insert into role_grants (organization_id, role_id, group_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000001',
+   'b0000000-0000-0000-0000-000000000001','2020-01-01');
+
+-- A direct grant, for contrast.
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000002',
+   'c0000000-0000-0000-0000-000000000002','2024-01-01');
+
+-- An administrative commission: the one case where a council reaches DOWN into
+-- a congregation. Its members are a group AT THE PRESBYTERY, which is why the
+-- resolver's third arm needs SECURITY DEFINER to see them (F26/F27).
+insert into group_types (id, organization_id, key, name) values
+  ('a0000000-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111111','committee','Committee');
+insert into groups (id, organization_id, group_type_id, name, membership_source) values
+  ('b0000000-0000-0000-0000-000000000005','11111111-1111-1111-1111-111111111111',
+   'a0000000-0000-0000-0000-000000000003','Commission on Alder Creek','managed');
+insert into group_memberships (organization_id, group_id, person_id, starts_on) values
+  ('11111111-1111-1111-1111-111111111111','b0000000-0000-0000-0000-000000000005',
+   'c0000000-0000-0000-0000-000000000006','2026-01-01');
+insert into administrative_commissions
+  (parent_org_id, target_org_id, scope, role_id, group_id, starts_on, ends_on, minute_reference)
+values ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222',
+        'original_jurisdiction','f0000000-0000-0000-0000-000000000001',
+        'b0000000-0000-0000-0000-000000000005','2026-01-01','2026-12-31',
+        'Presbytery 2026-01-15, item 9');
+
 insert into sasr_reports (organization_id, report_year, official_beginning_balance, computed_beginning_balance, ending_active, status) values
   ('22222222-2222-2222-2222-222222222222', 2025, 118, 116, 115, 'submitted'),
   -- D9: unmanaged org has no roll, so computed_beginning_balance is NULL.

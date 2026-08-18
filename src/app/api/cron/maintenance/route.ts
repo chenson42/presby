@@ -60,10 +60,27 @@ export async function GET(req: Request) {
       `),
     ]);
 
+  // F29: roll actions are routinely future-dated - a session approves a
+  // transfer effective at month end. The trigger that maintains
+  // memberships.current_roll fires when the action is APPROVED, but the correct
+  // answer changes on its EFFECTIVE DATE, and nothing writes that day. So the
+  // cache drifts with the passage of time and the directory shows a stale roll
+  // while every report shows the right one.
+  //
+  // A non-zero count here is normal on any day an action takes effect. A
+  // non-zero count that PERSISTS across runs means something else is wrong.
+  const rollReconcile = await db.execute(
+    sql`select presby_reconcile_current_roll() as fixed`,
+  );
+  const rolledForward = Number(
+    (rollReconcile.rows[0] as { fixed: number } | undefined)?.fixed ?? 0,
+  );
+
   const summary = {
     deletedPwdReset: pwdResetResult.rows.length,
     deletedEmailVerify: emailVerifyResult.rows.length,
     deletedTotpPending: totpPendingResult.rows.length,
+    rollCacheRolledForward: rolledForward,
   };
 
   // Structured log for ops observability (Vercel Function logs / Datadog).

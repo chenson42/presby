@@ -66,8 +66,13 @@ begin;
   select assert_eq((select count(*) from people where id = :ELDER), 0,
                    'presbytery: CANNOT see a congregation''s elder');
   select assert_eq((select count(*) from memberships), 1, 'presbytery: sees only its own membership');
-  select assert_eq((select count(*) from roll_actions), 0,
-                   'presbytery: CANNOT read a congregation''s roll actions');
+  -- The presbytery has roll actions of its OWN - a minister's membership sits
+  -- there (G-2.0502). What it must never see is a congregation's.
+  select assert_eq(
+    (select count(*) from roll_actions where organization_id <> :PRESBY), 0,
+    'presbytery: CANNOT read a congregation''s roll actions');
+  select assert_eq((select count(*) from roll_actions), 1,
+                   'presbytery: sees its own minister''s roll action');
 commit;
 
 -- ---------------------------------------------------------------------------
@@ -101,11 +106,19 @@ begin;
   end $$;
 rollback;
 
--- Pending rows are working state and must stay editable.
+-- Pending rows are working state and must stay editable. Creates its own row:
+-- a test that depends on seed state breaks the moment anyone works with the
+-- fixture by hand.
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update roll_actions set denial_reason = 'test' where approval_status = 'pending';
-  select assert_eq((select count(*) from roll_actions where denial_reason = 'test'), 1,
+  insert into roll_actions (organization_id, person_id, kind, effective_date,
+                            resulting_roll, approval_status)
+  values (:ALDER, :ELDER, 'other_gain', current_date, 'active', 'pending');
+  -- Targets only the row this test created; the seed carries its own pending
+  -- action and the assertion must not depend on how many exist.
+  update roll_actions set denial_reason = 'editable'
+   where approval_status = 'pending' and kind = 'other_gain';
+  select assert_eq((select count(*) from roll_actions where denial_reason = 'editable'), 1,
                    'pending roll action still editable');
 rollback;
 
@@ -242,3 +255,44 @@ rollback;
 \echo ' RLS suite complete. Every assertion above must say'
 \echo ' "pass" — and must have been run as presby_app.'
 \echo '======================================================'
+
+-- ---------------------------------------------------------------------------
+-- 10. The roll read path
+-- ---------------------------------------------------------------------------
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+
+  -- The cache and the replay must agree for today, or one of them is lying.
+  select assert_eq(
+    (select count(*) from presby_roll_cache_drift()),
+    0, 'roll: cache agrees with replay');
+
+  -- The replay answers "then", which the cache cannot. 2010 predates every
+  -- action in the fixture, including the 2011 baptism.
+  select assert_eq(
+    (select count(*) from memberships m
+      where presby_roll_as_of(m.person_id, :ALDER, '2010-01-01') is not null),
+    0, 'roll: nobody on the roll before the first recorded action');
+
+  -- ...and the baptized member WAS on the roll in 2015, years before the
+  -- imported opening balance, because her enrolment is its own action.
+  select assert_eq(
+    (select count(*) from memberships m
+      where presby_roll_as_of(m.person_id, :ALDER, '2015-01-01') = 'baptized'),
+    1, 'roll: replay finds the baptized member in 2015');
+
+  -- Voided actions must not count. A dismissal recorded in error and voided
+  -- leaves the member active and leaves the report line at zero.
+  select assert_eq(
+    (select count from presby_roll_changes(:ALDER, '2026-01-01', '2026-12-31')
+      where line = 'loss_certificate'),
+    0, 'roll: a voided dismissal does not appear in losses');
+
+  -- Total adherents is active + baptized + other participants. Affiliate is
+  -- reported separately and is deliberately not in that sum.
+  select assert_eq(
+    (select total_adherents from presby_roll_counts_as_of(:ALDER)),
+    (select active + baptized + other_participant
+       from presby_roll_counts_as_of(:ALDER)),
+    'roll: total adherents excludes affiliate members');
+commit;

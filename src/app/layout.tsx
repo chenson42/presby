@@ -3,9 +3,26 @@ import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Claude Code Starter",
+  title: {
+    default: "presby",
+    template: "%s · presby",
+  },
   description:
-    "Fork-and-go Next.js + Neon + NextAuth starter with admin, roles, TOTP 2FA, feature flags, and release notes.",
+    "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods.",
+  // OpenGraph is not decoration here. Church pages get shared into Facebook,
+  // group texts, and in-app browsers constantly, and a link with no preview
+  // reads as broken. It also silences third-party scripts (extensions, in-app
+  // webviews) that assume every page has og:type and call .content on the null
+  // returned by querySelector.
+  openGraph: {
+    type: "website",
+    siteName: "presby",
+    title: "presby",
+    description:
+      "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods.",
+  },
+  twitter: { card: "summary" },
+  robots: { index: false, follow: false }, // pre-release; revisit before launch
 };
 
 export default function RootLayout({

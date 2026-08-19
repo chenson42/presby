@@ -60,6 +60,11 @@ test.describe("Admin sign-in", () => {
     await expect(page.getByText(/welcome back/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /^sign out$/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /^sign in$/i })).toHaveCount(0);
+    // Regression for the P0.5 a7 primitive sweep: "Continue" is a real <a>
+    // wrapped in <Button asChild>, not a <button> — the E6 rule
+    // (docs/work-log/2026-08-19-brand-foundation.md). A bare <Button> here
+    // would change the accessible role and keyboard behavior silently.
+    await expect(page.getByRole("link", { name: /^continue$/i })).toBeVisible();
 
     // Click sign out, confirm we return to the signed-out variant.
     await page.getByRole("button", { name: /^sign out$/i }).click();

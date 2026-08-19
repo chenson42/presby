@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { updateProfile } from "./actions";
 
 export function ProfileForm({ name }: { name: string | null }) {
@@ -27,27 +30,21 @@ export function ProfileForm({ name }: { name: string | null }) {
   return (
     <form onSubmit={handleSubmit} className="mt-4 space-y-3">
       <div>
-        <label htmlFor="display-name" className="block text-sm font-medium">
-          Display name
-        </label>
-        <input
+        <Label htmlFor="display-name">Display name</Label>
+        <Input
           id="display-name"
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           maxLength={100}
           required
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          className="mt-1"
           placeholder="Your name"
         />
       </div>
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-      >
+      <Button type="submit" disabled={pending}>
         {pending ? "Saving…" : "Save name"}
-      </button>
+      </Button>
     </form>
   );
 }

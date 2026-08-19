@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { setFeedbackOptOut } from "@/app/(member)/feedback/actions";
 
 interface FeedbackOptOutToggleProps {
@@ -33,14 +34,16 @@ export function FeedbackOptOutToggle({ optedOut }: FeedbackOptOutToggleProps) {
         <p className="text-sm text-muted-foreground">
           The daily home page prompt is paused.
         </p>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={handleReEnable}
           disabled={isPending}
-          className="self-start rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted active:bg-muted/70 disabled:pointer-events-none disabled:opacity-50 transition-colors"
+          className="self-start"
         >
           {isPending ? "Saving…" : "Re-enable prompt"}
-        </button>
+        </Button>
       </div>
     );
   }

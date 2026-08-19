@@ -27,6 +27,16 @@ import { OrgSwitcher } from "@/components/shared/org-switcher";
  * nothing, and if the platform-admin column is unreachable the two platform
  * items are simply absent. Neither takes the page with it.
  */
+
+// The wordmark link, not a button: no border, no fill, no hover affordance.
+// rounded/px/font-semibold exist for the focus ring's hit area and the
+// logotype weight, not to imitate <Button>. Hoisted to a constant (rather
+// than inlined in the JSX below) so the ui-ok comment can sit on the line
+// directly above the flagged string — a JSX comment can't, without
+// rendering as literal page text.
+// ui-ok: wordmark link, styled for a focus ring and logotype weight, not a button imitation
+const WORDMARK_LINK_CLASS = "shrink-0 rounded-md px-1 py-1 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
 export async function GlobalNav({
   session,
   currentOrgSlug = null,
@@ -77,10 +87,7 @@ export async function GlobalNav({
         )}
       >
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
-          <Link
-            href="/"
-            className="shrink-0 rounded-md px-1 py-1 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
+          <Link href="/" className={WORDMARK_LINK_CLASS}>
             presby
           </Link>
           <OrgSwitcher

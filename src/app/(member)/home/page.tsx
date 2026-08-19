@@ -4,6 +4,7 @@ import { cachedAuth } from "@/lib/auth/cached-auth";
 import { db } from "@/lib/db";
 import { feedbackPromptState, whatsNewEntries } from "@/lib/db/schema";
 import { FEATURES } from "@/lib/permissions";
+import { Button } from "@/components/ui/button";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { FeedbackPromptCard } from "./feedback-prompt-card";
 
@@ -107,19 +108,13 @@ export default async function HomePage() {
           Quick links
         </h2>
         <div className="mt-3 flex flex-wrap gap-3">
-          <Link
-            href="/account"
-            className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
-          >
-            Account settings
-          </Link>
+          <Button asChild variant="outline">
+            <Link href="/account">Account settings</Link>
+          </Button>
           {isAdmin && (
-            <Link
-              href="/admin"
-              className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
-            >
-              Admin dashboard
-            </Link>
+            <Button asChild variant="outline">
+              <Link href="/admin">Admin dashboard</Link>
+            </Button>
           )}
         </div>
       </section>

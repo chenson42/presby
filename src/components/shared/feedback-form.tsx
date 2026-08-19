@@ -8,6 +8,9 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { submitFeedback } from "@/app/(member)/feedback/actions";
 import { APP_VERSION } from "@/lib/version";
 
@@ -62,13 +65,10 @@ export function FeedbackForm({ onSuccess }: FeedbackFormProps) {
     <form onSubmit={handleSubmit} className="mt-4 space-y-3">
       {/* Category */}
       <div>
-        <label
-          htmlFor="feedback-category"
-          className="block text-sm font-medium"
-        >
+        <Label htmlFor="feedback-category">
           Category{" "}
           <span className="font-normal text-muted-foreground">(optional)</span>
-        </label>
+        </Label>
         {/* "none" sentinel (empty string maps to null in the action) per ui-standards.md */}
         <select
           id="feedback-category"
@@ -97,10 +97,8 @@ export function FeedbackForm({ onSuccess }: FeedbackFormProps) {
 
       {/* Body */}
       <div>
-        <label htmlFor="feedback-body" className="block text-sm font-medium">
-          Message
-        </label>
-        <textarea
+        <Label htmlFor="feedback-body">Message</Label>
+        <Textarea
           id="feedback-body"
           value={body}
           onChange={(e) => setBody(e.target.value)}
@@ -108,7 +106,7 @@ export function FeedbackForm({ onSuccess }: FeedbackFormProps) {
           maxLength={2000}
           placeholder="What's on your mind?"
           disabled={isPending}
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
+          className="mt-1"
         />
         {/* Character counter */}
         <span
@@ -124,13 +122,9 @@ export function FeedbackForm({ onSuccess }: FeedbackFormProps) {
 
       {/* Actions — stacked on mobile, row on sm+ per Phase 3 spec */}
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-        <button
-          type="submit"
-          disabled={isSubmitDisabled}
-          className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 active:opacity-75 disabled:pointer-events-none disabled:opacity-50 transition-opacity"
-        >
+        <Button type="submit" disabled={isSubmitDisabled}>
           {isPending ? "Sending…" : "Send feedback"}
-        </button>
+        </Button>
       </div>
     </form>
   );

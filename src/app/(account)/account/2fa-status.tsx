@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 
 interface TwoFactorStatusPillProps {
   isEnrolled: boolean;
@@ -11,9 +12,12 @@ export function TwoFactorStatusPill({ isEnrolled }: TwoFactorStatusPillProps) {
     <div className="mt-4 flex items-center gap-3">
       {isEnrolled ? (
         <>
-          <span className="inline-flex items-center rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-300">
+          <Badge
+            variant="outline"
+            className="border-transparent bg-green-500/10 text-green-700 dark:text-green-300"
+          >
             Active
-          </span>
+          </Badge>
           <Link
             href="/account/2fa"
             className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
@@ -23,9 +27,12 @@ export function TwoFactorStatusPill({ isEnrolled }: TwoFactorStatusPillProps) {
         </>
       ) : (
         <>
-          <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+          <Badge
+            variant="outline"
+            className="border-transparent bg-amber-500/10 text-amber-700 dark:text-amber-300"
+          >
             Not set up
-          </span>
+          </Badge>
           <Link
             href="/account/2fa"
             className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"

@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { changePassword } from "./actions";
 
 export function PasswordForm() {
@@ -40,24 +43,20 @@ export function PasswordForm() {
   return (
     <form onSubmit={handleSubmit} className="mt-4 space-y-3">
       <div>
-        <label htmlFor="current-password" className="block text-sm font-medium">
-          Current password
-        </label>
-        <input
+        <Label htmlFor="current-password">Current password</Label>
+        <Input
           id="current-password"
           type="password"
           value={current}
           onChange={(e) => setCurrent(e.target.value)}
           required
           autoComplete="current-password"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          className="mt-1"
         />
       </div>
       <div>
-        <label htmlFor="new-password" className="block text-sm font-medium">
-          New password
-        </label>
-        <input
+        <Label htmlFor="new-password">New password</Label>
+        <Input
           id="new-password"
           type="password"
           value={next}
@@ -65,14 +64,12 @@ export function PasswordForm() {
           required
           minLength={8}
           autoComplete="new-password"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          className="mt-1"
         />
       </div>
       <div>
-        <label htmlFor="confirm-password" className="block text-sm font-medium">
-          Confirm new password
-        </label>
-        <input
+        <Label htmlFor="confirm-password">Confirm new password</Label>
+        <Input
           id="confirm-password"
           type="password"
           value={confirm}
@@ -80,16 +77,12 @@ export function PasswordForm() {
           required
           minLength={8}
           autoComplete="new-password"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          className="mt-1"
         />
       </div>
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-      >
+      <Button type="submit" disabled={pending}>
         {pending ? "Updating…" : "Change password"}
-      </button>
+      </Button>
     </form>
   );
 }

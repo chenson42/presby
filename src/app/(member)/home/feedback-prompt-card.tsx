@@ -21,6 +21,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { FeedbackForm } from "@/components/shared/feedback-form";
 import {
   snoozeFeedbackPrompt,
@@ -76,12 +77,7 @@ export function FeedbackPromptCard() {
         {/* "Share feedback" → Dialog with FeedbackForm */}
         <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen}>
           <Dialog.Trigger asChild>
-            <button
-              type="button"
-              className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 active:opacity-75 transition-opacity"
-            >
-              Share feedback
-            </button>
+            <Button type="button">Share feedback</Button>
           </Dialog.Trigger>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
@@ -105,14 +101,14 @@ export function FeedbackPromptCard() {
         </Dialog.Root>
 
         {/* "Not today" — snooze until tomorrow */}
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={handleSnooze}
           disabled={snoozePending || optOutPending}
-          className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted active:bg-muted/70 disabled:pointer-events-none disabled:opacity-50 transition-colors"
         >
           {snoozePending ? "Saving…" : "Not today"}
-        </button>
+        </Button>
 
         {/* "Stop asking" → AlertDialog confirm before opt-out */}
         <AlertDialog open={optOutAlertOpen} onOpenChange={setOptOutAlertOpen}>
@@ -134,11 +130,7 @@ export function FeedbackPromptCard() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Never mind</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleOptOut}
-                disabled={optOutPending}
-                className="bg-foreground text-background hover:opacity-90 disabled:opacity-50"
-              >
+              <AlertDialogAction onClick={handleOptOut} disabled={optOutPending}>
                 Yes, stop asking
               </AlertDialogAction>
             </AlertDialogFooter>

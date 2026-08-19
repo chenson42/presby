@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { requestEmailChange, cancelEmailChange } from "./actions";
 
 interface EmailFormProps {
@@ -63,26 +66,20 @@ export function EmailForm({ currentEmail, pendingEmail }: EmailFormProps) {
 
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
-          <label htmlFor="new-email" className="block text-sm font-medium">
-            New email address
-          </label>
-          <input
+          <Label htmlFor="new-email">New email address</Label>
+          <Input
             id="new-email"
             type="email"
             value={newEmail}
             onChange={(e) => setNewEmail(e.target.value)}
             required
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            className="mt-1"
             placeholder="you@example.com"
           />
         </div>
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-        >
+        <Button type="submit" disabled={pending}>
           {pending ? "Sending…" : "Request email change"}
-        </button>
+        </Button>
       </form>
     </div>
   );

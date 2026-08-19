@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
+import { Button } from "@/components/ui/button";
 
 export default async function Home() {
   const session = await auth();
@@ -32,32 +33,21 @@ export default async function Home() {
               await signOut({ redirectTo: "/" });
             }}
           >
-            <button
-              type="submit"
-              className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-            >
-              Sign out
-            </button>
+            <Button type="submit">Sign out</Button>
           </form>
         ) : (
-          <Link
-            href="/signin"
-            className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-          >
-            Sign in
-          </Link>
+          <Button asChild>
+            <Link href="/signin">Sign in</Link>
+          </Button>
         )}
         {signedIn ? (
           // /launch, not /home: it is the single post-authentication target and
           // it works out where this particular user belongs. A signed-in user
           // is entitled to read the front page, so this page never redirects
           // them (DECISION-034) — it offers the way in and nothing more.
-          <Link
-            href="/launch"
-            className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
-          >
-            Continue
-          </Link>
+          <Button asChild variant="outline">
+            <Link href="/launch">Continue</Link>
+          </Button>
         ) : null}
       </div>
     </main>

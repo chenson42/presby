@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { requestAccountDeletion } from "./actions";
 
 export function DeleteAccountButton() {
@@ -34,12 +35,9 @@ export function DeleteAccountButton() {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <button
-          type="button"
-          className="rounded-md border border-red-500/40 px-4 py-2 text-sm text-red-600 hover:bg-red-500/10"
-        >
+        <Button type="button" variant="destructive">
           Delete account
-        </button>
+        </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -54,7 +52,7 @@ export function DeleteAccountButton() {
           <AlertDialogAction
             onClick={handleConfirm}
             disabled={pending}
-            className="bg-red-600 text-white hover:bg-red-700"
+            variant="destructive"
           >
             {pending ? "Processing…" : "Yes, delete my account"}
           </AlertDialogAction>

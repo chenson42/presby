@@ -112,6 +112,31 @@ test.describe("Member home and routing invariants", () => {
     ).toHaveCount(0);
   });
 
+  // test 4b: /home's Quick Links stay real links after the P0.5 a7 primitive
+  // sweep — regression for the E6 rule (docs/work-log/2026-08-19-brand-foundation.md):
+  // a <Link> styled as a button must be <Button asChild><Link/></Button>, never
+  // a bare <Button>, or the accessible role and keyboard behavior change silently.
+  test("/home Quick Links render as accessible links, not buttons — regression for a7 primitive sweep", async ({ page }) => {
+    await page.goto("/signin");
+    await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
+    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
+    await page.getByRole("button", { name: /sign in with email/i }).click();
+    await page.waitForURL(
+      (u) => u.pathname !== "/signin" && u.pathname !== "/launch",
+      { timeout: 10_000 },
+    );
+
+    await page.goto("/home");
+    await expect(
+      page.getByRole("link", { name: "Account settings" }),
+      "Account settings should be a real link",
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Admin dashboard" }),
+      "Admin dashboard should be a real link, visible for an admin user",
+    ).toBeVisible();
+  });
+
   // test 5: member navigating directly to /admin is redirected to /access-pending
   test("member navigating directly to /admin is redirected to /access-pending", async ({ page }) => {
     await page.goto("/signin");

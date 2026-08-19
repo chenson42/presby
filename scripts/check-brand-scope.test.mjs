@@ -81,13 +81,18 @@ describe("E1 — emitter containment", () => {
   });
 });
 
-// ── E2 — emitter presence (dormant: every `required` is false) ──────────────
+// ── E2 — emitter presence (live for (org) as of commit c4, 2026-08-19;
+// still dormant for (public), which does not exist until P3) ───────────────
 
 describe("E2 — emitter presence", () => {
-  it("is dormant under the shipped allowlist — a bare org layout passes", () => {
-    const v = checkBrandScope([
-      f("src/app/(org)/o/[slug]/layout.tsx", "return <div>{children}</div>;"),
-    ]);
+  it("is still dormant for an emitter whose file does not exist — a synthetic stand-in for (public) passes", () => {
+    const emitters = [
+      { path: "src/app/(public)/site/[slug]/layout.tsx", required: false },
+    ];
+    const v = checkBrandScope(
+      [f("src/app/(public)/site/[slug]/layout.tsx", "return <div>{children}</div>;")],
+      { emitters },
+    );
     expect(v).toEqual([]);
   });
 
@@ -118,14 +123,47 @@ describe("E2 — emitter presence", () => {
     });
     expect(v).toEqual([]);
   });
+
+  // Live against the REAL (default) EMITTERS array as of commit c4
+  // (2026-08-19) — no `{ emitters }` override. `(org)/o/[slug]/layout.tsx`
+  // flipped to `required: true`; `(public)/site/[slug]/layout.tsx` stays
+  // `false` until P3 creates that file. This is the demonstration Note 11's
+  // shape asks for: failing before the marker exists, passing after —
+  // proven here rather than only against a synthetic override.
+  it("flags the real (org) layout under the default EMITTERS array if the marker is ever removed", () => {
+    const v = checkBrandScope([
+      f("src/app/(org)/o/[slug]/layout.tsx", "return <main>{children}</main>;"),
+    ]);
+    expect(rules(v)).toEqual(["E2"]);
+    expect(v[0].file).toBe("src/app/(org)/o/[slug]/layout.tsx");
+  });
+
+  it("passes under the default EMITTERS array now that the real layout renders the marker", () => {
+    const v = checkBrandScope([
+      f(
+        "src/app/(org)/o/[slug]/layout.tsx",
+        '<BrandTokens brand={orgBrand?.tokens ?? null} />\nreturn <main>{children}</main>;',
+      ),
+    ]);
+    expect(v).toEqual([]);
+  });
+
+  it("(public)/site/[slug]/layout.tsx stays dormant under the default array — no file, no violation", () => {
+    const v = checkBrandScope([
+      f("src/app/page.tsx", "export default function Home() { return null; }"),
+    ]);
+    expect(v).toEqual([]);
+  });
 });
 
 // ── E3 — no second emitter (live) ───────────────────────────────────────────
 
 describe("E3 — no second emitter", () => {
   it("flags a <style> element outside src/components/brand/", () => {
+    // page.tsx, not layout.tsx: layout.tsx is a required E2 emitter as of
+    // commit c4, and this fixture is testing E3 in isolation, not E2.
     const v = checkBrandScope([
-      f("src/app/(org)/o/[slug]/layout.tsx", "return <style>{css}</style>;"),
+      f("src/app/(org)/o/[slug]/page.tsx", "return <style>{css}</style>;"),
     ]);
     expect(rules(v)).toEqual(["E3"]);
   });

@@ -78,6 +78,22 @@ async function seedFlags() {
         "Org-level 2FA master switch. OFF = no user is TOTP-gated regardless of per-user column.",
       enabled: true,
     },
+    {
+      key: "ui.brand_theming",
+      // ON: gates whether (org) actually EMITS a per-organization brand
+      // (src/lib/brand/read-org-brand.ts) — never the /admin/organizations
+      // write/preview path, which works regardless (DECISION-003: a flag
+      // never gates a permission). Seeded ON — required for the e2e
+      // visual-parity fixture (e2e-alpha carries a brand row; see
+      // e2e/support/seed-orgs.ts) and matches this flag's own design intent
+      // as a ROLLBACK lever: it starts on, and an operator turns it off if a
+      // re-skin turns out unreadable for someone who cannot be seen in
+      // advance. Turning it off does not touch any organization_brands row —
+      // it is purely whether the per-org override is emitted.
+      description:
+        "Per-org brand emission in (org). OFF = every congregation renders the platform default regardless of what /admin/organizations has staged.",
+      enabled: true,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

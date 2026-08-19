@@ -176,7 +176,18 @@ export const VISUAL_ROUTES: VisualRoute[] = [
     path: "/o/e2e-alpha",
     storageState: "org-single",
     expectedStatus: 200,
-    note: "Active-relationship org portal stub.",
+    note: "Active-relationship org portal stub. Deliberately UNBRANDED — see E2E_BRANDED_ORG's comment in seed-orgs.ts for why alpha specifically must stay that way.",
+  },
+  {
+    path: "/o/e2e-presbytery",
+    storageState: "org-multi",
+    expectedStatus: 200,
+    note:
+      "BRANDED as of P0.5 commit c4 (e2e/support/seed-orgs.ts: " +
+      "E2E_BRANDED_ORG, seed #7a1f2b) — the one route in this manifest " +
+      "exercising real <BrandTokens> emission, not just the platform " +
+      "default. org-multi's second relationship makes this an active 'ok' " +
+      "route; e2e-alpha/beta/gamma stay unbranded.",
   },
   {
     path: "/o/e2e-beta",

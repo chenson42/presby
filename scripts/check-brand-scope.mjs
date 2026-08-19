@@ -13,17 +13,24 @@
  * IS the `:root`-scoped `<style>` element, so grep-presence and
  * behaviour-presence are one fact rather than two facts that can disagree.
  *
- * Four rules. E1, E3, C1 and, as of commit a8 (2026-08-19), C2 are live. E2
- * remains dormant and is flipped by a one-line edit here once `(public)`
- * exists:
+ * Four rules. E1, E3, C1 and, as of commit a8 (2026-08-19), C2 are live
+ * tree-wide. E2 went live for `(org)/o/[slug]/layout.tsx` at commit c4
+ * (2026-08-19) — that layout renders `<BrandTokens>` for real now. E2 stays
+ * dormant for `(public)/site/[slug]/layout.tsx` and is flipped by a one-line
+ * edit here once P3 creates that file:
  *
  *   E1 — emitter containment. `<BrandTokens` appears in no file outside
  *        EMITTERS. Live. At a1 it appears nowhere, so this is a ratchet placed
  *        before the thing it guards, which is the only time a ratchet is free.
  *   E2 — emitter presence. Each EMITTERS entry with `required: true` whose file
- *        exists must contain the marker. DORMANT: both flags are false. Slice c
- *        flips them. A route group added later is un-brandable by default until
- *        someone edits this array, which is the point.
+ *        exists must contain the marker. LIVE for `(org)/o/[slug]/layout.tsx`
+ *        as of commit c4 (2026-08-19) — that layout now renders
+ *        `<BrandTokens>` for real, and this rule is what stops a future edit
+ *        from silently deleting it. Still DORMANT for `(public)/site/[slug]`:
+ *        P3 has not created that file yet, so `required: true` there would
+ *        fail on a file that does not exist rather than guard anything. A
+ *        route group added later is un-brandable by default until someone
+ *        edits this array, which is the point.
  *   E3 — no second emitter. No file under src/ outside src/components/brand/
  *        may contain `<style` or `dangerouslySetInnerHTML=`. Live, at zero
  *        violations today. This is what stops someone copy-pasting the <style>
@@ -71,9 +78,13 @@ const SRC = path.join(ROOT, "src");
 
 // ── The allowlists ───────────────────────────────────────────────────────────
 
-/** The only two layouts that may emit the brand. `required` flips in slice c. */
+/**
+ * The only two layouts that may emit the brand. `(org)`'s `required` flipped
+ * to `true` at commit `c4` (2026-08-19) — see E2 below. `(public)`'s stays
+ * `false`: P3 has not created that file yet.
+ */
 export const EMITTERS = [
-  { path: "src/app/(org)/o/[slug]/layout.tsx", required: false },
+  { path: "src/app/(org)/o/[slug]/layout.tsx", required: true },
   { path: "src/app/(public)/site/[slug]/layout.tsx", required: false },
 ];
 
@@ -283,8 +294,13 @@ if (isMain) {
     process.exit(1);
   }
 
+  const dormantEmitters = EMITTERS.filter((e) => !e.required).map(
+    (e) => e.path,
+  );
   const dormant = [
-    ...(EMITTERS.every((e) => !e.required) ? ["E2 (no required emitter yet)"] : []),
+    ...(dormantEmitters.length
+      ? [`E2 for ${dormantEmitters.join(", ")} (file does not exist yet)`]
+      : []),
     ...(C2_ENABLED ? [] : ["C2 (turned on at commit a8)"]),
   ];
   console.log(

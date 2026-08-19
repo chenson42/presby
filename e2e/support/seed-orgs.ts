@@ -110,6 +110,35 @@ export const E2E_ORGS = {
  */
 export const E2E_ENDED_ON = "2026-03-31";
 
+/**
+ * The ONE branded fixture organization, and its invented seed colour.
+ *
+ * `presbytery` (e2e-presbytery) — NOT `alpha` (e2e-alpha). `alpha` looked
+ * like the obvious choice (it is already `/o/e2e-alpha`, the "active-
+ * relationship org portal stub" route `e2e/support/routes.ts` walks) and
+ * branding it first is exactly the mistake this comment exists to head off:
+ * `e2e/admin-organizations.spec.ts` (P0.5 commit `c3`) hard-codes `alpha` as
+ * the PERMANENTLY-unbranded fixture for its "still on default palette" OQ4
+ * filter test and its "never-branded" detail-page test, and branding it here
+ * broke both — caught by running the full suite, not reasoned about in
+ * advance. `presbytery` has no other spec asserting anything about its brand
+ * state, and `org-multi`'s SECOND relationship (see `firstMemberships` /
+ * the presbytery DO block below) is already active there, so `/o/e2e-
+ * presbytery` is a real, enterable "ok" route for an existing fixture user —
+ * no new person, user, or storageState needed. `beta` (org-ended) and
+ * `gamma` (unmanaged) were considered and rejected for a different reason:
+ * neither ever reaches the "ok" branch of `resolveOrgContext()`, so a brand
+ * row on either would never actually render anywhere — branding them would
+ * prove nothing.
+ *
+ * A deep maroon, nowhere near the platform's `hsl(221 83% 53%)` blue, so a
+ * branded vs. unbranded screenshot is unmistakable at a glance even before
+ * reading any computed style. Invented, per CLAUDE.md → No Real Data — no
+ * real congregation's actual colour.
+ */
+export const E2E_BRANDED_ORG = E2E_ORGS.presbytery;
+export const E2E_BRAND_SEED_HEX = "#7a1f2b";
+
 /** One `people` row per organization fixture user, with a stable id. */
 const FIXTURE_PEOPLE: Array<{
   id: string;
@@ -306,10 +335,35 @@ export async function seedE2EOrgs(platformDbUrl: string): Promise<void> {
     $seed$;
   `);
 
+  // The ONE branded fixture (P0.5 slice c, commit c4) — e2e-alpha only. See
+  // E2E_BRANDED_ORG's comment above for why this org and not a new one, and
+  // why beta/gamma/presbytery are deliberately untouched. `updated_by` needs
+  // a real `users.id`; the seeded platform admin already exists by this
+  // point in globalSetup (seedE2EUsers runs first).
+  const adminUserId = await userIdByEmail(sql, E2E_USERS.admin.email);
+  await sql`
+    INSERT INTO organization_brands
+      (organization_id, seed_hex, type_pairing, brand_token_version, updated_by)
+    VALUES (
+      ${E2E_BRANDED_ORG.id}::uuid,
+      ${E2E_BRAND_SEED_HEX},
+      'classic',
+      1,
+      ${adminUserId}::uuid
+    )
+    ON CONFLICT (organization_id) DO UPDATE SET
+      seed_hex            = EXCLUDED.seed_hex,
+      type_pairing        = EXCLUDED.type_pairing,
+      brand_token_version = EXCLUDED.brand_token_version,
+      updated_by          = EXCLUDED.updated_by,
+      updated_at          = now()
+  `;
+
   console.log(
     `[seed-orgs] provisioned ${Object.keys(E2E_ORGS).length} organizations ` +
       `(${Object.values(E2E_ORGS)
         .map((o) => o.slug)
-        .join(", ")}) and ${FIXTURE_PEOPLE.length} relationships`,
+        .join(", ")}), ${FIXTURE_PEOPLE.length} relationships, and a brand ` +
+      `on ${E2E_BRANDED_ORG.slug}`,
   );
 }

@@ -41,6 +41,7 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 | `admin@presby.invalid` | Platform admin, no congregation | `/admin` |
 | `member@presby.invalid` | Platform member, no congregation | `/no-organization` |
 | `admin-2fa@presby.invalid` | Admin with 2FA required, **not enrolled** | `/totp` → `/account/2fa` to enrol |
+| `admin-2fa-enrolled@presby.invalid` | Admin with 2FA required, **already enrolled** (fixed test secret, see `e2e/support/totp-fixture.ts`) | `/totp`, and a real 6-digit code lands it on `/admin` |
 | `org1@presby.invalid` | One congregation | straight into `/o/e2e-alpha` — no chooser |
 | `org1-org2@presby.invalid` | A congregation **and** a presbytery | the chooser, two cards |
 | `org3-unmanaged@presby.invalid` | Only an `unmanaged` congregation | `/no-organization` |

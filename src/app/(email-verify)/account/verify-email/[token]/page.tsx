@@ -16,6 +16,7 @@ import { AUDIT_ACTIONS } from "@/lib/audit";
 import { isUniqueViolation } from "@/lib/db/errors";
 import { revalidatePath } from "next/cache";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 function sha256Hex(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
@@ -114,12 +115,9 @@ function ErrorCard({ message }: { message: string }) {
       <div className="w-full max-w-md rounded-lg border border-border bg-background p-8 text-center shadow-sm">
         <h1 className="text-xl font-semibold">Email verification failed</h1>
         <p className="mt-3 text-sm text-muted-foreground">{message}</p>
-        <Link
-          href="/account"
-          className="mt-6 inline-block rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
-        >
-          Back to account settings
-        </Link>
+        <Button asChild className="mt-6">
+          <Link href="/account">Back to account settings</Link>
+        </Button>
       </div>
     </div>
   );

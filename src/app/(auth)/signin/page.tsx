@@ -1,6 +1,7 @@
 import { signIn } from "@/auth";
 import { sanitizeCallbackUrl } from "@/lib/auth/safe-callback";
 import { isLocalLoginEnabled } from "@/lib/auth/local-login";
+import { Button } from "@/components/ui/button";
 import { SignInCredentialsForm } from "./signin-credentials-form";
 
 export default async function SignInPage({
@@ -39,12 +40,9 @@ export default async function SignInPage({
         }}
         className="mt-6"
       >
-        <button
-          type="submit"
-          className="w-full rounded-md border border-border bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-        >
+        <Button type="submit" className="w-full">
           Sign in with Google
-        </button>
+        </Button>
       </form>
 
       {localLoginEnabled && (

@@ -24,6 +24,7 @@ export type E2ERole =
   | "admin"
   | "member"
   | "mfa-admin"
+  | "mfa-enrolled"
   /**
    * The three organization fixtures. They carry NO platform role — that is the
    * point: the post-login router's interesting rows are about congregations,
@@ -46,8 +47,11 @@ export interface E2EUser {
   roleName: "admin" | "member" | null;
   /**
    * Seeded value of users.two_factor_required. The mfa-admin fixture is the
-   * only one that carries `true`, and it is intentionally left WITHOUT a TOTP
-   * enrolment so the redirect-to-enrol gate is what the specs observe.
+   * only one that carries `true` and stays un-enrolled, so the redirect-to-enrol
+   * gate is what its specs observe. mfa-enrolled also carries `true`, but —
+   * unlike mfa-admin — seed-users.ts gives it a real, decryptable TOTP secret
+   * (see totp-fixture.ts), because it exists to prove the *other* half of the
+   * gate: a full login that completes a real TOTP challenge.
    */
   twoFactorRequired: boolean;
 }
@@ -76,6 +80,20 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
     email: "admin-2fa@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E MFA Admin",
+    roleName: "admin",
+    twoFactorRequired: true,
+  },
+  // Required AND enrolled — the CLAUDE.md Phase 4 auth-e2e gate's fixture.
+  // seed-users.ts gives this one (and only this one) a real TOTP secret via
+  // totp-fixture.ts, so totp-full-login.spec.ts can complete an actual
+  // challenge rather than just proving the redirect-to-enrol gate mfa-admin
+  // proves. Same admin role and org-less shape as `admin`, so the post-login
+  // destination is identical (/admin) once the code is verified.
+  "mfa-enrolled": {
+    role: "mfa-enrolled",
+    email: "admin-2fa-enrolled@presby.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E MFA Enrolled Admin",
     roleName: "admin",
     twoFactorRequired: true,
   },

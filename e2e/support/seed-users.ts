@@ -20,6 +20,7 @@
 import { neon } from "@neondatabase/serverless";
 import bcrypt from "bcryptjs";
 import { E2E_USER_LIST, type E2EUser } from "./users";
+import { seedTotpEnrollment } from "./totp-fixture";
 
 /**
  * Reserved TLD (RFC 2606) — it can never resolve, so a fixture address can
@@ -98,11 +99,15 @@ async function provision(sql: Sql, user: E2EUser): Promise<void> {
     `;
   }
 
-  // The mfa-admin fixture must stay un-enrolled: its whole purpose is to prove
-  // that a user who is REQUIRED to have 2FA but has not enrolled gets sent to
-  // enrolment. An enrolment left behind by a previous run would silently
+  // mfa-enrolled is the one fixture that DOES get a real, decryptable TOTP
+  // secret — see totp-fixture.ts. Every other required-2FA fixture (currently
+  // just mfa-admin) must stay un-enrolled: its whole purpose is to prove that
+  // a user who is REQUIRED to have 2FA but has not enrolled gets sent to
+  // enrolment, and an enrolment left behind by a previous run would silently
   // invalidate that assertion.
-  if (user.twoFactorRequired) {
+  if (user.role === "mfa-enrolled") {
+    await seedTotpEnrollment(sql, userId);
+  } else if (user.twoFactorRequired) {
     await sql`DELETE FROM user_totp WHERE user_id = ${userId}`;
     await sql`DELETE FROM user_totp_pending_enrollments WHERE user_id = ${userId}`;
   }

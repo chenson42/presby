@@ -5,6 +5,9 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { requestPasswordReset } from "../actions";
 import { Turnstile } from "@/components/shared/turnstile";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const siteKeySet = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
@@ -46,12 +49,9 @@ export default function ForgotPasswordPage() {
             has been sent. The link expires in 60 minutes.
           </p>
           <div className="mt-6 flex flex-col gap-3">
-            <Link
-              href="/signin"
-              className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-            >
-              Back to sign in
-            </Link>
+            <Button asChild>
+              <Link href="/signin">Back to sign in</Link>
+            </Button>
             <button
               type="button"
               onClick={() => {
@@ -78,10 +78,8 @@ export default function ForgotPasswordPage() {
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div>
-          <label htmlFor="forgot-email" className="block text-sm font-medium">
-            Email
-          </label>
-          <input
+          <Label htmlFor="forgot-email">Email</Label>
+          <Input
             id="forgot-email"
             name="email"
             type="email"
@@ -90,7 +88,7 @@ export default function ForgotPasswordPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             disabled={isSubmitting}
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+            className="mt-1"
             placeholder="you@example.com"
           />
         </div>
@@ -99,13 +97,13 @@ export default function ForgotPasswordPage() {
           onExpire={() => setTurnstileToken("")}
           onError={() => setTurnstileToken("")}
         />
-        <button
+        <Button
           type="submit"
           disabled={isSubmitting || (siteKeySet && !turnstileToken)}
-          className="w-full rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-60"
+          className="w-full"
         >
           {isSubmitting ? "Sending…" : "Send reset link"}
-        </button>
+        </Button>
       </form>
 
       <p className="mt-6 text-sm text-muted-foreground">

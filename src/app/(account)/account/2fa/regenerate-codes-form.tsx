@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { regenerateRecoveryCodes } from "./actions";
 
 export function RegenerateCodesForm() {
@@ -44,13 +45,9 @@ export function RegenerateCodesForm() {
 
   return (
     <form onSubmit={handleSubmit} className="mt-3">
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
-      >
+      <Button type="submit" variant="outline" size="sm" disabled={pending}>
         {pending ? "Regenerating…" : "Regenerate recovery codes"}
-      </button>
+      </Button>
       <p className="mt-2 text-xs text-muted-foreground">
         Replaces every existing code. The new set is shown once — save them
         before leaving the page.

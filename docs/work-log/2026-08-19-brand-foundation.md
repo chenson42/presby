@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3`, `a4`, `a5` complete**; next: `a6` (credential surfaces, auth e2e gate), `a7`, `a8` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified · `a5` `(admin)` sweep, 14 files, 28 violations cleared, 87 e2e, every visual diff attributed | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3`, `a4`, `a5`, `a6` complete**; next: `a7` (member + shared), then `a8` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified · `a5` `(admin)` sweep, 14 files, 28 violations cleared, 87 e2e, every visual diff attributed · `a6` credential sweep, mandatory auth e2e gate PASS (88/88, new MFA-enrolled fixture built for it), 12/12 visual diffs attributed | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1388,5 +1388,72 @@ exists to preserve the subtler original.
 hand-roll `@radix-ui/react-dialog` for destructive confirmations rather than the
 `AlertDialog` primitive `a4` regenerated for exactly this — out of scope for a markup
 sweep (different focus-trap semantics), left for its own pass.
+
+*Recorded by the orchestrator from the implementing agent's report.*
+
+---
+
+# Phase 4 · commit `a6` — credential-surface sweep + the mandatory auth e2e gate (ux-developer)
+
+**Date:** 2026-08-19
+
+**Scope:** `(auth)` (signin, totp), `(password-reset)`, `(email-verify)`,
+`(account)/account/2fa/*` (enrolment UI only). C2 census: 11 violations across 10
+files, all cleared onto `<Button>`/`<Input>`/`<Label>` (no `<Table>`/`<Textarea>`/
+`<Badge>` consumers in this scope); flag reverted, confirmed empty diff.
+
+**Named consequence, not discovered late:** every hand-rolled `bg-foreground
+text-background` "primary" button (Google sign-in, Verify, the two password-reset
+submits, Confirm enrollment) now renders in brand-primary blue via `<Button>`'s
+default variant — the direct effect of S15's "primary buttons are brand-driven"
+rather than an override, matching `a5`'s destructive-button precedent.
+
+**E6 hit three times:** the three success/error-state "back to X" links on
+`forgot-password`, `reset-password` (invalid-token), and the verify-email `ErrorCard`
+— all `<Button asChild><Link/></Button>`, `role="link"` preserved.
+
+**One incidental accessibility fix, named rather than silently bundled:** the TOTP
+code fields on `/totp` and `/account/2fa`'s enrolment form had no `htmlFor`/`id`
+pairing before this commit — added while migrating onto `<Label>`+`<Input>`. No
+existing `aria-*`, `autoComplete`, `autoFocus`, or `name` attribute touched anywhere
+in scope; no copy string changed. Verified directly by diff review (`reset-password`,
+`totp`) — every preserved attribute intact, only geometry classes deleted.
+
+**Deliberately not touched:** the Turnstile widget; every palette-literal alert box
+(the tracked 47-site status-token gap); `fresh-recovery-codes.tsx` (lives in
+`shared/`, `a7`'s scope); the QR `<details>`/`<summary>` disclosure (CLAUDE.md names
+a `<summary>`/`display` bug specifically — not touched casually).
+
+### The mandatory auth-e2e gate — PASS, not deferred
+
+No existing spec completed a real TOTP challenge — every prior fixture using
+`twoFactorRequired` was deliberately un-enrolled, proving only the redirect gate.
+Rather than report the gate unsatisfiable, the implementer built what it needed:
+
+- **New fixture `mfa-enrolled`** (`admin-2fa-enrolled@presby.invalid`) — actually
+  TOTP-enrolled, unique among the roster.
+- **`e2e/support/totp-fixture.ts`** — seeds a real, decryptable secret using the
+  well-known public TOTP demo value (doubled), duplicating `two-factor.ts`'s
+  AES-256-GCM format rather than importing it (the standing e2e/no-app-imports
+  rule). **Verified not a real credential** — it's the value most TOTP client
+  library READMEs use as their own example.
+- **`e2e/totp-full-login.spec.ts`** — credentials sign-in → `/totp` → wrong code
+  rejected → real code (computed via `otplib` from the same seed) accepted → lands
+  on `/admin`.
+- **Ran against the production build, 88/88 passed**, including the new spec. All
+  four gate requirements proven in one test: password sign-in, a completed MFA
+  challenge, correct post-login destination, wrong-code rejection.
+
+### Verification
+
+typecheck, lint clean · vitest **656 passed** (unchanged — no unit surface touched) ·
+`npm run check` all four tripwires, C2 confirmed dormant · build clean, 34 routes ·
+**visual: 60/72 passed, 12 diffs, every one on the three swept routes present in the
+manifest** (`/signin`, `/forgot-password`, `/account/2fa`; `/totp` and
+`/reset-password` aren't in the visual manifest), confirmed by inspecting the diff
+PNGs as stock Label/Input/Button geometry with no structural shift — `/account/2fa`'s
+QR-TTL noise didn't manifest this cycle (timing-dependent, unrelated to this commit)
+· **full e2e: 88 passed** (87 + the new gate spec) · browser pass at 360px, both
+schemes, five routes — no overflow, QR plate's `bg-white` preserved in dark mode.
 
 *Recorded by the orchestrator from the implementing agent's report.*

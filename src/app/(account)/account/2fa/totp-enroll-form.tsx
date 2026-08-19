@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { completeEnrollment } from "./actions";
 
 interface TotpEnrollFormProps {
@@ -120,10 +123,11 @@ export function TotpEnrollForm({
       </p>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-3">
-        <label className="block text-sm font-medium">
+        <Label htmlFor="totp-enroll-code">
           Enter the 6-digit code from your app
-        </label>
-        <input
+        </Label>
+        <Input
+          id="totp-enroll-code"
           type="text"
           inputMode="numeric"
           pattern="[0-9]{6}"
@@ -131,16 +135,12 @@ export function TotpEnrollForm({
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
           required
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-base tracking-widest"
+          className="tracking-widest"
           placeholder="123456"
         />
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-        >
+        <Button type="submit" disabled={pending}>
           {pending ? "Verifying…" : "Confirm enrollment"}
-        </button>
+        </Button>
       </form>
     </div>
   );

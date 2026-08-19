@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { consumeResetToken } from "../actions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 // Inner component that reads useSearchParams — must be inside a Suspense boundary.
 function ResetPasswordForm() {
@@ -26,12 +29,9 @@ function ResetPasswordForm() {
           <p className="mt-3 text-sm text-muted-foreground">
             No reset token was found. Request a new password reset link.
           </p>
-          <Link
-            href="/forgot-password"
-            className="mt-6 inline-block rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-          >
-            Request a new link
-          </Link>
+          <Button asChild className="mt-6">
+            <Link href="/forgot-password">Request a new link</Link>
+          </Button>
         </div>
       </div>
     );
@@ -78,10 +78,8 @@ function ResetPasswordForm() {
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div>
-          <label htmlFor="new-password" className="block text-sm font-medium">
-            New password
-          </label>
-          <input
+          <Label htmlFor="new-password">New password</Label>
+          <Input
             id="new-password"
             name="newPassword"
             type="password"
@@ -91,17 +89,12 @@ function ResetPasswordForm() {
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             disabled={isSubmitting}
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+            className="mt-1"
           />
         </div>
         <div>
-          <label
-            htmlFor="confirm-password"
-            className="block text-sm font-medium"
-          >
-            Confirm new password
-          </label>
-          <input
+          <Label htmlFor="confirm-password">Confirm new password</Label>
+          <Input
             id="confirm-password"
             name="confirmPassword"
             type="password"
@@ -111,16 +104,12 @@ function ResetPasswordForm() {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             disabled={isSubmitting}
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+            className="mt-1"
           />
         </div>
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-60"
-        >
+        <Button type="submit" disabled={isSubmitting} className="w-full">
           {isSubmitting ? "Updating…" : "Set new password"}
-        </button>
+        </Button>
       </form>
 
       <p className="mt-6 text-sm text-muted-foreground">

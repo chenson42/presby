@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { userTotp } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { sanitizeCallbackUrl } from "@/lib/auth/safe-callback";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { verifyTotpAction } from "./actions";
 
 export default async function TotpPage({
@@ -32,14 +35,13 @@ export default async function TotpPage({
       <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
       <form action={verifyTotpAction} className="mt-6 space-y-3">
         <input type="hidden" name="callbackUrl" value={callbackUrl} />
-        <label className="block text-sm font-medium">
-          6-digit code or recovery code
-        </label>
-        <input
+        <Label htmlFor="totp-token">6-digit code or recovery code</Label>
+        <Input
+          id="totp-token"
           name="token"
           autoComplete="one-time-code"
           required
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-base tracking-widest"
+          className="tracking-widest"
           placeholder="123456 or ABCD-EFGH"
           autoFocus
         />
@@ -53,12 +55,9 @@ export default async function TotpPage({
             Too many attempts. Please wait a moment before trying again.
           </p>
         )}
-        <button
-          type="submit"
-          className="w-full rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
-        >
+        <Button type="submit" className="w-full">
           Verify
-        </button>
+        </Button>
       </form>
     </main>
   );

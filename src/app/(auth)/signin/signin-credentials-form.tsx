@@ -3,6 +3,9 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Turnstile } from "@/components/shared/turnstile";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { signInWithCredentials } from "./actions";
 
 // Evaluated at module scope — accessible in 'use client' for bundle-time baking.
@@ -49,10 +52,8 @@ export function SignInCredentialsForm({ callbackUrl }: Props) {
         </p>
       )}
       <div>
-        <label htmlFor="signin-email" className="block text-sm font-medium">
-          Email
-        </label>
-        <input
+        <Label htmlFor="signin-email">Email</Label>
+        <Input
           id="signin-email"
           name="email"
           type="email"
@@ -61,15 +62,13 @@ export function SignInCredentialsForm({ callbackUrl }: Props) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           disabled={isPending}
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+          className="mt-1"
           placeholder="admin@claudecode.info"
         />
       </div>
       <div>
-        <label htmlFor="signin-password" className="block text-sm font-medium">
-          Password
-        </label>
-        <input
+        <Label htmlFor="signin-password">Password</Label>
+        <Input
           id="signin-password"
           name="password"
           type="password"
@@ -78,7 +77,7 @@ export function SignInCredentialsForm({ callbackUrl }: Props) {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           disabled={isPending}
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-60"
+          className="mt-1"
         />
       </div>
       <Turnstile
@@ -86,13 +85,14 @@ export function SignInCredentialsForm({ callbackUrl }: Props) {
         onExpire={() => setTurnstileToken("")}
         onError={() => setTurnstileToken("")}
       />
-      <button
+      <Button
         type="submit"
+        variant="outline"
         disabled={submitDisabled}
-        className="w-full rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-60"
+        className="w-full"
       >
         {isPending ? "Signing in…" : "Sign in with email"}
-      </button>
+      </Button>
       <div className="text-right">
         <Link
           href="/forgot-password"

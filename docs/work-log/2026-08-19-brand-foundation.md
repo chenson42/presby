@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3` complete**; next: `a4`, then the sweep | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3`, `a4` complete**; next: the sweep (`a5`–`a7`), then `a8` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1275,3 +1275,54 @@ observable (declared `color-scheme` moved nothing in this browser/OS).
 3000 and blocked the e2e webServer; killed to unblock.
 
 *Recorded by the orchestrator from the implementing agent's report.*
+
+---
+
+# Phase 4 · commit `a4` — primitives (ux-developer, verification finished by the orchestrator)
+
+**Date:** 2026-08-19
+
+**Generated** `table.tsx`, `input.tsx`, `label.tsx`, `textarea.tsx` via `npm run
+ui:add` (no new packages — `@radix-ui/react-label` was already installed).
+**Regenerated** `alert-dialog.tsx` on `@radix-ui/react-alert-dialog` (pre-approved,
+DECISION-036, installed with the a3 stash dance) — import-compatible: all three
+consumers (`(account)/account/delete-button.tsx`, `(member)/home/feedback-prompt-card.tsx`,
+`(admin)/admin/whats-new/delete-button.tsx`) keep the same component names, verified.
+**Cleaned** `button.tsx`/`badge.tsx`: the four dead size variants and the
+`data-variant`/`data-size` attributes deleted (grep-verified zero consumers first);
+`focus-visible:ring-offset-2 focus-visible:ring-offset-background` added to button,
+badge, and input (D4's structural half); `dark:bg-destructive/60` dropped (an alpha
+composite is uncheckable against `LEGAL_PAIRS`, and the corrected dark token clears
+its floor solid). Every divergence recorded in header comments, dropdown-menu-style.
+No call-site changes outside alert-dialog's three consumers; the new primitives land
+unused.
+
+**The C2 demonstration (Phase 3 Note 11).** Flag flipped on temporarily: exit 1,
+**exactly 52 `[C2]` violations** — matching a1's dry-run census — including
+`src/components/shared/org-switcher.tsx:99` as a representative hit; flag reverted to
+dormant, `npm run check` passes again. The failing half of failing-at-`a4` /
+passing-at-`a8` is now on record.
+
+**Verification** (finished by the orchestrator after the implementing agent was lost
+to a stream-watchdog stall twice during the long screenshot runs — the implementation
+itself was complete and intact):
+- typecheck, lint clean · vitest **656 passed** · `npm run check` all four tripwires ·
+  build clean.
+- **Visual parity vs the pre-`a4` baseline: no attributable pixel delta.** 67/72
+  passed outright; `/account/2fa` ×4 is the known TOTP-QR TTL drift (filed at `a3`);
+  the single `/signin` 360-light failure was a `networkidle` goto timeout, not a
+  pixel diff (no diff artifact produced), and re-running all four `/signin` combos
+  passed 4/4 against the same baseline — transient.
+- **Full e2e: 86 passed** — the E6 risk (link-as-button role changes) did not
+  manifest; no locator broke.
+- **E7 manual pass on the delete-account dialog** (production build, member fixture):
+  `role="alertdialog"` present, focus trapped inside, outside click does NOT close,
+  Escape closes. The stricter semantics are the intended behaviour change for a
+  destructive confirmation.
+
+**Note for the `a5` implementer (E5):** the new `<Table>` wraps in
+`<div class="relative w-full overflow-x-auto">` — check the widest table
+(`/admin/users`, six columns) at 360px for nested scroll regions before assuming the
+wrapper is free.
+
+*Recorded by the orchestrator; implementation by the ux-developer agent.*

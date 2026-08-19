@@ -32,8 +32,8 @@ prose lines against real primitives.
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
 | 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | **Complete** — all ten commits (`0.1`, `0.2`, `a1`–`a8`) landed 2026-08-19 | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified · `a5` `(admin)` sweep, 14 files, 28 violations cleared, 87 e2e, every visual diff attributed · `a6` credential sweep, mandatory auth e2e gate PASS (88/88, new MFA-enrolled fixture built for it), 12/12 visual diffs attributed · `a7` member+shared sweep, 15 violations → 0, org-switcher/avatar-menu risk handled clean, sign-out verified, DECISION-040 copy untouched by construction, 89 e2e · `a8` C2 flipped live tree-wide, adversarial canary confirmed it fires, zero violations anywhere, 89 e2e | 2026-08-19 |
-| 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
-| 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
+| 5 — Verification (slices 0/a) | qa | Complete | **PASS** — DECISION-045's deferral formally closed for 0/a | 2026-08-19 |
+| 6 — Shipped vs intent (slices 0/a) | analyst | Complete | **SHIP WITH NOTES** — 4 follow-ups, folded into TODO | 2026-08-19 |
 
 *Recorded by the orchestrator from the read-only analyst agent. Full output preserved.*
 
@@ -1646,6 +1646,57 @@ silently already fixed, none blocking.
 future slice-0/a change reverts to the normal Phase 5 gate.
 
 *Recorded by the orchestrator from the read-only qa agent's report.*
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst), closing slices 0/a
+
+*Scoped to slices 0 and a only. Slices b–e have not shipped and are judged by
+their own Phase 5/6 when they do — this verdict does not pre-clear Flow 1–3, 5,
+or G1/G3/G7/G9/G10, all of which are onboarding-editor/storage/logo territory
+with no code yet.*
+
+## VERDICT: SHIP WITH NOTES
+
+The gap to a clean SHIP IT is process hygiene, not a functional or accessibility
+defect. Two Phase-3-mandated Out-of-Scope deferrals never got a `docs/TODO.md`
+line, and one existing TODO line's status text is now stale.
+
+**The load-bearing claim was independently re-confirmed by hand a third time,
+deliberately**: rather than cite the canary story already told in Phase 4/5, this
+review wrote its own hand-rolled button file, ran `npm run check`, watched C2
+fail with the exact file:line, deleted it, watched it pass clean. `docs/ui-standards.md`'s
+Accessibility section was read directly (not the work-log's transcription) and
+every one of G5's seven asks (AAA 7:1, 3:1 non-text, `border`/`border-input`
+split, 44px targets, reduced-motion, 200% zoom, print legibility) is genuinely
+present. The `TOKEN_POLICY` three-way partition, `--accent` correctly landing
+*bounded* not brandable, and the six corrected palette failures were all verified
+against the actual shipped file, not the design doc's account of it.
+
+**`/admin/design-system` confirmed legitimate, not creep** — correctly classified
+Polish, composes only shipped primitives, zero C2 violations on the page itself.
+
+## Follow-ups (Rule 10 — folded into `docs/TODO.md` in this same commit)
+
+1. Type-scale conformance has no TODO line — 244 `text-sm`/97 `text-xs` sites
+   predate `TYPE_SCALE`; new surfaces comply, old ones don't yet.
+2. S17's account-level dark-mode persistence gap has no TODO line — slice a
+   shipped device-level `localStorage` only (DECISION-050); needed before any
+   toggle UI ships or S17 will read as satisfied when it isn't.
+3. TODO.md's P0.5 status line is stale — still says Phase 5/6 deferred; both
+   have now issued (PASS, SHIP WITH NOTES) for slices 0/a specifically.
+4. TODO.md's P0.5-slice-B-carryover line (radix umbrella, radius remap,
+   alert-dialog regen, ui-standards rewrite) is now fully resolved — every item
+   it names shipped in this pipeline. Move to Done.
+
+## Handoff
+
+**Closes Phase 6 for slices 0/a.** No agent handoff required for this scope. The
+pipeline's next actor is whoever picks up slice b (tech-lead Phase 3, already
+running) or the orchestrator, folding the four follow-ups above into
+`docs/TODO.md`.
+
+*Recorded by the orchestrator from the read-only analyst agent's report.*
 
 ---
 

@@ -70,9 +70,9 @@ built:**
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — 8 gaps, G-A is load-bearing | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-060/061/062 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete | Design complete — 3 commits, implementers named; DECISION-063/064/065 | 2026-08-19 |
-| 4 — Implementation | database-admin (1) · api-developer (2) · ux-developer (3) | In progress — commits 1–2/3 complete | — | — |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 4 — Implementation | database-admin (1) · api-developer (2) · ux-developer (3) | **Complete** — all three commits landed 2026-08-19 | — | — |
+| 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
+| 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
 ---
 
@@ -442,3 +442,48 @@ now correctly proving 1; full unit suite 1328/1328 (18 skipped, the DB-gated
 integration suites); all four tripwires; build clean.
 
 *Recorded by the orchestrator from the api-developer agent's report.*
+
+---
+
+# Phase 4 · commit 3/3 — the directory page, closing the pipeline (ux-developer)
+
+`src/app/(org)/o/[slug]/directory/page.tsx` repeats the `(org)` auth pattern in
+full, checks `org_portal.directory` before ever calling `getDirectory()`, and
+re-throws `OrgAccessError` to the existing error boundary while catching any
+other failure into a distinct load-error state — never conflating "denied"
+with "broken." Four states, four genuinely different messages: flag off, no
+permission (worded to not imply the whole portal was revoked), zero visible
+members, load error with a retry link. `OrgPortalStub` gets one new,
+deliberately ungated "Directory →" link — ungated on the viewer's own grant,
+since the destination page is the sole authority (Phase 1's rule: the gate
+lives in server-side data-fetching, never a conditional `<Link>`). `/home`
+loses its "Your roles"/"Your features" debug dump.
+
+**Verified, independently re-confirmed by the orchestrator**: the
+DECISION-040 regression re-run explicitly, **12/12 including the exact
+byte-identical-copy assertion**; a full e2e run came back **96/96 clean**
+(better than the implementer's own 88/8 split, which their own `git stash`
+check had already shown was pre-existing flakiness unrelated to this commit);
+1354 unit tests; all four tripwires; build clean. Confirmed in a real browser
+that no hidden field appears in the served HTML for any entry, not merely
+hidden by CSS.
+
+**A real QA-blocking gap, named rather than worked around**: no
+`scripts/seed-dev.sql` fixture is currently loginable with a real password/
+TOTP enrolment at a `managed` org with real directory content — manual
+verification used a temporary, fully-reverted scratch credential. Filed in
+`docs/TODO.md`'s verification-debt section for whoever runs Phase 5.
+
+## This closes P1's Phase 4
+
+Ten commits total across Phases 1–4 (`a147bdc` … `9018eaa`): the derived-group
+mechanism, the seed extension with two genuinely subtle timing bugs caught
+and fixed, and the first real tenant-content page in the app. Per
+DECISION-045, Phase 5 (qa) and Phase 6 (analyst) are **deferred** to the same
+combined operator-led pass covering the other foundation pipelines — not
+skipped. The org portal is no longer a stub for the one congregation and one
+permission this pipeline wired end to end; slice d of P0.5 (the church-facing
+brand editor) and P9 (tenant administration) can now build against a real
+permission catalog instead of a promise of one.
+
+*Recorded by the orchestrator from the ux-developer agent's report.*

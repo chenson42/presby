@@ -3,7 +3,7 @@
 **Read this first in a new session.** Then `docs/schema-design.md` for rationale
 and the findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-08-18.
+Updated 2026-08-19.
 
 ---
 
@@ -22,8 +22,13 @@ repos and is worth reading before designing anything: `../fpcw-directory`
 public repo), `../psvonline-portal` (presbytery, already org-scoped),
 `../synod-portal` (public learn layer, AI spend gate).
 
-**Not named yet.** `/personalize-starter` is deliberately un-run, so every file
-still says `presby`. Candidates: Kirk, Cairn.
+**Not named yet.** `/personalize-starter` is deliberately un-run, so `presby`
+threads through the database role, thirteen `presby_*` SQL functions and every
+migration filename. Leading candidate: **Presbyter** — but it is taken on `.org`,
+`.church`, `.app` and `.com`, as are `kirk`, `knox`, `presbytery` and `polity`.
+Free and defensible: `presbyterial.org`. Standing advice: keep the name, take
+`presbyterhq.org`, and inquire on the exact match. This gets more expensive every
+week it stays a placeholder.
 
 ---
 
@@ -80,8 +85,8 @@ grant on them under any elevation.
 
 ## Built and verified
 
-37 domain tables. Migrations `0008`–`0012` applied to Neon (Postgres 18.4).
-**36 assertions pass** in `scripts/test-rls.sql`, run **as `presby_app`** —
+37 domain tables. Migrations `0008`–`0015` applied to Neon (Postgres 18.4).
+**59 assertions pass** in `scripts/test-rls.sql`, run **as `presby_app`** —
 running it as the owner proves nothing, because `neondb_owner` has
 `rolbypassrls = t`.
 
@@ -94,7 +99,9 @@ running it as the owner proves nothing, because `neondb_owner` has
   reconcile and a drift detector
 - Officer registers: `presby_officer_roster(org, office, as_of)`, `_history`
 - `/developer` — generated reference (index, per-table pages, per-module ERDs).
-  Descriptions live in Postgres `COMMENT ON`, so they cannot drift.
+  Descriptions live in Postgres `COMMENT ON`, so they cannot drift. **But it is
+  blind to functions, triggers and RLS policies** — for presby, the half carrying
+  the invariants. Filed as P11.
 
 ---
 
@@ -121,27 +128,78 @@ security problems**. Three UI bugs were also phone-only and invisible to
 
 ---
 
-## Next
+## Where the work actually is
 
-1. **Roll UI** — the read path is done and nothing surfaces it.
-2. **A browser in the loop.** Playwright would have caught all three phone-only
-   bugs; Phase 1 UI is where that starts costing real time.
-3. **`ltree` on `organizations.path`** (still `text`) and the ancestry trigger.
-4. **Derived-group seeding at org creation** (F16) — the officer trigger raises
-   until it exists.
-5. **`ADMIN_ROLE` is still a wildcard**, violating invariant 6. Bounded but not
-   removed: platform and tenant authorization are now separate scopes
-   (`src/lib/permissions.ts` is frozen; `src/lib/authz.ts` governs church-facing).
+The schema was the whole project on 2026-08-17. Since then the platform grew a
+front door, and the shape of the remaining work is a **program of numbered
+pipelines**, decomposed by the analyst and recorded in
+`docs/work-log/2026-08-18-backbone-and-org-sites.md`.
 
-Open for the user: the name · whether versioned private material gets its own
-repo (`private/` is untracked scratch only).
+**Shipped**
 
-**D9 sequencing — answered 2026-08-18, deferred deliberately.** Congregation
-(Phase 1) and presbytery (Phase 2) are both important; neither is subordinate to
-the other. Nothing is live, so no forcing function exists yet. The decision comes
-due at the Roll UI, which is the first build that has to pick an audience.
+- **P0 — post-login router and org context.** `/launch` computes a nine-row
+  destination matrix and forwards; `/orgs` is the chooser and never
+  auto-forwards; `/no-organization`; `/o/<slug>` under a new `(org)` group with
+  an immutable, DNS-label-constrained slug. Named access-denied that is
+  byte-identical across platform statuses. Header split into an avatar (identity)
+  and an organization switcher (context), on Google's model.
+- **The design system**, finally taken delivery of — `cn()`, `components.json`,
+  five primitives, expanded tokens. Light mode fixed: it had **never** rendered
+  for anyone.
+- **P0.5 slice 0 + a1** — the brand token contract (`src/lib/brand/contract.ts`,
+  zero imports, `LEGAL_PAIRS` carrying their own contrast floors) and the tooling
+  (`ui:add`, `check:deps-drift`, `check:brand-scope`).
 
----
+**In flight — P0.5, the design and brand foundation.** Phases 1–3 complete,
+Phase 4 two commits in. Next: `0.2` (ui-standards visual rewrite) and `a2` (the
+visual-parity harness, which must baseline before any further visual change).
+Then the mechanics, then the 52-violation sweep, then C2 is turned on.
+**Blocks P1 and P3.**
+
+**Queued**, in dependency order: P1 tenant permissions + org portal shell · P2
+backbone and onboarding · P3 site model + renderer · P4 the church's site editor
+· P5 custom domains · P6 the daily cron agent · P7 data-bound blocks · P8 staff
+and employment · P9 tenant administration · P10 satellite sessions on custom
+domains · P11 the `/developer` restructure · P12 the component library and its
+generated dictionary. Every one needs its own Phase 1; the architect was
+explicit that "the architect already ruled" is not a substitute.
+
+## What a new session must know
+
+- **Fifty numbered decisions** now live in `docs/decisions.md`, newest first.
+  034–045 are the backbone program; 046–050 are the brand foundation.
+- **Verification is deferred, not skipped** (DECISION-045). The operator is the
+  verifier for the foundation pipelines; Phases 5 and 6 are held for one combined
+  pass. The outstanding items are listed under **Verification debt** at the top of
+  `docs/TODO.md`. One of them — `drizzle/0015`, a SECURITY DEFINER probe written
+  by a ux-developer mid-UI-slice — is different in kind and wants a
+  database-admin's eye.
+- **`docs/briefings.md` is the operator's read/unread digest.** Its staleness is
+  measured, not trusted: `scripts/briefings-check.mjs` compares a `covers:` marker
+  against decision numbers and `git log`, and says at session start how far behind
+  it is. Move the marker when you add entries.
+- **`docs/testing.md`** has the fixture accounts and the hand-testing walkthrough.
+  Password for every fixture is in that file; addresses are `@presby.invalid`.
+- **The status line** (`scripts/statusline.mjs`) shows running agents with
+  elapsed time. Liveness is an mtime heuristic with a 90-second window — an agent
+  thinking quietly looks idle.
+- **Do not trust a long-running dev server for a visual check.** One was observed
+  serving a stale CSS chunk and never recompiling, even after a touch. Use a
+  production build on a scratch port.
+
+## Four defects that had shipped and nothing noticed
+
+Worth carrying because they are all the same shape — code nothing had exercised:
+
+- **`withOrgContext()` rejected every member.** It checks membership before
+  setting the org GUC, and `memberships` is FORCE RLS keyed on that GUC. F26's
+  third occurrence. Latent because nothing called it until a page did.
+- **Light mode had never rendered.** `@theme` nested in a media query, which
+  Tailwind v4 hoists.
+- **The e2e suite reported success having run 6 of 48 specs.**
+- **The focus ring was invisible at 1.00:1** — `--ring` and `--primary` are the
+  same colour, and the ring is drawn flush against the fill. The fix is geometric
+  (a 2px offset the contract carries as data), not a different colour.
 
 ## Running it
 

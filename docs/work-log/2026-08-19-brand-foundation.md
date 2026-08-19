@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — `0.1` complete; next: ux-developer, `0.2` | `0.1` — contract shipped, palette corrected, 56 tests; 7 design findings, 1 needs an operator ruling | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1` and `a1` complete and pushed (`f0ebd7c`)**; next: ux-developer `0.2` and `a2` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1076,3 +1076,56 @@ Seven findings. Two are typed defects that would not compile as written, four ar
    - **Shipped as the design specifies**, because the design named explicit values and a visual token is the operator's call, not the implementer's. Flagged here for a ruling.
 
 Two smaller notes. `FOCUS_RING_OFFSET_PX = 2` is an addition to the design's constant list — D4 is only structural if the offset is *data* the primitives read, and the test that joins it to the ring/brand ratio needs something to assert. And `contrast.ts` accepts the legacy comma-separated `hsl()` form and rejects everything else, including any notation carrying alpha: a ratio against a translucent fill depends on what is behind it and is therefore not a property of the pair, so returning a plausible number for it would be worse than throwing.
+
+---
+
+# Phase 4 · commit `a1` — tooling (api-developer)
+
+*Serialized by the orchestrator. The implementing agent deliberately did not write this
+section itself: `git diff --stat` showed the work-log under concurrent modification
+(+531 lines from the `0.1` agent) and a lost update here would have destroyed the design.
+Good judgment worth recording.*
+
+**Created** `scripts/ui-add.mjs`, `scripts/check-deps-drift.mjs`,
+`scripts/check-brand-scope.mjs`, `scripts/check-brand-scope.test.mjs` (30 fixture
+tests), `scripts/ui-add.test.mjs` (11). **Modified** `package.json` (four script
+entries; `check` is a four-tripwire chain), `CLAUDE.md` (Common Commands, Project
+Layout, and a new Key Invariant — *The Brand Is a Cascade Override*),
+`.claude/agents/architect.md` (Route Group Rules + Component Rules 4 and 5).
+
+**Live vs dormant.** E1 (emitter containment) live — a ratchet placed before the thing
+it guards. E3 (no second emitter) live, zero violations. C1 (brand-class containment)
+live but vacuous, proven by fixture test. **E2 dormant** because `(public)` does not
+exist yet; **C2 dormant** behind one flag, flipped at `a8`.
+
+**The C2 dry run is the sweep's real size: 52 violations — 45 button-shaped strings
+across 28 files, 7 `<table>` across 6.** File counts match the design exactly.
+**But the button-shaped population includes the status chips**, which need `<Badge>` or
+an explicit exemption rather than a button — the design's census did not anticipate
+that, and the `a8` implementer inherits it.
+
+**Six design findings.**
+
+1. **`from "radix-ui"` already appears in `src/`** — at `dropdown-menu.tsx:6`, inside
+   the hand-correction comment quoting the import it forbids. A naive rule-2 grep fails
+   on commit one, tripped by the comment explaining the rule.
+2. **Comment-skipping needs four forms, not one.** `check-sql-date.mjs` skips `//` only;
+   the real hits include JSX `{/* … */}`. Documented rather than silently widened.
+3. **The C1 regex as designed over-matches** — `-brand(-…)?` also matches inside
+   `text-branding`. Boundary guards added, with a fixture test for exactly that.
+4. **`ui:add` step 5 fires after `npm ci`**, leaving rewritten imports with the package
+   uninstalled. Intended — the build stops and names it — but the error message says so
+   explicitly rather than leaving the operator to infer it.
+5. **`visual:baseline` / `visual:check` were assigned to `a1`'s docs edit but ship in
+   `a2`.** Documented only what `a1` adds: *"documenting a command that does not exist is
+   a doc that lies."*
+6. **The design named no test for `ui-add.mjs`.** Its rewrite runs ten-plus times in this
+   slice and **fails silently** — a missed rewrite compiles fine whenever the umbrella
+   happens to be installed, which is the state the lockfile restore exists to prevent.
+   Added, with the script restructured behind an `isMain` guard so the pure functions are
+   importable.
+
+**Operational hazard, from the `0.1` agent and repeated here because `a2` depends on it:**
+the running dev server was serving a **stale CSS chunk** and never recompiled even after a
+touch. Visual checks were done against a production build on a scratch port. **The
+visual-parity harness must not baseline against a long-running dev server.**

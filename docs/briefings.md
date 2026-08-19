@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=050 commit=dd36e61 -->
+<!-- covers: decision=050 commit=f0ebd7c -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -23,6 +23,21 @@ entries — that is the one piece of discipline this file needs, and it is check
 ---
 
 ## 2026-08-19
+
+- [ ] **`defect` · The brand contract failed its own defaults on first run.**
+  Three shipped defects, none previously visible, all found by measuring the
+  platform palette against the floor the contract was about to declare: the focus
+  ring at **1.00:1** against 3:1 (`--ring` and `--primary` are the same colour and
+  the ring is drawn flush against the fill — the fix is a 2px offset carried as
+  contract data, not a different colour); `muted-foreground` at 4.70:1 against a
+  7:1 floor across 201 references; `--input` at 1.24:1 against 3:1. Fixed in
+  `f0ebd7c`.
+  **And a correction to something I told you.** I reported dark
+  `destructive-foreground` at 3.61:1 as a shipped AA failure. It was not —
+  that token has zero consumers, because `button` and `badge` hard-code
+  `text-white` and dark fills render through an alpha, so what actually paints is
+  7.56:1. You ruled to move the text rather than the hue, which fixed the token
+  pair without regressing the destructive dropdown item to 3.04:1.
 
 - [ ] **`defect` · The focus ring has been invisible since P0 shipped.**
   `--ring` and `--primary` are the same colour in both schemes, so the ring

@@ -26,9 +26,9 @@ been independently verified.
 
 ## In Flight
 
-- [ ] **P0.5 — design foundation + brand architecture**: Phase 1 complete (six slices), Phase 2 running on slices 0 and a — `docs/work-log/2026-08-19-brand-foundation.md`
+- [ ] **P0.5 — design foundation + brand architecture** — Phases 1–3 complete; **Phase 4 in progress: `0.1` (contract + palette) and `a1` (tooling) shipped in `f0ebd7c`**. Next: `0.2` (ui-standards visual rewrite, ux-developer) and `a2` (visual-parity harness, ux-developer — must land before any further visual change so it baselines on unmodified code, and must NOT baseline against a long-running dev server, which was observed serving stale CSS). Then `a3`–`a4` mechanics, then `a5`–`a7` sweep (52 violations across 34 files) once `0.1` is merged, then `a8` flips C2 on. Slices b–e (generator, storage+emission, church editor, type pairings) have **no Phase 2 yet** — the architect reviewed only 0 and a. — `docs/work-log/2026-08-19-brand-foundation.md`
 
-- [ ] **P0 — post-login router and org context** (`/launch`, `/orgs`, `/no-organization`, `/o/[slug]`, `presby_user_organizations`, slug CHECK, membership/position guard, shadcn init) — Phase 4 complete 2026-08-18 (slices A, B, C1, C2/C3); **next: qa (Phase 5)** — `docs/work-log/2026-08-18-backbone-and-org-sites.md`
+- [ ] **P0 — post-login router and org context** — shipped and pushed. Phases 5 and 6 **deferred by DECISION-045**, not skipped; see Verification debt above. — `docs/work-log/2026-08-18-backbone-and-org-sites.md`
 
 ## Next Up
 

@@ -16,6 +16,7 @@ export const FEATURES = {
   ADMIN_EMAIL_QUEUE: "admin.email_queue",
   ADMIN_WHATS_NEW: "admin.whats_new",
   ADMIN_TWO_FACTOR: "admin.two_factor",
+  ADMIN_ORGANIZATIONS: "admin.organizations",
 } as const;
 
 export type FeatureKey = (typeof FEATURES)[keyof typeof FEATURES];
@@ -43,6 +44,13 @@ export const FEATURE_CATALOG: Array<{
     key: FEATURES.ADMIN_USERS,
     name: "Manage users",
     description: "View users and assign roles.",
+    category: "admin",
+  },
+  {
+    key: FEATURES.ADMIN_ORGANIZATIONS,
+    name: "Manage organization branding",
+    description:
+      "Set a congregation's brand colour, logo and type pairing at onboarding; neutralise an abusive tenant's brand.",
     category: "admin",
   },
   {

@@ -62,6 +62,12 @@ export const AUDIT_ACTIONS = {
   WHATS_NEW_ENTRY_CREATED: "whats_new.entry_created",
   WHATS_NEW_ENTRY_UPDATED: "whats_new.entry_updated",
   WHATS_NEW_ENTRY_DELETED: "whats_new.entry_deleted",
+  // Per-org brand (P0.5 slice c2) — written from
+  // src/app/(admin)/admin/organizations/[id]/actions.ts. F18: a platform
+  // action against a tenant's brand carries that tenant's organization_id as
+  // resourceId, or the church cannot see it. "Who made our website purple."
+  ORG_BRAND_SET: "org.brand.set",
+  ORG_BRAND_NEUTRALIZED: "org.brand.neutralized",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

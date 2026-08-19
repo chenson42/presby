@@ -8,6 +8,7 @@
  * their own requirements pass.
  */
 export * from "./org";
+export * from "./assets";
 export * from "./people";
 export * from "./person-ext";
 export * from "./roll";

@@ -8,10 +8,12 @@ import {
   uuid,
   timestamp,
   jsonb,
+  integer,
   index,
   unique,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { users } from "../schema";
 
 /**
  * The ecclesiastical hierarchy. See docs/schema-design.md section A.
@@ -136,5 +138,112 @@ export const orgUnits = pgTable(
   (t) => [
     index("org_units_org_idx").on(t.organizationId, t.unitType),
     unique("org_units_id_org_key").on(t.id, t.organizationId),
+  ],
+);
+
+/**
+ * Per-org brand: colour seed, logo asset keys, type pairing.
+ * DECISION-049 (docs/decisions.md), full rationale in
+ * docs/work-log/2026-08-19-brand-foundation.md's Phase 3 (re-run) "Data
+ * model" section.
+ *
+ * PK is `organization_id` ITSELF — a DEGENERATE composite key. One row per
+ * org, no second key to compose, so there is nothing to `unique(id,
+ * organization_id)` against. Stated explicitly per the architect's
+ * instruction ("or the next reviewer 'fixes' it") — this is deliberate, not
+ * an oversight.
+ *
+ * FORCE RLS, and there is NO PUBLIC GRANT ON THIS TABLE, EVER
+ * (drizzle/0016_presby_brand_storage.sql). `organizations` carries a bare
+ * grant because the org tree is public information; following that pattern
+ * here would make every congregation's brand readable by any authenticated
+ * caller with no org context — the enumeration oracle DECISION-049 rejects by
+ * name. "Follow the organizations pattern" is the wrong instinct here and
+ * looks right.
+ *
+ * Written today exclusively through `getPlatformDb()` by the platform
+ * operator at `/admin/organizations` (slice c) — no tenant self-serve editor
+ * exists yet (slice d, blocked on P1's tenant permission catalog). The
+ * FORCE-RLS policy and the `presby_app` grant are declared now anyway so
+ * slice d needs no migration of its own to start reading/writing through
+ * `withOrgContext()`.
+ *
+ * `markAssetKey` / `wordmarkAssetKey` -> `blob_assets(id, organization_id)`:
+ * the composite FK is enforced in the migration only. See `./assets.ts`'s
+ * comment on `blobAssets` for why it is not expressible here (it would
+ * require a circular module dependency between this file and assets.ts).
+ */
+export const organizationBrands = pgTable("organization_brands", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  // A7's rule ("never echo the user's string") gets database-level teeth in
+  // the migration: CHECK (~ '^#[0-9a-f]{6}$'). The generator parses this into
+  // numbers; nothing ever re-emits it verbatim into CSS.
+  seedHex: text("seed_hex").notNull(),
+  // Curated set lands in slice e (contract.ts's TYPE_PAIRINGS). No CHECK
+  // enum here yet — that catalog does not exist until e0, and hard-coding one
+  // now would be scope this commit doesn't own.
+  typePairing: text("type_pairing").notNull().default("classic"),
+  markAssetKey: uuid("mark_asset_key"),
+  wordmarkAssetKey: uuid("wordmark_asset_key"),
+  // D8: pinned per org so a generator improvement never silently re-skins
+  // every congregation on a Tuesday with no audit row (A13).
+  brandTokenVersion: integer("brand_token_version").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedBy: uuid("updated_by")
+    .notNull()
+    .references(() => users.id),
+});
+
+/**
+ * "Restore previous brand" needs a swatch AND a date (Flow 2), and the audit
+ * story ("who made our website purple") needs more than one `previous_*`
+ * column can answer — that answers exactly one restore and then loses the
+ * trail. DECISION-059: rows record only `'updated'` and `'neutralized'`,
+ * never `'created'`. There is nothing to restore TO from a creation event;
+ * the state before a first-ever brand is the platform default, which needs
+ * no row.
+ */
+export const organizationBrandHistory = pgTable(
+  "organization_brand_history",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // 'updated' | 'neutralized' — CHECKed in the migration, never 'created'.
+    action: text("action").notNull(),
+    // Snapshot of what is ABOUT TO BE superseded, i.e. this org's brand row
+    // immediately before the change captured by this history row. All
+    // nullable, unlike organization_brands' own columns: a 'neutralized' row
+    // may have nothing to snapshot if the org never had a prior brand.
+    seedHex: text("seed_hex"),
+    typePairing: text("type_pairing"),
+    markAssetKey: uuid("mark_asset_key"),
+    wordmarkAssetKey: uuid("wordmark_asset_key"),
+    brandTokenVersion: integer("brand_token_version"),
+    changedBy: uuid("changed_by")
+      .notNull()
+      .references(() => users.id),
+    changedAt: timestamp("changed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Composite-tenant-key convention (docs/schema-design.md sec 3), kept for
+    // consistency even though nothing composite-FKs into this table today —
+    // a future restore control (slice d) is a natural consumer.
+    unique("organization_brand_history_id_org_key").on(
+      t.id,
+      t.organizationId,
+    ),
+    // The restore-previous read: "the last few changes to this org's brand."
+    index("organization_brand_history_org_idx").on(
+      t.organizationId,
+      t.changedAt,
+    ),
   ],
 );

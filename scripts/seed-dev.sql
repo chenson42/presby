@@ -56,7 +56,10 @@ insert into organization_settings (organization_id, require_two_factor, settings
 -- ---------------------------------------------------------------------------
 insert into group_types (id, organization_id, key, name) values
   ('a0000000-0000-0000-0000-000000000001', null, 'court', 'Court'),
-  ('a0000000-0000-0000-0000-000000000002', null, 'committee', 'Committee');
+  ('a0000000-0000-0000-0000-000000000002', null, 'committee', 'Committee'),
+  -- P1 / DECISION-060: the active_membership derived group's type, parallel
+  -- to court/committee — a platform-wide template, not owned by any one org.
+  ('a0000000-0000-0000-0000-000000000004', null, 'roster', 'Roster');
 
 insert into groups (id, organization_id, group_type_id, name, membership_source, derived_from, is_protected) values
   ('b0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
@@ -67,7 +70,22 @@ insert into groups (id, organization_id, group_type_id, name, membership_source,
    'a0000000-0000-0000-0000-000000000001', 'Session', 'derived', 'session', true),
   -- A managed group, for contrast: staff edit this roster freely.
   ('b0000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222',
-   'a0000000-0000-0000-0000-000000000002', 'Property Committee', 'managed', null, false);
+   'a0000000-0000-0000-0000-000000000002', 'Property Committee', 'managed', null, false),
+  -- P1 / DECISION-060/063: drizzle/0017's memberships_sync_derived_group
+  -- trigger fails loudly on ANY memberships insert at an org with no
+  -- active_membership group yet — so this has to exist at every fixture org
+  -- a membership can target, not only the two this block already covers.
+  -- Named 'Active Membership' verbatim: presby_effective_permissions()'s
+  -- group arm surfaces this as source_name, and scripts/test-rls.sql section
+  -- 9 asserts on that exact string.
+  ('b0000000-0000-0000-0000-000000000006', '11111111-1111-1111-1111-111111111111',
+   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+  ('b0000000-0000-0000-0000-000000000007', '22222222-2222-2222-2222-222222222222',
+   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+  ('b0000000-0000-0000-0000-000000000008', '33333333-3333-3333-3333-333333333333',
+   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+  ('b0000000-0000-0000-0000-000000000009', '44444444-4444-4444-4444-444444444444',
+   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true);
 
 -- ---------------------------------------------------------------------------
 -- People (global) - invented names
@@ -97,8 +115,21 @@ insert into households (id, organization_id, name, is_giving_unit) values
 -- Memberships. The pastor holds TWO: membership at the presbytery
 -- (G-2.0502) and service at the congregation.
 -- ---------------------------------------------------------------------------
+-- P1: ELDER's row is inserted SEPARATELY from the block below, with an
+-- explicit created_at, because drizzle/0017's derived-group sync trigger
+-- stamps group_memberships.starts_on from `new.created_at::date` (memberships
+-- has no starts_on column of its own — DECISION-060/0017's own comment). Left
+-- at the column default (now()), ELDER's Active Membership grant would only
+-- be visible as of TODAY, and scripts/test-rls.sql's as-of-2015-06-01
+-- assertion — written on the premise that ELDER's is "a long-standing,
+-- always-active Alder Creek membership" — would see nothing. Backdating to
+-- current_roll_since (the date the relationship actually began) makes the
+-- trigger's stamp match the story the fixture already tells, rather than the
+-- day this script happened to run.
+insert into memberships (organization_id, person_id, household_id, household_role, engagement_status, current_roll, current_roll_since, created_at) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000002', 'head', 'regular', 'active', '1996-05-12', '1996-05-12T00:00:00Z');
+
 insert into memberships (organization_id, person_id, household_id, household_role, engagement_status, current_roll, current_roll_since) values
-  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000002', 'head', 'regular', 'active', '1996-05-12'),
   ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000001', 'head', 'regular', 'active', '2004-10-03'),
   ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000001', 'spouse', 'regular', 'active', '2004-10-03'),
   -- Not a member. On the other-participants roll, and fully in the directory.
@@ -200,12 +231,19 @@ insert into app_roles (id, organization_id, key, name, role_kind, is_protected) 
   ('f0000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',
    'session_member','Session Member','constitutional',true),
   ('f0000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222',
-   'property_chair','Property Committee Chair','custom',false);
+   'property_chair','Property Committee Chair','custom',false),
+  -- P1 / G-A / DECISION-060/063: the baseline-grant role, bound to the
+  -- active_membership derived group below. Constitutional and protected —
+  -- every congregation gets this role once real org provisioning exists
+  -- (G-B, still unbuilt); it is not a staff-created custom role.
+  ('f0000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222',
+   'member','Member','constitutional',true);
 
 insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000001','roll.approve'),
   ('f0000000-0000-0000-0000-000000000001','directory.view'),
-  ('f0000000-0000-0000-0000-000000000002','directory.view');
+  ('f0000000-0000-0000-0000-000000000002','directory.view'),
+  ('f0000000-0000-0000-0000-000000000004','directory.view');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would
@@ -218,6 +256,19 @@ insert into role_grants (organization_id, role_id, group_id, starts_on) values
 insert into role_grants (organization_id, role_id, person_id, starts_on) values
   ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000002',
    'c0000000-0000-0000-0000-000000000002','2024-01-01');
+
+-- P1 / DECISION-063: the ONE real binding proving the baseline grant end to
+-- end. The active_membership derived group exists at every fixture org
+-- (F16-style seeding above and after Fernwood/Marrowbone's creation), but the
+-- role_grants row that actually turns it into directory.view stays scoped to
+-- Alder Creek alone — proving the mechanism once, not seeding a permission
+-- with nothing behind it everywhere (Phase 1's "built-and-unwired" warning).
+-- starts_on predates every as-of date scripts/test-rls.sql section 9 checks
+-- against (2015-06-01, current date, 2027-06-01) — this is the FLOOR of the
+-- grant, not a term with its own boundary to prove.
+insert into role_grants (organization_id, role_id, group_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000004',
+   'b0000000-0000-0000-0000-000000000007','2000-01-01');
 
 -- An administrative commission: the one case where a council reaches DOWN into
 -- a congregation. Its members are a group AT THE PRESBYTERY, which is why the
@@ -286,6 +337,16 @@ insert into organizations (id, parent_id, organization_type, name, slug, path, p
   ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111',
    'congregation', 'Marrowbone Presbyterian Church', 'marrowbone',
    'northern_reach.marrowbone', 'invited');
+
+-- P1 / DECISION-063: these two orgs are created here, well after the F16
+-- block near the top of this file, so their active_membership derived groups
+-- have to be seeded here too — BEFORE the memberships insert below that
+-- targets them, or drizzle/0017's sync trigger raises on the first row.
+insert into groups (id, organization_id, group_type_id, name, membership_source, derived_from, is_protected) values
+  ('b0000000-0000-0000-0000-00000000000a', '55555555-5555-5555-5555-555555555555',
+   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+  ('b0000000-0000-0000-0000-00000000000b', '66666666-6666-6666-6666-666666666666',
+   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true);
 
 -- Six users, one per row of the destination matrix that the existing fixture
 -- cannot reach. All password-less like elder.fixture: they cannot sign in, and

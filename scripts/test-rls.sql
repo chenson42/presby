@@ -230,9 +230,10 @@ begin;
   -- has nothing to do with the term boundary this assertion exists to prove.
   -- Split so each half still proves what it originally proved: the term
   -- boundary (session-sourced count, unaffected) and the baseline grant's own
-  -- presence (currently 0 — this migration alone seeds no group and no
-  -- role_grants row; flips to 1 once commit 2's seed lands, and stays a
-  -- one-line edit here when it does).
+  -- presence. ELDER's membership row is seeded with a backdated created_at
+  -- (matching current_roll_since, 1996-05-12) precisely so this as-of query,
+  -- run against a date well before this fixture was ever loaded, still finds
+  -- the derived group_memberships row the sync trigger produced.
   select assert_eq(
     (select count(*) from presby_effective_permissions(:ELDER, :ALDER, '2015-06-01')
       where source_kind = 'group' and source_name = 'Session'),
@@ -240,7 +241,7 @@ begin;
   select assert_eq(
     (select count(*) from presby_effective_permissions(:ELDER, :ALDER, '2015-06-01')
       where permission_key = 'directory.view' and source_name = 'Active Membership'),
-    0, 'resolver: active_membership baseline grant not yet seeded (commit 2 of P1 flips this to 1)');
+    1, 'resolver: active_membership baseline grant resolves during the officer-term gap');
 
   -- F11: an administrative commission granted nothing until arm 3 existed.
   select assert_eq(
@@ -259,7 +260,7 @@ begin;
   select assert_eq(
     (select count(*) from presby_effective_permissions(:PASTOR, :ALDER, '2027-06-01')
       where permission_key = 'directory.view' and source_name = 'Active Membership'),
-    0, 'resolver: active_membership baseline grant not yet seeded (commit 2 of P1 flips this to 1)');
+    1, 'resolver: active_membership baseline grant survives the commission''s expiry');
 
   -- Provenance is part of the answer, not an afterthought.
   select assert_eq(

@@ -94,6 +94,20 @@ async function seedFlags() {
         "Per-org brand emission in (org). OFF = every congregation renders the platform default regardless of what /admin/organizations has staged.",
       enabled: true,
     },
+    {
+      key: "org_portal.directory",
+      // ON: /o/<slug>/directory is reachable at all. Checked bare, no
+      // DECISION-026 fail-open wrapper — it's a toggle, not an auth path
+      // (Phase 2, docs/work-log/2026-08-19-tenant-permissions-portal.md).
+      // Never substitutes for directory.view: a member with the flag on and
+      // no grant still sees the in-shell "you don't have permission" state,
+      // not the directory itself (DECISION-003: a flag never gates a
+      // permission). Seeded OFF — the first real tenant-content read ships
+      // dark until Phase 4's ux-developer commit lands the page behind it.
+      description:
+        "Congregation directory page in (org). OFF = /o/<slug>/directory renders 'isn't available yet' regardless of the viewer's directory.view grant.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

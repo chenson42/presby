@@ -35,19 +35,24 @@
   line-height: 1.55;
 }
 
-@media (prefers-color-scheme: dark) {
-  .reg {
-    --paper: #14161a;
-    --paper-sunk: #1a1d22;
-    --ink: #e8e6e1;
-    --iron: #9aa0a8;
-    --rule: #2b2f36;
-    --rule-strong: #3d434c;
-    --verdigris: #6fb3a3;
-    --verdigris-wash: #6fb3a31f;
-    --oxblood: #d08a8a;
-    --oxblood-wash: #d08a8a1a;
-  }
+/*
+ * P0.5 slice a: was `@media (prefers-color-scheme: dark)`, which would have
+ * made this the one page in the app that ignores an explicit theme choice
+ * once next-themes' `.dark` class mechanism landed elsewhere (E13). Values
+ * unchanged — this is the scheme axis, not the brand axis; `/developer` stays
+ * brand-exempt (its palette lives entirely under `.reg`, never `:root`).
+ */
+.dark .reg {
+  --paper: #14161a;
+  --paper-sunk: #1a1d22;
+  --ink: #e8e6e1;
+  --iron: #9aa0a8;
+  --rule: #2b2f36;
+  --rule-strong: #3d434c;
+  --verdigris: #6fb3a3;
+  --verdigris-wash: #6fb3a31f;
+  --oxblood: #d08a8a;
+  --oxblood-wash: #d08a8a1a;
 }
 
 .reg__inner {

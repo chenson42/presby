@@ -1,5 +1,8 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
 
 /*
  * Design tokens.
@@ -11,10 +14,13 @@
  *      through the raw token rather than baking a literal colour into the
  *      utility. That indirection is what lets a colour-scheme override work.
  *
- * Dark mode is `prefers-color-scheme` only, deliberately (DECISION-036 defers
- * the `.dark` class strategy to P0.5). Adding it later is a pure addition —
- * declare `@custom-variant dark (&:is(.dark *))` and copy the dark block into
- * `.dark { … }`. No token below has to be re-authored for that.
+ * Dark mode is a `.dark` class applied to `<html>` by next-themes' pre-paint
+ * script (P0.5 slice a; DECISION-050), not `prefers-color-scheme`. The class
+ * strategy is what lets a per-org brand emit BOTH ramps in one element with
+ * `.dark` selecting between them (slice c) — a media query cannot do that.
+ * `next-themes` defaults to `theme="system"`, so an unconfigured visitor still
+ * gets their OS preference; an explicit choice (once a toggle ships) now wins
+ * over it, which a media query could never honour.
  *
  * Every token name that existed before shadcn was initialised
  * (`--color-background`, `--color-foreground`, `--color-muted`,
@@ -83,47 +89,45 @@
   --ring: hsl(221 83% 53%);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: hsl(222 47% 11%);
-    --foreground: hsl(210 40% 98%);
+.dark {
+  --background: hsl(222 47% 11%);
+  --foreground: hsl(210 40% 98%);
 
-    --card: hsl(217 33% 17%);
-    --card-foreground: hsl(210 40% 98%);
+  --card: hsl(217 33% 17%);
+  --card-foreground: hsl(210 40% 98%);
 
-    --popover: hsl(217 33% 17%);
-    --popover-foreground: hsl(210 40% 98%);
+  --popover: hsl(217 33% 17%);
+  --popover-foreground: hsl(210 40% 98%);
 
-    --primary: hsl(217 91% 60%);
-    --primary-foreground: hsl(222 47% 11%);
+  --primary: hsl(217 91% 60%);
+  --primary-foreground: hsl(222 47% 11%);
 
-    --secondary: hsl(217 33% 17%);
-    --secondary-foreground: hsl(210 40% 98%);
+  --secondary: hsl(217 33% 17%);
+  --secondary-foreground: hsl(210 40% 98%);
 
-    --muted: hsl(217 33% 17%);
-    /* Corrected 65% → 73%: was 5.78:1 on card against a 7:1 floor.
-       Now 8.89 on background, 7.37 on card and on muted. */
-    --muted-foreground: hsl(215 20% 73%);
+  --muted: hsl(217 33% 17%);
+  /* Corrected 65% → 73%: was 5.78:1 on card against a 7:1 floor.
+     Now 8.89 on background, 7.37 on card and on muted. */
+  --muted-foreground: hsl(215 20% 73%);
 
-    --accent: hsl(217 33% 17%);
-    --accent-foreground: hsl(210 40% 98%);
+  --accent: hsl(217 33% 17%);
+  --accent-foreground: hsl(210 40% 98%);
 
-    /* The token pair was 3.61:1 with the old near-white foreground — failing
-       plain AA, not merely the AAA body floor. Corrected by moving the TEXT,
-       not the hue (operator ruling, work-log 2026-08-19-brand-foundation
-       note 7): the fill stays at 60% so rendered text-destructive keeps
-       4.73:1 on the page, and the foreground becomes the page ink, giving
-       4.73:1 on the pair. The rejected alternative (fill → 48% + white) fixed
-       a pair nothing renders while dropping rendered text-destructive to 3.67. */
-    --destructive: hsl(0 84% 60%);
-    --destructive-foreground: hsl(222 47% 11%);
+  /* The token pair was 3.61:1 with the old near-white foreground — failing
+     plain AA, not merely the AAA body floor. Corrected by moving the TEXT,
+     not the hue (operator ruling, work-log 2026-08-19-brand-foundation
+     note 7): the fill stays at 60% so rendered text-destructive keeps
+     4.73:1 on the page, and the foreground becomes the page ink, giving
+     4.73:1 on the pair. The rejected alternative (fill → 48% + white) fixed
+     a pair nothing renders while dropping rendered text-destructive to 3.67. */
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(222 47% 11%);
 
-    /* See the light block: `border` separates content, `input` identifies a
-       control. */
-    --border: hsl(217 33% 22%);
-    --input: hsl(217 33% 50%); /* 3.88:1 on background, 3.22:1 on card */
-    --ring: hsl(217 91% 60%); /* 4.91:1 on surface; offset, per the light block */
-  }
+  /* See the light block: `border` separates content, `input` identifies a
+     control. */
+  --border: hsl(217 33% 22%);
+  --input: hsl(217 33% 50%); /* 3.88:1 on background, 3.22:1 on card */
+  --ring: hsl(217 91% 60%); /* 4.91:1 on surface; offset, per the light block */
 }
 
 @theme inline {
@@ -154,14 +158,35 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-}
 
-/*
- * Tailwind's own radius scale (`rounded-sm`/`md`/`lg`/`xl`) is deliberately NOT
- * remapped onto `--radius`. Doing so would resize every existing page's corners
- * — this slice is a zero-visual-change slice. `--radius` is available to
- * primitives that want it; revisit the remap in P0.5.
- */
+  /*
+   * Tailwind v4 defaults (node_modules/tailwindcss/theme.css): --radius-sm
+   * 0.125rem, --radius-md 0.25rem, --radius-lg 0.5rem, --radius-xl 0.75rem —
+   * the UNREMAPPED scale a shadcn primitive would otherwise compute against.
+   * shadcn's own convention remaps all four off ONE `--radius` so a project
+   * can retune corner roundness in one place; its registry default for that
+   * variable is 0.625rem.
+   *
+   * `--radius` here stays 0.5rem — the value already in this file before P0.5
+   * — rather than adopting shadcn's 0.625rem default. Checked against every
+   * `rounded-*` utility actually in the tree (rounded-md ×97, rounded-lg ×23,
+   * rounded-full ×23, rounded-xl ×6, rounded-sm ×5; `full` and the un-remapped
+   * `xs`/`2xl`/`3xl` are untouched by this mapping) at 0.5rem:
+   *
+   *   --radius-sm  = var(--radius) - 4px = 4px   (Tailwind default sm: 4px)
+   *   --radius-md  = var(--radius) - 2px = 6px   (Tailwind default md: 6px)
+   *   --radius-lg  = var(--radius)       = 8px   (Tailwind default lg: 8px)
+   *   --radius-xl  = var(--radius) + 4px = 12px  (Tailwind default xl: 12px)
+   *
+   * All four are byte-identical to what already renders — the remap is a
+   * provable no-op, not an approximation. Do NOT "align with the registry" by
+   * bumping --radius to 0.625rem; that moves all four and repaints the app.
+   */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
 
 @layer base {
   /*
@@ -179,5 +204,24 @@
   body {
     background: var(--background);
     color: var(--foreground);
+  }
+}
+
+/*
+ * `tw-animate-css` (imported above) turns on the `animate-in`/`fade-in-0`/
+ * `zoom-in-95`/`slide-in-from-*` classes already written on dropdown-menu.tsx
+ * (lines 51, 239) — they were inert before this import, because Tailwind v4
+ * ships no animation utilities and the package was not installed. This rule
+ * lands in the SAME commit as that import so G5 (prefers-reduced-motion) is
+ * satisfied at the moment the animation risk is created, not later.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

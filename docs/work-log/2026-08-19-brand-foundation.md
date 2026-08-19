@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2` complete**; next: `a3`, `a4` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3` complete**; next: `a4`, then the sweep | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1223,5 +1223,55 @@ watch rows reshuffle), filed in `docs/TODO.md`; the route is excluded from the
 manifest (rule 6) until fixed. `/totp` (redirects before paint for every fixture) and
 `/access-pending` (renders an `audit_events` write, which would poison `/admin/audit`
 downstream in the same run) are the other two exclusions, rules 1 and 2.
+
+*Recorded by the orchestrator from the implementing agent's report.*
+
+---
+
+# Phase 4 · commit `a3` — scheme, motion, radius (ux-developer)
+
+**Date:** 2026-08-19
+
+**Created** `src/components/theme-provider.tsx` (`'use client'` wrapper around
+next-themes, documenting the device-vs-account persistence gap and the no-toggle rule)
+and `src/components/ui/sonner.tsx` (generated via `npm run ui:add -- sonner`, stock —
+`useTheme()` forwarded, zero registry divergence). **Modified** `globals.css`
+(`tw-animate-css` import, `@custom-variant dark`, the dark block moved from the media
+query to `.dark { … }` with values byte-identical, the four `--radius-*` mappings with
+the keep-0.5rem proof in a comment, the `prefers-reduced-motion` base rule),
+`layout.tsx` (`suppressHydrationWarning` on `<html>` not `<body>` per E3;
+`<ThemeProvider attribute="class" defaultTheme="system" enableSystem
+disableTransitionOnChange>`; Toaster switched to the wrapper with `theme` dropped),
+`developer.css` (media query → `.dark .reg`, values unchanged, E13 named),
+`color-scheme.spec.ts` (header rewritten for the class mechanism; two new `classList`
+assertions), `package.json`/lock (`tw-animate-css`, `next-themes` — both pre-ruled).
+
+**Implementer note — `ui:add`'s clean-tree precondition collides with same-commit
+dependency installs.** Installing `next-themes`/`tw-animate-css` first left the
+manifests dirty, so generating `sonner.tsx` required stashing the manifests, running
+`ui:add`, popping, and `npm ci`. `check:deps-drift` passed before and after. Whoever
+runs `ui:add` mid-slice again: install runtime deps in their own step or expect to
+stash.
+
+**Verification.** typecheck, lint clean · vitest **656 passing** (the `.dark`-branch
+fixture in `contract.test.ts`, written pre-emptively at `0.1`, now runs against the
+real moved block) · `npm run check` all four tripwires · build clean, 34 routes ·
+**full e2e 86 passed** (84 + the two new classList assertions) · browser sanity on the
+production build in both schemes (`/signin`, `/admin`; `/developer`'s `.dark .reg`
+verified by isolated toggle because no platform-admin e2e fixture exists), no
+wrong-scheme flash.
+
+**Visual parity — the harness's first live use, and it worked as designed.** Check
+against the step-zero baseline: 64/72 passed; all 8 failures on two routes
+(`/account/2fa` ×4, `/admin/audit` ×4). Both were investigated and attributed to
+**time-based data drift**, not this commit: the TOTP pending-enrollment secret has a
+10-minute TTL (the QR code alone diffed), and live `audit_events` rows accreted in
+the ~39-minute gap. Proof rather than assertion: a fresh baseline + immediate check
+on the `a3` code was **72/72, 0 diffs** — this commit introduces zero pixel delta on
+its own. Category A confirmed (radius remap a no-op); no Category C delta was
+observable (declared `color-scheme` moved nothing in this browser/OS).
+
+**Operational note:** a stale `next-server` from an earlier session was bound to port
+3000 and blocked the e2e webServer; killed to unblock.
 
 *Recorded by the orchestrator from the implementing agent's report.*

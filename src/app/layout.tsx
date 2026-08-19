@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { Toaster } from "sonner";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,18 +32,31 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen antialiased">
-        {children}
         {/*
          * pattern: server-action → client toast
          * Server actions return { ok, error? }. Client components read the result
          * and call toast.success() / toast.error() here in the Toaster singleton.
          * Never call toast() inside a 'use server' function — it is browser-only.
-         * Do not add 'use client' to this file; <Toaster> is a client leaf in a
-         * server tree, which Next.js App Router supports without any special handling.
+         * Do not add 'use client' to THIS file — <ThemeProvider> is a client
+         * WRAPPER (src/components/theme-provider.tsx), which the App Router
+         * accepts as a client leaf around server children with no ceremony;
+         * this file itself stays a server component. `suppressHydrationWarning`
+         * on <html> (NOT <body>) is required because next-themes' pre-paint
+         * script sets the `.dark` class and `style="color-scheme: …"` on
+         * <html> before React hydrates — a mismatch React would otherwise warn
+         * about on every request.
          */}
-        <Toaster theme="system" richColors closeButton position="top-right" />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster richColors closeButton position="top-right" />
+        </ThemeProvider>
       </body>
     </html>
   );

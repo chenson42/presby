@@ -69,7 +69,7 @@ built:**
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — 8 gaps, G-A is load-bearing | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-060/061/062 | 2026-08-19 |
-| 3 — Technical design | tech-lead | Pending | — | — |
+| 3 — Technical design | tech-lead | Complete | Design complete — 3 commits, implementers named; DECISION-063/064/065 | 2026-08-19 |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -253,3 +253,127 @@ grants / zero visible members / DB failure), and the exact in-shell
 permission-denied wording.
 
 *Recorded by the orchestrator from the read-only architect agent's report.*
+
+---
+
+# Phase 3 — Technical Design (tech-lead)
+
+## Summary
+
+Three commits. `drizzle/0017_presby_membership_roster.sql` adds
+`group_memberships.membership_id` (with the composite FK `officer_term_id`
+lacks), the `directory.view` permission row, and a sync trigger mirroring the
+officer-roster trigger's exact shape — same fail-loudly-if-the-group-is-missing
+behavior, same upsert-keyed-on-the-derived-column pattern.
+`src/lib/directory.ts` is the one query function, permission check and
+privacy-filtered read inside a single `withOrgContext()` transaction, hidden
+rows excluded in `WHERE`, hidden fields nulled via `CASE WHEN` — never
+fetch-then-filter. `src/app/(org)/o/[slug]/directory/page.tsx` is the page,
+with four distinct states (flag-off, zero-grants, zero-visible-members,
+load-error) plus a discoverability link from the portal stub, and `/home`'s
+"Your roles / Your features" debug sections are deleted outright.
+
+**The two product calls Phase 2 handed forward are resolved as two different
+questions, not one** (DECISION-065): who gets the baseline `directory.view`
+grant is "any current membership" (matching the codebase's one existing
+definition of "current"); who appears as a row in the directory stays the
+narrower, already-documented `schema-design.md` §11 formula. A missing
+`person_privacy` row defaults to the columns' own declared defaults, not to
+defensive full exclusion, because nothing creates that row yet and the
+alternative ships an empty directory everywhere on day one (DECISION-064).
+
+**A real finding changed the seed scope**: the sync trigger's fail-loudly
+behavior (correctly mirroring F16) means the derived group must exist at
+**all six** fixture organizations wherever a membership can be inserted, not
+just the two Phase 2 anticipated — only the actual permission *binding*
+stays scoped to Alder Creek, proving the feature once (DECISION-063).
+
+**Two existing `scripts/test-rls.sql` assertions will break, predictably**:
+both currently assert `count(*) = 0` for a resolver query during a term/
+commission gap, for two fixture people who happen to hold long-standing,
+always-active Alder Creek memberships — once the baseline grant exists, the
+correct count becomes 1, not 0. Exact `file:line` and fixes specified so this
+isn't discovered as a surprise regression at Phase 5.
+
+## Permissions & Flags
+
+`directory.view` (already a fixture-only row; this migration makes it real
+everywhere) binds through a new constitutional role, `member`, granted to the
+`active_membership` derived group — seeded only at Alder Creek. New flag
+`org_portal.directory`, default off, checked bare with no fail-open wrapper
+(a toggle, not an auth path). No `FEATURES`/`FEATURE_CATALOG` entry
+(platform-shell only, stays FROZEN). No `AUDIT_ACTIONS` entry — a read is not
+a mutation, confirmed against `check:audit`'s actual scan scope
+(`src/app/**/actions.ts` only).
+
+## Data model
+
+`drizzle/0017_presby_membership_roster.sql`: `group_memberships.membership_id`
+(unique, with a real composite FK to `memberships(id, organization_id)` —
+unlike `officer_term_id`'s pre-existing gap); the `directory.view` permission
+row; `presby_sync_derived_membership_group()`, mirroring the officer-roster
+trigger's shape exactly, using `ended_on is null` as the sole "is this
+current" predicate (no new definition invented, per DECISION-065). Fires
+after insert/update on `memberships`; raises if the org has no
+`active_membership` group yet — the same loud-failure discipline F16 already
+established, deliberately not softened.
+
+`scripts/seed-dev.sql`: the derived group seeded at all six fixture orgs
+(DECISION-063); the `member` role, its permission binding, and the actual
+`role_grants` row scoped to Alder Creek alone.
+
+## Component / page plan
+
+`src/lib/directory.ts` — `getDirectory(personId, organizationId):
+Promise<DirectoryResult>`, one `withOrgContext()` transaction covering the
+`presby_has_permission()` check and the query. Query excludes
+`directory_hidden` rows in `WHERE`; nulls the five field-level flags via
+`CASE WHEN` in the `SELECT` list. Throws on genuine DB failure rather than
+returning a variant, so the page can tell "denied" apart from "broken."
+
+`src/app/(org)/o/[slug]/directory/page.tsx` + co-located
+`directory-states.tsx` — four distinct states, each with its own copy,
+deliberately not collapsed into one generic "nothing here" message: flag off
+("isn't available yet"), zero grants ("you don't have permission... ask an
+administrator" — worded to not read as "your whole portal access was
+revoked"), zero visible members ("no one is listed yet"), load error ("try
+again in a moment"). `OrgPortalStub` gets one new conditional link, shown
+only when the flag is on, gating on nothing else — the destination page is
+the sole authority on the viewer's own permission, per Phase 1's "the gate
+lives in server-side data-fetching, never a conditional `<Link>`" rule.
+
+`GlobalNav` stays untouched — it's identity + org-switcher chrome by explicit
+prior design, not a tenant-content nav; a real tenant nav is P9's job once
+there's more than one page to link.
+
+`/home`: the "Your roles" and "Your features" sections deleted outright
+(not relocated — `/developer` already covers platform-admin introspection),
+along with the now-dead `roles` variable. `featuresList` is kept — it still
+drives the unrelated "Admin dashboard" quick-link.
+
+## Implementation order
+
+Three sequenced commits, each with its own tests: **database-admin**
+(migration + trigger + the two `test-rls.sql` fixes) → **api-developer**
+(seed extension + `directory.ts` + its tests) → **ux-developer** (the page,
+states, stub link, `/home` cleanup). Not one full-stack commit — the schema/
+trigger risk and the query-privacy risk each warrant a named owner and tests
+before the UI builds on top of them.
+
+## Acceptance criteria
+
+Every fixture member at Alder Creek with a live membership resolves
+`directory.view` via the real resolver, not a mock; hidden fields are absent
+from both the rendered HTML and the RSC payload, not merely hidden by CSS;
+`scripts/test-rls.sql` passes end to end as `presby_app` including the two
+updated assertions; all four states verified at 360px in a real browser.
+
+## Handoff
+
+**Next: database-admin (Phase 4, commit 1).** The migration, trigger, and
+`test-rls.sql` fix are specified exactly enough to start without further
+design decisions. Commit 2 (seed extension) depends on commit 1's migration
+being applied — the new `groups` rows need the new `group_type` and the
+trigger to exist before any membership re-insert.
+
+*Recorded by the orchestrator from the tech-lead agent's report.*

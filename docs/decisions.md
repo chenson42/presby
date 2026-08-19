@@ -4,6 +4,54 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-065: The derived group's *grantee* population and the directory's *content* population are two different questions with two different formulas
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 3)
+
+Phase 2 handed forward the question of whether `directory.view`'s baseline is "any active membership" or "on the roll." These turn out not to be the same question. **Who is granted the permission** (the `active_membership` derived group's population) is "any current membership" — `memberships.ended_on is null` — matching the codebase's own existing, singular definition of "current" (`presby_membership_is_active()`, `presby_available_organizations()`); inventing a narrower definition here would be a third, competing notion of "current" with no precedent. **Who appears as a row in the directory** stays the already-documented, narrower formula from `docs/schema-design.md` §11 (`current_roll` in the roll-member statuses, or `engagement_status = 'regular'`) — a visitor with a live-but-uncommitted relationship is a legitimate grantee of a baseline permission but not yet content whose contact information belongs in a printed directory. Conflating the two would either lock visitors out of a feature every other member has, or publish a stranger's information before the church has actually engaged them.
+
+---
+
+## DECISION-064: A missing `person_privacy` row defaults to the columns' own declared defaults, not to full exclusion
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 3)
+
+Nothing in the codebase creates a `person_privacy` row automatically — no trigger, no default-insert pattern, and no self-service privacy page exists yet to populate one. Treating a missing row as "hidden" defensively would ship every congregation an empty directory on day one, for every person, until someone builds that missing feature — worse than the alternative, which is a directory that is fully visible by the columns' own honest defaults (all `hide_*` flags default `false` except `hide_birthday`, which defaults `true`) until a person or an administrator actively sets a preference. `getDirectory()`'s `LEFT JOIN` plus `coalesce(pp.hide_x, &lt;column default&gt;)` makes this literal rather than implicit. This defaulting stays load-bearing until a self-service privacy page exists — filed in `docs/TODO.md`.
+
+---
+
+## DECISION-063: The `active_membership` derived group is seeded at every fixture organization, not only the one proving the permission end-to-end
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 3)
+
+The sync trigger (DECISION-060) fails loudly — by design, matching F16's reasoning — when a `memberships` row is inserted or updated at an organization with no `active_membership` derived group yet. `scripts/seed-dev.sql` inserts memberships at six fixture organizations, not the two Phase 2 anticipated when scoping "prove it once." Re-running the seed after this migration would raise on the first membership insert at any of the other four. The fix is not to weaken the trigger's fail-loudly behavior — that behavior is exactly what closes G-A's original gap (a silently-missing baseline grant with no error) — but to seed the derived group everywhere a membership can be inserted. **The role binding** (the `member` role, `app_role_permissions`, and the `role_grants` row actually granting `directory.view`) **stays scoped to Alder Creek alone** — the derived group's existence is a structural requirement of every org with memberships; wiring a permission through it is still the one-org proof Phase 2 intended.
+
+---
+
+## DECISION-065: The `active_membership` derived group's grantee population is "any current `memberships` row"; directory *content* eligibility is the narrower, already-documented fpcw-style formula — the two populations are deliberately different
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 3)
+
+Two distinct questions were bundled under "`directory.view`'s baseline" and needed separating. **Who is a member of the `active_membership` derived group** (and therefore eligible for a `directory.view` grant) is `memberships.ended_on is null` — no narrower. This is not a new definition; it is the codebase's existing, canonical answer to "does this person have a current relationship with this org," already load-bearing in `presby_membership_is_active()` (`drizzle/0015_presby_membership_probe.sql`, the `withOrgContext()` gate) and `presby_available_organizations()`/`presby_user_organizations()` (`drizzle/0010_presby_resolver.sql`). Narrowing it to roll status for this one feature would mean the platform disagrees with itself about what "current" means depending on which page is asking — the exact drift `presby_membership_is_active()`'s own comment warns against ("if the two drift, a card appears for an organization the gate then refuses"). **Who *appears as a row* in the rendered directory** is unrelated and already specified in `docs/schema-design.md` §11 ("Directory eligibility... following fpcw's `visibility.ts`"): `current_roll in (active, baptized, affiliate, other_participant) OR engagement_status = 'regular'`, minus `directory_hidden`, minus deceased — narrower than "any current membership," and deliberately so: a first-time visitor with a live `memberships` row can be granted the *ability* to browse the directory (matching every other member's baseline access) without themselves being *published in* it, which is the correct default until a church has actually engaged them. `src/lib/directory.ts`'s query additionally excludes `people.merged_into_id is not null`, beyond the literal §11 formula, on the `presby_match_person()` precedent that a tombstoned person never renders.
+
+---
+
+## DECISION-064: A missing `person_privacy` row defaults to the table's own column defaults, not to full exclusion
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 3)
+
+No trigger, seed, or application code anywhere creates a `person_privacy` row today (confirmed by search: `grep -rn person_privacy drizzle/ scripts/ src/` finds only the table definition and its comment, `drizzle/0011_presby_comments.sql:111`, and `scripts/seed-dev.sql` never inserts one) — every membership in the dev fixture is currently unconfigured, and this is the state every real congregation starts in until a self-service privacy page ships (unbuilt; no pipeline owns it yet). Defaulting a missing row to "fully hidden" would ship a directory that renders zero people for every congregation until each member individually visits a settings page that does not exist, which fails P1's own acceptance bar ("a member with the grant sees the directory") for the entire seed fixture on day one. Instead, `src/lib/directory.ts`'s query `LEFT JOIN`s `person_privacy` and `COALESCE`s each flag to the *same default the column itself declares* (`directory_hidden`→false, `hide_email`→false, `hide_phone`→false, `hide_address`→false, `hide_birthday`→true, `hide_photo`→false) — so a missing row behaves identically to a freshly-inserted, never-touched one, and the fallback is checkable against the schema rather than invented policy. `hide_birthday`'s default is `true` already (`src/lib/db/domain/privacy.ts:35`), so this is not "default everything visible" — it is "trust the table's own declared defaults," which happen to be protective on the one field the schema author already flagged as sensitive. Flagged as debt: this defaulting is load-bearing until a self-service privacy page exists to ever populate the row for real, same shape as DECISION-062's deferred items — lands in `docs/TODO.md`.
+
+---
+
+## DECISION-063: The `directory.view` permission-catalog row is seeded in the migration itself, not `scripts/seed.ts`; per-org role/grant rows stay fixture-only pending a real org-provisioning pipeline
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 3)
+
+`permissions` carries no `organization_id` — it is explicitly "global, code-seeded, never tenant-writable" (`src/lib/db/domain/authz.ts:24`) — but nothing in a real (non-dev) deployment inserts into it today; only `scripts/seed-dev.sql`, a synthetic dev-only fixture, does. `scripts/seed.ts` (`npm run db:seed`, the production-safe seed) cannot be the home for it either: it drives entirely off `FEATURE_CATALOG` in `src/lib/permissions.ts`, which is the *platform* shell catalog and is FROZEN against church-facing keys by explicit standing rule. Since `permissions` needs no org to exist first (unlike `app_roles`/`groups`/`role_grants`, which are inescapably per-org), an idempotent `insert ... on conflict (key) do nothing` inside `drizzle/0017_presby_membership_roster.sql` seeds it in every environment `db:migrate` reaches, dev and real alike — consistent with how `0009`/`0010` already treat "global catalog, seeded by migration" (`permissions` and the resolver functions) as the migration's job, not a TS seed script's. The per-org rows that bind `directory.view` to a real congregation's `active_membership` group (a new `app_roles` row, `app_role_permissions`, `role_grants`) stay fixture-only in `scripts/seed-dev.sql`, because no code anywhere provisions a *real* organization yet (G-B, DECISION-060) — the same non-answer already on record, not worsened here.
+
+---
+
 ## DECISION-062: `TENANT_ROLE_GRANTED`/`TENANT_ROLE_REVOKED` and the `role_grants` arm-1 cascade-on-membership-end fix are deferred to whichever pipeline first writes a person-targeted grant mutation
 
 **Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 2)

@@ -1592,3 +1592,273 @@ primitives, zero hand-rolled violations), build clean. Browser-verified via
 Playwright against the production build with the real admin fixture: 200, zero
 console/page errors, the alert-dialog opens and closes, the toast fires, both colour
 schemes screenshotted and reviewed — clean in both, no layout breaks.
+
+---
+
+# Phase 5 — Verification (qa), clearing DECISION-045's deferral for slices 0/a
+
+*Scoped to the whole shipped pipeline: `0.1`, `0.2`, `a1`–`a8`, plus the
+`/admin/design-system` addendum. This is the first independent check the pipeline
+has had — every prior number came from the implementer's own per-commit
+verification. The operator asked for this explicitly, after reviewing the shipped
+work in a browser.*
+
+## VERDICT: PASS
+
+**Every mechanical gate re-run independently from a clean state**, not trusted
+from the work-log: typecheck clean, lint clean, **656/656 unit tests**, all four
+tripwires green (**C2 independently proven live** with a real adversarial canary
+file, not just a config read), production build clean (29 routes), **89/89 e2e,
+zero skips**.
+
+**The mandatory auth gate was read line-by-line, not trusted by name**:
+`totp-full-login.spec.ts` genuinely completes a TOTP challenge — wrong code
+rejected, `otplib`-computed real code accepted, lands on `/admin`. Confirmed
+present and passing: `header-controls.spec.ts`'s sign-out path,
+`post-login-routing.spec.ts`'s DECISION-040 byte-identical-copy assertion.
+
+**Feature-gate audit**: confirmed by diff, not inference — this pipeline added no
+permission and no flag (`git diff dd36e61 HEAD` on `permissions.ts`/`schema.ts` is
+empty). `/admin/design-system` inherits the same `FEATURES.ADMIN_DASHBOARD` Edge
+gate as every other undifferentiated `/admin/*` page, confirmed by reading
+`src/proxy.ts` directly.
+
+**Independent visual parity**: fresh build, scratch port 3200 (never touched the
+operator's live port 3000), 72/72 baseline → 72/72 check, zero diffs — reproduces
+the pipeline's own "fresh-baseline-immediate-check is clean" finding rather than
+citing it.
+
+**Sample diff review** (3 files across admin/credential/shared) confirmed the
+Category B "delete, don't author" rule held: geometry deleted, only layout-context
+classes retained, `autoComplete` attributes intact, no copy changed.
+
+**Browser verification**, Playwright against the same fresh build, six routes,
+360px, both schemes: zero console errors, zero overflow. **Independently
+reproduced the documented `/admin/users` row-order bug** — the same fixture rows
+appeared in different order between two captures taken seconds apart, exactly the
+missing-secondary-sort-key defect already filed — treated as confirming evidence
+the rest of the surface is clean, not a new finding.
+
+**All five TODO follow-ups cross-referenced**: confirmed genuinely open, none
+silently already fixed, none blocking.
+
+**DECISION-045's original deferral is now formally closed by this PASS.** Any
+future slice-0/a change reverts to the normal Phase 5 gate.
+
+*Recorded by the orchestrator from the read-only qa agent's report.*
+
+---
+
+# Phase 1 (re-run) — slices b/c/e re-verification against shipped 0/a (analyst)
+
+*Scoped to slices b, c, e. Slice d untouched, pending P1. Not a fresh Phase 1 — the
+original five-pass review (above) stands; this re-verifies its assumptions against
+real, merged code rather than a plan.*
+
+## VERDICT
+
+**READY WITH NOTES.** Slice e is startable as originally decomposed, no new
+findings. Slice b is startable but needs one small contract addition first
+(N1/NEW-OQ1). Slice c is startable **only for its `(admin)` half** — its public
+logo/brand read path and its logo storage plan both lean on infrastructure that
+turns out not to exist yet (N2, N3), and that must be ruled on explicitly at Phase
+2, not discovered at Phase 4 the way the Radix umbrella and the photo-storage
+adapter both were in prior pipelines.
+
+## Findings
+
+- **N1 (slice b) — `--accent`/`--accent-foreground` is classified `bounded` in
+  `TOKEN_POLICY` (the generator must derive it) but has no `BRAND_ROLE` and no
+  `LEGAL_PAIRS` entry — a token the generator is allowed to touch with no floor
+  it's checked against.** Recommendation: add an `accent`/`on-accent` role and a
+  `LEGAL_PAIRS` pair (`on-accent` on `accent`, min 7 — content-axis text per S15) as
+  a small patch to `contract.ts` (slice 0's file) before slice b's property test is
+  written, not a new slice-b architectural decision.
+- **N2 (slice c) — the logo storage plan says it "rides DECISION-030's adapter,"
+  but DECISION-030's own Impact section states the blob table and service
+  interface are unbuilt** (confirmed also in `docs/TODO.md`'s "Photo storage
+  service... unbuilt" line). Slice c cannot ride an adapter that doesn't exist.
+  Needs an explicit architect ruling: build the generic adapter as a slice-c
+  sub-step (larger scope, but delivers what DECISION-030 deferred), or build a
+  brand-specific asset path now and accept reconciling two storage mechanisms
+  later — the same "two homes" failure mode G9 already warned against, for
+  storage instead of tokens.
+- **N3 (slice c) — the public logo/brand read path is designed as "a field of the
+  DECISION-041 published-content projection," but neither that projection nor the
+  `(public)` route group it would live in exist in the codebase.** `publicOrgSummary()`
+  exists but is the narrower DECISION-040 name-and-type reader, not this
+  projection. Worse: **P3 (site model + renderer) is the pipeline P0.5 is
+  scheduled to *block*, and P3 is where this projection would naturally get
+  built** — so slice c's public path depends on the thing it's supposed to
+  unblock. Needs an explicit ruling: pull a minimal published-content projection
+  forward as slice c's own work (named as P3-scope pulled early, so the
+  provenance isn't lost), or ship slice c's storage + `(admin)` emission now and
+  defer the public/anonymous read path until P3 actually exists.
+
+## Adversarial pass, narrowed re-run
+
+No reversals. A9 (branded-403-as-enumeration-signal) is **stronger than
+theoretical** — `check-brand-scope.mjs`'s E1/E3 are live today, so the guard rail
+against a second unpoliced emitter is enforced before the emitter it would guard
+even exists. A13 (silent re-skin on upgrade) now has a concrete anchor —
+`BRAND_TOKEN_VERSION = 1` is real and `contract.test.ts` would catch a drifted
+platform value today. New confirmation N4: the `(admin)` organizations surface
+(S18) is un-brandable by construction (`(admin)` isn't in the brandable-prefix
+allowlist), so the abuse-neutralization action can't accidentally render in the
+brand it's disabling.
+
+## Open questions — status
+
+OQ1 (S12 refinement), OQ3 (dark toggle), OQ5 (radix umbrella), OQ6 (AAA floor) —
+**all moot, resolved and shipped in slices 0/a.** OQ2 (minimal `(admin)` org
+surface) — answered (S18) but not yet built; still slice c's job. OQ4 ("still on
+default palette" report) — still open, unchanged, costs nothing new once
+`organization_brands` exists.
+
+**New, specific to b/c/e:** NEW-OQ1 = N1 above. NEW-OQ2 = N2 above (architect call).
+NEW-OQ3 = N3 above (architect call).
+
+## Handoff
+
+**Next: architect (Phase 2), scoped to slices b, c (`(admin)` half only), and e.**
+NEW-OQ2 and NEW-OQ3 need explicit rulings before any Phase 4 work starts on slice
+c — do not let an implementer default into "build it inline." Slice e proceeds as
+originally decomposed. Slice d remains untouched, pending P1.
+
+*Recorded by the orchestrator from the read-only analyst agent's report.*
+
+---
+
+# Phase 2 (re-run) — architectural review of slices b, c (`(admin)` half), e (architect)
+
+## Verdict
+
+**Approved with suggestions.** Slice b and e proceed once one small `contract.ts`
+patch lands (DECISION-054). Slice c's `(admin)` half proceeds now; its public/
+anonymous read path is explicitly deferred to P3, not built against
+infrastructure that doesn't exist. Three decisions minted (054–056, appended to
+`docs/decisions.md` alongside the previously-drafted-but-never-transcribed
+051–053 — see housekeeping note below). Nothing returns to Phase 1.
+
+**Housekeeping caught in passing**: DECISION-051–053 were drafted in this same
+work-log's Phase 3 section with the instruction "append when slice 0 lands," but
+never actually transcribed to `docs/decisions.md` — even though slice 0 shipped
+(`0.1`) and `check-brand-scope.mjs` already cites `DECISION-052` in a comment as
+if it exists. Fixed: all six (051–056) are now in `docs/decisions.md`, newest
+first, in the correct order.
+
+## Ruling on N1 — the `accent` role gap (slice b) — DECISION-054
+
+Confirmed real by reading `contract.ts` directly: `--accent`/`--accent-foreground`
+is `bounded` (the generator must derive it) but absent from `BRAND_ROLES`,
+`ROLE_TO_TOKEN`, and `LEGAL_PAIRS` — no floor its output is checked against.
+**Approved as a literal patch to slice 0's file** (not new slice-b scope, since
+slice b only ever reads `contract.ts`): add `"accent"`/`"on-accent"` to
+`BRAND_ROLES`, the matching `ROLE_TO_TOKEN` entries, and
+`{ fg: "on-accent", bg: "accent", min: 7, kind: "body", derives: "D1" }` to
+`LEGAL_PAIRS` — same shape as the existing `muted-surface` pair. Must land before
+slice b's property test is written, or the test silently never checks accent.
+
+## Ruling on N2 — the logo storage / DECISION-030 adapter gap (slice c) — DECISION-055
+
+Confirmed: DECISION-030's own Impact section says the blob table and service
+interface are unbuilt. **Ruling: build the generic adapter now, as a slice-c
+sub-step, with the logo as its first real consumer** — not a brand-specific asset
+path. Rejecting the brand-specific path is not conservatism: it would directly
+contradict the original Phase 2's own ruling ("the adapter is not what diverges
+— the authorization wrapped around it is") and recreate the "two homes" failure
+G9 already named for tokens, this time for storage. Scope discipline: the blob
+table + minimal `resolve`/`store` interface only, logo as sole caller — no touch
+to `people.photo_key`, no photo migration, since none exists yet. Closes
+`docs/TODO.md`'s "Photo storage service... unbuilt" line as a side effect.
+
+## Ruling on N3 — the public logo/brand read path (slice c) — DECISION-056, the consequential one
+
+Confirmed on every count: no `(public)` directory, no `sites` table, DECISION-041
+was *decided*, not built, and `publicOrgSummary()` is the DECISION-040 mechanism
+(bare-grant read, gated on slug existence, never `platform_status`) — not the
+DECISION-041 projection. Two structural facts rule out "extend it" or "stub it":
+DECISION-049 forbids the bare-grant pattern for `organization_brands` outright
+("no public grant on this table, ever"), and there is no `sites.status`/publish
+concept to gate against — inventing one now means P3 has to reconcile a
+throwaway gate against its real state machine later, the same duplication
+DECISION-055 just avoided for storage.
+
+**Ruling: slice c ships storage + `(org)` membership-scoped emission +
+`(admin)`-only write/preview now; the public/anonymous read path (and the
+favicon/social-card derivation that depends on it) is explicitly deferred to
+P3.** Costs nothing today — there is currently zero anonymous consumer of a
+public brand read. Corrects the decomposition table's "slice c blocks P3": slice
+c still supplies the schema P3 needs, but P3 now owns building the DECISION-041
+projection and wiring brand into it as a field, not inheriting a working public
+path for free.
+
+**Tripwire mechanics, confirmed exactly as speced**: `EMITTERS[0]`
+(`(org)/o/[slug]/layout.tsx`) flips to `required: true` once slice c wires
+`<BrandTokens>` there; `EMITTERS[1]` (`(public)/site/[slug]/layout.tsx`) stays
+`required: false` until P3 creates the file — the checker already tolerates a
+`required: true` entry whose file doesn't exist, so flipping it now would be
+inert, not premature; leaving it `false` is the more honest diff.
+
+**One C1 trap named for slice c's `(admin)` preview**: it must not use
+`bg-brand-*`/`text-brand-*` utilities at all — `(admin)` is outside
+`BRANDABLE_PREFIXES`, so those classes would resolve to the platform default,
+not the previewed org's colours. The preview renders the generator's parsed
+values as **inline style from parsed numbers** (A7's rule, same logic
+DECISION-047 already uses for "logo-as-content is legal wherever the caller is
+authorized," extended to a colour swatch) — must be stated explicitly in slice
+c's Phase 3 design or an implementer reaches for `bg-brand-raw` by habit and
+trips C1 on the first commit.
+
+## Placement — rest of the checklist
+
+- **`src/lib/brand/generate.ts` (slice b)** — confirmed: `src/lib/brand/`, may
+  import `contract.ts`/`contrast.ts` only. Matches the established import
+  direction exactly.
+- **The `(admin)` organizations surface (slice c, S18)** — follows
+  `admin/2fa/actions.ts`, not `admin/flags/`: a platform operator acting on
+  per-tenant data with **no membership**, via `getPlatformDb()` (not
+  `withOrgContext()` — DECISION-049 only named the tenant self-serve path), a
+  `FEATURES.*` gate, audit with `resourceType: "organization"`. **New
+  permission**: `FEATURES.ADMIN_ORGANIZATIONS = "admin.organizations"`,
+  platform-admin-shell scope, `permissions.ts` stays FROZEN otherwise. Naming
+  `getPlatformDb()` explicitly matters — without it an implementer might
+  fabricate a phantom membership to satisfy `withOrgContext()`, which would
+  quietly violate "Two Hierarchies Intersect Nowhere."
+- **Type pairings (slice e)** — the pairing enum is data, belongs in
+  `contract.ts` next to `TYPE_SCALE`. **But font resolution cannot live there**
+  — `next/font` imports must be statically analyzable and are Next-coupled,
+  which `contract.ts`'s zero-runtime-imports rule forbids. New file
+  `src/lib/brand/fonts.ts`, importing only the pairing-key type from
+  `contract.ts` — same pattern as `generate.ts`/`emit.ts`. No new dependency:
+  `next/font/google` self-hosts at build time, first use in the tree but a
+  Next.js built-in.
+- **`organization_brands`** — unchanged: FORCE RLS, degenerate PK, no public
+  grant ever. `organization_settings` (FORCE RLS, written exclusively through
+  `getPlatformDb()` in `admin/2fa/actions.ts`) is the live proof this exact
+  posture already works. The RLS/`withOrgContext()` path stays declared now for
+  slice d to use later without a migration.
+
+## Invariants Touched
+
+| Invariant | Effect |
+|---|---|
+| Isolation Is a Database Property | Unchanged posture; **new**: the slice-c write path for this release is `getPlatformDb()`, precedented but not previously named for this table. |
+| Two Hierarchies Intersect Nowhere | Reinforced — no phantom membership to satisfy `withOrgContext()` for a platform-operator write. |
+| Composite Tenant Keys | Unaffected, still degenerate. |
+| Permissions vs Flags | New `FEATURES.ADMIN_ORGANIZATIONS`; `ui.brand_theming` still emission-only; `org.branding` still slice d, still blocked on P1. |
+| Extensibility Goes Through Support (D8) | DECISION-055 keeps a second tenant-extensible storage mechanism from being invented ad hoc. |
+| No Real Data | The `(admin)` brand surface needs seed/fixture orgs, same discipline as every admin surface — named because a logo upload is the first surface where a real scanned image is a plausible accidental paste. |
+| Verify in a Browser | The inline-style-driven `(admin)` preview is exactly the kind of thing that passes `tsc`/`next build` while rendering the wrong colour if built carelessly — screenshot it. |
+
+## Handoff
+
+**Next: tech-lead (Phase 3), scoped to slice b, slice c's `(admin)` half, and
+slice e.** Three things to carry forward literally: (1) DECISION-054's patch to
+`contract.ts` is a prerequisite commit, not part of slice b's own diff; (2)
+slice c's design must name `getPlatformDb()` explicitly (citing
+`admin/2fa/actions.ts`) and the inline-style-not-token-utility rule for the
+preview; (3) slice c's design must state DECISION-056's deferral explicitly in
+its Out-of-Scope section — favicon/social-card derivation goes with it.
+
+*Recorded by the orchestrator from the read-only architect agent's report.*

@@ -4,6 +4,54 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-056: Slice c's public/anonymous brand read path is deferred to P3; slice c ships tenant storage, `(org)` membership-scoped emission, and `(admin)`-only write/preview only
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice c, Phase 2 re-run)
+
+Neither the DECISION-041 published-content projection, nor the `(public)` route group, nor a `sites`/publish-status model exist yet. `publicOrgSummary()` is the DECISION-040 mechanism — a bare-grant read on `organizations`, gated on slug existence, never `platform_status` — not the DECISION-041 projection, and its bare-grant access pattern is explicitly forbidden for `organization_brands` by DECISION-049 ("no public grant on this table, ever"). Pulling a minimal projection forward would mean inventing a throwaway publish-gate with no real data model behind it, which P3 would have to reconcile against its actual `sites` state machine later — the same duplication DECISION-055 was just ruled out for storage. There is also currently zero anonymous consumer of a public brand read (no public site, no presbytery directory), so nothing is lost by deferring. **Corrects the decomposition table's "slice c blocks P3"**: slice c still supplies the schema P3 needs, but P3 now owns building the DECISION-041 projection and wiring brand into it as a field — not inheriting a working public path for free. `EMITTERS[0]` (`(org)/o/[slug]/layout.tsx`) in `check-brand-scope.mjs` flips to `required: true` once slice c wires `<BrandTokens>` there; `EMITTERS[1]` (`(public)/site/[slug]/layout.tsx`) stays `required: false` until P3 creates the file, per the tripwire's own reviewable-diff-at-creation design.
+
+---
+
+## DECISION-055: Slice c builds DECISION-030's storage adapter now, scoped to the blob table and service interface only; the logo is its first consumer, not person photos
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice c, Phase 2 re-run)
+
+DECISION-030's own Impact section states the blob table and service interface are unbuilt; slice c's plan to "ride" that adapter had nothing to ride. Building a brand-specific asset path instead was rejected: it would contradict the original Phase 2's own ruling that "the adapter is not what diverges — the authorization wrapped around it is," and would recreate the exact "two homes" storage-duplication failure G9 already named for tokens. Slice c builds the tenant-scoped, composite-keyed blob table plus a minimal `resolve`/`store` service interface and wires the logo as its only caller; it does not touch `people.photo_key` or migrate any photo code, since none exists yet. Closes the "Photo storage service... unbuilt" line in `docs/TODO.md`.
+
+---
+
+## DECISION-054: `--accent`/`--accent-foreground` gets a role, a token mapping, and a contrast floor; the contract's closed vocabulary had a gap
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice b, Phase 2 re-run)
+
+`contract.ts` classified `--accent` `bounded` (a constraint the slice-b generator must implement) but declared no `BRAND_ROLE`, no `ROLE_TO_TOKEN` entry, and no `LEGAL_PAIRS` floor for it — the generator could touch a token with nothing checking its output. Patch: add `"accent"`/`"on-accent"` to `BRAND_ROLES`, `accent: "--accent"` / `"on-accent": "--accent-foreground"` to `ROLE_TO_TOKEN`, and `{ fg: "on-accent", bg: "accent", min: 7, kind: "body", derives: "D1" }` to `LEGAL_PAIRS`, matching the existing `muted-surface` pair's shape (content-axis, 7:1). Lands as a follow-up patch to slice 0's already-shipped file, before slice b's property test is written.
+
+---
+
+## DECISION-053: Slice a is not a zero-visual-change slice, and it proves its claim with a self-comparing screenshot harness
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice a)
+
+Three acceptance categories (pixel-identical / attributable / named); the diff-level rule that the sweep deletes class strings rather than authoring them; a Playwright `visual` project with gitignored `.visual/` baselines captured before and after on one machine, at 360 and 1280 in both schemes, zero new dependencies. Committed CI baselines need a pinned container and are deferred.
+
+---
+
+## DECISION-052: The brand-scope marker is the emitting component, and the tripwire has four clauses
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice a)
+
+`<BrandTokens>` *is* the `<style>` element, so grep-presence and behaviour-presence are one fact; a `data-brand-scope` attribute would mark a wrapper DECISION-050 already ruled out. E3 (no `<style>` outside `src/components/brand/`) closes the copy-paste bypass and is enforceable today at zero violations. The consumer clause that can be demonstrated failing is **C2 (hand-rolled primitives, 44 real violations)**, not the `--brand-*` clause, which is vacuous until slice c. Palette literals are out of scope pending semantic status tokens. Emission uses `:root:root` / `:root:root.dark` for specificity rather than relying on source order, and a plain string child rather than `dangerouslySetInnerHTML`.
+
+---
+
+## DECISION-051: The token partition is three-way, and the platform default palette is corrected to meet its own floor
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice 0)
+
+Brandable / bounded / platform, closed over every property `globals.css` declares, closure enforced by a test that parses the CSS. `--accent` and `--accent-foreground` are *bounded*, not brandable, because accent is menu-hover under content-axis text (later revisited — see DECISION-054, which adds accent's missing contrast floor without changing this classification). Six pairs of the current default palette fail the floors the contract declares — including `ring` on `primary` at 1.00:1, a focus ring that has been invisible on the primary button in both schemes since P0 — so slice 0 corrects five token values and adds a structural ring offset rather than shipping a contract its reference implementation violates.
+
+---
+
 ## DECISION-050: `next-themes` is approved for the colour scheme only; the brand style element always emits both ramps
 
 **Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice a)

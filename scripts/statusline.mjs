@@ -16,6 +16,16 @@
  * one that finished a moment ago looks live. It is approximate on purpose —
  * approximate and always visible beats exact and only on request.
  *
+ * WHAT THE LABEL IS. Claude Code writes agent-<id>.meta.json next to the
+ * transcript with the `description` the orchestrator gave the Agent tool call
+ * ("Implement c4 org brand emission") — that is what renders. It is a proper
+ * label, not a heuristic: reading the transcript's opening prompt line instead
+ * (the old approach) mostly produced "You are the ux-developer implementing…"
+ * for every agent, since that is how every prompt in this repo's pipeline
+ * starts — informative about the role, not about the work. Falls back to the
+ * transcript-scraping heuristic only if meta.json is missing (an older Claude
+ * Code version, or an agent spawned before this file existed).
+ *
  * Reads session JSON on stdin (Claude Code supplies it). Never fails loudly:
  * any error prints the minimal segment, because a status line that throws is
  * worse than a status line that says less.
@@ -88,18 +98,32 @@ function runningAgents(sessionId, projectDir) {
     const idle = now - st.mtimeMs / 1000;
     if (idle > LIVE_WINDOW_S) continue;
 
-    // The label is derived from the agent's own opening prompt — the first
-    // line of its transcript. Nothing is tracked alongside, so the label can
-    // never disagree with what is actually running.
-    const head = read(path)?.slice(0, 1500) ?? "";
-    const raw = head.match(/"content"\s*:\s*"([^"\\]{1,90})/)?.[1] ?? "";
-    const cleaned = raw
-      .replace(/[*`#]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const desc = cleaned
-      ? cleaned.slice(0, 34).replace(/\s+\S*$/, "")
-      : basename(name, ".jsonl").slice(6, 14);
+    // Prefer meta.json's own `description` — the short label the orchestrator
+    // gave this agent when spawning it. Only fall back to scraping the
+    // transcript's opening prompt line if meta.json is missing or unreadable.
+    const metaPath = path.replace(/\.jsonl$/, ".meta.json");
+    const metaRaw = read(metaPath);
+    let desc = null;
+    if (metaRaw) {
+      try {
+        const meta = JSON.parse(metaRaw);
+        if (meta?.description) desc = String(meta.description).slice(0, 40);
+      } catch {
+        /* fall through to the transcript heuristic below */
+      }
+    }
+
+    if (!desc) {
+      const head = read(path)?.slice(0, 1500) ?? "";
+      const raw = head.match(/"content"\s*:\s*"([^"\\]{1,90})/)?.[1] ?? "";
+      const cleaned = raw
+        .replace(/[*`#]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      desc = cleaned
+        ? cleaned.slice(0, 34).replace(/\s+\S*$/, "")
+        : basename(name, ".jsonl").slice(6, 14);
+    }
 
     out.push({ desc, age: Math.floor(now - st.birthtimeMs / 1000) });
   }

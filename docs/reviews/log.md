@@ -27,6 +27,35 @@ For no-op reviews (a cycle genuinely produced no actionable findings): `nothing 
 ## Entries
 
 <!-- newest entries go here, above the older ones -->
+
+**Reset 2026-08-19.** This file was carried over wholesale when presby was
+scaffolded from `chenson42/claudecode-nextjs-starter` on 2026-08-17 — every
+entry below the divider is that starter project's own review history, not
+presby's. `docs/STATE.md` already says presby has no shared *git* history with
+the starter, but this *doc* came along at scaffold time anyway, and its cadence
+math was accordingly measuring elapsed time against reviews that were never
+run on this codebase, on a repo that is two days old.
+
+The lines below are explicit **baselines, not completed reviews** — no review
+type has actually been run against presby's code yet. They exist so the
+cadence check's clock starts counting from today rather than reporting a false
+weeks-overdue count. The first *real* run of each type replaces its baseline
+line the normal way (newest entry on top) and should read like any other
+finding, not like this one.
+
+2026-08-19 | dependencies | baseline (reset) — clock starts here, not a completed review
+2026-08-19 | agent-instruction | baseline (reset) — clock starts here, not a completed review
+2026-08-19 | security | baseline (reset) — clock starts here, not a completed review
+2026-08-19 | documentation | baseline (reset) — clock starts here, not a completed review
+2026-08-19 | code | baseline (reset) — clock starts here, not a completed review
+2026-08-19 | retrospective | baseline (reset) — clock starts here, not a completed review
+2026-08-19 | test-coverage | baseline (reset) — clock starts here, not a completed review
+
+---
+
+*Below this line: the starter template's own review history, kept for
+reference only. Not presby's, and not counted toward presby's cadence.*
+
 2026-08-09 | external-review | Fable 5 first pass (starter + process + AI-SDLC industry research): core finding "process knows things it doesn't enforce" — e2e absent from CI despite retro naming it sole defense; 8 enforcement gaps, commit↔work-log trailer missing, 5 efficiency cuts; escape-rate trailers judged industry-leading; see 2026-08-09-fable-external-review.md
 2026-07-11 | retrospective | Pipeline healthy: all 6 edits from 05-17 landed; 1 formal loop-back across 25 pipelines (caught real hook defect); 0 trailer bypasses; risk: 57% of fixes found post-merge, 100% agent-review — e2e gate is sole defense for runtime/framework bug class; 8 punch items; see 2026-07-11-retrospective.md
 2026-07-11 | security | 0 critical/high, 1 medium (new: admin/2fa actions lack independent hasFeature check, mitigated by proxy edge gate), 4 low, 3 informational; 6 of 10 prior findings fixed and verified; see 2026-07-11-security.md

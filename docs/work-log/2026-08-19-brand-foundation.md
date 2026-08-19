@@ -39,6 +39,24 @@ prose lines against real primitives.
 
 ---
 
+
+## Operator answers to Phase 1's open questions (2026-08-19)
+
+| # | Decision | Effect |
+|---|---|---|
+| **S15** | **S12 refinement accepted: every surface participates in the brand; brand carries *emphasis*, neutral carries *content*.** Masthead, nav, links, primary buttons, focus rings, selected states and the public site's hero bands are brand-driven; table rows, form interiors, body copy, disabled states and semantic colours are neutral and identical everywhere. Transactional email is name-and-logo only; credential email stays presby-voiced. | Makes the accessibility floor achievable, and keeps the re-skin on the axis that reads as identity rather than the axis that reads as data. |
+| **S16** | **Body-text contrast floor is AAA (7:1)**, not AA. | Above the legal standard, deliberately. The audience skews old and the product's own content is about hearing loops and large-print bulletins. Constrains every future palette decision, knowingly. |
+| **S17** | **A member-facing dark-mode toggle ships**, account-level, defaulting to system. | Approves `next-themes`; its FOUC-prevention script is needed anyway to satisfy Flow 4's no-flash-of-the-previous-congregation requirement. The `.dark` class mechanism was shipping regardless. |
+| **S18** | **A minimal `(admin)` organizations surface comes into this pipeline** (slice c). | "The operator sets branding at onboarding" has nowhere to live otherwise — there is no organizations page in `/admin` at all today. It is also where neutralising an abusive tenant's brand belongs, and P2's onboarding work builds around it rather than replacing it. |
+
+Still open, for the architect: the `radix-ui` umbrella (OQ5) — **now a second
+occurrence**, hand-corrected again during the avatar pipeline on 2026-08-19, so
+slice a must settle it rather than defer it a third time. And OQ4, the
+"congregations still on the default palette" report, which the operator has not
+answered and which is cheap in this pipeline and awkward later.
+
+---
+
 # Phase 1 — Functional Refinement (analyst)
 
 ## VERDICT

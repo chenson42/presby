@@ -1,7 +1,7 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.9.0` · surveyed 2026-08-18.**
+knows what exists without re-reconning. **Version `0.10.0` · surveyed 2026-08-19.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
 a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries
@@ -18,6 +18,9 @@ inherited from the starter.
 - **presby: roll** — `presby_roll_as_of`, `_counts_as_of`, `_changes`, `presby_reconcile_current_roll`, `presby_roll_cache_drift`; officer registers `presby_officer_roster` / `_history`.
 - **presby: developer reference** — `/developer` index, `/developer/tables/<name>`, `/developer/erd/<module>`, `/developer/schema.json`. Generated from the schema + Postgres `COMMENT ON`.
 - **presby: NOT built** — no UI for any of the above; ledger/giving, events, worship, check-in, sites, tickets not designed.
+- **presby: post-login routing** — `/launch` computes a nine-row destination matrix and forwards; `/orgs` chooser (never auto-forwards); `/no-organization`; `/o/<slug>` org shell in the `(org)` group. Slug is immutable, DNS-label constrained. Named access-denied that is byte-identical across platform statuses (DECISION-040/044).
+- **presby: header controls** — avatar menu (identity: account, `/admin` and `/developer` when entitled, sign out) and organization switcher (context), split on Google's model. `src/components/shared/{avatar-menu,org-switcher,global-nav}.tsx`.
+- **Design system** — `cn()`, `components.json`, four generated primitives (`button`, `card`, `badge`, `dropdown-menu`), expanded token set. Light mode fixed — `@theme` inside a media query had made every visitor see dark (v0.10.0).
 - **Public / Auth** — landing page, sign-in (Google OAuth + credentials, Turnstile-guarded, lockout-aware), TOTP 2FA verify + trusted device, forgot/reset password, email-change verify landing, access-pending.
 - **presby: post-login router** — `/launch` decides and redirects (nine-row matrix as a pure function), `/orgs` chooser (org cards + Platform block, never auto-forwards), `/no-organization` zero-org funnel, `/o/<slug>` org landing stub in the new `(org)` group with the four-way miss response (enter / ended / denied / 404).
 - **Member** — `/home` platform shell (greeting, roles/features, what's-new card, daily feedback prompt) — no longer the landing target, `/whats-new` full list, feedback submit/snooze/opt-out actions.
@@ -33,7 +36,11 @@ inherited from the starter.
 
 ## Public / Auth
 
-- Landing page — public marketing stub. `src/app/page.tsx`
+- Landing page — public marketing stub; never redirects a signed-in user (DECISION-034). `src/app/page.tsx`
+- Post-login router — `/launch`, pure `computeDestination()` over nine rows. `src/app/launch/page.tsx`, `destination.ts`
+- Organization chooser — `/orgs`, cards carry name and type only, no membership language (DECISION-039). `src/app/(member)/orgs/page.tsx`
+- Not-connected page — `/no-organization`, copy differs for an org still being set up. `src/app/no-organization/page.tsx`
+- Organization shell — `/o/<slug>`, `(org)` group; `withOrgContext` only, `getPlatformDb()` forbidden. `src/app/(org)/o/[slug]/`
 - Sign-in — Google OAuth + credentials, Turnstile, lockout-aware, safe `callbackUrl` → `/launch`. `src/app/(auth)/signin/page.tsx`, `actions.ts`
 - TOTP verify — code entry + trusted-device cookie; enrolment redirect two-hop (proxy → `/totp` → `/account/2fa`). `src/app/(auth)/totp/page.tsx`, `actions.ts`
 - Forgot/reset password — request link + consume token (hashed at rest, enumeration-safe). `src/app/(password-reset)/forgot-password/page.tsx`, `reset-password/page.tsx`, `actions.ts`

@@ -26,6 +26,8 @@ been independently verified.
 
 ## In Flight
 
+- [ ] **P0.5 — design foundation + brand architecture**: Phase 1 complete (six slices), Phase 2 running on slices 0 and a — `docs/work-log/2026-08-19-brand-foundation.md`
+
 - [ ] **P0 — post-login router and org context** (`/launch`, `/orgs`, `/no-organization`, `/o/[slug]`, `presby_user_organizations`, slug CHECK, membership/position guard, shadcn init) — Phase 4 complete 2026-08-18 (slices A, B, C1, C2/C3); **next: qa (Phase 5)** — `docs/work-log/2026-08-18-backbone-and-org-sites.md`
 
 ## Next Up
@@ -82,6 +84,10 @@ been independently verified.
 - [ ] TOTP enrolment e2e — requires either a seeded deterministic TOTP secret (security risk — see routing feature option (c) rationale, e2e-auth-infra work-log Phase 2 Ruling 7) or external authenticator integration; deferred until a safe pattern is designed
 
 ## Done
+
+- [x] 2026-08-19 — Avatar menu + organization switcher: identity and context split on Google's model; caught a Radix bug that would have silently broken sign-out — `docs/work-log/2026-08-19-avatar-and-org-switcher.md`
+- [x] 2026-08-19 — v0.10.0 release notes + functionality map + version bump
+- [x] 2026-08-18 — P0 post-login router
 
 - [x] 2026-08-18 — Stale test replica retired: `(auth)/totp/actions.test.ts` deleted with the `/home` → `/launch` fallback change; its javascript:/data:/protocol-relative assertions now live in `src/lib/auth/safe-callback.test.ts` against the real function — `docs/work-log/2026-08-18-backbone-and-org-sites.md` (P0 slice C1)
 - [x] 2026-08-18 — Agent tool grants: `tools:` on all nine agents; analyst/architect/qa read-only and return their section for the orchestrator to record; QA re-chartered verification-only (test authorship → implementers); stale e2e briefing in `qa.md` corrected — SHIP IT — `docs/work-log/2026-08-18-agent-tool-restrictions.md`

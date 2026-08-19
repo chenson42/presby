@@ -20,7 +20,7 @@ inherited from the starter.
 - **presby: NOT built** — no UI for any of the above; ledger/giving, events, worship, check-in, sites, tickets not designed.
 - **presby: post-login routing** — `/launch` computes a nine-row destination matrix and forwards; `/orgs` chooser (never auto-forwards); `/no-organization`; `/o/<slug>` org shell in the `(org)` group. Slug is immutable, DNS-label constrained. Named access-denied that is byte-identical across platform statuses (DECISION-040/044).
 - **presby: header controls** — avatar menu (identity: account, `/admin` and `/developer` when entitled, sign out) and organization switcher (context), split on Google's model. `src/components/shared/{avatar-menu,org-switcher,global-nav}.tsx`.
-- **Design system** — `cn()`, `components.json`, four generated primitives (`button`, `card`, `badge`, `dropdown-menu`), expanded token set. Light mode fixed — `@theme` inside a media query had made every visitor see dark (v0.10.0).
+- **Design system** — `cn()`, `components.json`, generated primitives (button/card/badge/dropdown-menu/table/input/label/textarea/alert-dialog), closed token contract, `.dark` class scheme (not media-query). **Per-organization branding is live in `(org)`** (P0.5, gated `ui.brand_theming`): operator sets a congregation's colour/logo/type pairing at `/admin/organizations`; `(org)` emits it as a `:root`-scoped `<style>` reaching Radix portals; DECISION-040 denial pages and every other route stay platform-default by construction. `(public)/site/<slug>` (anonymous) emission is P3, not built.
 - **Public / Auth** — landing page, sign-in (Google OAuth + credentials, Turnstile-guarded, lockout-aware), TOTP 2FA verify + trusted device, forgot/reset password, email-change verify landing, access-pending.
 - **presby: post-login router** — `/launch` decides and redirects (nine-row matrix as a pure function), `/orgs` chooser (org cards + Platform block, never auto-forwards), `/no-organization` zero-org funnel, `/o/<slug>` org landing stub in the new `(org)` group with the four-way miss response (enter / ended / denied / 404).
 - **Member** — `/home` platform shell (greeting, roles/features, what's-new card, daily feedback prompt) — no longer the landing target, `/whats-new` full list, feedback submit/snooze/opt-out actions.
@@ -54,6 +54,16 @@ inherited from the starter.
 - `/no-organization` — five-state zero-org funnel (already has access / being set up / not a tenant / access ended / never connected) plus two doors. `src/app/no-organization/page.tsx`
 - `/o/<slug>` — org landing stub + the four-way miss response; `resolveOrgContext()` then `assertOrgAccess()`. `src/app/(org)/o/[slug]/page.tsx`, `org-states.tsx`, `error.tsx`, `not-found.tsx`
 
+## Brand / per-organization theming (P0.5)
+
+- Closed token contract — brandable/bounded/platform partition, legal contrast pairs (D1–D6), type scale, curated type pairings; zero runtime imports. `src/lib/brand/contract.ts`
+- Ramp generator — seed hex → independently-derived light + dark token sets + `adjustments[]`, property-tested against every OKLCH seed, versioned (`BRAND_TOKEN_VERSION`). `src/lib/brand/generate.ts`
+- Storage — `organization_brands` (one row per org, FORCE RLS, no public grant ever) + `organization_brand_history`; set/neutralise by the platform operator only (`org.branding`'s tenant-facing editor is still P1-blocked). `src/lib/db/domain/org.ts`
+- `(org)` emission — **live**, gated by `ui.brand_theming`. `(org)/o/[slug]/layout.tsx` resolves the caller's own membership, reads the org's brand (null-safe: flag off / not a member / never branded all render the platform default), and `<BrandTokens>` emits both colour schemes as one `:root`-scoped `<style>` element — reaches Radix portals, not just the layout's own DOM subtree. `src/lib/brand/read-org-brand.ts`, `src/components/brand/brand-tokens.tsx`
+- Un-brandable by construction — the DECISION-040 access-denied/ended/404 pages and every route outside `(org)`/`(public)/site/<slug>` never receive brand tokens; enforced by `scripts/check-brand-scope.mjs` (E1–E3, C1–C2 all live tree-wide as of `a8`/`c4`).
+- Font pairing — per-org heading/body face resolved to self-hosted `next/font/google` faces; applied to `(org)`'s body text today (heading-face differentiation not yet wired — see `docs/TODO.md`). `src/lib/brand/fonts.ts`
+- `(public)/site/<slug>` emission (anonymous visitors) is **not built** — P3.
+
 ## Member
 
 - Home — the platform shell, no longer the post-login destination (see Post-Login router). Greeting, roles/features summary, global nav (conditional Admin link), what's-new card, daily feedback prompt card (UTC-read/local-write, DECISION-023). `src/app/(member)/home/page.tsx`, `feedback-prompt-card.tsx`
@@ -76,6 +86,7 @@ inherited from the starter.
 - Feedback triage — status new→triaged→done/declined; renders bodies as plain text (hostile-content invariant). `admin/feedback/page.tsx`, `actions.ts`
 - What's-new CRUD — list+create, edit, delete; HTML-reject validation. `admin/whats-new/page.tsx`, `[id]/page.tsx`, `actions.ts`
 - Email-queue viewer — send status, delivery status, retry. `admin/email-queue/page.tsx`, `actions.ts`
+- Organizations — list + "still on default palette" (OQ4) filter, detail page sets/previews/neutralises a congregation's brand (seed colour, logo, type pairing), audited (`ORG_BRAND_SET`/`ORG_BRAND_NEUTRALIZED`). `admin/organizations/page.tsx`, `[id]/page.tsx`, `[id]/actions.ts`, `[id]/brand-form.tsx`
 
 ## Auth backend & edge
 

@@ -13,6 +13,11 @@ export default async function AdminDashboard() {
   const showDashboardPreview = await isFlagEnabled("demo.new_dashboard");
   const cards = [
     {
+      href: "/admin/design-system",
+      title: "Design system",
+      blurb: "Every primitive and token in one screen — the P0.5 sign-off page.",
+    },
+    {
       href: "/admin/users",
       title: "Users & roles",
       blurb: "Assign roles to users.",

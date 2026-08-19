@@ -16,6 +16,7 @@ export default async function AdminLayout({
 
   const nav = [
     { href: "/admin", label: "Dashboard" },
+    { href: "/admin/design-system", label: "Design system" },
     { href: "/admin/users", label: "Users" },
     { href: "/admin/flags", label: "Feature flags" },
     { href: "/admin/docs", label: "Release notes" },

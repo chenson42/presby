@@ -1566,3 +1566,29 @@ landed, ten commits, zero remaining C2 violations anywhere in the tree. Phases 5
 6 remain deferred per DECISION-045; the operator is the verifier.
 
 *Recorded by the orchestrator from the implementing agent's report.*
+
+---
+
+## Addendum — `/admin/design-system`, a sign-off page (orchestrator, 2026-08-19)
+
+Requested after `a8` landed: a single screen showing every primitive and token so
+the operator could review the pipeline without clicking through a dozen admin
+pages. **Classification: Polish** — no schema, no dependency, no permission change,
+gated by the same admin session check every `/admin` page already uses; Phases 2/3
+skipped with this notation rather than run through the full pipeline. Built
+directly by the orchestrator.
+
+`src/app/(admin)/admin/design-system/page.tsx` — a single client component (no data
+fetching; the page is a static demo, so the whole-file `'use client'` is the honest
+choice over three small wrapper files). Sections: colour tokens grouped by
+`TOKEN_POLICY`'s three-way partition, the seven-role type scale, every `Button`
+variant and size, every `Badge` variant, `Label`/`Input`/`Textarea`, a `Table`, the
+`DropdownMenu`, a live `AlertDialog` (openable, not just described), toast triggers,
+and a `Card`. Added to the admin nav (`layout.tsx`) and dashboard cards
+(`admin/page.tsx`).
+
+**Verified**: typecheck, lint, `npm run check` (including C2 — the page uses only
+primitives, zero hand-rolled violations), build clean. Browser-verified via
+Playwright against the production build with the real admin fixture: 200, zero
+console/page errors, the alert-dialog opens and closes, the toast fires, both colour
+schemes screenshotted and reviewed — clean in both, no layout breaks.

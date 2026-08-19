@@ -17,6 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { TYPE_PAIRINGS } from "@/lib/brand/contract";
+import { resolveTypePairing } from "@/lib/brand/fonts";
 import {
   Table,
   TableBody,
@@ -167,6 +169,46 @@ export default function DesignSystemPage() {
               <span className={t.cls}>The quick brown fox — {t.where}</span>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Type pairings ----------------------------------------------------- */}
+      <section>
+        <h2 className="text-xl font-semibold">Type pairings</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Source of truth: <code>TYPE_PAIRINGS</code> in{" "}
+          <code>src/lib/brand/contract.ts</code>, resolved to real self-hosted
+          faces by <code>src/lib/brand/fonts.ts</code>. This is the only
+          place these fonts render today — the church-facing editor and the{" "}
+          <code>(org)</code> emitter are later slices — so this section is
+          the A10/e1 360px-and-both-schemes validation surface, kept
+          permanently rather than thrown away, since a curated set that isn&apos;t
+          re-checked on every future change is a colour picker with fewer
+          options.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          {TYPE_PAIRINGS.map((pairing) => {
+            const resolved = resolveTypePairing(pairing.key);
+            return (
+              <div
+                key={pairing.key}
+                className="rounded-md border border-border p-4"
+              >
+                <p className="font-mono text-xs text-muted-foreground">
+                  {pairing.key}
+                </p>
+                <h3
+                  className={`${resolved.headingClassName} mt-2 text-xl font-semibold`}
+                >
+                  {pairing.label} pairing
+                </h3>
+                <p className={`${resolved.bodyClassName} mt-1 text-sm`}>
+                  The quick brown fox jumps over the lazy dog — {pairing.heading} /{" "}
+                  {pairing.body}.
+                </p>
+              </div>
+            );
+          })}
         </div>
       </section>
 

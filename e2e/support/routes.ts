@@ -164,6 +164,12 @@ export const VISUAL_ROUTES: VisualRoute[] = [
     expectedStatus: 200,
     note: "Per-congregation 2FA policy (DECISION-033).",
   },
+  {
+    path: "/admin/design-system",
+    storageState: "admin",
+    expectedStatus: 200,
+    note: "Primitive/token sign-off page — includes the e1 type-pairings preview, self-hosted fonts.",
+  },
 
   // --- (org) -------------------------------------------------------------
   {

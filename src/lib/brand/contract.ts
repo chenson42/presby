@@ -99,6 +99,20 @@ export const TOKEN_POLICY = [
     why: "A hero band carries text, and that text needs a foreground computed against the raw seed.",
   },
   {
+    token: "--font-heading",
+    policy: "brandable",
+    additive: true,
+    nonColour: true,
+    why: "A per-org type pairing (TYPE_PAIRINGS) selects the heading face; not in globals.css until the font resolver (slice e1) emits it.",
+  },
+  {
+    token: "--font-body",
+    policy: "brandable",
+    additive: true,
+    nonColour: true,
+    why: "Paired with --font-heading from the same curated TYPE_PAIRINGS entry; carries no palette value and no contrast pair.",
+  },
+  {
     token: "--background",
     policy: "bounded",
     bound: "nearWhiteOrNearDarkBand",
@@ -536,6 +550,67 @@ export const TYPE_SCALE = [
 ] as const satisfies readonly TypeScaleEntry[];
 
 export type TypeRole = (typeof TYPE_SCALE)[number]["role"];
+
+/* -------------------------------------------------------------------------
+ * Type pairings
+ *
+ * A closed set of curated heading/body font combinations (S14). Chosen
+ * against this product's own accessibility floor (AAA body text, S16) and
+ * its audience, which skews older (S16) — legibility and x-height win over
+ * character every time a choice was close. Google Fonts only; no display,
+ * script, or decorative face made the list. Font RESOLUTION is deliberately
+ * not here — `next/font/google` imports must be statically analyzable and
+ * are Next-coupled, which this file's zero-runtime-imports rule forbids —
+ * that lives in `src/lib/brand/fonts.ts` (slice e1), which imports only
+ * `TypePairingKey` from this file. This array is data: the enum and the
+ * reasoning behind each entry, nothing else.
+ *
+ * A10: each pairing must be validated against the real UI at 360px, in both
+ * schemes, before being added — a curated set that was never validated is a
+ * colour picker with fewer options. That validation is e1's job; adding an
+ * entry here without it happening is not itself a contract violation, but
+ * shipping one to `fonts.ts` unvalidated would be.
+ * ---------------------------------------------------------------------- */
+
+export type TypePairing = {
+  /** kebab-case, stored verbatim in `organization_brands.type_pairing`. */
+  readonly key: string;
+  /** Human-facing, shown in the editor (slice d). */
+  readonly label: string;
+  /** Google Fonts family name, resolved to a `next/font/google` import in `fonts.ts`. */
+  readonly heading: string;
+  /** Google Fonts family name, resolved to a `next/font/google` import in `fonts.ts`. */
+  readonly body: string;
+  /** One sentence, quotable in a review. */
+  readonly why: string;
+};
+
+export const TYPE_PAIRINGS = [
+  {
+    key: "classic",
+    label: "Classic",
+    heading: "Lora",
+    body: "Source Sans 3",
+    why: "Lora's calm, low-contrast serif curves read as a printed bulletin without tipping into a historic or ornamental register, and Source Sans 3's wide apertures and large x-height keep it legible in a table cell at the dense role.",
+  },
+  {
+    key: "modern",
+    label: "Modern",
+    heading: "Libre Franklin",
+    body: "Public Sans",
+    why: "Libre Franklin's grotesque sturdiness gives headings and a hero band confident weight without reading as trendy, and Public Sans — engineered by the U.S. government specifically for cross-age accessibility — keeps body copy legible at small sizes for a member squinting at a phone.",
+  },
+  {
+    key: "warm",
+    label: "Warm",
+    heading: "Bitter",
+    body: "Karla",
+    why: "Bitter's slab serif is grounded and warm, evoking a hymnal or bulletin insert rather than a corporate report, and Karla's rounded humanist letterforms carry the same warmth into body copy while holding a large x-height at the dense role.",
+  },
+] as const satisfies readonly TypePairing[];
+
+/** For `fonts.ts` (slice e1) to import as a type-only reference. */
+export type TypePairingKey = (typeof TYPE_PAIRINGS)[number]["key"];
 
 /* -------------------------------------------------------------------------
  * The platform default palette

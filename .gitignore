@@ -28,6 +28,11 @@ playwright-report/
 # Playwright storageState — contains live session cookies; never commit
 e2e/support/.auth/
 
+# Visual-parity harness baselines (e2e/visual-parity.spec.ts) — self-comparing
+# on one machine only (DECISION-053). A baseline rendered here would never
+# match ubuntu-latest and would drift from a runner image pinning nothing.
+e2e/.visual/
+
 # Pre-push gate marker (scripts/pre-push-gate.mjs --stamp) — per-machine, never committed
 .claude/pre-push-ok.json
 

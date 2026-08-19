@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2` complete**; next: `a2`, then `a3`–`a4` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2` complete**; next: `a3`, `a4` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1181,3 +1181,47 @@ unaffected because it cites `contract.ts` rather than hard-coding values.
 
 *Recorded by the orchestrator from the implementing agent's report; the agent returned
 its section as text to avoid concurrent modification of this file.*
+
+---
+
+# Phase 4 · commit `a2` — the visual-parity harness (ux-developer)
+
+**Date:** 2026-08-19
+
+**Created** `e2e/support/routes.ts` (the manifest: 18 routes × fixture storageState ×
+expected status, with six selection rules in the header) and `e2e/visual-parity.spec.ts`
+(the `visual` project's spec: 18 routes × {360×800, 1280×900} × {light, dark} = 72
+tests, `toHaveScreenshot({ fullPage, animations: "disabled", maxDiffPixels: 0 })`,
+`document.fonts.ready` awaited before capture). **Modified** `playwright.config.ts`
+(the `visual` project, gated), `package.json` (`visual:baseline` / `visual:check`),
+`.gitignore` (`e2e/.visual/`). Zero new dependencies.
+
+**Design deviation — the project gate is an env var, not argv.** A `process.argv`
+check for `--project=visual` passes `--list` but breaks real runs: Playwright's test
+workers are separate processes that reload the config and do not inherit the CLI's
+argv ("Project \"visual\" not found in the worker process"). The npm scripts set
+`PW_VISUAL=1`, which child processes do inherit; the `visual` project is only in the
+`projects` array when it is set, which is the only gate that holds regardless of
+Playwright's default project selection. Documented in the config header.
+
+**Verification** (per the operational hazard — never against a dev server):
+`npm run typecheck` and `lint --max-warnings=0` clean; `npx playwright test --list`
+collects 84 tests / 14 files with zero `visual-parity` matches (the default suite is
+untouched); production build served on port 3100, then `visual:baseline` (72 passed,
+72 PNGs) followed by `visual:check` twice (72 passed, 0 diffs, both runs). Suite
+integrity spot-checked with `color-scheme.spec.ts` + `role-boundaries.spec.ts`
+(7/7). Baselines were deleted after verification — they are working state, and `a3`
+must capture fresh ones on the commit before its change.
+
+**A real finding, caught by running it (the F26 pattern in miniature): `/admin/users`
+row order is unstable on unmodified code.** `orderBy(desc(users.createdAt))` has no
+secondary key, seeded users share millisecond-identical `created_at` values, and
+globalSetup's fixture upsert is enough of an UPDATE for Postgres to reorder the tied
+rows between baseline and check — a reproducible ~3,600-pixel diff per capture with
+zero CSS involvement. Genuine pre-existing page bug (an admin refreshing the page can
+watch rows reshuffle), filed in `docs/TODO.md`; the route is excluded from the
+manifest (rule 6) until fixed. `/totp` (redirects before paint for every fixture) and
+`/access-pending` (renders an `audit_events` write, which would poison `/admin/audit`
+downstream in the same run) are the other two exclusions, rules 1 and 2.
+
+*Recorded by the orchestrator from the implementing agent's report.*

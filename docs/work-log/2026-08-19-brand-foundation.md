@@ -2016,3 +2016,127 @@ rendered before Save is enabled, no accept-the-risk path.
 in parallel — no dependency on `0.3`/`c1`.
 
 *Recorded by the orchestrator from the tech-lead agent's report.*
+
+---
+
+# Phase 4 — Implementation, slices b/c(admin)/e (nine commits)
+
+*Compact record — each commit was independently re-verified by the orchestrator
+(typecheck/lint/vitest/tripwires/build re-run directly, not trusted from the
+implementer's report) before being committed. Full per-commit detail lives in
+each commit's own message.*
+
+**`0.3` (`bf85bc4`, api-developer, orchestrator-applied directly — a literal
+3-line patch).** DECISION-054's `accent`/`on-accent` role and pair added to
+`BRAND_ROLES`/`ROLE_TO_TOKEN`/`LEGAL_PAIRS`. 58 contract tests (was 56), picked
+up automatically since `min` lives on the pair.
+
+**`b1` (`982cd25`, api-developer).** `src/lib/brand/generate.ts` +
+`generate.test.ts` — the ramp generator, zero runtime imports beyond
+`contract.ts`/`contrast.ts`, inline OKLCH transform (DECISION-057). Property
+test: 588 seed/scheme cases (72 hues × 4 bands + 6 named edge seeds × 2
+schemes), ~7,600 assertions. **Caught two real bugs before they were ever a
+design claim**: a razor-thin `--input` contrast margin in the light surface
+tint (measured 2.93:1 against a 3:1 floor for a real seed), and a near-grey
+seed at the gamut tip collapsing to zero chroma in the dark-scheme search.
+Both fixed in the generator, not by softening the test. 620 new tests, 1278
+total.
+
+**`c1` (`ab126b8`, database-admin).** `organization_brands`,
+`organization_brand_history`, `blob_assets` — FORCE RLS, no public grant ever,
+hand-authored migration (`db:generate` is broken repo-wide on a pre-existing
+snapshot collision, filed in TODO). RLS verified against the Postgres
+catalog directly (`pg_class.relforcerowsecurity = true`, not just "ran without
+error"), plus an adversarial cross-org test confirming both read- and
+write-side rejection. The orchestrator added the `type_pairing` CHECK
+constraint after `e0` landed with the final curated set — the migration was
+originally written to leave it open pending that commit. 7 new DB-gated tests.
+
+**`e0` (`0e85b3c`, api-developer).** `TYPE_PAIRINGS` (classic/modern/warm, real
+curated Google Fonts pairings chosen against S16's AAA/older-audience floor) +
+`--font-heading`/`--font-body` additive `nonColour` `TOKEN_POLICY` entries.
+Pure data, no runtime change. 58 contract tests unchanged (additive/nonColour
+correctly excluded from the closure checks).
+
+**`e1` (`8460c96`, ux-developer).** `src/lib/brand/fonts.ts` — six static
+`next/font/google` calls (module-scope, per the compiler's static-analysis
+requirement), `resolveTypePairing()` an exhaustive-by-construction lookup. 29
+self-hosted `.woff2` files confirmed in the build. Validated permanently in
+`/admin/design-system`'s new "Type pairings" section — the only place these
+fonts render until `c4`.
+
+**`c2` (`8b0e234`, api-developer).** `FEATURES.ADMIN_ORGANIZATIONS`,
+`ORG_BRAND_SET`/`ORG_BRAND_NEUTRALIZED` audit actions, and the two server
+actions — `getPlatformDb()` only, never `withOrgContext()` (no tenant
+membership for a platform operator). Magic-byte sniffing, not browser MIME.
+E-c2's partial-save honesty implemented and tested: a logo failure alongside a
+genuine colour change still commits the colour and reports the logo failure
+specifically. Found and worked around a real pre-existing `authz.ts`/`org.ts`
+circular import (filed in TODO). 32 new tests.
+
+**`c3` (`bb3a3de`, ux-developer).** `/admin/organizations` (list, OQ4's report
+as a query-param filter on the same list) and `/admin/organizations/[id]`
+(detail, live client-side preview via `generateBrandTokens()` with zero server
+round-trip, neutralize dialog). Inline-style-only per the C1 trap — verified
+zero `bg-brand-*` classes, confirmed at the DOM computed-style level, not just
+grep. Flow 3 held: `adjustments[]` renders unconditionally above Save. Full
+set→save→neutralize cycle verified against the real dev DB; both colour
+schemes reviewed at 360px. 15 new unit tests, 7 new e2e (run twice).
+
+**`e0`/`e1` close slice e entirely** — no further commits in that slice.
+
+**`c4` (`60109ef` + `ffb2f91`, ux-developer) — the payoff commit.**
+`src/lib/brand/read-org-brand.ts` + `src/components/brand/brand-tokens.tsx`,
+wired into `(org)/o/[slug]/layout.tsx`. `<BrandTokens>` is the `:root`-scoped
+`<style>` element itself (DECISION-052) — confirmed reaching a real Radix
+`DropdownMenuContent` portal's computed style, not just the visible page.
+Null-safe by construction for three indistinguishable reasons; on the
+DECISION-040 denial path, confirmed **zero `<style>` tag emitted at all**, not
+merely a null-rendered one.
+
+**A real bug, caught only by running it in a browser.** The design's literal
+signature re-derived `personId` from the session inside the read function —
+but `session.user.id` is `users.id`, and `withOrgContext()` needs `people.id`
+(related through `people.user_id`, joined by `resolveOrgContext()`, not
+re-derivable safely a second way). The mismatch didn't fail loudly:
+`withOrgContext()` threw for a genuine active member on *every* request, and
+by the function's own null-safety contract that's indistinguishable from "not
+a member" — the page rendered a normal 200 on the platform default, no error
+anywhere a screenshot alone would have caught. Found via a planted
+`console.error`, fixed by threading `resolveOrgContext()`'s already-resolved
+`personId` through from the layout instead of re-deriving it.
+
+**Independently re-verified by the orchestrator, not just trusted**: the
+`personId`/`people.id` vs `users.id` distinction confirmed directly against
+`authz.ts`'s `resolveOrgContext` (line 392: `personId: match.personId`);
+`post-login-routing.spec.ts` run explicitly, 12/12 including the DECISION-040
+byte-identical-copy test; full e2e 96/96; a live fetch of the real branded
+fixture org (`e2e-presbytery`, seed `#7a1f2b`) confirmed `--primary` computes
+to that exact value, not platform blue, with a screenshot as visual proof.
+`check:brand-scope` confirmed E2 now live for `(org)`, only `(public)` still
+dormant. Three follow-ups filed: `resolveOrgContext()` isn't `cache()`-wrapped
+(extra DB round-trip per `(org)` page), heading/body font differentiation is
+partial (`fonts.ts` only exposes `.className`, not `.variable`), `GlobalNav`
+doesn't render the org's logo yet.
+
+## Handoff
+
+**`c5` — closed without a separate implementer commit.** Checked against the
+design's own scope: OQ4's report shipped as part of `c3`'s list filter (not a
+second page, per the original ruling); `docs/decisions.md`'s DECISION-057–059
+transcription was already done in the Phase 3 recording commit; `docs/TODO.md`'s
+"Photo storage service... unbuilt" line was already reworded when `c1` landed;
+`docs/product/functionality-map.md` got its brand section when `c4` landed. The
+one real gap — `CLAUDE.md`'s Project Layout never gained `src/lib/storage/` or
+`src/components/brand/` — is fixed by the orchestrator directly, folded into
+this same housekeeping pass rather than spun up as its own agent for three
+lines.
+
+**This closes the nine-commit batch** (`0.3`, `b1`, `c1`, `e0`, `e1`, `c2`,
+`c3`, `c4`) for slices b, c (`(admin)` + `(org)` halves), and e. Slice c's
+public/anonymous read path remains explicitly deferred to P3 (DECISION-056).
+Slice d remains blocked on P1's tenant permission catalog.
+
+Phase 5 (qa) and Phase 6 (analyst) for this batch are the natural next step,
+matching how slices 0/a were verified — but are not run automatically here;
+see the operator's own direction for what's next.

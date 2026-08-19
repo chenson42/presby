@@ -72,9 +72,17 @@ src/lib/db/index.ts    — TWO connections: db (presby_app, RLS enforced) and
                          getPlatformDb() (bypasses RLS, platform pages only)
 src/lib/authz.ts       — tenant authorization: withOrgContext, the resolver
 src/lib/permissions.ts — platform admin shell only. FROZEN; nothing church-facing
-src/lib/brand/         — the brand token contract. ZERO runtime imports, so an
-                         Edge handler, a DB-less test and a .mjs script can all
-                         read it. Source of truth for the token partition
+src/lib/brand/         — the brand token contract (contract.ts, zero runtime
+                         imports), the ramp generator (generate.ts), and font
+                         resolution (fonts.ts, next/font/google, module-scope
+                         only). read-org-brand.ts is the one function
+                         (org)/o/[slug]/layout.tsx calls for its own brand
+src/lib/storage/       — the generic tenant-scoped blob adapter (DECISION-030/
+                         055/058): store()/resolve() only, no caller queries
+                         blob_assets directly. Logo is the first consumer
+src/components/brand/  — brand-tokens.tsx (the :root-scoped <style> emitter —
+                         DECISION-052, it IS the marker check-brand-scope.mjs
+                         greps for) and org-mark.tsx (logo/wordmark, G7)
 src/components/ui/     — GENERATED shadcn primitives. Add with `npm run ui:add`,
                          never raw `shadcn add`; don't hand-edit without a
                          header comment recording the divergence

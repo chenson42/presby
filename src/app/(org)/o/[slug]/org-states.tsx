@@ -91,17 +91,30 @@ export function OrgAccessEnded({
 }
 
 /**
- * The landing stub. It reads NO tenant data — it has already called
- * `assertOrgAccess()`, which runs the in-transaction membership re-check and
- * selects nothing, so P0 proves the whole gate end to end while exposing
- * nothing. The portal itself is P1.
+ * The landing stub. It reads NO tenant data of its own — it has already
+ * called `assertOrgAccess()`, which runs the in-transaction membership
+ * re-check and selects nothing, so P0 proves the whole gate end to end while
+ * exposing nothing. The rest of the portal arrives page by page; the
+ * directory is the first (P1).
  */
 export function OrgPortalStub({
   name,
   organizationType,
+  slug,
+  directoryEnabled,
 }: {
   name: string;
   organizationType: OrganizationType;
+  slug: string;
+  /**
+   * `org_portal.directory`'s value at render time — a TOGGLE, gating whether
+   * the link exists at all. It is deliberately NOT gated on the viewer's own
+   * `directory.view` grant: per Phase 1's adversarial pass, the permission
+   * gate lives in server-side data-fetching, never a conditional `<Link>` —
+   * `/o/<slug>/directory` is the sole authority on the viewer's own
+   * permission and renders its own honest denied state.
+   */
+  directoryEnabled: boolean;
 }) {
   return (
     <section className="max-w-xl">
@@ -116,9 +129,17 @@ export function OrgPortalStub({
        * the chooser, both labelled the same thing — is worse than one.
        */}
       <p className="mt-3 text-sm text-muted-foreground">
-        You&apos;re in. There is nothing here yet — the roll, the directory, and
-        the officer register arrive with the organization portal.
+        You&apos;re in. There is nothing here yet — the roll and the officer
+        register arrive with the organization portal.
       </p>
+      {directoryEnabled && (
+        <Link
+          href={`/o/${slug}/directory`}
+          className="mt-4 inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          Directory →
+        </Link>
+      )}
     </section>
   );
 }

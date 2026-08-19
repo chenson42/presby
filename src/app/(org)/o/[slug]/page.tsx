@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import { assertOrgAccess, resolveOrgContext } from "@/lib/authz";
+import { isFlagEnabled } from "@/lib/flags";
 import {
   OrgAccessDenied,
   OrgAccessEnded,
@@ -72,10 +73,14 @@ export default async function OrgPage({
   // which error.tsx catches.
   await assertOrgAccess(resolved.org.personId, resolved.org.organizationId);
 
+  const directoryEnabled = await isFlagEnabled("org_portal.directory");
+
   return (
     <OrgPortalStub
       name={resolved.org.name}
       organizationType={resolved.org.organizationType}
+      slug={resolved.org.slug}
+      directoryEnabled={directoryEnabled}
     />
   );
 }

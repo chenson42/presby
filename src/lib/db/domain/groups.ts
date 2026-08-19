@@ -81,11 +81,11 @@ export const groups = pgTable(
  * `people` row, two profiles. This is also how an installed pastor works, since
  * ministers of Word and Sacrament are members of the presbytery (G-2.0502).
  *
- * Rows with source = 'derived' are owned by the officerTerms trigger. The
- * derived roster is MATERIALIZED here rather than exposed as a view, because
- * the permission resolver reads this table — a view would make session members
- * invisible to it, and a role granted to the Session group would resolve to
- * nobody. See F3.
+ * Rows with source = 'derived' are owned by the officerTerms trigger, or, as
+ * of P1 (`active_membership`), the memberships trigger. The derived roster is
+ * MATERIALIZED here rather than exposed as a view, because the permission
+ * resolver reads this table — a view would make session members invisible to
+ * it, and a role granted to the Session group would resolve to nobody. See F3.
  */
 export const groupMemberships = pgTable(
   "group_memberships",
@@ -102,7 +102,19 @@ export const groupMemberships = pgTable(
     // Without this the trigger cannot tell two non-consecutive terms apart and
     // silently rewrites the earlier one's end date, destroying the history of
     // who served when.
+    //
+    // Bonus finding (DECISION-060): this column has NO foreign key at all —
+    // exactly the composite-tenant-key gap Invariant "Composite Tenant Keys"
+    // exists to prevent (F2). Not P1's to fix; flagged for a future
+    // database-admin review. membershipId below deliberately does NOT repeat
+    // this gap.
     officerTermId: uuid("officer_term_id"),
+    // Derived rows produced by presby_sync_derived_membership_group()
+    // (drizzle/0017) map 1:1 to the membership that produced them, mirroring
+    // officerTermId's shape — but WITH the composite FK officerTermId lacks
+    // (DECISION-060). memberships carries unique(id, organizationId) as the
+    // target (memberships_id_org_key, src/lib/db/domain/people.ts).
+    membershipId: uuid("membership_id"),
     startsOn: date("starts_on").notNull().defaultNow(),
     endsOn: date("ends_on"),
   },
@@ -115,6 +127,7 @@ export const groupMemberships = pgTable(
     ),
     index("group_memberships_org_person_idx").on(t.organizationId, t.personId),
     unique("group_memberships_officer_term_key").on(t.officerTermId),
+    unique("group_memberships_membership_key").on(t.membershipId),
     foreignKey({
       columns: [t.groupId, t.organizationId],
       foreignColumns: [groups.id, groups.organizationId],
@@ -124,6 +137,11 @@ export const groupMemberships = pgTable(
       columns: [t.personId, t.organizationId],
       foreignColumns: [memberships.personId, memberships.organizationId],
       name: "group_memberships_person_fk",
+    }),
+    foreignKey({
+      columns: [t.membershipId, t.organizationId],
+      foreignColumns: [memberships.id, memberships.organizationId],
+      name: "group_memberships_membership_fk",
     }),
   ],
 );

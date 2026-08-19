@@ -219,10 +219,28 @@ begin;
     2, 'resolver: derived Session group grant resolves');
 
   -- The gap between her two terms. Term boundaries drop access on their own
-  -- because the resolver reads dates, not row existence.
+  -- because the resolver reads dates, not row existence — this is proved by
+  -- the SESSION-sourced grant specifically, not by the total row count.
+  --
+  -- P1 / DECISION-060: ELDER holds a long-standing, always-active Alder Creek
+  -- membership, so once the active_membership derived group AND its
+  -- directory.view role binding are seeded (scripts/seed-dev.sql, commit 2 of
+  -- 2026-08-19-tenant-permissions-portal — DECISION-063), a SECOND row
+  -- appears here even during the officer-term gap: the baseline grant, which
+  -- has nothing to do with the term boundary this assertion exists to prove.
+  -- Split so each half still proves what it originally proved: the term
+  -- boundary (session-sourced count, unaffected) and the baseline grant's own
+  -- presence (currently 0 — this migration alone seeds no group and no
+  -- role_grants row; flips to 1 once commit 2's seed lands, and stays a
+  -- one-line edit here when it does).
   select assert_eq(
-    (select count(*) from presby_effective_permissions(:ELDER, :ALDER, '2015-06-01')),
-    0, 'resolver: no permissions during the gap between terms');
+    (select count(*) from presby_effective_permissions(:ELDER, :ALDER, '2015-06-01')
+      where source_kind = 'group' and source_name = 'Session'),
+    0, 'resolver: no SESSION permissions during the gap between terms');
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:ELDER, :ALDER, '2015-06-01')
+      where permission_key = 'directory.view' and source_name = 'Active Membership'),
+    0, 'resolver: active_membership baseline grant not yet seeded (commit 2 of P1 flips this to 1)');
 
   -- F11: an administrative commission granted nothing until arm 3 existed.
   select assert_eq(
@@ -230,10 +248,18 @@ begin;
       where source_kind = 'commission'),
     2, 'resolver: administrative commission grants inside the congregation');
 
-  -- ...and stops the day it expires.
+  -- ...and stops the day it expires. Same split as the ELDER gap test above,
+  -- and for the same reason: PASTOR also holds a long-standing, always-active
+  -- Alder Creek membership, so the baseline grant (once seeded) survives a
+  -- commission's expiry even though the commission-sourced grants do not.
   select assert_eq(
-    (select count(*) from presby_effective_permissions(:PASTOR, :ALDER, '2027-06-01')),
-    0, 'resolver: commission access lapses when the commission ends');
+    (select count(*) from presby_effective_permissions(:PASTOR, :ALDER, '2027-06-01')
+      where source_kind = 'commission'),
+    0, 'resolver: commission-sourced permissions lapse when the commission ends');
+  select assert_eq(
+    (select count(*) from presby_effective_permissions(:PASTOR, :ALDER, '2027-06-01')
+      where permission_key = 'directory.view' and source_name = 'Active Membership'),
+    0, 'resolver: active_membership baseline grant not yet seeded (commit 2 of P1 flips this to 1)');
 
   -- Provenance is part of the answer, not an afterthought.
   select assert_eq(
@@ -460,8 +486,22 @@ rollback;
 -- POSITIVE CONTROL. Without it the two assertions above would pass just as
 -- happily against a trigger that rejects every ending, and a church could never
 -- record a departure.
+--
+-- drizzle/0017 (P1, DECISION-060): every memberships insert/update now fires
+-- presby_sync_derived_membership_group(), which fails loudly (F16) if the
+-- org has no active_membership derived group yet. Alder Creek's real one is
+-- seeded by scripts/seed-dev.sql in a later commit (DECISION-063) — not yet
+-- when this suite runs standalone against 0017 alone. This block's own UPDATE
+-- is a genuine write (unlike its sibling do-blocks above, which are expected
+-- to abort before any AFTER trigger fires), so it needs a scratch group to
+-- satisfy the new trigger. Rolled back with everything else in this
+-- transaction; leaves no trace in the persistent fixture.
 begin;
   select set_config('app.current_org_id', :ALDER, true);
+  insert into groups (organization_id, group_type_id, name, membership_source, derived_from)
+  values (:ALDER, 'a0000000-0000-0000-0000-000000000002', -- global 'committee' template
+          'Active Membership (scratch)', 'derived', 'active_membership')
+  on conflict (organization_id, derived_from) do nothing;
   update memberships set ended_on = current_date, ended_reason = 'moved away'
    where person_id = :OTHERPART and organization_id = :ALDER;
   select assert_eq(

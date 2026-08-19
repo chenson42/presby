@@ -39,6 +39,10 @@
           {
             "type": "command",
             "command": "node scripts/cadence-check.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node scripts/briefings-check.mjs"
           }
         ]
       }
@@ -54,5 +58,9 @@
         ]
       }
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node scripts/statusline.mjs"
   }
 }

@@ -20,12 +20,15 @@ The canonical directory tree lives in `CLAUDE.md` → Project Layout (do not mai
 - `access-pending` — authenticated users with no roles; don't dump them on `/admin`.
 - `api/admin/*` — every handler checks session + the relevant `FEATURES.*` key.
 - `api/webhooks/<provider>` — webhook handlers verify their own signatures; the proxy bypasses them (DECISION-028).
+- **Brandable groups: `(org)` and `(public)/site/<slug>`, and nothing else.** Every other group above — including `access-pending` — renders in the platform palette; a branded 403 tells a prober the org is a configured tenant (DECISION-047). `npm run check:brand-scope` enforces it. Un-brandable does not mean logo-free: brand-as-chrome is scoped to two layouts, logo-as-content is legal wherever the caller is authorized.
 
 ## Component Rules
 
 1. **Server Components by default** — `'use client'` only for interactivity, hooks, or browser APIs.
 2. **Use the shadcn primitives in `src/components/ui/`** — don't reinvent and don't hand-edit them (generated). No native browser dialogs (Workflow Rule 2).
 3. **`src/components/shared/`** — anything reused across surfaces. Feature-specific components stay co-located with their route.
+4. **`npm run ui:add -- <component…>` is the generation path.** Raw `npx shadcn add` is unsupported: it emits `from "radix-ui"` and installs the ~40-package umbrella, which has arrived by surprise twice (DECISION-048). The wrapper rewrites the import, restores the lockfile, and stops the build if a primitive needs a package nobody vetted.
+5. **No hand-rolled button, table or input class strings** — `check:brand-scope` C2 enforces it once the migration sweep lands. A surface that needs a size the primitive lacks gets a variant on the primitive, not a `className` at the call site.
 
 ## Server Rules
 

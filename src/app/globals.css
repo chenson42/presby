@@ -19,9 +19,21 @@
  * Every token name that existed before shadcn was initialised
  * (`--color-background`, `--color-foreground`, `--color-muted`,
  * `--color-muted-foreground`, `--color-border`, `--color-accent`) still
- * resolves, and the first five keep their exact previous values. `accent`
- * takes shadcn's semantic — a subtle hover surface, not the brand colour —
- * because nothing consumed it; the brand colour now lives in `primary`.
+ * resolves. `accent` takes shadcn's semantic — a subtle hover surface, not the
+ * brand colour — because nothing consumed it; the brand colour lives in
+ * `primary`.
+ *
+ * SOURCE OF TRUTH: `src/lib/brand/contract.ts` (`PLATFORM_TOKENS`). The values
+ * below are a transcription of it, and `src/lib/brand/contract.test.ts` parses
+ * this file and asserts both directions — every `:root` property is classified
+ * in `TOKEN_POLICY`, and every value matches `PLATFORM_TOKENS`. Change a colour
+ * here without changing it there and the test fails and names the token.
+ *
+ * Four values were corrected in P0.5 slice 0 (work-log
+ * 2026-08-19-brand-foundation) because the palette failed the floors the
+ * contract declares — S16 puts body text at AAA (7:1), non-text and control
+ * borders at 3:1. Each correction carries its measured ratio inline. This was
+ * a deliberate visible change, not a refactor.
  */
 
 :root {
@@ -44,7 +56,9 @@
   --secondary-foreground: hsl(222 47% 11%);
 
   --muted: hsl(210 40% 96%);
-  --muted-foreground: hsl(215 16% 47%);
+  /* Corrected 47% → 33%: was 4.70:1 on the page against a 7:1 floor, across
+     244 `text-muted-foreground` sites. Now 7.92 on background, 7.23 on muted. */
+  --muted-foreground: hsl(215 16% 33%);
 
   /* Subtle hover/active surface — not the brand colour. */
   --accent: hsl(210 40% 96%);
@@ -53,8 +67,19 @@
   --destructive: hsl(0 72% 51%);
   --destructive-foreground: hsl(0 0% 100%);
 
+  /* `border` separates CONTENT; `input` identifies a CONTROL. They carried the
+     identical value until P0.5 — which put every control border at 1.24:1
+     against a 3:1 floor (D3). Splitting them is what lets the control border
+     reach 3:1 without repainting every card edge in mid-grey. */
   --border: hsl(214 32% 91%);
-  --input: hsl(214 32% 91%);
+  --input: hsl(214 32% 59%); /* 3.20:1 on background */
+  /* Equal to `--primary` on purpose. The ring's contrast is only ever measured
+     against the SURFACE (5.17:1), because every focus ring is drawn with a 2px
+     offset in the surface colour and so is never adjacent to the control it
+     rings. That is D4 made structural instead of dependent on a lucky value —
+     see FOCUS_RING_OFFSET_PX in src/lib/brand/contract.ts. Flush against the
+     primary button this ring is 1.00:1, i.e. invisible; the offset, not the
+     value, is what fixes it. */
   --ring: hsl(221 83% 53%);
 }
 
@@ -76,17 +101,24 @@
     --secondary-foreground: hsl(210 40% 98%);
 
     --muted: hsl(217 33% 17%);
-    --muted-foreground: hsl(215 20% 65%);
+    /* Corrected 65% → 73%: was 5.78:1 on card against a 7:1 floor.
+       Now 8.89 on background, 7.37 on card and on muted. */
+    --muted-foreground: hsl(215 20% 73%);
 
     --accent: hsl(217 33% 17%);
     --accent-foreground: hsl(210 40% 98%);
 
+    /* Corrected 60% → 48% with a pure-white foreground: the pair was 3.61:1,
+       which fails plain AA, not merely the AAA body floor. Now 4.87:1, and the
+       fill still clears the page at 3.67:1. */
     --destructive: hsl(0 84% 60%);
-    --destructive-foreground: hsl(210 40% 98%);
+    --destructive-foreground: hsl(222 47% 11%);
 
+    /* See the light block: `border` separates content, `input` identifies a
+       control. */
     --border: hsl(217 33% 22%);
-    --input: hsl(217 33% 22%);
-    --ring: hsl(217 91% 60%);
+    --input: hsl(217 33% 50%); /* 3.88:1 on background, 3.22:1 on card */
+    --ring: hsl(217 91% 60%); /* 4.91:1 on surface; offset, per the light block */
   }
 }
 

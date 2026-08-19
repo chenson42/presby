@@ -26,9 +26,12 @@
     "test:e2e": "playwright test",
     "prepare": "node -e \"if(require('fs').existsSync('.git'))require('child_process').execSync('bash scripts/install-hooks.sh',{stdio:'inherit'})\"",
     "stats:escape": "node scripts/stats-escape.mjs",
+    "ui:add": "node scripts/ui-add.mjs",
     "check:audit": "node scripts/check-audit-coverage.mjs",
     "check:sql-date": "node scripts/check-sql-date.mjs",
-    "check": "npm run check:audit && npm run check:sql-date",
+    "check:deps-drift": "node scripts/check-deps-drift.mjs",
+    "check:brand-scope": "node scripts/check-brand-scope.mjs",
+    "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope",
     "docs:erd": "tsx scripts/generate-erd.ts"
   },
   "dependencies": {

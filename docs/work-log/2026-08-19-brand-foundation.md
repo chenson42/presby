@@ -30,8 +30,8 @@ prose lines against real primitives.
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
-| 3 — Technical design | tech-lead | Pending | — | — |
-| 4 — Implementation | TBD | Pending | — | — |
+| 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — `0.1` complete; next: ux-developer, `0.2` | `0.1` — contract shipped, palette corrected, 56 tests; 7 design findings, 1 needs an operator ruling | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -453,3 +453,626 @@ Must wait for slice 0's merged partition: rewriting the 7 tables and ~24 button 
 12. **Unresolved dependency, slice c:** the image encoder for write-time favicon/social derivation. Its own five-criteria pass. Do not let it arrive as a surprise at Phase 4 — that is how the Radix umbrella arrived twice.
 13. **`next-themes` ships system/localStorage in slice a.** S17's account-level persistence is a `users` column and is not slice a.
 14. **Recommend taking OQ4** in slice c.
+
+---
+
+# Phase 3 — Technical Design (tech-lead)
+
+*Scoped to slices **0** (token contract) and **a** (primitive migration) only. Slices b–e are not designed here. Phases 5 and 6 remain deferred per DECISION-045 — with one exception named in Edge Cases (E1): the **Phase 4** auth-e2e gate is not a Phase 5 gate and is not deferred.*
+
+## Summary
+
+Slice 0 writes the contract that every later slice and every future pipeline reads: a closed role vocabulary, `LEGAL_PAIRS` as a runtime array whose type is derived from it and whose contrast floor rides on each pair, a **three-way** (not two-way) partition of every custom property `globals.css` declares into *brandable / bounded / platform*, the type scale, and `BRAND_TOKEN_VERSION`. Slice a then makes S12 mechanically achievable: it normalises primitive generation so the Radix umbrella cannot return, switches the colour scheme from a media query to a class so both ramps can coexist in one emitted element, generates the five primitives the sweep actually consumes, and rewrites 28 files' worth of hand-rolled buttons, 6 hand-rolled tables and 14 hand-rolled inputs onto those primitives — because under DECISION-046's cascade design a hand-rolled class string is a surface the brand can never reach.
+
+**Two findings during this design change the shape of both slices, and in both cases the code contradicted the inherited assumption.** First: **the platform's own default palette fails six of the floors the contract is about to declare** — including a focus ring that is mathematically invisible on the primary button (1.00:1) and secondary body text at 4.70:1 against a 7:1 floor. A contract whose reference implementation violates it is a lie from commit one, so slice 0 corrects the palette and ships the test that proves it. Second: **"zero user-visible change" is not achievable for slice a and was never going to be** — a shadcn `<Table>` and a shadcn `<Button>` have their own geometry, so migrating onto them *is* a visual change. Section "Acceptance criteria" replaces the blanket claim with a three-category criterion that can actually be proved.
+
+## Permissions & Flags
+
+- **Permission key(s): none.** `org.branding` is slice d and depends on P1's tenant catalog. `src/lib/permissions.ts` stays FROZEN. Nothing in slices 0 or a is reachable by a user as a feature.
+- **Default role bindings: none.** No `FEATURE_CATALOG` entry, no seed change.
+- **Feature flag(s): none.** `ui.brand_theming` gates *emission*, which is slice c. Phase 1 is explicit that there is **no flag on the primitive migration** — a half-migrated UI behind a flag is two UIs. Slice a ships unflagged and is reverted by revert, not by switch.
+- **Audit events: none.** No mutation in either slice.
+
+This is worth stating plainly because it is unusual: **slices 0 and a add no route, no action, no table, no permission and no flag.** Everything below is contract, tooling, tokens and markup.
+
+## API Contract
+
+No HTTP routes and no server actions. The contract here is a **module surface** and a **CLI surface**, and implementers should follow these signatures literally.
+
+### `src/lib/brand/contract.ts` — data only, ZERO runtime imports
+
+Not `server-only` (precedent: `src/lib/utils.ts:6-8`). Type-only imports permitted; no `@/lib/db`, no `next/*`, no `react`, no `drizzle`, **and no import of its own siblings including `contrast.ts`**. Four consumers named in the header comment: server components, `generate.ts` (slice b), the property test, and the `.mjs` script that emits the cron agent's instruction payload.
+
+```ts
+export const BRAND_TOKEN_VERSION = 1;
+
+/** The closed role vocabulary. An agent composes roles; it never sees a hex. */
+export const BRAND_ROLES = [
+  "surface", "on-surface",
+  "brand", "on-brand",
+  "brand-raw", "on-brand-raw",
+  "muted-surface", "on-muted-surface",
+  "border", "input-border", "ring",
+  "danger", "on-danger",
+] as const;
+export type BrandRole = (typeof BRAND_ROLES)[number];
+
+/** Role → the CSS custom property it resolves to. Total over BRAND_ROLES. */
+export const ROLE_TO_TOKEN = {
+  surface: "--background",
+  "on-surface": "--foreground",
+  brand: "--primary",
+  "on-brand": "--primary-foreground",
+  "brand-raw": "--brand-raw",
+  "on-brand-raw": "--brand-raw-foreground",
+  "muted-surface": "--muted",
+  "on-muted-surface": "--muted-foreground",
+  border: "--border",
+  "input-border": "--input",
+  ring: "--ring",
+  danger: "--destructive",
+  "on-danger": "--destructive-foreground",
+} as const satisfies Record<BrandRole, TokenName>;
+
+export type BrandPair = {
+  readonly fg: BrandRole;
+  readonly bg: BrandRole;
+  readonly min: number;      // WCAG contrast floor for THIS pair
+  readonly kind: "body" | "large-text" | "non-text";
+  readonly derives: string;  // "D1" … "D5" — traceability to Phase 1
+};
+
+export const LEGAL_PAIRS = [
+  { fg: "on-surface",      bg: "surface",       min: 7,   kind: "body",      derives: "D1" },
+  { fg: "on-muted-surface",bg: "surface",       min: 7,   kind: "body",      derives: "D1" },
+  { fg: "on-muted-surface",bg: "muted-surface", min: 7,   kind: "body",      derives: "D1" },
+  { fg: "on-brand",        bg: "brand",         min: 4.5, kind: "text",      derives: "D2" },
+  { fg: "on-brand-raw",    bg: "brand-raw",     min: 4.5, kind: "large-text",derives: "D2" },
+  { fg: "on-danger",       bg: "danger",        min: 4.5, kind: "text",      derives: "D2/D6" },
+  { fg: "input-border",    bg: "surface",       min: 3,   kind: "non-text",  derives: "D3" },
+  { fg: "ring",            bg: "surface",       min: 3,   kind: "non-text",  derives: "D4" },
+  { fg: "brand",           bg: "surface",       min: 3,   kind: "non-text",  derives: "D3" },
+] as const satisfies readonly BrandPair[];
+export type LegalPair = (typeof LEGAL_PAIRS)[number];
+export type LegalTone = LegalPair["bg"];   // block `tone:` typing falls out of the array
+```
+
+Three deliberate choices inside that array, each of which a reviewer should check rather than assume:
+
+- **`border` is not in `LEGAL_PAIRS`; `input-border` is.** D3 as Phase 1 wrote it names *input borders, focus rings, icon-only affordances*. A card edge and a table rule are decoration, not "visual information required to identify a component." Today `--border` and `--input` carry the identical value `hsl(214 32% 91%)` — 1.24:1 against the page. Splitting them is what lets the control border reach 3:1 without repainting every card edge in mid-grey. Companion rule for `ui-standards.md`: **a border that identifies a control uses `border-input`; a border that separates content uses `border`.**
+- **D4 becomes structural, and this is a correction to the code, not just the contract.** D4 wants the ring to clear ≥3:1 against *both* the surface and the control it rings. Today `--ring` is byte-identical to `--primary`, so the focus ring on the default `<Button>` is **1.00:1 — invisible, shipped, in both schemes**. Deriving a per-org ring that clears its own brand fill is possible but fragile at every seed. The robust fix is geometric: **every focus ring is drawn with an offset in the surface colour**, so it is never adjacent to the control it rings. With the offset, D4 reduces to `ring on surface ≥ 3`, which is the pair above and holds for every seed. Primitive consequence in slice a: `focus-visible:ring-offset-2 focus-visible:ring-offset-background` is added to `button`, `badge` and `input`, and recorded as a deliberate registry divergence in each file's header comment (precedent: `dropdown-menu.tsx:5-11`).
+- **D6 is not a contrast pair.** "Minimum perceptual distance between `primary` and `destructive`" is a hue/ΔE question, and computing it as a WCAG ratio produces nonsense (today's blue-vs-red scores 1.08, which says nothing). It ships as a separate constant, `MIN_BRAND_DANGER_HUE_DISTANCE_DEG = 45`, enforced by slice b's generator, documented here so slice b does not re-derive it.
+
+```ts
+export type TokenPolicy = "brandable" | "bounded" | "platform";
+export type TokenEntry = {
+  readonly token: TokenName;
+  readonly policy: TokenPolicy;
+  readonly additive?: true;   // not present in globals.css :root today
+  readonly bound?: string;    // named constraint slice b's generator must implement
+  readonly why: string;       // one sentence, quotable in a review
+};
+export const TOKEN_POLICY = [ /* every token, exactly once — table below */ ] as const;
+
+export const BRAND_SCOPE_SELECTOR      = ":root:root";
+export const BRAND_SCOPE_SELECTOR_DARK = ":root:root.dark";
+
+export const TYPE_SCALE = [ /* table below */ ] as const;
+export const MIN_BODY_PX = 16;
+export const MIN_MEMBER_FACING_PX = 14;
+export const MIN_TOUCH_TARGET_PX = 44;
+export const MIN_BRAND_DANGER_HUE_DISTANCE_DEG = 45;
+
+/** The platform default palette, in both schemes. globals.css transcribes THIS. */
+export const PLATFORM_TOKENS = {
+  light: { /* token → colour string */ },
+  dark:  { /* token → colour string */ },
+} as const;
+```
+
+### `src/lib/brand/contrast.ts` — pure WCAG math, ZERO runtime imports
+
+Slice 0 needs contrast math to prove the platform palette meets its own floor, and slice b needs the same math inside the generator. Duplicating it is how the two drift, so it ships once, now.
+
+```ts
+export function parseColor(css: string): { r: number; g: number; b: number };  // hsl() and #rrggbb only
+export function relativeLuminance(rgb: { r: number; g: number; b: number }): number;
+export function contrastRatio(a: string, b: string): number;                   // WCAG 2.1, ≥1
+export function meets(pair: BrandPair, fg: string, bg: string): boolean;       // type-only import of BrandPair
+```
+
+`contrast.ts` imports `contract.ts` for the `BrandPair` **type only** (`import type`), which keeps both at zero runtime imports.
+
+### `npm run ui:add -- <component…>` (`scripts/ui-add.mjs`)
+
+The only supported way to generate a shadcn primitive in this repo. Raw `npx shadcn add` is documented as unsupported in `ui-standards.md` and CLAUDE.md.
+
+1. Snapshot `package.json` and `package-lock.json` into memory; refuse to run if `git status --porcelain` shows either already dirty.
+2. `npx shadcn@latest add --yes --overwrite <component…>`, stdio inherited.
+3. For every file under `src/components/ui/` that `git status --porcelain` now reports as added or modified, rewrite each `radix-ui` umbrella import to the individual package: `import { Foo as FooPrimitive } from "radix-ui"` → `import * as FooPrimitive from "@radix-ui/react-<kebab(Foo)>"`.
+   **Correction to the architect's Note:** *no `X.Root` → `X` member-access normalisation is required.* A namespace import of `@radix-ui/react-dropdown-menu` exposes `.Root`, `.Trigger` and friends exactly as the umbrella's namespace does — the hand-corrected `dropdown-menu.tsx` in the tree today is proof (`DropdownMenuPrimitive.Root`, line 17). Rewriting the import line is the whole job; rewriting member accesses would be a second, fragile regex with nothing to fix.
+4. Restore `package.json` + `package-lock.json` from the snapshot; `npm ci`.
+5. **Fail loudly if any rewritten import targets a package that is not already in `dependencies`.** Message: the package names, and "these are new runtime dependencies. They need the architect's five-criteria pass (CLAUDE.md → Agent Roster, Phase 2) before they can be installed. Install deliberately, then re-run." *This step is the whole point of the script:* the Radix umbrella arrived twice as a surprise at Phase 4, and this converts "surprise dependency" into "build stops and names it."
+6. Run `node scripts/check-deps-drift.mjs`.
+7. Print: primitives are generated files — record any deliberate divergence from the registry in a header comment, the way `dropdown-menu.tsx` does.
+
+### `npm run check:deps-drift` (`scripts/check-deps-drift.mjs`)
+
+Follows the existing family exactly — plain node, `walk()` over `src/`, regex, non-zero exit, header comment naming the motivating failure (F-B1, two occurrences, two hand-reverts). Three rules:
+
+1. `radix-ui` appears in neither `dependencies` nor `devDependencies` of `package.json`, nor as a root dependency in `package-lock.json`.
+2. No file under `src/` contains `from "radix-ui"`.
+3. Every `@radix-ui/react-*` specifier imported anywhere under `src/` is present in `package.json` `dependencies`. (Catches a rewrite to a package nobody installed — the failure mode step 5 of `ui:add` prevents at generation time and this one prevents at merge time.)
+
+### `npm run check:brand-scope` (`scripts/check-brand-scope.mjs`)
+
+Same family. The allowlist is **two path strings literal in the script**, not imported from `contract.ts` — the tripwires are `.mjs` with no build step, and regex-extracting an array out of a `.ts` file breaks on a formatter change. Duplicating two paths in a file whose entire job is to fail when they change is the correct trade (architect, §2; confirmed).
+
+```js
+const EMITTERS = [
+  { path: "src/app/(org)/o/[slug]/layout.tsx",      required: false }, // slice c flips → true
+  { path: "src/app/(public)/site/[slug]/layout.tsx", required: false }, // P3 creates the file; slice c flips
+];
+```
+
+Four rules, with a staged rollout that is honest about what exists today:
+
+- **E1 — emitter containment (on from slice a).** The marker `<BrandTokens` may appear in **no file outside `EMITTERS`**. At slice a it appears nowhere, so E1 is a ratchet placed before the thing it guards — which is the only time a ratchet is free.
+- **E2 — emitter presence (off until slice c).** Each `EMITTERS` entry with `required: true` whose file exists must contain the marker. Slice c flips both flags in a one-line, reviewable diff. A route group added in P9 is un-brandable by default until someone edits this array.
+- **E3 — no second emitter (on from slice a).** No file under `src/` outside `src/components/brand/` may contain the string `<style` or `dangerouslySetInnerHTML`. **Verified enforceable today at zero violations** — `src/` contains no `<style` element and no real `dangerouslySetInnerHTML` (the three grep hits are comments asserting the XSS invariant, which E3 must not trip on: match on `<style` and on `dangerouslySetInnerHTML=` in non-comment lines, reusing `check-sql-date.mjs`'s comment-skipping shape). This clause is what stops someone copy-pasting the `<style>` body into a third layout and sailing past a grep for the component name.
+- **C1 — brand-class containment (on from slice a, vacuous until slice c).** No `(bg|text|border|ring|from|via|to|fill|stroke|outline|decoration|shadow|accent|caret|divide|placeholder)-brand(-[a-z0-9-]+)?` utility outside the two brandable groups. A shared component rendered in both `(admin)` and `(org)` takes a `tone` prop instead — the same mechanism G6 requires of the agent.
+- **C2 — no hand-rolled primitives (turned on at the END of the sweep, a8).** No class string outside `src/components/ui/` may match *button-shaped* (`rounded-*` **and** `px-<n>` **and** `font-medium|font-semibold`) or *table-shaped* (a literal `<table` element). Escape hatch `// ui-ok: <reason>` on the line above, matching `check-sql-date.mjs`'s convention. `src/app/(admin)/developer/**` is exempt by path (it is a hand-set register with its own `.reg`-scoped palette and no shared tokens — verified: `developer.css` declares every value under `.reg`, never `:root`).
+
+**⚠ Correction to the architect, and the code is the reason.** Phase 2's "Scope order" says the consumer rule "cannot be turned on while ~24 violations exist" and Note 11 asks for it to be demonstrated failing pre-migration and passing after. But §2(b) and DECISION-047 define the consumer rule as the **`--brand-*` clause** — and there are **zero** `--brand-*` utilities in the tree today and there will be zero until slice c, so that clause is vacuously true and cannot be demonstrated failing against real code. The clause that *does* have violations to clear is C2, and the census is worse than "~24": **44 button-shaped class strings across 28 files, 14 input-shaped across 9, and 7 files containing `<table>` (6 in scope; `developer/tables/[table]/page.tsx` is the exempt seventh).** So Note 11's demonstration attaches to **C2**, is real, and is the a8 commit. C1's equivalent proof is a fixture test on the checker itself (`scripts/check-brand-scope.test.mjs` — vitest already includes `scripts/**/*.test.mjs`), which is the honest way to prove a rule that has nothing to catch yet.
+
+**Explicitly NOT a consumer rule: literal palette colours.** The census found **47 hard-coded Tailwind palette utilities across 21 files** (`bg-green-500/10`, `text-amber-700 dark:text-amber-300`, and so on) — and they are almost entirely *status chips*, which D6 says are platform-fixed and never derived. Banning them requires semantic tokens (`--success`, `--warning`, `--info`, each needing a fill/subtle-fill/foreground triple) that do not exist and whose design is a real exercise. **Out of scope for slice a; goes to `docs/TODO.md`** (see Out of Scope). Anyone reading "the sweep is done" as "all colour is tokens now" would be wrong, so it is written down here.
+
+### The brand-scope marker — decided
+
+**It is a server component, `<BrandTokens>` at `src/components/brand/brand-tokens.tsx`, and it *is* the `<style>` element.** Not a `data-brand-scope` attribute.
+
+The reason is DECISION-050. The emitter is a `:root`-scoped `<style>` precisely because portals escape a wrapper element — so a `data-brand-scope` attribute would mark a wrapper that does no work. The marker and the behaviour would then be two facts that can disagree in both directions: an attribute present with no emission, an emission with no attribute. Making the component the emitter collapses them into one fact, which is the most honest thing a grep can be pointed at. E3 closes the remaining hole (copy the `<style>` body somewhere else without importing the component).
+
+Signature, so slice c has nothing to invent:
+
+```ts
+// src/components/brand/brand-tokens.tsx — server component, no 'use client'
+export function BrandTokens(props: {
+  brand: BrandTokenSet | null;   // null → renders null. THIS is how the 403 stays un-branded.
+  nonce?: string;                // DECISION-024 forward constraint; nonce-able from day one
+}): React.ReactElement | null;
+```
+
+Two mechanics slice c must not rediscover:
+
+- **Render `<style>{cssText}</style>` with a plain string child — never `dangerouslySetInnerHTML`.** React 19 renders text children of `<style>` verbatim, the CSS text is built from parsed numbers only (A7), and it contains no `<` or `&`. This keeps DECISION-041's "no `dangerouslySetInnerHTML` in `(public)`" literally true rather than carved out.
+- **Do not pass React 19's `precedence` prop.** `precedence` hoists the style into React's managed head ordering, and nothing guarantees that lands *after* `globals.css`. Instead the emitted rules are specificity-armored: `:root:root { … }` and `:root:root.dark { … }` (exported as `BRAND_SCOPE_SELECTOR` / `..._DARK` so the emitter and its test share one string). `:root:root` is 0,2,0 and beats globals.css's `:root`; `:root:root.dark` is 0,2,1 and beats it in turn; platform tokens the brand does not own are untouched and cascade normally. Source-order dependence is exactly the kind of defect that passes `tsc`, `next build` and a page screenshot — which is the architect's own stated reason for ruling out the wrapper div.
+
+## Data Model
+
+**No schema changes required in slices 0 or a.** No table, no column, no index, no migration, no `db:push`. `organization_brands` (DECISION-049) is slice c; the account-level colour-scheme column (DECISION-050, S17) is the account-surface work and is explicitly not slice a.
+
+## Component / Page Plan
+
+### Slice 0
+
+**Files to create**
+- `src/lib/brand/contract.ts` — as specified above.
+- `src/lib/brand/contrast.ts` — as specified above.
+- `src/lib/brand/contract.test.ts` — three test groups, described under Implementation Order. This is the highest-value artifact in the slice.
+
+**Files to modify**
+- `src/app/globals.css` — token *values* only (below). No new tokens, no structural change; the `@theme inline` block and the `@layer base` block are untouched in slice 0.
+- `docs/ui-standards.md` — the visual rewrite (below).
+
+**The three-way partition, verified against `globals.css` as it actually is today.** The architect's starting partition named 14 of the file's 20 declared properties and left six unclassified; a partition with holes is not closed, and the six holes are the tokens a reviewer is most likely to guess wrong about. Corrected and complete:
+
+| Token | Policy | Why |
+|---|---|---|
+| `--primary` | **brandable** | The brand fill. S15's emphasis axis. |
+| `--primary-foreground` | **brandable** | Computed, never fixed white (D2). |
+| `--ring` | **brandable** | Focus ring; ≥3:1 on surface, offset makes the control clause structural (D4). |
+| `--brand-raw` | **brandable**, additive | The unmodified seed, decorative surfaces only (D10). Not in `globals.css` until slice c. |
+| `--brand-raw-foreground` | **brandable**, additive | A hero band carries text; that text needs a computed foreground. |
+| `--background` | **bounded** — `nearWhiteOrNearDarkBand` | D7. A congregation may have a cream page; they may not have a gold page. |
+| `--foreground` | **bounded** — `computedFor(--background, 7:1)` | Follows the background or D1 breaks. |
+| `--accent` | **bounded** — `nearNeutralTintWithin(--muted)` | ⚠ **Overturns the architect, who listed it plainly re-declarable.** `globals.css:49` says in its own comment that accent is "a subtle hover/active surface — not the brand colour," and it is what every dropdown item hover and every `ghost`/`outline` button hover paints with. Free re-declaration turns menu hover into a burgundy block behind *content*-axis text, which is the exact collision S15 exists to prevent. Bounded satisfies S15's "selected/active states are brand-driven" as a tint. |
+| `--accent-foreground` | **bounded** — `computedFor(--accent, 7:1)` | Menu item labels are content; 7:1, not 4.5:1. |
+| `--card` | platform | A clerk of session reads data on it. |
+| `--card-foreground` | platform | ⚠ Unclassified by the architect. If `--card` is fixed its foreground must be too, or the pair is unverifiable. |
+| `--popover` | platform | As `--card`. |
+| `--popover-foreground` | platform | ⚠ Unclassified by the architect. |
+| `--muted` | platform | Content axis. |
+| `--muted-foreground` | platform | Content axis, and the D1 pair the platform must guarantee for everyone. |
+| `--secondary` | platform | ⚠ Unclassified by the architect. Today it is byte-identical to `--muted`: a neutral chip/secondary-button surface, i.e. content. Brandable would give a page two competing brand fills with no rule for which wins. |
+| `--secondary-foreground` | platform | ⚠ Unclassified by the architect. |
+| `--destructive` | platform | D6. |
+| `--destructive-foreground` | platform | ⚠ Unclassified by the architect. D6 covers the pair, not just the fill. |
+| `--border` | platform | Decorative separators. |
+| `--input` | platform | Control identification (D3). Fixed so the 3:1 guarantee cannot be lowered per org. |
+| `--radius` | platform, non-colour | DECISION-048. A congregation does not choose corner radius. |
+| `--success` / `--success-foreground` / `--warning` / `--warning-foreground` / `--info` / `--info-foreground` | platform, **reserved** | Named now so the partition stays closed when the semantic-token slice lands. Listing a token that does not exist yet costs nothing and prevents the next author from treating "unlisted" as "brandable." |
+
+That is 20 declared properties + 2 additive + 6 reserved, every one classified exactly once. **Closure is enforced, not asserted:** `contract.test.ts` reads `src/app/globals.css`, extracts the custom-property names declared in `:root`, and asserts that set is exactly the set of non-additive, non-reserved entries in `TOKEN_POLICY`. The day someone adds a token to `globals.css` without classifying it, the test fails and names it. Vitest already runs in-repo file reads and needs no new dependency.
+
+**The platform default palette does not meet the floor the contract declares. Six pairs fail.** Measured against the current values in `globals.css`:
+
+| Pair | Light | Dark | Floor | |
+|---|---|---|---|---|
+| `foreground` on `background` | 17.87 | 17.08 | 7 | pass |
+| **`muted-foreground` on `background`** | **4.70** | **6.97** | 7 | **FAIL** |
+| **`muted-foreground` on `card`** | **4.70** | **5.78** | 7 | **FAIL** |
+| **`muted-foreground` on `muted`** | **4.29** | **5.78** | 7 | **FAIL** |
+| `primary-foreground` on `primary` | 5.17 | 4.91 | 4.5 | pass |
+| **`destructive-foreground` on `destructive`** | 4.80 | **3.61** | 4.5 | **FAIL (dark)** — fails plain AA, not just AAA |
+| **`input` on `background`** | **1.24** | **1.43** | 3 | **FAIL** |
+| **`ring` on `primary`** | **1.00** | **1.00** | 3 | **FAIL** — `--ring` is byte-identical to `--primary`; the focus ring on the default button is invisible today, in both schemes |
+| `ring` on `background` | 5.17 | 4.91 | 3 | pass |
+
+`muted-foreground` alone is **244 `text-sm text-muted-foreground` sites**. This is not a theoretical gap.
+
+**Ruling: slice 0 corrects the palette, in the same commit as the contract.** The alternatives were considered and rejected: shipping a contract its own reference implementation violates makes the contract decorative from commit one; a `KNOWN_VIOLATIONS` list is the "I accept the risk" checkbox Phase 1 says is not a floor; and deferring means every surface P1 and P3 build gets built against a palette that fails. The correction is five values and one class string, and it is *provable* rather than argued. **It is, however, a deliberate user-visible change, and slice 0 is therefore no longer a "no visual change" slice** — that line in Phase 1's decomposition is superseded here, on purpose, with the numbers above as the argument. If the operator would rather take the palette correction separately, the clean cut is to hold commit 0.1 and land the contract with the *current* values plus a failing test marked `.fails()` — I recommend against it and have designed for the correction landing.
+
+Values, computed and ready to transcribe (`contract.test.ts` re-verifies them, so an arithmetic slip fails at implementation rather than in production):
+
+| Token | Scheme | From | To | Result |
+|---|---|---|---|---|
+| `--muted-foreground` | light | `hsl(215 16% 47%)` | `hsl(215 16% 33%)` | 7.92 on background, 7.23 on muted |
+| `--muted-foreground` | dark | `hsl(215 20% 65%)` | `hsl(215 20% 73%)` | 8.89 on background, 7.37 on card |
+| `--destructive` | dark | `hsl(0 84% 60%)` | `hsl(0 84% 48%)` | 4.87 against white foreground; still 3.67 against the page |
+| `--destructive-foreground` | dark | `hsl(210 40% 98%)` | `hsl(0 0% 100%)` | pairs with the above |
+| `--input` | light | `hsl(214 32% 91%)` | `hsl(214 32% 59%)` | 3.20 on background |
+| `--input` | dark | `hsl(217 33% 22%)` | `hsl(217 33% 50%)` | 3.88 on background, 3.22 on card |
+| `--border` | both | unchanged | unchanged | decorative by definition; documented as such |
+| `--ring` | both | unchanged | unchanged | fixed structurally by the offset, not by a value |
+
+**Blast radius of the palette change on existing e2e:** `e2e/color-scheme.spec.ts` asserts only `--background` (white / `hsl(222 47% 11%)`), which does not move. `e2e/header-controls.spec.ts:340-350` asserts luminance *differences* and non-transparency, not fixed colours, and its margins widen. **Nothing existing breaks.** Because `--input` has no consumer until the `input` primitive lands in slice a, its light-mode change is invisible today — the 3:1 control border arrives exactly when the control does.
+
+**The type scale.** Declared as data in slice 0; **conformance is not slice a** (see Out of Scope). Every size is `rem`, never `px`, so a future large-print mode is a root multiplier rather than a rewrite (G5), and `text-size-adjust` is never suppressed.
+
+| Role | rem / px | Line height | Tailwind equivalent | Where allowed |
+|---|---|---|---|---|
+| `display` | 1.875 / 30 | 1.2 | `text-3xl` | page-level hero |
+| `title` | 1.5 / 24 | 1.25 | `text-2xl` | the single `<h1>` |
+| `section` | 1.25 / 20 | 1.3 | `text-xl` | `<h2>` |
+| `subhead` | 1.125 / 18 | 1.4 | `text-lg` | `<h3>` |
+| `body` | 1 / 16 | 1.6 | `text-base` | **all body copy — the floor** |
+| `dense` | 0.875 / 14 | 1.5 | `text-sm` | tabular cells, metadata, form labels. Never a paragraph. |
+| `micro` | 0.75 / 12 | 1.4 | `text-xs` | **`(admin)` and `/developer` only. Forbidden on any member-facing surface.** |
+
+### Slice a
+
+**Files to create**
+- `scripts/ui-add.mjs`, `scripts/check-deps-drift.mjs`, `scripts/check-brand-scope.mjs`, `scripts/check-brand-scope.test.mjs`
+- `src/components/theme-provider.tsx` — `'use client'`, the next-themes wrapper, nothing else in it
+- `src/components/ui/sonner.tsx` — shadcn's stock Toaster wrapper (see below)
+- `src/components/ui/table.tsx`, `input.tsx`, `label.tsx`, `textarea.tsx` — generated
+- `e2e/visual-parity.spec.ts` + `e2e/support/routes.ts` — the harness (see Acceptance criteria)
+
+**Files to regenerate**
+- `src/components/ui/alert-dialog.tsx` — currently hand-built on `@radix-ui/react-dialog`, uses React 19-deprecated `React.ElementRef`, interpolates `${className}` instead of `cn()`, and paints its action button `bg-foreground text-background` rather than through a variant. Regeneration installs `@radix-ui/react-alert-dialog` (**pre-approved, DECISION-036**) and gives it real `role="alertdialog"` semantics, which the `Dialog`-based version never had. Its three consumers (`(account)/account/delete-button.tsx`, `(member)/home/feedback-prompt-card.tsx`, `(admin)/admin/whats-new/delete-button.tsx`) keep the same component names, so the change is import-compatible.
+
+**Files to modify**
+- `src/app/globals.css` — `@import "tw-animate-css";`, `@custom-variant dark (&:is(.dark *));`, move the `@media (prefers-color-scheme: dark)` block to `.dark { … }`, add the four `--radius-*` mappings inside `@theme inline`, add the `prefers-reduced-motion` base rule
+- `src/app/layout.tsx` — `suppressHydrationWarning` on `<html>`, `<ThemeProvider>`, `<Toaster>` → the generated `sonner.tsx`
+- `src/app/(admin)/developer/developer.css` — its dark block is `@media (prefers-color-scheme: dark)` and would be the one surface that ignores an explicit user choice. Replace with `.dark .reg { … }`, placed after `.reg`. Values unchanged; behaviour identical under `theme=system`, correct under an explicit choice. `/developer` stays brand-exempt — this is the *scheme* axis, not the brand axis.
+- `src/components/ui/button.tsx`, `badge.tsx` — delete the four dead size variants and the `data-variant`/`data-size` attributes (**verified: zero consumers anywhere in `src/`**); add the focus-ring offset; drop `dark:bg-destructive/60` (an alpha-composited fill cannot be verified against a contract, and the corrected dark `--destructive` makes it unnecessary). Each divergence gets a line in a header comment, the `dropdown-menu.tsx` way.
+- 28 files carrying button-shaped class strings, 9 carrying input-shaped, 6 carrying `<table>` — the sweep
+- `package.json` — scripts and three new dependencies
+- `CLAUDE.md`, `.claude/agents/architect.md`, `docs/ui-standards.md`, `docs/TODO.md`
+
+**Which primitives to generate — narrowed, and this overturns the architect's list.** Phase 2 said "add input/select/dialog/sheet/tabs." The code says:
+
+- `select` requires `@radix-ui/react-select` and `tabs` requires `@radix-ui/react-tabs`. **Neither is installed, neither is pre-approved, and neither has a consumer** — there is no `Tabs` anywhere in `src/`, and every `<select>` in the tree is a native filter control that works. Generating them would drag two un-vetted runtime dependencies into a slice whose defining lesson is that un-vetted dependencies arrived twice by surprise.
+- `dialog` and `sheet` ride the already-installed `@radix-ui/react-dialog`, so they are free — but they also have no consumer in slice a.
+- **Ruling: generate only what the sweep consumes — `table`, `input`, `label`, `textarea`, `alert-dialog` (regenerated), `sonner`.** Everything else waits for the pipeline that needs it. This is not conservatism for its own sake: `npm run ui:add` is being built in this very slice precisely so that generating a primitive later costs one command, which removes the only good argument for pre-generating. A generated file with no consumer is dead code in a directory marked "do not hand-edit."
+
+`label` uses `@radix-ui/react-label` — **already installed** and, notably, currently unused; 14 files hand-roll `<label>`.
+
+**Dependencies added in slice a (three, all previously ruled on):**
+
+| Package | Status | Note |
+|---|---|---|
+| `@radix-ui/react-alert-dialog` | pre-approved, DECISION-036 | regeneration target |
+| `tw-animate-css` | pre-approved, DECISION-036 | see the motion finding below |
+| `next-themes` | approved, DECISION-050 | ~2KB, MIT, React 19 compatible, system/localStorage only |
+
+**⚠ A finding on `tw-animate-css` that changes the acceptance criterion.** `dropdown-menu.tsx` already ships `data-[state=open]:animate-in fade-in-0 zoom-in-95 slide-in-from-*` on both its content surfaces (lines 51 and 239) — and **those classes are inert today**, because `tw-animate-css` is not installed and Tailwind v4 does not provide them. Installing it does not "add animation support"; it **turns on animations that have never once rendered**, in every dropdown and every menu, the moment it lands. That is a user-visible change nobody has costed. It is also the right change (the primitives are authored for it and look unfinished without it), so it ships — as a *named* delta, with the `prefers-reduced-motion` base rule landing in the same commit so G5 is satisfied at the moment the risk is created rather than later:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
+
+**⚠ A finding on the radius remap that makes it strictly better than the architect hoped.** Phase 2 asked for `--radius` chosen so `rounded-md` is a no-op, "turning a whole-app visual change into a small enumerable set of deltas." Checked against the installed Tailwind v4 defaults (`node_modules/tailwindcss/theme.css:397-401`: xs 0.125, sm 0.25, md 0.375, lg 0.5, xl 0.75rem) and shadcn's canonical mapping, with `--radius` left at its **current** `0.5rem`:
+
+| | computed | Tailwind v4 default | delta |
+|---|---|---|---|
+| `--radius-sm: calc(var(--radius) - 4px)` | 4px | 4px | **none** |
+| `--radius-md: calc(var(--radius) - 2px)` | 6px | 6px | **none** |
+| `--radius-lg: var(--radius)` | 8px | 8px | **none** |
+| `--radius-xl: calc(var(--radius) + 4px)` | 12px | 12px | **none** |
+
+**The enumerable set of deltas is empty.** All four remapped steps are byte-identical at `--radius: 0.5rem`, and the tree uses only `rounded-md` (97), `rounded-lg` (23), `rounded-full` (23), `rounded-xl` (6) and `rounded-sm` (5) — `full` and the un-remapped `xs`/`2xl`/`3xl` are untouched. **Do not adopt shadcn's default `--radius: 0.625rem`**, which would move all four. Keep `0.5rem` and say why in the CSS comment, or the next person "aligns with the registry" and repaints the app.
+
+**Root layout and `<Toaster>` reconciliation.**
+
+```tsx
+<html lang="en" suppressHydrationWarning>
+  <body className="min-h-screen antialiased">
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      {children}
+      <Toaster richColors closeButton position="top-right" />
+    </ThemeProvider>
+  </body>
+</html>
+```
+
+- `ThemeProvider` is the only `'use client'` addition; server children pass through it as props, which the App Router handles with no ceremony. The existing comment block at `layout.tsx:37-44` ("Do not add 'use client' to this file") stays true of the file and needs its wording updated to say why a client *wrapper* is fine.
+- `<Toaster theme="system">` today reads `prefers-color-scheme` on its own, which will diverge from an explicit user choice the moment a toggle exists. The fix is **shadcn's stock `sonner.tsx`**: it calls `useTheme()` and forwards `theme` — when the value is `"system"`, sonner's own media query is the correct answer; when it is explicit, sonner follows the user. Using the stock file rather than a bespoke `resolvedTheme` wrapper keeps the registry-divergence count at zero here. `theme` is dropped from the call site because the wrapper supplies it.
+- `disableTransitionOnChange` prevents a transition flash on toggle.
+- next-themes also sets `style="color-scheme: dark"` on `<html>`, which nothing does today. Native scrollbars and native form controls will render dark in dark mode where they currently render light. That is a fix, and it is a **named delta** rather than a surprise.
+
+## Implementation Order
+
+Ten commits. Slice 0 must be **merged** before a5; a1–a4 may run in parallel with slice 0 (architect: "sequential on the token partition, parallel on the mechanics" — confirmed).
+
+**Slice 0**
+
+1. **`0.1` — the contract.** `contract.ts`, `contrast.ts`, `contract.test.ts`, and the `globals.css` value corrections, in one commit — they cannot be separated, because the test asserts `globals.css` transcribes `PLATFORM_TOKENS`. Three test groups:
+   (a) every entry of `LEGAL_PAIRS` evaluated against `PLATFORM_TOKENS` in **both** schemes, reading `min` **from the pair**;
+   (b) the closure test — the `:root` custom-property set in `globals.css` equals the non-additive, non-reserved `TOKEN_POLICY` set;
+   (c) `contrast.ts` unit cases against published WCAG reference values (black/white = 21, and two mid-tones).
+   *Implementer: **api-developer**.*
+2. **`0.2` — `docs/ui-standards.md`, docs only.** Separated from 0.1 so a prose commit cannot break a test and vice versa. *Implementer: **ux-developer**.*
+
+**Slice a — mechanics (no dependency on slice 0)**
+
+3. **`a1` — tooling.** `ui-add.mjs`, `check-deps-drift.mjs`, `check-brand-scope.mjs` (rules E1, E3, C1 live; E2 and C2 dormant), `check-brand-scope.test.mjs`, the four `package.json` script entries, `check` becomes a four-tripwire chain, and the CLAUDE.md / architect.md edits. No runtime change at all. *Implementer: **api-developer**.*
+4. **`a2` — the visual-parity harness.** Lands **before** any visual change so the baseline can be captured on unmodified code. *Implementer: **ux-developer**.*
+5. **`a3` — scheme, motion, radius.** `tw-animate-css`, `next-themes`, `@custom-variant dark`, the `.dark` block move, the `--radius-*` mappings, `prefers-reduced-motion`, `developer.css`'s `.dark .reg`, the root layout, `sonner.tsx`. *Implementer: **ux-developer**.*
+6. **`a4` — primitives.** Generate `table`, `input`, `label`, `textarea` via `npm run ui:add`; regenerate `alert-dialog`; clean the dead variants out of `button`/`badge`; add the focus-ring offset to `button`, `badge`, `input`; record every divergence in header comments. No consumer changes yet — the primitives land unused and the app still renders exactly as it did. *Implementer: **ux-developer**.*
+
+**Slice a — the sweep (requires slice 0 merged)**
+
+7. **`a5` — `(admin)`.** 6 tables, ~20 button strings, the admin layout. Highest volume, lowest risk, un-brandable surface, platform-only audience. *Implementer: **ux-developer**.*
+8. **`a6` — credential surfaces.** `(auth)`, `(password-reset)`, `(email-verify)`, and `(account)/account/2fa/*`. **Split out for a specific reason the architect did not flag: CLAUDE.md's Phase 4 gate requires a running-server e2e smoke of the full login path, including an MFA-enrolled user, for any change touching `src/app/(auth)/`.** Folding these files into a bigger sweep would drag that gate across the whole thing; isolating them keeps the gate proportionate and the commit reviewable. See E1 in Edge Cases — this gate is Phase 4 and is **not** covered by DECISION-045's deferral. *Implementer: **ux-developer**.*
+9. **`a7` — member and shared.** `(member)`, `(account)` (non-2FA), `src/components/shared/*`, `src/app/page.tsx`, `no-organization`, `launch`, `(org)`. *Implementer: **ux-developer**.*
+10. **`a8` — turn on C2.** Flip the rule, run `npm run check`, watch it pass, and record in the work-log that it was **demonstrated failing at `a4` and passing at `a8`** (Note 11, attached to the clause that actually has violations). One-line script change. *Implementer: **api-developer**.*
+
+**Why the sweep splits three ways rather than one.** The operator asked me to decide. The line is **trust class, not file count**: `(admin)` is platform-only and un-brandable; the credential group carries a mandatory auth-e2e gate; member and shared surfaces are the ones a congregation sees and the ones the brand will eventually reach. Splitting by trust class means each commit's review question is a single question, and a rollback of one does not un-migrate the others. A single 43-file diff is, in the architect's words, a diff nobody reads — and the same is true of a two-way split at 22 files each.
+
+## Acceptance criteria — how slice a proves what it claims
+
+**"Zero user-visible change" cannot be met and should not be claimed.** A shadcn `<Table>` renders `<div class="relative w-full overflow-x-auto"><table class="w-full caption-bottom text-sm">` with `<TableHead>` at `h-10 px-2 text-foreground font-medium`; today's tables are `<table class="mt-6 w-full text-sm">` with `<th class="py-2">` under a `text-muted-foreground` row. A shadcn `<Button>` is `h-9`; the hand-rolled buttons are `h-10` or unset with `py-2`. Migrating *is* the change. Phase 1's slice-a line ("zero user-visible change except radius and dark") is superseded here by a criterion that can be proved:
+
+**Category A — must be pixel-identical (`maxDiffPixels: 0`).** Commits `a1`, `a2`, and the radius portion of `a3`. The radius remap is provably a no-op (table above) and the tooling touches no runtime code. Any diff here is a bug.
+
+**Category B — deltas must be *attributable*, not merely acceptable.** Commits `a4`–`a7`. The criterion is a rule about the diff, not about the pixels: **the sweep deletes class strings; it does not author them.** Concretely — a primitive may receive only layout-context classes (`mt-6`, `w-full`, grid placement); it may **not** receive geometry (`h-10`, `px-4`, `text-sm`, `rounded-*`) or colour. If a surface needs a size the primitive does not have, that is a variant on the primitive, not a `className` at the call site. This is greppable at review and it is what stops the sweep becoming 43 files of bespoke overrides that re-create the problem with new syntax. Screenshot pairs are produced for every route and reviewed by the operator; the question asked of each is "is this delta the primitive's stock geometry?" not "does this look fine?"
+
+**Category C — named intended changes, listed once so nobody has to rediscover them.** (1) Dropdown and menu animations begin rendering (`tw-animate-css`). (2) The colour scheme becomes class-driven; `color-scheme` is now declared, so native scrollbars and controls follow the scheme. (3) Narrow tables gain horizontal scroll instead of overflowing at 360px. (4) `--muted-foreground` darkens/lightens to clear 7:1 (slice 0). (5) Focus rings gain a 2px offset and become visible on the primary button for the first time. (6) `alert-dialog` gains `role="alertdialog"`.
+
+**The harness (G11), scoped and decided: yes, it is part of slice a, at commit `a2`, and it uses zero new dependencies.**
+
+G11 asks for automated screenshot diffs at 360px and 1280px in both schemes. Committed Playwright baselines are the obvious build and the wrong one here: baselines rendered on macOS never match `ubuntu-latest`, and baselines generated on `ubuntu-latest` drift with the runner image — `.github/workflows/e2e.yml` pins nothing (`npx playwright install --with-deps chromium`). So the harness is **self-comparing across two runs on one machine**, which is exactly the instrument slice B used to prove its byte-identical claim, mechanised:
+
+- `e2e/support/routes.ts` — the route manifest: path, which `storageState`, expected status. Roughly 20 routes across `/`, `(auth)`, `(member)`, `(account)`, `(admin)`, `(org)`.
+- `e2e/visual-parity.spec.ts` — a Playwright project `visual`, matrix of {360, 1280} × {light, dark}, `toHaveScreenshot({ fullPage: true, animations: "disabled", maxDiffPixels: 0 })`, with `snapshotPathTemplate` pointed at `.visual/` (gitignored).
+- `npm run visual:baseline` → `playwright test --project=visual --update-snapshots`. `npm run visual:check` → `playwright test --project=visual`; failures write `-diff.png`.
+- `animations: "disabled"` is what keeps the tw-animate-css delta out of the diff while leaving it real and named in Category C.
+
+Workflow: capture the baseline on the commit before a change, apply the change, run the check, review or accept. Cost is one spec, one manifest, four `package.json` lines, no dependency, and it is directly reusable in slice c for the per-org verification G11 actually cares about. **Committing baselines to CI is explicitly out of scope** and goes to `docs/TODO.md` — it needs a pinned container image, which is its own decision.
+
+## E2E blast radius — existing specs this changes
+
+Phase 3's job here is the *existing* specs, not the new ones (retro 2026-07-11).
+
+| Spec | What changes | Action |
+|---|---|---|
+| `e2e/color-scheme.spec.ts` | Its entire premise. It guards "the palette follows `prefers-color-scheme`," which is currently a media query and becomes a class applied by next-themes' pre-paint script. The two assertions still pass — Playwright's `colorScheme` emulation drives `matchMedia`, which is what the script reads — but they now test a **different mechanism**, and its 12-line header comment describing the Tailwind `@theme`-hoisting incident becomes misleading. | Rewrite the header comment; **add an assertion that `document.documentElement.classList` carries `dark` under `colorScheme: "dark"` and does not under `"light"`.** Without it the spec passes for the wrong reason if the script is misconfigured and the CSS happens to fall back. This spec becomes the primary regression guard for the whole scheme mechanism. |
+| `e2e/header-controls.spec.ts:302-355` | The two-scheme block reads `--popover` and the avatar fill through computed style; same mechanism change. Assertions are ratio-based and the corrected palette widens their margins. | Verify, do not rewrite. |
+| `e2e/header-controls.spec.ts:153` | `.locator("span.truncate")` inside the org switcher — `org-switcher.tsx` is in sweep `a7`. A structural class used as a test hook. | The sweep must preserve the `span.truncate`, or the spec moves to a `data-testid`. Named so it is not discovered as a red run. |
+| `e2e/header-controls.spec.ts:350` | `getByTestId(AVATAR).locator("span").first()` — `avatar-menu.tsx` is in `a7`. | Preserve the span structure. |
+| `e2e/feedback.spec.ts:69` | `page.locator("tbody tr")` — descendant combinator, survives the `<Table>` wrapper. | No action; verified safe. |
+| `e2e/post-login-routing.spec.ts:211` | Asserts `main`'s innerText is byte-identical across `managed`/`invited`/`unmanaged` (DECISION-040). | The sweep may not change copy. Any text edit in `(org)` breaks the enumeration-safety guard, which is the correct failure. |
+| `e2e/admin-*.spec.ts` | Locate by role and text through the migrated tables and buttons. | Safe **iff** the sweep preserves the rendered element and the accessible name. Rule: a `<Link>` that looks like a button becomes `<Button asChild><Link/></Button>`, never `<Button>` — otherwise `getByRole("link")` becomes `getByRole("button")` and specs fail for a reason that looks cosmetic. |
+| `e2e/security-headers.spec.ts` | Unaffected. Report-only CSP already carries `script-src 'unsafe-inline'` and `style-src 'unsafe-inline'`, so next-themes' pre-paint script and (later) the brand `<style>` produce no violation today. | No action. The nonce work is a slice-c forward constraint. |
+
+**New tests slice a owes:** `scripts/check-brand-scope.test.mjs` (fixture-driven, proves C1 catches a violation it has nothing real to catch); the `contract.test.ts` groups above; the `classList` assertion in `color-scheme.spec.ts`.
+
+## Documentation changes
+
+**`docs/ui-standards.md` — the visual rewrite (commit `0.2`).** The file is 562 lines of genuinely good interaction guidance with **no type scale, no minimum sizes and no colour values**, and its Accessibility section states a **WCAG AA** floor, which S16 has now overridden. It is also written against primitives that do not exist ("Select & Combobox Patterns (Popover + Command)"). The rewrite is surgical, not a replacement:
+
+- **New section, "Colour and Tokens"** (after Page Layout): the three-way partition as a table, the "brand carries emphasis, neutral carries content" sentence as the operating rule, `border` vs `border-input`, "never write a Tailwind palette literal — if you need a colour that is not a token, that is a missing token and a design decision, not a class string," and the pointer to `contract.ts` as the source of truth.
+- **New section, "Type Scale"**: the seven roles, `rem` only, the 16px body floor, the 14px member-facing floor, `micro` restricted to `(admin)`/`/developer`, and the note that the scale exists in rem so large-print is a multiplier.
+- **Rewrite "Page Header & Typography"** to reference the roles rather than `text-2xl`.
+- **Rewrite "Accessibility"**: AA → **AAA (7:1) for body text**, 3:1 for non-text and control borders, focus rings **always with an offset** (with the 1.00:1 measurement as the reason), 44px touch targets kept, `prefers-reduced-motion` added, 200% zoom without horizontal scroll added, print added (church offices print rolls on monochrome lasers).
+- **Rewrite "Select & Combobox Patterns"** to say what actually exists: a native `<select>` for filters today; `Select` is not generated and arrives with the pipeline that needs it, via `npm run ui:add`.
+- **New subsection under Component Rules**: `npm run ui:add` is the supported generation path; raw `shadcn add` is not; primitives are not hand-edited and every deliberate divergence from the registry gets a header comment.
+- **Add to the Pre-merge UX Audit Checklist**: type-scale roles used rather than raw sizes; no palette literals; contrast checked against the AAA floor; focus ring has an offset.
+
+**`CLAUDE.md` — three edits, not two.** ⚠ The architect assigned "Common Commands" and "Component Rules / Route Group Rules," but **`CLAUDE.md` has no Component Rules and no Route Group Rules sections** — those live in `.claude/agents/architect.md` (lines 13 and 24). So:
+
+1. **Common Commands** — add `ui:add`, `check:deps-drift`, `check:brand-scope`, `visual:baseline`, `visual:check`; update the `check` line from "Both tripwires" to the four-tripwire chain.
+2. **Project Layout** — add `src/lib/brand/` (contract, zero runtime imports) and `src/components/ui/` (generated; use `ui:add`).
+3. **Key Invariants — new subsection, "The Brand Is a Cascade Override."** Six lines: branding re-declares existing tokens and introduces no styling system; the three-way partition is closed and lives in `contract.ts`; the emitter is `<BrandTokens>` and appears in exactly two layouts; `(org)` and `(public)/site/<slug>` are the only brandable groups, and everything else — `(auth)`, `(account)`, `(member)`, `(admin)`, `(email-verify)`, `(password-reset)`, `access-pending`, `/launch`, `/no-organization`, `/developer` — is not; un-brandable does not mean logo-free.
+
+**`.claude/agents/architect.md` — one edit, two sections.** Route Group Rules gains a line naming `(org)` and `(public)` as the only brandable groups (and `access-pending`, which the list currently mentions, as un-brandable). Component Rules gains `ui:add` as the generation path and "no hand-rolled button, table or input class strings — `check:brand-scope` C2 enforces it."
+
+**`docs/decisions.md` — three implementation entries to append when slice 0 lands** (drafted here so the implementer transcribes rather than invents):
+
+- **DECISION-051 — The token partition is three-way, and the platform default palette is corrected to meet its own floor.** Brandable / bounded / platform, closed over every property `globals.css` declares, closure enforced by a test that parses the CSS. `--accent` and `--accent-foreground` are *bounded*, not brandable, because accent is menu-hover under content-axis text. Six pairs of the current default palette fail the floors the contract declares — including `ring` on `primary` at 1.00:1, a focus ring that has been invisible on the primary button in both schemes since P0 — so slice 0 corrects five token values and adds a structural ring offset rather than shipping a contract its reference implementation violates.
+- **DECISION-052 — The brand-scope marker is the emitting component, and the tripwire has four clauses.** `<BrandTokens>` *is* the `<style>` element, so grep-presence and behaviour-presence are one fact; a `data-brand-scope` attribute would mark a wrapper DECISION-050 already ruled out. E3 (no `<style>` outside `src/components/brand/`) closes the copy-paste bypass and is enforceable today at zero violations. The consumer clause that can be demonstrated failing is **C2 (hand-rolled primitives, 44 real violations)**, not the `--brand-*` clause, which is vacuous until slice c. Palette literals are out of scope pending semantic status tokens. Emission uses `:root:root` / `:root:root.dark` for specificity rather than relying on source order, and a plain string child rather than `dangerouslySetInnerHTML`.
+- **DECISION-053 — Slice a is not a zero-visual-change slice, and it proves its claim with a self-comparing screenshot harness.** Three acceptance categories (pixel-identical / attributable / named); the diff-level rule that the sweep deletes class strings rather than authoring them; a Playwright `visual` project with gitignored `.visual/` baselines captured before and after on one machine, at 360 and 1280 in both schemes, zero new dependencies. Committed CI baselines need a pinned container and are deferred.
+
+## Edge Cases & Risks
+
+**E1 — DECISION-045 defers Phase 5, but the auth-e2e requirement is a *Phase 4* gate and is not deferred.** CLAUDE.md: "For any feature that touches `src/app/(auth)/` … a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required **before Phase 5 can begin**." Commit `a6` rewrites markup in `(auth)/signin`, `(auth)/totp` and the password-reset flow. The gate applies. This is the single most likely place for the pipeline to ship something broken under the deferral, because "Phase 5 is deferred" reads as "e2e is optional" and it is not.
+
+**E2 — the pre-paint script is now load-bearing for every user, and a JS-disabled user loses dark mode entirely.** Today the media query works with JS off. After `a3`, `.dark` is applied by next-themes' inline script. Accepted (the app requires JS to sign in at all), named so it is not rediscovered as a bug report.
+
+**E3 — hydration mismatch on `<html>`.** `suppressHydrationWarning` on `<html>` is mandatory and easy to omit or to put on `<body>` instead. Symptom is a console error in dev and nothing in prod, which is exactly how it survives to production.
+
+**E4 — `dark:` semantics change under every existing class string.** After `@custom-variant dark (&:is(.dark *))`, the ~47 palette literals carrying `dark:` variants (status chips in `(admin)` and `(account)`) resolve through the class rather than the media query. They keep working *because* next-themes applies the class from system preference by default — but they are the largest population of styling that changes mechanism without changing appearance, and they are exactly what the visual harness at `a3` must cover. Route the manifest through `/admin/feedback`, `/admin/email-queue` and `/account/2fa`, which carry the densest chip usage.
+
+**E5 — the `<Table>` wrapper adds a scroll container.** `overflow-x-auto` on a table inside an already-constrained layout can produce a nested scroll region or clip a sticky header. Check the widest table (`/admin/users`, six columns) at 360px and 1280px before assuming it is free.
+
+**E6 — a `<Link>` styled as a button must stay an `<a>`.** `<Button asChild><Link/></Button>`, never `<Button>`. Otherwise the accessible role changes, keyboard behaviour changes (Enter vs Space), and several e2e locators fail in a way that reads as cosmetic.
+
+**E7 — `alert-dialog` regeneration changes focus and escape semantics.** `role="alertdialog"` and the real Radix AlertDialog trap focus and require an explicit action; the current `Dialog`-based version closes on outside click. Its three consumers are all destructive confirmations, so the stricter behaviour is correct — but it is a behaviour change, not a restyle, and `account/delete-button.tsx` deserves a manual pass.
+
+**E8 — `ui:add` runs `npm ci` and will happily delete an uncommitted lockfile edit.** Hence the clean-tree precondition in step 1. Worth stating in the script's error message, not just in this document.
+
+**E9 — the `git status --porcelain` detection in `ui:add` misses a regenerated file whose content is byte-identical to what is already committed.** Harmless (nothing to rewrite), but the script must not treat "no files detected" as success without saying so.
+
+**E10 — `check:brand-scope` E3 must not trip on the three existing comments** that contain the string `dangerouslySetInnerHTML` while asserting the XSS invariant. Reuse `check-sql-date.mjs`'s comment-skipping logic; a tripwire that fires on a comment praising the invariant is a tripwire people learn to bypass.
+
+**E11 — the corrected `--muted-foreground` is 244 sites of visible change and the most likely thing to be mistaken for a regression** during review of the sweep, which lands later and larger. Mitigation: it ships in slice 0, alone, with a screenshot pair and the contrast table in the commit body.
+
+**E12 — `PLATFORM_TOKENS` and `globals.css` are two copies of the same values.** The closure test asserts the *names* match; the value transcription is asserted too, by parsing the declarations. If the implementer finds parsing values too brittle (nested `hsl()` with spaces), the fallback is asserting names only and treating value drift as caught by the pair tests — which read `PLATFORM_TOKENS`, so a `globals.css` that drifts from it would pass its own tests while rendering something else. Say which was chosen in the Phase 4 notes; do not leave it ambiguous.
+
+**E13 — `/developer` and the scheme axis.** `developer.css` is brand-exempt structurally, but if its dark block stays a media query it becomes the one page in the app that ignores an explicit theme choice. Fixed in `a3`; the risk is that "exempt from branding" gets read as "exempt from everything."
+
+**E14 — `next-themes` persists to `localStorage`, which is device-level, and S17 asked for account-level.** DECISION-050 already flags this. Slice a must not ship a toggle UI that implies the choice follows the account — in fact **slice a ships no toggle at all**, only the mechanism. Naming it here because "the `.dark` class works, let's add the switch" is a two-line temptation.
+
+## Out of Scope (confirm with the user)
+
+Each of these goes to `docs/TODO.md` in the commit that discovers it (Workflow Rule 10), not into slice a.
+
+1. **Type-scale conformance.** The scale is declared in slice 0; the tree contains **244 `text-sm` and 97 `text-xs`** usages, many of them body copy at 14px and 12px against a 16px floor. Migrating them is a separate, larger, and more visually consequential sweep than the primitive migration. New surfaces are authored to the scale from slice 0 onward.
+2. **Semantic status tokens and the 47 palette literals.** `--success` / `--warning` / `--info`, each needing fill, subtle-fill and foreground, plus the sweep of 21 files. Real design work, and D6 says these are platform-fixed anyway, so nothing about the brand depends on it.
+3. **`select`, `tabs`, `dialog`, `sheet`, `skeleton`, `separator`.** Generated by the pipeline that needs them, via `npm run ui:add`. Two of them require new runtime dependencies and an architect pass.
+4. **A colour-scheme toggle UI, and account-level persistence.** Mechanism only in slice a (DECISION-050).
+5. **Committed screenshot baselines in CI.** Needs a pinned container image; that is its own decision.
+6. **Everything in slices b–e** — the generator, brand storage, emission, the `(admin)` organizations surface, the church-facing editor, type pairings.
+7. **OQ4** ("congregations still on the default palette") — architect recommends taking it in slice c; still unanswered by the operator.
+
+## Implementer
+
+Split explicitly, by commit:
+
+| Commit | Scope | Implementer |
+|---|---|---|
+| `0.1` | `contract.ts`, `contrast.ts`, `contract.test.ts`, `globals.css` token values | **api-developer** — pure TypeScript, contrast math, no React, no route |
+| `0.2` | `docs/ui-standards.md` visual rewrite | **ux-developer** |
+| `a1` | `ui-add.mjs`, `check-deps-drift.mjs`, `check-brand-scope.mjs` + its fixture test, `package.json` scripts, CLAUDE.md, architect.md | **api-developer** — node tooling, no runtime code |
+| `a2` | visual-parity harness (`visual` project, route manifest, scripts) | **ux-developer** |
+| `a3` | `next-themes`, `tw-animate-css`, `@custom-variant dark`, `.dark` block, radius mappings, reduced-motion, root layout, `sonner.tsx`, `developer.css` | **ux-developer** |
+| `a4` | generate `table`/`input`/`label`/`textarea`, regenerate `alert-dialog`, `button`/`badge` cleanup + ring offset | **ux-developer** |
+| `a5` | `(admin)` sweep — 6 tables, ~20 buttons | **ux-developer** |
+| `a6` | credential sweep — `(auth)`, `(password-reset)`, `(email-verify)`, `(account)/account/2fa/*` — **auth e2e gate applies** | **ux-developer** |
+| `a7` | member and shared sweep | **ux-developer** |
+| `a8` | flip `check:brand-scope` C2 on; record the failing→passing demonstration | **api-developer** |
+
+**Not `full-stack-developer` anywhere.** The two axes here are genuinely separate — dependency-free data modules and node tooling on one side, CSS and markup on the other — and the handoff points (a contract file; a set of generated primitives) are unusually clean.
+
+## Handoff
+
+**Next: api-developer (Phase 4), commit `0.1`.** Everything needed is above: the module surface, the corrected token values with their measured ratios, and the three test groups. `0.2`, `a1` and `a2` can start in parallel; `a5` waits for `0.1` to merge.
+
+Three things I want the operator to look at before implementation starts, because each is a decision I made rather than deferred and each is reversible only cheaply *now*:
+
+1. **Slice 0 corrects the platform palette** and is therefore no longer a no-visual-change slice. The alternative is a contract violated by its own defaults.
+2. **Slice a is not zero-visual-change**, and the acceptance criterion has been rewritten in three categories rather than weakened into "looks fine."
+3. **The primitive list is narrowed to five**, dropping `select` and `tabs` (new dependencies, no consumers) and `dialog`/`sheet` (no consumers) — on the argument that building `ui:add` in this slice is what makes deferring them free.
+
+---
+
+# Phase 4 — Implementation
+
+*One section per commit. Commits land in the order of the design's Implementation Order; each subsection is written by that commit's implementer.*
+
+## Commit `0.1` — the contract (api-developer)
+
+**Date:** 2026-08-19
+
+### Files Created
+
+- `src/lib/brand/contract.ts` — the closed vocabulary. `BRAND_TOKEN_VERSION`, `BRAND_ROLES` + `ROLE_TO_TOKEN`, `LEGAL_PAIRS` as a runtime `as const` array with `LegalPair`/`LegalTone` derived from it and `min` riding on each pair, the three-way `TOKEN_POLICY` partition, `BRAND_SCOPE_SELECTOR`/`_DARK`, the floors that are not pairs (`MIN_BODY_PX`, `MIN_MEMBER_FACING_PX`, `MIN_TOUCH_TARGET_PX`, `MIN_BRAND_DANGER_HUE_DISTANCE_DEG`, `FOCUS_RING_OFFSET_PX`), `TYPE_SCALE`, and `PLATFORM_TOKENS`. **Zero runtime imports** — verified by grep: the file contains no `import` statement at all.
+- `src/lib/brand/contrast.ts` — `parseColor`, `relativeLuminance`, `contrastRatio`, `meets`. One `import type { BrandPair }`, which erases; no runtime imports.
+- `src/lib/brand/contract.test.ts` — 56 tests in the design's three groups, plus partition hygiene and a parser fixture.
+
+### Files Modified
+
+- `src/app/globals.css` — six declarations corrected (four tokens), the header comment now names `contract.ts` as the source of truth, and three new comments record the `border`/`input` split and why `--ring` equals `--primary`.
+
+### Schema Changes
+
+None. Slice 0 adds no table, no column, no migration.
+
+### Audit Events
+
+None. Slice 0 contains no mutation.
+
+### Measured contrast — before and after
+
+Computed with the module this commit ships, on 8-bit sRGB, both schemes.
+
+| Pair | Floor | Light before | Light after | Dark before | Dark after |
+|---|---|---|---|---|---|
+| `foreground` on `background` | 7 | 17.87 | 17.87 | 17.08 | 17.08 |
+| `muted-foreground` on `background` | 7 | **4.70** | **7.92** | 6.97 | 8.89 |
+| `muted-foreground` on `card` | 7 | **4.70** | **7.92** | **5.78** | **7.37** |
+| `muted-foreground` on `muted` | 7 | **4.29** | **7.23** | **5.78** | **7.37** |
+| `primary-foreground` on `primary` | 4.5 | 5.17 | 5.17 | 4.91 | 4.91 |
+| `destructive-foreground` on `destructive` | 4.5 | 4.80 | 4.80 | **3.61** | **4.87** |
+| `input` on `background` | 3 | **1.24** | **3.20** | **1.43** | **3.88** |
+| `ring` on `background` | 3 | 5.17 | 5.17 | 4.91 | 4.91 |
+| `ring` on `primary` (the ringed control) | — | 1.00 | 1.00 | 1.00 | 1.00 |
+| `border` on `background` | none | 1.24 | 1.24 | 1.43 | 1.43 |
+
+`ring on primary` stays 1.00 **on purpose**: D4 is satisfied geometrically, not by a value. `FOCUS_RING_OFFSET_PX = 2` is the contract's half; slice a's `focus-visible:ring-offset-2 focus-visible:ring-offset-background` on `button`/`badge`/`input` is the other half. A test asserts the two cannot be separated — if the ring ever fails to clear the brand fill, the contract must be mandating an offset.
+
+`border` is deliberately unchanged and deliberately not a legal pair: a card edge separates content, and D3 is about identifying a control. That is now `--input`'s job, and the two tokens diverge in value for the first time.
+
+### E12 — the choice the design asked for, made
+
+**Values as well as names, compared as parsed RGB.** The closure test extracts the `:root` custom-property set from `globals.css` and asserts set equality with the non-additive, non-reserved `TOKEN_POLICY` entries in both directions; a second test asserts every `PLATFORM_TOKENS` entry matches the declaration in the stylesheet, comparing `parseColor(actual)` against `parseColor(expected)` rather than the raw strings.
+
+Names-only was rejected because it leaves the suite self-certifying: every pair assertion reads `PLATFORM_TOKENS`, so a `globals.css` that had drifted would pass its own tests while the browser painted something nobody measured. Parsing turned out not to be brittle — the parser already exists in `contrast.ts` and is the same one the ratios are computed with. Comparing RGB rather than strings means an equivalent renotation is not called drift, which is what stops the test being edited into agreement with a change.
+
+The parser handles the dark block as `@media (prefers-color-scheme: dark) { :root { … } }` (today) **and** as `.dark { … }` (slice a), with a fixture test on the second branch so `a3` does not land against a code path nobody has run.
+
+### Verification
+
+- `npm run typecheck` — clean.
+- `npm run lint --max-warnings=0` — clean.
+- `npx vitest run` — 656 passing, 0 failing (600 before this commit; the number 559 quoted in the handoff was stale).
+- `npm run check` — all four tripwires pass.
+- `npm run build` — compiles.
+- **Mutation-checked**, because a test that cannot fail is not a test: drifting one value in `globals.css` fails the transcription test and names the token; adding an unclassified `--sidebar` to `:root` fails the closure test and names it; reverting the `muted-foreground` correction in *both* files fails three floor assertions.
+- **Verified in a browser** (CLAUDE.md → Verify in a Browser). The running dev server was serving a stale CSS chunk and had to be discounted — a production build served on a scratch port was used instead. `/signin`, `/`, `/forgot-password` screenshotted at 390px in both schemes; computed `--muted-foreground` reads `#475262` light / `#acb8c8` dark, and all three pages render legibly.
+
+### Surfaces that visibly change
+
+Slice 0 is not a no-visual-change commit, by design.
+
+1. **Secondary text everywhere** — `muted-foreground` is referenced 201 times across 48 files. Darker in light mode, lighter in dark. Page descriptions, table metadata, empty states, form hints, timestamps.
+2. **`/admin/whats-new` and `/admin/whats-new/[id]`** — six hand-rolled fields use `border-input` and get a markedly darker border in light mode. **The design said `--input` "has no consumer until the `input` primitive lands in slice a"; that is wrong**, and these six fields are the proof.
+3. **Every `outline` button in dark mode** — `button.tsx:16` carries `dark:border-input dark:bg-input/30 dark:hover:bg-input/50`. The border becomes visible (1.43 → 3.88) and the translucent fill lightens: the composite goes `#162033` → `#243450`, and `#1b263a` → `#32476a` on hover. Text on it stays far above the floor (15.58 → 11.93, and 14.49 → 8.94).
+4. **Destructive surfaces in dark mode** — the fill darkens from `hsl(0 84% 60%)` to `hsl(0 84% 48%)`: destructive `Button`/`Badge` fills, the destructive dropdown item's text and its focus tint.
+
+### Implementer Notes — where the design was wrong
+
+Seven findings. Two are typed defects that would not compile as written, four are factual corrections, one is a recommendation the operator has to rule on.
+
+1. **`BrandPair["kind"]` as written cannot type `LEGAL_PAIRS`.** The design declares `kind: "body" | "large-text" | "non-text"` and then uses `kind: "text"` on three of the nine pairs. Added `"text"` to the union.
+2. **`TokenEntry` as written cannot express the closure test.** It has `additive?: true` but no `reserved`, while the closure test is specified over "non-additive, **non-reserved**" entries and six reserved tokens are listed in the partition table. Added `reserved?: true`, and `nonColour?: true` for `--radius`, which is classified but carries no colour and therefore no `PLATFORM_TOKENS` value.
+3. **`TokenName` is never defined in the design** although three declarations depend on it. Derived it from `TOKEN_POLICY` (`(typeof TOKEN_POLICY)[number]["token"]`) so the partition is the single source of truth and a token cannot be named anywhere in the file without first being classified — rather than maintaining a second list, which is the failure mode the architect used to justify deleting `theme_tokens`. `AdditiveTokenName`, `ReservedTokenName`, `NonColourTokenName`, `DeclaredTokenName` and `PlatformTokenName` are all derived the same way. `ROLE_TO_TOKEN` is `satisfies Record<BrandRole, PlatformTokenName>` rather than the design's `Record<BrandRole, TokenName>`, which is strictly stronger: it makes "every role has a platform colour to measure" a compile error rather than a test.
+4. **`LEGAL_PAIRS` contains a pair `PLATFORM_TOKENS` cannot answer as specified.** `on-brand-raw` on `brand-raw` resolves to `--brand-raw*`, which are additive and by definition absent from `globals.css`. Test group (a) is specified over *every* pair in both schemes, so `PLATFORM_TOKENS` carries platform defaults for the two additive tokens (equal to the primary pair — the platform has no congregation and therefore no raw seed), and the transcription test skips exactly the entries `TOKEN_POLICY` marks `additive`. The alternative — skipping pairs whose tokens have no value — would have made the suite silently weaker than it reads.
+5. **The closed role vocabulary cannot express two of the pairs the design itself measured.** `--card` and `--popover` have no role in `BRAND_ROLES`, so `muted-foreground on card` — 4.70 light / 5.78 dark in the design's own failure table — is not reachable through `LEGAL_PAIRS`. It is asserted in `contract.test.ts` as a named, commented exception rather than by adding roles, because the vocabulary is the contract and a test file should not quietly extend it. **Follow-up for the vocabulary: either add `card-surface`/`popover-surface` roles, or state in `ui-standards.md` that `surface` covers all three and the generator must hold the floor on each.**
+6. **The `--input` claim is wrong, as above** — six fields on `/admin/whats-new*` and every dark-mode `outline` button consume it today. The change is still right; it is simply visible now rather than invisible until slice a.
+7. **The dark `destructive` correction fixes a pair nothing renders and regresses one that does.** ⚠ **Operator decision.**
+   - `--destructive-foreground` has **zero consumers**: `button.tsx:14` and `badge.tsx:16` both hard-code `text-white`. And dark destructive fills render through `dark:bg-destructive/60`, so what actually paints today is white on `#953139` — **7.56:1**, not the 3.61:1 the design cites as a shipped AA failure. The 3.61 pair is real in the *token* sense and must be fixed before `a4` drops the alpha, but it is not a defect a user has ever seen.
+   - The cost is: `text-destructive` on the dark page falls **4.73 → 3.67**, and on the dark popover **3.92 → 3.04**. That is rendered today, in the destructive dropdown item, and 3.67 is below the 4.5 text floor.
+   - There is a strictly better correction, and it is the one Phase 1's Flow 3 prescribes — *move the text, not the hue*: leave dark `--destructive` at `hsl(0 84% 60%)` and set dark `--destructive-foreground` to `hsl(222 47% 11%)`, the page ink. That pair is **4.73:1** (clears 4.5), and `text-destructive` keeps its 4.73 / 3.92. It is a two-line change and the suite stays green either way.
+   - **Shipped as the design specifies**, because the design named explicit values and a visual token is the operator's call, not the implementer's. Flagged here for a ruling.
+
+Two smaller notes. `FOCUS_RING_OFFSET_PX = 2` is an addition to the design's constant list — D4 is only structural if the offset is *data* the primitives read, and the test that joins it to the ring/brand ratio needs something to assert. And `contrast.ts` accepts the legacy comma-separated `hsl()` form and rejects everything else, including any notation carrying alpha: a ratio against a translucent fill depends on what is behind it and is therefore not a property of the pair, so returning a plausible number for it would be worse than throwing.

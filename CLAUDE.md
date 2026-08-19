@@ -72,6 +72,12 @@ src/lib/db/index.ts    — TWO connections: db (presby_app, RLS enforced) and
                          getPlatformDb() (bypasses RLS, platform pages only)
 src/lib/authz.ts       — tenant authorization: withOrgContext, the resolver
 src/lib/permissions.ts — platform admin shell only. FROZEN; nothing church-facing
+src/lib/brand/         — the brand token contract. ZERO runtime imports, so an
+                         Edge handler, a DB-less test and a .mjs script can all
+                         read it. Source of truth for the token partition
+src/components/ui/     — GENERATED shadcn primitives. Add with `npm run ui:add`,
+                         never raw `shadcn add`; don't hand-edit without a
+                         header comment recording the divergence
 src/proxy.ts           — Edge gate (admin + 2FA on /admin and /o/*). Edge
                          runtime: never import @/lib/db here
 src/app/launch/        — the post-login router. destination.ts holds the matrix
@@ -313,7 +319,14 @@ npm run db:seed      # Seed roles, features, and the demo flag
 npm run check:audit  # Tripwire: every mutation in actions.ts files must reference an AUDIT_ACTIONS key
 npm run check:sql-date # Tripwire: bans unannotated sql<Date> (the Neon driver returns computed
                        # date expressions as STRINGS — no column OID to map against)
-npm run check        # Both tripwires in sequence
+npm run check:deps-drift  # Tripwire: the radix-ui umbrella must not reappear (DECISION-048)
+npm run check:brand-scope # Tripwire: the brand emitter and *-brand utilities stay in the two
+                          # brandable route groups (DECISION-047)
+npm run check        # All four tripwires in sequence
+npm run ui:add -- <component…>  # The ONLY supported way to generate a shadcn primitive.
+                       # Wraps `shadcn add`, rewrites the radix-ui umbrella import to the
+                       # individual package, restores the lockfile. Raw `npx shadcn add`
+                       # is unsupported — it has installed ~40 surprise packages twice
 npm run stats:escape # 30-day escape-rate report (per-channel fix breakdown for the retrospective)
 npm run docs:erd     # Regenerate the /developer ER diagrams from the schema
 ```
@@ -436,6 +449,34 @@ PC(USA) records are permanent. `delete` is revoked on `people`; use
 No custom fields (D8). Tags are the only tenant-extensible attribute. A new need
 is a support ticket and, if real, becomes a feature for every church. This makes
 the ticket loop load-bearing, so it cannot be built last.
+
+### The Brand Is a Cascade Override
+
+Per-org branding **re-declares custom properties `globals.css` already
+declares** and introduces no second styling system. A primitive keeps writing
+`bg-primary`; whether that paints platform blue or a congregation's burgundy is
+decided by whether an ancestor re-declared `--primary` (DECISION-046).
+
+The partition of every token into **brandable / bounded / platform** is closed
+and machine-readable in `src/lib/brand/contract.ts`. Unlisted is not brandable —
+it is a missing classification, and a test fails when one appears.
+
+The emitter is `<BrandTokens>` and it **is** the `<style>` element, so
+grep-presence and behaviour-presence are one fact (DECISION-052). It appears in
+exactly the two layouts listed in `scripts/check-brand-scope.mjs`.
+
+`(org)` and `(public)/site/<slug>` are the only brandable route groups.
+Everything else — `(auth)`, `(account)`, `(member)`, `(admin)`,
+`(email-verify)`, `(password-reset)`, `access-pending`, `/launch`,
+`/no-organization`, `/developer` — renders in the platform palette. A branded
+403 tells a prober the org is a configured tenant (DECISION-047).
+
+**Un-brandable does not mean logo-free.** Brand-as-chrome is scoped to two
+layouts; logo-as-content on a neutral plate is legal wherever the caller is
+authorized.
+
+`npm run check:brand-scope` enforces this. It is `paper` for anything the grep
+cannot see.
 
 ### Verify in a Browser
 

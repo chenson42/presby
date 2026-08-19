@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3`, `a4`, `a5`, `a6`, `a7` complete**; next and last: `a8` (flip C2 for real) | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified · `a5` `(admin)` sweep, 14 files, 28 violations cleared, 87 e2e, every visual diff attributed · `a6` credential sweep, mandatory auth e2e gate PASS (88/88, new MFA-enrolled fixture built for it), 12/12 visual diffs attributed · `a7` member+shared sweep, 15 violations → 0, org-switcher/avatar-menu risk handled clean, sign-out verified, DECISION-040 copy untouched by construction, 89 e2e | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | **Complete** — all ten commits (`0.1`, `0.2`, `a1`–`a8`) landed 2026-08-19 | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified · `a5` `(admin)` sweep, 14 files, 28 violations cleared, 87 e2e, every visual diff attributed · `a6` credential sweep, mandatory auth e2e gate PASS (88/88, new MFA-enrolled fixture built for it), 12/12 visual diffs attributed · `a7` member+shared sweep, 15 violations → 0, org-switcher/avatar-menu risk handled clean, sign-out verified, DECISION-040 copy untouched by construction, 89 e2e · `a8` C2 flipped live tree-wide, adversarial canary confirmed it fires, zero violations anywhere, 89 e2e | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1531,5 +1531,38 @@ one existing test extended rather than duplicated) — `header-controls.spec.ts`
 12/12 including the DECISION-040 assertion · manual sign-out confirmed on the
 production build · browser pass, 360px, both schemes, five routes — zero overflow
 on all ten checks.
+
+*Recorded by the orchestrator from the implementing agent's report.*
+
+---
+
+# Phase 4 · commit `a8` — flip C2 for real, the last commit in slice a (api-developer)
+
+**Date:** 2026-08-19
+
+**Modified** `scripts/check-brand-scope.mjs` (`C2_ENABLED` `false → true`, header
+comment rewritten from "DORMANT" to "LIVE as of commit a8" with the full sweep
+provenance — a1's 52-violation dry-run, a4's failing-half demonstration, a5/a6/a7
+clearing 28/11/15 tree-wide) and `check-brand-scope.mjs`'s own fixture test (its
+"dormant by default" assertion inverted to "live by default — no opt-in required").
+**No app code, no schema, no new dependency.**
+
+**The failing half is cited, not re-faked** — it's already on record at `a4` (exactly
+52 violations, flag reverted). This commit is the passing half, made permanent.
+
+**Adversarial proof C2 is actually live, not silently no-op'd**: a throwaway
+button-shaped file created outside `src/components/ui/`, `npm run check` failed with
+`[C2] src/__c2-canary.tsx:5` naming the exact line; file deleted, check passed again,
+`git status` clean. Direct proof against real content, not just the fixture suite.
+
+**Verification.** typecheck, lint clean · vitest **656 passed** · **`npm run check`
+green with C2 live and zero violations tree-wide** (E2 correctly still dormant —
+`(public)` doesn't exist yet, unrelated) · build clean, 29 routes · **e2e: 89
+passed**, full suite including the mandatory `totp-full-login.spec.ts` MFA smoke ·
+canary check above.
+
+**This closes Phase 4 for both slice 0 and slice a** — `0.1`, `0.2`, `a1`–`a8` all
+landed, ten commits, zero remaining C2 violations anywhere in the tree. Phases 5 and
+6 remain deferred per DECISION-045; the operator is the verifier.
 
 *Recorded by the orchestrator from the implementing agent's report.*

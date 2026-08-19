@@ -13,8 +13,9 @@
  * IS the `:root`-scoped `<style>` element, so grep-presence and
  * behaviour-presence are one fact rather than two facts that can disagree.
  *
- * Four rules, staged. E1, E3 and C1 are live from commit a1; E2 and C2 are
- * dormant and each is flipped by a one-line edit here:
+ * Four rules. E1, E3, C1 and, as of commit a8 (2026-08-19), C2 are live. E2
+ * remains dormant and is flipped by a one-line edit here once `(public)`
+ * exists:
  *
  *   E1 — emitter containment. `<BrandTokens` appears in no file outside
  *        EMITTERS. Live. At a1 it appears nowhere, so this is a ratchet placed
@@ -36,11 +37,14 @@
  *   C2 — no hand-rolled primitives. No class string outside src/components/ui/
  *        may be button-shaped (`rounded-*` AND `px-<n>` AND
  *        `font-medium|font-semibold`) or table-shaped (a literal `<table`).
- *        DORMANT: C2_ENABLED is false. The census at design time was 44
- *        button-shaped strings across 28 files, 14 input-shaped across 9, and 6
- *        files with `<table>` in scope. Commit a8 flips C2_ENABLED to true at
- *        the end of the sweep — demonstrated failing before, passing after.
- *        Escape hatch: `// ui-ok: <reason>` on the line above, matching
+ *        LIVE as of commit a8 (2026-08-19). The a1 dry-run census was 52
+ *        violations (45 button-shaped across 28 files, 7 table-shaped across
+ *        6); a4 re-confirmed 52 and put the failing half of the
+ *        failing-before/passing-after demonstration on record; a5 (`(admin)`,
+ *        28 cleared), a6 (credential surfaces, 11 cleared) and a7 (member +
+ *        shared, 15 cleared) swept the tree to zero, each confirmed by its own
+ *        flip-test. `npm run check` now runs C2 for real, tree-wide, on every
+ *        commit. Escape hatch: `// ui-ok: <reason>` on the line above, matching
  *        check-sql-date.mjs's convention.
  *
  * The EMITTERS allowlist is two path strings literal in this file rather than
@@ -89,8 +93,8 @@ const PRIMITIVE_DIR = "src/components/ui/";
  */
 const C2_EXEMPT_PREFIXES = ["src/app/(admin)/developer/"];
 
-/** Flipped to true at commit a8, once the sweep has cleared the census. */
-export const C2_ENABLED = false;
+/** Flipped to true at commit a8 (2026-08-19), once the sweep cleared the census. */
+export const C2_ENABLED = true;
 
 // ── Patterns ─────────────────────────────────────────────────────────────────
 

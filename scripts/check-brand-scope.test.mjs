@@ -2,7 +2,8 @@
  * Fixture tests for the brand-scope tripwire.
  *
  * C1 has nothing real to catch until slice c introduces the additive
- * `--brand-*` tokens, and C2 is dormant until the sweep clears its census. A
+ * `--brand-*` tokens. C2 was dormant through the sweep (a1–a7) and went live
+ * at commit a8 (2026-08-19), once the census was cleared to zero tree-wide. A
  * rule with no live violations is a rule nobody has proved works, so the proof
  * is here: synthetic files fed straight to checkBrandScope(), which is why that
  * function takes an array of { path, content } rather than reading the disk.
@@ -231,7 +232,7 @@ describe("C1 — brand-class containment", () => {
   });
 });
 
-// ── C2 — no hand-rolled primitives (dormant until commit a8) ────────────────
+// ── C2 — no hand-rolled primitives (live as of commit a8, 2026-08-19) ───────
 
 describe("C2 — no hand-rolled primitives", () => {
   const button = f(
@@ -239,11 +240,13 @@ describe("C2 — no hand-rolled primitives", () => {
     '<button className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background" />',
   );
 
-  it("is dormant by default — the census of 44 real violations passes today", () => {
-    expect(checkBrandScope([button])).toEqual([]);
+  it("is live by default — no opt-in required after commit a8", () => {
+    const v = checkBrandScope([button]);
+    expect(rules(v)).toEqual(["C2"]);
+    expect(v[0].message).toMatch(/button-shaped/);
   });
 
-  it("catches a button-shaped class string when enabled", () => {
+  it("can still be forced on explicitly via opts.c2 (unchanged call sites)", () => {
     const v = checkBrandScope([button], { c2: true });
     expect(rules(v)).toEqual(["C2"]);
     expect(v[0].message).toMatch(/button-shaped/);

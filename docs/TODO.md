@@ -26,7 +26,7 @@ been independently verified.
 
 ## In Flight
 
-- [ ] **P0.5 — design foundation + brand architecture** — Phases 1–3 complete; **Phase 4 in progress: `0.1`–`a7` all shipped** (contract, tooling, docs rewrite, visual-parity harness, scheme/motion/radius, primitives, and all three sweeps — admin, credential, member+shared). Next and last: `a8` flips `check:brand-scope`'s C2 rule on for real (currently dormant; census confirms 0 violations across the whole tree post-sweep). Phases 5/6 remain deferred per DECISION-045. Slices b–e (generator, storage+emission, church editor, type pairings) have **no Phase 2 yet** — the architect reviewed only 0 and a. — `docs/work-log/2026-08-19-brand-foundation.md`
+- [ ] **P0.5 — design foundation + brand architecture, slices 0 and a** — Phases 1–4 **complete**: all ten commits (`0.1`, `0.2`, `a1`–`a8`) shipped 2026-08-19 — the token contract, tooling, the ui-standards rewrite, the visual-parity harness, class-driven dark mode, the five primitives, all three sweeps (admin/credential/member+shared), and `check:brand-scope`'s C2 rule now live tree-wide with an adversarial proof it fires. Phases 5/6 **deferred per DECISION-045** — awaiting an operator-led combined verification pass. Slices b–e (the ramp generator, brand storage + emission, the church-facing editor, type pairings) have **no Phase 2 yet** — the architect reviewed only 0 and a, and slice d depends on P1's tenant permission catalog. — `docs/work-log/2026-08-19-brand-foundation.md`
 
 - [ ] **P0 — post-login router and org context** — shipped and pushed. Phases 5 and 6 **deferred by DECISION-045**, not skipped; see Verification debt above. — `docs/work-log/2026-08-18-backbone-and-org-sites.md`
 

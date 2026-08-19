@@ -4,6 +4,30 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-059: `organization_brand_history` records only `'updated'` and `'neutralized'`, never `'created'`
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice c, Phase 3)
+
+A history row exists to let a future restore UI show "the previous brand, as a swatch and a date." There is nothing to restore *to* from a creation event — the state before a first-ever brand is the platform default, which needs no row. Recording a `'created'` row anyway would push the "the oldest row might mean 'go back to nothing'" distinction into application logic instead of the schema.
+
+---
+
+## DECISION-058: The blob storage adapter lives at `src/lib/storage/`, not folded into `src/lib/db/domain/`
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice c, Phase 3)
+
+DECISION-030 requires that no caller query the blob table directly — reads and writes go through a service interface. That interface is a small abstraction boundary, the same category as `src/lib/authz.ts` or `src/lib/brand/`, not a schema module in the shape every other `domain/` file is. `src/lib/storage/blob-store.ts` holds the interface and the Postgres-backed implementation; `src/lib/db/domain/assets.ts` holds only the `blobAssets` table definition, imported by the storage module and nothing else.
+
+---
+
+## DECISION-057: The ramp generator implements sRGB↔OKLCH conversion inline rather than adding a colour-science dependency; the property test samples a deterministic grid, not a fuzzer
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice b, Phase 3)
+
+`generate.ts` needs OKLCH math beyond what `contrast.ts` provides, and the property test needs to sweep a large seed space. Both could reach for a dependency (`culori`, `fast-check`); neither is pre-approved and neither has a second consumer anywhere in the tree. Transcribing Ottosson's reference OKLCH formulas inline is ~40 lines — small and auditable, consistent with DECISION-048's dependency discipline. The property test uses a fixed, deterministic grid (hue × chroma bands × named edge seeds) rather than randomized fuzzing, so a CI failure is reproducible by seed value alone.
+
+---
+
 ## DECISION-056: Slice c's public/anonymous brand read path is deferred to P3; slice c ships tenant storage, `(org)` membership-scoped emission, and `(admin)`-only write/preview only
 
 **Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice c, Phase 2 re-run)

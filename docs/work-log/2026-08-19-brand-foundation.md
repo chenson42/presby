@@ -28,9 +28,9 @@ prose lines against real primitives.
 
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
-| 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
-| 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
-| 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
+| 1 — Functional refinement | analyst (agent) | Complete — all six slices | READY WITH NOTES (0/a) → READY WITH NOTES on re-run (b/c/e, three new findings) | 2026-08-19 |
+| 2 — Architectural review | architect (agent) | Complete — 0/a, then b/c(admin)/e | Approved w/ suggestions (0/a: DECISION-046–050) → Approved w/ suggestions (b/c/e: DECISION-054–056) | 2026-08-19 |
+| 3 — Technical design | tech-lead | Complete — 0/a, then b/c(admin)/e | 10 commits (0/a) → 9 commits (b/c/e), DECISION-057–059 | 2026-08-19 |
 | 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | **Complete** — all ten commits (`0.1`, `0.2`, `a1`–`a8`) landed 2026-08-19 | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified · `a5` `(admin)` sweep, 14 files, 28 violations cleared, 87 e2e, every visual diff attributed · `a6` credential sweep, mandatory auth e2e gate PASS (88/88, new MFA-enrolled fixture built for it), 12/12 visual diffs attributed · `a7` member+shared sweep, 15 violations → 0, org-switcher/avatar-menu risk handled clean, sign-out verified, DECISION-040 copy untouched by construction, 89 e2e · `a8` C2 flipped live tree-wide, adversarial canary confirmed it fires, zero violations anywhere, 89 e2e | 2026-08-19 |
 | 5 — Verification (slices 0/a) | qa | Complete | **PASS** — DECISION-045's deferral formally closed for 0/a | 2026-08-19 |
 | 6 — Shipped vs intent (slices 0/a) | analyst | Complete | **SHIP WITH NOTES** — 4 follow-ups, folded into TODO | 2026-08-19 |
@@ -1913,3 +1913,106 @@ preview; (3) slice c's design must state DECISION-056's deferral explicitly in
 its Out-of-Scope section — favicon/social-card derivation goes with it.
 
 *Recorded by the orchestrator from the read-only architect agent's report.*
+
+---
+
+# Phase 3 (re-run) — technical design for slices b, c (`(admin)` half), e (tech-lead)
+
+## Summary
+
+Slice b writes `src/lib/brand/generate.ts`: a pure function, seed hex → two
+independently-derived token sets (light, dark) + `adjustments[]`, versioned. Proven
+correct the same way slice 0's own palette was — a property test sweeping every
+`LEGAL_PAIRS` entry (now including DECISION-054's accent pair) across a
+deterministic OKLCH grid, in both schemes. **This is the design's single
+highest-value artifact.**
+
+Slice c's `(admin)` half gives the platform operator `/admin/organizations`: set a
+congregation's seed colour/logo/type pairing, live preview, neutralise an abusive
+tenant's brand. Also builds DECISION-055's storage adapter (blob table +
+`resolve`/`store`, logo as sole caller) and wires `<BrandTokens>` into `(org)`'s
+layout behind a membership-scoped, null-safe read — **one correction to Phase 2**:
+DECISION-056 rules out the *public* path, not `(org)` emission, and the re-run
+Phase 2's own placement section confirms `(org)` emission ships now. No public/
+anonymous read path, no favicon/social-card derivation, no church-facing editor
+(slice d, still blocked on P1).
+
+Slice e adds `TYPE_PAIRINGS` next to `TYPE_SCALE` in `contract.ts` and
+`src/lib/brand/fonts.ts` resolving a pairing key to real `next/font/google` calls
+(self-hosted, module-scope-only per the Next compiler's static-analysis
+requirement — no dynamic `next/font` call is possible).
+
+## Permissions & Flags
+
+**New**: `FEATURES.ADMIN_ORGANIZATIONS = "admin.organizations"` — gates
+`/admin/organizations`, no seed-role binding needed (`ADMIN_ROLE`'s existing
+wildcard resolves it). **`ui.brand_theming` gates `(org)` emission only** —
+`(admin)` write/preview works with the flag off, since an operator must be able to
+stage a brand before the platform-wide switch flips, and gating the *write* on the
+flag would conflate permission and flag (DECISION-003). **Audit**:
+`ORG_BRAND_SET`, `ORG_BRAND_NEUTRALIZED`, both `resourceType: "organization"`
+(F18). No tenant permission — `org.branding` stays slice d.
+
+## Data model
+
+`organization_brands` (DECISION-049, transcribed: PK = `organization_id`, FORCE
+RLS, `CHECK` on hex/pairing, no public grant ever), `organization_brand_history`
+(DECISION-059: only `'updated'`/`'neutralized'` rows, captures what's about to be
+superseded), `blob_assets` (DECISION-055/058: tenant-scoped, content-addressed via
+sha256 dedup, `CHECK` rejects SVG/oversize at the schema level, own
+`src/lib/storage/` module — not `domain/`, since it's an abstraction boundary
+not a schema shape). The `(admin)` write path is `getPlatformDb()` throughout,
+never `withOrgContext()` — no tenant membership exists for a platform operator
+(named explicitly, precedented by `admin/2fa/actions.ts`, guards against a
+phantom-membership violation of "Two Hierarchies Intersect Nowhere").
+
+## Implementation order
+
+Nine commits: `0.3` (DECISION-054's contract patch, prerequisite) →
+`b1` (generator + property test, parallel-safe) / `c1` (schema: brand +
+history + blob tables) → `c2` (admin actions + permission) → `c3` (admin UI) →
+`c4` (`(org)` emission, flips `check-brand-scope.mjs`'s `EMITTERS[0]` live) →
+`e0` (contract patch for pairings/fonts) → `e1` (font resolution, 360px-validated
+per pairing) → `c5` (OQ4 report + docs housekeeping). Implementers:
+database-admin (`c1`), api-developer (`0.3`, `b1`, `c2`, `e0`), ux-developer
+(`c3`, `c4`, `e1`).
+
+## Key edge cases
+
+The C1 trap named twice, deliberately: the `(admin)` preview must render via
+**inline `style={}` from parsed numbers**, never `bg-brand-*` utilities — that
+route group sits outside `BRANDABLE_PREFIXES`, so those classes would resolve to
+nothing or the platform default and mislead the operator about what's about to
+save. An upload failure reports which half landed (Flow 2's "partial save ≠ total
+failure" rule) — logo `store()` happens *before* the DB transaction opens, so a
+failed upload never leaves a dangling asset reference. A brand colour that fails
+the floor is impossible by construction (D12); what varies is `adjustments[]`,
+rendered before Save is enabled, no accept-the-risk path.
+
+## Three new decisions, ratified by the orchestrator
+
+- **DECISION-057** — OKLCH conversion transcribed inline (~40 lines) rather than a
+  new colour-science dependency; the property test uses a deterministic grid, not
+  a fuzzer, so a CI failure is reproducible by seed value alone.
+- **DECISION-058** — the blob adapter lives at `src/lib/storage/`, not
+  `db/domain/` — it's an abstraction boundary, not a schema shape.
+- **DECISION-059** — the history table records only `'updated'`/`'neutralized'`.
+
+## Three questions the tech-lead flagged, ratified by the orchestrator
+
+1. **OKLCH inline vs. dependency** — ratified as designed (DECISION-057).
+2. **`ui.brand_theming` gates `(org)` emission only, not the admin write
+   capability** — ratified. Gating the write on the flag would conflate "may this
+   operator do this" with "is this behaviour on," which DECISION-003 forbids
+   outright; this is the correct application of an existing rule, not a new
+   product tradeoff.
+3. **No restore-previous control ships in `(admin)` v1** — ratified. Matches S18's
+   "minimal" framing; the history table is written regardless so slice d can build
+   restore later without a migration.
+
+## Handoff
+
+**Next: database-admin (Phase 4), commit `0.3` first, then `c1`.** `b1` may start
+in parallel — no dependency on `0.3`/`c1`.
+
+*Recorded by the orchestrator from the tech-lead agent's report.*

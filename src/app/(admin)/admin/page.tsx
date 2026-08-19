@@ -18,6 +18,12 @@ export default async function AdminDashboard() {
       blurb: "Every primitive and token in one screen — the P0.5 sign-off page.",
     },
     {
+      href: "/admin/organizations",
+      title: "Organizations",
+      blurb:
+        "Set a congregation's brand colour, logo and type pairing, and see which are still on the default palette.",
+    },
+    {
       href: "/admin/users",
       title: "Users & roles",
       blurb: "Assign roles to users.",

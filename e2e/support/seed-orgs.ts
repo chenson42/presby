@@ -33,7 +33,7 @@
  *
  * Everything here is idempotent: fixed UUIDs, upserts, and `on conflict do
  * nothing`. Every name is invented and every address is on the reserved
- * `example.invalid` TLD, per CLAUDE.md → No Real Data.
+ * reserved `.invalid` TLD (RFC 2606), per CLAUDE.md → No Real Data.
  */
 
 import { neon } from "@neondatabase/serverless";
@@ -146,7 +146,7 @@ const FIXTURE_PEOPLE: Array<{
   },
 ];
 
-const REQUIRED_EMAIL_SUFFIX = "@example.invalid";
+const REQUIRED_EMAIL_SUFFIX = ".invalid";
 const REQUIRED_SLUG_PREFIX = "e2e-";
 
 /**

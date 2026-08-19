@@ -25,7 +25,7 @@ import { E2E_USER_LIST, type E2EUser } from "./users";
  * Reserved TLD (RFC 2606) — it can never resolve, so a fixture address can
  * never collide with, or send mail to, a real person.
  */
-const REQUIRED_EMAIL_SUFFIX = "@example.invalid";
+const REQUIRED_EMAIL_SUFFIX = ".invalid";
 
 type Sql = ReturnType<typeof neon<false, false>>;
 
@@ -33,7 +33,7 @@ function assertFixtureEmail(user: E2EUser): void {
   if (!user.email.endsWith(REQUIRED_EMAIL_SUFFIX)) {
     throw new Error(
       `[seed-users] Refusing to provision "${user.email}": e2e fixture emails ` +
-        `must end in ${REQUIRED_EMAIL_SUFFIX}. This guard is what makes it safe ` +
+        `must end in the reserved ${REQUIRED_EMAIL_SUFFIX} TLD. This guard is what makes it safe ` +
         `for the fixture password to live in the repository.`,
     );
   }

@@ -10,7 +10,7 @@
  * 6 of 48 specs. See docs/work-log/2026-08-18-e2e-owns-its-users.md.
  *
  * The password below is not a secret. It provisions throwaway accounts on
- * `example.invalid` (a reserved TLD that can never resolve), and seed-users.ts
+ * the reserved `.invalid` TLD, which can never resolve, and seed-users.ts
  * refuses to write any user whose email does not end in that domain — so this
  * code cannot touch a real account even if pointed at the wrong database.
  *
@@ -57,7 +57,7 @@ const FIXTURE_PASSWORD = "e2e-fixture-only-not-a-secret";
 export const E2E_USERS: Record<E2ERole, E2EUser> = {
   admin: {
     role: "admin",
-    email: "e2e-admin@example.invalid",
+    email: "admin@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E Admin",
     roleName: "admin",
@@ -65,7 +65,7 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
   },
   member: {
     role: "member",
-    email: "e2e-member@example.invalid",
+    email: "member@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E Member",
     roleName: "member",
@@ -73,7 +73,7 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
   },
   "mfa-admin": {
     role: "mfa-admin",
-    email: "e2e-mfa-admin@example.invalid",
+    email: "admin-2fa@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E MFA Admin",
     roleName: "admin",
@@ -83,7 +83,7 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
   // into /o/e2e-alpha without showing the chooser.
   "org-single": {
     role: "org-single",
-    email: "e2e-org-single@example.invalid",
+    email: "org1@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E One Organization",
     roleName: null,
@@ -93,7 +93,7 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
   // committee, which is how PC(USA) service actually works. Two cards.
   "org-multi": {
     role: "org-multi",
-    email: "e2e-org-multi@example.invalid",
+    email: "org1-org2@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E Two Organizations",
     roleName: null,
@@ -103,7 +103,7 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
   // records, not a tenant, so there is no portal and no card.
   "org-unmanaged": {
     role: "org-unmanaged",
-    email: "e2e-org-unmanaged@example.invalid",
+    email: "org3-unmanaged@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E Unmanaged Only",
     roleName: null,
@@ -114,7 +114,7 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
   // access ended on 31 March" must say the 31st in every timezone.
   "org-ended": {
     role: "org-ended",
-    email: "e2e-org-ended@example.invalid",
+    email: "org2-ended@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E Ended Relationship",
     roleName: null,

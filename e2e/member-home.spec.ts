@@ -42,8 +42,13 @@ test.describe("Member home and routing invariants", () => {
     expect(new URL(page.url()).pathname, "admin should land on /admin").toBe("/admin");
   });
 
-  // test 3: admin sees Admin link and Account link in global nav
-  test("admin sees Admin link and Account link in global nav", async ({ page }) => {
+  // test 3: admin reaches Platform admin and Account from the avatar menu
+  //
+  // CONTRACT CHANGE. The header's four bare links became two menus — identity
+  // in the avatar, context in the org switcher. "Admin" is now "Platform
+  // admin", and both destinations live behind a click. The destinations
+  // themselves are unchanged, which is what this still asserts.
+  test("admin reaches Platform admin and Account from the avatar menu", async ({ page }) => {
     await page.goto("/signin");
     await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
     await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
@@ -61,13 +66,14 @@ test.describe("Member home and routing invariants", () => {
     // otherwise it fails for a reason unrelated to what it asserts.
     await page.goto("/home");
 
+    await page.getByTestId("avatar-menu-trigger").click();
     await expect(
-      page.getByRole("link", { name: /^admin$/i }),
-      "Admin link should be visible for admin user",
+      page.getByRole("menuitem", { name: "Platform admin" }),
+      "Platform admin item should be visible for admin user",
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /^account$/i }),
-      "Account link should be visible",
+      page.getByRole("menuitem", { name: "Account" }),
+      "Account item should be visible",
     ).toBeVisible();
   });
 
@@ -95,9 +101,14 @@ test.describe("Member home and routing invariants", () => {
     ).toBe("/no-organization");
 
     await page.goto("/home");
+    await page.getByTestId("avatar-menu-trigger").click();
     await expect(
-      page.getByRole("link", { name: /^admin$/i }),
-      "Admin link should NOT be visible for member user",
+      page.getByRole("menuitem", { name: "Platform admin" }),
+      "Platform admin item should NOT be present for member user",
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("menuitem", { name: "Developer" }),
+      "Developer item should NOT be present for member user",
     ).toHaveCount(0);
   });
 

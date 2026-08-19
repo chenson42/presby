@@ -4,6 +4,55 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-045: The foundation pipelines defer Phase 5 and 6 to a single operator-led verification
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** foundation program (P0, P0.5, P1)
+
+### Decision
+
+For the foundation pipelines only — the post-login router, the design and brand
+foundation, and the org portal shell — **Phase 5 (qa) and Phase 6 (analyst) are
+deferred**, not skipped. The operator is the verifier for these phases and will
+verify the foundation **as a whole**, once it is coherent enough to judge.
+
+Operator's reasoning, 2026-08-19: *"i don't want to invest in QE until we know
+that we have built exactly what we want."* Independent verification of a surface
+that is about to be re-skinned by the branding pass, and re-shelled by P1, would
+be verifying something that will not survive.
+
+### What is NOT deferred
+
+Everything mechanical keeps running on every slice, because it is cheap and it
+catches real defects:
+
+- `typecheck`, `lint --max-warnings=0`, unit tests, `build`, both tripwires
+- the Playwright e2e suite and the `test-rls.sql` isolation suite
+- **implementers author their own tests** (the qa charter change of 2026-08-18)
+  — that does not pause. QA being deferred is not permission to ship untested code.
+
+What is deferred is the **independent judgment**: qa's PASS/FAIL/BLOCKED verdict
+and analyst's shipped-vs-intent.
+
+### The debt, and why it is tracked
+
+Deferred verification fails when nobody remembers what was deferred. Every
+pipeline that defers records a line under **Verification debt** in
+`docs/TODO.md`, and the combined pass clears them by name. A pipeline that
+defers without adding its line has skipped a phase silently, which CLAUDE.md
+forbids.
+
+### One item flagged as different in kind
+
+`drizzle/0015_presby_membership_probe.sql` — the SECURITY DEFINER probe that
+fixed `withOrgContext()` — was written by a **ux-developer** during a UI slice,
+because that is where the defect surfaced. It changes the isolation model, it is
+the third occurrence of the F26 pattern, and the agent that wrote it said itself
+it wants a database-admin's eye. Deferring "did we build the right screen" is a
+different risk from deferring "is the tenant gate correct." Recorded here so the
+distinction is deliberate rather than accidental.
+
+---
+
 ## DECISION-044: The destination matrix reads two platform predicates, not one; the membership/position guard is bidirectional; the 403 renders at 200 until `forbidden()` stabilises
 
 **Status:** Resolved · **Date:** 2026-08-18 · **Feature:** `2026-08-18-backbone-and-org-sites` (P0) · **Class:** implementation

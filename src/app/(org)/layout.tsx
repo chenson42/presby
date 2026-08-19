@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 /**
  * `(org)` — the organization-scoped tree. THE CONTRACT, which every page added
  * under here inherits (CLAUDE.md → Post-Login Landing):
@@ -19,33 +17,15 @@ import Link from "next/link";
  * check lives there — and the contract sentence "every page resolves its slug"
  * stays literally true rather than becoming a layout's implicit promise.
  *
- * The real organization shell — switcher, navigation, branding — is P1. What is
- * here is enough chrome that an access-denied page is not a floating paragraph.
+ * IT ALSO NO LONGER RENDERS THE CHROME. The header names the organization you
+ * are in, and this layout sits ABOVE `[slug]`, so it cannot see which one that
+ * is. The shell therefore lives in `o/[slug]/layout.tsx`, which can. What is
+ * left here is the page frame every route in the group shares.
  */
 export default function OrgLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <div className="min-h-screen">
-      <header className="border-b border-border bg-background">
-        <nav
-          aria-label="Organization"
-          className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3 sm:px-6"
-        >
-          <Link href="/" className="text-sm font-semibold">
-            presby
-          </Link>
-          <Link
-            href="/orgs"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Switch organization
-          </Link>
-        </nav>
-      </header>
-      <main className="mx-auto max-w-4xl px-6 py-12">{children}</main>
-    </div>
-  );
+  return <div className="min-h-screen">{children}</div>;
 }

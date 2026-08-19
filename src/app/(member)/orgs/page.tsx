@@ -2,15 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
+import { isEnterableOrganization, type UserOrganization } from "@/lib/authz";
 import {
-  isEnterableOrganization,
-  userOrganizations,
-  type UserOrganization,
-} from "@/lib/authz";
-import {
-  readIsPlatformAdmin,
-  sessionCanAccessAdmin,
-} from "@/lib/platform-admin";
+  cachedIsPlatformAdmin,
+  cachedUserOrganizations,
+} from "@/lib/nav-data";
+import { sessionCanAccessAdmin } from "@/lib/platform-admin";
 import { organizationTypeLabel } from "@/lib/org-display";
 import { OrganizationsUnavailable } from "@/components/shared/organizations-unavailable";
 import { Button } from "@/components/ui/button";
@@ -56,9 +53,13 @@ export default async function OrgsPage() {
     // The unfiltered list, because this page needs both halves: the enterable
     // organizations become cards, and the ones still being set up become the
     // notice below them. One round trip answers both.
+    //
+    // The memoized readers (`@/lib/nav-data`), not the raw ones, because the
+    // header above this page reads exactly the same two values. Without the
+    // shared per-request cache, rendering /orgs would issue each query twice.
     [all, isPlatformAdmin] = await Promise.all([
-      userOrganizations(session.user.id),
-      readIsPlatformAdmin(session.user.id),
+      cachedUserOrganizations(session.user.id),
+      cachedIsPlatformAdmin(session.user.id),
     ]);
   } catch {
     return <OrganizationsUnavailable retryHref="/orgs" />;

@@ -109,13 +109,16 @@ export function OrgPortalStub({
         {organizationTypeLabel(organizationType)}
       </Badge>
       <h1 className="mt-3 text-2xl font-semibold">{name}</h1>
+      {/*
+       * NO "SWITCH ORGANIZATION" BUTTON HERE ANY MORE. It was P0's stand-in for
+       * a control that did not exist yet; the header's org switcher is that
+       * control, and two of them on one screen — one a picker, one a link to
+       * the chooser, both labelled the same thing — is worse than one.
+       */}
       <p className="mt-3 text-sm text-muted-foreground">
         You&apos;re in. There is nothing here yet — the roll, the directory, and
         the officer register arrive with the organization portal.
       </p>
-      <Button asChild variant="outline" className="mt-6 min-h-11">
-        <Link href="/orgs">Switch organization</Link>
-      </Button>
     </section>
   );
 }

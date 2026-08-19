@@ -275,15 +275,22 @@ test.describe("11 — an ended relationship is named and dated", () => {
 test.describe("12 — the chooser is reachable without typing a URL", () => {
   test.use({ storageState: storageStatePath("org-multi") });
 
-  test("global nav carries an Organizations link", async ({ page }) => {
-    // /launch forwards you through the chooser once, at sign-in. Without a link
-    // back, a user with two congregations has no way to reach the second one
-    // until the org switcher lands in P1.
+  test("the org switcher reaches the chooser without typing a URL", async ({
+    page,
+  }) => {
+    // /launch forwards you through the chooser once, at sign-in. Without a way
+    // back, a user with two congregations has no route to the second one.
+    //
+    // CONTRACT CHANGE: the bare "Organizations" link is now the org switcher's
+    // trigger, and the chooser is the last item inside it. The property being
+    // asserted — /orgs is reachable from the header on any signed-in page — is
+    // unchanged.
     await page.goto("/home");
 
-    const link = page.getByRole("link", { name: /^organizations$/i });
-    await expect(link).toBeVisible();
-    await link.click();
+    await page.getByTestId("org-switcher-trigger").click();
+    const all = page.getByRole("menuitem", { name: "All organizations" });
+    await expect(all).toBeVisible();
+    await all.click();
     await page.waitForURL((u) => u.pathname === "/orgs");
   });
 });

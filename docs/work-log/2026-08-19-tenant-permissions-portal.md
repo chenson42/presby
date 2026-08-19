@@ -70,7 +70,7 @@ built:**
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — 8 gaps, G-A is load-bearing | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-060/061/062 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete | Design complete — 3 commits, implementers named; DECISION-063/064/065 | 2026-08-19 |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 4 — Implementation | database-admin (1) · api-developer (2) · ux-developer (3) | In progress — commit 1/3 complete | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -377,3 +377,34 @@ being applied — the new `groups` rows need the new `group_type` and the
 trigger to exist before any membership re-insert.
 
 *Recorded by the orchestrator from the tech-lead agent's report.*
+
+---
+
+# Phase 4 · commit 1/3 — the derived group + migration (database-admin)
+
+`drizzle/0017_presby_membership_roster.sql`: `group_memberships.membership_id`
+(unique, real composite FK — unlike `officer_term_id`'s pre-existing gap, named
+inline for a future review), the `directory.view` permission row,
+`presby_sync_derived_membership_group()` mirroring the officer-roster
+trigger's exact shape including its fail-loudly discipline (F16).
+`presby_reject_derived_group_write()` needed no change, confirmed by reading
+it — already guards on `membership_source = 'derived'` for any `derived_from`.
+
+**A third, unanticipated break, found and fixed**: the new trigger fires on
+*every* `memberships` write, including `test-rls.sql`'s own positive-control
+test's genuine `UPDATE` (proving the departure-recording path isn't
+accidentally blocked) — that write now needs a scratch `active_membership`
+group to satisfy the trigger. Fixed with a scratch insert inside the same
+rolled-back transaction; no persistent fixture change, and self-resolving once
+commit 2 seeds the real group.
+
+**Verified, independently re-confirmed by the orchestrator**: migration
+idempotent (re-run twice, second run a clean no-op); composite FK rejects a
+cross-org `membership_id` in a scratch transaction; fail-loudly confirmed on a
+missing derived group; happy-path upsert confirmed (`ends_on` syncs on
+membership update, no duplicate row); `scripts/test-rls.sql` **61/61 as
+`presby_app`** (was 59 — net +2 from splitting two assertions that would
+otherwise break once commit 2 lands); full unit suite 1328/1328; all four
+tripwires; build clean.
+
+*Recorded by the orchestrator from the database-admin agent's report.*

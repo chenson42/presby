@@ -70,7 +70,7 @@ built:**
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — 8 gaps, G-A is load-bearing | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-060/061/062 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete | Design complete — 3 commits, implementers named; DECISION-063/064/065 | 2026-08-19 |
-| 4 — Implementation | database-admin (1) · api-developer (2) · ux-developer (3) | In progress — commit 1/3 complete | — | — |
+| 4 — Implementation | database-admin (1) · api-developer (2) · ux-developer (3) | In progress — commits 1–2/3 complete | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -408,3 +408,37 @@ otherwise break once commit 2 lands); full unit suite 1328/1328; all four
 tripwires; build clean.
 
 *Recorded by the orchestrator from the database-admin agent's report.*
+
+---
+
+# Phase 4 · commit 2/3 — seed extension + directory query (api-developer)
+
+The `active_membership` derived group seeded at all six fixture orgs
+(required everywhere a membership can insert, per DECISION-063 — placement
+verified against each org's own first membership insert, not assumed);
+`directory.view` bound via a new `member` role, scoped to Alder Creek alone.
+
+**A second subtle bug, found and fixed, not anticipated in Phase 3**: the
+trigger stamps `starts_on` from `memberships.created_at`, which has no column
+of its own and defaults to `now()`. Left alone, ELDER's grant would only be
+visible as of today — silently breaking the `2015-06-01` as-of assertion for
+a membership the fixture already describes as dating to 1996. Fixed by
+backdating that one row's `created_at` to match its own `current_roll_since`.
+
+`src/lib/directory.ts` matches DECISION-061's shape exactly: one
+`withOrgContext()` transaction, permission check then privacy-filtered query,
+`directory_hidden` excluded in `WHERE`, five field flags nulled independently
+via `CASE WHEN`. Content eligibility confirmed against `docs/schema-design.md`
+§11's exact formula. 11 real-Postgres integration tests, chosen over mocks
+specifically because the behaviors under test (a WHERE-clause exclusion, five
+independent CASE WHEN projections, a LEFT JOIN default) are what a mock can't
+catch a regression in.
+
+**Verified, independently re-confirmed by the orchestrator**: `presby_has_permission()`
+confirmed to actually exist (`drizzle/0010`); the content formula confirmed
+verbatim against schema-design.md; 11/11 directory tests against the real DB;
+`scripts/test-rls.sql` **61/61 as `presby_app`**, both placeholder assertions
+now correctly proving 1; full unit suite 1328/1328 (18 skipped, the DB-gated
+integration suites); all four tripwires; build clean.
+
+*Recorded by the orchestrator from the api-developer agent's report.*

@@ -39,13 +39,8 @@ jobs:
       - name: Tripwire checks (audit-log invariant + sql-date)
         run: npm run check
 
-      # ADVISORY until the next-auth beta.32 bump lands: @auth/core in the pinned
-      # beta.31 carries 2 critical advisories whose fix is an auth-core upgrade
-      # that must go through an e2e-gated pipeline, not a lockfile patch (see
-      # docs/TODO.md Next Up). Remove continue-on-error once that ships.
       - name: Dependency audit (production deps, high+)
         run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
 
       - name: Unit tests
         run: npm test

@@ -68,7 +68,7 @@ built:**
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — 8 gaps, G-A is load-bearing | 2026-08-19 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-060/061/062 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -169,3 +169,87 @@ adversarial note. `org_access_requests` is settled (descoped, operator ruling
 above) — do not re-litigate.
 
 *Recorded by the orchestrator from the read-only analyst agent's report.*
+
+---
+
+# Phase 2 — Architectural Review (architect)
+
+## Verdict
+
+**Approved with suggestions.** Nothing returns to Phase 1. Three decisions
+minted (DECISION-060/061/062).
+
+## G-A resolved: a derived group, not a resolver arm
+
+**Ruling: build `groups.derived_from = 'active_membership'`, trigger-synced
+from `memberships`, parallel to Session/Diaconate.** Routes entirely through
+the resolver's existing arm 2 — `presby_effective_permissions()` does not
+change. The rejected alternative (a fifth resolver arm reading `memberships`
+directly) either reinvents the derived group with bespoke plumbing or bypasses
+`role_grants`' uniform provenance model, and is the wildcard-shaped shortcut
+Phase 1's adversarial pass pre-emptively warned against, one layer below the
+role catalog instead of at it.
+
+**Concrete schema shape**: a new nullable, unique `membership_id` column on
+`group_memberships` (analogous to `officer_term_id`, but — unlike it — given a
+real composite FK `(membership_id, organization_id) → memberships(id,
+organization_id)`); a new trigger `presby_sync_derived_membership_group()`
+firing after insert/update on `memberships`; a new hand-written migration
+(`drizzle/0017`). `presby_reject_derived_group_write()` needs no change — it
+already guards on `membership_source = 'derived'` regardless of which
+`derived_from` kind.
+
+**Bonus finding**: `group_memberships.officer_term_id` has no FK at all today
+— exactly the gap Composite Tenant Keys exists to prevent (F2). Not P1's to
+fix, flagged for a future database-admin review.
+
+**G-B, answered**: no application code anywhere creates an organization today,
+so "who provisions the group at real org creation" has the same non-answer as
+the pre-existing Session/Diaconate question. P1's actual deliverable is the
+migration plus extending `scripts/seed-dev.sql`'s two fixture orgs with the
+third derived group and a `role_grants` row — proving arm 2 end-to-end, with
+the requirement for real org provisioning written down (DECISION-060) so a
+future onboarding pipeline inherits a checklist.
+
+## Directory feature placement
+
+`src/app/(org)/o/[slug]/directory/page.tsx` — Server Component, repeats the
+established per-page auth pattern rather than trusting the layout. Query
+logic in a new `src/lib/directory.ts` (not `db/domain/`, which is schema
+only) — one function, permission check and privacy-filtered query inside a
+single `withOrgContext()` call, not two round trips. **Privacy filtering is
+SQL-level, not post-fetch**: hidden rows excluded in `WHERE`, hidden fields
+nulled via `CASE WHEN` in the `SELECT` list — a hidden value must never be
+materialized as a JS value a later refactor could leak. Permission-denied
+state renders inline inside the branded shell (the person is a member; only
+DECISION-040's states strip the org's colours). `org_portal.directory`
+checked bare, first, no DECISION-026 wrapper — it's a toggle, not
+auth-critical. No `AUDIT_ACTIONS` entry — a read is not a mutation.
+
+Two product calls handed to Phase 3 explicitly, not resolved here: whether
+`directory.view`'s baseline is "any active membership" or "on the roll," and
+how a missing `person_privacy` row should be treated (safe-default vs.
+defensive-hide).
+
+## Carried-forward items ruled on
+
+1. **`TENANT_ROLE_GRANTED`/`REVOKED` — deferred, not seeded.** P1 writes no
+   person-targeted grant mutation; adding audit keys with nothing writing
+   them repeats the built-and-unwired trap one layer down. DECISION-062.
+2. **The `role_grants` arm-1 cascade gap — confirmed real, confirmed out of
+   scope, confirmed not worsened.** The derived-group mechanism is immune to
+   it by construction (arm 2 already syncs to `memberships.ended_on`).
+   DECISION-062.
+3. **`org_portal.directory` — confirmed the right mechanism.** Answers "is
+   this on at all" (flag); `directory.view` answers "may this person see it"
+   (permission). Neither substitutes for the other.
+
+## Handoff
+
+**Next: tech-lead (Phase 3).** The G-A schema shape and directory placement
+are settled — don't re-litigate the resolver-arm alternative. Phase 3 owns:
+the two product calls named above, the three empty-state copy blocks (zero
+grants / zero visible members / DB failure), and the exact in-shell
+permission-denied wording.
+
+*Recorded by the orchestrator from the read-only architect agent's report.*

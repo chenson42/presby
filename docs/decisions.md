@@ -4,6 +4,30 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-062: `TENANT_ROLE_GRANTED`/`TENANT_ROLE_REVOKED` and the `role_grants` arm-1 cascade-on-membership-end fix are deferred to whichever pipeline first writes a person-targeted grant mutation
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 2)
+
+P1 writes no `actions.ts` code that grants a role to a person — `directory.view`'s baseline flows entirely through DECISION-060's derived group, a migration and a seed fixture, not an application mutation. `check:audit`'s tripwire scans only `src/app/**/actions.ts`; adding `AUDIT_ACTIONS` keys with nothing writing them repeats the built-and-unwired trap already on record for the platform `ADMIN_ROLE` wildcard, one layer down. Likewise, `role_grants`' arm-1 (`person_id`) cascade gap is real but untouched by P1 — the derived-group mechanism is immune to it by construction (arm 2 already reads `group_memberships.ends_on`, kept in sync with `memberships.ended_on` by the new trigger). Both items land in `docs/TODO.md`, owned by whichever pipeline first writes a person-targeted `role_grants` mutation — most likely **P9**, the tenant administration surface.
+
+---
+
+## DECISION-061: The first real tenant-content read gets its own query-layer module (`src/lib/directory.ts`), not a function folded into `db/domain/`; privacy filtering is enforced in SQL, never in the Server Component
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 2)
+
+`src/lib/db/domain/*.ts` is schema only — every file is `pgTable` definitions; query/business logic over that schema lives one level up (`src/lib/authz.ts`, `src/lib/audit.ts`). The congregation directory is the first read of real church content, so it sets precedent for P8/P9 rather than reusing an ad hoc location: a new `src/lib/directory.ts` holds one function performing the membership re-check, the `directory.view` permission check, and the privacy-filtered query inside a single `withOrgContext()` transaction. `person_privacy.directory_hidden` rows are excluded in the query's `WHERE` clause — never selected, not merely hidden at render — and the five field-level hide flags are applied as `CASE WHEN` expressions in the `SELECT` list, so a hidden value is never materialized as a JS value a later refactor could leak. The route lives at `src/app/(org)/o/[slug]/directory/page.tsx`, repeating the existing per-page `resolveOrgContext`/four-way-miss/`assertOrgAccess` pattern (the `(org)` contract's auth-in-page rule), rendering its permission-denied state inline inside the branded shell rather than through the DECISION-040 miss page or an un-branded route.
+
+---
+
+## DECISION-060: The tenant permission catalog's baseline-grant problem is solved by a new derived group (`active_membership`), not a fifth resolver arm
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 2)
+
+`role_grants` requires an explicit row per grantee, which does not scale to "every active member can view the directory." The precedent for automatic, roster-wide grants is Session/Diaconate — materialized into `group_memberships` by trigger because the permission resolver's arm 2 reads that table directly, and a view would make members invisible to the join (F3). A new `groups.derived_from = 'active_membership'` value, trigger-synced from `memberships` (mirroring the officer-roster sync trigger, keyed on a new `membership_id` column analogous to `officer_term_id`), routes entirely through arm 2 **unmodified** — `presby_effective_permissions()`, a `security definer` function every isolation test exercises, does not change. The alternative (a fifth arm reading `memberships` directly for "implicit" grants) was rejected: it either still needs a role/group target and just reinvents the derived group with bespoke plumbing, or it bypasses `role_grants`' uniform provenance model, undermining "why can Jane see this" traceability — and it is the wildcard-shaped shortcut the adversarial pass pre-emptively warned against, one layer below the role catalog instead of at it. Unlike `officer_term_id`, the new `membership_id` column gets a composite FK to `memberships(id, organization_id)` — `officer_term_id`'s bare, unconstrained `uuid` is a pre-existing gap (flagged for a future database-admin review), not a pattern to repeat.
+
+---
+
 ## DECISION-059: `organization_brand_history` records only `'updated'` and `'neutralized'`, never `'created'`
 
 **Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice c, Phase 3)

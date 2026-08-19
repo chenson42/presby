@@ -4,6 +4,48 @@ Architectural and implementation decisions for the Claude Code Starter. Newest f
 
 ---
 
+## DECISION-050: `next-themes` is approved for the colour scheme only; the brand style element always emits both ramps
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice a)
+
+The org flash (a congregation's colours persisting through a context switch) and the scheme flash (light/dark) are **different problems**. Server-side emission solves the first entirely and `next-themes` contributes nothing to it; `next-themes`' pre-paint script solves the second, which nothing installed currently addresses. The brand payload is emitted as a **`:root`-scoped `<style>` element — not an inline style on a wrapper div, because Radix portals and the root-layout `<Toaster>` render outside any such wrapper** — carrying both `:root{…light…}` and `.dark{…dark…}`, with `next-themes` selecting by class. Emitting only the current scheme would force a re-render on toggle and re-create the very flash next-themes exists to prevent. The style element **must be nonce-able** from day one so an enforced CSP (DECISION-024 defers this to forks) does not break every branded page. `next-themes` ships in system/localStorage mode in slice a; **S17's account-level persistence is a `users` column plus a server-rendered initial class and is explicitly not slice a** — flagged rather than shipping device-level and calling S17 satisfied.
+
+---
+
+## DECISION-049: Brand lives in its own tenant table with two read paths and no public grant; `theme_tokens` is struck from §14; logo assets are content-addressed
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice c)
+
+`organization_brands` (PK `organization_id`, FORCE RLS) rather than `organization_settings.settings` jsonb, on DECISION-033's precedent — hot read path, CHECK constraints with teeth, and A7's "never echo the user's string" enforced by the **database** rather than by server-side discipline. **Not columns on `organizations`**, because that table carries a bare public grant precisely because the org tree is public — brand there would be readable by any authenticated caller with no org context, an enumeration oracle arrived at by following an existing precedent. Two read paths over one source: the RLS membership read inside `withOrgContext()`, and the DECISION-041 narrow SECURITY DEFINER published-content function, which carries the brand payload as a **field of the published projection** rather than a slug-keyed endpoint — a standalone public brand lookup is an enumeration oracle. Logo bytes ride DECISION-030's adapter unchanged; what diverges is the gate and the cache posture — content-addressed immutable URLs (the property that makes bytes-in-Postgres affordable on an anonymous path served every page load), one route handler per trust class, favicon and social card derived at write time. `theme_tokens jsonb` is removed from `docs/schema-design.md` §14 and the earlier G6 constraint on it is superseded.
+
+---
+
+## DECISION-048: The `radix-ui` umbrella is not adopted; generation is normalised by a wrapper and drift is a tripwire
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice a)
+
+Two occurrences, two hand-reverts, and slice a runs `shadcn add` ten-plus times — which is where the third occurrence becomes the *silent* one. Rejected on **supply-chain surface** (~40 packages in the audit and update path to use six, in a repo whose charter is a small auditable baseline), not on bundle size, which is roughly neutral. Instead: **`npm run ui:add`** wraps the CLI, rewrites `from "radix-ui"` to the individual packages, and restores the lockfile; **`npm run check:deps-drift`** fails the build if `radix-ui` reappears in `package.json` or any `src/` import — converting "an implementer must remember to md5 the lockfile" into a build failure. A tsconfig path alias to a local shim was considered and rejected: it fixes the import but not the dependency install, and shadowing a real package name is a resolution trap. Separately, `--radius-sm/md/lg/xl` are remapped onto `--radius` with `--radius` chosen so `rounded-md` is a no-op at today's `0.375rem`; **`--radius` is a platform token and is not per-org brandable** — a congregation does not choose corner radius.
+
+---
+
+## DECISION-047: The un-brandable rule is enforced by a tripwire on the emitter; the denial page, the org error boundary, and `/developer` render un-branded
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slices 0, a, c)
+
+`scripts/check-brand-scope.mjs` asserts the brand-scope marker appears in exactly `(org)/o/[slug]/layout.tsx` and `(public)/site/[slug]/layout.tsx`, and that additive `--brand-*` utilities appear nowhere outside those groups. The DECISION-040 access-denied page is un-branded — a branded 403 tells a prober the org is a configured tenant — and this is achieved by **the brand read returning `null` for a non-member** rather than by a rule at the 403, because the org layout renders *above* the denial, ended-relationship and 404 pages by deliberate design. The org error boundary is un-branded too: it names the organization from `publicOrgSummary()` and takes **no dependency on the brand read path**, overturning the "church's masthead" half of Flow 6 — an error page that paints in the brand depends on the read that may have just failed, and colour is not what tells a visitor they are in the right place. `/developer` is exempt and already structurally so. **Un-brandable does not mean logo-free:** brand-as-chrome is scoped to two layouts; logo-as-content on a neutral plate is legal wherever the caller is authorized — otherwise someone strips the marks off the chooser to satisfy the tripwire, in the one place G3 says they matter most.
+
+---
+
+## DECISION-046: The brand token contract is a dependency-free data module; branding is a cascade override of the existing token set
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-brand-foundation` (slice 0)
+
+**Branding introduces no new styling system.** It re-declares the raw custom properties `globals.css` already maps through `@theme inline`, so no component changes to become brandable — a primitive keeps writing `bg-primary`, and whether that paints platform blue or a congregation's burgundy is decided by whether an ancestor re-declared `--primary`. That is what makes the un-brandable rule mechanically true rather than aspirational.
+
+`src/lib/brand/contract.ts` holds the closed role vocabulary, the legal-pairs matrix (**a runtime `as const` array with the type derived from it, never two hand-maintained lists**), each pair's contrast floor, the **closed partition of re-declarable vs never-re-declarable tokens** (S15 made machine-readable — semantic colours, cards, popovers, muted surfaces, inputs and borders are never re-declarable), the type scale, and `BRAND_TOKEN_VERSION`. Deliberately not `server-only` — server components, the generator, the property test, and the cron agent's instruction data all consume it — and it carries **zero runtime imports**, which is what lets it be imported from an Edge handler, a DB-less vitest run, and a `.mjs` script. `generate.ts` and `emit.ts` import it; it imports neither. The property test iterates `LEGAL_PAIRS` and reads each floor **from the pair**, so adding a pair adds its assertion and a pair whose floor was never decided cannot be added.
+
+---
+
 ## DECISION-045: The foundation pipelines defer Phase 5 and 6 to a single operator-led verification
 
 **Status:** Resolved · **Date:** 2026-08-19 · **Feature:** foundation program (P0, P0.5, P1)

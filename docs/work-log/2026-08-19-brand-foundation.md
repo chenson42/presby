@@ -29,7 +29,7 @@ prose lines against real primitives.
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
-| 2 — Architectural review | architect | Pending — scoped to slices 0 and a | — | — |
+| 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD | Pending | — | — |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
@@ -269,3 +269,187 @@ A second brand colour · per-org custom CSS or raw token editing · a user-facin
 ## Handoff
 
 **Next: architect (Phase 2)**, scoped to **slices 0 and a only** — do not send b–e as one blob; that is how the derivation rules get decided by whoever types first.
+
+---
+
+# Phase 2 — Architectural Review (architect)
+
+*Scoped to slices **0** (token contract) and **a** (primitive migration) only. Slices b–e are not reviewed here. Recorded by the orchestrator from the read-only architect agent.*
+
+## Verdict
+
+**Approved with suggestions.** Nothing goes back to Phase 1. Five decisions proposed (046–050); three places marked **⚠ Overturned / extended**.
+
+**The ruling every other one hangs off:** branding is not a new styling system. **It is a cascade override of the token set `globals.css` already declares.** Raw values sit on `:root`; `@theme inline` maps them to `--color-*`. No component anywhere changes to become brandable — a primitive keeps writing `bg-primary`, and whether that paints platform blue or a congregation's burgundy is decided by whether an ancestor re-declared `--primary`. That is what makes clause 5 of the un-brandable rule mechanically true rather than aspirational, and what makes the tripwire small enough to be honest.
+
+## Placement
+
+### 1. The token contract — `src/lib/brand/contract.ts`
+
+Location approved. `src/lib/brand/` alongside `permissions.ts`, `flags.ts`, `initials.ts` — not `db/domain/` (not schema), not `components/` (data, not markup).
+
+**Not `server-only`, and the precedent is already written down** in `src/lib/utils.ts:6-8`. Same comment here, naming the four consumers: server components, the generator, the property test, the cron agent's instruction data.
+
+**Stronger than the analyst asked: `contract.ts` has ZERO runtime imports.** No `@/lib/db`, no `next/*`, no React, no drizzle. Type-only imports permitted. This is what lets it be imported from an Edge route handler, from a `vitest` run with no database, and from a `.mjs` script emitting the agent's instruction payload. Cheap to hold now, impossible to recover once one import lands.
+
+| File | Slice | May import |
+|---|---|---|
+| `contract.ts` | 0 | **nothing** |
+| `generate.ts` | b | `contract.ts` |
+| `emit.ts` | c | `contract.ts` |
+| storage/read helpers | c | `contract.ts`, db |
+
+`contract.ts` never imports its siblings. If that inverts, it has stopped being a contract.
+
+**Legal pairs are both — runtime structure is the source of truth, type derived from it.** Not two hand-maintained lists; that is the same failure mode used to justify deleting `theme_tokens`.
+
+```ts
+export const LEGAL_PAIRS = [
+  { fg: "on-surface", bg: "surface", min: 7,   kind: "body"     },
+  { fg: "on-brand",   bg: "brand",   min: 4.5, kind: "text"     },
+  { fg: "border",     bg: "surface", min: 3,   kind: "non-text" },
+] as const satisfies readonly BrandPair[];
+```
+
+Three consequences worth having deliberately: the property test iterates `LEGAL_PAIRS` and reads `min` **from the pair** rather than restating D1–D6 — adding a pair automatically adds its assertion, and a pair whose floor was never decided cannot be added because `min` is required. A pair not in the array is not expressible in the type system, so block `tone` typing falls out of the same array. And the agent's instruction data is `JSON.stringify(LEGAL_PAIRS)` — literally the same object, so G6 becomes a serialization of the contract rather than a prose paragraph in a prompt that drifts.
+
+**One addition slice 0 must carry:** the **closed partition of which existing tokens the brand scope may re-declare and which it may not.** This is S15 made machine-readable; without it S15 is a sentence a third implementer reinterprets.
+
+- **Re-declarable:** `--primary`, `--primary-foreground`, `--ring`, `--accent`, `--accent-foreground`, the additive `--brand-*` roles, and `--background`/`--foreground` **bounded by D7**.
+- **Never re-declarable:** `--card`, `--popover`, `--muted`, `--muted-foreground`, `--input`, `--border`, `--destructive`, and future `--warning`/`--success`. D6 fixes the semantic three; this extends it to the surfaces a clerk of session reads data on.
+
+### 2. The un-brandable rule — a tripwire on the *emitter*
+
+`scripts/check-brand-scope.mjs`, wired as `check:brand-scope` into the `check` chain. Follows the existing family exactly: plain node, `walk()` over `src/`, regex, non-zero exit, header comment naming the motivating failure.
+
+**(a) The emitter check — the real enforcement.** The brand-scope marker must appear in **exactly** `src/app/(org)/o/[slug]/layout.tsx` and `src/app/(public)/site/[slug]/layout.tsx`. Anywhere else, or missing from an allowlisted file, fails. Sufficient on its own, because under the cascade design a page cannot become branded without an ancestor scope. A route group added in P9 or P10 is un-brandable by default until someone edits the allowlist — a reviewable diff.
+
+**(b) The consumer check — narrow, meaningful only after slice a.** Only the additive `--brand-*` utilities are restricted; everything else re-skins through the cascade and is legal everywhere. A shared component rendered in both `(admin)` and `(org)` may not hard-code a brand class — if it needs emphasis it takes a `tone` prop, the same mechanism G6 requires for the agent.
+
+**The allowlist lives in the script, not imported from `contract.ts`.** The tripwires are `.mjs` with no build step; regex-extracting an array from a `.ts` file breaks on a formatter change. Two duplicated path strings in a file whose whole job is to fail when they change is the right trade.
+
+**⚠ Overturned / extended — the denial-page consequence is right, but the obvious implementation makes it false by default.**
+
+Confirmed without reservation: **the access-denied page must be un-branded**, because a branded 403 tells a prober the org is a configured tenant.
+
+But it does not follow automatically. `o/[slug]/layout.tsx` renders **above** `page.tsx` — above the 403, the ended-relationship page, and `not-found.tsx`. Its own comment says so: *"The header renders on the access-denied, relationship-ended and 404 pages too. That is the point."* Open the brand scope there naively and every denial page renders branded.
+
+The fix is **not** to move the scope down into pages — that makes honouring the brand something an implementer must remember, which Pass 1 says kills S12 within two pipelines. The fix: **the brand read is membership-scoped and returns `null` for a non-member, and the layout paints nothing when it gets `null`.** The layout never gates, never redirects, never varies its structure — it simply has no colours to emit. That composes with the existing deliberate contract that this layout is *not* the gate, and makes the un-branded denial a property of the read path rather than a rule someone must remember at the 403. Wrap it in React `cache()` so it does not double the membership check against the page's `assertOrgAccess`.
+
+**⚠ Overturned — Flow 6's "the church's masthead on the error page."** Flow 6 wants the church's masthead *and* requires the error page to have no dependency on the brand read path. Those are in tension and it resolves one way: **the org error boundary renders un-branded.** The visitor's need — "am I in the right place" — is met by the **organization's name as text** from `publicOrgSummary()`, a narrow public-tree read that already exists and never returns `platform_status`. Colour is not what tells someone they are in the right place; the name is. An error page that paints in the org's brand depends on the read that may have just failed.
+
+**Confirmed: `/developer` stays exempt — structurally, not by policy.** It sits in `(admin)`, imports `developer.css`, scopes its palette under `.reg`, imports none of the shared tokens. Forward constraint: `developer.css` must keep its palette local to `.reg` and never write to `:root`, or it becomes a third emitter.
+
+**One consequence the analyst did not draw.** "Un-brandable" must not be read as "no logos." `/orgs` is un-brandable and yet is precisely where a congregation's mark is most useful, because G3 says two churches named "First Presbyterian Church" is the common case. The distinction: **brand-as-chrome is scoped and forbidden outside the two layouts; logo-as-content is a component on a neutral plate and is legal anywhere the caller is authorized to see it.** State it, or someone strips the marks off the chooser to satisfy the tripwire.
+
+### 3. The logo's read path
+
+Same adapter, different gate, different route, different cache posture. **The adapter is not what diverges — the authorization wrapped around it is.**
+
+- **The public read is not a new endpoint keyed by slug.** A standalone public `getBrand(slug)` or `/api/brand/<slug>` is an **enumeration oracle**: query any slug, learn whether it is configured, learn whether it is a tenant. Instead the brand payload and logo asset key are **fields of the DECISION-041 published-content projection**, returned by the same narrow SECURITY DEFINER function on the same published-site condition. The gate for "may a stranger see this congregation's colours" becomes identical to "may a stranger see this congregation's homepage" — a gate that already has to be right.
+- **`getPlatformDb()` stays forbidden in `(public)`.**
+- **Caching: content-addressed plus immutable.** `/site/<slug>/brand/<assetHash>.<ext>`, `max-age=31536000, immutable`, strong ETag, sniffed content-type allowlist (SVG rejected per G7), `nosniff`, no `Vary: Cookie`. **This is the single property that makes DECISION-030's bytes-in-Postgres survivable on an anonymous path served on every page load.**
+- **One route handler per trust class.** No polymorphic `/api/assets/<key>` deciding authorization by inspecting the key — that is the exact shape in which a bug serves a tier-1 person photo to a stranger.
+- **Favicon and social card derive at write time, not request time.** **This is the one likely new runtime dependency in the pipeline** (an image encoder) and it is explicitly **not** pre-approved — it belongs to slice c and needs its own five-criteria pass. Named now so it is not discovered at Phase 4, which is what happened twice with the Radix umbrella.
+- G7's "never composite a logo onto a brand-coloured or dark surface" is a component invariant belonging in `org-mark.tsx` next to the initials fallback. Reuse `src/lib/initials.ts`; do not write a second one.
+
+### 4. Brand storage placement
+
+**Its own table: `organization_brands`, PK `organization_id`.** Against jsonb on DECISION-033's precedent verbatim — hot read path, CHECK constraints with teeth, and a blob deciding what colour 200 congregations render is "whatever last wrote the blob."
+
+**Also not columns on `organizations`, and this is tempting enough to name.** That table carries a bare `grant select to presby_app` with no policy precisely because the org tree is public. Putting brand there would make **every congregation's brand readable by any authenticated caller with no org context** — the enumeration oracle again, arrived at by following an existing precedent. And it would make the public tree a write target for tenant admins.
+
+- `FORCE RLS`, policy `organization_id = presby_current_org()`, read inside `withOrgContext()`.
+- The composite-key invariant is satisfied **degenerately** — the PK *is* `organization_id`, one row per org, no second key to compose. State it in the migration comment or the next reviewer "fixes" it.
+- **No public grant on this table. Ever.** Write it as a comment on the grant line, because "follow the `organizations` pattern" is the wrong instinct here and looks right.
+- Typed columns: seed hex with `CHECK (~ '^#[0-9a-f]{6}$')` — **A7's "never echo the user's string" gets database-level teeth, not just server-side discipline** — `type_pairing` CHECKed against the curated enum, `mark_asset_key`, `wordmark_asset_key`, `brand_token_version` (D8, pinned per org), `updated_at`, `updated_by`.
+- **"Restore previous brand" gets a history table, not `previous_*` columns.** Flow 2 wants a swatch *and a date*; A13 wants version pinning; the audit story is "who made our website purple." One previous-value column answers exactly one restore and then loses the trail.
+
+**`platform_status` non-revelation now holds by construction:** the tenant path keys on membership, the public path on published-site status, and neither answers "is this arbitrary slug a tenant."
+
+**Delete `theme_tokens jsonb` from `docs/schema-design.md` §14 — confirmed.** Plus: the earlier pipeline's **G6** (which constrained `theme_tokens` to a fixed set) is **superseded** by this contract and should be marked as such, or a future reader reintroduces it as a quick win during P3.
+
+**Unsolicited and cheap: take OQ4.** Once the table exists, "congregations still on the default palette" is a `LEFT JOIN … WHERE brand IS NULL` against the `(admin)` organizations surface S18 already approved.
+
+### 5. The `radix-ui` umbrella, and the radius remap
+
+**Do not adopt. Automate the correction and give it a tripwire.**
+
+Two occurrences, two hand-reverts, and slice a is about to run `shadcn add` ten-plus times. Hand-reverting ten times in one slice is where the third occurrence becomes the *silent* one. A comment asking the next human to remember is not a mitigation, it is a note.
+
+Against the five criteria: already solved (five `@radix-ui/react-*` are direct deps covering every use — the umbrella is the same code re-packaged); maintained and compatible; Edge-irrelevant; **bundle roughly neutral — the real cost is supply-chain surface**, ~40 packages in the audit and update path to use six, in a repo whose charter is a small auditable baseline; MIT either way.
+
+The honest argument *for* adopting is that generated code then works untouched, and a manual step that must be repeated has now failed twice. That is taken seriously — which is why the answer is not "keep hand-rewriting."
+
+- **`npm run ui:add`** — wraps the CLI, rewrites `from "radix-ui"` to individual packages, normalises `X.Root` → `X`, then restores `package.json`/lock and `npm ci`. Exactly what the ux-developer did by hand twice, correctly. An hour to encode, permanently removes the failure mode.
+- **`check:deps-drift`** — `radix-ui` absent from dependencies, and no `src/` file imports from it. Converts "an implementer must remember to md5 the lockfile" into a build failure.
+- **CLAUDE.md gains `npm run ui:add`**; `ui-standards.md` says raw `shadcn add` is not the supported path.
+
+**Rejected alternative, recorded so it is not relitigated:** a tsconfig `paths` alias to a local shim. Elegant, and it solves only the smaller half — the CLI installs the umbrella from the registry manifest, not from module resolution, so `package.json` still gets edited. It also adds a resolution trap: an alias shadowing a real package name silently wins over a genuine install.
+
+**Radius remap: approve, in slice a, bounded.** The primitives generated *in this slice* bake `rounded-md`; deferring means a second visual sweep later. Choose `--radius` so **`rounded-md` computes to today's `0.375rem`** — turning a whole-app visual change into a small enumerable set of deltas. **And `--radius` is a platform token, NOT per-org brandable in v1** — a congregation does not choose corner radius; it is D8-style extensibility creep and it multiplies the 360px verification surface G11 already flags.
+
+**Two smaller findings for slice a:** `button.tsx` carries non-stock size variants (`xs`, `icon-xs`, `icon-sm`, `icon-lg`) and `data-variant`/`data-size` attributes with **zero consumers anywhere in `src/`** — dead variants in a generated file are lost on regeneration and not worth recovering; delete them or record the delta in a header comment the way `dropdown-menu.tsx` records its import correction. Silent divergence from the registry in a file marked "do not hand-edit" is a quiet invariant violation.
+
+### 6. Server-side emission with no client theme provider
+
+**Achievable in `(org)` as it stands. Not confirmable in `(public)` — that group does not exist yet**, so this is a constraint placed on P3 rather than a confirmation.
+
+**⚠ Extended — emit a `:root`-scoped `<style>` element, not an inline `style` on a wrapper `<div>`. This is the most likely defect in slice c and it is invisible in a screenshot.**
+
+A wrapper div is the obvious implementation and it is subtly wrong, because **portals escape it.** Radix `DropdownMenu.Portal` and `Dialog.Portal` render into `document.body`, and `<Toaster>` lives in the root layout — all outside any wrapper inside `(org)`. A branded portal renders in platform default, and you notice only by opening a dropdown, which no page screenshot captures.
+
+A `<style>` element covers portals, covers the toaster, and does not leak: each request renders one route, so a rule emitted only under `(org)` cannot reach `(admin)`. The tripwire still enforces two layouts, and Flow 5's `data-sealed` reset still wins by specificity.
+
+**Forward constraint, cheap now and expensive later: CSP.** DECISION-024 ships report-only CSP and defers enforcement to forks. An inline `<style>` needs `style-src 'unsafe-inline'` or a nonce. **The brand style element must be nonce-able from day one**, or the first fork that enforces CSP breaks every branded page and cannot diagnose why.
+
+**Reconciling `next-themes` with "no client theme provider" — two different flashes, and Phase 3 must not conflate them.** The *org* flash (Flow 4) is solved entirely by server-side emission; `next-themes` contributes nothing. The *scheme* flash is what its pre-paint script solves, and nothing installed addresses it.
+
+**Ruling: the brand style element always emits BOTH ramps, and `next-themes` selects between them with a class.** `:root{…light…}` and `.dark{…dark…}` in one element. Emitting only the "current" scheme server-side would force a re-render on toggle and reintroduce a flash on the scheme axis — the exact bug next-themes exists to prevent, re-created by the brand system. D11 already requires both ramps to exist.
+
+**`next-themes` approved for slice a** (~2KB, MIT, React 19 compatible, nothing installed does pre-paint selection). Three things Phase 3 must plan for: the provider is `'use client'` in the root layout wrapping **every** surface including un-brandable ones (correct — scheme is not brand), `suppressHydrationWarning` on `<html>`, and `<Toaster theme="system">` must read the resolved theme.
+
+**⚠ One divergence between S17's wording and what the library does.** S17 says the preference is **account-level**; `next-themes` persists to `localStorage`, which is **device-level**. Account-level is a `users` column plus a server-rendered initial class, with `next-themes` as the client applier seeded from it. **Slice a ships system/localStorage mode only**; the account-level column arrives with the account-surface work. Flagged rather than quietly shipping device-level and calling S17 satisfied.
+
+## Scope order
+
+**The analyst is right about slice a, and the repo backs it with numbers.** Seven files hand-roll `<table>`; roughly **twenty-four** hand-roll button-shaped class strings; only seven import `<Button>` at all. Under the cascade design, a hand-rolled `bg-blue-600` **does not re-skin** — no cascade reaches a literal. So slice a is the difference between "the brand reaches every surface" and "the brand reaches the surfaces that happened to use a primitive." Defer it and S12 is false on day one, and you find out when a church asks why their admin tables are still blue. **Confirmed.**
+
+**Strengthening:** slice a is also what makes the consumer tripwire *enforceable* — a grep for hard-coded colour utilities cannot be turned on while ~24 violations exist. Slice a should end as slice B ended: the consumer rule confirmed **failing pre-migration and passing after**.
+
+**Parallel or sequential: sequential on the token partition, parallel on the mechanics.**
+
+May start immediately: umbrella resolution, `ui:add`, `check:deps-drift`, radius remap, `.dark` + `next-themes`, `alert-dialog` regeneration, generating the new primitives.
+
+Must wait for slice 0's merged partition: rewriting the 7 tables and ~24 button sites — because that rewrite is exactly where a developer decides, per surface, whether a colour is *emphasis* or *content*. Migrating 24 files against an unwritten contract means migrating them twice.
+
+**They must not be one commit.** The mechanics are reviewable; the sweep is reviewable; together they are a diff nobody reads.
+
+## Invariants Touched
+
+| Invariant | Effect |
+|---|---|
+| **Isolation Is a Database Property** | Extended. `organization_brands` is FORCE RLS read through `withOrgContext()`; public read is the narrow SECURITY DEFINER function. **New teeth:** explicit prohibition on a bare public grant — the enumeration oracle reached by following the `organizations` precedent. |
+| **Composite Tenant Keys** | Satisfied degenerately — PK *is* `organization_id`. Must be stated in the migration comment or it reads as an oversight. |
+| **Two Hierarchies Intersect Nowhere** | Structural, not a rule to remember: the read keys on `organization_id` alone with no recursion, so no path walks `path` or `parent_id` in either direction. Slice c's sponsor→new-worshiping-community is a **copy**, never a link. |
+| **Permissions vs Flags** | `ui.brand_theming` is a flag; per-org branding on/off is the presence of a row (tenant state); `org.branding` is a tenant key landing with P1. `src/lib/permissions.ts` stays FROZEN. |
+| **Extensibility Goes Through Support (D8)** | Reinforced twice — closed token vocabulary, and `--radius` is a platform token a congregation may not set. |
+| **Verify in a Browser** | The reason ruling 6 exists. Portals escaping a wrapper div passes `tsc`, `next build`, and a page screenshot. G11's screenshot-diff requirement is the right instrument and is not weakened. |
+| **CLAUDE.md changes** | **Two, at slice a**, owned by tech-lead: Common Commands gains `ui:add` and the two new tripwires (`check` becomes four); Component Rules gains the brand-scope rule and Route Group Rules gains one line naming `(org)` and `(public)` as the only brandable groups. |
+
+## Notes for Phase 3
+
+1. **The brand read is membership-scoped and returns `null` for a non-member**; the layout paints nothing on `null`. Wrap in `cache()`.
+2. **Emit a `:root`-scoped `<style>` element, not a wrapper div.** Portals. And make it nonce-able.
+3. **Both ramps in one element**, `.dark` selecting. Org flash and scheme flash are different problems.
+4. **The brand payload is a field of the published-content projection**, not a public endpoint keyed by slug.
+5. **No public grant on `organization_brands`.** Say it on the grant line.
+6. **Content-addressed, immutable logo URLs.** What makes bytes-in-Postgres affordable on an anonymous path.
+7. **One asset route per trust class.**
+8. **Slice 0's re-declarable/never-re-declarable partition is a closed machine-readable list**, not prose. It is S15 made buildable.
+9. **`contract.ts` has zero runtime imports.**
+10. **The 24-file sweep waits for slice 0; the mechanics do not.** Separate commits.
+11. **The consumer tripwire must be demonstrated failing pre-migration and passing post**, per slice B's precedent.
+12. **Unresolved dependency, slice c:** the image encoder for write-time favicon/social derivation. Its own five-criteria pass. Do not let it arrive as a surprise at Phase 4 — that is how the Radix umbrella arrived twice.
+13. **`next-themes` ships system/localStorage in slice a.** S17's account-level persistence is a `users` column and is not slice a.
+14. **Recommend taking OQ4** in slice c.

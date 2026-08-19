@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { retryEmailAction } from "./actions";
 
 interface RetryButtonProps {
@@ -27,15 +28,11 @@ export function RetryButton({ id }: RetryButtonProps) {
   }
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={isPending}
-      className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
-    >
+    <Button variant="outline" size="sm" onClick={handleClick} disabled={isPending}>
       {isPending ? (
         <>
           <span
-            className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent"
+            className="h-3 w-3 animate-spin rounded-full border-2 border-foreground border-t-transparent"
             aria-hidden="true"
           />
           Retrying…
@@ -43,6 +40,6 @@ export function RetryButton({ id }: RetryButtonProps) {
       ) : (
         "Retry now"
       )}
-    </button>
+    </Button>
   );
 }

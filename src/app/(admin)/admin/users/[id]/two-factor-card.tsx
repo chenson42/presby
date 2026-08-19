@@ -5,6 +5,9 @@ import { toast } from "sonner";
 import * as Dialog from "@radix-ui/react-dialog";
 import { setTwoFactorRequired, forceResetTwoFactor } from "./actions";
 import { FormattedDate } from "@/components/shared/formatted-date";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 
 interface TwoFactorCardProps {
   userId: string;
@@ -62,22 +65,31 @@ export function TwoFactorCard({
   function renderStatusBadge() {
     if (!twoFactorRequired) {
       return (
-        <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+        <Badge
+          variant="outline"
+          className="bg-amber-500/15 text-amber-700 dark:text-amber-300"
+        >
           2FA not required
-        </span>
+        </Badge>
       );
     }
     if (enrolled) {
       return (
-        <span className="inline-flex items-center rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-300">
+        <Badge
+          variant="outline"
+          className="bg-green-500/15 text-green-700 dark:text-green-300"
+        >
           Enrolled
-        </span>
+        </Badge>
       );
     }
     return (
-      <span className="inline-flex items-center rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300">
+      <Badge
+        variant="outline"
+        className="bg-red-500/15 text-red-700 dark:text-red-300"
+      >
         Not enrolled
-      </span>
+      </Badge>
     );
   }
 
@@ -117,17 +129,15 @@ export function TwoFactorCard({
             checked={twoFactorRequired}
             disabled={isSelf || isPending}
             onChange={(e) => handleToggleRequired(e.target.checked)}
-            className="mt-0.5 h-4 w-4 cursor-pointer rounded border-border disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-0.5 h-4 w-4 cursor-pointer rounded border-input disabled:cursor-not-allowed disabled:opacity-50"
           />
           <div>
-            <label
+            <Label
               htmlFor="require-2fa"
-              className={`block text-sm font-medium ${
-                isSelf ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-              }`}
+              className={isSelf ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
             >
               Require 2FA
-            </label>
+            </Label>
             <p className="text-xs text-muted-foreground">
               {isSelf
                 ? "You cannot change your own 2FA requirement."
@@ -140,13 +150,9 @@ export function TwoFactorCard({
         {enrolled && (
           <Dialog.Root open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
             <Dialog.Trigger asChild>
-              <button
-                type="button"
-                disabled={isPending}
-                className="rounded-md border border-red-500/40 px-3 py-1.5 text-sm text-red-600 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+              <Button type="button" variant="destructive" size="sm" disabled={isPending}>
                 Force-reset 2FA enrollment
-              </button>
+              </Button>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
@@ -161,20 +167,18 @@ export function TwoFactorCard({
                 </Dialog.Description>
                 <div className="mt-6 flex justify-end gap-3">
                   <Dialog.Close asChild>
-                    <button
-                      type="button"
-                      className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
-                    >
+                    <Button type="button" variant="outline" size="sm">
                       Cancel
-                    </button>
+                    </Button>
                   </Dialog.Close>
-                  <button
+                  <Button
                     type="button"
+                    variant="destructive"
+                    size="sm"
                     onClick={handleForceReset}
-                    className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
                   >
                     Yes, reset enrollment
-                  </button>
+                  </Button>
                 </div>
               </Dialog.Content>
             </Dialog.Portal>

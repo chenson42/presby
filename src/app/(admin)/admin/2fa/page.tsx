@@ -3,6 +3,15 @@ import { sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getPlatformDb } from "@/lib/db";
 import { FEATURES, hasFeature } from "@/lib/permissions";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { TwoFactorPolicyToggle } from "./policy-toggle";
 
 /**
@@ -111,56 +120,57 @@ export default async function TwoFactorPolicyPage() {
       </p>
 
       <h2 className="mt-8 text-sm font-semibold">Congregations</h2>
-      <table className="mt-2 w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-muted-foreground">
-            <th className="py-2">Organization</th>
-            <th>Type</th>
-            <th>Members</th>
-            <th>Requires 2FA</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="mt-2">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Organization</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Members</TableHead>
+            <TableHead>Requires 2FA</TableHead>
+            <TableHead></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {orgRows.length === 0 ? (
-            <tr>
-              <td colSpan={5} className="py-6 text-muted-foreground">
+            <TableRow>
+              <TableCell colSpan={5} className="py-6 text-muted-foreground">
                 No organizations yet.
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ) : (
             orgRows.map((o) => (
-              <tr key={o.id} className="border-b border-border">
-                <td className="py-3">{o.name}</td>
-                <td className="text-xs text-muted-foreground">
+              <TableRow key={o.id}>
+                <TableCell>{o.name}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
                   {o.organization_type.replace(/_/g, " ")}
-                </td>
-                <td className="text-xs text-muted-foreground">
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
                   {o.member_count}
-                </td>
-                <td>
-                  <span
-                    className={
-                      o.require_two_factor
-                        ? "rounded-full bg-green-500/15 px-2 py-0.5 text-xs text-green-700 dark:text-green-300"
-                        : "rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                    }
-                  >
-                    {o.require_two_factor ? "required" : "optional"}
-                  </span>
-                </td>
-                <td className="text-right">
+                </TableCell>
+                <TableCell>
+                  {o.require_two_factor ? (
+                    <Badge
+                      variant="outline"
+                      className="bg-green-500/15 text-green-700 dark:text-green-300"
+                    >
+                      required
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">optional</Badge>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">
                   <TwoFactorPolicyToggle
                     organizationId={o.id}
                     organizationName={o.name}
                     required={o.require_two_factor}
                   />
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
 
       <h2 className="mt-10 text-sm font-semibold">
         Required, but not enrolled
@@ -170,43 +180,45 @@ export default async function TwoFactorPolicyPage() {
         exempt them from their user page before they are locked out of admin
         routes.
       </p>
-      <table className="mt-2 w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-muted-foreground">
-            <th className="py-2">Email</th>
-            <th>Name</th>
-            <th>Required by</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="mt-2">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Email</TableHead>
+            <TableHead>Name</TableHead>
+            <TableHead>Required by</TableHead>
+            <TableHead></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {strandedRows.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="py-6 text-muted-foreground">
+            <TableRow>
+              <TableCell colSpan={4} className="py-6 text-muted-foreground">
                 Nobody is required without being enrolled.
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ) : (
             strandedRows.map((u) => (
-              <tr key={u.id} className="border-b border-border">
-                <td className="py-3">{u.email}</td>
-                <td className="text-xs text-muted-foreground">
+              <TableRow key={u.id}>
+                <TableCell>{u.email}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
                   {u.name ?? "—"}
-                </td>
-                <td className="text-xs text-muted-foreground">{u.source}</td>
-                <td className="text-right">
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {u.source}
+                </TableCell>
+                <TableCell className="text-right">
                   <Link
                     href={`/admin/users/${u.id}`}
                     className="text-xs underline"
                   >
                     Manage
                   </Link>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import { useTransition, useState } from "react";
 import { toast } from "sonner";
 import * as Dialog from "@radix-ui/react-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { deactivateUser, reactivateUser } from "../actions";
 
 interface DeactivateCardProps {
@@ -43,13 +45,19 @@ export function DeactivateCard({ userId, isActive, isSelf }: DeactivateCardProps
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold">Account status</h2>
         {isActive ? (
-          <span className="inline-flex items-center rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-300">
+          <Badge
+            variant="outline"
+            className="bg-green-500/15 text-green-700 dark:text-green-300"
+          >
             Active
-          </span>
+          </Badge>
         ) : (
-          <span className="inline-flex items-center rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300">
+          <Badge
+            variant="outline"
+            className="bg-red-500/15 text-red-700 dark:text-red-300"
+          >
             Inactive
-          </span>
+          </Badge>
         )}
       </div>
 
@@ -63,14 +71,15 @@ export function DeactivateCard({ userId, isActive, isSelf }: DeactivateCardProps
         {isActive ? (
           <Dialog.Root open={confirmOpen} onOpenChange={setConfirmOpen}>
             <Dialog.Trigger asChild>
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="sm"
                 disabled={isSelf || isPending}
-                className="rounded-md border border-red-500/40 px-3 py-1.5 text-sm text-red-600 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                 title={isSelf ? "You cannot deactivate your own account." : undefined}
               >
                 Deactivate account
-              </button>
+              </Button>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
@@ -85,34 +94,33 @@ export function DeactivateCard({ userId, isActive, isSelf }: DeactivateCardProps
                 </Dialog.Description>
                 <div className="mt-6 flex justify-end gap-3">
                   <Dialog.Close asChild>
-                    <button
-                      type="button"
-                      className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
-                    >
+                    <Button type="button" variant="outline" size="sm">
                       Cancel
-                    </button>
+                    </Button>
                   </Dialog.Close>
-                  <button
+                  <Button
                     type="button"
+                    variant="destructive"
+                    size="sm"
                     onClick={handleDeactivate}
                     disabled={isPending}
-                    className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
                   >
                     Yes, deactivate
-                  </button>
+                  </Button>
                 </div>
               </Dialog.Content>
             </Dialog.Portal>
           </Dialog.Root>
         ) : (
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={handleReactivate}
             disabled={isPending}
-            className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             Reactivate account
-          </button>
+          </Button>
         )}
         {isSelf && isActive && (
           <p className="mt-2 text-xs text-muted-foreground">

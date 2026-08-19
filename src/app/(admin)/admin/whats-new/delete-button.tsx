@@ -55,9 +55,9 @@ export function DeleteWhatsNewButton({ id, entryTitle }: DeleteWhatsNewButtonPro
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
+            variant="destructive"
             onClick={handleConfirm}
             disabled={pending}
-            className="bg-red-600 text-white hover:bg-red-700"
           >
             {pending ? "Deleting…" : "Delete"}
           </AlertDialogAction>

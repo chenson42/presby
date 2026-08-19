@@ -7,6 +7,11 @@
  *   3. Admin CRUD smoke: create an entry, verify it appears in the list
  *   4. Member denied /admin/whats-new → redirected to /access-pending
  *   5. Unauthenticated user navigating to /whats-new is redirected to /signin
+ *   6. Edit page's "Cancel" stays a real link after the P0.5 `a5` primitive
+ *      sweep (docs/work-log/2026-08-19-brand-foundation.md, E6) — it is now
+ *      `<Button asChild><Link/></Button>`, and a regression here would render
+ *      it `<Button onClick={...}>` instead, silently changing the accessible
+ *      role from "link" to "button" and breaking keyboard Enter/Space parity.
  *
  * Uses cached storageState from e2e/support/global-setup.ts (same pattern as
  * admin-email-queue.spec.ts and admin-audit.spec.ts).
@@ -161,6 +166,31 @@ test.describe("Admin — CRUD smoke: create a what's-new entry", () => {
     // After submission, the page reloads (server action + revalidatePath).
     // Wait for the entry to appear in the list.
     await expect(page.getByText(uniqueTitle)).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("edit page's Cancel control is an accessible link, not a button — regression for a5 primitive sweep", async ({
+    page,
+  }) => {
+    await page.goto("/admin/whats-new");
+
+    // Open the edit page for the first entry in the list.
+    await page.getByRole("link", { name: /^edit$/i }).first().click();
+    await page.waitForURL(/\/admin\/whats-new\/.+/);
+
+    // "Save changes" is a real submit button.
+    await expect(
+      page.getByRole("button", { name: /save changes/i }),
+    ).toBeVisible();
+
+    // "Cancel" is rendered via <Button asChild><Link/></Button> (E6) —
+    // its accessible role must stay "link", and it must carry a real href
+    // back to the list, not a client-side onClick.
+    const cancel = page.getByRole("link", { name: /^cancel$/i });
+    await expect(cancel).toBeVisible();
+    await expect(cancel).toHaveAttribute("href", "/admin/whats-new");
+
+    await cancel.click();
+    await expect(page).toHaveURL(/\/admin\/whats-new$/);
   });
 });
 

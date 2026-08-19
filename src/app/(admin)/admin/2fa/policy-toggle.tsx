@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { setOrganizationTwoFactorAction } from "./actions";
 
 interface TwoFactorPolicyToggleProps {
@@ -46,12 +47,13 @@ export function TwoFactorPolicyToggle({
   }
 
   return (
-    <button
+    <Button
+      variant="outline"
+      size="sm"
       onClick={handleClick}
       disabled={isPending}
-      className="rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
     >
       {isPending ? "Saving…" : required ? "Make optional" : "Require 2FA"}
-    </button>
+    </Button>
   );
 }

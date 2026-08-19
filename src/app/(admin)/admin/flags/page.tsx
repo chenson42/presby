@@ -1,6 +1,16 @@
 import { db } from "@/lib/db";
 import { featureFlags } from "@/lib/db/schema";
 import { asc } from "drizzle-orm";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { toggleFlagAction } from "./actions";
 
 export default async function FlagsPage() {
@@ -17,53 +27,54 @@ export default async function FlagsPage() {
         whether a capability is even visible in this deployment, not who can
         use it.
       </p>
-      <table className="mt-6 w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-muted-foreground">
-            <th className="py-2">Key</th>
-            <th>Description</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="mt-6">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Key</TableHead>
+            <TableHead>Description</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {flags.map((f) => (
-            <tr key={f.key} className="border-b border-border">
-              <td className="py-3 font-mono text-xs">{f.key}</td>
-              <td className="text-xs">{f.description ?? "—"}</td>
-              <td>
-                <span
-                  className={
-                    f.enabled
-                      ? "rounded-full bg-green-500/15 px-2 py-0.5 text-xs text-green-700 dark:text-green-300"
-                      : "rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                  }
-                >
-                  {f.enabled ? "on" : "off"}
-                </span>
-              </td>
-              <td>
+            <TableRow key={f.key}>
+              <TableCell className="font-mono text-xs">{f.key}</TableCell>
+              <TableCell className="text-xs">{f.description ?? "—"}</TableCell>
+              <TableCell>
+                {f.enabled ? (
+                  <Badge
+                    variant="outline"
+                    className="bg-green-500/15 text-green-700 dark:text-green-300"
+                  >
+                    on
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">off</Badge>
+                )}
+              </TableCell>
+              <TableCell>
                 <form action={toggleFlagAction}>
                   <input type="hidden" name="key" value={f.key} />
-                  <button
-                    type="submit"
-                    className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
-                  >
+                  <Button type="submit" variant="outline" size="sm">
                     Toggle
-                  </button>
+                  </Button>
                 </form>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
           {flags.length === 0 && (
-            <tr>
-              <td colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
+            <TableRow>
+              <TableCell
+                colSpan={4}
+                className="py-6 text-center text-sm text-muted-foreground"
+              >
                 No flags yet. Add some in <code>scripts/seed.ts</code> or via SQL.
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

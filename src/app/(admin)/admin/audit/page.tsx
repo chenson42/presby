@@ -19,6 +19,17 @@ import {
 } from "@/lib/audit-page-helpers";
 import { FEATURES, hasFeature } from "@/lib/permissions";
 import { FormattedDate } from "@/components/shared/formatted-date";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 // ---------------------------------------------------------------------------
 // Action select grouping — built dynamically from AUDIT_ACTIONS at render time.
@@ -162,17 +173,12 @@ export default async function AdminAuditPage({
       {/* Filter form — GET form; no JS required */}
       <form className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/30 p-4">
         <div className="flex flex-col gap-1">
-          <label
-            htmlFor="action-select"
-            className="text-xs font-medium text-muted-foreground"
-          >
-            Action
-          </label>
+          <Label htmlFor="action-select">Action</Label>
           <select
             id="action-select"
             name="action"
             defaultValue={validAction ?? ""}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
             <option value="">All actions</option>
             {ACTION_GROUPS.map(({ label, prefix }) => {
@@ -194,29 +200,21 @@ export default async function AdminAuditPage({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label
-            htmlFor="actor-input"
-            className="text-xs font-medium text-muted-foreground"
-          >
-            Actor email
-          </label>
-          <input
+          <Label htmlFor="actor-input">Actor email</Label>
+          <Input
             id="actor-input"
             type="text"
             name="actor"
             placeholder="Search by email…"
             defaultValue={validActor ?? ""}
             maxLength={256}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-56"
           />
         </div>
 
-        <button
-          type="submit"
-          className="rounded-md bg-foreground px-4 py-1.5 text-sm font-medium text-background hover:opacity-80"
-        >
+        <Button type="submit" size="sm">
           Apply filters
-        </button>
+        </Button>
 
         {hasFilters && (
           <a
@@ -253,95 +251,86 @@ export default async function AdminAuditPage({
 
       {/* Events table */}
       {rows.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                <th className="pb-2 pr-4 font-medium whitespace-nowrap">
-                  Date
-                </th>
-                <th className="pb-2 pr-4 font-medium">Action</th>
-                <th className="pb-2 pr-4 font-medium">Actor</th>
-                <th className="pb-2 pr-4 font-medium">Resource</th>
-                <th className="pb-2 pr-4 font-medium">IP</th>
-                <th className="pb-2 pr-4 font-medium">User-agent</th>
-                <th className="pb-2 font-medium">Metadata</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((row) => {
-                const meta = row.metadata as Record<string, unknown> | null;
-                const hasMetadata =
-                  meta != null && Object.keys(meta).length > 0;
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>Actor</TableHead>
+              <TableHead>Resource</TableHead>
+              <TableHead>IP</TableHead>
+              <TableHead>User-agent</TableHead>
+              <TableHead>Metadata</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => {
+              const meta = row.metadata as Record<string, unknown> | null;
+              const hasMetadata = meta != null && Object.keys(meta).length > 0;
 
-                // Resource cell: "type/id", "type", "id", or "—"
-                const resource =
-                  row.resourceType && row.resourceId
-                    ? `${row.resourceType}/${row.resourceId}`
-                    : (row.resourceType ?? row.resourceId ?? null);
+              // Resource cell: "type/id", "type", "id", or "—"
+              const resource =
+                row.resourceType && row.resourceId
+                  ? `${row.resourceType}/${row.resourceId}`
+                  : (row.resourceType ?? row.resourceId ?? null);
 
-                return (
-                  <tr key={row.id} className="align-top">
-                    {/* Date */}
-                    <td className="py-3 pr-4 text-xs text-muted-foreground whitespace-nowrap">
-                      <FormattedDate value={row.createdAt} mode="datetime" />
-                    </td>
+              return (
+                <TableRow key={row.id} className="align-top">
+                  {/* Date */}
+                  <TableCell className="text-xs text-muted-foreground">
+                    <FormattedDate value={row.createdAt} mode="datetime" />
+                  </TableCell>
 
-                    {/* Action */}
-                    <td className="py-3 pr-4 font-mono text-xs whitespace-nowrap">
-                      {row.action}
-                    </td>
+                  {/* Action */}
+                  <TableCell className="font-mono text-xs">
+                    {row.action}
+                  </TableCell>
 
-                    {/* Actor email — null for system events */}
-                    <td className="py-3 pr-4 text-xs whitespace-nowrap">
-                      {row.actorEmail ?? "—"}
-                    </td>
+                  {/* Actor email — null for system events */}
+                  <TableCell className="text-xs">
+                    {row.actorEmail ?? "—"}
+                  </TableCell>
 
-                    {/* Resource type / id — either or both may be null */}
-                    <td className="py-3 pr-4 text-xs whitespace-nowrap">
-                      {resource ?? "—"}
-                    </td>
+                  {/* Resource type / id — either or both may be null */}
+                  <TableCell className="text-xs">{resource ?? "—"}</TableCell>
 
-                    {/* IP — null for seed/cron writes */}
-                    <td className="py-3 pr-4 text-xs whitespace-nowrap">
-                      {row.ip ?? "—"}
-                    </td>
+                  {/* IP — null for seed/cron writes */}
+                  <TableCell className="text-xs">{row.ip ?? "—"}</TableCell>
 
-                    {/* User-agent — truncated in cell; full value on hover */}
-                    <td className="py-3 pr-4">
-                      {row.userAgent ? (
-                        <span
-                          className="block max-w-[200px] truncate text-xs"
-                          title={row.userAgent}
-                        >
-                          {row.userAgent}
-                        </span>
-                      ) : (
-                        <span className="text-xs">—</span>
-                      )}
-                    </td>
+                  {/* User-agent — truncated in cell; full value on hover */}
+                  <TableCell>
+                    {row.userAgent ? (
+                      <span
+                        className="block max-w-[200px] truncate text-xs"
+                        title={row.userAgent}
+                      >
+                        {row.userAgent}
+                      </span>
+                    ) : (
+                      <span className="text-xs">—</span>
+                    )}
+                  </TableCell>
 
-                    {/* Metadata — suppressed when empty ({}) */}
-                    <td className="py-3">
-                      {hasMetadata ? (
-                        <details>
-                          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                            View metadata
-                          </summary>
-                          <pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 text-xs">
-                            {JSON.stringify(meta, null, 2)}
-                          </pre>
-                        </details>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                  {/* Metadata — suppressed when empty ({}) */}
+                  <TableCell>
+                    {hasMetadata ? (
+                      <details>
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          View metadata
+                        </summary>
+                        <pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 text-xs">
+                          {JSON.stringify(meta, null, 2)}
+                        </pre>
+                      </details>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
 
       {/* Pagination */}

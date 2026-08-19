@@ -4,6 +4,17 @@ import { desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import Link from "next/link";
 import { assignRoleAction, removeRoleAction, unlockUserAction } from "./actions";
 import { FormattedDate } from "@/components/shared/formatted-date";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const PAGE_SIZE = 25;
 
@@ -80,18 +91,15 @@ export default async function UsersPage({
       </p>
 
       <form className="mt-6 flex gap-2" action="/admin/users" method="get">
-        <input
+        <Input
           name="q"
           defaultValue={q}
           placeholder="Search by name or email"
-          className="w-72 rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+          className="w-72"
         />
-        <button
-          type="submit"
-          className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
-        >
+        <Button type="submit" variant="outline" size="sm">
           Search
-        </button>
+        </Button>
         {q && (
           <Link
             href="/admin/users"
@@ -106,37 +114,43 @@ export default async function UsersPage({
         {total} user{total === 1 ? "" : "s"} · page {page} of {totalPages}
       </p>
 
-      <table className="mt-4 w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-muted-foreground">
-            <th className="py-2">User</th>
-            <th>Roles</th>
-            <th>Last login</th>
-            <th>Active</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="mt-4">
+        <TableHeader>
+          <TableRow>
+            <TableHead>User</TableHead>
+            <TableHead>Roles</TableHead>
+            <TableHead>Last login</TableHead>
+            <TableHead>Active</TableHead>
+            <TableHead></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map((u) => {
             const userRoleList = rolesByUser.get(u.id) ?? [];
             return (
-              <tr key={u.id} className="border-b border-border">
-                <td className="py-3">
+              <TableRow key={u.id}>
+                <TableCell className="whitespace-normal">
                   <Link href={`/admin/users/${u.id}`} className="hover:underline">
                     <div className="font-medium">{u.name ?? "—"}</div>
                     <div className="text-xs text-muted-foreground">{u.email}</div>
                   </Link>
                   {!u.twoFactorRequired && (
-                    <span className="mt-1 inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                    <Badge
+                      variant="outline"
+                      className="mt-1 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                    >
                       2FA exempt
-                    </span>
+                    </Badge>
                   )}
                   {u.lockedUntil && u.lockedUntil > new Date() && (
                     <>
-                      <span className="mt-1 inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                      <Badge
+                        variant="outline"
+                        className="mt-1 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                      >
                         Locked until{" "}
                         <FormattedDate value={u.lockedUntil} mode="datetime" />
-                      </span>
+                      </Badge>
                       <form
                         action={async (fd: FormData) => {
                           "use server";
@@ -145,43 +159,36 @@ export default async function UsersPage({
                         className="mt-1"
                       >
                         <input type="hidden" name="userId" value={u.id} />
-                        <button
-                          type="submit"
-                          className="rounded border border-border px-2 py-0.5 text-xs hover:bg-muted"
-                        >
+                        <Button type="submit" variant="outline" size="sm">
                           Unlock
-                        </button>
+                        </Button>
                       </form>
                     </>
                   )}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell className="whitespace-normal">
                   <div className="flex flex-wrap gap-1">
                     {userRoleList.map((r) => (
                       <form key={r} action={removeRoleAction}>
                         <input type="hidden" name="userId" value={u.id} />
                         <input type="hidden" name="roleName" value={r} />
-                        <button
-                          type="submit"
-                          className="rounded-full border border-border px-2 py-0.5 text-xs hover:bg-red-500/10"
-                          title="Remove role"
-                        >
+                        <Button type="submit" variant="outline" size="sm" title="Remove role">
                           {r} ×
-                        </button>
+                        </Button>
                       </form>
                     ))}
                   </div>
-                </td>
-                <td className="text-xs text-muted-foreground">
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
                   {u.lastLoginAt ? <FormattedDate value={u.lastLoginAt} mode="datetime" /> : "—"}
-                </td>
-                <td>{u.isActive ? "yes" : "no"}</td>
-                <td>
+                </TableCell>
+                <TableCell>{u.isActive ? "yes" : "no"}</TableCell>
+                <TableCell>
                   <form action={assignRoleAction} className="flex gap-2">
                     <input type="hidden" name="userId" value={u.id} />
                     <select
                       name="roleId"
-                      className="rounded border border-border bg-background px-2 py-1 text-xs"
+                      className="rounded border border-input bg-background px-2 py-1 text-xs"
                     >
                       {allRoles.map((r) => (
                         <option key={r.id} value={r.id}>
@@ -189,26 +196,26 @@ export default async function UsersPage({
                         </option>
                       ))}
                     </select>
-                    <button
-                      type="submit"
-                      className="rounded bg-foreground px-2 py-1 text-xs text-background"
-                    >
+                    <Button type="submit" size="sm">
                       Add
-                    </button>
+                    </Button>
                   </form>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             );
           })}
           {rows.length === 0 && (
-            <tr>
-              <td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+            <TableRow>
+              <TableCell
+                colSpan={5}
+                className="py-6 text-center text-sm text-muted-foreground"
+              >
                 {q ? "No users match that search." : "No users yet."}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
 
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between text-sm">

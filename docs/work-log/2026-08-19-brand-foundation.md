@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3`, `a4` complete**; next: the sweep (`a5`–`a7`), then `a8` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2`, `a2`, `a3`, `a4`, `a5` complete**; next: `a6` (credential surfaces, auth e2e gate), `a7`, `a8` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines · `a2` harness, 18 routes × 4 = 72 captures, self-comparison clean, caught the unstable `/admin/users` sort · `a3` scheme/motion/radius, 656 unit + 86 e2e, 72/72 visual self-consistency · `a4` five primitives + alert-dialog regen, C2 demonstrated failing at 52, E7 semantics verified · `a5` `(admin)` sweep, 14 files, 28 violations cleared, 87 e2e, every visual diff attributed | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1326,3 +1326,67 @@ itself was complete and intact):
 wrapper is free.
 
 *Recorded by the orchestrator; implementation by the ux-developer agent.*
+
+---
+
+# Phase 4 · commit `a5` — `(admin)` sweep (ux-developer)
+
+**Date:** 2026-08-19
+
+**Scope:** `src/app/(admin)/**` except `/developer` (exempt by design). C2 census in
+scope: 28 violations across 14 files (6 tables — `2fa/page.tsx` has two — plus 22
+button-shaped strings). All cleared; C2 flag flipped for the census and confirmed
+reverted (`git diff` on the tripwire script is empty).
+
+**Swept:** `2fa/page.tsx` + `policy-toggle.tsx`, `audit/page.tsx`,
+`email-queue/page.tsx` + `retry-button.tsx`, `feedback/page.tsx` +
+`feedback-status-control.tsx`, `flags/page.tsx`, `users/page.tsx` (the widest table,
+E5's named target), `users/[id]/deactivate-card.tsx` + `two-factor-card.tsx`,
+`whats-new/page.tsx` + `[id]/page.tsx` + `delete-button.tsx` — onto `<Table>`,
+`<Button>`, `<Badge>`, `<Label>`/`<Input>`/`<Textarea>`. `admin/layout.tsx`,
+`admin/page.tsx`, `admin/docs/page.tsx`, `users/[id]/page.tsx` reviewed, nothing to
+migrate (nav Links, not button-shaped; illustrative demo code left as-is).
+
+**Chip rule, applied uniformly:** every status chip chose **(a) shape onto `<Badge
+variant="outline">`, retaining the pre-existing palette-literal colour** — Badge's
+stock base class matched every hand-rolled chip's shape exactly, so (a) was strictly
+the smaller diff everywhere; the `(b)` `// ui-ok:` exemption was never needed in this
+scope. Where the original colour was already a token (`bg-muted`), a named variant
+(`secondary`) was used instead of a retained className.
+
+**E6 (link-as-button) hit once, real:** `whats-new/[id]/page.tsx`'s Cancel control —
+`<Button asChild variant="outline"><Link/></Button>`, keeping `role="link"`. Given a
+dedicated regression test (`e2e/whats-new.spec.ts`) since it's the one place in the
+sweep introducing a novel `asChild`-wrapped `<Link>` against existing spec coverage.
+
+**A separate finding, adjacent to but not itself a C2 hit:**
+`whats-new/delete-button.tsx`'s `<AlertDialogAction className="bg-red-600 ...">` was
+overriding colour with an authored class when the primitive already exposes
+`variant="destructive"` — swapped, deleting the authored colour string. Same
+principle as Category B, caught by inspection rather than the grep.
+
+**Verification.** typecheck, lint clean · vitest **656 passed** · `npm run check` all
+four tripwires, C2 confirmed dormant · build clean, 34 routes · **visual: 44/72
+passed, 28 diffs, every one attributed** — 4 are the known `/account/2fa` TTL noise;
+24 are the six swept routes × 4 captures, matching Category B stock-primitive
+geometry (taller `TableHead`, Badge's `rounded-full` shape, bordered button heights)
+plus, on three routes, live row-count drift from repeated build/test cycles (the same
+class `a3` already logged for `/admin/audit`) — nothing unattributable · **e2e: 87
+passed** (86 + the new Cancel-link regression test) · browser pass on `/admin/users`
+and `/admin/feedback` at 360px in both schemes: page-level `scrollWidth === clientWidth`
+(no page overflow) while the table's own container scrolls internally — E5 satisfied,
+no nested scroll region, no clipped sticky element.
+
+**UX note, named as a deliberate tradeoff, not a defect:** the role-remove pill on
+`/admin/users` loses its `rounded-full` pill shape (Button has no pill variant); the
+two destructive-confirmation triggers in `deactivate-card.tsx` go from a subtle
+red-outline text style to Button's solid `destructive` fill — a real strengthening of
+the affordance, not merely a geometry swap, since no "outline destructive" variant
+exists to preserve the subtler original.
+
+**Follow-up filed in `docs/TODO.md`:** `deactivate-card.tsx` and `two-factor-card.tsx`
+hand-roll `@radix-ui/react-dialog` for destructive confirmations rather than the
+`AlertDialog` primitive `a4` regenerated for exactly this — out of scope for a markup
+sweep (different focus-trap semantics), left for its own pass.
+
+*Recorded by the orchestrator from the implementing agent's report.*

@@ -108,9 +108,13 @@
     --accent: hsl(217 33% 17%);
     --accent-foreground: hsl(210 40% 98%);
 
-    /* Corrected 60% → 48% with a pure-white foreground: the pair was 3.61:1,
-       which fails plain AA, not merely the AAA body floor. Now 4.87:1, and the
-       fill still clears the page at 3.67:1. */
+    /* The token pair was 3.61:1 with the old near-white foreground — failing
+       plain AA, not merely the AAA body floor. Corrected by moving the TEXT,
+       not the hue (operator ruling, work-log 2026-08-19-brand-foundation
+       note 7): the fill stays at 60% so rendered text-destructive keeps
+       4.73:1 on the page, and the foreground becomes the page ink, giving
+       4.73:1 on the pair. The rejected alternative (fill → 48% + white) fixed
+       a pair nothing renders while dropping rendered text-destructive to 3.67. */
     --destructive: hsl(0 84% 60%);
     --destructive-foreground: hsl(222 47% 11%);
 

@@ -9,12 +9,15 @@ Conventions for building consistent, accessible UI across presby. Every rule bel
 ## Contents
 
 - [Page Layout](#page-layout)
+- [Colour and Tokens](#colour-and-tokens)
+- [Type Scale](#type-scale)
 - [Page Header & Typography](#page-header--typography)
 - [Action Bar](#action-bar)
 - [Back Navigation](#back-navigation)
 - [Toast Notifications](#toast-notifications)
 - [Forms — State Patterns](#forms--state-patterns)
 - [Forms — Unsaved Changes Guard](#forms--unsaved-changes-guard)
+- [Component Rules](#component-rules)
 - [Select & Combobox Patterns](#select--combobox-patterns)
 - [Loading & Error States](#loading--error-states)
 - [Four-State Component Design](#four-state-component-design)
@@ -77,18 +80,68 @@ return (
 
 ---
 
-## Page Header & Typography
+## Colour and Tokens
 
-Every page has a single `<h1>`.
+**Source of truth: `src/lib/brand/contract.ts`.** This section is prose over that file; if the two disagree, the contract wins and this section is stale. `TOKEN_POLICY` there is the closed, three-way partition of every custom property `globals.css` declares — closed means a property that isn't classified there is a build failure (`contract.test.ts`), not an oversight someone can leave unaddressed.
 
-- `text-2xl font-semibold` — matches the existing admin and account pages in this starter.
-- Follow `<h1>` immediately with a `<p className="text-sm text-muted-foreground">` description when the purpose of the page is not self-evident.
-- Use `text-muted-foreground` (not `text-gray-600`) for secondary text — the starter uses CSS variable tokens throughout.
-- Never use `CardTitle` for listing-card headings; use a bare `<h3>` so size is controlled explicitly.
+**Operating rule: brand carries emphasis, neutral carries content.** Masthead, primary buttons, links, the focus ring, and selected/active states are brand-driven and will repaint per organization once per-org branding ships (P0.5 slice c onward). Table rows, form-field interiors, body copy, disabled states, and status colors are neutral and identical for every organization, forever — a clerk of session reading the roll should never have to fight a brand color for legibility.
+
+| Policy | Meaning | Tokens |
+|---|---|---|
+| **brandable** | A per-org brand may re-declare this freely. | `--primary`, `--primary-foreground`, `--ring`, and the additive `--brand-raw` / `--brand-raw-foreground` (decorative, non-interactive surfaces only — not in `globals.css` until the per-org emitter ships) |
+| **bounded** | A per-org brand may re-declare this only within a named constraint the ramp generator enforces. | `--background` (near-white or near-dark band — a congregation may have a cream page, not a gold one), `--foreground` (computed against `--background` at 7:1), `--accent` (a near-neutral tint of `--muted` — it is the menu/hover surface under *content*-axis text, not a second brand fill), `--accent-foreground` (computed against `--accent` at 7:1) |
+| **platform** | Never re-declarable, by any organization. | `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--muted`, `--muted-foreground`, `--secondary`, `--secondary-foreground`, `--destructive`, `--destructive-foreground`, `--border`, `--input`, `--radius` (not a color), and the reserved-but-unbuilt `--success`, `--warning`, `--info` families |
+
+Unlisted is not brandable — it's a missing classification, and it fails a test.
+
+**`border` vs `border-input`.** These carry different values on purpose (`hsl(214 32% 91%)` vs `hsl(214 32% 59%)` in light mode). Use them by what the border is doing, not by habit:
+
+- A border that **identifies a control** (an input, a select, anything a user types into or picks from) uses `border-input`. It carries the 3:1 non-text contrast floor (WCAG 1.4.11) — a control someone can't see the edges of is a control they can't find.
+- A border that **separates content** (a card edge, a table rule, a divider between sections) uses `border`. It's decorative, not informational, and carries no contrast floor.
 
 ```tsx
-<h1 className="text-2xl font-semibold">Users</h1>
-<p className="mt-1 text-sm text-muted-foreground">Manage user accounts and role assignments.</p>
+<input className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+<div className="rounded-lg border border-border p-4">…</div>
+```
+
+**Never write a Tailwind palette literal** — `bg-blue-600`, `text-amber-700`, `border-green-500`, `dark:text-red-300`, and so on. If you need a color that isn't one of the tokens above, that's a missing token and a design decision, not a class string to reach for. Raise it — status chips (success/warning/info) are the known gap here (tracked in `docs/TODO.md`); everything else routes through the tokens.
+
+---
+
+## Type Scale
+
+Seven roles, declared in `src/lib/brand/contract.ts` (`TYPE_SCALE`). Every size is `rem`, **never `px`** — a role's Tailwind class already resolves to a `rem` value, and writing a raw pixel size (`text-[14px]`) or an arbitrary value opts a piece of text out of ever being reachable by a future large-print multiplier on the root font size.
+
+| Role | rem / px | Tailwind | Where |
+|---|---|---|---|
+| `display` | 1.875 / 30 | `text-3xl` | page-level hero |
+| `title` | 1.5 / 24 | `text-2xl` | the single `<h1>` |
+| `section` | 1.25 / 20 | `text-xl` | `<h2>` |
+| `subhead` | 1.125 / 18 | `text-lg` | `<h3>` |
+| `body` | 1 / 16 | `text-base` | **all body copy — the floor** |
+| `dense` | 0.875 / 14 | `text-sm` | tabular cells, metadata, form labels. Never a paragraph. |
+| `micro` | 0.75 / 12 | `text-xs` | **`(admin)` and `/developer` only. Forbidden on any member-facing surface.** |
+
+**16px is the body floor, everywhere.** Nothing below 14px (`dense`) is legal on a member-facing surface — `micro` is a platform-operator-only allowance, because a 12px table cell in `/admin/audit` is a different audience than a 12px timestamp in a congregation's directory. When a page mixes both audiences, use `dense` as the floor and treat `micro` as unavailable.
+
+Pick a role by what the text *is*, not by what looks right on your monitor: a page description under an `<h1>` is `dense`, not `body`, even though it reads fine at either size — it's metadata about the page, not the page's content.
+
+---
+
+## Page Header & Typography
+
+Every page has a single `<h1>`, set at the **`title`** role (see [Type Scale](#type-scale)) — `text-2xl font-semibold`.
+
+- `<h1>` → `title`. A standalone hero, outside the app shell, → `display`. `<h2>` → `section`. `<h3>` → `subhead`.
+- Follow `<h1>` immediately with a `<p>` at the **`dense`** role (`text-sm`) description when the purpose of the page is not self-evident — a page description is metadata about the page, not body content, even where it reads fine at either size.
+- Use `text-muted-foreground` (not `text-gray-600` or any other palette literal) for secondary text — the starter uses CSS variable tokens throughout.
+- Never use `CardTitle` for listing-card headings; use a bare `<h3>` at the `subhead` role so size is controlled explicitly.
+
+```tsx
+<h1 className="text-2xl font-semibold">Users</h1>                          {/* title */}
+<p className="mt-1 text-sm text-muted-foreground">                          {/* dense */}
+  Manage user accounts and role assignments.
+</p>
 ```
 
 ---
@@ -377,40 +430,45 @@ function handleNavigateAway(href: string) {
 
 ---
 
-## Select & Combobox Patterns
+## Component Rules
 
-### Searchable single-select (Popover + Command)
+### Generating shadcn primitives
 
-Use Radix UI `Popover` + `Command` + `CommandInput` for single-select fields with more than ~8 options.
+**`npm run ui:add -- <component…>` is the only supported way to generate a shadcn primitive in this repo.** It wraps `shadcn add`, then rewrites the registry's `import { Foo as FooPrimitive } from "radix-ui"` to the individual `@radix-ui/react-*` package this repo actually depends on, and restores the lockfile. Raw `npx shadcn add` is **not supported** — it installs the ~40-package `radix-ui` umbrella (`check:deps-drift` will fail the build if it lands).
 
-Add a `justSelected` ref so keyboard users can tab to the field and start typing immediately, without the popover reopening after selection:
-
-```tsx
-const justSelected = useRef(false);
-
-// In every onSelect handler:
-onSelect={() => {
-  justSelected.current = true;
-  setValue(id);
-  setOpen(false);
-}}
-
-// On the trigger:
-<PopoverTrigger asChild>
-  <button
-    role="combobox"
-    onFocus={() => {
-      if (justSelected.current) { justSelected.current = false; return; }
-      setOpen(true);
-    }}
-  >
-    {selectedLabel ?? "Select…"}
-  </button>
-</PopoverTrigger>
+```bash
+npm run ui:add -- table input label textarea
 ```
 
-- Use `"none"` as the sentinel for "no selection" — **never `""`**. Radix `CommandItem` and native `<select>` both reject empty string as a meaningful value.
-- Include a clear button (X icon, ghost style) whenever a value is selected and the field is optional.
+If the rewrite would introduce a runtime dependency the repo doesn't already have, the script fails loudly and names it — that's deliberate. A new `@radix-ui/react-*` package (or any other new dependency) needs the architect's five-criteria pass before it's installed, not a silent `npm install` inside a generator script.
+
+**Primitives under `src/components/ui/` are generated files — don't hand-edit them without a reason, and never without recording it.** Every deliberate divergence from the shadcn registry gets a header comment naming what changed and why, so the next re-generation doesn't silently undo it. The precedent is `src/components/ui/dropdown-menu.tsx`, which documents exactly why its Radix import is hand-corrected. A primitive missing a header comment for a divergence a reviewer can spot is a bug in the primitive, not a style nit.
+
+---
+
+## Select & Combobox Patterns
+
+### Native `<select>` — what exists today
+
+Every select and filter control in the app (`(admin)/admin/feedback/feedback-status-control.tsx`, `(admin)/admin/audit/page.tsx`, `(admin)/admin/users/page.tsx`, `shared/feedback-form.tsx`) is a plain native `<select>`. It's free keyboard support, free screen-reader support, and the platform's native picker UI on mobile — and it's the right choice for any bounded, short option list. Use it, styled with `border-input` (see [Colour and Tokens](#colour-and-tokens)):
+
+```tsx
+<select
+  className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+  value={value}
+  onChange={(e) => setValue(e.target.value)}
+>
+  <option value="all">All statuses</option>
+  <option value="open">Open</option>
+  <option value="closed">Closed</option>
+</select>
+```
+
+Always give it an associated `<label>`; use `"none"` (or another non-empty string) as the sentinel for "no selection," never `""` — a native `<select>` treats an empty-string option value the same as no `value` attribute at all, which breaks controlled-component behavior.
+
+### `Select` (Radix / shadcn) — not generated yet
+
+There is no `Popover`, `Command`, or `Select` primitive in `src/components/ui/` today, and no combobox anywhere in the tree. An earlier draft of this document described a searchable "Popover + Command" combobox pattern; it was never built, described a primitive this repo doesn't have, and has been removed. When a page's option list genuinely outgrows a native `<select>` (dozens of options, needs search), generate the real primitive with `npm run ui:add -- select` (or, for a searchable combobox, the `Command`-based pattern shadcn documents) as part of the pipeline that needs it — both pull in a new Radix package (`@radix-ui/react-select`, or `cmdk` for `Command`) that needs the architect's five-criteria pass first. Don't hand-roll a substitute in the meantime; wait for the primitive and cite the pipeline that generated it in this section's next rewrite.
 
 ### Multi-select
 
@@ -520,12 +578,15 @@ A single gray sentence in the middle of the page is not an empty state.
 ## Accessibility
 
 - **Keyboard navigation.** All interactive elements must be reachable with Tab. Verify by tabbing through the page — every button, link, and input must receive a visible focus ring.
-- **Focus rings.** Use `focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2` (or the starter's `--ring` CSS variable) on all focusable elements. Do not suppress focus rings with bare `focus:outline-none` unless you replace them with a custom ring style.
+- **Focus rings, always with a 2px offset.** `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background` on every focusable element. The offset is not polish — the platform's own `--ring` is byte-identical to `--primary`, so a ring drawn flush against the default `<Button>` measures **1.00:1, invisible, in both color schemes** (measured in `src/lib/brand/contract.ts`; the D4 test there asserts the offset is what fixes it, not the color). Drawing the ring with surface-colored space between it and the control it rings means its contrast is only ever measured against the surface, which the token contract can guarantee at every brand seed — measuring it against the control it rings cannot be guaranteed the same way. Never suppress a focus ring with bare `focus:outline-none` unless you replace it with an offset ring of your own.
 - **Semantic HTML.** `<main>`, `<nav>`, `<section>`, `<h1>`–`<h6>` in proper hierarchy. Screen readers depend on landmark roles; don't bury all structure in `<div>`.
-- **Contrast.** All text/background pairings must meet WCAG 2.1 AA — 4.5:1 ratio for normal text, 3:1 for large text (18px+ or 14px+ bold). Check new color pairings before shipping.
+- **Contrast — AAA for body text, not AA.** All body text (paragraph copy, table cells, form labels and hints, timestamps) meets **7:1** against its surface — above the WCAG AA 4.5:1 floor, deliberately: the audience skews older, and the product's own content is about hearing loops and large-print bulletins. Non-text UI — control borders, focus rings, icon-only affordances — meets **3:1**. This is why a control border uses `border-input` and a decorative border uses `border` (see [Colour and Tokens](#colour-and-tokens)) — only the former carries the 3:1 floor. Check new color pairings against these floors before shipping; the authoritative list of legal pairs and their floors is `LEGAL_PAIRS` in `src/lib/brand/contract.ts`, not this bullet.
 - **Error announcements.** When a form field has an error, add `aria-invalid="true"` and `aria-describedby="<field-id>-error"` to the input, and assign `id="<field-id>-error"` to the error message element. This is required any time per-field errors are shown.
 - **Touch targets.** Interactive elements must be at least 44×44px (WCAG 2.5.5). Icon-only buttons use `h-9 w-9` (36px) by default — add explicit `min-h-[44px] min-w-[44px]` when the button is a primary action, not a compact toolbar control.
 - **Color alone is not a signal.** Never rely solely on color to convey status (e.g., "red = error"). Always pair color with text, an icon, or an ARIA attribute.
+- **Reduced motion.** Respect `prefers-reduced-motion: reduce`. `globals.css` carries a base rule collapsing animation and transition durations to near-zero under that media query — don't add a component-level animation (a custom `@keyframes`, a JS-driven transition) that bypasses it. If you're using the stock `animate-in`/`fade-in`/`slide-in-from-*` utilities on a generated primitive, the base rule already covers you; a hand-rolled animation is where this gets missed.
+- **200% zoom.** A page's primary content must survive 200% browser zoom without horizontal scroll. Test with the browser's own zoom control, not by shrinking the viewport — a fixed-width element or an unwrapped flex row can pass a narrow-viewport check and still fail zoom, because zoom scales content inside a viewport that itself stays put.
+- **Print.** Church offices print rolls, directories, and reports on monochrome laser printers. Any content page a user might reasonably print — a roll view, a report, a directory listing — must stay legible with color removed: pair a status color with an icon or a label (not just a colored chip), and keep borders and dividers that rely on `border`/`border-input` rather than a colored background alone. Check the browser's print preview, not just the screen, before shipping a page whose primary use is "print this and hand it to the clerk of session."
 
 ---
 
@@ -551,9 +612,11 @@ QA runs this in Phase 5 for any change that touches UI. A single unchecked box b
 - [ ] `<FormattedDate>` used for all timestamp rendering — no `toLocale*()` calls
 - [ ] Form inputs have associated `<label>` elements (via `for`/`htmlFor`) — no unlabeled inputs
 - [ ] Error fields have `aria-invalid="true"` and `aria-describedby` pointing to the error message element
-- [ ] All interactive elements reachable by Tab; focus rings visible
+- [ ] All interactive elements reachable by Tab; focus rings visible, and drawn with a ring offset (`ring-offset-2`)
 - [ ] Touch targets ≥44×44px for primary interactive elements
-- [ ] Contrast ratios meet WCAG AA on all new text/background pairings
+- [ ] Contrast ratios meet the AAA floor (7:1) for body text and 3:1 for non-text/control borders — not just AA
+- [ ] Type-scale roles used for text sizing (`text-2xl` because it's `title`, not because it looked right) — no raw or arbitrary sizes
+- [ ] No hard-coded Tailwind palette literals (`bg-blue-600`, `text-amber-700`, `dark:text-red-300`) — tokens only
 - [ ] Semantic HTML: `<h1>` on every page, landmark roles (`<main>`, `<nav>`, `<section>`) where applicable
 - [ ] Action bar order: text-labeled buttons left of icon-only buttons
 - [ ] Back links use `?from=` when the page is reachable from multiple origins, with validation on the receiving end

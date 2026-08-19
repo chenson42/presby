@@ -31,7 +31,7 @@ prose lines against real primitives.
 | 1 — Functional refinement | analyst (agent) | Complete | READY WITH NOTES — six slices; blocking relationship corrected | 2026-08-19 |
 | 2 — Architectural review | architect (agent) | Complete — slices 0 and a | Approved with suggestions — 5 decisions (046–050), 3 overturns | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete — slices 0 and a | Design complete — 10 commits, implementers named; 3 decisions drafted (051–053), 4 overturns | 2026-08-19 |
-| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1` and `a1` complete and pushed (`f0ebd7c`)**; next: ux-developer `0.2` and `a2` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations | 2026-08-19 |
+| 4 — Implementation | api-developer (`0.1`, `a1`, `a8`) · ux-developer (`0.2`, `a2`–`a7`) | In progress — **`0.1`, `a1` pushed (`f0ebd7c`); `0.2` complete**; next: `a2`, then `a3`–`a4` | `0.1` contract + palette correction, 56 tests, operator ruling taken on the dark red · `a1` tooling, 3 CLI surfaces, 41 tests, C2 dry-run counts 52 violations · `0.2` ui-standards visual rewrite, 562 → 626 lines | 2026-08-19 |
 | 5 — Verification | qa | **Deferred** (DECISION-045) | — | — |
 | 6 — Shipped vs intent | analyst | **Deferred** (DECISION-045) | — | — |
 
@@ -1129,3 +1129,55 @@ that, and the `a8` implementer inherits it.
 the running dev server was serving a **stale CSS chunk** and never recompiled even after a
 touch. Visual checks were done against a production build on a scratch port. **The
 visual-parity harness must not baseline against a long-running dev server.**
+
+---
+
+# Phase 4 · commit `0.2` — `docs/ui-standards.md` visual rewrite (ux-developer)
+
+**Date:** 2026-08-19
+
+**File modified:** `docs/ui-standards.md` only (562 → 626 lines). No code, no CSS, no
+`package.json` — per the commit's scope.
+
+**Changes, matching the Phase 3 spec bullet-for-bullet:**
+
+- **New section "Colour and Tokens"** (after Page Layout): the three-way `TOKEN_POLICY`
+  partition as a table, transcribed from the *shipped* `contract.ts` rather than the
+  Phase 3 sketch; "brand carries emphasis, neutral carries content" as the operating
+  rule; the `border` vs `border-input` rule with the diverged values cited; "never write
+  a Tailwind palette literal" with the status-chip gap named and pointed at
+  `docs/TODO.md`; `contract.ts` declared source of truth ("if the two disagree, the
+  contract wins").
+- **New section "Type Scale"**: the seven roles, rem-only rule, 16px body floor, 14px
+  member-facing floor, `micro` restricted to `(admin)`/`/developer`, large-print
+  multiplier rationale.
+- **Rewrote "Page Header & Typography"** onto the roles (`title`/`section`/`subhead`/
+  `dense`) instead of bare size classes.
+- **Rewrote "Accessibility"**: AA → AAA (7:1) body floor; 3:1 non-text; focus ring
+  always with a 2px offset, citing the measured 1.00:1 invisible ring; added
+  `prefers-reduced-motion`, 200% zoom, and print (monochrome laser) rules; kept 44px
+  touch targets.
+- **Rewrote "Select & Combobox Patterns"**: removed the never-built "Popover + Command"
+  pattern (verified zero `Popover`/`Command`/`Select` files exist and grepped all four
+  real native-`<select>` consumers); documented native `<select>` as what exists;
+  `Select`/`Command` arrive via `npm run ui:add` with the pipeline that needs them.
+- **New "Component Rules" section**: `ui:add` as the only supported generation path,
+  raw `shadcn add` unsupported, header-comment rule for registry divergences with
+  `dropdown-menu.tsx` as precedent.
+- **Pre-merge UX Audit Checklist**: added type-scale-roles, no-palette-literals,
+  AAA-floor, and ring-offset items; updated the stale AA/focus-ring lines.
+- **Table of Contents** updated with the three new anchors.
+
+**Finding — a three-way self-description mismatch on the dark `--destructive`.** The
+shipped code (`f0ebd7c`) carries the *alternate* correction from `0.1`'s note 7 — dark
+`--destructive` unchanged at `hsl(0 84% 60%)`, `--destructive-foreground` set to the
+page ink `hsl(222 47% 11%)` (the "move the text, not the hue" option; the Per-Phase
+Status row records the operator ruling was taken) — but three pieces of prose still
+describe the superseded 48%-plus-white correction: the `globals.css` comment above the
+declarations, `docs/TODO.md`'s "Operator ruling" line (still listed as open), and
+note 7's own closing line "Shipped as the design specifies." Corrected by the
+orchestrator in the housekeeping commit that follows `0.2`; the doc itself is
+unaffected because it cites `contract.ts` rather than hard-coding values.
+
+*Recorded by the orchestrator from the implementing agent's report; the agent returned
+its section as text to avoid concurrent modification of this file.*

@@ -77,7 +77,7 @@ app has no access to).
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY FOR DESIGN | 2026-08-20 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-069/070/071 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -314,21 +314,117 @@ existing `src/lib/storage/` adapter) are both confirmed in scope for v1.
 
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
+**Approved with suggestions.** Phase 1 resolved every open product
+question directly with the user; nothing here reopens the feature's
+shape. Both questions named as the architect's to decide resolve the same
+direction: FORCE-RLS tenant tables, never a platform-shell table with a
+plain `organization_id`.
 
 ## Placement
 
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
+**Table placement (the highest-value call): RLS-enforced tenant tables.**
+`tickets`/`ticket_messages`/`ticket_actions` in a new `src/lib/db/domain/
+support.ts` — FORCE RLS, composite FKs, following `role-grants.ts`'s
+established query-layer module shape (`src/lib/tickets.ts`,
+`withOrgContext()`, permission-check-first). **DECISION-069.** Rejected the
+platform-shell alternative directly against precedent: `audit_events` is
+the exact "plain `organization_id` on an RLS-less table" shape, and
+DECISION-067 already ruled that unsafe-by-construction for a tenant-scoped
+reader — deferred there because nothing needed it yet. This pipeline's
+Flow 2 (a role-holder reading only their own org's tickets) needs it now,
+so the same deferral isn't available. Tickets' two audiences (a tenant
+role-holder, and the platform's `getPlatformDb()` bypass) are the ordinary
+shape every tenant table already supports — not the genuine
+two-tenant-simultaneous-read problem `organizations`/`person_links`/
+`transfer_certificates` needed bespoke policies for.
+
+**The `feedback` table question: a new tenant-scoped table, `feedback`
+untouched.** **DECISION-070.** Same isolation reasoning applied to
+`feedback` specifically — it's RLS-less by design, and Flow 0 needs a
+tenant-scoped reader. Beyond isolation: platform-app feedback and
+congregation-experience feedback are different products sharing a
+textarea, not the same feature. The new table lives alongside `tickets`
+in `support.ts`, keyed by `person_id` (never `users.id`).
+
+**`submitter_person_id`** is a plain FK to global `people(id)` — D1 already
+made `people` global, so F2's composite-key concern doesn't apply the way
+it did pre-D1; the real guard is a write-time current-membership check
+inside the transaction, mirroring `grantRole`'s target validation.
+`ticket_messages`/`ticket_actions` FK into `tickets(id, organization_id)`
+as a genuine composite, per F2 proper.
+
+**Server vs client split:** ordinary Server Components throughout, `'use
+client'` islands only for form inputs — same shape as every other `(org)`
+form this session. No client-side data fetching needed.
+
+**`(org)` layout / brand-scope:** `/o/<slug>/tickets*` needs no new
+brand-scoped layout — it's already under the brandable `(org)/o/[slug]/`
+tree. If Phase 3 wants a nested `tickets/layout.tsx` for shared nav, it
+must **not** render `<BrandTokens>` itself (emission happens exactly once,
+at `[slug]/layout.tsx` — a second emission violates `check-brand-
+scope.mjs`'s two-layout tripwire). `/admin/tickets` is unbranded, same as
+every other `(admin)` surface.
+
+**Dependencies: none needed.** `src/lib/storage/blob-store.ts`'s `store()`/
+`resolve()` is directly reusable for attachments — its dual-caller shape
+(platform-authorized or tenant-authorized) already fits both submission
+and triage without modification. **DECISION-071**: the interface carries
+over as-is, but `blob_assets`' content-type/size CHECK constraints are
+logo-specific policy, not adapter code — Phase 3 must make a deliberate,
+enumerated call on the accepted MIME types and size cap for ticket
+artifacts (almost certainly needs PDF beyond the logo path's PNG/JPEG/
+WEBP), keeping the same magic-byte-sniffing discipline and the same
+script-capable-format exclusion (SVG stays rejected; if PDF is added,
+name whether it's rendered inline or served as an opaque download only).
 
 ## Invariants Touched
 
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
+- **Isolation Is a Database Property** — the invariant that rules out the
+  platform-shell alternative on both named questions; both new tables are
+  FORCE RLS, the platform/tenant duality routes through the two existing
+  connections, never an app-level `WHERE organization_id = X` on an
+  unenforced table.
+- **Composite Tenant Keys (F2)** — respected with the D1-aware correction:
+  `submitter_person_id` plain FK (global `people`), `ticket_messages`/
+  `ticket_actions` genuine composite FKs.
+- **No Role Carries a Wildcard** — `tickets.file` is a new, narrow tier-1
+  permission (module `support`), seeded via migration per DECISION-063's
+  precedent; `FEATURES.ADMIN_TICKETS` is a new platform-shell key, same
+  category as `ADMIN_FEEDBACK`, not church-facing.
+- **Permissions vs Flags** — `org_portal.tickets` (seeded off) gates
+  whether the surface exists at all; `tickets.file` gates who may use it —
+  same split `org_portal.directory`/`directory.view` established.
+- **The Edge Gate Cannot Reach the Database** — untouched; no `src/
+  proxy.ts` changes needed.
+- **No Real Data** — no schema action needed; free-text PII/tier leakage
+  stays a procedural mitigation (Phase 1's own ruling), not a schema one.
 
-## Notes
+## Notes for Phase 3
 
-[Anything Phase 3 must honor.]
+1. **`ticket_messages.author_kind`** needs the same discriminated shape
+   `audit_events.actor_kind` uses — a submitter message is `person_id`, an
+   operator message is `users.id` (a platform operator has no `people`
+   row). Don't let one FK column serve both.
+2. **`assignee_kind`** from the original schema sketch is now narrower
+   than scoped — Phase 1 closed the AI-worker-actor question entirely, so
+   this resolves to "platform operator" only. Tech-lead decides whether
+   it's still worth a column or should be dropped for v1.
+3. **Audit correlation needs no schema change**: `ticket_actions.
+   audit_event_id` (ticket → audit, nullable, audit-exempt by default per
+   Phase 1) and `recordAudit()`'s `metadata.ticketId` (audit → ticket,
+   the existing F18/DECISION-067 convention) — not a new `audit_events`
+   column.
+4. **Congregation-feedback shape**: two legitimate options — a standalone
+   table with its own promote-to-ticket action (architect's lean), or
+   feedback-as-unpromoted-ticket via an `origin` column on `tickets`
+   itself. Tech-lead picks one and states the choice, rather than
+   defaulting silently.
+5. Phase 1's already-deferred item stands: the default fixture role
+   binding for `tickets.file` (`stated_clerk` candidate, per DECISION-066's
+   precedent for the shape of that binding).
+
+*Recorded by the orchestrator from the read-only architect agent's
+report.*
 
 ---
 

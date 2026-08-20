@@ -3,6 +3,27 @@
 Architectural and implementation decisions for the Claude Code Starter. Newest first. Each decision is numbered; the number does not change once assigned.
 
 ---
+## DECISION-071: Ticket attachments reuse `src/lib/storage/blob-store.ts`'s `store()`/`resolve()` interface unchanged; the `blob_assets` content-type/size CHECK constraints are explicitly widened in Phase 3, not silently inherited from the logo path
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-support-tickets` (Phase 2)
+
+The adapter's dual-caller shape (a platform-authorized caller with no membership, or a tenant-authorized caller that already ran `withOrgContext()` for something else, `organizationId` trusted either way) already fits both `/o/<slug>/tickets/new` (tenant submitter) and `/admin/tickets` (platform triage reading the attachment back) without modification — proven end to end by the brand-logo path. What's logo-specific is the CHECK constraint's *values* (`blob_assets_content_type_allowed`: PNG/JPEG/WEBP only; `blob_assets_byte_size_bounds`: ≤2MB), which is data, not the interface — ticket artifacts almost certainly need at least PDF and possibly a different size cap. Widening the constraint is ordinary schema work (database-admin, Phase 4), but Phase 3 must make it a deliberate, enumerated decision (exact MIME list, size cap, and whether any script-capable format is accepted as an opaque download only, never rendered inline — SVG stays rejected regardless; PDF can carry embedded JS too if added) rather than silently carrying the logo path's policy forward.
+
+---
+## DECISION-070: Flow 0's congregation feedback is a new tenant-scoped table in `src/lib/db/domain/support.ts`, not a nullable `organization_id` added to `schema.ts`'s `feedback` table; `feedback`'s existing shape, audience, and stated privacy invariant are untouched
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-support-tickets` (Phase 2)
+
+Same isolation argument as DECISION-069, applied to `feedback` specifically: it is RLS-less by design, like `audit_events`, and Flow 0 needs a *tenant-scoped* reader ("the org's designated `tickets.file` role-holder reviews incoming feedback for their organization") — filtering by `WHERE organization_id = X` in application code on an RLS-less table is a convention, not an isolation guarantee, the exact thing "Isolation Is a Database Property" rules out. Beyond isolation, platform-app feedback (bugs/suggestions to `ADMIN_ROLE`, `contextPath`/`appVersion` columns, no org concept, no promotion path) and congregation-experience feedback (triaged by an org's own role-holder, promotable into a ticket) are different products sharing a textarea, not the same feature — conflating them would import columns meaningless to the new flow or fork the table's meaning in place. `feedback` stays exactly as it is; the new table lives alongside `tickets` in `support.ts`, FORCE RLS, keyed by `person_id` (the `(org)`-scoped identity, never `users.id` — the same axis `role-grants.ts`'s header warns against conflating).
+
+---
+## DECISION-069: Support tickets are FORCE-RLS tenant tables (`src/lib/db/domain/support.ts`), not a platform-shell table with a plain `organization_id`; the platform triage surface reads the same rows via `getPlatformDb()`
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-support-tickets` (Phase 2)
+
+DECISION-067 already identified "`organization_id` as a plain column on an RLS-less platform-shell table" as unsafe-by-construction for a tenant-scoped reader (`audit_events`), and deferred building the safe version because nothing needed it yet — this pipeline's Flow 2 needs a tenant-scoped ticket reader now, so deferring isn't available. Tickets' two audiences (an org's own role-holder at `/o/<slug>/tickets`, and the platform's bypass connection at `/admin/tickets`) are the ordinary shape every tenant table already supports for free (the same duality `getPlatformDb()` already exercises reading `organization_brands`/`blob_assets`); it is not the genuine two-tenant-simultaneous-read problem `organizations`/`person_links`/`transfer_certificates` solved with bespoke cross-tenant policies, so no bespoke pattern is needed either. `submitter_person_id` is a plain FK to the global `people(id)` (D1 already made `people` global, so F2's composite-key concern doesn't apply the way it did pre-D1) guarded by a write-time current-membership check inside the query-layer transaction, mirroring `role-grants.ts`'s target-validation shape; `ticket_messages`/`ticket_actions` FK into `tickets(id, organization_id)` as a genuine composite per F2 proper.
+
+---
 ## DECISION-068: The self/other-escalation subset check runs as two ordinary, already-org-scoped reads inside the mutation's `withOrgContext()` transaction — no new privileged SQL function
 
 **Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-administration` (Phase 2)

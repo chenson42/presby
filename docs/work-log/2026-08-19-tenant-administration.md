@@ -73,7 +73,7 @@ model yet. Don't block on P8, but don't duplicate its scope either.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — bootstrap gap + 6 adversarial findings | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-066/067/068 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete | Design complete, implementers named | 2026-08-19 |
-| 4 — Implementation | database-admin, api-developer, ux-developer | Pending | — | — |
+| 4 — Implementation | database-admin, api-developer, ux-developer | database-admin commit (1/3) complete | — | 2026-08-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -463,3 +463,120 @@ contract. No new decisions minted this phase; DECISION-066/067/068 stand as
 written.
 
 *Recorded by the orchestrator from the tech-lead agent's full design doc.*
+
+---
+
+# Phase 4 — Implementation (commit 1 of 3: database-admin, schema/seed)
+
+## Files Created
+
+- `drizzle/0018_presby_role_administration.sql` — the global `role_grants.manage`
+  permission-catalog row, idempotent (`on conflict (key) do nothing`), matching
+  `0017`'s header-comment and hand-authored style (DECISION-063's precedent:
+  `permissions` needs no org to exist first, so the migration is the right
+  home, not `scripts/seed.ts`).
+
+## Files Modified
+
+- `drizzle/meta/_journal.json` — registered `0018_presby_role_administration`
+  at `idx: 18`, same shape as `0017`'s entry (`"version": "7"`, incrementing
+  `when`, `breakpoints: true`).
+- `scripts/seed-dev.sql` — Authorization fixture block (originally ~lines
+  219–271, now ~219–290 after the additions):
+  - Added `role_grants.manage` to the existing `permissions` catalog insert
+    (module `authz`, tier 1), duplicating the migration's own row — same
+    "both use `on conflict do nothing`" pattern `directory.view` already
+    established between `0017` and this file.
+  - New `app_roles` row: `stated_clerk` (`f0000000-0000-0000-0000-000000000005`
+    — `...0003` was already taken at Fernwood, `55555555-...`, so `0005` was
+    the next free suffix in the Alder Creek series), Alder Creek
+    (`22222222-...`), `role_kind: 'constitutional'`, `is_protected: true`.
+  - New `app_role_permissions` row: `stated_clerk` → `role_grants.manage`.
+  - New direct (`person_id`) `role_grants` row: `stated_clerk` granted to
+    Tobias Renwick (`c0000000-0000-0000-0000-000000000002`) at Alder Creek,
+    `starts_on: 2023-01-08` — matches his existing `clerk_of_session`
+    `officer_terms` row (`e0000000-0000-0000-0000-000000000005`) exactly; no
+    discrepancy from the design doc's stated id/date.
+  - Deliberately **no** `stated_clerk` role or grant at Bramblewood
+    (`33333333-...`) or Quillhaven (`44444444-...`) — same "prove the
+    mechanism once" reasoning DECISION-063 used for `directory.view`; verified
+    empty by direct query.
+  - One-line comments above each addition citing P9/DECISION-066, matching the
+    file's existing comment density.
+
+## Schema Changes
+
+- No `pgTable` changes — `role_grants`, `app_roles`, `app_role_permissions`
+  already support this shape; only catalog/fixture data changed.
+- Applied via **`npm run db:generate`... not used** (see Implementer Notes —
+  `db:generate` is broken repo-wide, hand-authored per the standing house
+  note). The migration was applied directly with `psql "$MIGRATE_DATABASE_URL"
+  -f drizzle/0018_presby_role_administration.sql` against the dev database
+  (same connection `db:migrate` targets), run twice to prove idempotency
+  (`INSERT 0 1` then `INSERT 0 0`). The `scripts/seed-dev.sql` fixture delta
+  (the four new statements) was applied the same way, once, against the
+  already-loaded dev fixture — the full file is not idempotent
+  end-to-end (no `ON CONFLICT` on `organizations`/`people`/etc.), so it cannot
+  be safely re-run wholesale against a DB it's already loaded into; the delta
+  alone is what a fresh load of the now-edited file would additionally insert.
+
+## Audit Events
+
+- None — this commit is schema/seed only, no application mutation path.
+  `TENANT_ROLE_GRANTED`/`TENANT_ROLE_REVOKED` are commit 2's job
+  (`src/lib/audit.ts`, per the Phase 3 design and DECISION-062/067).
+
+## Implementer Notes
+
+**`npm run db:migrate` does not work in this environment — confirmed
+pre-existing, not introduced by this change.** Running it (with or without
+`0018` present — verified via `git stash`) exits 1 with no stderr, and the
+`__drizzle_migrations` tracking table stops at `idx 9` (`0009_presby_rls`):
+drizzle-kit's own migration runner has not successfully applied anything past
+`0009` in this database, consistent with `docs/TODO.md`'s existing open item
+("`db:generate` is broken repo-wide... Migrations `0013`–`0017` have all been
+hand-authored... as a workaround") — evidently the workaround extends to
+`db:migrate` itself failing silently on this hand-authored chain, not only
+`db:generate`. I applied and verified `0018` (and the `seed-dev.sql` delta)
+directly via `psql` instead, which is the same mechanism the migration's own
+header cites (`docs/testing.md`'s documented load path) and is how `0013`–
+`0017` were evidently gotten into this database in the first place. This is
+worth a `docs/TODO.md` line of its own (added below) rather than silently
+working around it a second time with no trace.
+
+Verification run directly against the dev database (`psql
+"$MIGRATE_DATABASE_URL"` / `"$APP_DATABASE_URL"`):
+
+- `role_grants.manage` exists in `permissions` exactly once (`module: authz`,
+  `sensitivity_tier: 1`).
+- `stated_clerk` exists in `app_roles` exactly once, at Alder Creek only.
+- The direct grant to Tobias Renwick exists with `starts_on: 2023-01-08`,
+  matching `officer_terms.e0000000-...005`'s own `starts_on` exactly.
+- Zero `stated_clerk` roles or grants at Bramblewood or Quillhaven.
+- Deliberately violated `role_grants_principal_check` (both `person_id` and
+  `group_id` null) — rejected as expected.
+- Deliberately violated `role_grants_person_fk` (Tobias Renwick has no
+  `memberships` row at Bramblewood) — rejected as expected.
+- `npm run typecheck` — clean, no errors (SQL-only change, as expected).
+- `npm run check` — all four tripwires pass (`check:audit`, `check:sql-date`,
+  `check:deps-drift`, `check:brand-scope`).
+- `scripts/test-rls.sql` run as `presby_app` (`psql "$APP_DATABASE_URL" -v
+  ON_ERROR_STOP=1 -f scripts/test-rls.sql`) — exit 0, 61 `NOTICE: pass` lines,
+  zero occurrences of "fail" in the full log. Nothing broke; this commit
+  touches no trigger, matching the design doc's own note.
+
+**Handoff to api-developer (commit 2 of 3):** `role_grants.manage`
+(`module: authz`, tier 1) and `stated_clerk` (`f0000000-0000-0000-0000-000000000005`,
+constitutional, protected, Alder Creek only) are live in the dev database and
+in `scripts/seed-dev.sql` for any fresh load. Tobias Renwick
+(`c0000000-0000-0000-0000-000000000002`) holds the grant at Alder Creek from
+`2023-01-08`; no grant exists at Bramblewood or Quillhaven (clean
+"no grant, forbidden" fixtures per the Phase 3 design). To apply locally:
+`psql "$MIGRATE_DATABASE_URL" -f drizzle/0018_presby_role_administration.sql`
+(idempotent, safe to re-run) and, for a **fresh** database only, `psql
+"$MIGRATE_DATABASE_URL" -f scripts/seed-dev.sql` (not safe to re-run against
+an already-seeded database — see above). No `npm run db:seed` change was
+needed this commit; the design doc's `org_portal.roles` flag addition to
+`scripts/seed.ts` is commit 2's job. `src/lib/role-grants.ts`'s subset check
+(DECISION-068) can now read `app_role_permissions` for `stated_clerk`'s row
+directly — the catalog binding it depends on exists.

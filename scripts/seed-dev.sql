@@ -224,7 +224,11 @@ insert into permissions (key, module, description, sensitivity_tier) values
   ('roll.approve','roll','Approve a roll action',1),
   ('directory.view','directory','Browse the directory',1),
   ('ledger.approve','ledger','Approve a disbursement',2),
-  ('pastoral.notes.view','pastoral','Read pastoral care notes',3)
+  ('pastoral.notes.view','pastoral','Read pastoral care notes',3),
+  -- P9 / DECISION-066: duplicates drizzle/0018_presby_role_administration.sql's
+  -- own insert, same "both use on conflict do nothing" pattern directory.view
+  -- already established between 0017 and this file.
+  ('role_grants.manage','authz','Grant or revoke a role at this organization',1)
 on conflict (key) do nothing;
 
 insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
@@ -237,13 +241,20 @@ insert into app_roles (id, organization_id, key, name, role_kind, is_protected) 
   -- every congregation gets this role once real org provisioning exists
   -- (G-B, still unbuilt); it is not a staff-created custom role.
   ('f0000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222',
-   'member','Member','constitutional',true);
+   'member','Member','constitutional',true),
+  -- P9 / DECISION-066: the bootstrap role for role_grants.manage. G-3.0104's
+  -- Stated Clerk maps onto "who clicks grant/revoke" - a designated office,
+  -- not a wildcard bound to the whole Session. Direct-granted only, never to
+  -- a group (see the role_grants row below).
+  ('f0000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222',
+   'stated_clerk','Stated Clerk','constitutional',true);
 
 insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000001','roll.approve'),
   ('f0000000-0000-0000-0000-000000000001','directory.view'),
   ('f0000000-0000-0000-0000-000000000002','directory.view'),
-  ('f0000000-0000-0000-0000-000000000004','directory.view');
+  ('f0000000-0000-0000-0000-000000000004','directory.view'),
+  ('f0000000-0000-0000-0000-000000000005','role_grants.manage');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would
@@ -269,6 +280,17 @@ insert into role_grants (organization_id, role_id, person_id, starts_on) values
 insert into role_grants (organization_id, role_id, group_id, starts_on) values
   ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000004',
    'b0000000-0000-0000-0000-000000000007','2000-01-01');
+
+-- P9 / DECISION-066: stated_clerk, direct-granted to Tobias Renwick, the same
+-- person already holding the open clerk_of_session officer term
+-- (e0000000-0000-0000-0000-000000000005). starts_on matches that term's
+-- starts_on (2023-01-08) - the software capability begins when the office
+-- did. Deliberately NOT granted at Bramblewood or Quillhaven - "prove the
+-- mechanism once" (DECISION-063's reasoning for directory.view), which also
+-- leaves both orgs as a clean "no grant, forbidden" fixture for free.
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000005',
+   'c0000000-0000-0000-0000-000000000002','2023-01-08');
 
 -- An administrative commission: the one case where a council reaches DOWN into
 -- a congregation. Its members are a group AT THE PRESBYTERY, which is why the

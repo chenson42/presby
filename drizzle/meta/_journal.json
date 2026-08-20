@@ -127,6 +127,13 @@
       "when": 1787014040186,
       "tag": "0017_presby_membership_roster",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787014041186,
+      "tag": "0018_presby_role_administration",
+      "breakpoints": true
     }
   ]
 }

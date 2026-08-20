@@ -137,8 +137,8 @@ ticket once the mechanism exists.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-081/082/083/084/085 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — split three-commit Implementation Order (database-admin → api-developer → ux-developer); DECISION-086/087/088/089 minted | 2026-08-20 |
-| 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) | Complete — all 3 of 3 commits done | Schema/migration/RLS-test complete (commit 1); query layer, OIDC ingest auth, ingest route, all Server Actions, and their tests complete and verified against the shared dev database (commit 2); render path, `src/proxy.ts` fix, provisioning UI, `/admin/sites`, the ContactForm read-side section, the real `presby-site-kit` stub repo, and their tests — all complete, verified against a real running dev server in a real browser, and cross-checked against `test-rls.sql`/`presby_roll_cache_drift()` with zero leftover fixture data (commit 3) | 2026-08-20 |
-| 5 — Verification | qa | Complete | FAIL — two coverage gaps, loop back to Phase 4 | 2026-08-20 |
+| 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) → api-developer (commit 4, Phase 5 loop-back) → ux-developer (commit 5, Phase 5 loop-back) | Complete — 5 of 5 commits done | Schema/migration/RLS-test complete (commit 1); query layer, OIDC ingest auth, ingest route, all Server Actions, and their tests complete and verified against the shared dev database (commit 2); render path, `src/proxy.ts` fix, provisioning UI, `/admin/sites`, the ContactForm read-side section, the real `presby-site-kit` stub repo, and their tests — all complete, verified against a real running dev server in a real browser, and cross-checked against `test-rls.sql`/`presby_roll_cache_drift()` with zero leftover fixture data (commit 3); real-Postgres integration test for the ingest route handler closing qa's coverage gap #1, 20 tests, verified three times with clean DB state each time (commit 4); e2e spec closing qa's coverage gap #2, 7 tests against a real dev server, verified against real staged content and a real ContactForm round trip, independently re-run by the orchestrator (commit 5) | 2026-08-20 |
+| 5 — Verification | qa | Pending re-verification | FAIL (first pass) — two coverage gaps, loop back to Phase 4; both gaps closed by commits 4 and 5 | 2026-08-20 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2466,6 +2466,284 @@ verified against the real deploy target). `docs/TODO.md`'s two existing
 follow-up lines from commit 2 (`read-org-brand.ts`'s latent
 `next/font/google` import fragility; `provisionSite()`'s no-GitHub-API-check
 gap) are unchanged by this commit and still open.
+
+---
+
+## Commit 4 (api-developer, Phase 5 loop-back) — ingest route integration test
+
+**Date:** 2026-08-20 · **Implementer:** api-developer
+
+Closes qa's Phase 5 coverage gap #1 only (`src/app/api/sites/ingest/route.ts`
+had zero integration-level test coverage). Gap #2 (no e2e spec for
+`/site/<slug>`) is a separate loop-back item, not addressed by this commit.
+
+### Files Created
+
+- `src/app/api/sites/ingest/route.test.ts` — real-Postgres integration test,
+  importing `POST` directly and calling it against a real `Request`. Combines
+  `sites-ingest-auth.test.ts`'s real-JWT-signing + JWKS-stub harness (a real
+  RSA keypair via `node:crypto generateKeyPairSync`, a hand-built and
+  genuinely-signed JWT, `vi.stubGlobal("fetch", ...)` standing in for
+  GitHub's JWKS endpoint) with `sites.test.ts`'s real-Postgres
+  fixture/cleanup harness (`hasDb` skip-guard, dynamic imports in
+  `beforeAll`, two self-contained fixture orgs — `orgHappy`, `orgSuspended`
+  — plus a nonexistent-repo string for the 404 case, thorough `afterAll`
+  cleanup). 20 tests, covering the full contract:
+  1. **401 — missing/malformed Authorization header** (3 sub-cases: absent,
+     non-Bearer scheme, malformed token shape).
+  2. **401 — genuinely-signed token, failed claim checks** (4 sub-cases:
+     wrong issuer, wrong audience, non-`main` ref, `job_workflow_ref`
+     outside `presby-site-kit`'s own workflow).
+  3. **401 — tampered signature** (payload's `repository` claim swapped
+     post-signing, same header/signature — signature verification fails).
+  4. **404 — a verified token whose `repository` claim resolves to no
+     `organization_sites` row.**
+  5. **422 — malformed request body**, 7 sub-cases matching `route.ts`'s own
+     `validateBundle()` exactly: invalid JSON, missing `bundle`, unsupported
+     `schemaVersion`, empty `pages`, a malformed page entry (missing
+     `frontMatter`), `images` not an array, a malformed image entry
+     (`contentType: "image/gif"`, outside the three allowed values).
+  6. **422 — an image that fails magic-byte sniffing** (bytes that are not
+     any recognized image format, declared as `image/png`) — also asserts
+     zero `blob_assets` rows were written for the rejected image.
+  7. **200 — full happy path**: response shape
+     (`{status:"ingested",organizationSlug,commitSha,pageCount}`);
+     `organization_sites` queried directly — `status` promoted
+     `provisioning -> live`, `lastIngestedCommitSha`, `lastIngestedAt`,
+     `contentBundleKey` all set correctly; `blob_assets` queried directly —
+     exactly two rows (one `image/png`, one `application/json`), the JSON
+     row's id matches `organization_sites.contentBundleKey`; `audit_events`
+     queried directly — one `site.content_ingested` row, `actorUserId`/
+     `actorEmail` both null, `resourceType: "organization"`, metadata
+     `{repo, commitSha, pageCount, imageCount}` exact match;
+     `revalidatePath` (mocked via `vi.hoisted`) called exactly twice — once
+     `(/site/<slug>, "layout")`, once `(/site/<slug>)` for the one page at
+     `"/"`.
+  8. **200 — idempotency**: a second POST with the same commit sha returns
+     `{status:"already_current",organizationSlug,commitSha}`; confirms
+     `organization_sites.lastIngestedAt`/`contentBundleKey` unchanged,
+     `blob_assets` row count unchanged, `audit_events` row count unchanged
+     (no second audit row), `revalidatePath` not called at all.
+  9. **Suspended-status interaction**: a fresh org is provisioned then
+     admin-suspended (via `setSiteStatus`, no prior ingest), then the route
+     itself performs that org's first-ever ingest — asserts the response is
+     still `200 "ingested"`, but `organization_sites.status` stays
+     `'suspended'` (not resurrected to `'live'`) while
+     `lastIngestedCommitSha`/`contentBundleKey` still advance, and
+     `getPublishedSite()` still returns `not_found` afterward. This is the
+     route-level confirmation (through the real HTTP entry point, not the
+     `sites.ts` primitive directly) that `recordSiteIngest`'s
+     never-resurrects-a-suspended-site fix actually holds end-to-end.
+
+### Divergence from the task's assumptions — none in the contract itself
+
+`route.ts`'s actual response/validation shapes matched the task's
+description exactly (`SitesIngestResponse`'s three variants, the specific
+422 messages, the 401/404/422 status codes) — no test had to be rewritten
+against a different reality than assumed.
+
+One real, non-obvious blocker found and resolved, not a route-logic
+divergence: **`src/lib/audit.ts` imports `@/auth` (-> next-auth) at module
+scope**, and next-auth's own module graph fails to resolve under vitest's
+resolver in this environment (`Cannot find module '.../next/server' ...
+next-auth/lib/env.js`) — unrelated to this feature, a pre-existing
+resolution quirk every other test file that transitively imports
+`src/lib/audit.ts` for real already works around by mocking `@/auth`
+(`admin/organizations/[id]/actions.test.ts` is the existing precedent). The
+route always calls `recordAudit({ actor: null, ... })` — `auth()` itself is
+never invoked at runtime — but the unused import still executes at module
+load time. Fixed by adding `vi.mock("@/auth", () => ({ auth: vi.fn() }))`
+to the new test file only; `recordAudit()`, its real DB write, and
+`AUDIT_ACTIONS` all stay genuinely real and unmocked.
+
+### A concurrency hazard found in verification, not in shipped code
+
+Running `route.test.ts` together with `sites.test.ts` in one `vitest run`
+invocation (multiple files, Vitest's default parallel-file execution) raced
+on `sites.public_render`'s save/restore: both files independently read the
+flag's pre-suite value in their own `beforeAll` and restore it in their own
+`afterAll`, with no lock between them. When they interleave, the second
+file's `beforeAll` can read the flag as `true` (already flipped on by the
+first file, not yet restored) and record that as "original," leaving the
+flag stuck `true` after both `afterAll`s complete — confirmed by direct
+query (`enabled = true` when it should have been `false`), manually
+corrected (`update feature_flags set enabled = false where key =
+'sites.public_render'`), then re-verified by running `route.test.ts` alone
+(the task's own prescribed verification command) three separate times, each
+correctly leaving the flag `false` afterward. This is a pre-existing hazard
+in `sites.test.ts`'s own save/restore design (any second file that also
+mutates this same global flag races it identically) — not introduced by, or
+fixable within the scope of, this commit (`sites.test.ts` is explicitly
+out-of-bounds per the task's instruction). Flagged here rather than silently
+worked around: **do not run `route.test.ts` and `sites.test.ts` together in
+one `vitest run` invocation** until a follow-up gives flag-mutating
+DB-backed suites a lock (e.g. `--no-file-parallelism` for the DB-gated
+group, or a per-test-run-unique flag key). Filed to `docs/TODO.md`.
+
+### Verification (commands run)
+
+- `npx dotenv -e .env.local -- npx vitest run src/app/api/sites/ingest/route.test.ts`
+  → real Postgres, not skipped: **20/20 passed.** Re-run twice more
+  (fresh `Date.now()` stamps each time) to confirm no cross-run
+  interference: 20/20 both times.
+- `npm run typecheck` → clean.
+- `npm run check` → all four tripwires pass (`check:audit`, `check:sql-date`,
+  `check:deps-drift`, `check:brand-scope`).
+- `npm run lint` → clean, zero warnings.
+- `npx vitest run` (full suite, no `dotenv`, matching how CI actually runs
+  it — no `.env.local` loaded) → **1653/1653 passed, 119 skipped** (up from
+  qa's own 1653/1653 + 99 skipped baseline: +20 skipped is exactly this new
+  file's tests, correctly skipping with no `DATABASE_URL`/`PLATFORM_DATABASE_URL`
+  set). Zero regressions anywhere else.
+- **A misleading result investigated, not assumed**: an earlier combined run
+  (`npx dotenv -e .env.local -- npx vitest run` with no file filter — i.e.
+  loading `.env.local` into the WHOLE suite, not scoping it to DB-backed
+  files the way this project's own commands do) reported 3 failures in
+  `src/lib/rate-limit.test.ts`, a file this commit never touched. Root-caused
+  before reporting anything: `.env.local` sets `RATE_LIMIT_DISABLED=true` for
+  real local dev use (`src/lib/rate-limit.ts`'s own documented escape hatch),
+  and `rate-limit.test.ts`'s ordinary (non-escape-hatch) tests don't isolate
+  against that ambient env var — they assume it is unset, which is true under
+  the project's normal `npm test` (no `.env.local` loaded) but false when
+  `.env.local` is loaded across the whole suite. Confirmed by running
+  `rate-limit.test.ts` alone both with and without `dotenv -e .env.local`:
+  fails only with it loaded, passes without, and passes/fails identically
+  whether or not `route.test.ts` exists — pre-existing, environment-scoping
+  fragility, unrelated to this commit. `git status --short` during
+  investigation showed only the one new untracked test file, confirming
+  nothing else had changed. Not fixed here (`rate-limit.test.ts` is out of
+  this task's scope); the correct verification pattern — confirmed against
+  commit 2's own precedent, which scoped `dotenv` to the two DB-backed files
+  it added rather than the whole suite — is `dotenv` scoped per-file, never
+  suite-wide. **Not a new finding** — `docs/TODO.md` already tracked this
+  exact symptom from `2026-08-19-tenant-permissions-portal.md` Phase 4
+  commit 2, mis-diagnosed there as "cross-file pollution... when run
+  alongside a real-DB integration file." That entry is corrected in place
+  (not duplicated) with this commit's actual root cause, confirmed by
+  isolating the variable directly: `DATABASE_URL`/`PLATFORM_DATABASE_URL`
+  set alone (no `.env.local`, no `RATE_LIMIT_DISABLED`) → 15/15 clean;
+  `.env.local` loaded with zero other files present → the same 3 failures
+  reproduce on `rate-limit.test.ts` alone.
+- `scripts/test-rls.sql` as `presby_app` (`psql "$APP_DATABASE_URL" -v
+  ON_ERROR_STOP=1 -f scripts/test-rls.sql`) → **exit 0**, `grep -ci fail` on
+  captured output → `0`. Run three times across this commit's work (before,
+  during, and after the flag-race investigation above) — clean every time
+  once the manually-corrected flag value was in place.
+- Direct DB verification, not inferred from a green test run: after the
+  final `route.test.ts`-alone run, `select count(*) from organizations
+  where slug like 'sites-ingest-route-test-%'` → `0`; same for the fixture
+  granter user's email pattern → `0`; `select count(*) from audit_events
+  where action = 'site.content_ingested'` → `0`; `select key, enabled from
+  feature_flags where key = 'sites.public_render'` → `f` (correctly
+  restored); `select * from presby_roll_cache_drift()` → `0 rows`.
+
+### Handoff
+
+**Next: qa (Phase 5, re-verification).** Gap #1 (this commit) is closed:
+`src/app/api/sites/ingest/route.ts` now has 20 real-Postgres integration
+tests exercising the full contract end-to-end through the real HTTP entry
+point. Gap #2 (no e2e spec for `/site/<slug>`) remains open — out of this
+commit's scope (an integration test, not an e2e spec, was the assignment)
+and still needs its own implementer pass, most likely ux-developer since
+the missing spec covers the render path/`ContactForm`/asset route rather
+than the ingest endpoint. `docs/TODO.md` updated by this commit: one new
+follow-up filed (the `sites.public_render`-flag test-isolation race between
+DB-backed suites that both mutate it) and one existing entry corrected in
+place (`rate-limit.test.ts`'s cross-file failure — real root cause is
+`.env.local`'s `RATE_LIMIT_DISABLED=true` leaking suite-wide, not the
+cross-file DB pollution the original entry guessed).
+
+---
+
+## Commit 5 (ux-developer, Phase 5 loop-back) — e2e spec for `/site/<slug>`
+
+**Date:** 2026-08-20 · **Implementer:** ux-developer
+
+Closes qa's Phase 5 coverage gap #2 (zero e2e coverage existed for
+`/site/<slug>`, this pipeline's own primary user-facing surface).
+
+### Files Created
+
+- `e2e/public-sites.spec.ts` (574 lines) — `test.describe.serial`, 7 cases,
+  run against a real dev server:
+  1. `sites.public_render` flag off, for an org whose site is genuinely
+     `live` underneath → 404 (proves the flag is a real kill switch, not
+     just "an unprovisioned org 404s").
+  2. Flag on + `live` status → 200, and the real staged content actually
+     renders: `presby-site-kit`'s `v0.0.1-stub` output (the page's own
+     front-matter title as an `<h1>`, "Content coming soon.") plus the
+     `page.tsx`-rendered Contact section and ContactForm fields.
+  3. A nonexistent slug → 404; captures the response body as a baseline for
+     cases 4/5.
+  4. `status='provisioning'` → 404, asserted **byte-identical** to case 3's
+     captured baseline (`expect(bodyText).toBe(notFoundBaseline.bodyText)`,
+     not merely two independently-passing 404 checks) — confirmed by direct
+     reading of the assertion, not just the test's name.
+  5. `status='suspended'` → 404, same byte-identical assertion against the
+     same baseline.
+  6. A real ContactForm submission through the browser: confirms the toast,
+     the `site_contact_messages` row (unconditional primary check), and —
+     signed in as `elder.fixture@example.invalid` (Marguerite Ashcombe, the
+     seeded `tickets.file` holder) — that the message is visible on
+     `/o/alder-creek/tickets`'s "Site messages" section (DECISION-089) and
+     that "mark read" both updates the UI and persists to the database
+     (polled directly, not inferred from the optimistic update).
+  7. A filled honeypot field (`#_hp`, reachable by Playwright but never by a
+     real visitor) → the UI shows the same fake success toast by design, but
+     the database confirms no row was created.
+
+  Fixture staging writes directly against `PLATFORM_DATABASE_URL` via
+  `@neondatabase/serverless`'s `neon()` — the same mechanism
+  `e2e/support/seed-orgs.ts` already uses — rather than importing
+  `src/lib/sites.ts`, which is `import "server-only"`-guarded and throws
+  unconditionally under plain Node outside Next's `react-server` condition.
+  Mutates `scripts/seed-dev.sql`'s existing Alder Creek fixture rather than
+  inventing a new org: Alder Creek is the one seeded org with a
+  sign-in-capable `tickets.file` holder (`elder.fixture`), needed for case
+  6's read-side check. Every mutated row (`organization_sites`,
+  `blob_assets`, `site_contact_messages`, three feature flags) is captured
+  before the suite runs and restored — then reconfirmed by direct query,
+  not assumed — in `afterAll`.
+
+### Two real bugs found and fixed in the test itself (not application code)
+
+- **Cleanup ordering**: `afterAll` originally deleted the staged
+  `blob_assets` row before restoring `organization_sites.content_bundle_key`
+  to its original (null) value — `organization_sites_content_bundle_fk`
+  (drizzle/0020) rejected the delete with a live foreign-key violation,
+  caught only by actually running the cleanup, not by reading the
+  migration. Fixed by restoring the site row first, deleting the blob
+  second.
+- **Race condition in case 6's mark-read assertion**: the first draft closed
+  `elderContext` immediately after clicking "mark read," then queried the
+  database and observed `status = 'new'` instead of `'read'` — not because
+  the server action was broken, but because closing a browser context
+  aborts requests still in flight from its pages, and the optimistic UI
+  update (local state, `startTransition`, no success toast to await) can
+  clear the badge before `markSiteContactMessageReadAction`'s own fetch has
+  resolved. Fixed with `expect.poll(...)` against the database, executed
+  before the `finally` block closes the context.
+
+### Verification (commands run — by the orchestrator, independently)
+
+- `npx playwright test e2e/public-sites.spec.ts` against a real dev server
+  → **7/7 passed.**
+- Direct `psql` queries after the run confirmed full cleanup: exactly the
+  single expected `organization_sites` fixture row for `alder-creek`
+  (`status='provisioning'`, `last_ingested_commit_sha` null — its real
+  pre-suite seeded state), `site_contact_messages` count `0`, all three
+  touched flags (`sites.public_render`, `org_portal.tickets`,
+  `auth.require_2fa`) restored to their real original values (`f`, `f`,
+  `t`), `presby_roll_cache_drift()` → 0 rows.
+- Read the file in full, including the assertion bodies for cases 4 and 5,
+  to confirm the "byte-identical" claim in each test name is a genuine
+  literal `toBe()` comparison against the case-3 baseline, not two
+  independently-passing checks that merely both happen to return 404.
+
+### Handoff
+
+**Both Phase 5 coverage gaps are now closed.** Re-running Phase 5 (qa) next
+to confirm and issue a fresh verdict.
 
 ---
 

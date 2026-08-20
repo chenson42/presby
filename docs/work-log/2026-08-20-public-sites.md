@@ -135,7 +135,7 @@ ticket once the mechanism exists.
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-081/082/083/084/085 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -423,21 +423,94 @@ report.*
 
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
+**Approved with suggestions.** The locked architecture needs no
+redesign. One of Phase 1's five priority items surfaced a genuine,
+previously-unnoticed correctness gap — not in this pipeline's design,
+but in the existing Edge gate — that Phase 4 must fix, not merely
+suggest: **`src/proxy.ts` has no bypass for `/site/<slug>` and will
+redirect every anonymous visitor to `/signin`, contradicting
+DECISION-041's own contract.** Everything else confirms and sharpens
+Phase 1's recommendations. Five decisions minted (081–085).
 
 ## Placement
 
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
+- `src/lib/db/domain/sites.ts` — new domain module (`organization_sites`,
+  `site_contact_messages`).
+- `src/lib/sites.ts` — query-layer module, mirroring `directory.ts`/
+  `role-grants.ts`/`tickets.ts`'s established shape.
+- `src/app/api/sites/ingest/route.ts` — **not** `api/webhooks/`; that
+  directory is scoped to third-party inbound webhooks, GitHub Actions
+  OIDC from the platform's own CI is a different trust class.
+- `(public)/site/[slug]/{page,layout}.tsx` — as DECISION-041 already
+  specifies; `layout.tsx` is `check-brand-scope.mjs`'s already-
+  allowlisted, currently-dormant second emitter (DECISION-047/056) —
+  building it activates an existing allowance, not a new violation.
+- Provisioning: a new section on `/admin/organizations/[id]/page.tsx`
+  (reusing `FEATURES.ADMIN_ORGANIZATIONS`, matching how brand config
+  already lives there) plus a new cross-org `/admin/sites` list page
+  for ingest/CI health, same permission, no new `FEATURES` key.
+- Server vs client split: Server Components throughout; the only
+  client island is `ContactForm`'s submit interaction.
+- Dependencies: **yes, one new dependency** — `presby-site-kit`, a
+  pinned-tag git reference, evaluated and approved (DECISION-082).
 
 ## Invariants Touched
 
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
+- **Isolation Is a Database Property** — both new tables FORCE RLS;
+  public reads only through the existing DECISION-041/049 SECURITY
+  DEFINER projection, never a bare grant.
+- **Composite Tenant Keys** — `organization_sites` degenerate (PK =
+  `organization_id`, matching `organization_brands`); `site_contact_
+  messages` genuine composite.
+- **No Role Carries a Wildcard** — no new `FEATURES.*` key;
+  `ADMIN_ORGANIZATIONS` reused.
+- **Permissions vs Flags** — `sites.public_render` is a bare
+  `isFlagEnabled()` rollback switch, not a DECISION-026 auth-critical
+  wrapper (this isn't an auth path; fail-closed-to-404 during a DB
+  blip is the right direction here, unlike login).
+- **The Edge Gate Cannot Reach the Database** — untouched in spirit,
+  but `src/proxy.ts` needs an explicit new anonymous-bypass line
+  before Phase 4 ships (DECISION-085) — without it the feature is
+  broken for every anonymous visitor, not a hypothetical risk.
+- **Brand-scope tripwire** — no new rule needed, just flipping
+  `required: false → true` on the already-allowlisted second emitter
+  once it renders for real.
+- **No Real Data** — mitigated procedurally at `presby-site-kit`'s own
+  creation (its own explicit statement, carried from Phase 1 Gap 9).
 
-## Notes
+## Notes for Phase 3
 
-[Anything Phase 3 must honor.]
+1. Name the table `organization_sites`, not `sites` — avoids
+   colliding with §14's now-superseded identifier.
+2. Both new tables are platform-authorized-write / no-membership-
+   caller tables — `getPlatformDb()` for provisioning (admin operator)
+   and ingest (OIDC machine, both "verified, no membership" callers);
+   the `blob-store.ts`-style trusted-org-context pattern for the
+   anonymous `ContactForm` write, gated on "this org's site is live"
+   in place of a membership check.
+3. **`src/proxy.ts`'s `/site/*` bypass is mandatory, not optional —
+   recommend it land in the same commit that creates
+   `(public)/site/[slug]/`, so the route is never live-but-broken.**
+4. The public brand read for the new layout is new code, not a reuse
+   of `read-org-brand.ts` (which needs a `personId` an anonymous
+   visitor doesn't have) — brand rides as a field of the same
+   published-content projection the page body needs.
+5. `ContactForm`'s read side (who inside the org sees messages) is
+   left open — `tickets.file` is the plausible-but-undecided reuse
+   candidate.
+6. `presby-site-kit`'s own consumability (compiled output in the tag,
+   vs. a build step) needs a concrete answer before Phase 4 can wire
+   the dependency — named as real work, not assumed free.
+7. **Pre-existing drift, not introduced here, but adjacent**:
+   `src/lib/db/domain/assets.ts`'s Drizzle `check()` calls still
+   declare the pre-widening `blob_assets` constraints (PNG/JPEG/WEBP,
+   2MB) even though `drizzle/0019` already widened them for ticket
+   attachments — a `db:push` would silently *revert* the wider
+   constraint. Worth a one-line fix before this pipeline adds a third
+   consumer on top of an already-inconsistent source of truth.
+
+*Recorded by the orchestrator from the read-only architect agent's
+report.*
 
 ---
 

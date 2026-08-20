@@ -3,6 +3,41 @@
 Architectural and implementation decisions for the Claude Code Starter. Newest first. Each decision is numbered; the number does not change once assigned.
 
 ---
+## DECISION-085: `src/proxy.ts` requires an explicit anonymous-bypass for `/site/*`, added before the public-sites feature ships — without it, every anonymous visitor is redirected to `/signin`
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-public-sites` (Phase 2)
+
+Discovered by tracing `src/proxy.ts`'s actual control flow rather than assuming DECISION-041's "`(public)` is unauthenticated by contract" was already enforced at the Edge: `PUBLIC_PATHS` is an exact-match `Set` (no `/site/<slug>` entry, and cannot have one — the slug varies), and no `PROTECTION_RULES` pattern matches `/site/*` either, so an anonymous request falls through to the `edgeAuth()`/`session?.user` check and is redirected to `/signin`. `/api/*` is unconditionally bypassed already (confirmed, no change needed — the ingest endpoint needs nothing), but `(public)/site/[slug]` is a page route, not an API route, and isn't covered by that bypass. Fix: add `if (pathname === "/site" || pathname.startsWith("/site/")) return NextResponse.next();` before the `edgeAuth()` call, mirroring the file's existing `/account/verify-email/` prefix-bypass. Required for Phase 4, not optional — a correctness gap in the existing gate, found before any code was written, not a design choice for this pipeline to make.
+
+---
+## DECISION-084: The ingest endpoint's `SITE_CONTENT_INGESTED` audit write is intentionally outside `check:audit`'s scan scope, following the existing four-precedent pattern; the tripwire itself is not widened
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-public-sites` (Phase 2)
+
+Confirmed by reading `scripts/check-audit-coverage.mjs` directly: it scans only files literally named `actions.ts`/`actions.tsx`, so a route handler's mutation is structurally invisible to it. `src/lib/audit.ts` already documents four instances of exactly this shape (`RATE_LIMIT_BLOCKED`, `EMAIL_QUEUE_PERMANENT_FAILURE`, `ACCESS_DENIED`, `USER_ACCOUNT_LOCKED`), each with an inline comment explaining the gap is intentional. `SITE_CONTENT_INGESTED` (actor `null`, `resourceType: "organization"`, metadata carrying the OIDC-verified repo/commit-sha) follows the same documented-precedent pattern rather than triggering a widening of the tripwire's scan path, which would be unscoped work — retroactively touching every existing route handler, including the `api/webhooks/*` tree DECISION-028 already carves out — that doesn't belong to this pipeline.
+
+---
+## DECISION-083: `ContactForm` submissions land in a new FORCE-RLS tenant table (`site_contact_messages`), not a straight-to-email design; a honeypot field plus IP-keyed rate limiting is the v1 bot mitigation, no CAPTCHA vendor evaluated
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-public-sites` (Phase 2)
+
+Follows DECISION-069/070's identical isolation reasoning — a tenant-scoped reader is needed (a congregation's own role-holder reviewing messages sent to them), so an RLS-less or email-only design is ruled out the same way it was for `tickets`/`feedback`, rather than inventing a new pattern for the one write path that happens to be anonymous. `organizations` has no contact-email column today, so a mail-only design would need to invent one anyway and would lose the audit-visible record and delivery resilience every other write path in this app already gets by landing in a table first. Written via a `blob-store.ts`-style trusted-org-context call, gated on "this org's site is `status = 'live'`" in place of the membership check `withOrgContext()` normally performs — the anonymous-write equivalent of "verify before you trust the org id," since RLS trusts whatever org id it's handed and an anonymous caller could otherwise stuff a message into any UUID by guessing. `checkRateLimit()` needs no change to support an IP-only key (`getRequestIp()`, DECISION-017). No CAPTCHA vendor is evaluated or pre-approved; a honeypot field is judged sufficient for v1, revisit only if real abuse is observed — mirrors DECISION-077's identical "ship the minimal defensible thing" posture. The read side (which tenant role sees submitted messages) is left open for Phase 3, with `tickets.file` as the plausible-but-undecided reuse candidate.
+
+---
+## DECISION-082: `presby-site-kit` is a real, direct npm dependency of `presby` (a pinned-tag git reference), not an external-only repo `presby` never imports
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-public-sites` (Phase 2)
+
+The locked architecture's own framing — "whatever `site-kit` version is currently running inside `presby`," one server rendering every org's content through one versioned component set — only works if `site-kit`'s renderer/component library executes inside `presby`'s own build. Confirmed against this project's dependency-evaluation criteria: Edge runtime isn't a concern (this route needs the DB and is never Edge, per the Edge Gate invariant); bundle size is acceptable (server-rendered, only `ContactForm`'s submit interaction ships client JS); license should be stated explicitly at `site-kit`'s creation (MIT, matching `presby`'s own) rather than inherited by assumption. Pinned to an **exact tag** (`github:<org>/presby-site-kit#v1.2.0`), never a floating branch ref — the git-dependency equivalent of this repo's existing `^`-pinned discipline; `package-lock.json`'s resolved commit SHA is a second independent anchor. One-directional only — `site-kit` and `site-<slug>` repos never depend on `presby`. `site-kit`'s own consumability (compiled output checked into the tag, vs. a build step `presby`'s install must run) is named as real, undecided implementation work for Phase 3/4, not assumed away.
+
+---
+## DECISION-081: The sites-status table is `organization_sites`, shaped like `organization_brands` (degenerate PK, FORCE RLS, no public grant), not named `sites`
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-public-sites` (Phase 2)
+
+Ratifies Phase 1's recommendation after reading `organization_brands`' actual RLS/grant SQL directly (`drizzle/0016_presby_brand_storage.sql`) and confirming DECISION-049's reasoning transfers unmodified: a site's status (`provisioning`/`live`/`suspended`) is the same shape of signal DECISION-040 already ruled must stay hidden, and `organization_brands` already solved exactly this shape once — no public grant, ever, FORCE RLS, `presby_current_org()` policy. Renamed away from `sites` specifically to avoid colliding with `docs/schema-design.md` §14's now-superseded sketch, which used that identifier for an unrelated, much larger DB-composition shape. Columns: `organization_id` (PK, degenerate — one row per org, matching `organization_brands`), `repo`, `status` (`provisioning|live|suspended`), `last_ingested_commit_sha`, `last_ingested_at`, `content_bundle_key`, `updated_by` (nullable, unlike `organization_brands.updated_by` — machine ingest writes have no `users.id` to attribute). Provisioning writes (admin operator) and ingest writes (OIDC-verified machine caller) both use `getPlatformDb()` — both are "verified, no membership" callers, the same shape; the public read never touches this table directly, only through the existing DECISION-041/049 SECURITY DEFINER projection.
+
+---
 ## DECISION-080: Exact role-catalog bindings for `tickets.file`/`ledger.approve`/`pastoral.notes.view` — `support_contact` (Marguerite Ashcombe), `treasurer` (Priya Balakrishnan), `installed_pastor` (Rowan Thistlewood); the `FEATURES.ADMIN_TICKETS` cross-pipeline dependency lands in support-tickets' Phase 4 commit 2 (api-developer), not commit 3 (ux-developer)
 
 **Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-role-catalog` (Phase 3)

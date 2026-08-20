@@ -11,7 +11,8 @@ vi.mock("server-only", () => ({}));
 const mockAuth = vi.hoisted(() => vi.fn());
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+const mockRevalidatePath = vi.hoisted(() => vi.fn());
+vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 
 const mockRecordAudit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/lib/audit", async () => {
@@ -34,7 +35,15 @@ vi.mock("@/lib/storage/blob-store", async () => {
 // --- getPlatformDb(): select chain (existing-row lookup) --------------------
 const mockLimit = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 const mockWhere = vi.hoisted(() => vi.fn().mockReturnValue({ limit: mockLimit }));
-const mockFrom = vi.hoisted(() => vi.fn().mockReturnValue({ where: mockWhere }));
+// revalidateLiveSitePath (this commit's own addition, see actions.ts) chains
+// .from(organizations).leftJoin(organizationSites)....where()....limit() —
+// a SECOND shape off the same .from() return value the pre-existing
+// fetchExistingBrand() chain (.from().where().limit()) already uses. Both
+// methods live on the same mock object so either chain resolves.
+const mockLeftJoin = vi.hoisted(() => vi.fn().mockReturnValue({ where: mockWhere }));
+const mockFrom = vi.hoisted(() =>
+  vi.fn().mockReturnValue({ where: mockWhere, leftJoin: mockLeftJoin }),
+);
 const mockSelect = vi.hoisted(() => vi.fn().mockReturnValue({ from: mockFrom }));
 
 // --- getPlatformDb(): transaction chain -------------------------------------
@@ -64,6 +73,20 @@ const mockGetPlatformDb = vi.hoisted(() =>
 );
 vi.mock("@/lib/db", () => ({ getPlatformDb: mockGetPlatformDb }));
 
+// @/lib/sites — mocked wholesale, same principle as tickets/actions.test.ts
+// mocking @/lib/tickets: the SQL correctness of provisionSite/setSiteStatus
+// is proven by sites.test.ts against a real Postgres connection. This file's
+// own mockGetPlatformDb harness (above) has no `.insert`/`.update` chain
+// configured — those real functions would crash against it if exercised for
+// real here. This also avoids pulling in @/lib/sites' own transitive
+// `next/font/google` import path in a plain Node vitest environment.
+const mockProvisionSite = vi.hoisted(() => vi.fn());
+const mockSetSiteStatus = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/sites", () => ({
+  provisionSite: (...args: unknown[]) => mockProvisionSite(...args),
+  setSiteStatus: (...args: unknown[]) => mockSetSiteStatus(...args),
+}));
+
 // A PRE-EXISTING circular import (org.ts -> schema.ts -> domain/index.ts ->
 // authz.ts -> org.ts) breaks when `@/lib/db/domain/org` is the FIRST module
 // in that cycle to load — authz.ts's top-level `organizationType(...)` call
@@ -81,6 +104,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   setOrganizationBrandAction,
   neutralizeOrganizationBrandAction,
+  provisionSiteAction,
+  setSiteStatusAction,
 } from "./actions";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { FEATURES } from "@/lib/permissions";
@@ -159,6 +184,8 @@ beforeEach(() => {
     contentType: "image/png",
     byteSize: PNG_BYTES.byteLength,
   });
+  mockProvisionSite.mockResolvedValue({ kind: "ok" });
+  mockSetSiteStatus.mockResolvedValue({ kind: "ok" });
 });
 
 // ---------------------------------------------------------------------------
@@ -610,5 +637,175 @@ describe("neutralizeOrganizationBrandAction", () => {
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: { hadBrand: false } }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// provisionSiteAction / setSiteStatusAction (docs/work-log/2026-08-20-
+// public-sites.md Phase 3 "Server actions — call sites") — thin wrappers
+// over @/lib/sites' provisionSite/setSiteStatus, mocked here; SQL
+// correctness lives in sites.test.ts.
+// ---------------------------------------------------------------------------
+
+describe("provisionSiteAction — authorization", () => {
+  it("rejects an unauthenticated caller without calling provisionSite", async () => {
+    mockAuth.mockResolvedValue(null);
+    const result = await provisionSiteAction(
+      formData({ organizationId: VALID_ORG, repo: "presby-churches/site-alder-creek" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockProvisionSite).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in user lacking admin.organizations", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+    const result = await provisionSiteAction(
+      formData({ organizationId: VALID_ORG, repo: "presby-churches/site-alder-creek" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockProvisionSite).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid organizationId without calling provisionSite", async () => {
+    const result = await provisionSiteAction(
+      formData({ organizationId: "not-a-uuid", repo: "presby-churches/site-alder-creek" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockProvisionSite).not.toHaveBeenCalled();
+  });
+});
+
+describe("provisionSiteAction — result mapping", () => {
+  it("passes organizationId, repo, and the acting operator's userId through", async () => {
+    await provisionSiteAction(
+      formData({ organizationId: VALID_ORG, repo: "presby-churches/site-alder-creek" }),
+    );
+    expect(mockProvisionSite).toHaveBeenCalledWith(
+      VALID_ORG,
+      "presby-churches/site-alder-creek",
+      "operator-1",
+    );
+  });
+
+  it("maps invalid_input to a client-visible error, writes no audit row", async () => {
+    mockProvisionSite.mockResolvedValue({
+      kind: "invalid_input",
+      error: 'Enter a repo as "owner/repo".',
+    });
+    const result = await provisionSiteAction(
+      formData({ organizationId: VALID_ORG, repo: "not-a-repo" }),
+    );
+    expect(result).toEqual({ ok: false, error: 'Enter a repo as "owner/repo".' });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("maps already_provisioned to a client-visible error, writes no audit row", async () => {
+    mockProvisionSite.mockResolvedValue({ kind: "already_provisioned" });
+    const result = await provisionSiteAction(
+      formData({ organizationId: VALID_ORG, repo: "presby-churches/site-alder-creek" }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "This organization already has a site provisioned.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("on success, writes SITE_PROVISIONED and revalidates both admin pages", async () => {
+    const result = await provisionSiteAction(
+      formData({ organizationId: VALID_ORG, repo: "presby-churches/site-alder-creek" }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTIONS.SITE_PROVISIONED,
+        resourceType: "organization",
+        resourceId: VALID_ORG,
+        metadata: { repo: "presby-churches/site-alder-creek" },
+      }),
+    );
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/sites");
+  });
+});
+
+describe("setSiteStatusAction — authorization", () => {
+  it("rejects an unauthenticated caller without calling setSiteStatus", async () => {
+    mockAuth.mockResolvedValue(null);
+    const result = await setSiteStatusAction(
+      formData({ organizationId: VALID_ORG, status: "suspended" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockSetSiteStatus).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in user lacking admin.organizations", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+    const result = await setSiteStatusAction(
+      formData({ organizationId: VALID_ORG, status: "suspended" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockSetSiteStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("setSiteStatusAction — input validation and result mapping", () => {
+  it("rejects an invalid organizationId without calling setSiteStatus", async () => {
+    const result = await setSiteStatusAction(
+      formData({ organizationId: "not-a-uuid", status: "suspended" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockSetSiteStatus).not.toHaveBeenCalled();
+  });
+
+  it.each(["provisioning", "", "deleted"])(
+    "rejects a status outside live/suspended (%s) without calling setSiteStatus",
+    async (status) => {
+      const result = await setSiteStatusAction(
+        formData({ organizationId: VALID_ORG, status }),
+      );
+      expect(result).toEqual({ ok: false, error: "Invalid status." });
+      expect(mockSetSiteStatus).not.toHaveBeenCalled();
+    },
+  );
+
+  it("maps not_found to a client-visible error, writes no audit row", async () => {
+    mockSetSiteStatus.mockResolvedValue({ kind: "not_found" });
+    const result = await setSiteStatusAction(
+      formData({ organizationId: VALID_ORG, status: "suspended" }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "This organization has no site provisioned.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("on success (suspend), writes SITE_STATUS_CHANGED, revalidates the admin pages and the public site path", async () => {
+    mockLimit.mockResolvedValue([{ slug: "alder-creek" }]);
+    const result = await setSiteStatusAction(
+      formData({ organizationId: VALID_ORG, status: "suspended" }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mockSetSiteStatus).toHaveBeenCalledWith(VALID_ORG, "suspended", "operator-1");
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTIONS.SITE_STATUS_CHANGED,
+        resourceType: "organization",
+        resourceId: VALID_ORG,
+        metadata: { status: "suspended" },
+      }),
+    );
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/sites");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/site/alder-creek", "layout");
+  });
+
+  it("on success (reactivate), accepts status=live", async () => {
+    const result = await setSiteStatusAction(
+      formData({ organizationId: VALID_ORG, status: "live" }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mockSetSiteStatus).toHaveBeenCalledWith(VALID_ORG, "live", "operator-1");
   });
 });

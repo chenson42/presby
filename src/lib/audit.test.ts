@@ -115,6 +115,12 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // src/app/(org)/o/[slug]/tickets/actions.ts
   TICKET_CREATED: "tenant.ticket.created",
   TICKET_FEEDBACK_PROMOTED: "tenant.ticket.feedback_promoted",
+  // Public sites (2026-08-20) — written from
+  // src/app/(admin)/admin/organizations/[id]/actions.ts and
+  // src/app/api/sites/ingest/route.ts (SITE_CONTENT_INGESTED only, actor null)
+  SITE_PROVISIONED: "site.provisioned",
+  SITE_STATUS_CHANGED: "site.status_changed",
+  SITE_CONTENT_INGESTED: "site.content_ingested",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

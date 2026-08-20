@@ -46,18 +46,28 @@ import { blobAssets } from "@/lib/db/domain/assets";
  */
 
 // Widened by DECISION-071/073 (2026-08-20, support tickets) to admit PDF
-// ticket attachments. This is the shared OUTER bound only — each caller
-// keeps its own narrower magic-byte sniff as the real per-feature gate. The
-// org-brand logo action's sniffImageContentType()/MAX_LOGO_BYTES (2MB,
-// images only) run BEFORE store() and are untouched by this widening, so
-// the logo path accepts nothing new in practice. Mirrors the DB CHECK
+// ticket attachments, and again by DECISION-088 (2026-08-20, public sites)
+// to admit the normalized site content bundle (application/json). This is
+// the shared OUTER bound only — each caller keeps its own narrower
+// magic-byte sniff (or, for the JSON bundle, its own 422-on-malformed-body
+// validation) as the real per-feature gate. The org-brand logo action's
+// sniffImageContentType()/MAX_LOGO_BYTES (2MB, images only) run BEFORE
+// store() and are untouched by either widening, so the logo path accepts
+// nothing new in practice. Mirrors the DB CHECK
 // (blob_assets_content_type_allowed / blob_assets_byte_size_bounds) widened
-// in the same commit, drizzle/0019_presby_ticket_support.sql.
+// in drizzle/0019_presby_ticket_support.sql and again in
+// drizzle/0020_presby_public_sites.sql — this constant had drifted out of
+// sync with the live DB constraint for the application/json case until this
+// commit (src/lib/db/domain/assets.ts's own Drizzle check() calls were fixed
+// in the schema commit, but this module's own ALLOWED_CONTENT_TYPES was not;
+// api-developer's commit 2 needs store() to actually accept
+// "application/json" for the ingest route, so it is fixed here).
 const ALLOWED_CONTENT_TYPES = [
   "image/png",
   "image/jpeg",
   "image/webp",
   "application/pdf",
+  "application/json",
 ] as const;
 type AllowedContentType = (typeof ALLOWED_CONTENT_TYPES)[number];
 

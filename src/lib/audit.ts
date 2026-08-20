@@ -82,6 +82,19 @@ export const AUDIT_ACTIONS = {
   // filing and feedback-promotion are audited.
   TICKET_CREATED: "tenant.ticket.created",
   TICKET_FEEDBACK_PROMOTED: "tenant.ticket.feedback_promoted",
+  // Public sites (2026-08-20, docs/work-log/2026-08-20-public-sites.md) —
+  // written from src/app/(admin)/admin/organizations/[id]/actions.ts
+  // (provisioning/status changes, actor is the signed-in platform operator)
+  // and from src/app/api/sites/ingest/route.ts (SITE_CONTENT_INGESTED only,
+  // actor: null — a machine write, verified by GitHub Actions OIDC, not a
+  // session). DECISION-084: the ingest route's write is intentionally
+  // outside check:audit's scan scope (that tripwire scans only
+  // src/app/**/actions.ts) — the fifth instance of the documented
+  // RATE_LIMIT_BLOCKED/EMAIL_QUEUE_PERMANENT_FAILURE/ACCESS_DENIED/
+  // USER_ACCOUNT_LOCKED precedent pattern above.
+  SITE_PROVISIONED: "site.provisioned",
+  SITE_STATUS_CHANGED: "site.status_changed",
+  SITE_CONTENT_INGESTED: "site.content_ingested",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

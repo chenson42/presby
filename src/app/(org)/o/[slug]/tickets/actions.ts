@@ -13,6 +13,7 @@ import {
   type TicketArea,
   type TicketPriority,
 } from "@/lib/tickets";
+import { markSiteContactMessageRead } from "@/lib/sites";
 import {
   notifyOperatorsOfNewTicket,
   notifyOperatorsOfSubmitterReply,
@@ -362,6 +363,44 @@ export async function dismissFeedbackAction(
 
   // audit-exempt: routine triage disposition; matches feedback/actions.ts's
   // identical precedent (updateFeedbackStatus).
+  revalidatePath(`/o/${slug}/tickets`);
+
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// markSiteContactMessageReadAction — public-sites' ContactForm read side
+// (DECISION-089, docs/work-log/2026-08-20-public-sites.md Phase 3)
+// ---------------------------------------------------------------------------
+
+export async function markSiteContactMessageReadAction(
+  slug: string,
+  messageId: string,
+): Promise<ActionResult> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await markSiteContactMessageRead(
+    identity.personId,
+    identity.organizationId,
+    messageId,
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage site messages here.",
+      };
+    case "not_found":
+      return { ok: false, error: "That message no longer exists." };
+    case "ok":
+      break;
+  }
+
+  // audit-exempt: routine triage, matches dismissFeedbackAction's identical
+  // posture — reading your own inbox is not a security-sensitive mutation
+  // (DECISION-089).
   revalidatePath(`/o/${slug}/tickets`);
 
   return { ok: true };

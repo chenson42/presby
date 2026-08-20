@@ -91,12 +91,26 @@ vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => mockRevalidatePath(...args),
 }));
 
+// @/lib/sites — mocked wholesale, same principle as @/lib/tickets below:
+// markSiteContactMessageRead's SQL correctness is proven by sites.test.ts
+// against a real Postgres connection. Mocking here (rather than letting the
+// real module load) also avoids the real module's `import "server-only"`
+// (this file has no top-level `vi.mock("server-only", ...)`, unlike
+// admin/organizations/[id]/actions.test.ts) and its transitive
+// `next/font/google` import path in a plain Node vitest environment.
+const mockMarkSiteContactMessageRead = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/sites", () => ({
+  markSiteContactMessageRead: (...args: unknown[]) =>
+    mockMarkSiteContactMessageRead(...args),
+}));
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fileTicketAction,
   replyToTicketAction,
   promoteFeedbackAction,
   dismissFeedbackAction,
+  markSiteContactMessageReadAction,
 } from "./actions";
 
 const SESSION = {
@@ -485,6 +499,65 @@ describe("dismissFeedbackAction", () => {
     mockDismissFeedback.mockResolvedValueOnce({ kind: "ok" });
 
     const result = await dismissFeedbackAction("alder-creek", "feedback-1");
+
+    expect(result).toEqual({ ok: true });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/o/alder-creek/tickets");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markSiteContactMessageReadAction (DECISION-089,
+// docs/work-log/2026-08-20-public-sites.md Phase 3)
+// ---------------------------------------------------------------------------
+
+describe("markSiteContactMessageReadAction", () => {
+  it("not signed in returns an error without calling markSiteContactMessageRead", async () => {
+    mockAuth.mockResolvedValueOnce(null);
+
+    const result = await markSiteContactMessageReadAction("alder-creek", "message-1");
+
+    expect(result).toEqual({ ok: false, error: "You must be signed in to do that." });
+    expect(mockMarkSiteContactMessageRead).not.toHaveBeenCalled();
+  });
+
+  it("passes the resolved personId/organizationId and the messageId argument through", async () => {
+    mockMarkSiteContactMessageRead.mockResolvedValueOnce({ kind: "ok" });
+
+    await markSiteContactMessageReadAction("alder-creek", "message-1");
+
+    expect(mockMarkSiteContactMessageRead).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      "message-1",
+    );
+  });
+
+  it("forbidden → ok:false, no audit", async () => {
+    mockMarkSiteContactMessageRead.mockResolvedValueOnce({ kind: "forbidden" });
+
+    const result = await markSiteContactMessageReadAction("alder-creek", "message-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "You don't have permission to manage site messages here.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("not_found → ok:false, no audit", async () => {
+    mockMarkSiteContactMessageRead.mockResolvedValueOnce({ kind: "not_found" });
+
+    const result = await markSiteContactMessageReadAction("alder-creek", "message-1");
+
+    expect(result).toEqual({ ok: false, error: "That message no longer exists." });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("ok → revalidates, never audits (routine triage disposition, DECISION-089)", async () => {
+    mockMarkSiteContactMessageRead.mockResolvedValueOnce({ kind: "ok" });
+
+    const result = await markSiteContactMessageReadAction("alder-creek", "message-1");
 
     expect(result).toEqual({ ok: true });
     expect(mockRecordAudit).not.toHaveBeenCalled();

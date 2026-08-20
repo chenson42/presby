@@ -7,7 +7,9 @@ import { getPlatformDb } from "@/lib/db";
 import {
   organizationBrands,
   organizationBrandHistory,
+  organizations,
 } from "@/lib/db/domain/org";
+import { organizationSites } from "@/lib/db/domain/sites";
 import { FEATURES, hasFeature } from "@/lib/permissions";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { generateBrandTokens, type GeneratedBrand } from "@/lib/brand/generate";
@@ -17,6 +19,7 @@ import {
   BlobValidationError,
   type BlobRef,
 } from "@/lib/storage/blob-store";
+import { provisionSite, setSiteStatus } from "@/lib/sites";
 
 /**
  * The platform operator's brand actions — P0.5 slice c2 (Phase 3 re-run,
@@ -99,6 +102,32 @@ function sniffImageContentType(
 
 function formatMB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * ADDITION beyond DECISION-081/083's own file list, named explicitly per
+ * Phase 3's own instruction: "after either [brand] transaction commits, if
+ * this org has organization_sites.status = 'live', also
+ * revalidatePath(...)" — otherwise a live public site's colours go stale
+ * until the next content ingest, since brand changes and site ingest are two
+ * independent write paths that would otherwise never tell each other's cache
+ * to invalidate. `organization_sites` has no `presby_app` grant at all
+ * (DECISION-081), so this MUST run on the platform connection already in
+ * scope in this file — never `withOrgContext()`.
+ */
+async function revalidateLiveSitePath(
+  platformDb: ReturnType<typeof getPlatformDb>,
+  organizationId: string,
+): Promise<void> {
+  const [row] = await platformDb
+    .select({ slug: organizations.slug, siteStatus: organizationSites.status })
+    .from(organizations)
+    .leftJoin(organizationSites, eq(organizationSites.organizationId, organizations.id))
+    .where(eq(organizations.id, organizationId))
+    .limit(1);
+  if (row?.siteStatus === "live") {
+    revalidatePath(`/site/${row.slug}`, "layout");
+  }
 }
 
 export type PolicyResult = { ok: true } | { ok: false; error: string };
@@ -307,6 +336,7 @@ export async function setOrganizationBrandAction(
   });
 
   revalidatePath(`/admin/organizations/${organizationId}`);
+  await revalidateLiveSitePath(platformDb, organizationId);
 
   if (fileError) {
     return {
@@ -369,6 +399,117 @@ export async function neutralizeOrganizationBrandAction(
   });
 
   revalidatePath(`/admin/organizations/${organizationId}`);
+  await revalidateLiveSitePath(platformDb, organizationId);
+
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Public site provisioning (docs/work-log/2026-08-20-public-sites.md Phase 3
+// "Server actions — call sites") — thin wrappers over src/lib/sites.ts's
+// provisionSite/setSiteStatus; all SQL correctness lives there and is proven
+// by sites.test.ts.
+// ---------------------------------------------------------------------------
+
+/**
+ * FormData fields: `organizationId` (uuid), `repo` ("owner/repo").
+ */
+export async function provisionSiteAction(
+  formData: FormData,
+): Promise<PolicyResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) {
+    return { ok: false, error: "Invalid organization." };
+  }
+  const repo = String(formData.get("repo") ?? "");
+
+  const result = await provisionSite(organizationId, repo, session.user.id);
+  switch (result.kind) {
+    case "invalid_input":
+      return { ok: false, error: result.error };
+    case "already_provisioned":
+      return {
+        ok: false,
+        error: "This organization already has a site provisioned.",
+      };
+    case "ok":
+      break;
+  }
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.SITE_PROVISIONED,
+    resourceType: "organization",
+    resourceId: organizationId,
+    metadata: { repo: repo.trim() },
+  });
+
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  revalidatePath("/admin/sites");
+
+  return { ok: true };
+}
+
+/**
+ * Admin-manual status flips only (suspend / reactivate) — ingest sets
+ * `'live'` itself on a successful commit and never calls this. FormData
+ * fields: `organizationId` (uuid), `status` (`"live"` | `"suspended"`).
+ */
+export async function setSiteStatusAction(
+  formData: FormData,
+): Promise<PolicyResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) {
+    return { ok: false, error: "Invalid organization." };
+  }
+  const status = String(formData.get("status") ?? "");
+  if (status !== "live" && status !== "suspended") {
+    return { ok: false, error: "Invalid status." };
+  }
+
+  const result = await setSiteStatus(organizationId, status, session.user.id);
+  if (result.kind === "not_found") {
+    return {
+      ok: false,
+      error: "This organization has no site provisioned.",
+    };
+  }
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.SITE_STATUS_CHANGED,
+    resourceType: "organization",
+    resourceId: organizationId,
+    metadata: { status },
+  });
+
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  revalidatePath("/admin/sites");
+  // A suspend must take the public page down promptly, not wait for the next
+  // content ingest — unlike the brand-change addition above, this write IS
+  // the site's own status, so the revalidate is unconditional on the new
+  // status rather than gated on "is it currently live" (there is no live
+  // status left to gate on once suspended, and reactivating needs the same
+  // treatment for the opposite reason).
+  const platformDb = getPlatformDb();
+  const [orgRow] = await platformDb
+    .select({ slug: organizations.slug })
+    .from(organizations)
+    .where(eq(organizations.id, organizationId))
+    .limit(1);
+  if (orgRow) {
+    revalidatePath(`/site/${orgRow.slug}`, "layout");
+  }
 
   return { ok: true };
 }

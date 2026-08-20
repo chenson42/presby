@@ -137,7 +137,7 @@ ticket once the mechanism exists.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-081/082/083/084/085 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — split three-commit Implementation Order (database-admin → api-developer → ux-developer); DECISION-086/087/088/089 minted | 2026-08-20 |
-| 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) | In progress — commit 1 of 3 complete | Schema/migration/RLS-test complete, verified against the shared dev database; commits 2/3 not yet started | 2026-08-20 |
+| 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) | In progress — commits 1–2 of 3 complete | Schema/migration/RLS-test complete (commit 1); query layer, OIDC ingest auth, ingest route, all Server Actions, and their tests complete and verified against the shared dev database (commit 2); commit 3 (render path, proxy fix, provisioning UI, site-kit stub repo) not yet started | 2026-08-20 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1586,6 +1586,411 @@ assume it's on). `scripts/seed-dev.sql`'s new Alder Creek
 `organization_sites` row (`status = 'provisioning'`) needs its own isolated
 `INSERT` against an already-seeded dev database, same workaround used here
 — the full file is not idempotently re-runnable.
+
+---
+
+## Commit 2 of 3 (api-developer) — server: query layer, OIDC ingest, actions
+
+**Date:** 2026-08-20 · **Implementer:** api-developer
+
+### Files Created
+
+- `src/lib/sites-ingest-auth.ts` — GitHub Actions OIDC verification
+  (DECISION-087). JWKS fetch + module-level in-memory cache (~1h TTL,
+  mirroring `rate-limit.ts`'s plain-`Map` pattern), signature verification
+  via `node:crypto` (`createPublicKey({format:"jwk"})` +
+  `verify("RSA-SHA256", ...)`) with the algorithm **hardcoded**, never read
+  from the token's own `alg` header. Checks, in order: signature, `exp`,
+  `iss`, `aud` (against `SITES_INGEST_OIDC_AUDIENCE`), `repository_owner`
+  (against `GITHUB_SITES_ORG`), `ref === "refs/heads/main"`, `event_name`
+  (only when present), `job_workflow_ref` prefix match against
+  `<GITHUB_SITES_ORG>/presby-site-kit/.github/workflows/`, and presence of
+  `repository`/`sha`. Returns `{ ok: true, claims: { repository, sha } }` or
+  `{ ok: false, status: 401, error }`. `_resetJwksCacheForTests()` exported
+  for test isolation only.
+- `src/lib/sites.ts` — the query-layer module. Every function from Phase 3's
+  API Contract: `getPublishedSite`, `resolvePublishedOrganization`,
+  `getSiteAdminDetail`, `provisionSite`, `setSiteStatus`, `listSitesForAdmin`,
+  `resolveOrganizationByRepo`, `recordSiteIngest`, `submitSiteContactMessage`,
+  `listSiteContactMessages`, `markSiteContactMessageRead`. Four caller
+  shapes, documented in the module header: (1) the anonymous public read
+  through plain `db` + `presby_published_site()`, no org GUC; (2)
+  platform-authorized no-membership callers (`getPlatformDb()` throughout —
+  `organization_sites` has no `presby_app` grant at all per DECISION-081);
+  (3) the anonymous `ContactForm` write via a hand-rolled
+  `withTrustedOrgContext()` helper mirroring `blob-store.ts`'s own (not
+  imported — that one is private, and the two trust boundaries are
+  independent); (4) the genuine tenant-member read/write via
+  `withOrgContext()`, gated on `tickets.file` through the imported
+  `hasTicketsFile` from `@/lib/tickets` (DECISION-089), the third documented
+  consumer of that exported precedent.
+- `src/app/api/sites/ingest/route.ts` — the ingest route handler. Verifies
+  OIDC, checks `sites.public_render` (503 if off — a disabled feature
+  rejects ingest too, not just the read path), resolves the org by repo,
+  short-circuits on a repeat commit sha (`"already_current"`, no writes),
+  validates the bundle shape (422 on anything malformed), sniffs each
+  image's magic bytes (never trusts the declared `contentType`), stores
+  images then the composed JSON bundle via `getBlobStore().store()`, calls
+  `recordSiteIngest()`, writes `SITE_CONTENT_INGESTED` (`actor: null`),
+  fires `revalidatePath` on the layout and every page path, returns the
+  `SitesIngestResponse` shape exactly as specified.
+- `src/app/(public)/site/[slug]/actions.ts` — `submitContactMessageAction`.
+  Honeypot check (fake `ok:true`, no rate-limit consumption, no DB write, if
+  filled) → IP-and-slug-keyed `checkRateLimit()` (5/hour, mirrors
+  `(password-reset)/actions.ts`'s exact precedent) → `submitSiteContactMessage()`.
+  No `auth()` anywhere in this file — every caller is anonymous by
+  construction. No audit event (matches `replyToTicket`'s "conversation, not
+  a security-sensitive mutation" precedent).
+- `src/app/(public)/site/[slug]/actions.test.ts` — mocked orchestration
+  tests (11 tests): honeypot short-circuit (including the whitespace-only
+  case, which trims to empty and is correctly NOT treated as filled),
+  rate-limit keying and the blocked-path copy, and full result-kind mapping.
+- `src/lib/sites-ingest-auth.test.ts` — 26 tests. **Positive case**: a real
+  RSA keypair (`node:crypto generateKeyPairSync`), a hand-built and
+  genuinely-signed JWT (manual base64url header/payload + `crypto.sign`),
+  the public key served as a JWK from a `vi.stubGlobal("fetch", ...)`
+  stand-in for GitHub's JWKS endpoint — no JWT library, per DECISION-087.
+  Also covers "no `event_name` claim" and "a different site-kit tag in
+  `job_workflow_ref`" as positive cases. **Negative paths**, each with its
+  own dedicated test rather than one generic "rejects bad input": missing/
+  malformed Authorization header, malformed token shape, invalid JSON
+  segments, a tampered signature (payload altered post-signing), a token
+  signed by a *different* private key under the *same* `kid`, an unknown
+  `kid`, a header that declares `alg: "none"` while the token is still
+  genuinely RS256-signed (proves the hardcoded-algorithm property directly,
+  not just "a bad token is rejected"), expired token, missing `exp`, wrong
+  `iss`, wrong `aud`, `SITES_INGEST_OIDC_AUDIENCE` unset server-side, wrong
+  `repository_owner`, non-`main` `ref`, `pull_request` `event_name`, a
+  `job_workflow_ref` outside `presby-site-kit`'s own workflow (same org,
+  wrong repo, and a different org's `presby-site-kit` fork — two distinct
+  cases), missing `repository`/`sha` claims, a failing/non-OK JWKS fetch.
+  Plus one JWKS-caching test (a second verification within the TTL does not
+  re-fetch).
+- `src/lib/sites.test.ts` — 33 real-Postgres integration tests, following
+  `tickets.test.ts`'s harness shape exactly (`hasDb` skip-guard, dynamic
+  imports in `beforeAll`, self-contained fixture teardown in `afterAll`).
+  Four fixture orgs (`orgLive` — provisioned, ingested, a real JSON bundle
+  stored via `getBlobStore()`; `orgProvisioning` — provisioned, never
+  ingested; `orgSuspended` — provisioned, ingested, then admin-suspended;
+  `orgUnprovisioned` — no `organization_sites` row at all) plus a
+  nonexistent-slug string. Covers: `getPublishedSite()`'s enumeration-safety
+  property across all five miss cases plus the flag-off case, each asserted
+  as byte-identical `{ kind: "not_found" }` — the task's own "single most
+  important test in this commit"; `resolvePublishedOrganization()`'s cheaper
+  form; `recordSiteIngest`/`resolveOrganizationByRepo`'s idempotency
+  primitive (documented as a primitive, not the full route-handler
+  short-circuit — see Implementer Notes); `provisionSite`/`setSiteStatus`/
+  `getSiteAdminDetail`/`listSitesForAdmin` round trips including
+  `already_provisioned` and `not_found`; `submitSiteContactMessage()`
+  rejected for every non-live reason (provisioning, suspended, never
+  provisioned, nonexistent slug) plus its own input validation; and
+  `listSiteContactMessages`/`markSiteContactMessageRead`'s `tickets.file`
+  permission gate and enumeration discipline. `sites.public_render` is
+  flipped on for the suite's own duration and restored in `afterAll` — see
+  Verification below for confirmation nothing leaked into the shared dev
+  database.
+
+### Files Modified
+
+- `src/lib/storage/blob-store.ts` — `ALLOWED_CONTENT_TYPES` widened to add
+  `"application/json"`. **Not named in Phase 3's own file list for this
+  commit — a gap found while implementing, not invented scope.** DECISION-088
+  widened the DB CHECK and `src/lib/db/domain/assets.ts`'s Drizzle `check()`
+  calls (both commit 1), but `blob-store.ts`'s own `ALLOWED_CONTENT_TYPES`
+  constant — the actual runtime guard `store()` enforces — was never touched,
+  so `getBlobStore().store({ contentType: "application/json", ... })` would
+  have thrown `BlobValidationError` for every ingest call. Fixed here since
+  this commit is the first real caller.
+- `src/lib/audit.ts` — three new `AUDIT_ACTIONS` keys:
+  `SITE_PROVISIONED` (`"site.provisioned"`), `SITE_STATUS_CHANGED`
+  (`"site.status_changed"`), `SITE_CONTENT_INGESTED`
+  (`"site.content_ingested"`, DECISION-084 — the fifth documented instance
+  of an audit write outside `check:audit`'s scan scope).
+- `src/lib/audit.test.ts` — the `AUDIT_ACTIONS` catalog regression guard's
+  `EXPECTED_ENTRIES`/count updated with the three new keys (this test asserts
+  an exact catalog shape; it fails on any addition that isn't reflected here
+  by design).
+- `src/app/(admin)/admin/organizations/[id]/actions.ts` — two new actions,
+  `provisionSiteAction`/`setSiteStatusAction`, thin wrappers over
+  `sites.ts`'s `provisionSite`/`setSiteStatus` (auth + `FEATURES.
+  ADMIN_ORGANIZATIONS`, `recordAudit`, `revalidatePath` on both
+  `/admin/organizations/[id]` and the new `/admin/sites`). Also: a new
+  `revalidateLiveSitePath()` helper, called from the end of both the
+  **existing** `setOrganizationBrandAction`/`neutralizeOrganizationBrandAction`
+  — exactly Phase 3's own named instruction — so a live public site's colours
+  don't go stale until the next content ingest. **One deliberate addition
+  beyond Phase 3's literal instruction**: `setSiteStatusAction` itself also
+  revalidates `/site/<slug>` unconditionally on success (not gated on "is it
+  currently live", since the write IS the site's own status) — Phase 3 named
+  the revalidation for brand changes but not for a direct suspend/reactivate,
+  which left a suspended site's public page serving stale cached HTML
+  indefinitely (no natural revalidation trigger exists for "an admin just
+  suspended this"). See Implementer Notes for the full reasoning; flagged
+  here as scope added beyond the letter of the design, not silently folded
+  in.
+- `src/app/(admin)/admin/organizations/[id]/actions.test.ts` — extended:
+  `@/lib/sites` mocked wholesale (`provisionSite`/`setSiteStatus`), the
+  `mockGetPlatformDb` select chain extended with a `leftJoin` branch for
+  `revalidateLiveSitePath`'s query shape, 16 new tests for
+  `provisionSiteAction`/`setSiteStatusAction` (authorization, input
+  validation, every result-kind mapping, the audit write's exact metadata,
+  and the site-path revalidation on both provision-time and status-change
+  paths).
+- `src/app/(org)/o/[slug]/tickets/actions.ts` — one new action,
+  `markSiteContactMessageReadAction`, thin wrapper over `sites.ts`'s
+  `markSiteContactMessageRead`, same `resolveActingIdentity(slug)` helper
+  this file already has, audit-exempt (matches `dismissFeedbackAction`'s
+  identical posture per DECISION-089).
+- `src/app/(org)/o/[slug]/tickets/actions.test.ts` — extended: `@/lib/sites`
+  mocked wholesale (the real module was never reachable from this file
+  before — see Implementer Notes), 5 new tests for
+  `markSiteContactMessageReadAction`.
+- `.env.example` — documented `SITES_INGEST_OIDC_AUDIENCE` and
+  `GITHUB_SITES_ORG`, both required for the ingest route to accept any
+  token.
+
+### API Endpoints / Server Actions (contract for commit 3 / qa)
+
+- **`POST /api/sites/ingest`** — route handler, GitHub Actions OIDC auth
+  (no session). Request/response shapes exactly as Phase 3 specified (see
+  that section above — unchanged by this commit). Requires
+  `SITES_INGEST_OIDC_AUDIENCE` and `GITHUB_SITES_ORG` env vars set, or every
+  token is rejected 401.
+- **`submitContactMessageAction(slug: string, formData: FormData): Promise<ActionResult>`**
+  — `src/app/(public)/site/[slug]/actions.ts`. No auth gate (anonymous by
+  design). Expects `formData` fields `name`, `email`, `body`, and a hidden
+  honeypot field named `_hp`.
+- **`markSiteContactMessageReadAction(slug: string, messageId: string): Promise<ActionResult>`**
+  — `src/app/(org)/o/[slug]/tickets/actions.ts`. Gate: signed-in + active
+  membership + `tickets.file`.
+- **`provisionSiteAction(formData: FormData): Promise<PolicyResult>`** —
+  `src/app/(admin)/admin/organizations/[id]/actions.ts`. Gate:
+  `FEATURES.ADMIN_ORGANIZATIONS`. `formData` fields: `organizationId` (uuid),
+  `repo` (`"owner/repo"`).
+- **`setSiteStatusAction(formData: FormData): Promise<PolicyResult>`** —
+  same file/gate. `formData` fields: `organizationId` (uuid), `status`
+  (`"live"` | `"suspended"`).
+- **Query-layer functions commit 3's pages call directly** (not Server
+  Actions): `getPublishedSite(slug)`, `resolvePublishedOrganization(slug)`,
+  `getSiteAdminDetail(organizationId)`, `listSitesForAdmin()`,
+  `listSiteContactMessages(viewerPersonId, organizationId)` — exact
+  signatures in `src/lib/sites.ts`, unchanged from Phase 3's own contract
+  except the one addition named below.
+
+### Audit Events
+
+- `SITE_PROVISIONED` — written from `provisionSiteAction` on success.
+  `resourceType: "organization"`, `resourceId: organizationId`,
+  `metadata: { repo }`.
+- `SITE_STATUS_CHANGED` — written from `setSiteStatusAction` on success.
+  `resourceType: "organization"`, `resourceId: organizationId`,
+  `metadata: { status }`.
+- `SITE_CONTENT_INGESTED` — written from the ingest route on every
+  successful (non-`already_current`) ingest. `actor: null` (machine write),
+  `resourceType: "organization"`, `resourceId: organizationId`,
+  `metadata: { repo, commitSha, pageCount, imageCount }`. Outside
+  `check:audit`'s scan scope by design (DECISION-084) — confirmed still true
+  after this commit (`npm run check:audit` passes with the route handler
+  present, per Verification below).
+- `markSiteContactMessageReadAction` / `submitContactMessageAction` —
+  deliberately NOT audited, per DECISION-089 and the "conversation, not a
+  security-sensitive mutation" precedent respectively.
+
+### Seed / `FEATURES` Changes
+
+- None beyond commit 1's `sites.public_render` flag row (seeded `false`).
+  No new `FEATURES.*` key (both new admin actions reuse
+  `FEATURES.ADMIN_ORGANIZATIONS`, per Phase 3).
+
+### Verification (commands run, not just "passed")
+
+- `npm run typecheck` → clean, no errors.
+- `npm run check` → all four tripwires pass: `check:audit` ("Audit-coverage
+  check passed" — confirmed this still holds with the ingest route handler
+  present, per DECISION-084's own prediction, not just assumed),
+  `check:sql-date`, `check:deps-drift`, `check:brand-scope` (still reports
+  the commit-3 `(public)/site/[slug]/layout.tsx` emitter as `dormant`,
+  unchanged — expected, that file doesn't exist yet).
+- `npx vitest run` (full existing + new unit suite, mocked/no-DB) → **89
+  files / 1616 tests passed, 5 files / 98 tests skipped** (the two new
+  DB-gated files — `sites.test.ts`, and the pre-existing DB-gated set —
+  correctly skip with no `DATABASE_URL`/`PLATFORM_DATABASE_URL` set).
+- `dotenv -e .env.local -- npx vitest run src/lib/sites.test.ts src/lib/sites-ingest-auth.test.ts`
+  → **real Postgres, not skipped: 59 / 59 tests passed** (33 in
+  `sites.test.ts`, 26 in `sites-ingest-auth.test.ts`).
+- `npm run lint` → clean, zero warnings (`--max-warnings=0`).
+- `npm run build` → succeeds. `/api/sites/ingest` appears in the route table
+  as a dynamic route; no `(public)/site/[slug]` page route yet (correctly —
+  that's commit 3's, and no `page.tsx` exists in this commit).
+- **Test-fixture cleanup, checked directly against the shared dev database,
+  not assumed from a green test run** — per the task's explicit instruction,
+  since this session has twice previously reported a false "pre-existing"
+  failure that was actually leftover fixture data:
+  - First `sites.test.ts` run failed inside its own `afterAll` (a
+    `group_memberships_person_fk` violation from deleting `memberships`
+    directly, out from under drizzle/0017's own materialization trigger —
+    the exact failure mode `tickets.test.ts`'s afterAll avoids by never
+    doing it). This DID leave four fixture orgs, one fixture user, and two
+    fixture people behind — confirmed with a direct query
+    (`select id, slug, name, created_at from organizations where slug like
+    'sites-test-%'`) before assuming anything, not inferred from the test's
+    own "passed"/"failed" status.
+  - Fixed the afterAll to mirror `tickets.test.ts`'s own minimal shape
+    (delete only `organizations`; cascade handles `organization_sites`,
+    `site_contact_messages`, `memberships`, `groups`, `app_roles`,
+    `role_grants`) and re-ran: **59/59 passed, afterAll included**.
+  - Manually cleaned the four leftover orgs / one user / two people from the
+    FIRST (failed-cleanup) run — confirmed by their distinct timestamp
+    (`stamp`) suffix in the slug, different from the second run's — via
+    direct `DELETE` against `MIGRATE_DATABASE_URL`.
+  - Re-ran the suite a THIRD time after cleanup to confirm the fixed
+    `afterAll` leaves nothing behind on a clean database: **59/59 passed**,
+    then verified directly: `select count(*) from organizations where slug
+    like 'sites-test-%'` → `0`; `select key, enabled from feature_flags
+    where key = 'sites.public_render'` → `f` (restored to its pre-suite
+    value, not left `true`).
+  - `select count(*) from organization_sites` → `1` — investigated rather
+    than assumed: this is commit 1's own committed `scripts/seed-dev.sql`
+    fixture row (Alder Creek, `status = 'provisioning'`), not test leakage —
+    confirmed by joining to `organizations.slug = 'alder-creek'`.
+  - `select count(*) from site_contact_messages` → `0`, clean.
+- Ran `scripts/test-rls.sql` as `presby_app` AFTER all of the above:
+  `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql` →
+  **exit 0**, `grep -ci fail` on the captured output → `0`. Section 16 (from
+  commit 1) still passes cleanly against the now-cleaned database, including
+  its own `presby_published_site()` no-org-GUC assertions.
+
+### Implementer Notes
+
+- **`imageKeys` added to `PublishedSite`, beyond Phase 3's literal
+  interface — the single most substantive divergence in this commit,
+  flagged explicitly per the task's own instruction.** Phase 3's
+  `renderSiteBundle()` signature (in the "`presby-site-kit` consumability"
+  section) takes an `imageUrl: (manifestKey: string) => string` builder that
+  `page.tsx` (commit 3) must construct, and the asset route
+  (`assets/[key]/route.ts`, also commit 3) resolves `[key]` as a literal
+  `blob_assets.id` via `getBlobStore().resolve()`. But content only ever
+  references a stable `manifestKey`, and the manifestKey -> blobKey map
+  (`recordSiteIngest`'s own stored bundle shape,
+  `{ schemaVersion, pages, imageKeys }`) was never exposed on
+  `GetPublishedSiteResult`'s `PublishedSite` interface as Phase 3 wrote it.
+  Without exposing it, commit 3's `page.tsx` has no way to build that
+  closure at all — this reads as a real gap in the design doc's own
+  interface, not a case where the code should follow the letter over
+  a schema conflict. Resolved by ADDING the field (never narrowing anything
+  Phase 3 specified) and documenting the reasoning inline in
+  `src/lib/sites.ts`'s own doc comment on the field. Named here so
+  ux-developer isn't guessing at where this map comes from.
+- **`src/lib/storage/blob-store.ts`'s `ALLOWED_CONTENT_TYPES` was still
+  missing `"application/json"` going into this commit** — DECISION-088 and
+  commit 1's own widening touched the DB CHECK and
+  `src/lib/db/domain/assets.ts`'s Drizzle `check()` calls, but not this
+  runtime constant, which is what `store()` actually enforces. Not named in
+  Phase 3's file list for this commit (it's not listed as a commit-2 file at
+  all) — found only because this commit is the first real caller of
+  `store({ contentType: "application/json" })`. Fixed here rather than
+  filed as a follow-up, since leaving it would have made the ingest route
+  DOA on its very first real call.
+- **`src/lib/brand/fonts.ts`'s `resolveTypePairing` import made dynamic,
+  not static, inside `getPublishedSite()`** — a real, load-bearing
+  discovery, not a style preference. `fonts.ts` calls `next/font/google` at
+  MODULE SCOPE, which only resolves under Next's own compiler; a static
+  top-level import in `sites.ts` crashes at module-load time under plain
+  Node/vitest (`TypeError: Lora is not a function`) — this is not
+  hypothetical, it broke BOTH existing mocked `actions.test.ts` files the
+  moment they gained a real (even partially real) transitive import of
+  `sites.ts`, and it would have made `sites.test.ts` itself unable to import
+  its own subject module at all, regardless of whether any test body ever
+  exercised the brand branch. `read-org-brand.ts` has the identical static
+  import today and has simply never been hit by this, because — checked
+  directly, not assumed — no test file in this codebase imports it, even
+  transitively. Fixed here with a type-only import
+  (`import type { ResolvedTypePairing }`, erased at compile time, zero
+  runtime cost) plus a scoped `await import("@/lib/brand/fonts")` only
+  inside the one branch that needs it. Behaviourally identical in the real
+  Next.js server process (Next compiles the whole module graph regardless of
+  whether an import is static or dynamic); this is a testability fix, not a
+  behavior change. **Flagged as a candidate follow-up for
+  `read-org-brand.ts` too**, since the same crash is now one accidental test
+  import away there as well — not fixed in this commit, since that file is
+  P0.5's, not this pipeline's, and touching it wasn't in scope.
+- **Two existing mocked `actions.test.ts` files required scaffolding
+  changes, not just new test additions, because of the new `@/lib/sites`
+  import** — both `admin/organizations/[id]/actions.test.ts` (needed
+  `@/lib/sites` mocked wholesale, plus a `leftJoin` branch added to the
+  existing `mockGetPlatformDb` select-chain scaffold for
+  `revalidateLiveSitePath`'s own query shape) and `tickets/actions.test.ts`
+  (needed `@/lib/sites` mocked wholesale — this file had NO top-level
+  `vi.mock("server-only", ...)` at all before this commit, because every
+  real module it transitively touched was already mocked at the `@/lib/X`
+  boundary; the real `sites.ts`, unmocked, was the first module in this
+  file's graph to actually load `"server-only"` for real). Both confirmed
+  passing with the exact same assertions plus the new ones, not weakened.
+- **`recordSiteIngest`'s "ingest never sets 'suspended', only an admin
+  action does" was implemented as "ingest always writes 'live'
+  unconditionally"** — including on top of a prior `'suspended'` status,
+  flagged at length in the implementer's own doc comment as a named tension
+  rather than silently shipped. **The orchestrator judged this too real to
+  defer to Phase 6 and fixed it before commit**: an admin-suspended site is
+  a live moderation control, not a display preference, and one an ordinary
+  content commit could silently reverse isn't a control at all — the
+  obvious, conservative interpretation (`status` stays exactly where an
+  admin left it until an admin action moves it again; ingest still promotes
+  `provisioning → live` on first success; bundle/commit metadata still
+  advances regardless of status, so un-suspending later serves current
+  content) needed no rule Phase 3 hadn't already implied. A new regression
+  test (`recordSiteIngest never resurrects a suspended site...`,
+  `src/lib/sites.test.ts`) confirms status is preserved, content metadata
+  still advances, and the public read stays a uniform `not_found` — 34/34
+  passing after the fix, up from 33.
+- **`setSiteStatusAction` revalidates `/site/<slug>` on every status change,
+  not just when the org happens to currently be live** — beyond Phase 3's
+  own named file-list instruction (which only named the brand-action
+  addition). Justified because a suspend that doesn't invalidate the cached
+  public page is a real, not hypothetical, "an admin thought they took a
+  site down and it's still visible" bug — the highest-consequence gap this
+  commit found in the design doc's own prose. See the actions.ts inline
+  comment for the reasoning against the brand-action case (which IS gated on
+  current live status, per Phase 3's own instruction, since there the write
+  isn't about the site's status at all).
+- **`provisionSite()` maps a `repo` unique-constraint violation
+  (`organization_sites_repo_unique`) to `invalid_input`** rather than
+  letting a raw `23505` surface as an unhandled exception — not a named
+  `ProvisionSiteResult` kind in Phase 3, and not a new kind invented here;
+  reuses the existing `invalid_input` variant with a specific message. A
+  real gap (two orgs racing to provision the same typo'd repo string) that
+  Phase 3's Edge Cases section names as unsolved for the *existence* check
+  but not for the *uniqueness* check.
+- **Did not touch** `src/proxy.ts`, any `(public)/site/[slug]/{page,layout}.tsx`
+  or the assets route, `/admin/organizations/[id]/page.tsx` or
+  `/admin/sites/page.tsx`, `scripts/check-brand-scope.mjs`'s `EMITTERS[1]`
+  flip, or the `presby-site-kit` stub repo — all explicitly out of scope for
+  this commit, all commit 3's (ux-developer).
+
+### Handoff
+
+**Next: ux-developer (commit 3 of 3).** Everything commit 3 needs is now
+live and tested: `src/lib/sites.ts` exports the full query-layer surface
+(including the `imageKeys` addition on `PublishedSite` — read that field's
+own doc comment before wiring `renderSiteBundle()`'s `imageUrl` builder, it
+exists specifically to make that closure possible); `POST
+/api/sites/ingest` is live (needs `SITES_INGEST_OIDC_AUDIENCE` and
+`GITHUB_SITES_ORG` set in the environment before any real ingest will
+succeed — both are currently undocumented-but-required in every deployed
+environment, `.env.example` names them); `submitContactMessageAction` is
+ready for `contact-form.tsx` to call via a form action;
+`provisionSiteAction`/`setSiteStatusAction` are ready for the new "Site"
+section on `/admin/organizations/[id]`;
+`markSiteContactMessageReadAction`/`listSiteContactMessages` are ready for
+the third section on `/o/<slug>/tickets`. Remember `src/proxy.ts`'s
+`/site/*` bypass (DECISION-085) is still outstanding — the render path will
+be live-but-broken (redirecting every anonymous visitor to `/signin`) until
+that diff lands, and Phase 2/3 both say it must land in the SAME commit as
+the page tree, not after. Also remaining: the `presby-site-kit` stub repo
+(`v0.0.1-stub` tag) and pointing `package.json`/`package-lock.json` at it —
+`page.tsx` cannot be written against a real import until that exists.
+`scripts/check-brand-scope.mjs`'s `EMITTERS[1].required` flip to `true`
+happens once `layout.tsx` exists and renders `<BrandTokens>` for real.
 
 ---
 

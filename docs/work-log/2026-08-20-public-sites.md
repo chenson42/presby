@@ -139,7 +139,7 @@ ticket once the mechanism exists.
 | 3 — Technical design | tech-lead | Complete | Design complete — split three-commit Implementation Order (database-admin → api-developer → ux-developer); DECISION-086/087/088/089 minted | 2026-08-20 |
 | 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) → api-developer (commit 4, Phase 5 loop-back) → ux-developer (commit 5, Phase 5 loop-back) | Complete — 5 of 5 commits done | Schema/migration/RLS-test complete (commit 1); query layer, OIDC ingest auth, ingest route, all Server Actions, and their tests complete and verified against the shared dev database (commit 2); render path, `src/proxy.ts` fix, provisioning UI, `/admin/sites`, the ContactForm read-side section, the real `presby-site-kit` stub repo, and their tests — all complete, verified against a real running dev server in a real browser, and cross-checked against `test-rls.sql`/`presby_roll_cache_drift()` with zero leftover fixture data (commit 3); real-Postgres integration test for the ingest route handler closing qa's coverage gap #1, 20 tests, verified three times with clean DB state each time (commit 4); e2e spec closing qa's coverage gap #2, 7 tests against a real dev server, verified against real staged content and a real ContactForm round trip, independently re-run by the orchestrator (commit 5) | 2026-08-20 |
 | 5 — Verification | qa | Complete | FAIL (first pass, two coverage gaps) → PASS (re-verification after commits 4/5 closed both gaps) | 2026-08-20 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-08-20 |
 
 ---
 
@@ -3014,34 +3014,70 @@ blocker — do not run two flag-mutating DB-backed suites in the same
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Date:** 2026-08-20
+**Verified by:** analyst
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> The shipped feature delivers exactly the architecture Phase 1 through 3 negotiated — anonymous git-staged public sites, OIDC-gated ingest, enumeration-safe everywhere, dark behind `sites.public_render` — and it is genuinely well-tested (unit, real-Postgres integration, and e2e, independently re-verified twice by qa); the gaps found at this phase are process/documentation housekeeping the pipeline's own Phase 3 design promised and didn't deliver, not functional defects.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The core render path is real, not a mock.** `src/app/(public)/site/[slug]/page.tsx` calls `getPublishedSite()`, which reads through `presby_published_site()` — a SECURITY DEFINER function independently confirmed to collapse "never provisioned," "suspended," "nonexistent slug," and "org inactive" into the same zero-row result (read `drizzle/0020_presby_public_sites.sql` directly, section 4). `src/app/api/sites/ingest/route.ts` matches Phase 3's contract almost verbatim — OIDC verification first, then the `sites.public_render` flag check (503, not silent), then org resolution, idempotency short-circuit, bundle validation, per-image magic-byte sniffing, blob storage, `recordSiteIngest`, audit write, dual revalidation. Read in full, independently — matches.
+- **The grant asymmetry is real, not documentation.** `organization_sites` has no `presby_app` grant at all in the migration — the only tenant-connection path to that table is `presby_published_site()`'s `EXECUTE` grant. qa independently confirmed this with a live `permission denied` query, twice, across both Phase 5 passes.
+- **The `src/proxy.ts` fix (DECISION-085) landed correctly and was verified as its own step** — a real, pre-existing correctness gap caught by the architect before any code was written, proven with a unit test asserting `edgeAuth()` is never called for `/site/*`.
+- **Enumeration safety is proven at every layer** — SQL, unit, integration, and e2e (a literal `toBe()` byte-identical comparison across nonexistent/provisioning/suspended, not three independently-passing 404s that happen to agree).
+- **The `recordSiteIngest` suspended-site-resurrection catch was real and was caught before it shipped**, covered by both a unit regression test and the commit-4 route-level integration test.
+- **Two genuine defects were found and fixed during the Phase 5 loop-back** (a foreign-key-violating cleanup order and an optimistic-UI/DB-poll race in the new e2e spec) — caught by actually running the tests against real infrastructure.
+- **The DECISION-041/§14 conflict Phase 1 flagged was actually resolved**, not just noted — the appended correction on DECISION-041 explicitly states the routing/security contract stands, the DB-composition model is superseded, and "P4 the church's site editor" does not survive in any form.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1: no new tenant permission for `/site/<slug>`, gated purely on a status check. Shipped: exactly that. **Matches.**
+- Phase 1: recommend `sites.public_render` as a rollback flag. Shipped: seeded `false`, gates both the render path and the ingest endpoint (503 on ingest when off — a deliberate strengthening beyond what Phase 1 asked for). **Matches, with a deliberate improvement.**
+- Phase 1 Gap 3 (highest-value): `ContactForm` needs its own destination, IP-based rate limiting, bot mitigation. Shipped: a new FORCE-RLS table, honeypot + IP/slug-keyed rate limiting, a tenant read side gated on `tickets.file`, tested end-to-end including a real anonymous browser submission read back by a real signed-in fixture user. **Matches.**
+- Phase 1 Gap 5: the unpublished/nonexistent/suspended response needs a deliberate, uniform answer. Shipped: proven uniform at four layers. **Matches, exceeds the bar.**
+- Phase 1 Gap 6: a sibling table shaped like `organization_brands`, forward-`presby_app`-readable. Shipped: shaped like `organization_brands` for FORCE RLS/no-public-grant, but deliberately *without* a forward-looking `presby_app` SELECT grant, because Phase 1's own Open Question 1 (does P4 survive?) was answered "no" before Phase 3 designed the table. **Acceptable, reasoned drift** — named explicitly in DECISION-081/the design doc, not a silent narrowing.
+- Phase 1 Open Question 3: are `site-<slug>` content repos public or private? **Not resolved anywhere in this pipeline.** No real `site-<slug>` repo exists yet — correctly out of scope, but a real gap against the enumeration-safety guarantee once a real repo exists: a suspended/de-tenanted org's content would stay readable directly on GitHub if that repo is public, even though `/site/<slug>` correctly 404s. **Genuine gap, needs an owner before real provisioning** — see Follow-Ups.
+- Phase 3's own Implementation Order (commit 3, item 9) named "release notes entry + functionality-map update, at ship time per Rule 14" as in-scope. **Not shipped** — confirmed by reading the functionality map directly: it still says "sites not designed" and "P3, not built," both now false. No release-notes entry exists for this pipeline. **Regression against the pipeline's own design doc** — the Phase 6 backstop this phase exists to catch; corrected as part of this Phase 6's own housekeeping (see below).
+- `docs/architecture.md` §7 still reads "actively being designed... not yet built." The technical description is accurate; only the status framing is stale per Rule 15 — corrected as part of this Phase 6's own housekeeping.
+
+## Gap Verification (from Phase 1's ten numbered gaps + three Open Questions)
+
+1–2 (allowlist naming/v1 allowlist): deferred to a later pipeline, named explicitly — not silently dropped. 3 (ContactForm): built and tested. 4 (CI-failure-to-ticket echo): confirmed out of scope by the user's own Phase 1 resolution. 5 (uniform not-found): built and proven at four layers. 6 (platform-side DB shape): built, reasoned deviation (see diff above). 7 (ingest idempotency): built and tested. 8 (image handling via blob adapter): built exactly as recommended. 9 (presby-site-kit's own No-Real-Data statement): confirmed present in the real repo's README. 10 (ingest-rejection message content-leak): checked directly — `route.ts`'s 422 messages reference `manifestKey` and generic shape descriptions, never raw MDX/front-matter content; no leak found. Open Questions: (1) P4 dead — resolved, carried into DECISION-041's correction. (2) staged-preview-before-live — explicitly deferred by the user. (3) `site-<slug>` repo visibility — genuinely still open, correctly out of scope, needs an owner before real provisioning.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: pass — `/admin/sites` mirrors `admin/feedback`'s established pattern.
+- Failure microcopy: pass — `ContactForm` shows a persistent inline banner alongside the toast and never discards typed content on rejection.
+- Permission gate: pass — independently re-derived (table below), no permission-vs-flag conflation found.
+- Audit event: pass — `SITE_CONTENT_INGESTED`/`SITE_PROVISIONED`/`SITE_STATUS_CHANGED` all fire correctly, verified by the route-level integration test asserting exact metadata shape directly against the database.
+- Mobile (360px): not independently re-verified at this phase — covered by commit 3's real-browser walkthrough, not re-run here.
 
-## Follow-Ups (if SHIP WITH NOTES)
+### Permission Gate Detail
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+| Surface | Gate |
+|---|---|
+| `/site/<slug>`, asset route | Anonymous by design, `organization_sites.status='live'` via SECURITY DEFINER |
+| `POST /api/sites/ingest` | GitHub Actions OIDC only, `sites.public_render` flag second (401 before flag check — a stolen/forged token can't even learn the flag's state) |
+| `provisionSiteAction`/`setSiteStatusAction`, `/admin/sites` | `FEATURES.ADMIN_ORGANIZATIONS`, no new key |
+| `markSiteContactMessageReadAction`, `listSiteContactMessages` | membership + `tickets.file` inside `withOrgContext()` |
+| `submitContactMessageAction` | Anonymous + honeypot + IP/slug rate limit + live-status gate |
 
-## Red Flags (if NEEDS REWORK)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Specific. What has to change before this ships.]
+1. **`presby-site-kit`'s git-dependency install is unverified against Vercel's real build sandbox** — verified locally only by blocking SSH, not the actual deploy target. Blocking for the first real production deploy that includes this dependency, not for shipping today.
+2. **Vercel serverless function payload-size ceiling vs. the base64-inflated ingest bundle is unverified** — named in Phase 3's own Edge Cases and never tracked. The per-image/per-bundle 10MB CHECK constraint is the correctness bound, not the transport bound.
+3. **`site-<slug>` content-repo visibility (public vs. private GitHub repo) is an undecided operational question that matters for real privacy** — a suspended/de-tenanted org's content stays readable directly on GitHub if the repo is public, undermining the enumeration-safety property proven at every other layer. Needs an owner and a decision before the first real congregation's `site-<slug>` repo is created.
+
+## What's-New Consideration (Rule 13)
+
+**Not publishing at this time.** `sites.public_render` is seeded off and no real organization has a provisioned, live site — nothing any member or visitor can actually see today. Revisit when the first real congregation's site is flipped to `status='live'` with the flag on; that is also the natural moment for a real-content release-notes entry.
+
+## Feedback Row (Rule 12)
+
+Not applicable — this pipeline originated from the functionality map's own "sites" gap and direct user/session direction, not an in-app feedback submission.

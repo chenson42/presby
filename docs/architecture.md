@@ -99,7 +99,7 @@ Tickets are worked on the platform side by a human operator, most often paired w
 
 ## 7. Public websites — how a congregation's site gets built and stays current
 
-*This piece is newer than the rest of this document — actively being designed as of this writing, not yet built. Described here at the shape we've committed to, because it's a natural extension of the ticket loop above and worth understanding in the same pass. Current status and the open questions still being worked are in [`docs/work-log/2026-08-20-public-sites.md`](work-log/2026-08-20-public-sites.md).*
+*This piece is newer than the rest of this document — built and tested to the shape described below, but not yet turned on: it ships behind the `sites.public_render` flag, seeded off, and no real congregation has a provisioned site yet. The mechanism is proven; the rollout hasn't started. Full pipeline history, and the open operational question of content-repo visibility that has to be settled before the first real site is provisioned, are in [`docs/work-log/2026-08-20-public-sites.md`](work-log/2026-08-20-public-sites.md).*
 
 The constraint that shaped this design: **presby's own source repository must never contain a real congregation's data** — not a real name, address, photo, or phone number, ever, because that's a permanent, effectively unscrubbable commitment once it's in git history. A congregation's public website necessarily *is* real content. So it can't live in this repository, and it can't be built the way most of this platform is built.
 

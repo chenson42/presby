@@ -138,7 +138,7 @@ ticket once the mechanism exists.
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-081/082/083/084/085 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — split three-commit Implementation Order (database-admin → api-developer → ux-developer); DECISION-086/087/088/089 minted | 2026-08-20 |
 | 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) → api-developer (commit 4, Phase 5 loop-back) → ux-developer (commit 5, Phase 5 loop-back) | Complete — 5 of 5 commits done | Schema/migration/RLS-test complete (commit 1); query layer, OIDC ingest auth, ingest route, all Server Actions, and their tests complete and verified against the shared dev database (commit 2); render path, `src/proxy.ts` fix, provisioning UI, `/admin/sites`, the ContactForm read-side section, the real `presby-site-kit` stub repo, and their tests — all complete, verified against a real running dev server in a real browser, and cross-checked against `test-rls.sql`/`presby_roll_cache_drift()` with zero leftover fixture data (commit 3); real-Postgres integration test for the ingest route handler closing qa's coverage gap #1, 20 tests, verified three times with clean DB state each time (commit 4); e2e spec closing qa's coverage gap #2, 7 tests against a real dev server, verified against real staged content and a real ContactForm round trip, independently re-run by the orchestrator (commit 5) | 2026-08-20 |
-| 5 — Verification | qa | Pending re-verification | FAIL (first pass) — two coverage gaps, loop back to Phase 4; both gaps closed by commits 4 and 5 | 2026-08-20 |
+| 5 — Verification | qa | Complete | FAIL (first pass, two coverage gaps) → PASS (re-verification after commits 4/5 closed both gaps) | 2026-08-20 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2857,6 +2857,156 @@ environment, a real dev server and DB are both available).
 ## Verdict
 
 **FAIL**
+
+*Recorded by the orchestrator from the read-only qa agent's report.*
+
+---
+
+# Phase 5 — Re-Verification (qa)
+
+**Date:** 2026-08-20
+**Verified by:** qa
+
+Re-run after commit d89cb41 ("fix(sites): close both Phase 5 coverage gaps
+for public-sites ingest and render") landed both loop-back deliverables —
+Commit 4 (api-developer, `src/app/api/sites/ingest/route.test.ts`) and
+Commit 5 (ux-developer, `e2e/public-sites.spec.ts`).
+
+## Type Check
+
+`npm run typecheck`: **PASS**
+
+## Unit Tests
+
+Full suite (no `.env.local`, matching CI): **1653/1653 passed, 119
+skipped** — the 119 is exactly the prior baseline (99) plus the new
+`route.test.ts`'s 20 DB-gated tests correctly skipping with no
+`DATABASE_URL`. Zero regressions.
+
+DB-backed, independently run against real Postgres:
+`npx dotenv -e .env.local -- npx vitest run src/app/api/sites/ingest/route.test.ts`
+→ **20/20 passed**, on a fresh run, not taken from the implementer's report.
+
+## End-to-End Tests
+
+- `npx playwright test e2e/public-sites.spec.ts` against a real dev server
+  (started fresh for this verification): **7/7 passed.**
+- Full e2e suite, same running dev server: **103/103 passed** (18 spec
+  files, including this pipeline's 7 cases inline, plus every spec Phase 3
+  flagged as blast radius — `admin-organizations.spec.ts`,
+  `post-login-routing.spec.ts`, `security-headers.spec.ts`,
+  `color-scheme.spec.ts`, `totp-full-login.spec.ts`). Zero regressions
+  anywhere else.
+
+## Regression Tests Added
+
+- `src/app/api/sites/ingest/route.test.ts` — 20 real-Postgres integration
+  tests exercising the full ingest contract through the real HTTP entry
+  point (auth/claim failures including a genuinely tampered signature, 404
+  unresolvable repo, 7 sub-cases of 422 body validation, magic-byte
+  sniffing rejection, the full happy path with DB/blob/audit/revalidatePath
+  assertions, idempotency, and the suspended-status-survives-ingest
+  interaction) — closes gap #1.
+- `e2e/public-sites.spec.ts` — 7 e2e cases against a real dev server
+  (render-flag kill switch, real staged content actually rendering,
+  byte-identical 404s across nonexistent/provisioning/suspended states, a
+  real browser ContactForm round trip read back through the `tickets.file`
+  UI with a DB-polled confirmation, honeypot rejection) — closes gap #2.
+
+Both files were read in full, not just their names/counts — the assertion
+bodies genuinely test what their names claim (cases 4/5's
+"byte-identical" claim is a literal `toBe()` against a captured baseline,
+not two independently-passing 404 checks; the happy-path ingest test
+queries `organization_sites`/`blob_assets`/`audit_events` directly rather
+than trusting the response body alone).
+
+## Coverage on Critical Modules
+
+Unaffected by this loop-back (`git show --stat d89cb41` confirms only the
+two test files, `docs/TODO.md`, and the work-log changed — zero
+application-code files touched), re-measured directly:
+`src/lib/permissions.ts` 100% stmts/branches/funcs/lines;
+`src/lib/flags.ts` 100% stmts/branches/funcs/lines; `src/lib/two-factor.ts`
+91.3% stmts / 100% branches / 90% funcs / 90.47% lines.
+
+## Independent verification, not taken from any implementer's report
+
+- Started a real dev server and ran both new suites against it fresh.
+- Direct DB queries after both runs confirmed real cleanup: Alder Creek's
+  `organization_sites` back to the committed fixture
+  (`status='provisioning'`, `content_bundle_key=null`,
+  `last_ingested_commit_sha=null`); `blob_assets`/`site_contact_messages`
+  at 0 rows for Alder Creek; `sites.public_render`/`org_portal.tickets`
+  restored `false`, `auth.require_2fa` restored `true`; zero leftover
+  `sites-ingest-route-test-*` orgs or granter users; zero leftover
+  `site.content_ingested` audit rows; `presby_roll_cache_drift()` → 0 rows.
+- Ran `scripts/test-rls.sql` as `presby_app` twice. **First run (while the
+  full Playwright suite was still executing in the background) reported a
+  FAIL** on the `presby_published_site: provisioning ... alder-creek
+  returns zero rows` assertion — investigated live, not reported as-is:
+  a genuine race between qa's own concurrent verification commands (the
+  e2e run had Alder Creek mid-flight in `status='live'` with the flag on
+  at that exact moment), confirmed by direct query. **Second run, after
+  the e2e suite's own `afterAll` restored state, was clean: exit 0, 90
+  `NOTICE: pass`, 0 fail** — a self-inflicted harness-overlap false alarm,
+  not a defect in shipped code.
+- Read `src/app/api/sites/ingest/route.ts` in full to independently
+  re-derive the Feature-Gate Audit below, rather than inferring it from
+  green tests.
+- `npm run check` (all four tripwires) and `npm run lint` — both clean.
+- `git status --short` after all verification — clean.
+
+## Feature-Gate Audit
+
+*(No route or action code changed in this loop-back — commit d89cb41
+touched only the two test files, `docs/TODO.md`, and the work-log. Table
+independently re-derived by reading `route.ts` directly, not carried
+forward unchecked.)*
+
+| Route or action | Auth mechanism | Correct? |
+|---|---|---|
+| `POST /api/sites/ingest` | `verifyGithubActionsOidcToken()` (hardcoded RSA-SHA256, all claims checked) → `isFlagEnabled("sites.public_render")` (503 if off) → org resolution | Yes — auth runs first, before any org resolution or write |
+| `(public)/site/[slug]/*`, the asset route | None — anonymous by design (DECISION-041) | Correct by design, unchanged, confirmed by this loop-back's own e2e run |
+| `submitContactMessageAction` | None + honeypot + IP/slug rate limit + live-status gate | Unchanged |
+| `provisionSiteAction`/`setSiteStatusAction`, `/admin/sites` | `auth()` + `FEATURES.ADMIN_ORGANIZATIONS` | Unchanged |
+| `markSiteContactMessageReadAction`, `listSiteContactMessages` | membership + `hasTicketsFile` inside `withOrgContext()` | Unchanged |
+
+## Assessment of whether the two gaps are genuinely closed
+
+**Gap #1 — closed, and closed well.** The route's full 266-line
+orchestration (OIDC → flag → org resolution → idempotency → validation →
+sniffing → blob storage → `recordSiteIngest` → audit → dual revalidation)
+is exercised end-to-end through the real `POST` handler with a
+genuinely-signed JWT and real Postgres. It independently re-proves
+`recordSiteIngest`'s suspended-site-not-resurrected fix at the route level,
+and asserts DB state directly rather than trusting response bodies alone.
+
+**Gap #2 — closed, and closed well.** The flag as a genuine kill switch,
+real staged content actually rendering, the enumeration-safety collapse
+proven as a literal byte-identical body comparison, a full anonymous-write
+round trip confirmed both in the database and on the tenant read side, and
+honeypot rejection confirmed by DB row-count — all exercised through a real
+browser against a real dev server.
+
+**No new gap found.** Checked specifically for missed cases (partial-page
+match on `renderSiteBundle()` returning null, the asset route, brand-token
+emission on the public layout) — covered by commit 3's own unit tests and
+real-browser walkthrough, and not named as gaps by the original FAIL.
+
+## Verdict
+
+**PASS**
+
+## Handoff
+
+**Next: analyst (Phase 6 — Shipped vs Intent).** Both named coverage gaps
+are closed, independently re-verified against a fresh dev server and real
+Postgres. No new defect found; the one anomaly encountered (`test-rls.sql`'s
+transient FAIL) was root-caused live to a race between qa's own concurrent
+verification commands, not a product defect. `docs/TODO.md`'s
+flag-mutation-race entry is a real, already-filed follow-up, not a
+blocker — do not run two flag-mutating DB-backed suites in the same
+`vitest run` invocation until that's fixed.
 
 *Recorded by the orchestrator from the read-only qa agent's report.*
 

@@ -76,7 +76,7 @@ app has no access to).
 
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
-| 1 — Functional refinement | analyst | In progress | — | — |
+| 1 — Functional refinement | analyst | Complete | READY FOR DESIGN | 2026-08-20 |
 | 2 — Architectural review | architect | Pending | — | — |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
@@ -89,42 +89,224 @@ app has no access to).
 
 ## VERDICT
 
-[READY FOR DESIGN | READY WITH NOTES | NEEDS REWORK | NOT YET]
+**READY FOR DESIGN** (upgraded from the analyst's READY WITH NOTES — the
+notes were exactly the open questions below, now resolved by the user
+before Phase 2 launches)
 
 ## ONE-LINE TAKE
 
-> [The feature in one honest sentence.]
+> A ticket-submission-and-triage loop with real precedent in this codebase
+> (`/admin/feedback`'s state machine, the `org_portal.*` flag/permission
+> pattern) — gated on both ends by a designated role rather than a
+> baseline-member grant, resolved as an ordinary human-plus-Claude-Code
+> engineering task with the ticket as the paper trail, not a new
+> autonomous AI actor with its own write path.
+
+## Prior art checked
+
+None of the four sibling repos (`fpcw-directory`, `westervillelions`,
+`psvonline-portal`, `synod-portal`) own a support-ticket system.
+`synod-portal`'s "Ask the Hub" is the closest analog for "an AI surface
+touching something it shouldn't be trusted with by default" — and it's
+**read-only** over a curated corpus, and still needed a spend cap,
+kill-switch flag, and rate limiting before shipping. Directly relevant
+below: it's why the analyst treated an autonomous AI write-path as the
+single riskiest part of this feature, and why the user's clarification
+matters as much as it does.
 
 ## User Verbs
 
 | Surface | Verb | Cadence |
-|---------|------|---------|
-| [admin / member / anonymous] | [verb] | [on demand / per session / one-time] |
+|---|---|---|
+| Any org member | File lightweight feedback about their congregation's experience | on demand, low friction |
+| Tenant role-holder (`tickets.file`) | Review their org's incoming feedback; promote one into a formal ticket | per session |
+| Tenant role-holder — `/o/<slug>/tickets/new` | File a ticket directly (subject, description, category, artifact upload) — same form the promote-from-feedback path pre-fills | on demand |
+| Tenant role-holder — `/o/<slug>/tickets` | View their org's ticket list and a ticket's thread/status | on demand |
+| Tenant role-holder | Reply to their own open ticket | on demand |
+| Platform operator — `/admin/tickets` (new, parallel to `/admin/feedback`) | View the cross-org triage queue, filter by status/category | per session |
+| Platform operator | Change status, reply, (re)classify category, assign | per ticket |
+| Platform operator (+ Claude Code) | Resolve a ticket by making the underlying change through the app's own admin surfaces / engineering workflow — not a new AI-attributed write path | per ticket, as needed |
 
 ## Flows
 
-**Flow 1 — [name]:** [entry → step → step → outcome]
-- Failure: [what the user sees if a step goes wrong]
+**Flow 0 — Member feedback, promoted to a ticket:** entry — an org member
+files lightweight feedback about their congregation's experience (low
+friction, no `tickets.file` permission needed) → the org's designated
+`tickets.file` role-holder reviews incoming feedback for their
+organization → promotes one into a formal ticket, pre-filled from the
+feedback body → proceeds as Flow 1. This is the low-friction on-ramp
+Flow 1 alone doesn't provide: an ordinary member with a problem isn't
+blocked from surfacing it just because they don't hold the filing role.
+- Failure: feedback that's never promoted simply stays feedback — no
+  forced conversion, no silent drop; the role-holder's queue is the only
+  place "unpromoted" feedback needs to be visibly waiting.
 
-**Flow 2 — [name]:** [...]
+**Flow 1 — File a ticket directly:** entry `/o/<slug>/tickets/new` (only
+reachable by a holder of the new `tickets.file` permission) → subject,
+description, category, optional artifact upload → submit → ticket
+created, confirmation email queued via the existing durable email queue.
+- Failure: invalid fields rejected inline; a DB/network failure on submit
+  shows a human message, never a stack trace or silent no-op.
+
+**Flow 2 — View and follow up:** entry `/o/<slug>/tickets` → thread view
+(submitter + operator messages, current status, attached artifacts) →
+optionally reply.
+- Failure: a ticket ID belonging to another org, or that doesn't exist,
+  returns a generic not-found — never a 403 that confirms the ID is real
+  (the same enumeration discipline DECISION-040 already applies to org
+  slugs).
+
+**Flow 3 — Platform triage and resolution:** entry `/admin/tickets` →
+cross-org list, filterable by status/category → open a ticket (submitter's
+org, person, thread, artifacts) → change status / reply / classify /
+assign → **resolve** by making the actual change through normal means (an
+existing admin action, a migration, a code change) with a platform
+operator holding `FEATURES.ADMIN_TICKETS` in the loop throughout — this is
+where "worked in combo by a platform worker and Claude Code" lives: an
+ordinary engineering task with a ticket for a paper trail, not a distinct
+automated system.
+- Failure: an illegal status transition is rejected server-side, current
+  and attempted status both named (mirrors `feedback/actions.ts`'s
+  `VALID_TRANSITIONS` exactly).
 
 ## Permissions & Flags
 
-- **Permission(s):** [new `FEATURES.KEY`, or existing key reused]
-- **Default roles:** [list]
-- **Flag(s):** [new key + rollout plan, or "not needed"]
+- **New tenant permission `tickets.file`** (module `support`, tier 1) —
+  **granted via a designated role, not bootstrapped onto
+  `active_membership`.** Resolved by the user directly: filing is gated
+  the same way `role_grants.manage` is — a specific office-holder, not
+  every member automatically. Phase 3 to decide the default fixture
+  binding; `stated_clerk` is the natural first candidate since it's
+  already the one designated-representative role that exists.
+- **New platform permission `FEATURES.ADMIN_TICKETS`** — new `FEATURES`
+  catalog key, admin-shell only, default to nobody, same posture as
+  `FEATURES.ADMIN_FEEDBACK`.
+- **New flag `org_portal.tickets`**, seeded off — mirrors `org_portal.
+  directory` / `org_portal.roles`.
 
-## Gaps the Request Didn't Address
+## Resolved by the user (2026-08-20), overriding/narrowing the analyst's open questions
 
-- [Gap, why it matters, suggested resolution]
+1. **Filing is role-gated, not baseline.** The analyst recommended binding
+   `tickets.file` to `active_membership` (every current member, matching
+   `directory.view`'s bootstrap). The user explicitly chose the opposite:
+   only a designated role can file — deliberately mirroring the
+   platform-admin side's "a certain role" model on the tenant side too. An
+   ordinary member with a problem goes through their congregation's
+   designated role-holder, not directly.
+2. **No autonomous AI-worker actor, at all.** This resolves the analyst's
+   Open Question 1 and the single biggest risk they flagged. "Most would
+   be worked in combo by a platform worker and Claude Code" means
+   resolution is an ordinary human-supervised engineering task — a
+   platform operator, with `FEATURES.ADMIN_TICKETS`, using Claude Code the
+   way this entire repo already is used, to make whatever change the
+   ticket calls for. There is no new AI-attributed identity, no new write
+   path bypassing `withOrgContext()`, and no "ships with no deploy"
+   automation to design. This substantially narrows Phase 3's scope
+   relative to what the analyst flagged as needing its own future
+   pipeline — `change_class`/category still matters (it's still useful to
+   know at a glance whether a ticket is a copy tweak or a schema change),
+   but it's advisory triage metadata now, not an automation-eligibility
+   gate.
+3. **Categories: confirmed in scope for v1**, resolving Open Question 3's
+   overlap-with-`/admin/feedback` question in categories' favor — tickets
+   get a real category field from day one, operator-correctable at
+   triage (per the analyst's "not submitter-authoritative" recommendation,
+   which still holds even without the automation-eligibility stakes).
+4. **Artifact uploads: confirmed in scope for v1**, reopening the
+   analyst's "deferred" recommendation. `src/lib/storage/` (the generic
+   tenant-scoped blob adapter, DECISION-030/055/058, `store()`/`resolve()`
+   only) already exists — the org logo was its first consumer; a ticket
+   attachment is a natural second. Phase 3 to confirm file-type/size
+   limits and whether an attachment is visible to the platform triage
+   queue only or also reflected back to the submitter's own thread view
+   (should be both, trivially, but naming it so it isn't assumed).
+5. **A two-tier submission model, not filing-only-by-role.** Any ordinary
+   member can file lightweight feedback about their congregation; the
+   `tickets.file` role-holder is the one who promotes feedback into a
+   formal ticket (Flow 0). This resolves the tension the role-gate
+   otherwise creates (an ordinary member noticing a problem previously had
+   no direct path at all under decision #1 above) without reopening
+   baseline filing access. **Real open technical question for Phase 2,
+   not decided here**: the existing platform `feedback` table
+   (`src/lib/db/schema.ts:361`) has no `organization_id` — it's
+   deliberately `userId`-only, and its own header comment states a
+   privacy invariant ("FK to users only — no joins to roles, sessions, or
+   any other application table"). "Congregation members file feedback"
+   implies the feedback itself needs organization context to be
+   promotable into a tenant-scoped ticket and to be visible to the right
+   org's role-holder — Phase 2 must decide whether that's (a) the
+   existing `feedback` table gaining a nullable `organization_id` (general
+   platform feedback stays org-less; congregation feedback carries one),
+   respecting or consciously revising its stated privacy invariant, or
+   (b) a distinct, tenant-scoped feedback mechanism that doesn't touch the
+   existing table at all. Not a call to make silently either way.
 
-## Out of Scope (confirm with user)
+## Gaps the Request Didn't Address (still open for Phase 2/3)
 
-- [Thing the request implies but isn't in scope]
+- **Table placement is undecided and material** — a tenant-owned, RLS-
+  enforced `tickets` table (`db/domain/`) read cross-tenant by platform ops
+  via `getPlatformDb()`, or a platform-shell table (`schema.ts`, like
+  `feedback`/`audit_events`) with `organization_id` as a plain column
+  verified only at insert time. The single highest-value question for
+  Phase 2 — it decides which connection each surface uses.
+- **`audit_events.ticket_id`** exists only in the schema sketch
+  (`docs/schema-design.md` §12), not in live `schema.ts` — add now if this
+  pipeline touches `audit_events` at all, so a resolving mutation can be
+  correlated back to its ticket without a later migration.
+- **Routine triage (status/assignment/classification changes) is
+  audit-exempt**, by direct precedent — `feedback/actions.ts` already
+  marks its own status-change mutation this way. What's audited is
+  whatever underlying tenant mutation resolves the ticket, under that
+  mutation's own existing `AUDIT_ACTIONS` key.
+- **PII/tier leakage through free text** — a ticket body is prose a
+  member writes, and nothing in the schema stops tier-2/3 content being
+  pasted in to illustrate a problem. Mitigation is procedural (small
+  trusted `FEATURES.ADMIN_TICKETS` circle, submission microcopy), not
+  something validation can close.
+- **Empty states, 2FA mid-enrolment, 360px mobile** — named by the
+  analyst, unchanged: real copy for both empty states, no special 2FA
+  handling needed (`(org)` is already Edge-gated), and a real browser
+  check owed at ship time per CLAUDE.md's "Verify in a Browser."
 
-## Open Questions
+## Out of Scope (confirmed)
 
-- [Question for the user]
+- **A distinct AI-worker actor identity or automated write path** — closed
+  by the user's clarification above, not merely deferred to a future
+  pipeline. Resolution runs through existing engineering workflows.
+- **Internal/private operator notes** invisible to the submitter — v1
+  assumes every operator reply is submitter-visible.
+- **Any runtime write to `docs/TODO.md` or any committed file.** D8's "a
+  real need becomes a feature for every church" is a human reading the
+  ticket queue and deciding to run `/new-feature` — the running
+  application has, and should have, zero write access to its own
+  repository.
+- **Platform admin filing a ticket on a congregation's behalf**
+  (phone-support intake) — plausible, not in v1.
+- SLA/priority/due-dates, canned responses, a public status page.
+
+## Open Questions (remaining for Phase 2/3, not the user)
+
+- Table placement (RLS-tenant vs. platform-shell) — Phase 2's call.
+- Default fixture role binding for `tickets.file` (`stated_clerk`
+  candidate) — Phase 3's call.
+- `/admin/feedback` vs. tickets: permanent coexistence confirmed by the
+  user implicitly (categories are in scope, meaning tickets is its own
+  structured system, not a merge into feedback) — Phase 3 should still
+  name where the line is in submitter-facing copy so members aren't
+  confused about which form to use.
+
+## Handoff
+
+**Next: architect (Phase 2).** Carry forward: the table-placement question
+as the single highest-value Phase 2 call; `tickets.file` is role-gated
+(not baseline `active_membership`), but any member can file low-friction
+feedback that a role-holder promotes into a ticket (Flow 0) — resolve
+whether that reuses `feedback` with a nullable `organization_id` or is a
+distinct tenant-scoped table, respecting or explicitly revising that
+table's stated no-joins privacy invariant; no AI-actor identity or new
+write path is in scope, at all — Phase 2/3 should not reintroduce it as a
+"future-proofing" concern; categories and artifact uploads (via the
+existing `src/lib/storage/` adapter) are both confirmed in scope for v1.
 
 ---
 

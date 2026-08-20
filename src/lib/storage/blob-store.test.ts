@@ -139,7 +139,7 @@ describe.skipIf(!hasDb)(
 
     it("store() rejects an oversized buffer at the application layer before ever reaching the database", async () => {
       const store = getBlobStore();
-      const tooBig = Buffer.alloc(2_097_153, 1); // one byte past the 2MB cap
+      const tooBig = Buffer.alloc(10_485_761, 1); // one byte past the 10MB cap (DECISION-071/073)
 
       await expect(
         store.store({
@@ -190,7 +190,7 @@ describe.skipIf(!hasDb)(
             organizationId: orgId,
             contentHash: `oversize-${randomUUID()}`,
             contentType: "image/png",
-            byteSize: 3_000_000, // the CHECK, not the actual buffer length
+            byteSize: 10_485_761, // one byte past the CHECK's 10MB bound (DECISION-071/073); not the actual buffer length
             bytes: Buffer.from("small"),
           });
         });

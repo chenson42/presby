@@ -1165,7 +1165,20 @@ giving data.
 
 ---
 
-## 14. Section K — Sites (sketch)
+## 14. Section K — Sites (sketch) — SUPERSEDED, see note below
+
+> **Superseded 2026-08-20** (DECISION-041's correction, `2026-08-20-public-sites`
+> Phase 1, confirmed by the user). The DB-composition model sketched below —
+> `sites`/`site_pages`/`site_sections` as a live database schema, edited through
+> an in-browser editor — is not being built. Public-site content instead lives
+> in per-congregation Git repositories, staged by CI, and rendered by presby
+> from a structured bundle stored in the existing blob adapter; there is no
+> `site_pages`/`site_sections` table. "Editing a site" is a git commit made
+> through the support-ticket loop, not a page in this app. Kept below for
+> historical context only — do not build against it. See
+> `docs/work-log/2026-08-20-public-sites.md` for the actual design and
+> DECISION-041 for the corrected routing/security contract, which **does**
+> still apply.
 
 ```
 sites          (organization_id, primary_hostname, theme_tokens jsonb, status)

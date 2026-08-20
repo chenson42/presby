@@ -143,6 +143,24 @@ ticket once the mechanism exists.
 
 ---
 
+## Both Open Questions from Phase 1, resolved directly by the user (2026-08-20)
+
+1. **The DECISION-041/§14 conflict** — corrected. DECISION-041 now
+   carries an appended correction (append-only, not edited in place):
+   the routing/security contract stands, the `site_pages`/
+   `site_sections` DB-composition data model is superseded.
+   `docs/schema-design.md` §14 is marked superseded at its own header,
+   kept for historical context only. Phase 2 does not need to write
+   this correction itself — it's done.
+2. **"P4 — the church's site editor" is dead.** Confirmed by the user:
+   the ticket loop is the editor. No self-service in-browser editing
+   surface gets built, in this pipeline or later. Editing a site is a
+   git commit, made by an operator pairing with Claude Code, exactly
+   like any other `content`/`config`/`theme`-class ticket. Phase 2/3
+   should design with this as settled, not provisional.
+
+---
+
 # Phase 1 — Functional Refinement (analyst)
 
 ## VERDICT

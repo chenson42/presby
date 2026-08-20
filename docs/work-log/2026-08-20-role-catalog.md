@@ -81,7 +81,7 @@ append-only, never edited in place.
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-080 | 2026-08-20 |
 | 4 — Implementation | database-admin | Complete (Commit A + Commit B) | — | 2026-08-20 |
 | 5 — Verification | qa | Complete | PASS | 2026-08-20 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP IT | 2026-08-20 |
 
 ---
 
@@ -1206,32 +1206,96 @@ confirmed by `git show --stat` on `081c16b` and `28c5d84`: only
 
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP IT**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> Four permission-catalog gaps close exactly as Phase 1 scoped them —
+> `tickets.file` lands on its own honestly-non-constitutional
+> `support_contact` role held by Marguerite Ashcombe (not Tobias
+> Renwick), `ledger.approve`/`pastoral.notes.view` land on real
+> PC(USA) offices the schema already anticipated, `roll.propose`
+> completes a clean propose/approve separation on `stated_clerk`, and
+> the platform Support Operator bundle is exactly two `FEATURES.*`
+> keys — every claim independently re-derived from a live database
+> query, not accepted from the work-log's own account.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Zero concentration regression, verified live** — Tobias Renwick
+  holds exactly `{property_chair, stated_clerk}`, nothing added;
+  Marguerite Ashcombe/Priya Balakrishnan/Rowan Thistlewood each hold
+  exactly the one new role designed for them.
+- **The DECISION-072 correction is present, accurate, and correctly
+  append-only** — a distinct dated block below the original entry,
+  never edited in place.
+- **Cross-pipeline FK sequencing genuinely held**, confirmed by commit
+  timestamp order, not narrative: `0019` (08:48) → Commit A (08:56) →
+  `FEATURES.ADMIN_TICKETS` (09:17) → Commit B (09:21).
+- **Fresh-eyes read of `scripts/seed-dev.sql` turned up nothing
+  surprising** — the "why Marguerite, not Tobias" and "why Rowan"
+  reasoning is discoverable from the SQL comments alone, not only the
+  work-log.
+- **No scope creep** — no presbytery/synod variant, no
+  `committee_on_ministry` concept, no new route/page/component in
+  either commit.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: `tickets.file` gets its own non-constitutional role,
+  granted to Marguerite Ashcombe. Shipped: `support_contact`, granted
+  to Marguerite Ashcombe. **Matches**, confirmed live.
+- Phase 1 said: fix `ledger.approve`/`pastoral.notes.view` with real
+  offices. Shipped: `treasurer`/`installed_pastor`, matching
+  `officer_terms` rows. **Matches.**
+- Phase 1 said: `roll.propose` is a fourth gap, Phase 3's call. Shipped:
+  DECISION-078 bound it to `stated_clerk`. **Matches** — explicitly
+  deferred to Phase 3, and the reasoning is sound.
+- Phase 1 said: Support Operator needs nothing beyond
+  `FEATURES.ADMIN_TICKETS`. Shipped: `{admin.tickets, admin.feedback}`.
+  **Acceptable drift** — a reasonable design-time judgment (a support
+  operator triaging tickets also needs incoming feedback) within
+  Phase 1's stated bound ("narrower than admin"), independently
+  confirmed as exactly two keys.
+- Phase 1 said: presbytery/synod pastoral care and
+  `committee_on_ministry` are out of scope. Shipped: neither appears.
+  **Matches.**
+- Phase 1 said: DECISION-072 needs a correction, and a `docs/TODO.md`
+  line for the lost self-lockout protection. Shipped: both landed.
+  **Matches.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: not applicable — no UI, fixture-only.
+- Failure microcopy: not applicable — the one named consequence
+  (revoking the sole `support_contact` holder succeeds silently) is
+  Phase 1's own documented, accepted, tracked residual risk.
+- Permission gate: pass — bindings match design exactly, section-15
+  isolation assertions prove cross-org isolation for all three roles.
+- Audit event: not applicable — direct fixture inserts, matching
+  `bindAdminFeatures()`'s own no-audit precedent for seed-time binding.
+- Mobile (360px): not applicable — no UI shipped.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Process compliance
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+- **Rule 10**: confirmed current — the self-lockout TODO line is
+  accurate and open by design; the blob-store fix is correctly in
+  Done.
+- **Rule 12**: not applicable — no in-app feedback origin.
+- **Rule 13 (what's-new)**: ruled explicitly — no. Fixture data and a
+  platform bundle, no member-visible behavior change; both new tenant
+  permissions still gate no live route.
+- **Rule 14 (functionality-map)**: ruled explicitly — no update
+  needed. The map documents mechanism (generic grant/revoke against
+  arbitrary `app_roles` rows), which is unchanged; documenting which
+  specific roles exist in the dev fixture would over-document seed
+  data the map's own header disclaims tracking.
 
-## Red Flags (if NEEDS REWORK)
+## Follow-Ups
 
-- [Specific. What has to change before this ships.]
+None new. The two items already tracked (the self-lockout TODO line,
+the blob-store fix in Done) are correctly closed or correctly still
+open by design — neither needs a status change.
+
+*Recorded by the orchestrator from the read-only analyst agent's
+report. Pipeline closed at SHIP IT — no further phase triggered.*

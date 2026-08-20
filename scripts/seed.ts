@@ -108,6 +108,20 @@ async function seedFlags() {
         "Congregation directory page in (org). OFF = /o/<slug>/directory renders 'isn't available yet' regardless of the viewer's directory.view grant.",
       enabled: false,
     },
+    {
+      key: "org_portal.roles",
+      // ON: /o/<slug>/admin/roles is reachable at all. Checked bare, no
+      // DECISION-026 fail-open wrapper — it's a toggle, not an auth path
+      // (Phase 3, docs/work-log/2026-08-19-tenant-administration.md).
+      // Never substitutes for role_grants.manage: a stated clerk with the
+      // flag on and no grant still sees the in-shell "you don't have
+      // permission" state, not the roles page itself (DECISION-003: a flag
+      // never gates a permission). Seeded OFF, same "ships dark until the
+      // page lands" reasoning as org_portal.directory.
+      description:
+        "Tenant role-administration page in (org). OFF = /o/<slug>/admin/roles renders 'isn't available yet' regardless of the viewer's role_grants.manage grant.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

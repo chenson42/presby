@@ -107,6 +107,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // src/app/(admin)/admin/organizations/[id]/actions.ts
   ORG_BRAND_SET: "org.brand.set",
   ORG_BRAND_NEUTRALIZED: "org.brand.neutralized",
+  // Tenant role administration (P9) — written from
+  // src/app/(org)/o/[slug]/admin/roles/actions.ts
+  TENANT_ROLE_GRANTED: "tenant.role.granted",
+  TENANT_ROLE_REVOKED: "tenant.role.revoked",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

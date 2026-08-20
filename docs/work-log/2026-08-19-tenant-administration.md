@@ -73,7 +73,7 @@ model yet. Don't block on P8, but don't duplicate its scope either.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — bootstrap gap + 6 adversarial findings | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-066/067/068 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete | Design complete, implementers named | 2026-08-19 |
-| 4 — Implementation | database-admin, api-developer, ux-developer | database-admin commit (1/3) complete | — | 2026-08-19 |
+| 4 — Implementation | database-admin, api-developer, ux-developer | api-developer commit (2/3) complete | — | 2026-08-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -580,3 +580,245 @@ needed this commit; the design doc's `org_portal.roles` flag addition to
 `scripts/seed.ts` is commit 2's job. `src/lib/role-grants.ts`'s subset check
 (DECISION-068) can now read `app_role_permissions` for `stated_clerk`'s row
 directly — the catalog binding it depends on exists.
+
+---
+
+# Phase 4 — Implementation (commit 2 of 3: api-developer, server)
+
+## Files Created
+
+- `src/lib/role-grants.ts` — the mutation-layer module: `listGrants`,
+  `getGrantFormOptions`, `grantRole`, `revokeRole`, plus a private
+  `hasRoleGrantsManage` helper. Same shape as `directory.ts`: one
+  `withOrgContext()` transaction per exported function, thrown exceptions
+  for genuine failure, typed result variants for every expected outcome.
+- `src/lib/role-grants.test.ts` — real-Postgres integration tests
+  (`directory.test.ts`'s harness: `hasDb` skip-guard, dynamic imports in
+  `beforeAll`, a self-contained fixture across four organizations, torn
+  down in `afterAll`). 25 tests (one added by the orchestrator's fix below).
+- `src/app/(org)/o/[slug]/admin/roles/actions.ts` — `grantRoleAction`,
+  `revokeRoleAction`. Auth-in-the-action-body plumbing and the audit write
+  only; all SQL correctness lives in and is proven by `role-grants.ts`.
+- `src/app/(org)/o/[slug]/admin/roles/actions.test.ts` — mocked at the
+  `@/lib/role-grants` boundary (matching `directory/page.test.tsx`'s
+  mocking style, applied to a Server Action). 16 tests.
+
+## Files Modified
+
+- `src/lib/audit.ts` — two new `AUDIT_ACTIONS` keys, `TENANT_ROLE_GRANTED`
+  (`"tenant.role.granted"`) and `TENANT_ROLE_REVOKED`
+  (`"tenant.role.revoked"`), placed after `ORG_BRAND_NEUTRALIZED` with a
+  comment citing DECISION-067's explicit-`organization_id`-in-metadata
+  convention.
+- `src/lib/audit.test.ts` — the file's own `EXPECTED_ENTRIES` drift-guard
+  object needed the same two keys added, or `npm run typecheck` fails
+  (`Record<..., string>` is missing properties) — caught immediately by
+  running typecheck, not discovered later.
+- `scripts/seed.ts` — new flag `org_portal.roles`, `enabled: false`, added
+  immediately after `org_portal.directory`, matching its comment shape and
+  "flag is a toggle, permission is the real gate" framing exactly.
+
+## Schema Changes
+
+None — this commit is server logic only, consuming database-admin's
+commit 1 (`role_grants.manage`, `stated_clerk`) unchanged.
+
+## Audit Events
+
+- `TENANT_ROLE_GRANTED` — written by `grantRoleAction` on `{ kind: "ok" }`
+  only. `resourceType: "role_grant"`, `resourceId` the new grant id,
+  `metadata: { organizationId, roleId, roleKey, granteeType, granteeId }`.
+- `TENANT_ROLE_REVOKED` — written by `revokeRoleAction` on `{ kind: "ok" }`
+  only, same `metadata` shape, supplied by the caller (the page already
+  has this data from its own `listGrants()` read — `revokeRole()` itself
+  returns only a result kind, not row detail).
+- Both actions checked by `npm run check:audit` — in practice the
+  tripwire's `MUTATION_RE` (`db.insert|update|delete`) never fires on
+  this `actions.ts` file at all, since it delegates every mutation to
+  `role-grants.ts` rather than calling `db` directly; the tripwire passes
+  trivially rather than by matching an `AUDIT_ACTIONS` reference. Noted
+  rather than silently relied on — the coverage is real (both actions do
+  call `recordAudit()`), just not exercised by this specific heuristic.
+
+## A design tension found — and the implementer's resolution reverted, by the orchestrator, before commit
+
+api-developer found a real inconsistency: the Phase 3 design's own edge-case
+wording ("a role bound only to `directory.view` cannot grant a role that
+also carries `role_grants.manage` → `escalation_denied`") only makes sense
+if the granter reaches the subset check WITHOUT holding `role_grants.manage`
+first — which is only possible if `grantRole` has no primary
+`hasRoleGrantsManage` gate at all. api-developer resolved the tension by
+removing the gate from `grantRole` and keeping it on the other three
+functions, reasoning that the subset check alone was sufficient "by
+construction" since granting a role carrying `role_grants.manage` itself
+requires already holding it.
+
+**That resolution was wrong, and the orchestrator caught it in independent
+review before commit, not in a later phase.** Removing the primary gate
+means it is sufficient by construction *only* for roles that themselves
+carry `role_grants.manage` — not for any other role. Concretely: `narrowPerson`
+(holding nothing but `directory.view`, the baseline every `active_membership`
+member has via the `member` role) could call `grantRole` for `viewer`
+(bound only to `directory.view`) and succeed, since the subset check alone
+— {directory.view} ⊆ {directory.view} — has nothing to say about whether
+the granter is authorized to use the feature *at all*. This directly
+recreates the exact failure mode DECISION-066 minted `stated_clerk`
+specifically to avoid: "that would hand every member the power to grant
+roles to every other member." An ordinary member with zero administrative
+standing could write `role_grants` rows for any role at or below their own
+permission tier — a real authorization bypass, not a cosmetic gap, even
+though today's seeded roles keep its immediate blast radius to
+`member`/`property_chair`/`viewer`-tier grants.
+
+**Fixed directly** (`src/lib/role-grants.ts`): restored the
+`hasRoleGrantsManage` gate as `grantRole`'s first check, matching the other
+three functions — the gate answers "may this person administer role grants
+at all," the subset check is an independent second layer answering "even
+granted that, can they hand out something they don't personally hold,"
+never a substitute for the gate. The flagship escalation test needed a
+different fixture to stay meaningful under the corrected model: a person
+holding `role_grants.manage` and *nothing else* (`bareClerkPerson`,
+new in the fixture) attempting to grant a role that requires an additional
+permission they lack (`directory.view`) — that is the scenario the subset
+check actually exists to catch; testing a granter who never clears the gate
+was never a meaningful test of it. Added a second, explicit regression test
+for the vulnerability itself: `narrowPerson` attempting to grant `viewer` —
+a role entirely within their own permission subset — now correctly returns
+`forbidden`, not `ok`. Both `role-grants.ts`'s module header and the
+`grantRole` docstring were rewritten to state the two-layer model plainly.
+Re-verified: `npm run typecheck`, `npm run check` (all four tripwires),
+`npm test` (1370 passed / 43 skipped), the real-Postgres suite (**25/25
+passed**, up from 24 — the new regression test), `actions.test.ts` (16/16),
+and `scripts/test-rls.sql` as `presby_app` (61 pass, 0 fail) — all clean
+after the fix.
+
+The one accepted, narrow residue noted by the original draft still stands
+and is unaffected by this fix: a role with zero `app_role_permissions` rows
+could be granted by anyone holding `role_grants.manage`, regardless of the
+subset check, since the subset of nothing is always satisfied — not a
+privilege-escalation risk (an empty-permission role grants no capability),
+just a data-quality one. No seeded role is empty today.
+
+## A significant discovery: the "arm-1 cascade gap" is already closed by a pre-existing trigger, contradicting DECISION-062/066
+
+Writing `role-grants.test.ts`'s finding-4 fixture (end a membership without
+touching its `role_grants` row) failed against the real dev database:
+`drizzle/0014_presby_org_router.sql` already installs
+`presby_guard_membership_end()`, a `BEFORE UPDATE OF ended_on` trigger that
+raises `check_violation` — "cannot end this relationship on % - a role
+grant beginning % is still open at this organization" — for precisely this
+case, in both directions (ending a membership under an open grant is
+rejected; opening a grant at an already-ended membership is separately
+rejected by its sibling `presby_guard_position_needs_membership()`).
+`scripts/test-rls.sql` (lines 468–484) already asserts this exact
+behavior, with a comment naming it explicitly: "the role_grants half of
+the trigger." Migration `0014` predates this pipeline's own `0018` and
+even P1's `0017`/permission-portal work chronologically (by migration
+number), yet DECISION-062 (P1 Phase 2) states the cascade gap is "real but
+untouched," and DECISION-066/the Phase 3 design both build on that framing,
+asking this commit to surface a state that the database already refuses to
+create via any ordinary application mutation path. This looks like a
+genuine research gap in P1's Phase 2 review — the trigger existed and was
+already tested — rather than a new development in this commit.
+
+**What I did about it:** kept `listGrants()`'s `membershipEnded` LEFT
+JOIN/COALESCE exactly as designed — it is correct, harmless defensive code
+regardless of whether the state is reachable through the app today, and it
+is the right answer for the one path that CAN still produce it (a direct
+historical-data import, or a future migration that relaxes the guard).
+`role-grants.test.ts`'s finding-4 fixture now constructs the state via a
+narrowly-scoped, `try`/`finally`-guarded `ALTER TABLE memberships DISABLE
+TRIGGER memberships_guard_end` around the one `UPDATE`, immediately
+re-enabled — simulating imported/legacy data, never done in application
+code, only in the test fixture. **Did not** touch the trigger itself,
+`drizzle/`, or `docs/decisions.md` — those are out of this commit's scope
+per the brief and belong to database-admin / the analyst's Phase 6 review.
+Flagging this explicitly for the orchestrator to decide whether
+DECISION-062/066 need a correcting note and whether `docs/TODO.md`'s
+"arm-1 cascade gap, unfixed" line (if one exists) needs updating to say
+"guarded since `0014`, for the ordinary mutation path" instead.
+
+## Implementer Notes
+
+- `role_grants.granted_by` FK caveat: resolved by giving `grantRole` a
+  fourth parameter, `granterUserId: string` (a `users.id`), separate from
+  `granterPersonId: string` (a `people.id` used for the membership/
+  permission checks). `admin/roles/actions.ts` is the layer that has both
+  at once — `session.user.id` from `auth()` and `resolved.org.personId`
+  from `resolveOrgContext()` — and passes both in rather than either
+  function re-deriving one from the other. Documented at both the
+  `grantRole()` call site and the `actions.ts` header, citing
+  `src/lib/brand/read-org-brand.ts`'s header as the precedent for the same
+  bug class (P0.5).
+- Divergence from the brief: `actions.ts` uses `auth()` directly, not
+  `cachedAuth()`. `src/lib/auth/cached-auth.ts`'s own header says
+  `cachedAuth()` is for Server Component render trees only and is
+  misleading in a Server Action, where `cache()` is a no-op — every other
+  `actions.ts` in the tree (`account/actions.ts`, `account/2fa/actions.ts`,
+  `admin/organizations/[id]/actions.ts`) already follows this. Noted
+  explicitly rather than silently deviating.
+- `effectivePermissions()` (the exported wrapper in `src/lib/authz.ts`)
+  was NOT called from inside `grantRole`'s subset check, even though
+  DECISION-068 names it — calling it would open a SECOND `withOrgContext()`
+  transaction nested inside the one `grantRole` already has open, which
+  contradicts DECISION-068's own text ("both reads happen inside the ONE
+  transaction the mutation already opens"). Instead, `grantRole` calls
+  `presby_effective_permissions()` directly via `tx.execute()`, the same
+  underlying SQL `effectivePermissions()` itself runs — same guarantee,
+  no nested transaction, no redundant membership re-check.
+
+## Verification
+
+- `npm run typecheck` — clean.
+- `npm run check` (all four tripwires) — clean.
+- `npm test` (the real CI command, no `DATABASE_URL`) — 1370 passed, 42
+  skipped (role-grants.test.ts correctly among the skipped set), 0 failed.
+- `dotenv -e .env.local -- vitest run src/lib/role-grants.test.ts` — **24
+  passed, 0 failed, 0 skipped** — confirmed running against real Postgres
+  (the `hasDb` guard was true; a deliberate `not-a-uuid` input threw a real
+  Postgres `22P02` cast error, not a mocked result, in the "genuine
+  failures propagate" describe block).
+- `vitest run "src/app/(org)/o/[slug]/admin/roles/actions.test.ts"` — 16
+  passed, 0 failed.
+- `scripts/test-rls.sql` run as `presby_app` (`psql "$APP_DATABASE_URL" -v
+  ON_ERROR_STOP=1 -f scripts/test-rls.sql`) — exit 0, 61 `NOTICE: pass`
+  lines, zero occurrences of "fail". Nothing broken.
+- Pre-existing, unrelated flake noted and NOT touched: `npm run test`
+  under `dotenv -e .env.local` (only) fails 3 `rate-limit.test.ts` tests
+  that pass cleanly without `.env.local`'s vars loaded — confirmed via
+  `git stash` that this reproduces identically on a clean tree with zero
+  changes from this commit. Not investigated further (out of scope); the
+  actual CI invocation (`npm run test`, no dotenv) is fully green.
+
+## Handoff to ux-developer (commit 3 of 3)
+
+`src/lib/role-grants.ts` exports `listGrants(viewerPersonId, organizationId)
+→ GrantListResult`, `getGrantFormOptions(viewerPersonId, organizationId) →
+GrantFormOptionsResult`, `grantRole(granterPersonId, organizationId,
+granterUserId, input: GrantRoleInput) → GrantResult` — note the FOUR
+parameters, `granterUserId` is new relative to the Phase 3 design's literal
+signature — and `revokeRole(granterPersonId, organizationId, grantId) →
+RevokeResult`. `src/app/(org)/o/[slug]/admin/roles/actions.ts` exports
+`grantRoleAction(slug, { roleId, target, startsOn? }) →
+ActionResult<{ grantId }>` and `revokeRoleAction(slug, { grantId, roleId,
+roleKey, granteeType, granteeId }) → ActionResult` — `revokeRoleAction`
+needs the grant's role/grantee detail as input because `revokeRole()`
+itself doesn't return it; the page already has this from its own
+`listGrants()` read and should pass the row's own fields straight through
+when building the revoke confirmation. New flag `org_portal.roles`
+(`scripts/seed.ts`), seeded off — the page must check it before rendering
+anything, same as `directory/page.tsx`'s `org_portal.directory` check.
+`GrantListEntry.grantee` (person arm) carries `membershipEnded: string |
+null` — per the "significant discovery" note above, expect this to be
+`null` in virtually every real-world case going forward (the DB guard
+prevents new occurrences); render it as a visible warning when non-null
+rather than assuming it's dead code. No `Dialog`/`Select` primitive exists
+yet (per the Phase 3 design, out of scope to add) — `grant-role-form.tsx`
+needs native `<select>`s and `revoke-dialog.tsx` needs `AlertDialog`
+(already generated, used by `neutralize-dialog.tsx`). Also owed: a real
+browser, 360px-viewport walkthrough of both flows including a **live**
+self-lockout check (CLAUDE.md → Verify in a Browser; the Phase 3 design's
+own acceptance criteria), and `docs/product/functionality-map.md` /
+`docs/TODO.md` updates at Phase 6 ship time, not this commit.
+
+*Recorded by api-developer.*

@@ -68,6 +68,13 @@ export const AUDIT_ACTIONS = {
   // resourceId, or the church cannot see it. "Who made our website purple."
   ORG_BRAND_SET: "org.brand.set",
   ORG_BRAND_NEUTRALIZED: "org.brand.neutralized",
+  // Tenant role administration (P9) — written from
+  // src/app/(org)/o/[slug]/admin/roles/actions.ts. DECISION-067:
+  // `organization_id` is recorded explicitly in `metadata` (not just
+  // `resourceId`, which carries the grant id) because no tenant-facing
+  // audit reader exists yet to establish a convention by example.
+  TENANT_ROLE_GRANTED: "tenant.role.granted",
+  TENANT_ROLE_REVOKED: "tenant.role.revoked",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

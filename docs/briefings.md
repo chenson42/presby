@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=068 commit=4bab655 -->
+<!-- covers: decision=068 commit=895d436 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -23,6 +23,28 @@ entries — that is the one piece of discipline this file needs, and it is check
 ---
 
 ## 2026-08-19
+
+- [ ] **`decision` · Congregations can now designate someone to manage who
+  has access to what — not live for anyone yet, on purpose.** A
+  congregation's Stated Clerk (a real, elected office, not a new
+  invention) can grant or revoke administrative roles for other members —
+  the same read-only "who's a member" grant `directory.view` uses, applied
+  to a write, with careful checks so nobody can grant themselves more power
+  than they already have and nobody can accidentally lock everyone out. The
+  page is built and independently tested twice over (once by an automated
+  verification pass, once by a fresh read against the original
+  requirements), but the switch that turns it on for real congregations is
+  deliberately left off — there's no benefit to exposing an administration
+  surface before a real congregation exists to use it safely.
+
+- [ ] **`finding` · Two architectural decisions from earlier today turned
+  out to be based on a stale reading of the database — corrected, not
+  removed.** Both described a specific gap (a departed member could
+  theoretically keep an administrative permission forever) as real and
+  unaddressed. It turns out a safeguard already existed in the database
+  from before either decision was made — nobody had checked. Both
+  decisions now carry a dated correction explaining what was actually
+  true, rather than being silently rewritten.
 
 - [ ] **`defect` · A just-written feature would have let any ordinary
   member grant themselves or anyone else administrative-adjacent roles,

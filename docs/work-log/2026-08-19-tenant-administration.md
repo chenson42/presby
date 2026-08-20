@@ -71,7 +71,7 @@ model yet. Don't block on P8, but don't duplicate its scope either.
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — bootstrap gap + 6 adversarial findings | 2026-08-19 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-066/067/068 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -194,3 +194,102 @@ non-negotiable acceptance criteria for Phase 3's design, not optional
 polish. The out-of-scope list must not silently re-enter through Phase 3.
 
 *Recorded by the orchestrator from the read-only analyst agent's report.*
+
+---
+
+# Phase 2 — Architectural Review (architect)
+
+## Verdict
+
+**Approved with suggestions.** Nothing returns to Phase 1. Three decisions
+minted (DECISION-066/067/068).
+
+## Task 1 — the bootstrap permission: `stated_clerk`, not an extension of `session_member`
+
+**Ruling: a new constitutional role, `stated_clerk`, holding a new permission
+`role_grants.manage`, granted by a direct (`person_id`) `role_grants` row —
+never bound to a derived group.** Extending `session_member` was rejected:
+its existing binding (`roll.approve`, granted to the whole derived Session
+group) is doing real polity work — G-2.0401 makes roll actions a collective
+decision — and handing every sitting elder the power to grant/revoke
+administrative access simultaneously, with no individual act of designation,
+is wildly out of proportion. PC(USA) polity already draws this exact line:
+**G-3.0104's Stated Clerk** is a designated administrative office at every
+council, elected by the body but exercising its records/execution duty
+individually — maps directly onto "who clicks the grant-role button."
+Exact seed shape given (mirrors `session_member`/`property_chair`/`member`'s
+existing form), fixture-scoped to Alder Creek, `organizationTypeScope`
+templating deferred to real org provisioning (G-B, still unbuilt). Named
+consequence: this is the first arm-1 grant the codebase seeds, so
+DECISION-062's flagged cascade gap goes live the moment it lands —
+inherited, not introduced. **DECISION-066.**
+
+## Task 2 — the tenant audit surface: defer the reader; write path stays unconditional
+
+**Confirmed worse than Phase 1 suspected**: `audit_events` isn't merely
+missing an `organization_id` column — it's **absent from `drizzle/0009`'s
+`tenant_tables` array entirely**, so it has no RLS policy of any kind.
+`presby_app` can read every row regardless of org context. The brand
+pipeline's `resourceId`-overload convention is safe today only because its
+one reader is platform-only; a tenant-facing reader on the same table has no
+such backstop and repeats the exact enumeration-oracle shape DECISION-049
+already rejected once for `organization_brands`. **Ruling: defer the reader**
+— building it safely needs a dedicated FORCE-RLS projection or a
+narrowly-scoped SECURITY DEFINER function, real schema work this pipeline's
+Phase 1 scope didn't ask for. The write path (`TENANT_ROLE_GRANTED`/`REVOKED`)
+ships unconditionally regardless (Rule 7; no reader exists yet to leak to),
+with `organization_id` recorded explicitly in `metadata` so a future reader
+isn't guessing at convention. Flow 3 ("who holds what," already in scope,
+already RLS-correct via the resolver) is a genuinely better answer to
+current-state questions but does not cover history — the gap stays open,
+named, tracked. **DECISION-067.**
+
+## Task 3 — shared-admin-chrome: confirmed, one constraint added
+
+Confirmed directly against the code: `(admin)`'s nav is a flat array with no
+`FEATURES.*` filtering in the layout itself, nothing shaped for reuse across
+the `(organization_type, effective_permissions)` axis. Build a new
+`(org)/o/[slug]/admin/layout.tsx` from the generated primitives. **One
+constraint for tech-lead**: the new layout must NOT itself render
+`<BrandTokens>` — `check-brand-scope.mjs`'s E1/E3 rules restrict the marker
+to exactly the two files in `EMITTERS`, and this layout sits beneath
+`[slug]/layout.tsx` in the tree and inherits the emitted cascade for free.
+Not a new decision — DECISION-043/047/052 applying without incident.
+
+## Task 4 — all six adversarial findings achievable inside the existing pattern
+
+All six confirmed as server-side logic inside a `withOrgContext()`-scoped
+mutation, mirroring `directory.ts`'s shape — no new resolver arm, no new
+tenant table. The highest-stakes one (self/other-escalation) gets its own
+ruling: the subset check is two ordinary, already-org-scoped reads
+(`effectivePermissions()` for the granter, a plain `SELECT` over the global
+`app_role_permissions`/`permissions` catalog for the target role) inside the
+mutation's own transaction — **not a new privileged SQL function**, since
+neither read crosses an org boundary and `presby_effective_permissions()`
+already self-guards against exactly the risk a second DEFINER function would
+reintroduce. **DECISION-068.** The remaining five are implementation-level
+reuses of already-established shapes (the `(org)` contract's resolution
+order, `directory.ts`'s `memberships`-scoped person search, a join on
+`memberships.ended_on` for the visible-not-fixed cascade flag, a
+subset-aware self-lockout guard).
+
+## Documentation hygiene, caught in passing
+
+`docs/decisions.md` carried duplicate decision numbers (063/064/065, each
+minted twice across two work-log recording passes) — confirmed neither
+duplicate pair conflicted with this ruling, but flagged for cleanup.
+**Fixed by the orchestrator immediately, before minting 066–068**: merged or
+deduplicated all three, confirmed zero duplicate numbers remain anywhere in
+the file (`ea073b0`).
+
+## Handoff
+
+**Next: tech-lead (Phase 3).** Carry forward: the `stated_clerk` seed shape
+(DECISION-066) as the literal binding to design against; the audit-defer
+ruling (DECISION-067) — Flow 3 in scope, a reader is not, both TODO lines
+land in the same commit (Rule 10); the subset-check placement (DECISION-068)
+as `src/lib/role-grants.ts`'s concrete shape; the brand-scope constraint on
+the new admin layout; all six adversarial findings as non-negotiable
+acceptance criteria. The out-of-scope list must not silently re-enter.
+
+*Recorded by the orchestrator from the read-only architect agent's report.*

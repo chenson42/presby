@@ -3,6 +3,30 @@
 Architectural and implementation decisions for the Claude Code Starter. Newest first. Each decision is numbered; the number does not change once assigned.
 
 ---
+## DECISION-068: The self/other-escalation subset check runs as two ordinary, already-org-scoped reads inside the mutation's `withOrgContext()` transaction — no new privileged SQL function
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-administration` (Phase 2)
+
+The granter's own effective permissions come from `effectivePermissions()` (already exported, `src/lib/authz.ts`); the target role's permission set comes from a plain `SELECT` over `app_role_permissions`/`permissions` — global, non-RLS catalog tables joined through an `app_roles` row already scoped to the transaction's org context by FORCE RLS. Both reads happen inside the one transaction the mutation already opens; neither crosses an org boundary, so neither needs SECURITY DEFINER. `presby_effective_permissions()` itself already self-guards against being used as a fishing tool outside the caller's current org context — building a second privileged function to perform a same-org comparison it can already answer twice over would be the wildcard-shaped shortcut the adversarial pass warns against, one layer below the checker instead of the checked. Lives in a new `src/lib/role-grants.ts`, parallel to `directory.ts` (DECISION-061's precedent for the first tenant mutation's query-layer module).
+
+---
+
+## DECISION-067: The tenant-facing audit reader is deferred; Flow 3 ("who holds what") is the safe, partial consolation
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-administration` (Phase 2)
+
+`audit_events` is absent from `drizzle/0009_presby_rls.sql`'s `tenant_tables` array — it has no RLS policy at all, so a tenant-scoped reader built on today's `resourceId`-overload convention (already used by `ORG_BRAND_SET`/`NEUTRALIZED` for a platform-only reader) would be readable cross-tenant by construction, the same shape DECISION-049 already rejected once for `organization_brands`. Building a safe reader needs a dedicated `organization_id`-bearing FORCE-RLS projection or a narrowly-scoped SECURITY DEFINER function — real schema work this pipeline's Phase 1 scope did not ask for. `TENANT_ROLE_GRANTED`/`TENANT_ROLE_REVOKED` are still written unconditionally (CLAUDE.md Rule 7; the write path needs no RLS since no reader exists yet to leak to), with `organization_id` recorded explicitly in `metadata` so a future reader isn't guessing at convention. Flow 3 ("who holds what," via `presby_effective_permissions()`/`explainPermission()`, already RLS-correct and already in scope) is a genuinely better answer to current-state questions but does not cover history — a tenant-facing audit reader stays a named, tracked `docs/TODO.md` follow-up, not a silently-closed gap.
+
+---
+
+## DECISION-066: `stated_clerk` is a new constitutional role, direct-granted only — the bootstrap permission for tenant administration is not an extension of `session_member`
+
+**Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-administration` (Phase 2)
+
+The `role_grants.manage` permission cannot bootstrap onto `session_member` (bound to the derived Session group): that would hand every sitting elder the power to grant and revoke administrative access simultaneously, on no individual act of designation, wildly out of proportion to `session_member`'s existing binding (`roll.approve`, a collective-body decision G-2.0401 already models as a body vote). PC(USA) polity already separates the two: G-3.0104's Stated Clerk is a designated administrative office at every council (congregation, presbytery, synod), elected by the body but exercising its records/execution duty individually — the correct shape for "who clicks grant/revoke in the software." New constitutional role `stated_clerk`, `role_kind: 'constitutional'`, `is_protected: true`, holding a new global permission `role_grants.manage` (module `authz`, tier 1, migration-seeded per DECISION-063's precedent), granted by a **direct** (`person_id`, arm 1) `role_grants` row — never bound to a derived group. Fixture-scoped in `scripts/seed-dev.sql` for now, matching `session_member`/`property_chair`/`member`'s existing form; `organizationTypeScope`-templating stays deferred to G-B (real org provisioning), unbuilt per DECISION-063. This is the first arm-1 grant proving `role_grants.manage` end to end, and it makes DECISION-062's flagged cascade gap live for the first time — inherited, not introduced, by this pipeline.
+
+---
+
 ## DECISION-065: The `active_membership` derived group's grantee population is "any current `memberships` row"; directory *content* eligibility is the narrower, already-documented fpcw-style formula — the two populations are deliberately different
 
 **Status:** Resolved · **Date:** 2026-08-19 · **Feature:** `2026-08-19-tenant-permissions-portal` (Phase 3)

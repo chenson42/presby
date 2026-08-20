@@ -3,6 +3,20 @@
 Architectural and implementation decisions for the Claude Code Starter. Newest first. Each decision is numbered; the number does not change once assigned.
 
 ---
+## DECISION-079: `pastoral.notes.view` must bind to an office representing the actual pastoral relationship (installed or temporary-supply pastor), never to a presiding-function label like "moderator"
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-role-catalog` (Phase 2)
+
+Moderator of Session is ordinarily held ex officio by the installed pastor, but it is a presiding function that can be held by someone with no ongoing pastoral relationship to the congregation — a presbytery-appointed moderator during a pastoral vacancy, who may be a ruling elder or a minister from another church entirely. Binding tier-3 pastoral-notes access (`docs/schema-design.md`'s own "strictest grant in the system," `visibility = 'clergy_only'`) to "whoever moderates the meeting" would let that role admit a non-clergy or externally-appointed holder into the strictest read grant in the schema. The office key Phase 3 picks must name the pastoral relationship itself, not the meeting-chairing function — exact string is Phase 3's call, this is a tier-sensitivity constraint on that call, not a name.
+
+---
+## DECISION-078: `roll.propose` binds to `stated_clerk` (a new `app_role_permissions` row, no new role); the standing test for any future capability proposed against `stated_clerk` is constitutional duty vs. software convenience
+
+**Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-role-catalog` (Phase 2)
+
+`roll.approve` is already bound to `session_member` (the derived Session group — a collective body decision, G-2.0401's body-vote model); `roll.propose` on `stated_clerk` completes a clean propose/approve separation of duties — one accountable individual drafts, the body approves — and register-keeping is squarely the Clerk of Session's own constitutional duty (`docs/schema-design.md` §8 already assigns roll/register maintenance to this office). This is categorically different from `tickets.file`'s original binding (DECISION-072, corrected): that had nothing to do with clerking and was bound to `stated_clerk` only because no other office existed — expediency, not duty. The standing test for anything proposed against `stated_clerk` going forward: does this permission belong to the Clerk of Session's actual constitutional job, or is `stated_clerk` just the only administratively-empowered office that happens to exist in the fixture? `roll.propose` passes; `tickets.file` did not. Recorded so the next pipeline doesn't have to re-litigate DECISION-072's arc from scratch.
+
+---
 ## DECISION-077: Ticket lifecycle emails route through a new shared `src/lib/tickets-notifications.ts`, not inline `enqueueEmail()` calls scattered across three action files; no rate-limiting or digestion is added on top
 
 **Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-support-tickets` (Phase 3 revision)

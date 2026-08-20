@@ -77,7 +77,7 @@ append-only, never edited in place.
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-078/079 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -261,21 +261,94 @@ correction.
 
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
+**Approved with suggestions.** Every Phase 1 claim was checked directly
+against source (the schema, the derived-group trigger, the fixture, the
+platform seed script) rather than accepted on summary, and held up. One
+real gap Phase 1 didn't name (a cross-pipeline FK sequencing dependency)
+plus two open calls ruled on directly rather than relayed as options.
 
 ## Placement
 
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
+**No new directories, no schema change, fixture-only** — confirmed for
+all four bindings. Treasurer/pastoral role/Support Contact are new rows
+in `scripts/seed-dev.sql`'s existing `app_roles`/`app_role_permissions`/
+`role_grants` blocks. The platform Support Operator bundle is new rows in
+`scripts/seed.ts`, mirroring the existing `bindAdminFeatures()` shape
+directly (read, not guessed): loop a feature-key list, insert
+`roleFeatures` rows, `onConflictDoNothing()`. A new `SUPPORT_OPERATOR_ROLE`
+constant belongs in `src/lib/permissions.ts` next to `ADMIN_ROLE`/
+`MEMBER_ROLE`. No server/client split, no dependencies — no UI, no route,
+no server action anywhere in this pipeline.
 
 ## Invariants Touched
 
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
+- **No Role Carries a Wildcard** — Support Operator confirmed to stay at
+  exactly two `FEATURES.*` keys, not three. Checked the concrete
+  precedent directly: `/admin/2fa/page.tsx` joins `organizations` for
+  display with no second feature gate, and `organizations` already
+  carries a public grant (DECISION-040/049 — the org tree is public) —
+  `/admin/tickets`'s planned `organizations` join rides on
+  `FEATURES.ADMIN_TICKETS` alone, the same way `/admin/feedback`'s
+  `users` join needs no `FEATURES.ADMIN_USERS`.
+- **The Court Is Not a Group** — confirmed by reading
+  `presby_sync_derived_group()` directly: any `officer_terms.office`
+  value outside `'ruling_elder'`/`'deacon'` is a safe no-op, not an error
+  or a silent mis-projection. No CHECK constraint on `officer_terms.office`
+  exists, and no application code pattern-matches it against a closed
+  set — two new office labels (Treasurer, pastoral role) need zero code
+  change.
+- **Two Hierarchies Intersect Nowhere** — not implicated; all four
+  bindings are ordinary in-org direct grants at one congregation.
+- **Composite Tenant Keys, Permissions vs Flags** — not applicable / clean;
+  no new tables, no flags proposed.
 
 ## Notes
 
-[Anything Phase 3 must honor.]
+1. **A real sequencing dependency, not a Phase 1 error.** `roll.propose`/
+   `roll.approve`/`directory.view`/`ledger.approve`/`pastoral.notes.view`
+   are all already in the catalog — confirmed. `tickets.file` is
+   different in kind: designed (the exact migration SQL is written out in
+   the sibling work-log) but **not yet committed** — `drizzle/
+   0019_presby_ticket_support.sql` doesn't exist as a file yet at review
+   time. `app_role_permissions.permission_key` is a hard FK to
+   `permissions.key`; role-catalog's own Phase 4 insert for Support
+   Contact will FK-violate on any database where `0019` hasn't actually
+   been applied. The dependency is one-directional and needs to be named
+   explicitly in Phase 3's Implementation Order: role-catalog's Phase 4
+   must run **after support-tickets' Phase 4 database-admin step has
+   applied `0019`**, not merely after that pipeline's design is complete.
+   Same shape on the platform side — `roleFeatures.featureKey` FKs to
+   `features.key`, so the Support Operator bundle's `ADMIN_TICKETS` row
+   needs `src/lib/permissions.ts`'s new `FEATURES.ADMIN_TICKETS` entry to
+   exist first.
+2. **`roll.propose` — ruled, not deferred.** Binds to `stated_clerk` now.
+   **DECISION-078**: register-keeping is the Clerk's actual constitutional
+   duty (`docs/schema-design.md` §8), completing a clean propose/approve
+   separation of duties against `roll.approve`'s existing binding to the
+   collective `session_member` group — categorically different from
+   `tickets.file`'s original expedient binding. The standing test for
+   anything proposed against `stated_clerk` going forward: constitutional
+   duty of the office, or just the only empowered role that happens to
+   exist in the fixture.
+3. **Pastoral role naming — a constraint, not a name.** "Moderator" isn't
+   just imprecise, it's the wrong axis: Moderator of Session can be held
+   by a presbytery-appointed outsider during a pastoral vacancy, with no
+   ongoing pastoral relationship to the congregation. Binding tier-3
+   `pastoral.notes.view` (the schema's own "strictest grant in the
+   system") to a presiding function rather than the pastoral relationship
+   itself would let a non-clergy or externally-appointed holder into it.
+   **DECISION-079**: Phase 3's office key must name the relationship
+   (installed/temporary-supply pastor), never the meeting-chair function.
+4. Phase 1's Gaps/Out-of-Scope sections all hold up under direct
+   verification — the presbytery/synod deferral, the missing
+   `officer_terms` rows (recommend Phase 4 add both, dated to match
+   `stated_clerk`'s own precedent), and the `docs/TODO.md` line for
+   `tickets.file`'s lost self-lockout protection (already added — see
+   `2026-08-20-support-tickets`'s Phase 3 revision and DECISION-072's
+   correction, both already committed as of this review).
+
+*Recorded by the orchestrator from the read-only architect agent's
+report.*
 
 ---
 

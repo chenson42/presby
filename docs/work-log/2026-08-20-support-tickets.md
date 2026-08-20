@@ -81,7 +81,7 @@ app has no access to).
 | 3 — Technical design | tech-lead | Complete | Design complete, twice revised same-day pre-Phase-4 (ticket email notifications + area/priority fields; then tickets.file's role binding decoupled to the sibling role-catalog pipeline) — DECISION-072 through 077 | 2026-08-20 |
 | 4 — Implementation | database-admin → api-developer → ux-developer | Complete (3 of 3 commits) | — | 2026-08-20 |
 | 5 — Verification | qa | Complete | PASS | 2026-08-20 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP IT | 2026-08-20 |
 
 ---
 
@@ -2356,32 +2356,134 @@ No missing or misdirected gate found anywhere in this diff.
 
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP IT**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> The support-ticket loop shipped exactly as Phase 1's own resolved
+> scope described — role-gated filing/reply/triage with a baseline-
+> member feedback on-ramp, no autonomous AI actor anywhere, every
+> permission gate present and correctly ordered on independent code
+> review.
+
+## A correction to this review's own briefing
+
+The Phase 6 prompt described "one real security-adjacent bug caught in
+commit 2 — a missing gate that would have let any member grant
+low-tier roles" as this pipeline's highest-stakes Phase 4 finding.
+**That bug belongs to a different pipeline** — the `role_grants.ts`
+gate bug caught in `2026-08-19-tenant-administration` (P9), not
+support-tickets. The orchestrator's own briefing conflated the two.
+The analyst searched this pipeline's full record (work-log,
+decisions, the sibling role-catalog pipeline) and found no such bug
+here, then independently re-read every exported function in
+`src/lib/tickets.ts` and both `actions.ts` files directly rather than
+writing around the discrepancy — the gate is present and correctly
+ordered everywhere it should be, and deliberately absent exactly where
+Phase 3 said it should be (`submitFeedback`). Recorded here so the
+mistake in framing doesn't get silently repeated, not because it
+affected the actual verdict.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- `hasTicketsFile` gates every write before any validation or mutation
+  runs, in all nine exported functions except the deliberately-
+  ungated `submitFeedback` — verified by direct read, not inference.
+- All six admin triage actions and both admin pages call
+  `requireAdminTicketsSession()` first, confirmed line-by-line.
+- Both attachment routes do the join-based ownership check before
+  ever calling `resolve()` — a role-holder or operator can't fetch an
+  unrelated blob by guessing a UUID under an unrelated ticket URL.
+- Flow 0 (feedback → ticket) is intact end to end: no gate, 5/hour
+  rate limit, and `promoteFeedbackToTicket` deliberately doesn't
+  re-verify the original submitter's membership — documented, not an
+  oversight.
+- `area`/`priority` (Phase 3's revision) are coherent with Phase 1's
+  resolved scope — both follow `change_class`'s exact model
+  (submitter-set, operator-correctable, used only for filter/sort);
+  grepping the whole surface for any conditional branch on their
+  value turns up nothing but tests. No automation gate crept in.
+- Nothing Phase 1 explicitly deferred crept back in — no internal-only
+  notes, no platform-admin-files-on-behalf-of path, no public status
+  page, no AI-actor discriminator anywhere in `support.ts`.
+- Native `<select>`s throughout are the current, correct house
+  convention (`docs/ui-standards.md`) — not a corner cut; no `Select`
+  primitive exists in this repo yet.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: three flows, both-ends role gating, categories +
+  artifacts in scope, no autonomous AI actor. Shipped: all three
+  flows, correctly gated, `change_class`+`area`+`priority`,
+  PNG/JPEG/WEBP/PDF attachments per DECISION-071/073, zero AI-actor
+  code. **Matches.**
+- Phase 1's five open technical questions: table placement (→
+  FORCE-RLS tenant tables, DECISION-069), `feedback` reuse-vs-new (→
+  new `congregation_feedback` table, DECISION-070), default role
+  binding (→ resolved by the sibling role-catalog pipeline, already
+  SHIP IT), `/admin/feedback` coexistence (→ distinct copy/routes).
+  **Matches.**
+- Phase 3's five email triggers, firing only on genuinely new
+  information: shipped, independently corroborated by both a real
+  browser walkthrough and a direct `email_queue` query (five sent,
+  one correctly absent). **Matches.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: pass — specific, actionable copy distinguishing
+  "nothing yet" from "nothing matches this filter."
+- Failure microcopy: pass — every `ActionResult` failure branch
+  renders a human sentence; no stack-trace path found.
+- Permission gate: pass — verified independently at the query,
+  action, and route-handler layers, no discrepancy from qa's own
+  audit.
+- Audit event: pass — `TICKET_CREATED`/`TICKET_FEEDBACK_PROMOTED`
+  fire only on success; routine triage audit-exempt by named
+  precedent, matching Phase 1's explicit ruling.
+- Mobile (360px): pass, resting on the implementer's documented real
+  walkthrough plus qa's independent DB corroboration — not re-run by
+  this phase (see below for why that's an acceptable call, not a gap).
 
-## Follow-Ups (if SHIP WITH NOTES)
+## On the qa-flagged 2FA-walkthrough limitation
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+**Acceptable to ship on, a considered call.** Not an auth-touching
+diff, so CLAUDE.md's mandatory e2e-MFA-smoke gate doesn't apply. What
+stands behind the claim is stronger than one unverified account: a
+real Playwright session at 360px covering every flow, with the
+load-bearing "emails actually landed" claim independently re-derived
+by qa via direct `email_queue` query rather than trusted. Re-running it
+a third time would mean another throwaway TOTP seed and cleanup cycle
+for a diff that doesn't touch the surface the mandatory gate exists to
+protect.
 
-## Red Flags (if NEEDS REWORK)
+## Rule 14 — functionality-map.md
 
-- [Specific. What has to change before this ships.]
+**Needed updating — applied by the orchestrator in this same commit**,
+per Rule 14's own instruction that ship time is the place, not a
+deferred TODO line. See the diff in this commit for the exact wording:
+drop `tickets` from "NOT built," correct the stale table count, and add
+the org-portal/admin functionality-map entries this pipeline shipped.
+
+## Rule 15 — architecture.md
+
+Read §6 directly against the shipped implementation — nothing
+contradicts it. One minor incompleteness, not urgent: §6 mentions
+category and priority but not `area`, which shipped as a third fixed
+vocabulary. Worth folding in next time that section is touched for
+another reason.
+
+## Rule 13 — what's-new
+
+Correctly held. `org_portal.tickets` ships off; publishing now would
+advertise a feature nobody can reach yet. Already-tracked TODO line
+matches this reasoning.
+
+## Follow-Ups
+
+- `docs/product/functionality-map.md` — applied in this commit, not
+  deferred.
+- `docs/architecture.md` §6 could mention `area` next time it's
+  touched for another reason — cosmetic, not its own pipeline.
+
+*Recorded by the orchestrator from the read-only analyst agent's
+report. Pipeline closed at SHIP IT.*

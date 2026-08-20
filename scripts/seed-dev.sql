@@ -179,6 +179,21 @@ insert into officer_terms (id, organization_id, person_id, office, class_year, s
   ('e0000000-0000-0000-0000-000000000005', '22222222-2222-2222-2222-222222222222',
    'c0000000-0000-0000-0000-000000000002', 'clerk_of_session', null, '2023-01-08', null, null, null);
 
+-- P9-role-catalog / DECISION-080: two more open-ended offices the schema
+-- already anticipated (src/lib/db/domain/officers.ts:84,96 lists 'treasurer'
+-- alongside 'clerk_of_session' as an open-ended office; 'installed_pastor' is
+-- lifted from docs/schema-design.md §8's own phrase, per DECISION-079).
+-- starts_on picks up the day after Priya's diaconate term ended (below) and
+-- Rowan's presbytery current_roll_since respectively — the software grant
+-- begins when the office did, matching stated_clerk's own precedent.
+insert into officer_terms (id, organization_id, person_id, office, class_year, starts_on, ends_on, end_reason, recorded_by) values
+  ('e0000000-0000-0000-0000-000000000006', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000003', -- Priya Balakrishnan
+   'treasurer', null, '2025-01-13', null, null, null),
+  ('e0000000-0000-0000-0000-000000000007', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000006', -- Rowan Thistlewood
+   'installed_pastor', null, '2015-08-01', null, null, null);
+
 -- ---------------------------------------------------------------------------
 -- Roll actions. approval_status='approved' rows are frozen by trigger.
 -- ---------------------------------------------------------------------------
@@ -247,14 +262,41 @@ insert into app_roles (id, organization_id, key, name, role_kind, is_protected) 
   -- not a wildcard bound to the whole Session. Direct-granted only, never to
   -- a group (see the role_grants row below).
   ('f0000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222',
-   'stated_clerk','Stated Clerk','constitutional',true);
+   'stated_clerk','Stated Clerk','constitutional',true),
+  -- P9-role-catalog / DECISION-080: tickets.file's own role — property_chair's
+  -- shape (custom, unprotected), NOT a repurposed constitutional office. No
+  -- PC(USA) office corresponds to "point of contact with outside software
+  -- support" (Phase 1's own reasoning); minting one would repeat the
+  -- "churchy name for a software convenience" DECISION-066's bar rules out.
+  ('f0000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222',
+   'support_contact','Support Contact','custom',false),
+  -- P9-role-catalog / DECISION-080: Treasurer — constitutional, protected.
+  -- G-3.0205 assumes a Treasurer at every congregation; officers.ts:84,96
+  -- already anticipated the office key.
+  ('f0000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222',
+   'treasurer','Treasurer','constitutional',true),
+  -- P9-role-catalog / DECISION-079/080: Installed Pastor — constitutional,
+  -- protected. Key names the pastoral relationship, never the presiding
+  -- (Moderator) function, per DECISION-079's tier-3 constraint.
+  ('f0000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222',
+   'installed_pastor','Installed Pastor','constitutional',true);
 
 insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000001','roll.approve'),
   ('f0000000-0000-0000-0000-000000000001','directory.view'),
   ('f0000000-0000-0000-0000-000000000002','directory.view'),
   ('f0000000-0000-0000-0000-000000000004','directory.view'),
-  ('f0000000-0000-0000-0000-000000000005','role_grants.manage');
+  ('f0000000-0000-0000-0000-000000000005','role_grants.manage'),
+  -- P9-role-catalog / DECISION-078: roll.propose completes the clean
+  -- propose/approve separation of duties against roll.approve's existing
+  -- binding to the collective session_member group — register-keeping is
+  -- the Clerk of Session's own constitutional duty. Tobias Renwick's
+  -- existing stated_clerk grant already carries this once this lands; no
+  -- new role_grants row needed.
+  ('f0000000-0000-0000-0000-000000000005','roll.propose'),
+  ('f0000000-0000-0000-0000-000000000006','tickets.file'),
+  ('f0000000-0000-0000-0000-000000000007','ledger.approve'),
+  ('f0000000-0000-0000-0000-000000000008','pastoral.notes.view');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would
@@ -291,6 +333,35 @@ insert into role_grants (organization_id, role_id, group_id, starts_on) values
 insert into role_grants (organization_id, role_id, person_id, starts_on) values
   ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000005',
    'c0000000-0000-0000-0000-000000000002','2023-01-08');
+
+-- P9-role-catalog / DECISION-080: support_contact, direct-granted to
+-- Marguerite Ashcombe — deliberately NOT Tobias Renwick, who already holds
+-- property_chair and stated_clerk; a third grant to him would recreate the
+-- "one person, every capability" concentration this pipeline exists to
+-- interrupt. starts_on is the date this pipeline's grant lands, not an
+-- office date — there is no term to match (no officer_terms row for this
+-- role, by design: no PC(USA) office corresponds to it).
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000006',
+   'c0000000-0000-0000-0000-000000000001', -- Marguerite Ashcombe
+   '2026-08-20');
+
+-- P9-role-catalog / DECISION-080: treasurer, direct-granted to Priya
+-- Balakrishnan, matching the officer_terms row above (starts the day after
+-- her diaconate term ended with no successor recorded).
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000007',
+   'c0000000-0000-0000-0000-000000000003', -- Priya Balakrishnan
+   '2025-01-13');
+
+-- P9-role-catalog / DECISION-080: installed_pastor, direct-granted to Rowan
+-- Thistlewood — the fixture's own pastor, D1's whole justification, holding
+-- no other role today. starts_on matches his presbytery membership's
+-- current_roll_since.
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000008',
+   'c0000000-0000-0000-0000-000000000006', -- Rowan Thistlewood
+   '2015-08-01');
 
 -- An administrative commission: the one case where a council reaches DOWN into
 -- a congregation. Its members are a group AT THE PRESBYTERY, which is why the

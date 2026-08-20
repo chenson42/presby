@@ -32,6 +32,11 @@
 -- Support-ticket fixture (section 14). scripts/seed-dev.sql's sample rows.
 \set TICKET   '\'90000000-0000-0000-0000-000000000001\''
 \set FEEDBACK '\'92000000-0000-0000-0000-000000000001\''
+-- Role-catalog fixture (section 15). scripts/seed-dev.sql's Alder-Creek-only
+-- new roles.
+\set TREASURER_ROLE '\'f0000000-0000-0000-0000-000000000007\''
+\set INSTALLED_PASTOR_ROLE '\'f0000000-0000-0000-0000-000000000008\''
+\set SUPPORT_CONTACT_ROLE '\'f0000000-0000-0000-0000-000000000006\''
 
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
@@ -53,7 +58,9 @@ begin;
   select assert_eq((select count(*) from memberships), 6, 'alder: sees own memberships');
   select assert_eq((select count(*) from memberships where organization_id <> :ALDER), 0,
                    'alder: sees NO foreign memberships');
-  select assert_eq((select count(*) from officer_terms), 5, 'alder: sees own officer terms');
+  -- P9-role-catalog: 5 base + treasurer + installed_pastor = 7. support_contact
+  -- carries no officer_terms row by design (no PC(USA) office corresponds to it).
+  select assert_eq((select count(*) from officer_terms), 7, 'alder: sees own officer terms');
 commit;
 
 begin;
@@ -671,4 +678,40 @@ begin;
       where relname in ('tickets', 'ticket_messages', 'ticket_actions', 'congregation_feedback')
         and relforcerowsecurity),
     4, 'support tables: FORCE row level security is set on all four');
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 15. Role catalog expansion (P9-role-catalog / DECISION-080). treasurer,
+--     installed_pastor, and support_contact are new app_roles rows seeded
+--     ONLY at Alder Creek — same shape as section 2's tenant isolation, proved
+--     directly against a foreign org rather than assumed from FORCE RLS alone.
+-- ---------------------------------------------------------------------------
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from app_roles
+      where key in ('treasurer', 'installed_pastor', 'support_contact')),
+    3, 'alder: sees its own three new roles');
+  select assert_eq(
+    (select count(*) from role_grants
+      where role_id in (:TREASURER_ROLE, :INSTALLED_PASTOR_ROLE, :SUPPORT_CONTACT_ROLE)),
+    3, 'alder: sees its own three new role grants');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) from app_roles
+      where key in ('treasurer', 'installed_pastor', 'support_contact')),
+    0, 'bramblewood: sees no alder treasurer/installed_pastor/support_contact roles');
+  select assert_eq(
+    (select count(*) from role_grants
+      where role_id in (:TREASURER_ROLE, :INSTALLED_PASTOR_ROLE, :SUPPORT_CONTACT_ROLE)),
+    0, 'bramblewood: sees no alder role grants for the new roles');
+  -- Known-id cross-org read, same discipline as section 14's ticket check:
+  -- querying by the KNOWN role id from a foreign org returns zero, not a
+  -- 403 that would confirm the id is real.
+  select assert_eq(
+    (select count(*) from app_roles where id = :TREASURER_ROLE),
+    0, 'bramblewood: cross-org read of alder''s treasurer role by known id returns zero');
 commit;

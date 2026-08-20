@@ -79,7 +79,7 @@ append-only, never edited in place.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-078/079 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-080 | 2026-08-20 |
-| 4 — Implementation | database-admin | Pending | — | — |
+| 4 — Implementation | database-admin | Complete (Commit A) | — | 2026-08-20 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -726,26 +726,231 @@ total count) — new rows appearing in that list is additive, not breaking.
 
 # Phase 4 — Implementation
 
-## Files Created
+## Commit A — tenant fixture (database-admin, complete)
 
-- `path/to/file` — purpose
+Commit B (platform Support Operator bundle) is not part of this commit — it
+remains gated on `FEATURES.ADMIN_TICKETS` landing in `src/lib/permissions.ts`,
+confirmed absent by grep at the time of this commit, per Phase 3's
+Implementation Order.
 
-## Files Modified
+### Precondition check (done first, before touching any file)
 
-- `path/to/file` — what changed
+1. `git log --oneline -1 -- drizzle/0019_presby_ticket_support.sql` →
+   `6d8a1e9 feat(tickets): schema and migration for the support-ticket loop`
+   — committed, not merely present on disk.
+2. `psql "$MIGRATE_DATABASE_URL" -c "select 1 from permissions where key = 'tickets.file';"`
+   → one row returned — applied to the dev database.
 
-## Schema Changes
+Both preconditions held; proceeded.
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+### Files Modified
 
-## Audit Events
+- `scripts/seed-dev.sql` — extended the existing Authorization fixture block
+  with all four bindings from Phase 3's Data Model section:
+  - Two new `officer_terms` rows (`e0000000-...-006` treasurer/Priya
+    Balakrishnan `2025-01-13`→open, `e0000000-...-007` installed_pastor/Rowan
+    Thistlewood `2015-08-01`→open), added into the existing `officer_terms`
+    insert block (after `e0000000-...-005`).
+  - Three new `app_roles` rows (`f0000000-...-006` `support_contact`
+    custom/unprotected, `f0000000-...-007` `treasurer`
+    constitutional/protected, `f0000000-...-008` `installed_pastor`
+    constitutional/protected), added into the existing `app_roles` insert
+    (after `stated_clerk`).
+  - Four new `app_role_permissions` rows: `stated_clerk` → `roll.propose`
+    (DECISION-078, no new role/grant — Tobias Renwick's existing grant
+    already carries it), `support_contact` → `tickets.file`, `treasurer` →
+    `ledger.approve`, `installed_pastor` → `pastoral.notes.view`.
+  - Three new `role_grants` rows, all direct (arm 1), all Alder Creek: Support
+    Contact → Marguerite Ashcombe (`2026-08-20`, no matching officer term by
+    design — no PC(USA) office corresponds to it); Treasurer → Priya
+    Balakrishnan (`2025-01-13`, matching the new officer term); Installed
+    Pastor → Rowan Thistlewood (`2015-08-01`, matching the new officer term).
+- `scripts/test-rls.sql` —
+  - Fixed the section-2 assertion `alder: sees own officer terms` from `5` to
+    `7` (the two new `officer_terms` rows land at Alder Creek; the design doc
+    didn't call this out explicitly, found by re-running the suite against
+    the design's own SQL and reading the failure). `support_contact` carries
+    no `officer_terms` row by design, so it doesn't move this count further.
+  - Added three new `\set` variables (`TREASURER_ROLE`,
+    `INSTALLED_PASTOR_ROLE`, `SUPPORT_CONTACT_ROLE`) alongside the existing
+    fixture-id block.
+  - Added new section 15 ("Role catalog expansion"), mirroring section 2's
+    and section 14's own two-part shape (an Alder Creek positive count, a
+    Bramblewood zero-count, plus a known-id cross-org read that must return
+    zero rows rather than a distinguishable 403 — section 14's own
+    enumeration-discipline pattern): `app_roles`/`role_grants` counts scoped
+    to Alder Creek (3 and 3) and to Bramblewood (0 and 0), plus a
+    known-role-id cross-org read of the `treasurer` role from Bramblewood
+    context (0).
 
-- [Action key written when the security-sensitive mutation fires]
+### Schema Changes
 
-## Implementer Notes
+None. No `schema.ts` edit, no Drizzle Kit run, no migration file. Every
+insert targets an existing table with existing columns, per Phase 3's Data
+Model ("No schema changes required"). Nothing to apply via `db:push` or
+`db:generate` — this commit is fixture data only.
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+### Migration mode
+
+N/A — no migration. The dev database already carries every table this commit
+writes to (`app_roles`, `app_role_permissions`, `role_grants`,
+`officer_terms`), unchanged in shape. Applied directly as SQL against the
+already-migrated dev database (see Verification below).
+
+### Verification
+
+**ID collision check, re-confirmed before writing** (per the task's
+instruction — the sibling pipeline may have touched the file since it was
+last checked):
+
+```
+grep -n "f0000000-0000-0000-0000-000000000006\|f0000000-0000-0000-0000-000000000007\|f0000000-0000-0000-0000-000000000008\|e0000000-0000-0000-0000-000000000006\|e0000000-0000-0000-0000-000000000007" scripts/seed-dev.sql
+```
+→ no matches (exit 1) before editing. Clean.
+
+**Apply.** `scripts/seed-dev.sql` is not fully re-runnable end-to-end against
+an already-seeded database (confirmed directly: `app_roles`/`officer_terms`
+queried against `$MIGRATE_DATABASE_URL` before this commit already showed the
+base fixture's 5 roles / 5 officer terms present — the sibling pipeline's own
+prior commit had already applied the base fixture plus its own ticket rows).
+Per the task's documented workaround, extracted just the new INSERT block
+(officer_terms → app_roles → app_role_permissions → role_grants, wrapped in
+one `begin`/`commit`) into an isolated scratch file and applied it directly:
+
+```
+$ psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f <scratch>/role-catalog-commit-a.sql
+BEGIN
+INSERT 0 2
+INSERT 0 3
+INSERT 0 4
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+COMMIT
+```
+
+No FK or constraint violation.
+
+**Direct query confirmation:**
+
+```
+select id, key, name, role_kind, is_protected from app_roles
+ where id in ('f0000000-...-006','f0000000-...-007','f0000000-...-008');
+```
+→ `support_contact` (custom, unprotected), `treasurer` (constitutional,
+protected), `installed_pastor` (constitutional, protected) — all present,
+correct `role_kind`/`is_protected`.
+
+```
+select id, person_id, office, starts_on, ends_on from officer_terms
+ where id in ('e0000000-...-006','e0000000-...-007');
+```
+→ treasurer/Priya `2025-01-13`→null, installed_pastor/Rowan `2015-08-01`→null
+— both present, correct dates, open-ended as designed.
+
+```
+select role_id, permission_key from app_role_permissions
+ where role_id = 'f0000000-...-005';
+```
+→ `role_grants.manage`, `roll.propose` — `stated_clerk` now carries both.
+
+```
+select organization_id, role_id, person_id, starts_on from role_grants
+ where role_id in ('f0000000-...-006','f0000000-...-007','f0000000-...-008');
+```
+→ all three, correct `person_id`/`starts_on`, all Alder Creek.
+
+**`scripts/test-rls.sql` as `presby_app`:**
+
+```
+$ psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql
+```
+Exit code 0. 82 "pass" lines, 0 "FAIL" occurrences (`grep -c FAIL` → 0,
+`grep -c pass` → 82), including the corrected section-2 officer-terms count
+(now 7) and the three new section-15 assertions.
+
+**`npm run typecheck`** — clean, no output beyond the tsc invocation.
+
+**`npm run check`** (all four tripwires) — all four passed: audit-coverage,
+`sql<Date>` guard, dependency-drift, brand-scope. Unaffected by this
+SQL-only change, as expected.
+
+### Audit Events
+
+None. No application mutation fired — every row is a direct fixture insert,
+not a call through `grantRole()`/`src/lib/role-grants.ts`. No new
+`AUDIT_ACTIONS` key needed; `npm run check:audit` scans only
+`src/app/**/actions.ts`, untouched by this commit.
+
+### Implementer Notes — divergences from Phase 3 and things that surprised me
+
+1. **The `officer_terms` count assertion in `scripts/test-rls.sql` section 2
+   needed a fix Phase 3's design doc didn't call out.** The design doc names
+   `scripts/test-rls.sql` additions only as "extend... with a cross-org
+   assertion for at least one new role" — it doesn't mention that adding two
+   `officer_terms` rows at Alder Creek breaks the pre-existing `count(*) = 5`
+   assertion at line 56 (now 7). Caught by reading the file directly before
+   editing, not by a test failure — trusted the actual fixture/schema over
+   the design doc's silence, per the task's own instruction.
+2. **`scripts/seed-dev.sql` is genuinely not re-runnable end-to-end today**,
+   confirmed directly rather than assumed from the task's framing: the dev
+   database already carried the base fixture (5 `app_roles`, 5
+   `officer_terms`) before this commit ran, meaning some prior session
+   already applied it and any second full run would collide on the
+   `organizations`/`people` inserts long before reaching this pipeline's own
+   new rows. Used the documented isolated-INSERT-block workaround, matching
+   the sibling support-tickets pipeline's own Commit 1 approach. This is a
+   standing fixture-hygiene gap (not idempotent), not something this commit
+   introduces or is positioned to fix — flagged here for whoever eventually
+   picks up fixture idempotency as its own piece of work, not filed as a new
+   `docs/TODO.md` line since Phase 3 didn't ask for one and the sibling
+   pipeline already established this as the accepted workaround rather than
+   a blocking defect.
+3. **Everything else matched Phase 3 exactly** — id values, dates, column
+   order, role_kind/is_protected pairs, and the person assignments all copied
+   directly from the design doc's own SQL with no reconstruction from prose.
+   No FK violations, no naming collisions, no surprises in the data itself.
+
+### Handoff
+
+**New rows available to the next implementer:**
+- `app_roles`: `support_contact` (`f0000000-...-006`, custom, unprotected),
+  `treasurer` (`f0000000-...-007`, constitutional, protected),
+  `installed_pastor` (`f0000000-...-008`, constitutional, protected) — all
+  Alder Creek only, all reachable today through the existing generic
+  `src/lib/role-grants.ts` / `/o/<slug>/admin/roles` UI with zero code
+  changes.
+- `app_role_permissions`: `stated_clerk` now additionally carries
+  `roll.propose` (alongside its existing `role_grants.manage`).
+- `officer_terms`: two new open-ended rows (`e0000000-...-006` treasurer,
+  `e0000000-...-007` installed_pastor), both dated to match their
+  corresponding `role_grants.starts_on`.
+- `role_grants`: three new direct (arm 1) grants at Alder Creek, to
+  Marguerite Ashcombe, Priya Balakrishnan, and Rowan Thistlewood
+  respectively.
+- No new relationships beyond ordinary rows on existing tables — no schema
+  change for the next agent to react to.
+
+**Local apply command for anyone re-provisioning a fresh dev database from
+scratch:** `psql "$MIGRATE_DATABASE_URL" -f scripts/seed-dev.sql` (the file
+as a whole, which now includes this commit's rows in their proper fixture
+position) followed by `npm run db:seed`. For an already-seeded database like
+the one this commit ran against, use the isolated-INSERT-block workaround
+documented above (item 2) instead of re-running the whole file.
+
+**Next: Commit B is still gated** on `FEATURES.ADMIN_TICKETS` landing in
+`src/lib/permissions.ts` (support-tickets pipeline's Phase 4 commit 2,
+api-developer, per DECISION-080's correction) — re-check by grep before
+starting Commit B, don't trust this note's own staleness. Once that lands,
+Commit B (database-admin again: `SUPPORT_OPERATOR_ROLE` constant,
+`scripts/seed.ts` additions, `npm run db:seed`) can proceed independently —
+no ordering requirement against this commit.
+
+After both commits, **qa (Phase 5)** is next in the pipeline for this feature
+as a whole — this response covers Commit A only; Commit B still needs its own
+Phase 4 entry appended before Phase 5 can evaluate the complete pipeline. If
+qa is invoked before Commit B lands, the correct verdict is `BLOCKED` naming
+`FEATURES.ADMIN_TICKETS` as the unmet prerequisite, not a partial `PASS`.
 
 ---
 

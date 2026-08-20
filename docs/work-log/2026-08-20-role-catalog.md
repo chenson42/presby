@@ -79,7 +79,7 @@ append-only, never edited in place.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-078/079 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-080 | 2026-08-20 |
-| 4 — Implementation | database-admin | Complete (Commit A) | — | 2026-08-20 |
+| 4 — Implementation | database-admin | Complete (Commit A + Commit B) | — | 2026-08-20 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -951,6 +951,170 @@ as a whole — this response covers Commit A only; Commit B still needs its own
 Phase 4 entry appended before Phase 5 can evaluate the complete pipeline. If
 qa is invoked before Commit B lands, the correct verdict is `BLOCKED` naming
 `FEATURES.ADMIN_TICKETS` as the unmet prerequisite, not a partial `PASS`.
+
+## Commit B — platform Support Operator bundle (database-admin, complete)
+
+### Precondition check (done first, before touching any file)
+
+`grep -n "ADMIN_TICKETS" src/lib/permissions.ts` returned both the
+`FEATURES.ADMIN_TICKETS` constant (line 20, `"admin.tickets"`) and its
+`FEATURE_CATALOG` entry (lines 57–63, category `admin`, name "Manage support
+tickets") — the sibling `2026-08-20-support-tickets` pipeline's Phase 4 commit
+2 (api-developer) had landed. Precondition held; proceeded.
+
+### Files Modified
+
+- `src/lib/permissions.ts` — added one constant, next to `ADMIN_ROLE`/
+  `MEMBER_ROLE`, exactly as Phase 3 specified:
+
+  ```ts
+  export const ADMIN_ROLE = "admin" as const;
+  export const MEMBER_ROLE = "member" as const;
+  export const SUPPORT_OPERATOR_ROLE = "support_operator" as const;
+  ```
+
+- `scripts/seed.ts`:
+  - Imported `SUPPORT_OPERATOR_ROLE` alongside the other permission constants.
+  - Added one entry to `seedRoles()`'s `defs` array, matching the file's
+    actual shape exactly (Phase 3's prose guess matched — no divergence):
+
+    ```ts
+    { name: SUPPORT_OPERATOR_ROLE, displayName: "Support Operator", isSystem: true, sortOrder: 50 },
+    ```
+
+    Placed between `ADMIN_ROLE` (sortOrder 0) and `MEMBER_ROLE` (sortOrder
+    100), matching Phase 3's stated intent.
+  - Added `bindSupportOperatorFeatures()`, mirroring `bindAdminFeatures()`'s
+    shape exactly but over the fixed two-key list, copied verbatim from
+    Phase 3's design:
+
+    ```ts
+    async function bindSupportOperatorFeatures() {
+      const role = await db.query.roles.findFirst({
+        where: eq(schema.roles.name, SUPPORT_OPERATOR_ROLE),
+      });
+      if (!role) return;
+      for (const key of [FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK]) {
+        await db
+          .insert(schema.roleFeatures)
+          .values({ roleId: role.id, featureKey: key })
+          .onConflictDoNothing();
+      }
+      console.log("bound tickets + feedback features to support_operator");
+    }
+    ```
+
+  - Called from `main()` immediately after `bindAdminFeatures()`:
+
+    ```ts
+    await bindAdminFeatures();
+    await bindSupportOperatorFeatures();
+    await seedLocalAdmin();
+    ```
+
+### Schema Changes
+
+None. `roles` and `role_features` (Drizzle: `roleFeatures`) are existing
+platform-shell tables; this commit only inserts rows via the existing seed
+script. No `schema.ts` edit, no Drizzle Kit run, no migration file.
+
+### Migration mode
+
+N/A — no migration. This commit is application/seed-script code plus data,
+not a schema change. Applied by running `npm run db:seed` against the dev
+database (the same one Commit A's verification queries targeted, via
+`$DATABASE_URL` / `$MIGRATE_DATABASE_URL`), which is idempotent
+(`onConflictDoNothing()` throughout) and safe to re-run.
+
+### Verification
+
+**`npm run db:seed`** — completed with no error:
+
+```
+seeded roles
+seeded 11 features
+seeded 6 feature flags
+bound all features to admin
+bound tickets + feedback features to support_operator
+done.
+```
+
+**Direct query — role exists:**
+
+```sql
+select id, name, display_name, is_system, sort_order from roles where name = 'support_operator';
+```
+→ one row: `support_operator`, `Support Operator`, `is_system = t`,
+`sort_order = 50`.
+
+**Direct query — exactly two `role_features` rows, no more, no fewer:**
+
+```sql
+select rf.feature_key
+from role_features rf
+join roles r on r.id = rf.role_id
+where r.name = 'support_operator'
+order by rf.feature_key;
+```
+→ `admin.feedback`, `admin.tickets` — exactly two rows.
+
+**`npm run typecheck`** — clean, no errors.
+
+**`npm run check`** (all four tripwires) — all four passed: audit-coverage
+("Audit-coverage check passed."), `sql<Date>` guard ("sql<Date> guard
+passed."), dependency-drift ("Dependency-drift check passed."), brand-scope
+("Brand-scope check passed" — dormant E2 note for a file that doesn't exist
+yet, pre-existing and unrelated to this commit).
+
+**`scripts/test-rls.sql` as `presby_app`:**
+
+```
+$ psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql
+```
+Exit code 0. Log starts at `BEGIN`, ends at `COMMIT`, no `ERROR` lines
+anywhere (637 total lines). `grep -ic fail` → 0. `grep -ic pass` → 82 —
+matching the exact baseline named in the task (82 pass, 0 fail), unchanged
+from Commit A's own run, as expected since this commit touches only
+`roles`/`role_features` (platform-shell tables `scripts/test-rls.sql` doesn't
+assert on) and not `memberships`/`roll_actions`/any tenant table the suite
+does assert on. No roll-drift investigation was needed — the run was fully
+clean, not partially clean with an attributable-elsewhere failure.
+
+### Audit Events
+
+None. No application mutation fired through a user-facing action — every row
+is inserted directly by the seed script, mirroring `bindAdminFeatures()`'s own
+precedent (which also writes no audit event). `npm run check:audit` scans only
+`src/app/**/actions.ts`, untouched by this commit.
+
+### Implementer Notes — divergences from Phase 3 and things that surprised me
+
+None. Phase 3's design code (constant, `defs` entry, `bindSupportOperatorFeatures()`,
+the `main()` call site) matched the actual file structure of both
+`src/lib/permissions.ts` and `scripts/seed.ts` exactly — no reconstruction or
+adjustment was needed. The one thing Phase 3 flagged as uncertain (whether the
+`defs` array's exact object shape matched what's actually in the file) turned
+out to match verbatim, including field names (`name`, `displayName`,
+`isSystem`, `sortOrder`) and the `onConflictDoNothing()` pattern.
+
+### Handoff
+
+**New row available to the next implementer:** the platform `roles` table now
+has a `support_operator` row (`is_system = true`, `sort_order = 50`, between
+`admin` and `member`), bound in `role_features` to exactly
+`FEATURES.ADMIN_TICKETS` (`admin.tickets`) and `FEATURES.ADMIN_FEEDBACK`
+(`admin.feedback`) — narrower than `admin`'s full-catalog bundle, broader than
+`member`'s empty one. It is reachable today through the existing generic
+`/admin/users` role-assignment UI with zero code changes (Phase 2's Placement
+finding — no new page, route, or component).
+
+**Local apply commands for anyone re-provisioning:**
+`npm run db:push` (or `npm run db:migrate` if migration-tracked — not
+applicable here, no schema changed) is not needed for this commit; the only
+step is `npm run db:seed`, which is idempotent and safe to re-run.
+
+**Both commits of this pipeline are now complete.** Next: **qa (Phase 5)**
+evaluates the complete pipeline (Commit A + Commit B together).
 
 ---
 

@@ -5,6 +5,7 @@
  */
 export const ADMIN_ROLE = "admin" as const;
 export const MEMBER_ROLE = "member" as const;
+export const SUPPORT_OPERATOR_ROLE = "support_operator" as const;
 
 export const FEATURES = {
   ADMIN_DASHBOARD: "admin.dashboard",

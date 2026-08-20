@@ -8,6 +8,7 @@ import {
   FEATURE_CATALOG,
   FEATURES,
   MEMBER_ROLE,
+  SUPPORT_OPERATOR_ROLE,
 } from "../src/lib/permissions";
 
 if (!process.env.DATABASE_URL) {
@@ -34,6 +35,12 @@ const db = drizzle(sql, { schema });
 async function seedRoles() {
   const defs = [
     { name: ADMIN_ROLE, displayName: "Admin", isSystem: true, sortOrder: 0 },
+    {
+      name: SUPPORT_OPERATOR_ROLE,
+      displayName: "Support Operator",
+      isSystem: true,
+      sortOrder: 50,
+    },
     { name: MEMBER_ROLE, displayName: "Member", isSystem: true, sortOrder: 100 },
   ];
   for (const r of defs) {
@@ -141,6 +148,20 @@ async function bindAdminFeatures() {
       .onConflictDoNothing();
   }
   console.log("bound all features to admin");
+}
+
+async function bindSupportOperatorFeatures() {
+  const role = await db.query.roles.findFirst({
+    where: eq(schema.roles.name, SUPPORT_OPERATOR_ROLE),
+  });
+  if (!role) return;
+  for (const key of [FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK]) {
+    await db
+      .insert(schema.roleFeatures)
+      .values({ roleId: role.id, featureKey: key })
+      .onConflictDoNothing();
+  }
+  console.log("bound tickets + feedback features to support_operator");
 }
 
 async function seedLocalAdmin() {
@@ -337,6 +358,7 @@ async function main() {
   await seedFeatures();
   await seedFlags();
   await bindAdminFeatures();
+  await bindSupportOperatorFeatures();
   await seedLocalAdmin();
   await seedMemberUser();
   await seedMfaAdminUser();

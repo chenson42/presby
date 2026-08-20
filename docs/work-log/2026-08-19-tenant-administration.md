@@ -72,8 +72,8 @@ model yet. Don't block on P8, but don't duplicate its scope either.
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — bootstrap gap + 6 adversarial findings | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-066/067/068 | 2026-08-19 |
-| 3 — Technical design | tech-lead | Pending | — | — |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 3 — Technical design | tech-lead | Complete | Design complete, implementers named | 2026-08-19 |
+| 4 — Implementation | database-admin, api-developer, ux-developer | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -293,3 +293,173 @@ the new admin layout; all six adversarial findings as non-negotiable
 acceptance criteria. The out-of-scope list must not silently re-enter.
 
 *Recorded by the orchestrator from the read-only architect agent's report.*
+
+---
+
+# Phase 3 — Technical Design (tech-lead)
+
+## Summary
+
+Three flows over tables that already exist — `role_grants`, `app_roles`,
+`app_role_permissions` need no schema change. The only data-model work is
+provisioning what DECISION-066 named: the `role_grants.manage` permission row
+(migration-seeded, `drizzle/0018_presby_role_administration.sql`, idempotent
+`on conflict do nothing`) and the `stated_clerk` role/binding/direct-grant
+(fixture-seeded in `scripts/seed-dev.sql`, mirroring `session_member` /
+`property_chair` / `member`'s exact shape — bound to Tobias Renwick at Alder
+Creek, matching his existing `clerk_of_session` officer term's start date;
+Bramblewood and Quillhaven deliberately get no grant, same "prove the
+mechanism once" reasoning DECISION-063 used for `directory.view`). All
+mutation logic lives in a new `src/lib/role-grants.ts`, built to
+`directory.ts`'s exact shape: one `withOrgContext()` transaction per exported
+function, thrown exceptions for genuine failure, typed result variants for
+every expected outcome. New flag `org_portal.roles`, seeded off, checked bare
+(a toggle, not an auth path — same reasoning as `org_portal.directory`).
+
+## Permissions & flags
+
+- `role_grants.manage` — module `authz`, tier 1 (the row itself exposes
+  nothing in tiers 2/3; a granted role *carrying* a tier-2/3 permission is the
+  subset check's job at grant time, not this row's classification).
+- `stated_clerk` — `role_kind: 'constitutional'`, `is_protected: true`,
+  fixture-seeded (no code provisions a real organization yet — G-B).
+- `org_portal.roles` flag, seeded off, added to `scripts/seed.ts` next to
+  `org_portal.directory`. Never substitutes for the permission check — flag
+  off means nobody reaches the page; flag on with no grant means an honest
+  in-shell denial.
+- New audit keys `TENANT_ROLE_GRANTED` / `TENANT_ROLE_REVOKED` in
+  `src/lib/audit.ts`, `organization_id` recorded explicitly in `metadata`
+  (DECISION-067's convention — a future reader shouldn't have to guess).
+
+## API contract — `src/lib/role-grants.ts`
+
+`listGrants(viewerPersonId, organizationId)` → who holds what, joining
+`memberships.ended_on` so an arm-1 grant on a lapsed membership stays
+**visible, not silently continuing and not auto-ended** — finding 4 made
+visible without being fixed, per DECISION-062's own framing.
+
+`getGrantFormOptions(...)` → roles/people/groups for the grant form; people
+queried through `memberships` scoped to this org, never a bare `people` scan
+(finding 5, the F21 shape re-applied).
+
+`grantRole(granterPersonId, organizationId, { roleId, target, startsOn? })` →
+validates the role and target belong to this org (closes finding 2's
+"supply an ID from another org" variant), then runs DECISION-068's subset
+check — the granter's `effectivePermissions()` against the target role's
+`app_role_permissions`, inside the same transaction, no new SQL function —
+and rejects with the missing keys named if the grant would exceed the
+granter's own permissions (finding 1). One real implementation caveat the
+design calls out explicitly rather than leaving for Phase 4 to trip over:
+`role_grants.granted_by` is a `users.id` FK, not `people.id` — the function
+takes `granterPersonId` for the permission/membership checks, but the Server
+Action layer must pass the session's `users.id` separately for that column;
+conflating the two would violate the FK.
+
+`revokeRole(granterPersonId, organizationId, grantId)` → ends (never
+deletes — the row is the audit trail), and before ending a grant that itself
+carries `role_grants.manage`, counts every *other* currently-effective
+holder (expanding a group grant to its live membership) and blocks with
+`self_lockout_blocked` if the count would hit zero (finding 6).
+
+## Component / page plan
+
+`(org)/o/[slug]/admin/layout.tsx` — minimal chrome, no auth of its own (the
+`(org)` contract's rule: auth lives in the page, which can see the
+pathname), does **not** render `<BrandTokens>` (inherits the cascade from
+the ancestor layout — the Phase 2 constraint). One back-link, no nav array —
+building a real tenant nav is deliberately deferred to whichever future page
+makes a second link exist to navigate between.
+
+`admin/roles/page.tsx` — repeats the `(org)` auth pattern in full, structured
+identically to `directory/page.tsx`: session → `resolveOrgContext` four-way
+switch → `assertOrgAccess` → flag check *before* any data fetch → `listGrants`
+→ `getGrantFormOptions`. `roles-states.tsx` (flag-off / forbidden /
+load-error, matching `directory-states.tsx`'s copy register), `roles-list.tsx`
+(a `Table`, not cards — this page is genuinely wide-column, the opposite of
+the directory's card rationale), `grant-role-form.tsx` (a client-side inline
+form, not a `Dialog` — no `Dialog` primitive exists yet and generating one is
+out of scope; native `<select>`s per `docs/ui-standards.md`, radio-toggled
+between a person target and a group target), `revoke-dialog.tsx` (an
+`AlertDialog` naming both the person/group *and* the role, modeled directly
+on `neutralize-dialog.tsx`; a `self_lockout_blocked` result surfaces inline
+via `toast.error`, not a silent dialog close), `actions.ts` (Server Actions
+`grantRoleAction` / `revokeRoleAction` — `organizationId` always comes from a
+fresh `resolveOrgContext()` call, never from client-supplied form data; both
+call `recordAudit()` on success, satisfying `check:audit`).
+
+`OrgPortalStub` gains an "Administration →" link, gated on the flag alone,
+never on the viewer's own grant — the destination page stays the sole
+authority on the viewer's own permission, matching `directoryEnabled`'s
+existing rule.
+
+## Implementation order
+
+1. **database-admin** — `drizzle/0018_presby_role_administration.sql` (the
+   permission catalog row) + the `scripts/seed-dev.sql` additions
+   (`stated_clerk` role/binding/direct grant).
+2. **api-developer** — `src/lib/role-grants.ts` + `role-grants.test.ts`
+   (real-Postgres integration tests, `directory.test.ts`'s harness), the
+   `granted_by`/`granterPersonId` FK caveat resolved as part of this commit,
+   `src/lib/audit.ts` additions, `scripts/seed.ts` flag, `admin/roles/
+   actions.ts` + its test.
+3. **ux-developer** — `admin/layout.tsx`, `admin/roles/page.tsx`, the three
+   supporting components + their tests, the `OrgPortalStub`/`page.tsx` link,
+   plus a real-browser phone-viewport walkthrough (CLAUDE.md → Verify in a
+   Browser) including a **live** self-lockout check through the actual UI,
+   not just the unit test.
+
+## Edge cases — the six adversarial findings, each given a concrete test
+
+Self/other-escalation (a role bound only to `directory.view` cannot grant one
+that also carries `role_grants.manage`); cross-org write (a person with no
+active membership at the target org throws `OrgAccessError` before permission
+logic runs, plus a code-review check that `actions.ts` never reads
+`organizationId` from `formData`); no wildcard template (the role `<select>`
+renders exactly `options.roles.length` entries, no "select all"); the arm-1
+cascade gap surfaced not fixed (ending a person's membership without
+touching their `role_grants` row leaves the grant listed, with
+`membershipEnded` set, not filtered out and not auto-ended); no enumeration
+via bare `people` (a person with a membership only at another org is absent
+from `getGrantFormOptions`, verified against a raw `people` count showing
+more rows exist than are offered); self-lockout (single-holder org blocks a
+self-revoke; two-holder org allows one revoke then blocks the survivor's).
+Plus the flag-off/empty-list states matching the directory page's precedent.
+
+## Out of scope (reaffirmed, not re-litigated)
+
+Roll-action recording/approval, officer-term management, creating new
+`app_roles` or editing what permissions a role carries (the wildcard-role-
+template risk), household/member invitation and `org_access_requests`, the
+cross-org commission/delegation UI, a tenant-facing audit reader
+(DECISION-067), a real `Select`/`Command` primitive, a tenant nav beyond the
+one new link.
+
+## E2E blast radius
+
+Checked directly: no existing spec touches `/o/<slug>/directory`,
+`/o/<slug>/admin/*`, `role_grants`, or the platform `admin/users` role
+flow. **Zero existing specs need updating.** This feature doesn't touch
+`src/auth.ts`/`(auth)`/`api/auth`/`lib/auth`, so it doesn't trigger the
+mandatory auth-touching e2e-smoke gate. New e2e coverage for the route itself
+is named as a `docs/TODO.md` follow-up, not silently skipped.
+
+## Acceptance criteria
+
+Real-Postgres integration tests for all six adversarial findings; typecheck,
+build, and all four `check` tripwires clean; a real-browser 360px walkthrough
+of both grant flows, the escalation-denied error, the revoke confirmation,
+and the flag-off state; the self-lockout guard exercised live through the UI,
+not only unit-tested; `docs/product/functionality-map.md` updated at ship
+time (Rule 14) — this is the first tenant-facing capability a congregation's
+own staff can act on, not internal admin tooling, so Phase 6 should weigh a
+`whats_new_entries` post (Rule 13).
+
+## Handoff
+
+**Next: Phase 4 implementation**, database-admin first (schema/seed is the
+dependency every other commit needs), then api-developer, then ux-developer —
+sequential, not parallel, since each layer consumes the prior one's concrete
+contract. No new decisions minted this phase; DECISION-066/067/068 stand as
+written.
+
+*Recorded by the orchestrator from the tech-lead agent's full design doc.*

@@ -103,6 +103,7 @@ export function OrgPortalStub({
   slug,
   directoryEnabled,
   rolesEnabled,
+  ticketsEnabled,
 }: {
   name: string;
   organizationType: OrganizationType;
@@ -124,6 +125,15 @@ export function OrgPortalStub({
    * permission and renders its own honest denied state.
    */
   rolesEnabled: boolean;
+  /**
+   * `org_portal.tickets`'s value at render time (support tickets pipeline)
+   * — same split again: gates whether the "Tickets" and "Give feedback"
+   * cards exist at all, never the viewer's own `tickets.file` grant.
+   * `/o/<slug>/tickets` and `/o/<slug>/feedback` stay the sole authorities
+   * on the viewer's own permission (or, for feedback, lack of one to check)
+   * and render their own honest states.
+   */
+  ticketsEnabled: boolean;
 }) {
   return (
     <section className="max-w-xl">
@@ -156,6 +166,22 @@ export function OrgPortalStub({
             className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Administration →
+          </Link>
+        )}
+        {ticketsEnabled && (
+          <Link
+            href={`/o/${slug}/tickets`}
+            className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            Tickets →
+          </Link>
+        )}
+        {ticketsEnabled && (
+          <Link
+            href={`/o/${slug}/feedback`}
+            className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            Give feedback →
           </Link>
         )}
       </div>

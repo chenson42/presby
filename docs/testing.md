@@ -47,12 +47,18 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 | `org3-unmanaged@presby.invalid` | Only an `unmanaged` congregation | `/no-organization` |
 | `org2-ended@presby.invalid` | A relationship that **ended** 31 Mar 2026 | `/no-organization` |
 | `clerk.fixture@example.invalid` | Tobias Renwick at Alder Creek — holds `stated_clerk` (`role_grants.manage`), P9 | `/o/alder-creek` — try `/o/alder-creek/admin/roles` by hand, `org_portal.roles` flag permitting |
+| `elder.fixture@example.invalid` | Marguerite Ashcombe at Alder Creek — holds `support_contact` (`tickets.file`), support-tickets pipeline | `/o/alder-creek` — try `/o/alder-creek/tickets` and `/o/alder-creek/feedback` by hand, `org_portal.tickets` flag permitting |
 
-`clerk.fixture` is provisioned by `scripts/seed-dev.sql` (not the Playwright
-roster) and uses the same shared fixture password below. It exists
-specifically so the P9 role-administration surface can be walked through as
-the one seeded person who actually holds `role_grants.manage` — every other
-account in this table predates that permission.
+`clerk.fixture` and `elder.fixture` are provisioned by `scripts/seed-dev.sql`
+(not the Playwright roster) and use the same shared fixture password below.
+`clerk.fixture` exists so the P9 role-administration surface can be walked
+through as the one seeded person who actually holds `role_grants.manage`.
+`elder.fixture` originally existed ONLY for `scripts/test-rls.sql`'s SQL-level
+`presby_two_factor_required()` assertion (password-less, could not sign in) —
+the support-tickets pipeline upgraded it to sign-in-capable, since Marguerite
+Ashcombe (the person it's linked to) is the one fixture person holding
+`tickets.file`, and there was no other way to walk the tickets/feedback
+surfaces through a real browser session as the person they were built for.
 
 `org1-org2` is the ruling elder who serves on a presbytery committee — one
 person, two organizations, which is how PC(USA) service actually works.

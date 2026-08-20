@@ -397,12 +397,29 @@ insert into sasr_reports (organization_id, report_year, official_beginning_balan
 -- rows and quietly returns false for the users it protects. An assertion needs
 -- a user_id link to catch that, so the fixture provides one.
 --
--- Synthetic, inactive-by-omission (no password, so it cannot sign in) and on
--- the reserved example.invalid domain.
+-- Originally synthetic and password-less (cannot sign in). UPGRADED to
+-- sign-in-capable by the support-tickets pipeline's ux-developer Phase 4
+-- commit 3/3 (2026-08-20): Marguerite Ashcombe (this person row) is the one
+-- fixture holding `support_contact` / `tickets.file` (DECISION-080, the
+-- role_grants row below), and there was no way to walk `/o/alder-creek/
+-- tickets` and `/o/alder-creek/feedback` through a real browser session as
+-- the person they were built for — the exact gap `clerk.fixture` closed for
+-- P9's `stated_clerk`. `people.user_id` is a single 1:1 column, so this is
+-- an UPGRADE of the existing linked row, not a second one: same reserved
+-- .invalid domain, same shared fixture password documented in
+-- docs/testing.md, is_active so it can sign in, two_factor_required
+-- explicitly false so a manual walkthrough isn't gated behind a separate
+-- TOTP enrolment detour (mirrors clerk.fixture's own reasoning exactly).
+-- Nothing in scripts/test-rls.sql depends on this row being password-less —
+-- confirmed by reading that file before making this change; its `:ELDER`/
+-- `:ELDERUSER` assertions (presby_two_factor_required()) test the 2FA
+-- POLICY resolution, not sign-in capability.
 -- ---------------------------------------------------------------------------
-insert into users (id, email, name, email_verified)
+insert into users (id, email, name, email_verified, password, is_active, two_factor_required)
 values ('e0000000-0000-0000-0000-0000000000f2', 'elder.fixture@example.invalid',
-        'Fixture Elder', now())
+        'Fixture Elder', now(),
+        '$2b$10$tHdp7RHkvStQGKE5A/BRTenWeJ/HUOeY3iA/MmCGXE2fUCS9wBzT2',
+        true, false)
 on conflict (id) do nothing;
 
 update people
@@ -470,9 +487,11 @@ insert into groups (id, organization_id, group_type_id, name, membership_source,
    'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true);
 
 -- Six users, one per row of the destination matrix that the existing fixture
--- cannot reach. All password-less like elder.fixture: they cannot sign in, and
--- they exist for scripts/test-rls.sql and for manual browser verification with
--- a dev session. Reserved example.invalid domain, invented names.
+-- cannot reach. All password-less (elder.fixture itself was upgraded to
+-- sign-in-capable above, 2026-08-20 — these six are unrelated to that
+-- change and stay as originally built): they cannot sign in, and they exist
+-- for scripts/test-rls.sql and for manual browser verification with a dev
+-- session. Reserved example.invalid domain, invented names.
 insert into users (id, email, name, email_verified) values
   ('e0000000-0000-0000-0000-0000000000a1', 'router.none@example.invalid',      'Fixture No-Org',    now()),
   ('e0000000-0000-0000-0000-0000000000a2', 'router.unmanaged@example.invalid', 'Fixture Unmanaged', now()),

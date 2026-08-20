@@ -75,6 +75,7 @@ export default async function OrgPage({
 
   const directoryEnabled = await isFlagEnabled("org_portal.directory");
   const rolesEnabled = await isFlagEnabled("org_portal.roles");
+  const ticketsEnabled = await isFlagEnabled("org_portal.tickets");
 
   return (
     <OrgPortalStub
@@ -83,6 +84,7 @@ export default async function OrgPage({
       slug={resolved.org.slug}
       directoryEnabled={directoryEnabled}
       rolesEnabled={rolesEnabled}
+      ticketsEnabled={ticketsEnabled}
     />
   );
 }

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Tests for <OrgPortalStub>'s P1 directory link and P9 administration link.
+ * Tests for <OrgPortalStub>'s P1 directory link, P9 administration link, and
+ * the support-tickets pipeline's Tickets / Give feedback links.
  *
  * `<OrgAccessDenied>` / `<OrgAccessEnded>` are UNCHANGED by this commit and
  * are covered by e2e/post-login-routing.spec.ts test 9 (the DECISION-040
@@ -23,6 +24,7 @@ describe("OrgPortalStub — directory discoverability link", () => {
         slug="alder-creek"
         directoryEnabled={true}
         rolesEnabled={false}
+        ticketsEnabled={false}
       />,
     );
     const link = screen.getByRole("link", { name: /directory/i });
@@ -37,6 +39,7 @@ describe("OrgPortalStub — directory discoverability link", () => {
         slug="alder-creek"
         directoryEnabled={false}
         rolesEnabled={false}
+        ticketsEnabled={false}
       />,
     );
     expect(screen.queryByRole("link")).toBeNull();
@@ -50,6 +53,7 @@ describe("OrgPortalStub — directory discoverability link", () => {
         slug="alder-creek"
         directoryEnabled={false}
         rolesEnabled={false}
+        ticketsEnabled={false}
       />,
     );
     const body = document.body.textContent ?? "";
@@ -67,6 +71,7 @@ describe("OrgPortalStub — P9 administration discoverability link", () => {
         slug="alder-creek"
         directoryEnabled={false}
         rolesEnabled={true}
+        ticketsEnabled={false}
       />,
     );
     const link = screen.getByRole("link", { name: /administration/i });
@@ -81,6 +86,7 @@ describe("OrgPortalStub — P9 administration discoverability link", () => {
         slug="alder-creek"
         directoryEnabled={false}
         rolesEnabled={false}
+        ticketsEnabled={false}
       />,
     );
     expect(screen.queryByRole("link")).toBeNull();
@@ -94,9 +100,60 @@ describe("OrgPortalStub — P9 administration discoverability link", () => {
         slug="alder-creek"
         directoryEnabled={true}
         rolesEnabled={true}
+        ticketsEnabled={false}
       />,
     );
     expect(screen.getByRole("link", { name: /directory/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: /administration/i })).toBeTruthy();
+  });
+});
+
+describe("OrgPortalStub — support-tickets Tickets / Give feedback links", () => {
+  it("shows Tickets and Give feedback links to /o/<slug>/tickets and /o/<slug>/feedback when the flag is on", () => {
+    render(
+      <OrgPortalStub
+        name="Alder Creek Presbyterian Church"
+        organizationType="congregation"
+        slug="alder-creek"
+        directoryEnabled={false}
+        rolesEnabled={false}
+        ticketsEnabled={true}
+      />,
+    );
+    const ticketsLink = screen.getByRole("link", { name: /^tickets/i });
+    expect(ticketsLink.getAttribute("href")).toBe("/o/alder-creek/tickets");
+    const feedbackLink = screen.getByRole("link", { name: /give feedback/i });
+    expect(feedbackLink.getAttribute("href")).toBe("/o/alder-creek/feedback");
+  });
+
+  it("shows no Tickets/Give feedback links when the flag is off — gated unconditionally on nothing but the flag", () => {
+    render(
+      <OrgPortalStub
+        name="Alder Creek Presbyterian Church"
+        organizationType="congregation"
+        slug="alder-creek"
+        directoryEnabled={false}
+        rolesEnabled={false}
+        ticketsEnabled={false}
+      />,
+    );
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("shows all four links independently when every flag is on", () => {
+    render(
+      <OrgPortalStub
+        name="Alder Creek Presbyterian Church"
+        organizationType="congregation"
+        slug="alder-creek"
+        directoryEnabled={true}
+        rolesEnabled={true}
+        ticketsEnabled={true}
+      />,
+    );
+    expect(screen.getByRole("link", { name: /directory/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /administration/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /^tickets/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /give feedback/i })).toBeTruthy();
   });
 });

@@ -129,6 +129,22 @@ async function seedFlags() {
         "Tenant role-administration page in (org). OFF = /o/<slug>/admin/roles renders 'isn't available yet' regardless of the viewer's role_grants.manage grant.",
       enabled: false,
     },
+    {
+      key: "org_portal.tickets",
+      // ON: /o/<slug>/tickets* AND /o/<slug>/feedback are reachable at all —
+      // ONE flag gates both, deliberately (support-tickets pipeline, Phase
+      // 3: "there is no product reason to ship the on-ramp without the
+      // destination or vice versa, and a second flag would only invite the
+      // two drifting out of sync"). Checked bare, no DECISION-026 fail-open
+      // wrapper — a toggle, not an auth path. Never substitutes for
+      // tickets.file: a role-holder with the flag on and no grant still
+      // sees the in-shell "you don't have permission" state, not the
+      // tickets page itself (DECISION-003). Seeded OFF, same "ships dark
+      // until the page lands" reasoning as org_portal.directory/roles.
+      description:
+        "Support-ticket filing/triage and the congregation-feedback on-ramp in (org). OFF = /o/<slug>/tickets* and /o/<slug>/feedback render 'isn't turned on yet' regardless of the viewer's tickets.file grant.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

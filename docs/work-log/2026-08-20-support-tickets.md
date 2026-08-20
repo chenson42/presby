@@ -79,7 +79,7 @@ app has no access to).
 | 1 — Functional refinement | analyst | Complete | READY FOR DESIGN | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-069/070/071 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete, twice revised same-day pre-Phase-4 (ticket email notifications + area/priority fields; then tickets.file's role binding decoupled to the sibling role-catalog pipeline) — DECISION-072 through 077 | 2026-08-20 |
-| 4 — Implementation | database-admin → api-developer → ux-developer | In progress (commit 2 of 3 complete) | — | 2026-08-20 |
+| 4 — Implementation | database-admin → api-developer → ux-developer | Complete (3 of 3 commits) | — | 2026-08-20 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1891,6 +1891,353 @@ Support Contact-role-holder (or whichever role
 `2026-08-20-role-catalog` bound `tickets.file` to) actually reaches the new
 UI — the permission and every function gating on it have been live and
 tested since this commit, independent of that binding's landing.
+
+## Commit 3 of 3 (ux-developer) — pages, components, and nav wiring
+
+**Date:** 2026-08-20 · **Implementer:** ux-developer
+
+By the time this commit started, `2026-08-20-role-catalog`'s own Phase 4 had
+already landed live in the shared dev database: `support_contact` bound to
+Marguerite Ashcombe (`c0000000-…-0001`) at Alder Creek, `tickets.file` since
+2026-08-20 — confirmed by direct query, not assumed from the sibling
+work-log's own status table. The "known, deliberate interim state" above
+resolved itself before this commit needed to route around it.
+
+### Files Created
+
+Tenant side (`(org)/o/[slug]/`):
+
+- `tickets/layout.tsx` — chrome only (back link + All tickets/File a ticket
+  nav), no auth, no `<BrandTokens>`, no extra padding wrapper — mirrors
+  `admin/layout.tsx` one level over in this same tree.
+- `tickets/tickets-states.tsx` — `TicketsFlagOff`, `TicketsForbidden`,
+  `TicketsLoadError`, mirroring `roles-states.tsx`'s three-block shape.
+  `TicketsForbidden` takes `slug` as well as `name` (not in the roles
+  precedent) because it renders from three different route depths and a
+  relative link would resolve differently at each — caught by reasoning
+  through the render tree before writing it, not by a failing test.
+- `tickets/page.tsx` — the list: two sections on one page ("Open tickets" via
+  `listTickets()`, "Incoming feedback" via `listPendingFeedback()`), exact
+  auth/flag-before-fetch pattern `admin/roles/page.tsx` established.
+- `tickets/ticket-list.tsx`, `tickets/feedback-review-list.tsx`,
+  `tickets/dismiss-feedback-dialog.tsx` (the `AlertDialog` split out of the
+  list, mirroring `RolesList`/`RevokeDialog`).
+- `tickets/file-ticket-form.tsx` — the one-component-two-submit-targets form
+  (Phase 3's framing): `fileTicketAction` in file mode, `promoteFeedbackAction`
+  in promote mode (`fromFeedback` prop). Promote mode shows the feedback body
+  as a read-only quote, not an editable field — `promoteFeedbackToTicket()`
+  takes no body param at all, per its own contract.
+- `tickets/new/page.tsx` — reads `?fromFeedback=`, calls `getFeedbackPreview()`
+  when present, renders "doesn't exist"/"already handled" panels for
+  `not_found`/non-`new` status. Adds a belt-and-suspenders `listTickets()`
+  permission check before rendering the form at all (see Implementer Notes).
+- `tickets/[id]/page.tsx`, `tickets/[id]/not-found.tsx` (segment-local, no
+  `loading.tsx`), `tickets/[id]/reply-form.tsx`,
+  `tickets/[id]/attachment-display.tsx` (images inline, `application/pdf`
+  always a plain download link — DECISION-073, never rendered inline
+  regardless of who uploaded it).
+- `feedback/page.tsx`, `feedback/feedback-form.tsx` — the baseline on-ramp,
+  no `tickets.file` check, `assertOrgAccess()` is the entire gate.
+
+Platform side (`(admin)/admin/tickets/`):
+
+- `page.tsx` — cross-org queue, `FEATURES.ADMIN_TICKETS` gate,
+  `?status=&area=&priority=` filters via a plain GET `<form>` of native
+  `<select>`s, `getPlatformDb()` throughout.
+- `[id]/page.tsx` — detail: thread, the operator-only `ticket_actions`
+  timeline, the five triage controls, the reply form. Three sequential
+  `getPlatformDb()` reads (ticket row, message rows, action rows) — no
+  shared query helper existed for this in commit 2, so this file writes its
+  own, matching `fetchTicketRow()`'s shape in `actions.ts` next door rather
+  than importing it (that function is private to that module).
+- `status-control.tsx`, `assign-control.tsx`, `classify-control.tsx`,
+  `area-control.tsx`, `priority-control.tsx` — five independent
+  optimistic-update-and-revert controls, mirroring
+  `feedback-status-control.tsx`'s shape, one per Server Action.
+- `admin-reply-form.tsx`, `upload-attachment-action.ts` — see Implementer
+  Notes for why the latter is a genuinely new file, not a divergence from
+  the design doc.
+
+Shared:
+
+- `src/lib/tickets-labels.ts` — display labels for the four controlled
+  vocabularies, AND (added after a real `next build` failure — see
+  Implementer Notes) its own re-declared copies of the vocabulary arrays,
+  for client components to import values from without pulling
+  `src/lib/tickets.ts`'s `"server-only"` marker into a client bundle.
+- 19 test files, one per new component/page (listed under Tests below), plus
+  `src/lib/tickets-labels.test.ts`.
+
+### Files Modified
+
+- `src/app/(org)/o/[slug]/org-states.tsx` + `org-states.test.tsx` —
+  `OrgPortalStub` gains a `ticketsEnabled` prop and two links ("Tickets →",
+  "Give feedback →"), threaded exactly the way `directoryEnabled`/
+  `rolesEnabled` already are: flag-gated at the link, never on the viewer's
+  own `tickets.file` grant.
+- `src/app/(org)/o/[slug]/page.tsx` — reads `org_portal.tickets` and passes
+  it through.
+- `src/app/(admin)/admin/layout.tsx` — added `{ href: "/admin/tickets",
+  label: "Tickets" }` to `nav`.
+- `scripts/seed.ts` — added the `org_portal.tickets` flag definition, seeded
+  `enabled: false`, same `org_portal.roles` pattern (gates BOTH
+  `/o/<slug>/tickets*` and `/o/<slug>/feedback` — one flag, per Phase 3).
+- `scripts/seed-dev.sql`, `docs/testing.md` — see "The sign-in fixture" below.
+- `docs/TODO.md` — two new lines (a follow-up on the 2FA-enrolment gap
+  discovered during verification, and the standard "flag ships off, publish
+  What's New later" deferral).
+
+### Schema Changes
+
+None. This commit consumes commit 1's schema and commit 2's query/action
+layer exactly as handed off — no `drizzle/`, `support.ts`, or
+`src/lib/tickets.ts`/`tickets-notifications.ts` edits.
+
+### Audit Events
+
+None written by this commit's own code (no new mutations — every mutation
+this commit's UI triggers routes through commit 2's actions, whose audit
+posture is unchanged). `upload-attachment-action.ts`'s `store()` call is a
+blob write, not a security-sensitive mutation in its own right — same
+posture the org-brand logo upload action already has.
+
+### Tests
+
+One file per new component/page, mocked at the `@/lib/tickets` /
+`@/lib/tickets-notifications` / the four `actions.ts` files' boundary,
+`admin/roles`'s test pattern (`vi.mock` per module, `vi.hoisted` for
+functions referenced inside a mock factory). 19 new test files:
+
+- `src/lib/tickets-labels.test.ts` — every vocabulary value has a label and
+  a legal `Badge` variant (no raw Tailwind palette literal); a
+  `describe.skipIf(!hasDb)` block (dynamic `import("./tickets")`, same
+  `tickets.test.ts` shape) asserts the re-declared arrays stay byte-identical
+  to `src/lib/tickets.ts`'s own.
+- `tickets/tickets-states.test.tsx`, `ticket-list.test.tsx`,
+  `feedback-review-list.test.tsx`, `dismiss-feedback-dialog.test.tsx`,
+  `page.test.tsx` (the flag-before-`listTickets()` ordering contract, the
+  `OrgAccessError` re-throw, both empty states), `file-ticket-form.test.tsx`
+  (area/priority/category selects render EXACTLY the controlled-vocabulary
+  option count, priority defaults to Normal, dual submit target),
+  `new/page.test.tsx` (the belt-and-suspenders gate, all three
+  `getFeedbackPreview()` outcomes), `[id]/page.test.tsx`,
+  `[id]/reply-form.test.tsx`, `[id]/attachment-display.test.tsx` (PDF is
+  NEVER inline, regardless of the content type given).
+- `feedback/page.test.tsx`, `feedback/feedback-form.test.tsx`.
+- `admin/tickets/page.test.tsx`, `[id]/page.test.tsx` (both `getPlatformDb()`
+  chain-mocked, same shape `(admin)/tickets/actions.test.ts`'s own header
+  documents, including the circular-import fix), `status-control.test.tsx`
+  (the state-machine option list per current status, terminal states render
+  no `<select>`), `classify-control.test.tsx`, `area-control.test.tsx`,
+  `priority-control.test.tsx`, `assign-control.test.tsx`,
+  `admin-reply-form.test.tsx`, `upload-attachment-action.test.ts`.
+
+`npx vitest run` (this pipeline's files only): 26 test files, 155 passed,
+1 skipped (the DB-gated drift-guard, skipped with no `DATABASE_URL`). With
+`DATABASE_URL`/`PLATFORM_DATABASE_URL` sourced: 156/156. Full repo suite,
+plain `npm run test` (no `.env.local`): 87 passed | 4 skipped test files,
+1558 passed | 65 skipped tests, 0 failed — up from commit 2's reported
+1455 passed (the 103-test delta is this commit's own new files).
+
+### Verification (this commit)
+
+- `npm run typecheck` — clean. One real fix needed first: a stale
+  `.next/dev/types` cache reported the new route segments as invalid
+  `LayoutRoutes` — resolved by `rm -rf .next && npm run build` to regenerate
+  Next's typed-routes manifest, not by touching any source file.
+- `npm run lint` — clean (`--max-warnings=0`). Two real fixes: the
+  `eslint-disable-next-line` comments for the two `<img>` exemptions
+  (`attachment-display.tsx`, `admin/tickets/[id]/page.tsx`) were originally
+  placed several comment-lines above the `<img>` itself — the directive only
+  disables the LITERAL next line, so both fired anyway; moved the directive
+  to be the line immediately preceding `<img>`, with the rationale comment
+  above that.
+- `npm run check` — all four tripwires pass. One real fix:
+  `check:brand-scope`'s `[C2]` rule flagged a raw `<button>` in
+  `admin/tickets/page.tsx`'s filter form (a button-shaped class string
+  outside `src/components/ui/`) — replaced with `<Button variant="outline">`.
+- `npm run build` — clean production build; all new routes appear in the
+  route table (`/o/[slug]/tickets`, `/o/[slug]/tickets/[id]`, `/o/[slug]/
+  tickets/[id]/attachments/[key]`, `/o/[slug]/tickets/new`, `/o/[slug]/
+  feedback`, `/admin/tickets`, `/admin/tickets/[id]`, `/admin/tickets/[id]/
+  attachments/[key]`).
+- Full test suite — see Tests above.
+- `scripts/test-rls.sql` as `presby_app`, run a THIRD time after the
+  real-browser walkthrough and its cleanup (see below) — exit 0, 82 pass
+  lines, 0 fail, `presby_roll_cache_drift()` returns zero rows.
+
+### The sign-in fixture
+
+`docs/testing.md` and `scripts/seed-dev.sql` were checked directly, per the
+brief: no platform user was linked to Marguerite Ashcombe (`elder.fixture@
+example.invalid`, `e0000000-…-f2`) with a password — that row existed only
+for `scripts/test-rls.sql`'s SQL-level `presby_two_factor_required()`
+assertion (`docs/testing.md`'s own note). Followed P9's exact
+`clerk.fixture` precedent: added `password`/`is_active`/
+`two_factor_required` columns to the existing `insert ... on conflict (id)
+do nothing` (the SAME bcrypt hash `clerk.fixture` uses, for the same shared
+`e2e-fixture-only-not-a-secret` password), applied as a live `UPDATE`
+against the shared dev database (the insert's `on conflict` made it a
+no-op there), and added a row to `docs/testing.md`'s Accounts table.
+`people.user_id` is a 1:1 column, so this is an UPGRADE of the existing
+link, not a second user — confirmed nothing in `scripts/test-rls.sql`
+depends on the row being password-less before making the change, by reading
+that file first, not assuming.
+
+**A real, previously-undiscovered gap surfaced immediately**: Alder Creek
+carries `organization_settings.require_two_factor = true`
+(`presby_two_factor_required()` returns `true` for BOTH `elder.fixture` AND
+`clerk.fixture`, confirmed by direct query) — completing sign-in redirects
+to `/account/2fa` (enrolment) or `/totp` (verification), same as any
+2FA-required org. Neither fixture carries a persisted TOTP enrolment in
+`scripts/seed-dev.sql`. Worked around FOR THIS VERIFICATION SESSION ONLY by
+seeding a throwaway TOTP secret directly against the dev database (the same
+already-public demo secret `e2e/support/totp-fixture.ts` uses for the
+`mfa-enrolled` e2e fixture, `AES-256-GCM` against `AUTH_TOTP_ENCRYPTION_KEY`,
+that file's exact format) — left in place afterward (not reverted) because
+it unblocks the next person who needs to sign in as `elder.fixture` by
+hand, using a secret this codebase already treats as public, not a new
+one. Building a PERMANENT fix (persisting this into `scripts/seed-dev.sql`
+itself, matching `totp-fixture.ts`'s approach) is out of this pipeline's
+scope — fixture infrastructure, not ticket-UI work — and is tracked in
+`docs/TODO.md`.
+
+### Implementer Notes
+
+- **`src/lib/tickets-labels.ts` gained re-declared vocabulary arrays,
+  beyond its originally-planned "just labels" scope** — a real `next build`
+  failure (`classify-control.tsx` importing `CHANGE_CLASSES` from `@/lib/
+  tickets` broke the client bundle: "This module cannot be imported from a
+  Client Component module," because `tickets.ts` opens with `import
+  "server-only"`) forced this. Every client-side `<select>` in this
+  pipeline now imports its TYPES from `@/lib/tickets` (`import type`, fully
+  erased, safe) and its VALUES (the arrays) from `tickets-labels.ts`
+  instead. `tickets-labels.test.ts` guards the two copies staying
+  byte-identical. Documented here per the brief's own instruction to name a
+  divergence rather than let it read as an oversight — same posture commit
+  2 took for `resolveMeta()`.
+- **`tickets/new/page.tsx`'s belt-and-suspenders `listTickets()` permission
+  check is not in Phase 3's written contract**, added because
+  `tickets/layout.tsx`'s "File a ticket" nav link renders unconditionally
+  (the layout has no data to gate it on), so a forbidden visitor can reach
+  the URL directly. Without this check the form would render fully and only
+  fail on submit — this renders the same honest `TicketsForbidden` state
+  every other tickets page already has instead.
+- **`upload-attachment-action.ts` (admin side) is a genuinely new file**,
+  not named in Phase 3's file list — `replyToTicketAsOperatorAction`
+  deliberately takes an already-`store()`'d `attachmentKey`, not a `File`,
+  and Phase 3 named the store-then-reply split as "ux-developer's call to
+  design." Duplicates (does not import) `(org)/tickets/actions.ts`'s
+  `storeAttachmentIfPresent()` logic, for the same reason `sniff.ts`'s own
+  header gives for not importing across the `(admin)`/`(org)` boundary — it
+  isn't exported, and `src/lib/` doesn't import from `src/app/`.
+- **Priority/status `Badge`s use existing shadcn variants
+  (`default`/`secondary`/`outline`/`destructive`), not new Tailwind palette
+  literals**, diverging from Phase 3's own suggestion to mirror
+  `admin/feedback/page.tsx`'s `STATUS_BADGE`/`CATEGORY_BADGE` maps (`bg-
+  yellow-100`, etc.). `docs/ui-standards.md` — dated AFTER that reference
+  file, and the more current, authoritative source — forbids new raw
+  palette literals outright and names status chips as a tracked gap
+  (`docs/TODO.md`) to be closed with real semantic tokens, not grown. The
+  more recent `admin/roles/roles-list.tsx` already established the
+  variant-only convention this commit follows instead. Every badge still
+  pairs its variant with its own text label (never color alone as the
+  signal).
+
+### Real-browser verification (CLAUDE.md → Verify in a Browser)
+
+A genuine Chromium session via Playwright's own installed browser (not
+`curl`, not a test harness — `chromium.launch()` directly, 360px viewport),
+signed in as `elder.fixture@example.invalid` (Marguerite Ashcombe) and
+separately as `admin@presby.invalid`, with `org_portal.tickets` flipped ON
+for the session and back OFF afterward (matching `org_portal.directory`/
+`org_portal.roles`'s own still-off state in the shared dev database — a
+flag landing does not mean flipping it on is this pipeline's call).
+
+**Observed directly, not assumed:**
+
+- `/o/alder-creek` shows "Tickets →" and "Give feedback →" links.
+- `/o/alder-creek/tickets` shows the seeded ticket and the seeded pending
+  feedback row.
+- Filed a new ticket with a real PNG attachment (subject/category/area/
+  priority/body all set) — landed on the thread, the attachment rendered as
+  a real inline `<img>` (a 1×1 test pixel, so visually near-invisible but
+  confirmed present in the DOM and byte-correct).
+- Filed a second ticket with a real (minimal, valid) PDF attachment —
+  confirmed via a direct authenticated `GET` on the attachment route: `200`,
+  `Content-Type: application/pdf`, `Content-Disposition: attachment;
+  filename="attachment.pdf"`, and the response bytes were byte-identical to
+  the uploaded file. The UI rendered a plain download link, never an inline
+  viewer, for it.
+- Client-side attachment validation, exercised for real: an 11MB file was
+  rejected before ever reaching the server ("That file is larger than
+  10MB.", the file input cleared); a `.txt` file showed the soft "doesn't
+  look like a PNG, JPEG, WEBP, or PDF" warning without hard-blocking
+  selection (the server's own magic-byte sniff is the real, authoritative
+  gate).
+- Replied to the own ticket as the submitter — persisted (confirmed on a
+  hard reload after the fact; the in-session assertion right after
+  `router.refresh()` raced the RSC refetch and is a scratch-script artifact,
+  not an app bug).
+- Promoted the seeded pending-feedback row into a second ticket via `/tickets/
+  new?fromFeedback=<id>` — the pre-fill banner, the read-only quoted body,
+  and the submit-through-`promoteFeedbackAction` path all worked; the
+  original feedback row flipped to `promoted` with the correct
+  `promoted_to_ticket_id`.
+- Submitted congregation feedback via `/o/alder-creek/feedback` as the same
+  member — appeared in the review queue afterward.
+- Signed in as `admin@presby.invalid`, confirmed `/admin/tickets` (cross-org
+  queue) lists all three tickets from this session, filterable.
+- On the filed ticket's admin detail page: replied as operator, walked
+  `new → triaged → in_progress → resolved` one status at a time (each a
+  real optimistic update + confirmed persisted), confirmed the terminal
+  state renders plain text with no `<select>`.
+- **Confirmed the queued notification emails directly** in `/admin/
+  email-queue` (not merely that the mutation returned `ok: true`) — all 6
+  distinct template keys observed with `status = 'sent'`:
+  `ticket_filed_confirmation`, `ticket_new` (fanned out to every user
+  holding `FEATURES.ADMIN_TICKETS` — 5 recipients, confirming the operator
+  pool lookup), `ticket_submitter_reply` (fanned out to the pool, since no
+  assignee was set), `ticket_operator_reply`, `ticket_resolved`.
+  `ticket_feedback_promoted` did NOT fire for the promoted seed row — by
+  design, confirmed correct rather than assumed: the original feedback
+  submitter (Priya Balakrishnan, `c0000000-…-0003`) has no linked `users`
+  row, so `submitterEmail` was `null`, and the dev server's own log showed
+  the exact expected `console.warn`: `"[tickets] promoted feedback has no
+  linked user email — skipping submitter notification."`
+- 200% zoom / print were not separately walked this commit (no new
+  print-relevant surface; the 360px pass covered the explicitly-named
+  mobile risk from Phase 3's Edge Cases).
+
+**Cleanup, because this ran against the shared dev database**: after
+verification, deleted the three tickets (and their messages/actions) filed
+live during the walkthrough, the one new `congregation_feedback` row, the
+two attachment `blob_assets` rows, and restored the seeded feedback row's
+`status`/`promoted_to_ticket_id` to its pre-walkthrough values —
+`scripts/test-rls.sql` FAILED on the first re-run after the walkthrough
+("alder: sees its own ticket — expected 1, got 4"), traced to this
+session's own live test data (not assumed as pre-existing drift — the count
+matched exactly: 1 seeded + 3 filed during verification), fixed, and
+`scripts/test-rls.sql` re-ran clean (82 pass, 0 fail) both immediately after
+and again after the subsequent `tickets.test.ts` DB-gated run.
+
+## Handoff
+
+**Next: qa (Phase 5).** All three Phase 4 commits complete. `org_portal.
+tickets` is seeded OFF (`scripts/seed.ts`) and currently OFF in the shared
+dev database — QA will need to flip it on to exercise `/o/<slug>/tickets*`
+and `/o/<slug>/feedback` by hand or via a flag-aware test path.
+`elder.fixture@example.invalid` (Marguerite Ashcombe, `tickets.file` at
+Alder Creek) is now sign-in-capable with a persisted TOTP enrolment (see
+"The sign-in fixture" above) — the shared `e2e-fixture-only-not-a-secret`
+password, `otplib`'s `generateSync({ secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+})` for the 6-digit code, same as the `mfa-enrolled` e2e fixture.
+`admin@presby.invalid` already holds `FEATURES.ADMIN_TICKETS` (the `admin`
+role carries every feature) for the `/admin/tickets` side, no seed change
+needed. Per CLAUDE.md's Phase 4 gate, this pipeline does not touch `src/
+app/(auth)/`/`src/auth.ts`/`src/app/api/auth/`/`src/lib/auth/`, so the
+mandatory running-server MFA-enrolled-user e2e smoke does not apply here —
+named explicitly so QA doesn't have to re-derive that from the diff.
 
 ---
 

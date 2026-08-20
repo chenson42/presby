@@ -74,6 +74,7 @@ export default async function OrgPage({
   await assertOrgAccess(resolved.org.personId, resolved.org.organizationId);
 
   const directoryEnabled = await isFlagEnabled("org_portal.directory");
+  const rolesEnabled = await isFlagEnabled("org_portal.roles");
 
   return (
     <OrgPortalStub
@@ -81,6 +82,7 @@ export default async function OrgPage({
       organizationType={resolved.org.organizationType}
       slug={resolved.org.slug}
       directoryEnabled={directoryEnabled}
+      rolesEnabled={rolesEnabled}
     />
   );
 }

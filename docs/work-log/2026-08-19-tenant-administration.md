@@ -73,7 +73,7 @@ model yet. Don't block on P8, but don't duplicate its scope either.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES — bootstrap gap + 6 adversarial findings | 2026-08-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-066/067/068 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete | Design complete, implementers named | 2026-08-19 |
-| 4 — Implementation | database-admin, api-developer, ux-developer | api-developer commit (2/3) complete | — | 2026-08-19 |
+| 4 — Implementation | database-admin, api-developer, ux-developer | Complete (3/3) | — | 2026-08-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -822,3 +822,272 @@ own acceptance criteria), and `docs/product/functionality-map.md` /
 `docs/TODO.md` updates at Phase 6 ship time, not this commit.
 
 *Recorded by api-developer.*
+
+---
+
+# Phase 4 — Implementation (commit 3 of 3: ux-developer, client)
+
+## Files Created
+
+- `src/app/(org)/o/[slug]/admin/layout.tsx` — minimal chrome: a back link to
+  `/o/<slug>`, no auth of its own, no `<BrandTokens>` emission, no nav array
+  (Phase 3 design, DECISION-043/047/052 applying without incident).
+- `src/app/(org)/o/[slug]/admin/roles/page.tsx` — repeats the `(org)` auth
+  pattern from `directory/page.tsx` line for line: `cachedAuth()` → four-way
+  `resolveOrgContext()` switch → `assertOrgAccess()` → flag check
+  (`org_portal.roles`) BEFORE `listGrants()`/`getGrantFormOptions()` are ever
+  called → renders the roles table and the grant form.
+- `src/app/(org)/o/[slug]/admin/roles/roles-states.tsx` — `RolesFlagOff`,
+  `RolesForbidden`, `RolesLoadError`, three genuinely distinct copy blocks
+  matching `directory-states.tsx`'s register.
+- `src/app/(org)/o/[slug]/admin/roles/roles-list.tsx` — a `Table` (wide-column
+  data, the directory's card rationale does not apply here). Columns: role,
+  granted-to, granted-by, since, a per-row `RevokeDialog` trigger. Finding 4
+  (the arm-1 cascade gap) is surfaced via a `Badge` reading "Membership ended
+  {date}" next to a person-arm grantee whose `membershipEnded` is non-null —
+  not filtered, not fixed.
+- `src/app/(org)/o/[slug]/admin/roles/grant-role-form.tsx` — `"use client"`.
+  A radio toggle between a person and a group target (only the relevant
+  native `<select>` visible at a time, per docs/ui-standards.md's Select &
+  Combobox Patterns — no `Select`/`Command` primitive exists yet), a role
+  `<select>` rendering exactly `options.roles.length` entries (no wildcard —
+  finding 3), a submit button disabled with inline copy when the selected
+  target kind's list is empty, and the zero-roles sentence when
+  `options.roles.length === 0`. `escalation_denied`/`forbidden` surface via
+  `toast.error(result.error)` verbatim.
+- `src/app/(org)/o/[slug]/admin/roles/revoke-dialog.tsx` — `AlertDialog`
+  modeled directly on `neutralize-dialog.tsx`. Confirmation title names both
+  the grantee and the role ("Revoke Stated Clerk from Tobias Renwick?"), never
+  a generic confirm. `self_lockout_blocked` (and any other denial) surfaces
+  via `toast.error` with the server's own message.
+- Five test files, one per new component (`page.test.tsx`,
+  `roles-states.test.tsx`, `roles-list.test.tsx`, `grant-role-form.test.tsx`,
+  `revoke-dialog.test.tsx`) — 45 tests total, mocked at the `@/lib/role-grants`
+  and `./actions` boundaries, matching `directory/page.test.tsx`'s style. At
+  minimum: flag-off renders before `listGrants()` is ever called; forbidden
+  renders on `{ kind: "forbidden" }`; the grant form renders zero `<option>`s
+  beyond `options.roles.length` (no "select all"); the empty-roles sentence
+  renders when `options.roles.length === 0`; the arm-1 badge renders only when
+  `membershipEnded !== null`; the self-lockout error surfaces via
+  `toast.error`, verbatim.
+
+## Files Modified
+
+- `src/app/(org)/o/[slug]/org-states.tsx` — `OrgPortalStub` gains a
+  `rolesEnabled: boolean` prop and an "Administration →" link, threaded
+  through exactly the way `directoryEnabled` already is: gated on
+  `org_portal.roles` alone, never on the viewer's own `role_grants.manage`
+  grant — `/o/<slug>/admin/roles` stays the sole authority on the viewer's
+  own permission.
+- `src/app/(org)/o/[slug]/page.tsx` — reads `org_portal.roles` via
+  `isFlagEnabled()` alongside the existing `org_portal.directory` read, passes
+  `rolesEnabled` to `OrgPortalStub`.
+- `src/app/(org)/o/[slug]/org-states.test.tsx` — existing `OrgPortalStub`
+  tests updated to pass the new required `rolesEnabled` prop; new describe
+  block covers the Administration link's on/off/both-links-independently
+  cases.
+- `scripts/seed-dev.sql` — one additive block (see "Fixture gap" below); the
+  existing DECISION-066 authorization fixture block (permissions,
+  `stated_clerk`, the three `role_grants` rows) is untouched, per the brief.
+- `docs/testing.md` — added `clerk.fixture@example.invalid` to the Accounts
+  table with a one-paragraph note on why it exists.
+
+## Schema Changes
+
+None.
+
+## Audit Events
+
+None — this commit adds no `db.insert/update/delete` calls; both mutations
+route through the already-shipped `grantRoleAction`/`revokeRoleAction`
+(commit 2), which already write `TENANT_ROLE_GRANTED`/`TENANT_ROLE_REVOKED`.
+
+## The fixture gap (CLAUDE.md → Verify in a Browser) — resolved by adding a real login
+
+Per the brief: neither existing platform user linked to an Alder Creek person
+could actually sign in. `elder.fixture@example.invalid` (linked to Marguerite
+Ashcombe) is deliberately password-less — its own header comment says so — and
+no user was linked to Tobias Renwick, the one person holding `stated_clerk`.
+The e2e Playwright roster (`e2e/support/users.ts`) doesn't reach Alder Creek
+either; it only provisions `e2e-alpha`/`e2e-beta`/`e2e-gamma`/`e2e-presbytery`.
+
+**Resolution taken: added a second, real, sign-in-capable platform user**
+(`clerk.fixture@example.invalid`, id `e0000000-0000-0000-0000-0000000000f3`)
+to `scripts/seed-dev.sql`, linked to Tobias Renwick
+(`c0000000-0000-0000-0000-000000000002`). Unlike `elder.fixture`, it carries a
+real bcrypt hash of the same shared fixture password documented in
+`docs/testing.md` (`e2e-fixture-only-not-a-secret`), `is_active = true`, and
+`two_factor_required` explicitly `false` (the `users` column default is
+`true`, which would otherwise force a TOTP-enrolment detour before the roles
+page was ever reachable). This is a lasting, additive fixture, not a
+throwaway — it's now in `scripts/seed-dev.sql` for any future browser
+verification of this surface. Applied to the dev database directly via
+`psql` (same mechanism database-admin's commit 1 used, since `db:migrate`
+doesn't apply past migration `0009` in this environment) and verified with a
+`select` confirming the password hash, `is_active`, and the `people.user_id`
+link.
+
+**Chose this over the scratch/rolled-back alternative** because a permanent,
+reusable login is more valuable to whichever agent (most likely qa, per the
+Phase 3 design's "self-lockout guard exercised live through the UI" acceptance
+criterion) needs to repeat this walkthrough later — a scratch grant would need
+reconstructing from scratch every time.
+
+## A second, unrelated fixture surprise found live: Alder Creek requires 2FA
+
+Signing in as `clerk.fixture` first landed on `/totp`, not `/launch` →
+`/o/alder-creek`. `organization_settings.require_two_factor = true` for Alder
+Creek (pre-existing fixture data, not something this commit touches), combined
+with the platform `auth.require_2fa` flag being enabled in this dev database,
+forces 2FA for every Alder Creek sign-in — matching `computeEffectiveTwoFactor()`'s
+documented behavior exactly, not a bug. **Handled as a temporary, rolled-back
+scratch toggle**: set `organization_settings.require_two_factor = false` for
+Alder Creek only, for the duration of the browser walkthrough, then restored
+it to `true` afterward (verified by a `select` after restoration). Building
+real TOTP enrolment for a new fixture user was judged out of scope for this
+commit — `clerk.fixture` is deliberately *not* 2FA-required going forward
+(`two_factor_required = false` on the user row itself), so this one-time org
+policy interaction won't recur for this specific account on future sign-ins.
+
+## A real defect found and fixed during the live walkthrough: the list did not refresh after a mutation
+
+Per the brief's own instruction to "check whether the page needs
+`router.refresh()` too by testing this live" — it does. `grantRoleAction`/
+`revokeRoleAction` already call `revalidatePath()` server-side (commit 2), but
+that only marks the route's cache stale; it does not re-render an
+already-mounted client tree. Confirmed live: granting a role showed the
+"Role granted." toast, but the table below stayed on its pre-grant snapshot
+until a manual reload. **Fixed**: both `grant-role-form.tsx` and
+`revoke-dialog.tsx` now call `router.refresh()` (from `next/navigation`) on
+`{ ok: true }`, immediately after the success toast. Re-verified live after
+the fix — grants and revocations now appear in the table without a manual
+reload. All five component test files updated to mock `next/navigation`'s
+`useRouter` (no prior precedent for this in the codebase; added a plain
+`{ refresh: vi.fn() }` mock, asserted `router.refresh()` fires on the
+`{ ok: true }` branch in both `grant-role-form.test.tsx` and
+`revoke-dialog.test.tsx`).
+
+## Real-browser verification actually performed (not assumed)
+
+Playwright, headless Chromium, 360×800 viewport, against the real dev server
+and real dev database (scratch script, not committed — `scratch/` is
+gitignored and hard-blocked by the pre-commit hook per CLAUDE.md, deleted
+after use). Signed in as `clerk.fixture@example.invalid`:
+
+- **Sign-in → `/launch` → `/o/alder-creek`** (single-org fast path, no
+  chooser) — confirmed.
+- **Portal stub**: "Administration →" link present (flag on), correctly
+  absent when the flag is off (unit-tested; not re-verified live since it's
+  the same conditional already proven for `directoryEnabled`).
+- **`/o/alder-creek/admin/roles`**: heading, "Who holds what" table (the four
+  seeded grants: `member`→Active Membership group, `property_chair`→Tobias,
+  `session_member`→Session group, `stated_clerk`→Tobias), "Grant a role" form
+  below it. Layout intact at 360px — the table's own `overflow-x-auto`
+  wrapper (from the generated `<Table>` primitive) scrolls horizontally
+  rather than breaking the page.
+- **Grant flow, person target**: granted Property Committee Chair to
+  Marguerite Ashcombe — succeeded, toast, new row appeared after the
+  `router.refresh()` fix, with `grantedByEmail` correctly showing
+  `clerk.fixture@example.invalid` (not `—`, confirming the `granted_by`
+  `users.id` FK is wired correctly end to end from the Server Action layer).
+- **Grant flow, group target**: granted Property Committee Chair to the
+  "Board of Deacons" derived group — succeeded, row showed the group name
+  with a "(group)" marker.
+- **Escalation-denied, constructed live**: Tobias's effective permission set
+  (`role_grants.manage`, `roll.approve`, `directory.view`, via `stated_clerk`
+  + `session_member` + `member`) turned out to be a superset of every
+  *seeded* role's permissions at Alder Creek — there is no seeded role today
+  he could legitimately be denied. Per the brief's own allowance
+  ("construct the scenario"), temporarily inserted one scratch `app_roles`
+  row (`scratch_overreach`, bound to `pastoral.notes.view`, a tier-3
+  permission no seeded role carries) directly in the dev database, attempted
+  the grant through the real UI, observed the exact server message rendered
+  as a visible toast — **"You can't grant permissions you don't hold
+  yourself: pastoral.notes.view."** — then deleted the scratch role and its
+  `app_role_permissions` row afterward (verified gone).
+- **Revoke confirmation copy**: opened the dialog for Tobias's own
+  `stated_clerk` grant — title read exactly **"Revoke Stated Clerk from
+  Tobias Renwick?"**, naming both, never "Are you sure?".
+- **Self-lockout, live, not just unit-tested**: confirmed the revoke of
+  Tobias's `stated_clerk` grant (the only holder at Alder Creek) — the
+  dialog did not silently close; a visible toast read **"Revoking this would
+  leave nobody able to grant or revoke roles at this organization. Contact
+  support if you need to change this."** The grant remained in the table
+  afterward (confirmed by re-reading the row), proving nothing was written.
+- **Keyboard/focus**: tabbed through the page; the "Back to portal" link
+  showed a visible, offset focus ring.
+
+**Dev database left exactly as found**: the scratch role, the extra test
+`role_grants` rows created by the walkthrough's grant flows, the temporarily
+loosened 2FA policy, and the `org_portal.roles` flag (flipped on for testing)
+were all reverted/deleted after verification — confirmed by re-querying the
+same four original fixture grants, `require_two_factor = true`, and
+`org_portal.roles.enabled = false` (its shipped default). The one intentional,
+lasting change is `clerk.fixture`'s row in `scripts/seed-dev.sql` and the dev
+database, added via the same idempotent `insert ... on conflict (id) do
+nothing` pattern `elder.fixture` already uses.
+
+## Implementer Notes
+
+- Divergence from the brief: the brief's Build step 4 said RolesList's
+  columns are "role name, grantee (person or group name), granted-by email,
+  since (startsOn)" with a per-row Revoke button — built exactly as
+  specified, plus an accessible `sr-only` header for the actions column
+  (no visible label needed; the button's own "Revoke" text is the label).
+- `roles/page.tsx`'s two-call sequence (`listGrants()` then, only on
+  `{ kind: "ok" }`, `getGrantFormOptions()`) matches the brief's ordering
+  exactly; a defensive `{ kind: "forbidden" }` branch on
+  `getGrantFormOptions()`'s own result is unreachable in practice (both calls
+  share the identical `hasRoleGrantsManage` gate) but handled rather than
+  assumed, since the two are separate transactions.
+- Used `cachedAuth()` in `page.tsx` (a Server Component), matching
+  `directory/page.tsx` exactly — this is unrelated to commit 2's documented
+  `auth()`-not-`cachedAuth()` divergence in `actions.ts`, which is a Server
+  Action and a different rule (`cachedAuth()`'s own header: for Server
+  Component render trees only).
+- Did not touch `src/lib/role-grants.ts`, `admin/roles/actions.ts`, or the
+  existing DECISION-066 fixture block in `scripts/seed-dev.sql`, per the
+  brief.
+
+## Verification
+
+- `npm run typecheck` — clean.
+- `npm run check` (all four tripwires, `check:brand-scope` specifically for
+  the new `(org)/admin/layout.tsx`) — clean; dormant note for
+  `(public)/site/[slug]/layout.tsx` unchanged (still doesn't exist).
+- `npm run lint` — clean, zero warnings.
+- `npm test` (the real CI command) — 1409 passed, 43 skipped, 0 failed (up
+  from 1370/42 at commit 2's handoff — 39 new tests: 45 new across the five
+  new roles-surface test files, minus a few shared assertions folded into
+  existing describe blocks, plus 3 new `org-states.test.tsx` cases for the
+  Administration link).
+- `npm run build` — full production build, clean; `/o/[slug]/admin/roles`
+  registered as a dynamic route (`ƒ`) alongside `/o/[slug]/directory`.
+- Real-browser walkthrough — see above, actually performed against a running
+  dev server and the real dev database, not assumed from passing unit tests.
+
+## Handoff to qa (Phase 5)
+
+All three P9 commits are complete. What a reviewer should click through: sign
+in as `clerk.fixture@example.invalid` / `e2e-fixture-only-not-a-secret`
+(docs/testing.md), flip `org_portal.roles` on, visit `/o/alder-creek` → click
+"Administration →" → `/o/alder-creek/admin/roles`. New copy strings a fork's
+branding pass should review: "Roles", "Who holds what", "Grant a role", the
+three `roles-states.tsx` denial/error messages, and the revoke confirmation's
+"Revoke {role} from {grantee}?" pattern — none reference PC(USA)-specific
+polity language directly in this commit (unlike `stated_clerk` itself, which
+is commit 1's fixture data). UX tradeoffs: no `Dialog`/`Select` primitive
+(Phase 3 design, out of scope); the grant form is a single inline form rather
+than a two-step wizard, matching the "narrowest CRUD" framing from Phase 1.
+The self-lockout guard, the escalation-denied path, and the arm-1 cascade
+badge are all real-Postgres-tested in `role-grants.test.ts` (commit 2) *and*
+now confirmed live through the actual UI (this commit) — qa's Phase 5
+auth-touching-e2e gate does not apply here (this feature doesn't touch
+`src/auth.ts`/`(auth)`/`api/auth`/`lib/auth`, per the Phase 3 design's E2E
+blast-radius note), but qa should still exercise the flows above with a real
+signed-in session, not only the mocked component tests, given how much this
+commit's own walkthrough surfaced (the `router.refresh()` gap) that no unit
+test caught. `docs/product/functionality-map.md` and `docs/TODO.md` updates
+are Phase 6 ship-time work (Rule 10/14), not this commit's.
+
+*Recorded by ux-developer.*

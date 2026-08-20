@@ -46,6 +46,13 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 | `org1-org2@presby.invalid` | A congregation **and** a presbytery | the chooser, two cards |
 | `org3-unmanaged@presby.invalid` | Only an `unmanaged` congregation | `/no-organization` |
 | `org2-ended@presby.invalid` | A relationship that **ended** 31 Mar 2026 | `/no-organization` |
+| `clerk.fixture@example.invalid` | Tobias Renwick at Alder Creek — holds `stated_clerk` (`role_grants.manage`), P9 | `/o/alder-creek` — try `/o/alder-creek/admin/roles` by hand, `org_portal.roles` flag permitting |
+
+`clerk.fixture` is provisioned by `scripts/seed-dev.sql` (not the Playwright
+roster) and uses the same shared fixture password below. It exists
+specifically so the P9 role-administration surface can be walked through as
+the one seeded person who actually holds `role_grants.manage` — every other
+account in this table predates that permission.
 
 `org1-org2` is the ruling elder who serves on a presbytery committee — one
 person, two organizations, which is how PC(USA) service actually works.

@@ -102,6 +102,7 @@ export function OrgPortalStub({
   organizationType,
   slug,
   directoryEnabled,
+  rolesEnabled,
 }: {
   name: string;
   organizationType: OrganizationType;
@@ -115,6 +116,14 @@ export function OrgPortalStub({
    * permission and renders its own honest denied state.
    */
   directoryEnabled: boolean;
+  /**
+   * `org_portal.roles`'s value at render time (P9) — threaded through
+   * exactly the way `directoryEnabled` already is, gated on the FLAG alone
+   * and never on the viewer's own `role_grants.manage` grant.
+   * `/o/<slug>/admin/roles` stays the sole authority on the viewer's own
+   * permission and renders its own honest denied state.
+   */
+  rolesEnabled: boolean;
 }) {
   return (
     <section className="max-w-xl">
@@ -132,14 +141,24 @@ export function OrgPortalStub({
         You&apos;re in. There is nothing here yet — the roll and the officer
         register arrive with the organization portal.
       </p>
-      {directoryEnabled && (
-        <Link
-          href={`/o/${slug}/directory`}
-          className="mt-4 inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        >
-          Directory →
-        </Link>
-      )}
+      <div className="flex flex-col items-start gap-2">
+        {directoryEnabled && (
+          <Link
+            href={`/o/${slug}/directory`}
+            className="mt-4 inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            Directory →
+          </Link>
+        )}
+        {rolesEnabled && (
+          <Link
+            href={`/o/${slug}/admin/roles`}
+            className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            Administration →
+          </Link>
+        )}
+      </div>
     </section>
   );
 }

@@ -339,6 +339,34 @@ update people
  where id = 'c0000000-0000-0000-0000-000000000001';
 
 -- ---------------------------------------------------------------------------
+-- P9: a SIGN-IN-CAPABLE platform user linked to Tobias Renwick.
+--
+-- elder.fixture@example.invalid above is deliberately password-less — it
+-- exists only for scripts/test-rls.sql's SQL-level assertions and cannot
+-- authenticate through /signin. Tobias Renwick is the one fixture person
+-- holding stated_clerk (DECISION-066, role_grants row above), and no
+-- existing platform user was linked to him — there was no way to walk the
+-- P9 role-administration UI through a real browser session as the person it
+-- was built for. This user closes that gap: same reserved .invalid domain,
+-- same shared fixture password documented in docs/testing.md
+-- ('e2e-fixture-only-not-a-secret', bcrypt-hashed below), is_active so it can
+-- sign in, and two_factor_required explicitly false so a manual walkthrough
+-- of /o/alder-creek/admin/roles is not gated behind a separate TOTP
+-- enrolment detour. Password-bearing (unlike elder.fixture above) on
+-- purpose — the point of this row is that it CAN sign in.
+-- ---------------------------------------------------------------------------
+insert into users (id, email, name, email_verified, password, is_active, two_factor_required)
+values ('e0000000-0000-0000-0000-0000000000f3', 'clerk.fixture@example.invalid',
+        'Fixture Stated Clerk', now(),
+        '$2b$10$tHdp7RHkvStQGKE5A/BRTenWeJ/HUOeY3iA/MmCGXE2fUCS9wBzT2',
+        true, false)
+on conflict (id) do nothing;
+
+update people
+   set user_id = 'e0000000-0000-0000-0000-0000000000f3'
+ where id = 'c0000000-0000-0000-0000-000000000002';
+
+-- ---------------------------------------------------------------------------
 -- The post-login router fixture (P0)
 -- ---------------------------------------------------------------------------
 -- Deliberately NOT at Alder Creek or Bramblewood. scripts/test-rls.sql asserts

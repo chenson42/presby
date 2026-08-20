@@ -134,7 +134,7 @@ ticket once the mechanism exists.
 
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
-| 1 — Functional refinement | analyst | In progress | — | — |
+| 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
 | 2 — Architectural review | architect | Pending | — | — |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
@@ -147,42 +147,257 @@ ticket once the mechanism exists.
 
 ## VERDICT
 
-[READY FOR DESIGN | READY WITH NOTES | NEEDS REWORK | NOT YET]
+**READY WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The feature in one honest sentence.]
+> A sound, already-negotiated architecture (git content, CI staging,
+> OIDC ingest, one platform renderer) that this pass makes concrete —
+> but it collides, unreconciled, with an *earlier* locked decision
+> (DECISION-041 / `docs/schema-design.md` §14's DB-composition
+> `sites`/`site_pages`/`site_sections` model) that Phase 2/3 must
+> explicitly supersede rather than silently ignore, and it leaves a
+> real unauthenticated write path (the contact form) genuinely open.
+
+## Prior art checked
+
+`../westervillelions` is the closest real analog — a live public
+church site, not an MDX pipeline, but its *content shape* is exactly
+what a v1 allowlist needs: a hero band, a leadership grid, and —
+load-bearing — a `/donate` page that **links out to a third-party
+processor (Zeffy)** rather than collecting card data itself, live
+proof that "giving stays out of PCI scope via link-out/embed" is
+already the right shape, not a hypothesis. `../synod-portal`'s public
+`(public)/learn` confirms the anonymous route-group shape but is
+hand-authored, no ingest precedent. Neither `../fpcw-directory` nor
+`../psvonline-portal` own a public-site concept. None of the four
+repos have prior art for the ingest contract or the git-content-repo
+shape — this part is genuinely new ground for the whole project
+family.
+
+## A structural finding — not a defect in what the user negotiated, a gap in sequencing
+
+`docs/decisions.md` DECISION-041 (2026-08-18) already resolved the
+*route and security contract* for public sites: `/site/<slug>` under a
+new `(public)` group, custom-domain canonicalization, and — critically
+— reads go only through "the narrow SECURITY DEFINER published-content
+reader," `getPlatformDb()` forbidden, no `dangerouslySetInnerHTML`.
+`docs/schema-design.md` §14's sketch under that same decision is a
+**live DB composition engine** — `sites`/`site_pages`/`site_sections`
+tables, an implied in-browser editor (`docs/STATE.md`'s own queue
+names "P4 the church's site editor" as the very next pipeline after
+this one).
+
+The architecture locked this session is a *different* mechanism for
+the same problem — content in git, staged by CI, rendered from a
+parsed MDX bundle in the blob adapter, not rows in `site_pages`. The
+*routing/security* half of DECISION-041 transfers over unchanged and
+should be reused, not re-litigated — "sealed sections never restyled"
+maps cleanly onto "the allowlisted component set accepts only fixed
+props, never arbitrary CSS/JS," arguably a *stronger* version of the
+same guarantee. But the *data-model* half is superseded outright, and
+nothing on record says so yet. Left unaddressed, a future reader could
+reasonably start from §14's sketch and build the wrong tables.
+**Recommendation for Phase 2/3, not decided here**: an appended
+correction to DECISION-041, the same append-only shape DECISION-072
+already models — routing contract stands, composition-engine data
+model superseded by git+CI+blob-staged-bundle, `sites` narrows to a
+small provisioning/status table.
+
+**A genuine roadmap fork this raises, for the user, not Phase 2/3 to
+guess:** does "P4 the church's site editor" still exist? Under the
+DB-composition model it meant a browser WYSIWYG editor writing SQL
+rows. Under the now-locked git+CI model, "editing your site" is a git
+commit, and support-tickets' own Flow 3 already closed the door on any
+autonomous AI-attributed write path. Is P4 dead, superseded by "the
+ticket loop is the editor," or does it survive in a different form
+(e.g. a self-service surface that opens a PR via the GitHub API,
+still human-reviewed)?
 
 ## User Verbs
 
 | Surface | Verb | Cadence |
-|---------|------|---------|
-| [admin / member / anonymous] | [verb] | [on demand / per session / one-time] |
+|---|---|---|
+| Content-repo committer (platform operator + Claude Code, per support-tickets' closure) | Edits MDX/front-matter/images in `site-<slug>`, opens/merges a PR | per ticket |
+| GitHub Actions CI (machine actor, OIDC) | Validates, normalizes, requests a token, POSTs the bundle to the ingest endpoint | automatic, every push to `main` |
+| Platform operator | Provisions a new congregation's site; observes ingest/CI health | one-time / on demand |
+| Anonymous visitor | Browses the site; submits the contact form; clicks a donate link | on demand, unauthenticated |
 
 ## Flows
 
-**Flow 1 — [name]:** [entry → step → step → outcome]
-- Failure: [what the user sees if a step goes wrong]
+**Flow A — Provision a site:** create `site-<slug>` from the `site-kit`
+template, record the repo reference + `status: provisioning` against
+the org. Not reachable at `/site/<slug>` until content is staged (404,
+same as never-provisioned).
 
-**Flow 2 — [name]:** [...]
+**Flow B — Content change via ticket** (closes the loop with
+support-tickets' `content`/`config`/`theme` categories): a ticket is
+"done" only when CI passes *and* ingest succeeds, already named as the
+bar. **Gap**: nothing wires a CI failure back into the ticket thread
+itself — an operator who doesn't separately check the repo's Actions
+tab has no signal inside presby that a merge didn't ship.
+
+**Flow C — CI ingest** (the load-bearing machine flow): push → CI
+validates → normalizes to a structured bundle → requests a short-lived
+OIDC token scoped to that repo/run → POSTs to the ingest endpoint →
+platform verifies the token, resolves `organization_id` from the
+`repository` claim, checks idempotency by commit SHA, stores via the
+blob adapter, fires on-demand ISR. **Gap**: no alerting path named if
+ingest starts silently failing for an org while CI itself stays green
+— CI only knows its own POST succeeded, not that presby is degraded.
+
+**Flow D — Anonymous browse:** resolve org → read the live staged
+bundle → render through `site-kit`'s fixed components with the org's
+brand tokens. **Needs a deliberate, uniform answer** for
+never-had-a-site / provisioning / suspended — see Gap 5.
+
+**Flow E — Contact form submission:** the one genuinely new
+unauthenticated write path in this entire feature. **Has no home
+anywhere in the locked architecture** — see Gap 3, the single
+highest-value gap in this review.
 
 ## Permissions & Flags
 
-- **Permission(s):** [new `FEATURES.KEY`, or existing key reused]
-- **Default roles:** [list]
-- **Flag(s):** [new key + rollout plan, or "not needed"]
+- **No new tenant permission for viewing `/site/<slug>`** — fully
+  anonymous, gated by a status check (does this org have a live site),
+  never `organizations.platformStatus` (that distinguishes tenant/
+  non-tenant for the *private* portal deep-link case and has no
+  bearing here).
+- **Recommend a new platform flag**, `sites.public_render`, a rollback
+  switch for the render path itself — this is the platform's newest
+  attack surface (externally-authored, structurally-guardrailed-but-
+  not-fully-trusted content), worth a kill switch that doesn't need a
+  deploy.
+- **The ingest endpoint's auth is not session-based at all** — machine-
+  to-machine OIDC, the first route in the tree with a wholly different
+  auth model. Flag for the architect: confirm it isn't accidentally
+  exempt from `check:audit`'s scan path if it lives as a route handler
+  rather than a Server Action.
+- **Recommend an audit event for successful ingest**
+  (`SITE_CONTENT_INGESTED`) despite the actor being a machine —
+  `auditEvents.actorUserId` is already nullable with a free-text
+  fallback, fits with no schema change. A content mutation with
+  immediate public-internet visibility is exactly the audit trail's
+  job, in spirit if not letter of Rule 7.
 
 ## Gaps the Request Didn't Address
 
-- [Gap, why it matters, suggested resolution]
+1. **`StaffList`/`EventList` read as live-data-bound in the
+   illustrative names, but content repos have no live DB access at
+   all under this architecture** — they're static MDX. v1's allowlist
+   should be named explicitly as *static/content-authored only*, with
+   "pulls from presby's real roll/roster/events" deferred to the
+   already-queued "P7 data-bound blocks."
+2. **Concrete v1 component allowlist**: `Hero`, `ServiceTimes`,
+   `AddressMap` (fixed-template embed, never a raw caller-supplied
+   `src`), `StaffList`/gallery (recommend one underlying component
+   with an optional bio field, not two), `EventList` (static),
+   `SermonEmbed` (restricted to an allowlisted domain set — YouTube/
+   Vimeo/SoundCloud/Spotify — extracts an ID, never passes through an
+   arbitrary iframe `src`, which would be a live code-injection surface
+   inside the "content is data, never code" guarantee), `ContactForm`
+   (needs its own design, see Gap 3), `DonateLink` (v1: link-out only,
+   mirroring westervillelions' real Zeffy precedent — an *embedded*
+   widget is a different trust boundary, deferred), and base MDX prose.
+3. **The `ContactForm` submission path is the single highest-value gap
+   in this review.** It can't reuse `congregation_feedback` (requires
+   an active membership per DECISION-070) and shouldn't become a
+   ticket (ticket filing is deliberately role-gated — an anonymous
+   stranger filing one would defeat that gate). Needs: a destination,
+   IP-based rate limiting (no person to key on), and bot mitigation (no
+   CAPTCHA vendor is pre-approved per DECISION-048's dependency
+   discipline — even a honeypot field is a real decision). Treat as its
+   own small flow, not an allowlist afterthought.
+4. **A CI failure has no visible echo in the ticket that asked for the
+   change** (Flow B) — at minimum a documented manual step, possibly a
+   future webhook back into the ticket thread.
+5. **The unpublished/nonexistent/suspended response needs a
+   deliberate, uniform answer** — the same enumeration-safety instinct
+   DECISION-040 already applied to `/o/<slug>` (byte-identical across
+   states) transfers directly: "this congregation's site was
+   suspended" shouldn't be distinguishable from "never had one" to a
+   random prober.
+6. **Platform-side DB shape — concrete recommendation**: a small
+   sibling table, shaped like `organization_brands`
+   (FORCE RLS, tenant-readable via `withOrgContext()`, admin-writable
+   via `getPlatformDb()`), **not** like `organizations` itself —
+   DECISION-049 already ruled a bare public grant specifically wrong
+   for exactly this shape of data ("readable by any caller with no org
+   context, an enumeration oracle"), and a site's status is exactly
+   the kind of "is this org a paying tenant" signal DECISION-040 said
+   must stay hidden. The public read path never reads this table with
+   a bare grant — a narrow SECURITY DEFINER function gated on
+   `status = 'live'`, mirroring DECISION-041's contract, returns
+   nothing (same as 404) for every other status.
+7. **Ingest idempotency**: dedupe on commit SHA — a repeat SHA returns
+   200 "already current," skips re-staging/re-revalidating, mirroring
+   the blob adapter's own content-hash dedup one level up.
+8. **Image handling — concrete recommendation**: use the blob adapter,
+   referenced by key, **not** checked into the content repo's git
+   history. The failure mode isn't one large file, it's *frequent
+   small text edits plus occasional binary replacements retained
+   forever* — exactly git's worst case at "hundreds of orgs, multiple
+   years" scale, paid on every future clone/checkout. The real cost,
+   named honestly: a two-step authoring workflow (upload, then
+   reference by key) is worse UX than dropping a file next to content
+   — reducing that friction is a Phase 3 implementation detail, but
+   the storage decision itself should lock now.
+9. **`presby-site-kit` needs its own explicit "No Real Data"
+   statement — it will not inherit presby's by proximity.** CLAUDE.md's
+   invariant is textually scoped to "this repository." Recommend
+   stating it explicitly at repo creation, while `site-<slug>` repos
+   are the deliberate, explicit exception — stated so a future session
+   doesn't mistakenly block a real congregation from using real
+   content.
+10. No new leak vector found from the small sites table itself. One
+    procedural echo: an ingest-rejection message could in principle
+    quote a fragment of offending content back — same "don't paste
+    raw content into anything landing in presby's own history"
+    mitigation as the ticket-body PII concern already named.
 
-## Out of Scope (confirm with user)
+## Out of Scope (confirmed)
 
-- [Thing the request implies but isn't in scope]
+No autonomous AI-worker actor anywhere (confirmed consistent with
+support-tickets' own closure — commits go through the operator's own
+GitHub identity via ordinary git/gh workflow, no independent machine
+write authority). The self-service in-browser editor (DECISION-041/
+§14's implied "P4") — genuinely unclear whether it still exists in any
+form, flagged as an open question, not assumed either way. The
+provisioning automation's actual implementation (already named as
+Phase 3/4 scope). Multi-language content, a sermon archive, an
+embedded donate widget, any per-page CSS/JS.
 
 ## Open Questions
 
-- [Question for the user]
+1. **Does "P4 the church's site editor" still exist, in what form?** A
+   real roadmap fork, not a Phase 2/3 detail — see the structural
+   finding above.
+2. **Does staged content need a preview step before going live**, or is
+   "CI passes + ingest succeeds = live immediately" the intended v1
+   behavior? A git PR reviews MDX source, not the rendered page — a
+   volunteer congregation's real public site going live with no
+   rendered preview is a named, not assumed-away, risk.
+3. **Are `site-<slug>` repos private or public GitHub repos?** Changes
+   the sensitivity of Gap 6/10 above (a private repo's status leaking
+   is more sensitive than a public one's) — not stated anywhere in the
+   locked architecture.
+
+## Handoff
+
+**Next: architect (Phase 2).** Carry forward, in priority order: (1)
+the DECISION-041/§14 reconciliation — write it down, don't infer it;
+(2) the small `sites`-sibling-table shape (FORCE RLS,
+`organization_brands`-style, not `organizations`-style); (3)
+`presby-site-kit` becomes presby's first cross-repo dependency —
+squarely the architect's own dependency charter; (4) the `ContactForm`
+path needs its own small design, not folded into the allowlist; (5)
+confirm the ingest endpoint's non-session auth model doesn't fall
+outside `check:audit`'s scan path. Open Questions 1–3 are for the
+user, before Phase 2 designs anything that assumes an answer either
+way.
+
+*Recorded by the orchestrator from the read-only analyst agent's
+report.*
 
 ---
 

@@ -87,9 +87,24 @@ export interface ResolvedBlob {
   contentType: string;
 }
 
+export interface ResolvedBlobMeta {
+  contentType: string;
+  byteSize: number;
+}
+
 export interface BlobStore {
   store(input: StoreInput): Promise<BlobRef>;
   resolve(input: ResolveInput): Promise<ResolvedBlob | null>;
+  /**
+   * Metadata-only read — no `bytes` column in the SELECT. Added for support
+   * tickets (2026-08-20, commit 2/3): `getTicketThread()` needs a message's
+   * attachment `contentType` to decide inline-vs-download markup for every
+   * message in a thread, and fetching a full (up to 10MB) BYTEA payload just
+   * to read one column back out of it — then discarding the bytes — is the
+   * wrong cost to pay per message. Same DECISION-030 discipline as
+   * `resolve()`: `blob_assets` is still queried nowhere but this file.
+   */
+  resolveMeta(input: ResolveInput): Promise<ResolvedBlobMeta | null>;
 }
 
 /** Thrown by `store()` for anything the DB CHECK constraints would also reject. */
@@ -217,6 +232,26 @@ class PostgresBlobStore implements BlobStore {
       // asset deleted out from under a still-live mark_asset_key, or a typo
       // in a hand-built URL) is an ordinary "nothing here" for every caller,
       // not an exceptional one.
+      return rows[0] ?? null;
+    });
+  }
+
+  async resolveMeta({
+    organizationId,
+    key,
+  }: ResolveInput): Promise<ResolvedBlobMeta | null> {
+    return withTrustedOrgContext(organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          contentType: blobAssets.contentType,
+          byteSize: blobAssets.byteSize,
+        })
+        .from(blobAssets)
+        .where(
+          and(eq(blobAssets.id, key), eq(blobAssets.organizationId, organizationId)),
+        )
+        .limit(1);
+
       return rows[0] ?? null;
     });
   }

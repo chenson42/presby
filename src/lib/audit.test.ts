@@ -111,6 +111,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // src/app/(org)/o/[slug]/admin/roles/actions.ts
   TENANT_ROLE_GRANTED: "tenant.role.granted",
   TENANT_ROLE_REVOKED: "tenant.role.revoked",
+  // Support tickets (2026-08-20) — written from
+  // src/app/(org)/o/[slug]/tickets/actions.ts
+  TICKET_CREATED: "tenant.ticket.created",
+  TICKET_FEEDBACK_PROMOTED: "tenant.ticket.feedback_promoted",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

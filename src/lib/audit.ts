@@ -75,6 +75,13 @@ export const AUDIT_ACTIONS = {
   // audit reader exists yet to establish a convention by example.
   TENANT_ROLE_GRANTED: "tenant.role.granted",
   TENANT_ROLE_REVOKED: "tenant.role.revoked",
+  // Support tickets (2026-08-20) — written from
+  // src/app/(org)/o/[slug]/tickets/actions.ts. Routine triage (status,
+  // assignment, classification, area, priority) is audit-exempt by direct
+  // precedent (admin/feedback/actions.ts's identical posture) — only
+  // filing and feedback-promotion are audited.
+  TICKET_CREATED: "tenant.ticket.created",
+  TICKET_FEEDBACK_PROMOTED: "tenant.ticket.feedback_promoted",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

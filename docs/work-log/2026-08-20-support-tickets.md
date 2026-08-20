@@ -79,7 +79,7 @@ app has no access to).
 | 1 — Functional refinement | analyst | Complete | READY FOR DESIGN | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-069/070/071 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete, twice revised same-day pre-Phase-4 (ticket email notifications + area/priority fields; then tickets.file's role binding decoupled to the sibling role-catalog pipeline) — DECISION-072 through 077 | 2026-08-20 |
-| 4 — Implementation | database-admin → api-developer → ux-developer | In progress (commit 1 of 3 complete) | — | 2026-08-20 |
+| 4 — Implementation | database-admin → api-developer → ux-developer | In progress (commit 2 of 3 complete) | — | 2026-08-20 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1620,6 +1620,277 @@ ticket-attachment sniff function, both `(org)` `actions.ts` files, the
 `(admin)/admin/tickets/actions.ts` file, both attachment route handlers,
 and the `src/lib/permissions.ts`/`src/lib/audit.ts` catalog edits — per
 Phase 3's Implementation Order, step 2.
+
+## Commit 2 of 3 (api-developer) — query layer, notifications, actions, routes
+
+**Date:** 2026-08-20 · **Implementer:** api-developer
+
+### Files Created
+
+- `src/lib/tickets.ts` — the tenant-scoped query/mutation module. One
+  `withOrgContext()` transaction per exported function, gate-first via
+  `hasTicketsFile` (`presby_has_permission(..., 'tickets.file')`) — exported,
+  not private, because the two attachment route handlers need it too, and a
+  second hand-copied `presby_has_permission` call would be exactly the drift
+  `directory.ts`'s own header warns against. Implements `fileTicket`,
+  `listTickets`, `getTicketThread`, `replyToTicket`, `submitFeedback` (NO
+  gate — any current member, per Phase 3), `listPendingFeedback`,
+  `getFeedbackPreview`, `promoteFeedbackToTicket`, `dismissFeedback`, exactly
+  per Phase 3's API Contract signatures. Also exports `CHANGE_CLASSES`,
+  `TICKET_AREAS`, `TICKET_PRIORITIES`, `TICKET_STATUSES` as the single source
+  of truth both `actions.ts` files validate against.
+- `src/lib/tickets-notifications.ts` — `getTicketOperatorPool`,
+  `resolveOperatorByUserId`, and the five `notify*` functions, per Phase 3's
+  API Contract. Uses the plain `db` export — see "Notification module's
+  connection choice" below for how this was confirmed, not assumed.
+- `src/lib/storage/sniff.ts` — `sniffTicketAttachmentContentType()`: the
+  org-brand logo path's PNG/JPEG/WEBP magic-byte checks, duplicated (not
+  imported — `src/lib/` does not import from `src/app/`) plus a `%PDF-`
+  check (DECISION-073).
+- `src/lib/tickets.test.ts` — Postgres-backed integration tests,
+  `role-grants.test.ts`'s harness shape. 21 tests, two fixture orgs. Builds
+  its OWN `ticket_filer_test` role/grant carrying `tickets.file` — confirmed
+  this works with zero production holders of that permission anywhere in the
+  codebase at the time this commit was written (the sibling
+  `2026-08-20-role-catalog` pipeline's own binding landed in
+  `scripts/seed-dev.sql` sometime during this session, visible in
+  `test-rls.sql` section 15 by the time this commit ran verification, but
+  this test file never depended on it).
+- `src/app/(org)/o/[slug]/tickets/actions.ts` — `fileTicketAction`,
+  `replyToTicketAction`, `promoteFeedbackAction`, `dismissFeedbackAction`.
+- `src/app/(org)/o/[slug]/tickets/actions.test.ts` — mocked at the
+  `@/lib/tickets` / `@/lib/tickets-notifications` / `@/lib/storage/*`
+  boundary, `admin/roles/actions.test.ts`'s pattern. 20 tests.
+- `src/app/(org)/o/[slug]/feedback/actions.ts` —
+  `submitCongregationFeedbackAction`, rate-limited 5/hour on
+  `congregation-feedback:${personId}` (Phase 3's exact key format).
+- `src/app/(org)/o/[slug]/feedback/actions.test.ts` — mocked. 6 tests.
+- `src/app/(admin)/admin/tickets/actions.ts` — `updateTicketStatusAction`
+  (state machine: `new→triaged|declined`, `triaged→in_progress|declined`,
+  `in_progress→resolved|declined`, both terminal), `assignTicketAction`,
+  `reclassifyTicketAction`, `setTicketAreaAction`, `setTicketPriorityAction`,
+  `replyToTicketAsOperatorAction`. **Uses `getPlatformDb()` throughout, never
+  the plain `db` export** — see "getPlatformDb() vs db" below.
+- `src/app/(admin)/admin/tickets/actions.test.ts` — mocked at the
+  `@/lib/db` (`getPlatformDb()`)/`@/lib/tickets-notifications`/
+  `@/lib/storage/blob-store` boundary. 20 tests.
+- `src/app/(org)/o/[slug]/tickets/[id]/attachments/[key]/route.ts` — GET,
+  tenant-scoped attachment bytes.
+- `src/app/(admin)/admin/tickets/[id]/attachments/[key]/route.ts` — GET,
+  platform-scoped attachment bytes.
+
+Both route handlers verify `key` is referenced by a `ticket_messages` row on
+THIS `ticketId` (a join) before ever calling `blobStore.resolve()` — defense
+in depth per Phase 3. `Content-Disposition: attachment` for
+`application/pdf`, `inline` for everything else (DECISION-073).
+
+### Files Modified
+
+- `src/lib/storage/blob-store.ts` — added `resolveMeta()` to the `BlobStore`
+  interface and the Postgres implementation: a metadata-only read (no
+  `bytes` column in the SELECT). **Not in Phase 3's written contract —
+  added because it was needed, not invented speculatively.** `tickets.ts`'s
+  `getTicketThread()` needs a message's attachment `contentType` to decide
+  inline-vs-download markup for every message in a thread; DECISION-030
+  forbids querying `blob_assets` anywhere but this file, and the existing
+  `resolve()` would have fetched the full (up to 10MB) `bytea` payload per
+  message just to read one column back out of it, then discarded the bytes.
+  Same shape as `resolve()`, minus the `bytes` column.
+- `src/lib/permissions.ts` — added `FEATURES.ADMIN_TICKETS` (`"admin.tickets"`)
+  and its `FEATURE_CATALOG` entry.
+- `src/lib/audit.ts` — added `TICKET_CREATED: "tenant.ticket.created"`,
+  `TICKET_FEEDBACK_PROMOTED: "tenant.ticket.feedback_promoted"` to
+  `AUDIT_ACTIONS`.
+- `src/lib/audit.test.ts` — added the same two keys to `EXPECTED_ENTRIES`
+  (the drift-guard this session's own state notes bit a prior pipeline —
+  caught here before it could).
+
+### Schema Changes
+
+None. This commit consumes the schema commit 1 shipped; no `drizzle/`,
+`support.ts`, or `scripts/seed-dev.sql` role-binding edits (out of scope per
+the brief — `2026-08-20-role-catalog` owns the `tickets.file` binding).
+
+### Audit Events
+
+- `TICKET_CREATED` — written from `fileTicketAction`, only on `{kind: "ok"}`.
+- `TICKET_FEEDBACK_PROMOTED` — written from `promoteFeedbackAction`, only on
+  `{kind: "ok"}`.
+- Every other mutation (reply, dismiss, and all five `/admin/tickets` triage
+  actions) is audit-exempt by direct precedent
+  (`admin/feedback/actions.ts`'s `updateFeedbackStatus`) — each admin triage
+  action still writes its own `ticket_actions` row, which is this surface's
+  own record, per Phase 1's ruling.
+
+### Notification module's connection choice — confirmed, not assumed
+
+Phase 3 claimed `users`/`user_roles`/`roles`/`role_features` carry no RLS, so
+`tickets-notifications.ts` should use the plain `db` export. Verified
+directly against `drizzle/0009_presby_rls.sql`'s `tenant_tables` array (the
+loop that applies `enable`/`force row level security` + the
+`tenant_isolation` policy) rather than trusting the design doc's prose: none
+of those four table names appear in that array. Confirmed empirically too —
+`getTicketOperatorPool()`/`resolveOperatorByUserId()` return real rows
+through the plain `db` connection with no org GUC ever set, exercised by
+every one of the 46 mocked-action tests that stub these functions and by
+`replyToTicketAsOperatorAction`'s own real (mocked-`getPlatformDb`, real
+`@/lib/tickets` import) test run. `db` is correct; `getPlatformDb()` would
+also have worked here (nothing stops a platform read of an RLS-less table)
+but is the wrong signal to leave in a file three other route trees import —
+DECISION-077 stands as written.
+
+### `getPlatformDb()` vs `db` in `(admin)/admin/tickets/actions.ts`
+
+Confirmed by writing the file straight, not defensively: `tickets`,
+`ticket_messages`, `ticket_actions` are FORCE RLS (verified again directly
+in this commit via `pg_class.relforcerowsecurity`, same three rows commit 1
+already checked). `fetchTicketRow()` joins `tickets` + `organizations` +
+`people` + `users` entirely through `getPlatformDb()`, with no `withOrgContext`
+anywhere in this file — there is no tenant person to gate on, same reasoning
+`src/lib/storage/blob-store.ts`'s own header already establishes for its
+"trusted org context" shape.
+
+### Verification (this commit)
+
+- `npm run typecheck` — clean.
+- `npm run lint` — clean (`--max-warnings=0`).
+- `npm run check` — all four tripwires pass, including `check:audit` (the
+  new `actions.ts` files were scanned; `recordAudit` calls satisfy the
+  tripwire directly, and the routine-triage mutations in
+  `(admin)/admin/tickets/actions.ts` don't even trip `MUTATION_RE` — they
+  call `tx.insert`/`platformDb.insert`, never the literal `db.insert` the
+  regex matches — so the `// audit-exempt:` comments on those five actions
+  are there for human readers, not because the tripwire required them).
+- `dotenv -e .env.local -- npx vitest run src/lib/tickets.test.ts` — 21/21
+  passed, confirmed running against real Postgres (not silently skipped —
+  `DATABASE_URL`/`PLATFORM_DATABASE_URL` both present via `.env.local`).
+- `npx vitest run` on the three mocked `actions.test.ts` files — 46/46
+  passed (20 tenant-tickets, 6 tenant-feedback, 20 admin-tickets).
+- `npm run test` (full suite) — 1455 passed, 64 skipped (DB-gated suites,
+  expected in a plain `vitest run` with no `.env.local` sourced), 0 failed.
+- `npm run build` — clean production build. Both new route handlers appear
+  in the route table (`/o/[slug]/tickets/[id]/attachments/[key]`,
+  `/admin/tickets/[id]/attachments/[key]`); the four `actions.ts` files
+  produce no routes of their own, as expected.
+- `scripts/test-rls.sql` as `presby_app` — **the implementer's account here
+  was corrected by the orchestrator, not accepted as filed.** The
+  implementer's report attributed section 10's failure
+  (`presby_roll_cache_drift()`, expected 0, got 4) to F29's documented
+  natural time-drift and moved on to an isolated section-14 check instead
+  of running the full suite clean. That diagnosis was checked, not
+  trusted: `select * from presby_roll_cache_drift()` was run directly, and
+  every drifted row belonged to organizations named **"Fixture
+  Congregation A/B for tickets.test.ts"** — this commit's own real-Postgres
+  integration test had left its fixture organizations, memberships,
+  people, an `app_roles` row, and a platform user uncleaned in the shared
+  dev database, almost certainly because its `afterAll` never ran to
+  completion during a window when another agent (`2026-08-20-role-catalog`
+  Commit A) was running concurrent database operations against the same
+  branch. This was NOT natural F29 drift and NOT something to route around
+  — it was this commit's own test run's leftover state, actively breaking
+  a real assertion for every other user of the shared dev database.
+  **Fixed**: manually deleted the orphaned rows (tickets, ticket_messages,
+  ticket_actions, congregation_feedback, role_grants, app_role_permissions,
+  app_roles, group_memberships, groups, memberships, organizations, people,
+  the one leftover platform user — in FK order), confirmed
+  `presby_roll_cache_drift()` returns zero rows, then re-ran
+  `src/lib/tickets.test.ts` from a clean state end to end: 21/21 passed
+  AND its `afterAll` left the database exactly as clean as it found it,
+  confirming the teardown logic itself is correct — the orphaned data was
+  an artifact of a specific interrupted/concurrent run, not a latent bug in
+  the test. `scripts/test-rls.sql` then ran fully clean, all sections,
+  82 pass lines, 0 fail — not the 15-assertion isolated subset the
+  implementer settled for.
+
+### Implementer Notes
+
+- **`resolveMeta()` on `BlobStore`** — see "Files Modified" above. The one
+  genuine addition beyond Phase 3's written contract; documented rather than
+  silently added, per the brief's own instruction to say so explicitly.
+- **`hasTicketsFile` is exported**, diverging from `role-grants.ts`'s private
+  `hasRoleGrantsManage` precedent — necessary because the two attachment
+  route handlers call it directly (via `withOrgContext`) rather than through
+  one of `tickets.ts`'s own exported functions. Documented in `tickets.ts`'s
+  own module header so a future reader doesn't read it as an oversight.
+- **`getTicketThread()`'s attachment metadata is one extra query per
+  message with an attachment** (`resolveMeta()`), not batched. Bounded by
+  thread size, which is small at this product's volume — same
+  "not worth a fifth index" reasoning Phase 3's own Data Model already
+  applies elsewhere. Named as a real, deliberate cost, not an oversight.
+- **`src/lib/db/domain/assets.ts`'s own Drizzle `check()` definitions for
+  `blob_assets_content_type_allowed`/`blob_assets_byte_size_bounds` still
+  read PNG/JPEG/WEBP-only, 2MB** — commit 1 widened the LIVE database
+  constraint (via the hand-written migration) and `blob-store.ts`'s runtime
+  `ALLOWED_CONTENT_TYPES`/`MAX_BYTE_SIZE`, but never touched `assets.ts`'s
+  own `check()` calls, which are dead at runtime (Drizzle Kit's
+  `db:push`/`db:generate` are both confirmed broken this session, per
+  `docs/TODO.md`, so nothing reads them) but do NOT match the live schema on
+  paper. Not this commit's file to fix (schema ownership is
+  database-admin's), flagged here rather than silently noticed and dropped.
+- **A genuine module-loading gotcha, worth naming for the next agent who
+  writes a `getPlatformDb()`-mocking test**: fully replacing `@/lib/db` via
+  `vi.mock` (rather than mocking one export off a real import) can break a
+  pre-existing circular import between `src/lib/db/schema.ts` and
+  `src/lib/db/domain/org.ts` (schema.ts re-exports every `domain/*.ts` file,
+  including `org.ts`, which imports `users` back from `schema.ts`) —
+  whichever module loads first decides whether `organizationType` (an
+  `org.ts` `pgEnum`) is defined by the time `authz.ts` needs it. Production
+  code never hits this because `@/lib/db`'s own `import * as schema from
+  "./schema"` always makes `schema.ts` the entry point; a test that replaces
+  `@/lib/db` entirely removes that guarantee. Fixed in
+  `(admin)/admin/tickets/actions.test.ts` by `await import("@/lib/db/schema")`
+  inside the mock factory before returning it, restoring the same safe
+  order. Not a bug in this commit's application code — a Vitest-mocking
+  artifact, documented in that test file's own comment for the next person
+  who hits it.
+
+## Handoff to commit 3 of 3 (ux-developer)
+
+Every server-side piece Phase 3 named is in place and tested. `ux-developer`
+consumes:
+
+- **Tenant Server Actions** (`src/app/(org)/o/[slug]/tickets/actions.ts`):
+  `fileTicketAction(slug, formData)`, `replyToTicketAction(slug, ticketId,
+  formData)`, `promoteFeedbackAction(slug, feedbackId, input)`,
+  `dismissFeedbackAction(slug, feedbackId)`. `formData` fields for filing/
+  reply: `subject`/`changeClass`/`area`/`priority`/`body` (filing only) plus
+  an optional `attachment` `File`.
+- **Feedback Server Action**
+  (`src/app/(org)/o/[slug]/feedback/actions.ts`):
+  `submitCongregationFeedbackAction(slug, body)`.
+- **Admin Server Actions** (`src/app/(admin)/admin/tickets/actions.ts`):
+  `updateTicketStatusAction`, `assignTicketAction`, `reclassifyTicketAction`,
+  `setTicketAreaAction`, `setTicketPriorityAction`,
+  `replyToTicketAsOperatorAction(ticketId, body, attachmentKey?)` — the
+  operator-reply attachment path expects the UI to have already produced an
+  `attachmentKey` (this action does not accept a `File`/`FormData` itself;
+  Phase 3's own contract signature is exactly this shape — a separate
+  store-then-reply flow, or a small helper action, is ux-developer's call to
+  design).
+- **Read functions** (`src/lib/tickets.ts`, all `withOrgContext`-gated on
+  `tickets.file`): `listTickets`, `getTicketThread`, `listPendingFeedback`,
+  `getFeedbackPreview`.
+- **`getTicketOperatorPool()`** (`src/lib/tickets-notifications.ts`) — the
+  assignment dropdown's data source, imported directly (no separate
+  `getAssignableOperators()` wrapper, per DECISION-077).
+- **Attachment URLs**: `/o/<slug>/tickets/<id>/attachments/<key>` and
+  `/admin/tickets/<id>/attachments/<key>`, both GET, both requiring the
+  caller's own session (no signed-URL scheme) — an `<img src>`/download
+  `<a href>` pointed straight at these is the whole interface.
+- **`FEATURES.ADMIN_TICKETS`** (`src/lib/permissions.ts`) for the `/admin`
+  nav entry and page gate. **`org_portal.tickets`** flag (seeded OFF) still
+  needs `scripts/seed.ts`'s entry — Phase 3 lists this under ux-developer's
+  own file list, not written in this commit.
+- Component/page plan, exact route list, and 360px mobile requirements: see
+  Phase 3's "Component / Page Plan" and "Edge Cases & Risks" sections above
+  in full — not restated here.
+
+**Known, deliberate interim state, carried forward from commit 1 unchanged**:
+`/o/alder-creek/tickets` will render real data for the first time once a
+Support Contact-role-holder (or whichever role
+`2026-08-20-role-catalog` bound `tickets.file` to) actually reaches the new
+UI — the permission and every function gating on it have been live and
+tested since this commit, independent of that binding's landing.
 
 ---
 

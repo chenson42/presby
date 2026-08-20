@@ -17,6 +17,7 @@ export const FEATURES = {
   ADMIN_WHATS_NEW: "admin.whats_new",
   ADMIN_TWO_FACTOR: "admin.two_factor",
   ADMIN_ORGANIZATIONS: "admin.organizations",
+  ADMIN_TICKETS: "admin.tickets",
 } as const;
 
 export type FeatureKey = (typeof FEATURES)[keyof typeof FEATURES];
@@ -51,6 +52,13 @@ export const FEATURE_CATALOG: Array<{
     name: "Manage organization branding",
     description:
       "Set a congregation's brand colour, logo and type pairing at onboarding; neutralise an abusive tenant's brand.",
+    category: "admin",
+  },
+  {
+    key: FEATURES.ADMIN_TICKETS,
+    name: "Manage support tickets",
+    description:
+      "Triage the cross-org support ticket queue at /admin/tickets: status, assignment, classification, and replies.",
     category: "admin",
   },
   {

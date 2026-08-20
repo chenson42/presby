@@ -80,7 +80,7 @@ app has no access to).
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-069/070/071 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete, twice revised same-day pre-Phase-4 (ticket email notifications + area/priority fields; then tickets.file's role binding decoupled to the sibling role-catalog pipeline) — DECISION-072 through 077 | 2026-08-20 |
 | 4 — Implementation | database-admin → api-developer → ux-developer | Complete (3 of 3 commits) | — | 2026-08-20 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-08-20 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2243,46 +2243,112 @@ named explicitly so QA doesn't have to re-derive that from the diff.
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-08-20
 **Verified by:** qa
-
-## Type Check
-
-`npm run typecheck`: PASS / FAIL
-
-## Unit Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
-
-## End-to-End Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
-
-## Regression Tests Added
-
-- [test name — file:line — guards against: brief description]
-
-## Coverage on Critical Modules
-
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
-
-## Feature-Gate Audit
-
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
-
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**PASS**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+Doesn't touch `src/auth.ts`/`(auth)`/`api/auth`/`lib/auth`, so the stricter
+auth-e2e gate doesn't apply. Named limitation: qa did not personally repeat
+the implementer's real-browser 2FA walkthrough this session (would have
+required re-seeding a throwaway TOTP secret for another cleanup cycle) —
+substituted direct, independently-run verification instead: the full
+DB-backed test suite, `test-rls.sql` as `presby_app`, direct schema/RLS/
+constraint queries, a direct code read of every named adversarial
+requirement and every touched route/action's gate, and a direct
+`email_queue` query corroborating all six notification-trigger claims (five
+sent, one correctly absent — no linked platform user for that feedback
+submitter).
+
+## Type Check
+
+`npm run typecheck`: **PASS**
+
+## Unit Tests
+
+Plain `npm run test` (no `.env.local`): 1623 total | 1558 passed | 65
+skipped (DB-gated) | 0 failed — matches the implementer's own reported
+figures exactly. DB-backed `tickets.test.ts`: 21/21 against real Postgres.
+Full pipeline surface DB-backed (26 files): 168/168. `blob-store.test.ts`
+regression fix (`9162f13`): 7/7. `tickets-labels.test.ts` drift guard: 5/5.
+Spot-check regression on `/o/<slug>/directory` and `/o/<slug>/admin/roles`
+(10 files, 84 tests): 0 failed.
+
+## End-to-End Tests
+
+No Playwright suite required (not auth-touching). The implementer performed
+a genuine Chromium/Playwright 360px walkthrough as both a tenant role-
+holder and a platform operator, covering filing (PNG + PDF), replying,
+promotion, dismissal, the admin state machine, and all six notification
+triggers. qa corroborated the load-bearing claim — "emails actually
+landed" — with a direct `email_queue` query, not by trusting the report:
+
+```
+ticket_filed_confirmation  sent  2
+ticket_new                 sent  15
+ticket_operator_reply      sent  1
+ticket_resolved            sent  1
+ticket_submitter_reply     sent  5
+ticket_feedback_promoted   absent (0 rows, as claimed)
+```
+
+## Regression Tests Added
+
+`blob-store.test.ts`'s oversized-payload assertions, updated from the
+stale 2MB bound to the new 10MB one (`9162f13`) — a drift-fix rather than a
+new failing-then-passing test, but self-evidently correct and now 7/7.
+
+## Coverage on Critical Modules
+
+`src/lib/permissions.ts`: 100% (untouched logic, one new catalog entry).
+`src/lib/two-factor.ts`: 91.3% (untouched). `src/lib/flags.ts`: 100%
+(untouched).
+
+## Adversarial/Edge-Case Requirements — verified against code, not the design doc's prose
+
+Every one confirmed present and passing, each independently cited to
+file:line: `getTicketThread`'s cross-org/nonexistent enumeration collapse;
+`submitFeedback`'s no-gate-but-real-membership shape; `promoteFeedbackToTicket`'s
+deliberate no-re-verification of the original submitter's membership; the
+admin actions' `getPlatformDb()` usage (all six functions); both attachment
+routes' join-based ownership check; PDF-never-inline on both routes and
+both UI display points; all five email triggers wired to the correct call
+sites; `tickets-labels.ts`'s vocabulary arrays byte-identical to
+`tickets.ts`'s source of truth.
+
+## Mechanical Gates
+
+`npm run typecheck`, `npm run check` (all four tripwires), `npm run build`,
+`npm run test` (full suite) — all run by qa directly, all clean.
+`scripts/test-rls.sql` as `presby_app` — exit 0, 81 pass, 0 fail.
+`select * from presby_roll_cache_drift()` — 0 rows. Direct schema queries
+confirmed all four new tables FORCE RLS, the widened `blob_assets` CHECK
+constraints, the `tickets.file` permission row, and the sibling
+role-catalog pipeline's `support_contact` binding live.
+
+## Regression Check
+
+`git show --stat` on all four commits (`6d8a1e9`, `c2ed378`, `9162f13`,
+`15d8f25`) — every file touched is inside this pipeline's own footprint or
+the named shared-infra touch points. `/o/<slug>/directory` and
+`/o/<slug>/admin/roles` unaffected.
+
+## Feature-Gate Audit
+
+| Route or action | `auth()` | Gate | Correct key? |
+|---|---|---|---|
+| Tenant `tickets/actions.ts` (file/reply/promote/dismiss) | yes | `hasTicketsFile` inside `withOrgContext` | `tickets.file` |
+| `submitCongregationFeedbackAction` | yes | deliberately none — `withOrgContext`'s membership check is the whole gate, by design | n/a |
+| Tenant attachment route | yes | `hasTicketsFile` | `tickets.file` |
+| Admin `tickets/actions.ts` (6 actions) | yes (`requireAdminTicketsSession()` first, every action) | yes | `FEATURES.ADMIN_TICKETS` |
+| Admin attachment route + both admin pages | yes | yes | `FEATURES.ADMIN_TICKETS` |
+| `/o/[slug]/tickets*` pages | yes, via `resolveOrgContext` per the `(org)` contract | yes, `tickets.file`-gated | `tickets.file` |
+
+No missing or misdirected gate found anywhere in this diff.
+
+*Recorded by the orchestrator from the read-only qa agent's report.*
 
 ---
 

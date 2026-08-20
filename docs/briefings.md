@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=050 commit=f0ebd7c -->
+<!-- covers: decision=068 commit=d1e6fa6 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -23,6 +23,92 @@ entries — that is the one piece of discipline this file needs, and it is check
 ---
 
 ## 2026-08-19
+
+- [ ] **`decision` · Per-congregation branding shipped end to end.** An
+  operator sets a colour, logo, and one of three type pairings at
+  `/admin/organizations`; every page under a congregation's own `/o/<slug>`
+  now renders in that palette, while every platform-shell page (auth, admin,
+  the DECISION-040 access-denied page) stays platform-default by
+  construction — a branded 403 would tell a prober the slug is a real
+  tenant. The colour ramp is generated in OKLCH from one seed colour with no
+  new dependency, and it's asserted against real contrast floors (588
+  seed/scheme combinations tested), not just picked to look right. Public,
+  anonymous rendering of a congregation's own site (`(public)/site/<slug>`)
+  is deliberately not part of this — that's its own later pipeline (P3).
+
+- [ ] **`defect` · Two real bugs the branding work caught in itself, not in
+  something older.** First: the read function that hands a congregation's
+  brand to its own pages was built taking only an organization id and
+  re-deriving *which person* was asking from the session — but the
+  permission check needs a different id than the session carries, and the
+  mismatch failed silently, rendering the platform-default look for every
+  real member with no error anywhere. Second: the same property-testing that
+  proved the colour generator correct also caught it producing an
+  under-contrast input-field border in some light palettes and a
+  washed-out, indistinguishable grey in some dark ones. All three fixed
+  before shipping, with the property test now covering the specific cases
+  that found them.
+
+- [ ] **`decision` · A congregation's own members can now see a real
+  directory of who else belongs there** — the first actual church content
+  the platform shows anyone, gated by a genuine permission check (not just
+  "you're logged in") and filtered field-by-field in the database query
+  itself, never in the page component, so a privacy setting can't be
+  bypassed by a change to what the page happens to render. Getting any
+  member this far required solving a real bootstrapping problem first: there
+  was no mechanism to say "every member of this congregation automatically
+  has at least directory access" without inventing something that could
+  later be abused for more sensitive data — solved with a narrow, purpose-
+  built group rather than a shortcut in the permission engine itself.
+
+- [ ] **`finding` · Three real bugs the permissions work caught in itself.**
+  A safety trigger that keeps the elder/deacon rosters in sync turned out to
+  also fire — correctly, but unexpectedly — on an unrelated update inside
+  the isolation test suite's own test, breaking it. A historical
+  membership fixture dated 1996 silently failed a "what did the roll look
+  like on this date in the past" check, because the new mechanism stamped
+  its own start date from a database default (today) rather than the
+  membership's real, decades-old start. And separately, unrelated to any of
+  this: the architectural decision log had three decision numbers each
+  minted twice by two different recording passes — caught and fixed before
+  it could cause a real collision.
+
+- [ ] **`decision` · Tenant administration — letting a congregation manage
+  its own permissions — is underway, and the hardest question in it is
+  answered.** Who gets to grant access to others, before anyone else has
+  been granted anything? Extending it to every elder simultaneously was
+  rejected as disproportionate power with no individual accountability;
+  instead it's bound to a new role modeled directly on the Presbyterian
+  Stated Clerk — a real, elected office whose job already is exactly this
+  kind of individual record-keeping authority. Fixture-seeded to exactly one
+  person at one congregation for now, on purpose, to prove the mechanism
+  once rather than everywhere at once.
+
+- [ ] **`defect` · The table that would record who granted or revoked
+  access has no isolation protection at all** — not merely missing a
+  congregation-id column, but entirely absent from the list of tables the
+  database's row-level security even applies to. Nothing writes to it in a
+  way that leaks anything today, but a congregation-facing "who did this"
+  screen cannot safely be built on top of it as-is. Deferred rather than
+  built unsafely; the underlying write still happens on every action, so the
+  history exists in the database even though no screen can show it to a
+  congregation yet.
+
+- [ ] **`finding` · The command that's supposed to apply database migrations
+  doesn't actually work in this environment, and hasn't for a while.**
+  Confirmed it fails identically on unmodified `main`, so it's not something
+  recent work broke. Every migration past the ninth has, in practice, been
+  applied by hand directly against the database rather than through the
+  tool meant to do that — which has worked, but means there's no tooling
+  proof that a fresh environment could stand this database up from
+  scratch by running the documented command. Worth a real look, not just
+  another line item, since it sits under every other schema change made
+  so far and every one still to come.
+
+- [ ] **`finding` · The next-auth security bump this file already told you
+  about is done.** The version that closed the three known advisories
+  shipped. The custom-domain session work it was blocking (noted below,
+  still unread) can now proceed whenever that's prioritized.
 
 - [ ] **`defect` · The brand contract failed its own defaults on first run.**
   Three shipped defects, none previously visible, all found by measuring the

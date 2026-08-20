@@ -80,7 +80,7 @@ append-only, never edited in place.
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-078/079 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-080 | 2026-08-20 |
 | 4 — Implementation | database-admin | Complete (Commit A + Commit B) | — | 2026-08-20 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-08-20 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1120,46 +1120,85 @@ evaluates the complete pipeline (Commit A + Commit B together).
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-08-20
 **Verified by:** qa
-
-## Type Check
-
-`npm run typecheck`: PASS / FAIL
-
-## Unit Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
-
-## End-to-End Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
-
-## Regression Tests Added
-
-- [test name — file:line — guards against: brief description]
-
-## Coverage on Critical Modules
-
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
-
-## Feature-Gate Audit
-
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
-
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**PASS**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+Every binding — three new tenant roles, `roll.propose` onto
+`stated_clerk`, the platform Support Operator bundle — verified by
+direct query against the live database, not inferred from the
+work-log's own claims. Confirmed no concentration regression (Tobias
+Renwick still holds exactly `{property_chair, stated_clerk}`, no
+third/fourth role). Confirmed the two cross-pipeline FK preconditions
+genuinely held before their dependents ran, by commit timestamp order,
+not narrative. `scripts/test-rls.sql` ran fully clean (82 pass, 0
+fail) — the full suite, not an isolated subset.
+
+## Type Check
+
+`npm run typecheck`: **PASS**
+
+## Unit Tests
+
+Default `npm run test` (no DB env): 1519 total | 1455 passed | 64
+skipped (4 DB-gated files) | 0 failed. Re-ran all four DB-gated files
+against real Postgres rather than accepting the skip:
+`role-grants.test.ts`/`tickets.test.ts`/`directory.test.ts` — all
+pass (62 tests), independently confirming the new fixture rows didn't
+disturb the generic grant/revoke/directory machinery.
+`blob-store.test.ts` — found 2 of 8 stale, silently-wrong tests
+(their oversized-payload assertions predated DECISION-071/073's 10MB
+widening and no longer exercised a real rejection). Root-caused to the
+sibling support-tickets pipeline's own diff, not this pipeline's —
+**fixed directly by the orchestrator** rather than left as a flagged
+gap (`9162f13`), since it was a small, mechanical, verifiable fix
+affecting test-suite integrity generally. Re-verified 7/7 passing
+after the fix.
+
+## End-to-End Tests
+
+Not run — this pipeline touches no route, action, or page (see
+Feature-Gate Audit), and doesn't touch auth, so the stricter e2e gate
+doesn't apply. Phase 3's "E2e blast radius" claim independently
+re-confirmed: no Playwright spec asserts a literal count of Alder
+Creek roles; new rows are additive.
+
+## Regression Tests Added
+
+None required — fixture-only work, independently re-confirmed via
+`git show --stat` on both Phase 4 commits: no `src/app/`, no `.tsx`,
+no route file touched. Regression-test discipline applies to code
+changes; there is none here to regress.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: unaffected (one new exported constant, no
+  new branch logic).
+- `src/lib/two-factor.ts` / `src/lib/flags.ts`: not touched.
+- `src/lib/role-grants.ts`: not touched, but independently re-verified
+  live — `getGrantFormOptions()` queries `app_roles` scoped only by
+  `organizationId`, no `role_kind`/`is_protected` filter, so all three
+  new roles surface with zero code change.
+
+## Feature-Gate Audit
+
+No protected routes or Server Actions were added or changed —
+confirmed by `git show --stat` on `081c16b` and `28c5d84`: only
+`scripts/seed-dev.sql`, `scripts/test-rls.sql`, `scripts/seed.ts`,
+`src/lib/permissions.ts` (one new constant), and the work-log itself.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|-----------------|-------------------|----------------------------|----------------------------|
+| n/a — no protected routes touched | n/a | n/a | n/a |
+
+## Verdict
+
+**PASS**
+
+*Recorded by the orchestrator from the read-only qa agent's report.*
 
 ---
 

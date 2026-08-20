@@ -109,6 +109,8 @@ been independently verified.
 
 ## Done
 
+- [x] 2026-08-20 — `blob-store.test.ts`'s two oversized-payload assertions updated to the 10MB bound (DECISION-071/073 widened it from 2MB, but the tests weren't updated to match, so they silently passed for the wrong reason). Found by role-catalog's Phase 5 qa run re-running DB-gated suites rather than accepting a skip; fixed same-day — `docs/work-log/2026-08-20-role-catalog.md` Phase 5
+
 - [x] 2026-08-19 — **`role_grants`' arm-1 (`person_id`) cascade-on-membership-end gap: closed at the DB level for the ordinary mutation path, not merely tracked.** `drizzle/0014_presby_org_router.sql`'s `presby_guard_membership_end()` trigger (predating both DECISION-062 and DECISION-066 by migration number) already rejects the state; `scripts/test-rls.sql` lines 471–485 already assert it. DECISION-062/066 both corrected with an appended note. `listGrants()`'s `membershipEnded` field is retained as correct-but-currently-unreachable defensive code for direct historical-data imports only — `docs/work-log/2026-08-19-tenant-administration.md` Phase 4 commit 2 / Phase 6
 
 - [x] 2026-08-19 — `AUDIT_ACTIONS.TENANT_ROLE_GRANTED`/`TENANT_ROLE_REVOKED` added and wired: `src/lib/audit.ts`, written from `src/app/(org)/o/[slug]/admin/roles/actions.ts` on every successful grant/revoke — DECISION-062 (P1 Phase 2) — `docs/work-log/2026-08-19-tenant-administration.md` Phase 4 commit 2

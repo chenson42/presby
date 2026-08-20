@@ -78,7 +78,7 @@ app has no access to).
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY FOR DESIGN | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-069/070/071 | 2026-08-20 |
-| 3 — Technical design | tech-lead | Complete | Design complete, revised same-day pre-Phase-4 for two user requirements (ticket email notifications, area/priority fields) — DECISION-072 through 077 | 2026-08-20 |
+| 3 — Technical design | tech-lead | Complete | Design complete, twice revised same-day pre-Phase-4 (ticket email notifications + area/priority fields; then tickets.file's role binding decoupled to the sibling role-catalog pipeline) — DECISION-072 through 077 | 2026-08-20 |
 | 4 — Implementation | database-admin → api-developer → ux-developer | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -468,14 +468,29 @@ DECISION-076/077.
 
 - **`tickets.file`** — new tenant permission, module `support`, tier 1.
   Migration-seeded catalog row (DECISION-063 precedent — global, non-tenant,
-  no org needed first). **Default binding: piggybacked onto the existing
-  `stated_clerk` constitutional role** at Alder Creek
-  (`f0000000-0000-0000-0000-000000000005`, already granted to Tobias
-  Renwick, `c0000000-0000-0000-0000-000000000002`) via one new
-  `app_role_permissions` row in `scripts/seed-dev.sql` — **no new
-  `role_grants` row, no new `app_roles` row.** See DECISION-072 for why
-  `stated_clerk` is confirmed rather than a new role, and for the emergent
-  self-lockout protection this reuse buys for free.
+  no org needed first), **owned end-to-end by this pipeline**: the
+  `permissions` insert in `0019_presby_ticket_support.sql`, and every piece
+  of application code that checks it (`hasTicketsFile`, the filing/thread/
+  review-queue UI, the tenant `actions.ts` functions). **Which role binds
+  to it is explicitly NOT this pipeline's call.** DECISION-072 originally
+  piggybacked `tickets.file` onto the existing `stated_clerk` role; that
+  was corrected (append-only, see DECISION-072's correction note) by the
+  sibling `2026-08-20-role-catalog` pipeline, whose own Phase 1 resolved
+  that `tickets.file` should bind to a new, deliberately non-constitutional
+  custom role instead (working name "Support Contact," direct-granted to
+  Marguerite Ashcombe) — the exact role key/name is that pipeline's own
+  Phase 3 call, still in flight. **This pipeline's Phase 4 does not write
+  an `app_roles`/`app_role_permissions`/`role_grants` fixture row for
+  `tickets.file`** — that write belongs entirely to `2026-08-20-role-
+  catalog`'s own Phase 4, once its Phase 3 finalizes the role. This needs
+  no coordination to ship correctly: `hasTicketsFile` is just
+  `presby_has_permission(..., 'tickets.file')`, which correctly returns
+  `false` for everyone at every org until *some* role, anywhere, is bound
+  to it — the permission catalog row and the application code that checks
+  it are both fully functional and testable with zero holders. Same split
+  DECISION-063 already established for `directory.view`: the catalog row
+  is migration work, the per-org role binding is a separate, later
+  concern.
 - **`FEATURES.ADMIN_TICKETS`** (`"admin.tickets"`) — new platform `FEATURES`
   catalog key, `src/lib/permissions.ts`, category `"admin"`, default to
   nobody (same posture as `FEATURES.ADMIN_FEEDBACK`).
@@ -1200,20 +1215,48 @@ attachment action gets its own `sniffTicketAttachmentContentType()`
   "Tickets" }` to `nav`.
 - `scripts/seed.ts` — add `org_portal.tickets` flag definition (seeded
   `enabled: false`).
-- `scripts/seed-dev.sql` — the `tickets.file` → `stated_clerk`
-  `app_role_permissions` row (DECISION-072); one or two synthetic sample
-  rows (a ticket, a pending feedback row) at Alder Creek so QA/e2e has
-  something to click through — exact ids/content are database-admin's call.
+- `scripts/seed-dev.sql` — **no `app_roles`/`app_role_permissions`/
+  `role_grants` row for `tickets.file`** — that binding is
+  `2026-08-20-role-catalog`'s own Phase 4 to write, once its Phase 3 names
+  the role (see Permissions & Flags). This pipeline's `seed-dev.sql` change
+  is limited to one or two synthetic sample rows (a ticket, a pending
+  feedback row) at Alder Creek, inserted as **plain SQL, not through
+  `fileTicket()`/`submitFeedback()`** — a raw `insert` bypasses
+  `hasTicketsFile`'s runtime gate entirely (that check only fires inside
+  the query-layer module's functions, never on a seed script's direct
+  write), so the sample rows need no `tickets.file` holder to exist at
+  insert time. `submitter_person_id` on both rows is an ordinary existing
+  fixture member (not Marguerite Ashcombe specifically — the sample data
+  represents a member's/role-holder's report, not a demonstration of who
+  holds the role). See Implementation Order for the resulting, deliberate
+  interim state this produces and why it's correct rather than a gap to
+  route around.
 
 ## Implementation Order
 
 1. **database-admin** — `drizzle/0019_presby_ticket_support.sql` (permission
    catalog row, four tables + FORCE RLS + grants, `blob_assets` CHECK
    widening), `src/lib/db/domain/support.ts` (table definitions),
-   `scripts/seed-dev.sql` (the `stated_clerk` binding + sample fixture
-   rows), `npm run db:push` on a dev branch, `scripts/test-rls.sql`
-   additions proving tenant isolation on all four new tables (a cross-org
-   read of another org's ticket must return zero rows).
+   `scripts/seed-dev.sql` (sample fixture rows only — **no role binding
+   here, see Permissions & Flags/Files to modify**), `npm run db:push` on a
+   dev branch, `scripts/test-rls.sql` additions proving tenant isolation on
+   all four new tables (a cross-org read of another org's ticket must
+   return zero rows). **No Phase 4 ordering dependency on
+   `2026-08-20-role-catalog`'s own Phase 4** — chose this over the
+   alternative (sequencing one pipeline's Phase 4 after the other's)
+   because the sample rows are raw SQL inserts, which never pass through
+   `hasTicketsFile`'s runtime check, so they need no role-holder to exist
+   at insert time. The one real, worth-naming consequence: until
+   `2026-08-20-role-catalog`'s Phase 4 lands and binds some role to
+   `tickets.file`, `/o/alder-creek/tickets` renders `TicketsForbidden` for
+   every fixture person, including whoever eventually becomes the sample
+   rows' submitter — the sample data sits in the database, correctly
+   isolated and correctly invisible, exactly demonstrating the
+   Permissions & Flags claim that the permission and the UI are fully
+   functional with zero holders. Once the sibling pipeline's Phase 4 seeds
+   a holder, the same rows become reviewable with no further seed-dev.sql
+   change from this pipeline. QA should expect and confirm this sequence,
+   not read it as a defect.
 2. **api-developer** — `src/lib/tickets.ts` + `tickets.test.ts` (Postgres-
    backed, `role-grants.test.ts`'s harness shape — real fixtures across at
    least two orgs to prove cross-org `not_found`/enumeration discipline;
@@ -1272,21 +1315,21 @@ attachment action gets its own `sniffTicketAttachmentContentType()`
   benefit (`submitter_person_id` is a plain FK to global `people`, not a
   composite-to-`memberships` target the way a `role_grants` grantee is).
 - **A ticket filed against an org whose sole `tickets.file` holder has
-  since left — already closed, not a new mechanism**: because `tickets.file`
-  is bound to `stated_clerk`, which also carries `role_grants.manage`,
-  `revokeRole()`'s existing self-lockout guard already refuses to leave an
-  org with zero `role_grants.manage` holders, and
-  `presby_guard_membership_end()` already refuses to end a membership while
-  an open `role_grants` row exists at that org. The two together mean a
-  congregation can never organically reach "zero `tickets.file` holders
-  with open tickets" through any ordinary application path — an emergent
-  property of DECISION-072's binding choice, not new code. **Named residual
-  risk**: if some future congregation ever binds `tickets.file` to a
-  DIFFERENT role that does not also carry `role_grants.manage`, this
-  protection does not follow automatically — flagged for `docs/TODO.md`
-  rather than solved speculatively now (G-B, real org provisioning, is
-  still unbuilt; this is the same "fixture-only, real provisioning owns the
-  general case" deferral DECISION-063/066 already accepted).
+  since left — no protection, and that is correct, not a gap this pipeline
+  owns.** The original design here relied on `tickets.file` being bound to
+  `stated_clerk` (which also carries `role_grants.manage`) for an emergent
+  self-lockout protection; that binding was superseded (see DECISION-072's
+  correction and Permissions & Flags above) in favor of a dedicated,
+  non-constitutional role that carries `tickets.file` alone. `revokeRole()`
+  only ever checks the hardcoded `role_grants.manage` key
+  (`src/lib/role-grants.ts`), so a role holding solely `tickets.file` was
+  never a candidate for that protection regardless of which role it lived
+  on — this was never this pipeline's mechanism to build or preserve. The
+  `2026-08-20-role-catalog` pipeline owns this finding (its Phase 1
+  confirms the gap is deliberate, not an oversight, and notes
+  `property_chair` already carries the identical exposure today) and the
+  tracked `docs/TODO.md` consequence — no new content needed here beyond
+  this pointer.
 - **Attachment upload failure — atomic, not partial**: `getBlobStore().
   store()` runs and is validated (type sniff, size) **before** the ticket-
   creation transaction opens, exactly the org-brand logo path's E-c1/E-c2

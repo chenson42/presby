@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=068 commit=d1e6fa6 -->
+<!-- covers: decision=068 commit=4bab655 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -23,6 +23,20 @@ entries — that is the one piece of discipline this file needs, and it is check
 ---
 
 ## 2026-08-19
+
+- [ ] **`defect` · A just-written feature would have let any ordinary
+  member grant themselves or anyone else administrative-adjacent roles,
+  caught before it ever shipped.** The tenant role-administration code
+  (grant/revoke access at a congregation) was built with a check that,
+  looked at closely, only stopped someone from handing out a role more
+  powerful than their own — it never checked whether they were allowed to
+  hand out roles *at all*. The practical effect: any regular member could
+  have granted certain lower-tier roles to anyone, with zero administrative
+  standing, because the one permission meant to gate this whole feature was
+  never actually being checked in the write path. Found in my own review
+  before commit, not by a later test failure — fixed the same session, with
+  a new test that specifically re-creates the exploit and confirms it's
+  now blocked.
 
 - [ ] **`decision` · Per-congregation branding shipped end to end.** An
   operator sets a colour, logo, and one of three type pairings at

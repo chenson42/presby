@@ -145,6 +145,25 @@ async function seedFlags() {
         "Support-ticket filing/triage and the congregation-feedback on-ramp in (org). OFF = /o/<slug>/tickets* and /o/<slug>/feedback render 'isn't turned on yet' regardless of the viewer's tickets.file grant.",
       enabled: false,
     },
+    {
+      key: "sites.public_render",
+      // ON: the public /site/<slug> render path AND the ingest endpoint are
+      // both live. Checked bare, no DECISION-026 fail-open wrapper — this is
+      // not an auth path, and fail-closed-to-404 during a DB blip or an
+      // operator-initiated rollback is the correct direction here (public-
+      // sites pipeline, Phase 2/3). Gates BOTH the read path
+      // ((public)/site/[slug]/{page,layout}.tsx and the asset route) and
+      // ingest — a disabled feature rejects ingest too, not just hides the
+      // read path, so an org's content can't go "live" behind a flag that
+      // then flips on with stale-vs-fresh ambiguity. Does NOT gate
+      // /admin/organizations' provisioning UI or /admin/sites — an operator
+      // can provision and monitor sites while the public path stays off.
+      // Seeded OFF, same "ships dark until the page lands" reasoning as
+      // org_portal.directory/roles/tickets.
+      description:
+        "Public per-org website render + ingest. OFF = /site/<slug> 404s and ingest is rejected, regardless of organization_sites.status.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

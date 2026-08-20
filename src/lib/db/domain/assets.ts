@@ -43,11 +43,17 @@ export const blobAssets = pgTable(
     // uploads of byte-identical content within one org resolve to the same
     // row instead of storing the image twice (E-c6).
     contentHash: text("content_hash").notNull(),
-    // Raster only. SVG rejected at the schema (G7) — <script> and
-    // <foreignObject> make sanitising it its own project, so it never gets a
-    // row to begin with.
+    // Raster only, plus PDF (DECISION-071/073, ticket attachments) and
+    // structured JSON (DECISION-088, the normalized site content bundle).
+    // SVG is rejected at the schema (G7) — <script> and <foreignObject> make
+    // sanitising it its own project, so it never gets a row to begin with.
+    // Each caller keeps its own narrower magic-byte sniff / declared-type
+    // check as the real per-feature gate; this CHECK is only the shared
+    // outer bound (the union of every consumer's needs).
     contentType: text("content_type").notNull(),
-    // The 2MB cap (Flow 2: "That file is 12 MB — we can take up to 2 MB.").
+    // The 10MB cap (DECISION-071/073 widened this from the original 2MB —
+    // "That file is 12 MB — we can take up to 2 MB." no longer describes the
+    // live constraint; see blob_assets_byte_size_bounds below).
     byteSize: integer("byte_size").notNull(),
     bytes: bytea("bytes").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -75,11 +81,11 @@ export const blobAssets = pgTable(
     unique("blob_assets_org_hash_key").on(t.organizationId, t.contentHash),
     check(
       "blob_assets_content_type_allowed",
-      sql`${t.contentType} in ('image/png','image/jpeg','image/webp')`,
+      sql`${t.contentType} in ('image/png','image/jpeg','image/webp','application/pdf','application/json')`,
     ),
     check(
       "blob_assets_byte_size_bounds",
-      sql`${t.byteSize} > 0 and ${t.byteSize} <= 2097152`,
+      sql`${t.byteSize} > 0 and ${t.byteSize} <= 10485760`,
     ),
   ],
 );

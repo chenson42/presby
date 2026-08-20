@@ -18,3 +18,4 @@ export * from "./authz";
 export * from "./privacy";
 export * from "./reporting";
 export * from "./support";
+export * from "./sites";

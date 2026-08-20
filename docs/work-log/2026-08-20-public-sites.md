@@ -137,7 +137,7 @@ ticket once the mechanism exists.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-081/082/083/084/085 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — split three-commit Implementation Order (database-admin → api-developer → ux-developer); DECISION-086/087/088/089 minted | 2026-08-20 |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) | In progress — commit 1 of 3 complete | Schema/migration/RLS-test complete, verified against the shared dev database; commits 2/3 not yet started | 2026-08-20 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1319,26 +1319,273 @@ list; each commit is independently buildable and typecheckable in sequence.
 
 # Phase 4 — Implementation
 
-## Files Created
+## Commit 1 of 3 (database-admin) — schema and migration
 
-- `path/to/file` — purpose
+**Date:** 2026-08-20 · **Implementer:** database-admin
 
-## Files Modified
+### Files Created
 
-- `path/to/file` — what changed
+- `drizzle/0020_presby_public_sites.sql` — hand-written migration (per
+  CLAUDE.md/`docs/TODO.md`: `db:generate`/`db:migrate` are both confirmed
+  broken on the pre-existing snapshot collision; every migration past `0012`
+  is hand-authored). Idempotent throughout (`create table if not exists`,
+  `do $$ ... if not exists (select 1 from pg_constraint ...)` guards,
+  `create index if not exists`, drop-if-exists-then-add for the widened
+  `blob_assets` CHECK constraint). Contents, in order: `organization_sites`
+  (degenerate PK, `status` CHECK) with its `unique(repo)` constraint declared
+  inline on the column; `site_contact_messages` (`status` CHECK,
+  `unique(id, organization_id)`, a review-queue index); the composite FK
+  `organization_sites.content_bundle_key` → `blob_assets(id, organization_id)`
+  (nullable, `MATCH SIMPLE`, unenforced until a key is set — same shape as
+  `organization_brands_mark_asset_fk`); `presby_published_site(text)`
+  (`security definer`, `set search_path = public`, `revoke all from public`,
+  `grant execute to presby_app` — verbatim from Phase 3's own function body);
+  a `site_tables` FORCE-RLS/`tenant_isolation` `do $$` block mirroring
+  `0016`/`0019`'s loop shape exactly; the asymmetric grants (`presby_platform`
+  full verbs on `organization_sites`, **no** `presby_app` grant on it at all;
+  `presby_app` select/insert/update on `site_contact_messages`, **no**
+  `presby_platform` grant on it); and the `blob_assets` CHECK widening to add
+  `application/json` (DECISION-088).
+- `src/lib/db/domain/sites.ts` — Drizzle table definitions for both tables,
+  matching the migration exactly, following `support.ts`/`org.ts`'s
+  established convention. `organizationSites.contentBundleKey`'s composite FK
+  to `blob_assets(id, organization_id)` is **not** expressed in Drizzle here
+  — same circular-module-dependency reason `assets.ts`'s own header documents
+  for `organization_brands`; enforced in the migration only.
 
-## Schema Changes
+### Files Modified
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- `drizzle/meta/_journal.json` — registered `0020_presby_public_sites`,
+  `idx: 20`, matching `0019`'s entry shape (incremented `when`).
+- `src/lib/db/domain/index.ts` — added `export * from "./sites";`.
+- `src/lib/db/domain/assets.ts` — **the pre-existing drift fix** (Phase 2
+  Note 7 / DECISION-088): the Drizzle `check()` calls still declared the
+  pre-`0019` values (PNG/JPEG/WEBP, 2MB) even though `0019` had already
+  widened the live DB constraint to PNG/JPEG/WEBP/PDF/10MB. Now reads
+  `'image/png','image/jpeg','image/webp','application/pdf','application/json'`
+  and `byte_size <= 10485760`, matching the live database exactly (verified
+  directly — see Verification below) and adding this pipeline's own
+  `application/json` widening in the same pass, per the design doc's
+  explicit instruction not to let a third consumer land on an
+  already-inconsistent source of truth.
+- `scripts/seed.ts` — added the `sites.public_render` feature-flag row,
+  seeded `enabled: false` (same "ships dark until the page lands" posture as
+  `org_portal.directory`/`roles`/`tickets`), inserted after `org_portal.tickets`
+  in the `seedFlags()` defaults array.
+- `scripts/seed-dev.sql` — appended one `organization_sites` row at Alder
+  Creek: `status = 'provisioning'`, `last_ingested_commit_sha`/
+  `last_ingested_at`/`content_bundle_key` all null (the ingest endpoint
+  doesn't exist until commit 2, so nothing could have promoted this row to
+  `'live'` yet), `updated_by = null` (no seeded platform-admin `users` row
+  exists in this file to attribute a provisioning write to —
+  `INITIAL_ADMIN_EMAILS` assigns that role dynamically at first real
+  sign-in; this mirrors the tickets fixture's own "raw INSERT, not routed
+  through the real action" posture). **No `site_contact_messages` sample
+  row** — per the task's own instruction, checked against Phase 3's Edge
+  Cases: an anonymous contact-form message is a strange thing to fabricate
+  as fixture data, and there's no live site yet for a visitor to have
+  plausibly reached.
+- `scripts/test-rls.sql` — new section 16 (appended at file end). Diverges
+  from the mechanical "mirror section 14" instruction in one deliberate way,
+  explained inline in the file: `organization_sites` and
+  `site_contact_messages` are **asymmetric by design** (Phase 3's own call —
+  `presby_app` has zero table grant on `organization_sites`, unlike every
+  other tenant table this suite has tested so far), so a single zero-rows
+  loop over both tables would have been the wrong test for one of them. What
+  it actually asserts: (1) `organization_sites` — a direct `presby_app`
+  `SELECT` fails with `insufficient_privilege` (a **stronger** property than
+  "zero rows"), proven both with no org GUC set and with Alder Creek's own
+  GUC set, using the same `do $$ ... exception when insufficient_privilege`
+  idiom section 4 already established for F21; (2) FORCE RLS is set on both
+  new tables (`pg_class.relforcerowsecurity`); (3) `site_contact_messages` —
+  the ordinary unset-GUC / own-org / cross-org / known-id-cross-org sequence
+  section 14 established for `tickets`/`congregation_feedback`, creating its
+  own row inside a rolled-back transaction since Phase 3 deliberately seeds
+  none; (4) `presby_published_site()` called with no org GUC set (matching
+  how the anonymous page actually reaches it) against both the seeded
+  Alder Creek slug (status `'provisioning'`, must return zero rows — this is
+  itself a real, not synthetic, exercise of the enumeration-safety
+  collapse) and a never-provisioned slug, asserting both are indistinguishable.
 
-## Audit Events
+### Schema Changes
 
-- [Action key written when the security-sensitive mutation fires]
+- Two new tables: `organization_sites` (degenerate PK = `organization_id`),
+  `site_contact_messages` (genuine composite tenant table) — see
+  `drizzle/0020_presby_public_sites.sql` and `src/lib/db/domain/sites.ts`
+  for full column/constraint lists.
+- One new SECURITY DEFINER function: `presby_published_site(p_slug text)`.
+- `blob_assets_content_type_allowed` CHECK widened again to add
+  `application/json` (byte-size bound unchanged at 10MB).
+- Applied via: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f
+  drizzle/0020_presby_public_sites.sql`, directly against the shared dev
+  database — the established house pattern this session (`npm run
+  db:migrate`/`db:generate` both confirmed broken, `docs/TODO.md`; not
+  re-investigated here). **Will `db:generate` before merge is not
+  applicable** — `db:generate` is the broken tool this whole hand-authored
+  house style exists to work around; the versioned, reviewable artifact
+  this commit produces *is* `drizzle/0020_presby_public_sites.sql` itself.
 
-## Implementer Notes
+### Audit Events
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+- None written by this commit. `SITE_CONTENT_INGESTED`/`SITE_PROVISIONED`/
+  `SITE_STATUS_CHANGED` are `src/lib/audit.ts` additions scoped to commit 2
+  (api-developer), per the Implementation Order — this commit is schema
+  only and writes no application-level mutation.
+
+### Verification (commands run, not just "passed")
+
+- Applied `drizzle/0020_presby_public_sites.sql` via
+  `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f ...` **twice**. First
+  run: `CREATE TABLE` ×2, all constraints/index/function/grants applied
+  clean. Second run: `NOTICE: relation "organization_sites" already exists,
+  skipping` / same for `site_contact_messages` and the index; every other
+  statement re-ran clean (function `create or replace`, grants idempotent by
+  nature, CHECK drop-then-add). Exit 0 both times.
+- Confirmed directly (not inferred from the SQL read): `select relname,
+  relforcerowsecurity from pg_class where relname in ('organization_sites',
+  'site_contact_messages')` → both `t`. `presby_published_site` exists,
+  `prosecdef = t` (security definer), language `sql`.
+  `information_schema.routine_privileges` for `presby_published_site` shows
+  `EXECUTE` granted to `presby_app` (and the owner) — no `public` row.
+  `pg_get_constraintdef` on `blob_assets_content_type_allowed` shows all
+  five content types including `application/json`.
+  `information_schema.role_table_grants` on `organization_sites` lists only
+  `neondb_owner`/`presby_platform` — **no `presby_app` row at all**,
+  confirming the asymmetric no-grant design. The same query on
+  `site_contact_messages` lists `presby_app` with insert/select/update and
+  **no `presby_platform` row**.
+- **`presby_published_site()` tested for real, both directions**, not just
+  read as correct: as `presby_app`, `select * from
+  presby_published_site('alder-creek')` returned **zero rows** while the
+  seeded fixture's `status = 'provisioning'` (the not-yet-live case);
+  `select * from presby_published_site('never-provisioned-church')` also
+  returned zero rows (the never-provisioned case) — the two are
+  indistinguishable from the caller's side, which is the whole point. Then,
+  in a separate owner-connection transaction, flipped Alder Creek's row to
+  `status = 'live'`, committed, and re-ran the same `presby_app` query: it
+  returned **one row** — `organization_name = 'Alder Creek Presbyterian
+  Church'`, `organization_type = 'congregation'` — proving the function
+  actually joins and projects correctly when the site is live, not just
+  correctly returns nothing when it isn't. Reverted the row back to
+  `status = 'provisioning'`, `last_ingested_commit_sha = null` immediately
+  after, matching the committed `scripts/seed-dev.sql` fixture exactly
+  (verified with a follow-up `select` before moving on).
+- Confirmed `presby_app` cannot `SELECT` `organization_sites` directly at
+  all: `select count(*) from organization_sites` as `presby_app` →
+  `ERROR: permission denied for table organization_sites` — the design's
+  stated "no direct grant" is a real, tested property, not just a comment.
+- Applied the `scripts/seed-dev.sql` addition as an isolated `INSERT` block
+  against the shared dev database (the file itself isn't idempotently
+  re-runnable against an already-seeded database, per this session's
+  established workaround) — `INSERT 0 1`, no FK/constraint violation.
+- Ran `scripts/test-rls.sql` as `presby_app`:
+  `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql` →
+  **exit 0**, 90 `NOTICE: pass ...` lines, **zero occurrences of "fail"**
+  in the full output (`grep -ci fail` on the captured log → `0`). The RLS
+  test transaction that creates a scratch `site_contact_messages` row rolls
+  back at the end of its block — confirmed with a follow-up `select
+  count(*) from site_contact_messages` → `0` after the suite completed, so
+  no test artifact was left behind.
+- Investigated one drift-shaped concern per the task's explicit instruction
+  rather than assuming it was pre-existing: ran `select * from
+  presby_roll_cache_drift()` after all of the above → `0 rows`. Also
+  confirmed `select count(*) from organization_sites` (owner connection) is
+  exactly `1` (the one committed fixture row, not a leftover from the
+  live-flip-and-revert verification above).
+- `npm run typecheck` → clean, no errors.
+- `npm run check` → all four tripwires pass: `check:audit` ("Audit-coverage
+  check passed" — this commit touches no `actions.ts` file, so nothing new
+  to scan), `check:sql-date` (passed), `check:deps-drift` (passed),
+  `check:brand-scope` (passed — reports `dormant: E2 for
+  src/app/(public)/site/[slug]/layout.tsx (file does not exist yet)`, which
+  is expected and correct: that file is commit 3's, and the tripwire's own
+  `required: false` for that emitter is not flipped to `true` until ux-
+  developer's commit per Phase 3's own instruction).
+- `npx vitest run` (full existing unit suite, not scoped) → 87 files / 1558
+  tests passed, 4 files / 65 tests skipped (pre-existing DB-gated skips,
+  unrelated to this commit) — confirms this commit introduces no regression
+  in any existing suite. This commit adds no new unit tests of its own: the
+  schema/migration/RLS layer's test coverage for this commit *is*
+  `scripts/test-rls.sql`'s new section 16, run above — `src/lib/sites.ts`
+  (commit 2) is where query-layer Vitest coverage for these tables belongs,
+  per the Implementation Order.
+
+### Implementer Notes
+
+- **One place this commit diverges from the design doc's literal prose,
+  flagged per the task's own instruction to trust the schema/code over the
+  prose when they conflict**: Phase 3's own task briefing for `scripts/
+  test-rls.sql` says to add assertions where "a cross-org read of another
+  org's `organization_sites`/`site_contact_messages` row must return zero
+  rows under `presby_app`." That's the right test for
+  `site_contact_messages`, but it is **not achievable, and not the right
+  test, for `organization_sites`** — Phase 3's own Data Model section (and
+  DECISION-081) is explicit that `presby_app` gets **no direct table grant**
+  on `organization_sites` at all, so a `SELECT` from that role doesn't
+  return zero rows, it fails outright with `insufficient_privilege` before
+  RLS is even consulted. I wrote the actually-correct, stronger test (a
+  permission-denied assertion, proven with the `do $$ ... exception when
+  insufficient_privilege` idiom section 4 already established) rather than
+  attempting the literally-requested zero-rows form, which would have
+  either errored out the whole script (`ON_ERROR_STOP` is on) or required
+  wrapping every such query in exception-catching anyway — at which point
+  it's the same idiom, just testing the correct property. Noted here rather
+  than silently reconciling it, per the report instructions.
+- **`drizzle/meta/_journal.json`** needed a new entry for this migration to
+  be tracked at all (`idx: 20`), matching `0019`'s registration shape — not
+  explicitly named in the task instructions but required for consistency
+  with the established hand-authored-migration house style; skipping it
+  would have left `0020` in the same "applied by hand, never tracked"
+  state `docs/TODO.md`'s own `db:migrate`-broken note already describes for
+  `0013`–`0018`.
+- **Migration ordering confirmed clean**: `0020` is the next unused number;
+  `docs/TODO.md`'s In-Flight section shows no other schema pipeline running
+  concurrently (P0's own entry is already shipped and deferred only on
+  Phases 5/6 verification debt, unrelated to schema), so there was no
+  numbering collision to sequence around.
+- **`organization_sites.repo`'s fixture value**, `presby-churches/site-
+  alder-creek`, is entirely synthetic — matches the `^[\w.-]+/[\w.-]+$`
+  format Phase 3's Edge Cases names as the eventual `provisionSiteAction`
+  validation, but no such GitHub org or repo exists; picked only to be a
+  plausible-looking, obviously-fake string, consistent with the No Real
+  Data invariant (this repo's own fixture, not `presby-site-kit`'s or a
+  `site-<slug>` repo's business).
+- **Did not touch** `src/lib/sites.ts`, the ingest route, `src/proxy.ts`,
+  any UI, `presby-site-kit`, `src/lib/audit.ts`, or `package.json` — all
+  explicitly out of scope for this commit per the task instructions and
+  Phase 3's own Implementation Order (commits 2 and 3).
+
+### Handoff
+
+**Next: api-developer (commit 2 of 3).** New tables/relationships now
+available: `organizationSites`/`siteContactMessages` exported from
+`src/lib/db/domain/sites.ts` (and re-exported through `src/lib/db/domain/
+index.ts` → `db/schema.ts` → `db/index.ts`'s `drizzle(pool, { schema })`,
+so both are reachable from both connections exactly like every other
+domain table). `presby_published_site(p_slug text)` is live, tested, and
+`EXECUTE`-granted to `presby_app` — `getPublishedSite()` should call it via
+`db.execute(sql\`select * from presby_published_site(${slug})\`)` exactly as
+Phase 3 specifies. Remember: `organization_sites` itself has **no**
+`presby_app` grant — any query-layer function touching it directly
+(`getSiteAdminDetail`, `provisionSite`, `setSiteStatus`,
+`listSitesForAdmin`, `resolveOrganizationByRepo`, `recordSiteIngest`) must
+go through `getPlatformDb()`, never `withOrgContext()`/`db` — the schema
+will reject the latter with a permission error, not silently filter it.
+`site_contact_messages` **is** reachable through `withOrgContext()`
+(select/insert/update all granted to `presby_app`) as well as through a
+trusted-org-context write for the anonymous `ContactForm` path (DECISION-083
+— gate on `organization_sites.status = 'live'`, not a membership check).
+`blob_assets` now accepts `application/json` (for the normalized site
+bundle) alongside the existing four types, and `src/lib/db/domain/assets.ts`
+no longer disagrees with the live database about any of its content-type or
+byte-size constraints. Local apply for a fresh clone/branch:
+`psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f
+drizzle/0020_presby_public_sites.sql`, then `npm run db:seed` (picks up the
+new `sites.public_render` flag row, seeded `false` — commit 2/3 should not
+assume it's on). `scripts/seed-dev.sql`'s new Alder Creek
+`organization_sites` row (`status = 'provisioning'`) needs its own isolated
+`INSERT` against an already-seeded dev database, same workaround used here
+— the full file is not idempotently re-runnable.
 
 ---
 

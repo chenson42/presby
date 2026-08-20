@@ -609,4 +609,28 @@ insert into congregation_feedback (id, organization_id, person_id, body, status,
    'It would help if the events calendar showed which Sunday school class meets when — right now I have to ask at the welcome desk every week.',
    'new', '2026-08-17T09:05:00Z');
 
+-- ---------------------------------------------------------------------------
+-- Public sites — sample fixture row (2026-08-20-public-sites, Phase 4
+-- commit 1 of 3, database-admin).
+--
+-- Alder Creek only, status 'provisioning': the ingest endpoint doesn't exist
+-- until commit 2, so there is nothing that could have promoted this row to
+-- 'live' yet — last_ingested_commit_sha/last_ingested_at/content_bundle_key
+-- all stay null, matching what provisionSite() would have written for a
+-- freshly-provisioned org that has never received a push. updated_by is
+-- null: no platform-admin user is seeded in this file (INITIAL_ADMIN_EMAILS
+-- assigns that role dynamically on first real sign-in), so there is no
+-- users.id fixture to attribute a provisioning write to — same "raw INSERT,
+-- not routed through the real action" posture the support-tickets fixture
+-- above already uses, and updated_by is nullable for exactly this reason
+-- (DECISION-081).
+--
+-- No site_contact_messages sample row: an anonymous contact-form message is
+-- a strange thing to fabricate as fixture data, and there's no live site yet
+-- for a visitor to have plausibly reached (see the work-log's Phase 3 "Edge
+-- Cases" — the ContactForm write path only exists once a site is 'live').
+insert into organization_sites (organization_id, repo, status, updated_by) values
+  ('22222222-2222-2222-2222-222222222222', 'presby-churches/site-alder-creek',
+   'provisioning', null);
+
 commit;

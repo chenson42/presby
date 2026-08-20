@@ -715,3 +715,114 @@ begin;
     (select count(*) from app_roles where id = :TREASURER_ROLE),
     0, 'bramblewood: cross-org read of alder''s treasurer role by known id returns zero');
 commit;
+
+-- ---------------------------------------------------------------------------
+-- 16. Public sites. organization_sites (DECISION-081) and
+--     site_contact_messages (DECISION-083) — drizzle/0020_presby_public_sites.sql.
+--
+--     The two tables are asymmetric by design (Phase 3 of
+--     docs/work-log/2026-08-20-public-sites.md), so they need DIFFERENT
+--     tests, not one loop:
+--
+--       organization_sites      presby_app has NO table grant at all — the
+--                                only presby_app access is through
+--                                presby_published_site()'s EXECUTE grant.
+--                                A direct SELECT must fail with
+--                                insufficient_privilege, a STRONGER property
+--                                than "zero rows"; proven the same way F21
+--                                (section 4) proves an unauthorized INSERT is
+--                                rejected, not by attempting a row count.
+--       site_contact_messages   ordinary FORCE-RLS tenant table with a real
+--                                presby_app grant — same shape as section
+--                                14's tickets/congregation_feedback. Creates
+--                                its own row inside a rolled-back
+--                                transaction rather than depending on
+--                                scripts/seed-dev.sql carrying one (Phase 3
+--                                deliberately seeds no sample
+--                                site_contact_messages row — an anonymous
+--                                contact-form message is a strange thing to
+--                                fabricate as fixture data).
+-- ---------------------------------------------------------------------------
+
+-- organization_sites: no grant at all, proven directly rather than assumed
+-- from the migration's own comment. Deliberately NOT inside an org context —
+-- the point is that presby_app cannot reach this table by ANY org id.
+begin;
+  do $$
+  begin
+    perform count(*) from organization_sites;
+    raise exception 'FAIL organization_sites — presby_app read succeeded; the "no direct grant" design is not enforced';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_sites: presby_app has no direct table grant (permission denied)';
+  end $$;
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    perform count(*) from organization_sites;
+    raise exception 'FAIL organization_sites — presby_app read succeeded even with an org GUC set';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_sites: presby_app has no direct table grant even inside alder''s own org context';
+  end $$;
+commit;
+
+-- FORCE RLS specifically (F1) on both new tables — declared even though
+-- organization_sites' real defense is the missing grant above; RLS is
+-- defense-in-depth per the design, not the load-bearing mechanism for that
+-- one table.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('organization_sites', 'site_contact_messages')
+        and relforcerowsecurity),
+    2, 'public-sites tables: FORCE row level security is set on both');
+commit;
+
+-- site_contact_messages: ordinary FORCE-RLS tenant table, same discipline as
+-- section 14. Creates its own row (Phase 3 seeds none) inside a
+-- rolled-back transaction.
+begin;
+  select assert_eq((select count(*) from site_contact_messages), 0,
+                   'unset GUC: site_contact_messages invisible');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into site_contact_messages (id, organization_id, name, email, body)
+  values ('93000000-0000-0000-0000-000000000001', :ALDER,
+          'Fixture Visitor', 'visitor@example.invalid',
+          'What time is the Sunday service?');
+  select assert_eq((select count(*) from site_contact_messages), 1,
+                   'alder: sees its own contact message');
+
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from site_contact_messages), 0,
+                   'bramblewood: sees no alder contact messages');
+  -- The specific cross-org read: a foreign org querying by the KNOWN id of
+  -- alder's message must return zero rows, not merely "the table looks
+  -- empty from here" — same enumeration discipline as section 14's ticket
+  -- check.
+  select assert_eq(
+    (select count(*) from site_contact_messages where id = '93000000-0000-0000-0000-000000000001'),
+    0, 'bramblewood: cross-org read of alder''s contact message by known id returns zero');
+rollback;
+
+-- presby_published_site(): the enumeration-safety property the whole design
+-- depends on. Called with NO org GUC set, matching how the anonymous
+-- (public)/site/[slug] page actually reaches it. scripts/seed-dev.sql seeds
+-- Alder Creek's organization_sites row with status = 'provisioning' (the
+-- ingest endpoint doesn't exist until commit 2 of this pipeline), so
+-- 'alder-creek' itself is one of the not-live cases this function must
+-- collapse into zero rows — proven here alongside a slug that was never
+-- provisioned at all, and the two must be indistinguishable from the
+-- caller's side.
+begin;
+  select assert_eq(
+    (select count(*) from presby_published_site('alder-creek')),
+    0, 'presby_published_site: provisioning (not yet live) alder-creek returns zero rows');
+  select assert_eq(
+    (select count(*) from presby_published_site('never-provisioned-church')),
+    0, 'presby_published_site: a slug with no organization_sites row at all returns zero rows, indistinguishable from provisioning');
+commit;

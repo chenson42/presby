@@ -49,8 +49,18 @@ vi.mock("@/lib/tickets", () => ({
   listPendingFeedback: (...args: unknown[]) => listPendingFeedback(...args),
 }));
 
+// Public sites' ContactForm read side (DECISION-089) — the third section on
+// this page. Mocked wholesale: the real @/lib/sites imports "server-only"
+// and is not itself under test here (src/lib/sites.test.ts owns that).
+const listSiteContactMessages = vi.fn();
+vi.mock("@/lib/sites", () => ({
+  listSiteContactMessages: (...args: unknown[]) =>
+    listSiteContactMessages(...args),
+}));
+
 vi.mock("./actions", () => ({
   dismissFeedbackAction: vi.fn(),
+  markSiteContactMessageReadAction: vi.fn(),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -76,6 +86,7 @@ afterEach(() => {
   isFlagEnabled.mockReset();
   listTickets.mockReset();
   listPendingFeedback.mockReset();
+  listSiteContactMessages.mockReset().mockResolvedValue({ kind: "ok", messages: [] });
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -184,6 +195,19 @@ describe("TicketsPage — result branches", () => {
         },
       ],
     });
+    listSiteContactMessages.mockResolvedValue({
+      kind: "ok",
+      messages: [
+        {
+          messageId: "msg-1",
+          name: "Nadia Okonkwo",
+          email: "nadia@example.invalid",
+          body: "Is there a Wednesday evening service?",
+          status: "new",
+          createdAt: "2026-08-18T09:05:00Z",
+        },
+      ],
+    });
 
     const el = await TicketsPage({ params: makeParams() });
     render(el);
@@ -193,22 +217,57 @@ describe("TicketsPage — result branches", () => {
     expect(
       screen.getByRole("heading", { name: /incoming feedback/i }),
     ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /site messages/i })).toBeTruthy();
     expect(screen.getByText(/directory search broken/i)).toBeTruthy();
     expect(screen.getByText(/priya balakrishnan/i)).toBeTruthy();
+    expect(screen.getByText(/nadia okonkwo/i)).toBeTruthy();
   });
 
-  it("renders both empty states when there is no data", async () => {
+  it("renders all three empty states when there is no data", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     isFlagEnabled.mockResolvedValue(true);
     listTickets.mockResolvedValue({ kind: "ok", tickets: [] });
     listPendingFeedback.mockResolvedValue({ kind: "ok", feedback: [] });
+    listSiteContactMessages.mockResolvedValue({ kind: "ok", messages: [] });
 
     const el = await TicketsPage({ params: makeParams() });
     render(el);
 
     expect(screen.getByText(/no tickets yet/i)).toBeTruthy();
     expect(screen.getByText(/no incoming feedback right now/i)).toBeTruthy();
+    expect(screen.getByText(/no site messages yet/i)).toBeTruthy();
+  });
+});
+
+describe("TicketsPage — site messages (ContactForm read side, DECISION-089)", () => {
+  it("re-throws OrgAccessError from listSiteContactMessages() rather than rendering the load-error state", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listTickets.mockResolvedValue({ kind: "ok", tickets: [] });
+    listPendingFeedback.mockResolvedValue({ kind: "ok", feedback: [] });
+    listSiteContactMessages.mockRejectedValue(
+      new OrgAccessError("person-1", "org-1"),
+    );
+
+    await expect(TicketsPage({ params: makeParams() })).rejects.toThrow(
+      "mock: no active membership",
+    );
+  });
+
+  it("renders the load-error state for any other thrown error from listSiteContactMessages()", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listTickets.mockResolvedValue({ kind: "ok", tickets: [] });
+    listPendingFeedback.mockResolvedValue({ kind: "ok", feedback: [] });
+    listSiteContactMessages.mockRejectedValue(new Error("connection reset"));
+
+    const el = await TicketsPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.getByText(/couldn.t load tickets right now/i)).toBeTruthy();
   });
 });
 

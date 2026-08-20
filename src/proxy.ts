@@ -25,6 +25,14 @@ export async function proxy(req: NextRequest) {
 
   if (pathname.startsWith("/api/")) return NextResponse.next();
   if (pathname.startsWith("/account/verify-email/")) return NextResponse.next();
+  // Public organization websites (DECISION-085) — fully anonymous by
+  // construction, matching DECISION-041's contract. /site/<slug> never
+  // reaches edgeAuth(), the 2FA gate, or PROTECTION_RULES below. Without
+  // this bypass every anonymous visitor is redirected to /signin, which is
+  // exactly backwards for a public route. See
+  // docs/work-log/2026-08-20-public-sites.md Phase 3, "src/proxy.ts fix —
+  // exact diff".
+  if (pathname === "/site" || pathname.startsWith("/site/")) return NextResponse.next();
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
 
   const session = await edgeAuth();

@@ -13,8 +13,10 @@ import {
   platformSchemeTokens,
 } from "@/components/brand/brand-preview-swatch";
 import { OrgMark } from "@/components/brand/org-mark";
+import { getSiteAdminDetail } from "@/lib/sites";
 import { BrandForm } from "./brand-form";
 import { NeutralizeDialog } from "./neutralize-dialog";
+import { SiteSection } from "./site-section";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -69,6 +71,8 @@ export default async function OrganizationBrandDetailPage({
     .limit(1);
 
   if (!org) notFound();
+
+  const siteDetail = await getSiteAdminDetail(id);
 
   const [brand] = await platformDb
     .select({
@@ -163,6 +167,12 @@ export default async function OrganizationBrandDetailPage({
           />
         </div>
       </section>
+
+      <SiteSection
+        organizationId={id}
+        organizationName={org.name}
+        site={siteDetail}
+      />
     </div>
   );
 }

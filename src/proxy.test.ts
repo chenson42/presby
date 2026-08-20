@@ -152,3 +152,40 @@ describe("proxy — the routes around it", () => {
     expect(location.searchParams.get("callbackUrl")).toBe("/no-organization");
   });
 });
+
+describe("proxy — /site/* (public organization websites, DECISION-085)", () => {
+  it("admits an anonymous visitor to /site/<slug> with no redirect", async () => {
+    // No signedIn()/auth mock call here on purpose — edgeAuth() must never be
+    // consulted at all for this path. If it were, this test would still pass
+    // (auth.mockReset() in beforeEach leaves it resolving undefined, which
+    // itself would 307 to /signin) — the real assertion is res.status === 200
+    // AND that this happens with zero auth() setup, unlike every other
+    // describe block in this file.
+    const res = await proxy(request("/site/alder-creek"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("admits /site/<slug>/assets/<key>, a nested path under the bypass", async () => {
+    const res = await proxy(request("/site/alder-creek/assets/some-key"));
+
+    expect(res.status).toBe(200);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("does not bypass /siteX or other paths that merely start with the string", async () => {
+    // startsWith("/site/") must not accidentally admit an unrelated route
+    // that happens to share a prefix character sequence.
+    auth.mockResolvedValueOnce(null as unknown as Awaited<
+      ReturnType<typeof edgeAuth>
+    >);
+
+    const res = await proxy(request("/sitemap-builder"));
+
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get("location") as string);
+    expect(location.pathname).toBe("/signin");
+  });
+});

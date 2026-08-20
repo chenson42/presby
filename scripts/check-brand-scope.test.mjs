@@ -81,19 +81,20 @@ describe("E1 — emitter containment", () => {
   });
 });
 
-// ── E2 — emitter presence (live for (org) as of commit c4, 2026-08-19;
-// still dormant for (public), which does not exist until P3) ───────────────
+// ── E2 — emitter presence (live for (org) as of commit c4, 2026-08-19; live
+// for (public) as of the public-sites pipeline's Phase 4 commit 3/3,
+// 2026-08-20) ────────────────────────────────────────────────────────────
 
 describe("E2 — emitter presence", () => {
-  it("is still dormant for an emitter whose file does not exist — a synthetic stand-in for (public) passes", () => {
+  it("flags a required emitter that exists without the marker (synthetic (public) stand-in)", () => {
     const emitters = [
-      { path: "src/app/(public)/site/[slug]/layout.tsx", required: false },
+      { path: "src/app/(public)/site/[slug]/layout.tsx", required: true },
     ];
     const v = checkBrandScope(
       [f("src/app/(public)/site/[slug]/layout.tsx", "return <div>{children}</div>;")],
       { emitters },
     );
-    expect(v).toEqual([]);
+    expect(rules(v)).toEqual(["E2"]);
   });
 
   it("flags a required emitter that exists without the marker", () => {
@@ -126,10 +127,11 @@ describe("E2 — emitter presence", () => {
 
   // Live against the REAL (default) EMITTERS array as of commit c4
   // (2026-08-19) — no `{ emitters }` override. `(org)/o/[slug]/layout.tsx`
-  // flipped to `required: true`; `(public)/site/[slug]/layout.tsx` stays
-  // `false` until P3 creates that file. This is the demonstration Note 11's
-  // shape asks for: failing before the marker exists, passing after —
-  // proven here rather than only against a synthetic override.
+  // flipped to `required: true` at c4; `(public)/site/[slug]/layout.tsx`
+  // flipped to `required: true` in the public-sites pipeline's Phase 4
+  // commit 3/3 (2026-08-20). This is the demonstration Note 11's shape asks
+  // for: failing before the marker exists, passing after — proven here
+  // rather than only against a synthetic override.
   it("flags the real (org) layout under the default EMITTERS array if the marker is ever removed", () => {
     const v = checkBrandScope([
       f("src/app/(org)/o/[slug]/layout.tsx", "return <main>{children}</main>;"),
@@ -138,7 +140,7 @@ describe("E2 — emitter presence", () => {
     expect(v[0].file).toBe("src/app/(org)/o/[slug]/layout.tsx");
   });
 
-  it("passes under the default EMITTERS array now that the real layout renders the marker", () => {
+  it("passes under the default EMITTERS array now that the real (org) layout renders the marker", () => {
     const v = checkBrandScope([
       f(
         "src/app/(org)/o/[slug]/layout.tsx",
@@ -148,7 +150,28 @@ describe("E2 — emitter presence", () => {
     expect(v).toEqual([]);
   });
 
-  it("(public)/site/[slug]/layout.tsx stays dormant under the default array — no file, no violation", () => {
+  it("flags the real (public) layout under the default EMITTERS array if the marker is ever removed", () => {
+    const v = checkBrandScope([
+      f(
+        "src/app/(public)/site/[slug]/layout.tsx",
+        "return <main>{children}</main>;",
+      ),
+    ]);
+    expect(rules(v)).toEqual(["E2"]);
+    expect(v[0].file).toBe("src/app/(public)/site/[slug]/layout.tsx");
+  });
+
+  it("passes under the default EMITTERS array now that the real (public) layout renders the marker", () => {
+    const v = checkBrandScope([
+      f(
+        "src/app/(public)/site/[slug]/layout.tsx",
+        "<BrandTokens brand={brand?.tokens ?? null} />\nreturn <main>{children}</main>;",
+      ),
+    ]);
+    expect(v).toEqual([]);
+  });
+
+  it("a required emitter whose file is absent from the input is not flagged — the file-does-not-exist-yet path", () => {
     const v = checkBrandScope([
       f("src/app/page.tsx", "export default function Home() { return null; }"),
     ]);

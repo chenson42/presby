@@ -6,11 +6,13 @@ import {
   resolveOrgContext,
 } from "@/lib/authz";
 import { listPendingFeedback, listTickets } from "@/lib/tickets";
+import { listSiteContactMessages } from "@/lib/sites";
 import { isFlagEnabled } from "@/lib/flags";
 import { OrgAccessDenied, OrgAccessEnded } from "../org-states";
 import { TicketsFlagOff, TicketsForbidden, TicketsLoadError } from "./tickets-states";
 import { TicketList } from "./ticket-list";
 import { FeedbackReviewList } from "./feedback-review-list";
+import { SiteMessagesList } from "./site-messages-list";
 
 /**
  * `/o/<slug>/tickets` — the ticket list AND the feedback review queue on one
@@ -104,6 +106,28 @@ export default async function TicketsPage({
     return <TicketsForbidden name={resolved.org.name} slug={slug} />;
   }
 
+  // ContactForm's read side (DECISION-089) — same tickets.file gate as the
+  // two calls above, imported from @/lib/sites rather than @/lib/tickets.
+  // No try/catch: listSiteContactMessages() uses withOrgContext() exactly
+  // like listTickets()/listPendingFeedback() and can throw the identical
+  // OrgAccessError for the identical rare mid-request-revoked-membership
+  // race; re-thrown for [slug]/error.tsx one level up, same as those two.
+  let siteMessagesResult;
+  try {
+    siteMessagesResult = await listSiteContactMessages(
+      resolved.org.personId,
+      resolved.org.organizationId,
+    );
+  } catch (err) {
+    if (err instanceof OrgAccessError) throw err;
+    return <TicketsLoadError slug={slug} />;
+  }
+
+  if (siteMessagesResult.kind === "forbidden") {
+    // Unreachable in practice — the same reasoning as feedbackResult above.
+    return <TicketsForbidden name={resolved.org.name} slug={slug} />;
+  }
+
   return (
     <section className="space-y-10">
       <div>
@@ -125,6 +149,15 @@ export default async function TicketsPage({
           ticket, or dismiss it.
         </p>
         <FeedbackReviewList feedback={feedbackResult.feedback} slug={slug} />
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold">Site messages</h2>
+        <p className="text-sm text-muted-foreground">
+          Sent through {resolved.org.name}&apos;s public website contact
+          form, if it has one.
+        </p>
+        <SiteMessagesList messages={siteMessagesResult.messages} slug={slug} />
       </div>
     </section>
   );

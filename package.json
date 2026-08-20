@@ -57,6 +57,7 @@
     "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "otplib": "^13.4.0",
+    "presby-site-kit": "git+https://github.com/chenson42/presby-site-kit.git#v0.0.1-stub",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

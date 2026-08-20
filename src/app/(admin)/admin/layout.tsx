@@ -18,6 +18,7 @@ export default async function AdminLayout({
     { href: "/admin", label: "Dashboard" },
     { href: "/admin/design-system", label: "Design system" },
     { href: "/admin/organizations", label: "Organizations" },
+    { href: "/admin/sites", label: "Sites" },
     { href: "/admin/users", label: "Users" },
     { href: "/admin/flags", label: "Feature flags" },
     { href: "/admin/tickets", label: "Tickets" },

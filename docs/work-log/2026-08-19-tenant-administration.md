@@ -74,7 +74,7 @@ model yet. Don't block on P8, but don't duplicate its scope either.
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-066/067/068 | 2026-08-19 |
 | 3 — Technical design | tech-lead | Complete | Design complete, implementers named | 2026-08-19 |
 | 4 — Implementation | database-admin, api-developer, ux-developer | Complete (3/3) | — | 2026-08-19 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-08-19 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1091,3 +1091,65 @@ test caught. `docs/product/functionality-map.md` and `docs/TODO.md` updates
 are Phase 6 ship-time work (Rule 10/14), not this commit's.
 
 *Recorded by ux-developer.*
+
+---
+
+# Phase 5 — Test Verification (qa)
+
+## Verdict
+
+**PASS**
+
+## Summary
+
+Independently re-ran everything rather than trusting the implementers'
+recorded numbers: the real-Postgres suite (25/25, including both halves of
+the corrected escalation model — a non-holder of `role_grants.manage`
+blocked at the gate, and a genuine holder blocked at the subset check for a
+permission they don't personally hold), a live 360px browser walkthrough
+signed in as `clerk.fixture@example.invalid` (grant by person, grant by
+group, the revoke dialog naming both grantee and role, a live self-lockout
+block with the exact toast copy, a constructed escalation-denied case with a
+scratch tier-3 role, the flag-off state, and the audit trail written
+correctly for every successful mutation and skipped for the denied one),
+`e2e/post-login-routing.spec.ts` (12/12, confirming zero regression to
+DECISION-040's four-way miss response or the existing directory/portal
+routes), and all mechanical gates (typecheck, all four tripwires, full
+build, full test suite, `test-rls.sql` — 61 pass / 0 fail).
+
+**Specifically re-derived, not assumed: the gate-bug fix from Phase 4
+commit 2 is correct and complete.** Traced `grantRole`'s corrected order of
+operations directly and confirmed the two-layer model actually closes the
+vulnerability — a member with zero `role_grants.manage` cannot reach the
+subset check at all now, regardless of what they'd otherwise qualify for by
+permission-subset alone.
+
+All temporary state created during the live walkthrough (scratch role
+grants, the scratch tier-3 role, the flag toggle, the 2FA setting) was
+restored and independently re-verified as restored; the `audit_events` rows
+the walkthrough generated were deliberately left in place as genuine history
+of real mutations against synthetic fixture data (audit is append-only by
+design).
+
+## Findings that don't rise to FAIL
+
+- DECISION-062/066's text calling the arm-1 cascade gap "real and unfixed"
+  is stale — already logged as a `docs/TODO.md` line by the implementer,
+  needs a Phase 6 ruling: correct the decision text, or downgrade the TODO
+  line to "closed, defensive code retained."
+- A sub-3-second `router.refresh()` timing window observed only via
+  automated polling, never via actual click-driven interaction — not a
+  regression of the fix, noted for whenever e2e coverage lands on this
+  route (already a named follow-up).
+
+## Handoff
+
+**Next: analyst (Phase 6).** Carry forward: every adversarial finding
+independently re-verified against real Postgres and a real browser; the
+gate-bug fix re-derived as correct, not merely trusted; the
+DECISION-062/066 documentation-correction item awaiting a ruling;
+`docs/product/functionality-map.md`, `docs/TODO.md` reconciliation, and a
+`whats_new_entries` consideration (Rule 13 — this is tenant-staff-usable,
+not internal tooling) all still outstanding as Phase 6 ship-time work.
+
+*Recorded by the orchestrator from the read-only qa agent's report.*

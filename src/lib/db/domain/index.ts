@@ -17,3 +17,4 @@ export * from "./groups";
 export * from "./authz";
 export * from "./privacy";
 export * from "./reporting";
+export * from "./support";

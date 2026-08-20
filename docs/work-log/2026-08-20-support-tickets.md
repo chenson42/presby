@@ -79,7 +79,7 @@ app has no access to).
 | 1 — Functional refinement | analyst | Complete | READY FOR DESIGN | 2026-08-20 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-069/070/071 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete, twice revised same-day pre-Phase-4 (ticket email notifications + area/priority fields; then tickets.file's role binding decoupled to the sibling role-catalog pipeline) — DECISION-072 through 077 | 2026-08-20 |
-| 4 — Implementation | database-admin → api-developer → ux-developer | Pending | — | — |
+| 4 — Implementation | database-admin → api-developer → ux-developer | In progress (commit 1 of 3 complete) | — | 2026-08-20 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1413,26 +1413,213 @@ module, actions, route handlers, permission/audit catalog edits),
 
 # Phase 4 — Implementation
 
-## Files Created
+## Commit 1 of 3 (database-admin) — schema and migration
 
-- `path/to/file` — purpose
+**Date:** 2026-08-20 · **Implementer:** database-admin
 
-## Files Modified
+### Files Created
 
-- `path/to/file` — what changed
+- `drizzle/0019_presby_ticket_support.sql` — hand-written migration (per
+  CLAUDE.md: `db:generate` is broken on the pre-existing snapshot collision,
+  `docs/TODO.md`). Idempotent throughout (`create table if not exists`,
+  `do $$ ... if not exists (select 1 from pg_constraint ...)` guards,
+  `create index if not exists`, drop-if-exists-then-add for the two widened
+  `blob_assets` CHECK constraints — safe to re-run because widening never
+  invalidates existing rows). Contents: the `tickets.file` permission-catalog
+  row (`insert ... on conflict (key) do nothing`, DECISION-063 precedent);
+  the four new tables (`tickets`, `ticket_messages`, `ticket_actions`,
+  `congregation_feedback`) with their CHECK constraints and indexes exactly
+  per Phase 3's Data Model; a `support_tables` FORCE-RLS/`tenant_isolation`
+  policy `do $$` block mirroring `0016_presby_brand_storage.sql`'s
+  `brand_tables` loop shape; the `presby_platform`/`presby_app` grants
+  (asymmetric per Phase 3 — tenant side gets `select, insert` only on
+  `tickets`/`ticket_messages`/`ticket_actions`, but `select, insert, update`
+  on `congregation_feedback`); and the `blob_assets` CHECK widening
+  (PNG/JPEG/WEBP/PDF, 10MB, DECISION-071/073).
+- `src/lib/db/domain/support.ts` — Drizzle table definitions for all four
+  tables, matching the migration exactly. Composite FKs (`ticket_messages`/
+  `ticket_actions` → `tickets(id, organization_id)`, `congregation_feedback.
+  promoted_to_ticket_id` → `tickets(id, organization_id)`) via `foreignKey()`,
+  matching `authz.ts`/`groups.ts`'s convention. `submitter_person_id`/
+  `person_id`/`author_person_id` are plain FKs to global `people(id)`
+  (D1/DECISION-069). `ticket_messages.attachment_asset_key`'s composite FK to
+  `blob_assets(id, organization_id)` is **not** expressed in Drizzle —
+  declaring it would require this file to import `assets.ts` and vice versa,
+  the identical circular-module-dependency problem `assets.ts`'s own header
+  documents for `organization_brands`; enforced in the migration only, same
+  precedent. Exports everything a query-layer module needs (`tickets`,
+  `ticketMessages`, `ticketActions`, `congregationFeedback`).
 
-## Schema Changes
+### Files Modified
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- `drizzle/meta/_journal.json` — registered `0019_presby_ticket_support`,
+  `idx: 19`, matching `0018`'s entry shape (incremented `when`).
+- `src/lib/db/domain/index.ts` — added `export * from "./support";` so
+  `db/schema.ts`'s `export * from "./domain"` (and therefore `db/index.ts`'s
+  `drizzle(pool, { schema })`) picks up the four new tables.
+- `src/lib/storage/blob-store.ts` — widened `ALLOWED_CONTENT_TYPES` to add
+  `"application/pdf"` and `MAX_BYTE_SIZE` to `10_485_760` (DECISION-071/073).
+  **Verified, not just trusted, that this doesn't change the org-brand logo
+  path's real behavior**: `src/app/(admin)/admin/organizations/[id]/
+  actions.ts` has its own hardcoded `MAX_LOGO_BYTES = 2_097_152` and
+  `sniffImageContentType()` (recognizes only PNG/JPEG/WEBP magic bytes),
+  entirely independent constants that run *before* `store()` is ever called
+  — the shared widening is invisible to that path in practice, confirmed by
+  reading the file, not by trusting the design doc's claim.
+- `scripts/seed-dev.sql` — appended one ticket, its row-1 filing message,
+  and one pending `congregation_feedback` row at Alder Creek, as **raw
+  SQL inserts**, not through `fileTicket()`/`submitFeedback()` (those gate
+  on `hasTicketsFile()`/`withOrgContext()`, which a seed script running as
+  table owner never passes through — so no `tickets.file` role-holder needs
+  to exist yet, per Phase 3's Implementation Order note). **No
+  `app_roles`/`app_role_permissions`/`role_grants` row for `tickets.file`**
+  — that binding is explicitly the sibling `2026-08-20-role-catalog`
+  pipeline's own Phase 4, per Phase 3's decoupling. `submitter_person_id`/
+  `person_id` are Desmond Okonkwo (`c0000000-...-0004`, an
+  other-participant) and Priya Balakrishnan (`c0000000-...-0003`,
+  respectively) — ordinary existing fixture members, not Marguerite
+  Ashcombe, per Phase 3's explicit instruction not to pre-stage "who holds
+  the role" into this pipeline's own fixture. One deliberate addition beyond
+  the letter of "a ticket, a pending feedback row": I also inserted the
+  ticket's row-1 `ticket_messages` (the filing body), because `tickets` has
+  no `description` column by design — the filing body IS `ticket_messages`
+  row 1 (Phase 3's Data Model) — and a ticket with zero messages does not
+  reflect what `fileTicket()` actually produces. Flagged here in case a
+  later reader looks for a literal 2-row diff.
+- `scripts/test-rls.sql` — new `\set TICKET`/`\set FEEDBACK` variables and a
+  new section 14 (appended at file end, matching the existing convention of
+  later sections following the original "suite complete" echo). Asserts,
+  as `presby_app`: unset-GUC invisibility on all four new tables (mirrors
+  section 1); Alder Creek sees its own ticket/thread/feedback row (mirrors
+  section 2); Bramblewood sees zero rows on all four tables generally
+  *and*, specifically, a cross-org read **by the known id** of Alder
+  Creek's ticket/thread/feedback returns zero — not merely "the table looks
+  empty from here," which is the literal SQL-level shape of `getTicketThread
+  ()`'s `not_found` (never a 403) that Phase 3's Edge Cases describes;
+  and a direct `pg_class.relforcerowsecurity` check that all four tables
+  have FORCE (not just ENABLE) RLS set.
 
-## Audit Events
+### Schema Changes
 
-- [Action key written when the security-sensitive mutation fires]
+- Four new tables: `tickets`, `ticket_messages`, `ticket_actions`,
+  `congregation_feedback` — see `drizzle/0019_presby_ticket_support.sql`
+  and `src/lib/db/domain/support.ts` for full column/constraint lists.
+- One new permission-catalog row: `tickets.file` (module `support`, tier 1).
+- `blob_assets_content_type_allowed`/`blob_assets_byte_size_bounds` CHECK
+  constraints widened (PNG/JPEG/WEBP → +PDF; 2MB → 10MB).
+- Applied via: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f
+  drizzle/0019_presby_ticket_support.sql`, directly against the shared dev
+  database — the established house pattern this session (`npm run
+  db:migrate` is confirmed broken, `docs/TODO.md`; not re-investigated).
+  Applied **twice** to prove idempotency (second run: every `CREATE TABLE`/
+  `CREATE INDEX` logged `NOTICE: ... already exists, skipping`; every
+  constraint-adding `do $$` block found its guard already satisfied and did
+  nothing; the `blob_assets` CHECK drop-then-add pair re-ran cleanly both
+  times). No `db:push`/Neon branch was used — this pipeline followed the
+  same hand-authored-migration house style as every migration since `0012`.
 
-## Implementer Notes
+### Audit Events
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+- None written by this commit. Per Phase 1/Phase 3: routine ticket
+  filing/triage is audit-exempt by direct precedent (`feedback/actions.ts`'s
+  own identical posture) — `AUDIT_ACTIONS.TICKET_CREATED`/
+  `TICKET_FEEDBACK_PROMOTED` are api-developer's commit (2 of 3) to add to
+  `src/lib/audit.ts` and wire into the actual mutations.
+
+### Verification (this commit)
+
+- `psql "$MIGRATE_DATABASE_URL" -f drizzle/0019_presby_ticket_support.sql`
+  — clean on first run, clean and fully idempotent on second run (no errors,
+  only expected `NOTICE: ... already exists, skipping`).
+- `scripts/seed-dev.sql`'s new rows — the full script could not be re-run
+  end to end against this shared dev database (it is a one-shot fixture
+  load, plain `insert`s with no `on conflict`, and the base fixture was
+  already loaded in this environment from prior pipelines — confirmed by
+  `select count(*) from organizations` = 10, `people` = 16, well past
+  `seed-dev.sql`'s own base counts). Extracted and ran the new block in
+  isolation instead, against the org (`22222222-...`, Alder Creek) and
+  people (`c0000000-...-0003`, `c0000000-...-0004`) rows confirmed already
+  present — all three inserts committed cleanly, zero constraint
+  violations.
+- `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql` —
+  exit code 0, 76 `pass` NOTICEs total (61 pre-existing + 15 new), 0 `fail`
+  occurrences anywhere in output. All 15 new section-14 assertions
+  individually confirmed passing, including both cross-org "known id"
+  checks and the `relforcerowsecurity` check.
+- Direct queries confirmed: `select * from permissions where key =
+  'tickets.file'` returns exactly one row; `pg_class.relforcerowsecurity`
+  is `true` for all four new tables; `pg_get_constraintdef()` on
+  `blob_assets`'s two CHECK constraints shows the widened values verbatim
+  (`'image/png','image/jpeg','image/webp','application/pdf'` and
+  `byte_size > 0 AND byte_size <= 10485760`).
+- `npm run typecheck` — clean, no errors (confirms `support.ts` compiles
+  against `db/index.ts`'s schema composition with no changes needed there
+  beyond the `domain/index.ts` re-export).
+- `npm run lint` — clean, no warnings (`--max-warnings=0`).
+- `npm run check` — all four tripwires pass (`check:audit`,
+  `check:sql-date`, `check:deps-drift`, `check:brand-scope`).
+
+### Implementer Notes
+
+- **Nothing diverged from Phase 3's Data Model** on column names, types,
+  CHECK values, or indexes — every constraint and index in the migration
+  and in `support.ts` traces directly to the work-log's Data Model section.
+- **One real surprise, caught by verification rather than assumed**: the
+  shared dev database already had `scripts/seed-dev.sql`'s base fixture
+  loaded from earlier pipelines in this session, so the full script cannot
+  be re-run end to end (it is not idempotent by design — plain `insert`s,
+  meant for a fresh database). This is a pre-existing property of the house
+  pattern, not something this commit introduced or needs to fix; documented
+  above rather than silently working around it, and the new rows were still
+  verified to load cleanly against the real referenced rows.
+- **`ticket_messages.attachment_asset_key`'s composite FK to `blob_assets`
+  is enforced in the migration only, not in `support.ts`** — this mirrors
+  `assets.ts`'s own documented reason for the identical omission on
+  `organization_brands`' asset-key FKs (a circular module dependency
+  between the two files). Worth naming explicitly since it's easy to read
+  as an oversight rather than a repeated, deliberate pattern.
+- **No `app_roles`/`app_role_permissions`/`role_grants` row for
+  `tickets.file` was written**, per Phase 3's explicit decoupling — until
+  `2026-08-20-role-catalog`'s own Phase 4 lands, `hasTicketsFile()` (next
+  commit) will correctly return `false` for every fixture person, and
+  `/o/alder-creek/tickets` will render `TicketsForbidden` for everyone,
+  including the two people named in this commit's sample rows. This is the
+  expected interim state Phase 3 named, not a defect in this commit.
+
+## Handoff to commit 2 of 3 (api-developer)
+
+New tables and relationships now available: `tickets`, `ticketMessages`,
+`ticketActions`, `congregationFeedback` (all exported from
+`@/lib/db/domain/support` and re-exported through `@/lib/db/domain` /
+`@/lib/db/schema`). `tickets` composite-FKs `ticketMessages`/`ticketActions`/
+`congregationFeedback.promotedToTicketId` via `(id, organizationId)`;
+`submitterPersonId`/`personId`/`authorPersonId` are plain FKs to global
+`people`; `authorUserId`/`actorUserId`/`assigneeUserId` are plain FKs to
+`users`. The `tickets.file` permission-catalog row exists
+(`presby_has_permission(..., 'tickets.file')` is callable today and will
+correctly return `false` until a role is bound — no coordination needed
+with the role-catalog pipeline to start building `hasTicketsFile()` against
+it). `blob-store.ts`'s `store()`/`resolve()` now accept `application/pdf`
+up to 10MB at the shared adapter layer — commit 2 still needs its own
+`sniffTicketAttachmentContentType()` (PNG/JPEG/WEBP magic bytes + `%PDF-`)
+as the real per-feature gate, called before `store()`, per DECISION-073.
+
+**Local apply commands for the next agent**, if working from a fresh
+checkout of this branch: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f
+drizzle/0019_presby_ticket_support.sql` (idempotent, safe to re-run), then
+`psql "$MIGRATE_DATABASE_URL" -f scripts/seed-dev.sql` **only against a
+genuinely fresh database** — against this shared dev database, that full
+script will fail on the first duplicate-key org insert, as it did during
+this commit's own verification; the new support-tickets fixture rows are
+additive to the existing script and need no separate seed step once the
+base fixture exists.
+
+**Next: api-developer (commit 2 of 3)** — `src/lib/tickets.ts`,
+`src/lib/tickets-notifications.ts`, `src/lib/storage/blob-store.ts`'s
+ticket-attachment sniff function, both `(org)` `actions.ts` files, the
+`(admin)/admin/tickets/actions.ts` file, both attachment route handlers,
+and the `src/lib/permissions.ts`/`src/lib/audit.ts` catalog edits — per
+Phase 3's Implementation Order, step 2.
 
 ---
 

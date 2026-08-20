@@ -475,4 +475,48 @@ insert into role_grants (organization_id, role_id, person_id, starts_on) values
   ('55555555-5555-5555-5555-555555555555','f0000000-0000-0000-0000-000000000003',
    'c1000000-0000-0000-0000-000000000003','2026-01-01');
 
+-- ---------------------------------------------------------------------------
+-- Support tickets — sample fixture rows (2026-08-20-support-tickets, Phase 4
+-- commit 1 of 3, database-admin).
+--
+-- Deliberately raw INSERTs, NOT routed through fileTicket()/submitFeedback():
+-- those query-layer functions gate on hasTicketsFile()/withOrgContext(), and
+-- a seed script inserting as the table owner never passes through either —
+-- so these two rows need no tickets.file role-holder to exist at insert
+-- time. No app_roles/app_role_permissions/role_grants row for tickets.file
+-- is written here — that binding belongs entirely to the sibling
+-- `2026-08-20-role-catalog` pipeline's own Phase 4 (see the work-log's
+-- Permissions & Flags / Implementation Order). Until that binding lands,
+-- /o/alder-creek/tickets renders TicketsForbidden for every fixture person,
+-- including Desmond below — the sample data sits correctly isolated and
+-- correctly invisible in the meantime, which is the expected interim state,
+-- not a defect (see the work-log's Implementation Order note 1).
+--
+-- submitter_person_id on both rows is an ordinary existing Alder Creek
+-- member/participant, not Marguerite Ashcombe specifically — the sample
+-- data represents a member's report, not a demonstration of who holds the
+-- role (that demonstration is the role-catalog pipeline's own fixture).
+-- ---------------------------------------------------------------------------
+insert into tickets (id, organization_id, submitter_person_id, subject, change_class, area, priority, status, created_at) values
+  ('90000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000004', -- Desmond Okonkwo, other_participant
+   'Directory search does not find members by maiden name',
+   'bug', 'directory', 'normal', 'new', '2026-08-15T14:22:00Z');
+
+-- Row 1 of the thread — the filing body itself. Schema note: tickets carries
+-- no description column; the filing body IS ticket_messages row 1
+-- (authorKind = 'submitter'), matching what fileTicket() would have written.
+insert into ticket_messages (id, organization_id, ticket_id, author_kind, author_person_id, body, created_at) values
+  ('91000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
+   '90000000-0000-0000-0000-000000000001', 'submitter',
+   'c0000000-0000-0000-0000-000000000004',
+   'When I search for Mrs. Renwick under her maiden name Balakrishnan, nothing comes up in the directory. Is that expected?',
+   '2026-08-15T14:22:00Z');
+
+insert into congregation_feedback (id, organization_id, person_id, body, status, created_at) values
+  ('92000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000003', -- Priya Balakrishnan
+   'It would help if the events calendar showed which Sunday school class meets when — right now I have to ask at the welcome desk every week.',
+   'new', '2026-08-17T09:05:00Z');
+
 commit;

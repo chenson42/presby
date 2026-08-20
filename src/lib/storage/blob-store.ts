@@ -45,11 +45,24 @@ import { blobAssets } from "@/lib/db/domain/assets";
  * assumes a person is in scope.
  */
 
-const ALLOWED_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+// Widened by DECISION-071/073 (2026-08-20, support tickets) to admit PDF
+// ticket attachments. This is the shared OUTER bound only — each caller
+// keeps its own narrower magic-byte sniff as the real per-feature gate. The
+// org-brand logo action's sniffImageContentType()/MAX_LOGO_BYTES (2MB,
+// images only) run BEFORE store() and are untouched by this widening, so
+// the logo path accepts nothing new in practice. Mirrors the DB CHECK
+// (blob_assets_content_type_allowed / blob_assets_byte_size_bounds) widened
+// in the same commit, drizzle/0019_presby_ticket_support.sql.
+const ALLOWED_CONTENT_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "application/pdf",
+] as const;
 type AllowedContentType = (typeof ALLOWED_CONTENT_TYPES)[number];
 
-/** The 2MB cap (Flow 2: "we can take up to 2 MB"). Mirrors the DB CHECK. */
-const MAX_BYTE_SIZE = 2_097_152;
+/** The 10MB cap (DECISION-073). Mirrors the DB CHECK. */
+const MAX_BYTE_SIZE = 10_485_760;
 
 export interface BlobRef {
   /** The row's own uuid — NOT the content hash. See `store()`'s doc comment. */

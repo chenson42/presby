@@ -29,6 +29,9 @@
 \set U_MIXED     '\'e0000000-0000-0000-0000-0000000000a4\''
 \set U_ENDED     '\'e0000000-0000-0000-0000-0000000000a5\''
 \set U_DUP       '\'e0000000-0000-0000-0000-0000000000a6\''
+-- Support-ticket fixture (section 14). scripts/seed-dev.sql's sample rows.
+\set TICKET   '\'90000000-0000-0000-0000-000000000001\''
+\set FEEDBACK '\'92000000-0000-0000-0000-000000000001\''
 
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
@@ -607,3 +610,65 @@ begin;
       where organization_id = :FERNWOOD and ended_on is not null),
     1, 'gate: the ended relationship is still visible to the org list');
 rollback;
+
+-- ---------------------------------------------------------------------------
+-- 14. Support tickets. Four new FORCE-RLS tables (DECISION-069/070,
+--     drizzle/0019_presby_ticket_support.sql). Same shape as section 2 —
+--     an org sees its own rows, and a foreign org's cross-org read of a
+--     specific known row id returns zero, not a 403 that would confirm the
+--     id is real (Flow 2's enumeration discipline, verified at the SQL
+--     layer here and at the query-layer in src/lib/tickets.test.ts).
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq((select count(*) from tickets), 0,
+                   'unset GUC: tickets invisible');
+  select assert_eq((select count(*) from ticket_messages), 0,
+                   'unset GUC: ticket_messages invisible');
+  select assert_eq((select count(*) from ticket_actions), 0,
+                   'unset GUC: ticket_actions invisible');
+  select assert_eq((select count(*) from congregation_feedback), 0,
+                   'unset GUC: congregation_feedback invisible');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq((select count(*) from tickets), 1,
+                   'alder: sees its own ticket');
+  select assert_eq((select count(*) from ticket_messages where ticket_id = :TICKET), 1,
+                   'alder: sees its own ticket''s thread');
+  select assert_eq((select count(*) from congregation_feedback), 1,
+                   'alder: sees its own pending feedback');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from tickets), 0,
+                   'bramblewood: sees no alder tickets');
+  select assert_eq((select count(*) from ticket_messages), 0,
+                   'bramblewood: sees no alder ticket messages');
+  select assert_eq((select count(*) from ticket_actions), 0,
+                   'bramblewood: sees no alder ticket actions');
+  select assert_eq((select count(*) from congregation_feedback), 0,
+                   'bramblewood: sees no alder congregation feedback');
+
+  -- The specific cross-org read: a foreign org querying by the KNOWN id of
+  -- alder's ticket/feedback row must return zero rows, not merely "the
+  -- table looks empty from here" — this is what getTicketThread()'s
+  -- not_found (never a 403) actually rests on.
+  select assert_eq((select count(*) from tickets where id = :TICKET), 0,
+                   'bramblewood: cross-org read of alder''s ticket by known id returns zero');
+  select assert_eq((select count(*) from ticket_messages where ticket_id = :TICKET), 0,
+                   'bramblewood: cross-org read of alder''s ticket thread by known ticket id returns zero');
+  select assert_eq((select count(*) from congregation_feedback where id = :FEEDBACK), 0,
+                   'bramblewood: cross-org read of alder''s feedback by known id returns zero');
+rollback;
+
+-- FORCE RLS specifically (F1) — not merely ENABLE, which the table owner
+-- (and any role sharing the owner's privileges) would bypass silently.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('tickets', 'ticket_messages', 'ticket_actions', 'congregation_feedback')
+        and relforcerowsecurity),
+    4, 'support tables: FORCE row level security is set on all four');
+commit;

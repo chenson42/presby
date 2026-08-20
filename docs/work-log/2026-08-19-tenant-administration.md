@@ -75,7 +75,7 @@ model yet. Don't block on P8, but don't duplicate its scope either.
 | 3 — Technical design | tech-lead | Complete | Design complete, implementers named | 2026-08-19 |
 | 4 — Implementation | database-admin, api-developer, ux-developer | Complete (3/3) | — | 2026-08-19 |
 | 5 — Verification | qa | Complete | PASS | 2026-08-19 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-08-19 |
 
 ---
 
@@ -1153,3 +1153,84 @@ DECISION-062/066 documentation-correction item awaiting a ruling;
 not internal tooling) all still outstanding as Phase 6 ship-time work.
 
 *Recorded by the orchestrator from the read-only qa agent's report.*
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst)
+
+## Verdict
+
+**SHIP WITH NOTES**
+
+## Summary
+
+All three Phase 1 flows (grant, revoke, view-who-holds-what) are present,
+working, and scoped exactly as intended — nothing explicitly deferred
+(roll actions, officer terms, role/permission creation, commission/
+delegation UI, `org_access_requests`, a tenant audit reader) crept back in.
+The security fix from Phase 4 commit 2 was independently re-derived a
+*third* time (orchestrator caught it, qa re-verified it, analyst re-traced
+it cold against the source) and confirmed correct and complete each time.
+Two items keep this from a clean SHIP IT, both now tracked, neither
+blocking: the DECISION-062/066 documentation correction (resolved below)
+and one fresh-eyes gap — granting a `role_grants.manage`-carrying role to a
+group (including a derived group) has no confirmation guard, unlike the
+symmetric revoke-side self-lockout case.
+
+## Fresh-eyes findings (new, not from Phase 1's adversarial pass)
+
+1. **No confirmation guard on the over-grant direction.** A `stated_clerk`
+   could, with one dropdown misclick in `grant-role-form.tsx`, grant a
+   `role_grants.manage`-carrying role to a group target — including the
+   derived `active_membership` group — instantly handing role-
+   administration power to every current member. Recoverable via revoke
+   (not a self-lockout, since the granter's own grant still stands
+   immediately after), not exploitable by an unauthorized actor, but a real
+   gap against this feature's own "no wildcard, no accidental over-grant"
+   bar. Tracked in `docs/TODO.md`.
+2. **No de-duplication check.** `grantRole` doesn't check for an existing
+   active grant before inserting — the same role can be granted to the same
+   target twice, producing two indistinguishable rows. Data-quality only.
+   Tracked in `docs/TODO.md`.
+
+## Housekeeping applied by the orchestrator (Rule 10/14, this commit)
+
+- `docs/decisions.md` — DECISION-062 and DECISION-066 each received an
+  appended correction note (history not edited in place) stating the arm-1
+  cascade gap was a research gap in their own Phase 2 reviews, not a live
+  schema gap — `drizzle/0014_presby_org_router.sql`'s
+  `presby_guard_membership_end()` trigger, predating both decisions by
+  migration number, already closed it.
+- `docs/TODO.md` — the arm-1 cascade-gap line moved from Next Up to Done
+  with the corrected framing; two new Next-Up lines added for the
+  fresh-eyes findings above; one new line added noting the deferred
+  what's-new draft (below).
+- `docs/product/functionality-map.md` — a new "presby: org portal" Index
+  bullet, a corrected "presby: NOT built" line (it was stale even before
+  P9 — P1's directory work was never recorded either), and a new "Org
+  portal" full-map section covering both the directory (P1) and role-
+  administration (P9) surfaces.
+
+## Rule 13 — what's-new: deferred, not skipped
+
+`org_portal.roles` ships seeded off — no real congregation can reach this
+surface yet. Publishing a what's-new post now would announce a capability
+nobody can use and, worse, announce the existence of a role-administration
+surface before any real organization has a designated `stated_clerk` to
+receive it safely. Ruling: draft the copy when the flag is actually
+flipped on for a real tenant, not at this Phase 6. Tracked in
+`docs/TODO.md` so it isn't lost.
+
+## Rule 12 — feedback row
+
+Not applicable. This pipeline originated from DECISION-043 and P1's
+deferral list, not an in-app feedback row — no UUID to mark `done`.
+
+## Handoff
+
+**P9 is closed.** No further pipeline phase required. Verification debt
+status: unlike P0/P0.5/P1 (DECISION-045's deferred-verification pattern),
+P9 ran its own Phase 5/6 in full — no debt entry needed in
+`docs/TODO.md`'s Verification debt section.
+
+*Recorded by the orchestrator from the read-only analyst agent's report.*

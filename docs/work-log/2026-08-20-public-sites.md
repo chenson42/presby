@@ -138,7 +138,7 @@ ticket once the mechanism exists.
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-081/082/083/084/085 | 2026-08-20 |
 | 3 — Technical design | tech-lead | Complete | Design complete — split three-commit Implementation Order (database-admin → api-developer → ux-developer); DECISION-086/087/088/089 minted | 2026-08-20 |
 | 4 — Implementation | database-admin (commit 1 of 3) → api-developer (commit 2) → ux-developer (commit 3) | Complete — all 3 of 3 commits done | Schema/migration/RLS-test complete (commit 1); query layer, OIDC ingest auth, ingest route, all Server Actions, and their tests complete and verified against the shared dev database (commit 2); render path, `src/proxy.ts` fix, provisioning UI, `/admin/sites`, the ContactForm read-side section, the real `presby-site-kit` stub repo, and their tests — all complete, verified against a real running dev server in a real browser, and cross-checked against `test-rls.sql`/`presby_roll_cache_drift()` with zero leftover fixture data (commit 3) | 2026-08-20 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | FAIL — two coverage gaps, loop back to Phase 4 | 2026-08-20 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2471,46 +2471,116 @@ gap) are unchanged by this commit and still open.
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-08-20
 **Verified by:** qa
-
-## Type Check
-
-`npm run typecheck`: PASS / FAIL
-
-## Unit Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
-
-## End-to-End Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
-
-## Regression Tests Added
-
-- [test name — file:line — guards against: brief description]
-
-## Coverage on Critical Modules
-
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
-
-## Feature-Gate Audit
-
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
-
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL** — two named coverage gaps, not a functional defect. Everything
+qa independently re-derived (the `proxy.ts` bypass, OIDC verification
+including the algorithm-confusion proof, the `recordSiteIngest`
+suspended-status fix, `presby_published_site()`'s enumeration safety
+verified live against the real database in both directions, the
+`organization_sites` no-grant posture, the real `presby-site-kit`
+dependency, all mechanical gates, the full existing e2e suite, and the
+commit blast-radius) checks out and checks out well. The gate held on
+missing coverage, applying CLAUDE.md's stricter auth-touching standard
+in spirit even though this pipeline doesn't touch the literal named
+auth files — qa's own judgment call, reasoned explicitly rather than
+defaulting to a lighter bar for security-critical new code.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+## Type Check
+
+`npm run typecheck`: **PASS**
+
+## Unit Tests
+
+Full suite (no DB env): 1653/1653 passed, 99 skipped (expected).
+DB-backed (`sites.test.ts` + `sites-ingest-auth.test.ts`): 60/60
+passed, independently re-run. Spot-check of unaffected surfaces
+(`directory`, `admin/roles`, `admin/tickets`): all pass, no
+regression. `npm run lint`, `npm run build` (clean `.next/`): both
+PASS.
+
+## End-to-End Tests
+
+Full suite, real server, real DB: **96/96 passed**, including the four
+specs Phase 3 flagged as blast radius. **Gap: zero e2e coverage of
+this pipeline's own primary surfaces** — no spec exists for
+`/site/<slug>` at all, confirmed by a directory search returning
+nothing.
+
+## Regression Tests Added
+
+- `recordSiteIngest never resurrects a suspended site...` —
+  `src/lib/sites.test.ts:525` — re-derived independently as a genuine
+  exercise of the real code path (fixture suspended via the real
+  `setSiteStatus()` action, not a raw insert).
+- `IGNORES the header's declared alg...` —
+  `src/lib/sites-ingest-auth.test.ts:267` — re-derived as a genuine
+  proof: a real RS256-signed token with a lying header still verifies
+  via the hardcoded path.
+
+## Coverage on Critical Modules
+
+Unaffected by this pipeline (confirmed via `git show --stat`):
+`permissions.ts` 100%, `two-factor.ts` 91.3%/100%/90%, `flags.ts` 100%.
+
+## Independent verification, not taken from any implementer's report
+
+- `presby_published_site()` enumeration safety queried live against
+  the real database in both directions — nonexistent slug,
+  `provisioning`, and a temporarily-suspended org all return zero
+  rows, indistinguishably.
+- `organization_sites` confirmed to carry no `presby_app` table grant
+  at all via `information_schema.role_table_grants` — a direct
+  `SELECT` as `presby_app` fails with `permission denied`.
+- `presby-site-kit` confirmed as a genuine external dependency —
+  `node_modules/presby-site-kit` matches what's actually published at
+  `github.com/chenson42/presby-site-kit`, tag `v0.0.1-stub`.
+- `scripts/test-rls.sql` as `presby_app`: exit 0, 90 pass, 0 fail.
+- `check:brand-scope` reports a plain pass with no `dormant` suffix —
+  both emitters live.
+
+## Feature-Gate Audit
+
+| Route or action | Auth mechanism | Correct? |
+|---|---|---|
+| `POST /api/sites/ingest` | GitHub Actions OIDC, hardcoded RSA-SHA256, all claims checked | Yes |
+| `(public)/site/[slug]/*`, the asset route | None — anonymous by design (DECISION-041) | Correct by design, confirmed |
+| `submitContactMessageAction` | None + honeypot + IP/slug rate limit + live-status gate | Yes |
+| `provisionSiteAction`/`setSiteStatusAction`, `/admin/sites` | `auth()` + `FEATURES.ADMIN_ORGANIZATIONS` | Yes |
+| `markSiteContactMessageReadAction`, `listSiteContactMessages` | membership + `hasTicketsFile` inside `withOrgContext()` | Yes, DECISION-089 |
+
+## Two named coverage gaps — the reason for FAIL
+
+1. **`src/app/api/sites/ingest/route.ts` has zero integration-level test
+   coverage.** 266 lines of real orchestration (OIDC → flag → org
+   resolution → idempotency → image sniffing → bundle storage →
+   `recordSiteIngest` → audit write → dual revalidation) never
+   exercised as a whole — only its individual pieces (`sites-ingest-
+   auth.ts`, `sites.ts`'s primitives) are tested. Buildable today by
+   combining the two existing test harnesses (real-JWT-signing from
+   `sites-ingest-auth.test.ts`, real-Postgres fixtures from
+   `sites.test.ts`) — a gap, not an infeasibility.
+2. **No e2e spec exists for `/site/<slug>` at all**, unlike every other
+   feature this session shipped (`admin-organizations.spec.ts`,
+   `feedback.spec.ts`, `whats-new.spec.ts`). Commit 3's real-browser
+   walkthrough proved the flow works once, manually, with fixtures
+   reverted afterward — it left no repeatable regression check.
+
+qa applied CLAUDE.md's stricter auth-touching standard in spirit,
+judging this pipeline's genuinely new OIDC auth mechanism deserves the
+same rigor even though it doesn't touch the literal named auth files
+— and ruled FAIL, not BLOCKED, since nothing here is infeasible to
+test (a real signed OIDC token is fully constructible in this test
+environment, a real dev server and DB are both available).
+
+## Verdict
+
+**FAIL**
+
+*Recorded by the orchestrator from the read-only qa agent's report.*
 
 ---
 

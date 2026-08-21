@@ -3,6 +3,13 @@
 Architectural and implementation decisions for the Claude Code Starter. Newest first. Each decision is numbered; the number does not change once assigned.
 
 ---
+## DECISION-092: `presby_published_site()` returns service times and office hours as two separately-aggregated `jsonb` arrays (`service_times`, `office_hours`), not one `kind`-tagged array; the admin editor replaces a kind's entire row set on save rather than diffing individual rows
+
+**Status:** Resolved · **Date:** 2026-08-21 · **Feature:** `2026-08-21-public-site-org-profile` (Phase 3)
+
+Two related shape calls the architect left open for Phase 3. Read side: filtering by `kind` inside the SQL aggregate itself (`jsonb_agg(...) filter (where kind = 'service')` / `... 'office_hours'`, two correlated subqueries in the same `SELECT`) means presby-site-kit's `ServiceTimes` component and whatever renders office hours never group or filter one array client-side — each gets its own, and Phase 1 Gap 6's "every field independently omittable" contract falls directly out of it (`serviceTimes: []` or `officeHours: []`, never one array a component has to partition first). Write side: the admin editor treats each kind's row set as one unit — a transaction that deletes every `organization_service_times` row for `(organization_id, kind)` and re-inserts the submitted list, not per-row diffed CRUD with client-tracked row identity — because there is no `organization_service_times` history table (resolved Q6) and no concurrent-editor story to protect against (platform-admin-only, low-frequency per Phase 1's own cadence note). A diffed update model would buy correctness this feature has no consumer for; whole-list replace is the smaller surface and the one precedent-free choice here that still composes cleanly with "no history table."
+
+---
 ## DECISION-091: Structured service times land in a genuine child table (`organization_service_times`, typed `day_of_week`/`start_time`/`end_time`/`label` columns, composite tenant key), not a JSONB array column on `organization_profiles`
 
 **Status:** Resolved · **Date:** 2026-08-21 · **Feature:** `2026-08-21-public-site-org-profile` (Phase 2)

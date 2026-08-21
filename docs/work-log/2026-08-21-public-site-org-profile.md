@@ -43,8 +43,8 @@ than it leaks page content.
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-090/091 | 2026-08-21 |
-| 3 — Technical design | tech-lead | Pending | — | — |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 3 — Technical design | tech-lead | Complete | Design complete — DECISION-092; implementer named (database-admin, then full-stack-developer) | 2026-08-21 |
+| 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI) | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -133,28 +133,6 @@ No verb in the request names "the user" ambiguously — the request itself alrea
 
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
-
-## Placement
-
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
-
-## Invariants Touched
-
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
-
-## Notes
-
-[Anything Phase 3 must honor.]
-
----
-
-# Phase 2 — Architectural Review (architect)
-
-## Verdict
-
 Approved with suggestions.
 
 ## Placement
@@ -203,52 +181,276 @@ Read the function as currently defined (not just its comment) — a plain three-
 
 *Recorded by the orchestrator from the read-only architect agent's report.*
 
+## Open question resolved by the user (2026-08-21)
+
+**Office hours shares `organization_service_times`'s structured shape**, via a `kind` discriminator (`'service' | 'office_hours'`) rather than a second table or a free-text column on `organization_profiles`.
+
 ---
 
 # Phase 3 — Technical Design (tech-lead)
 
 ## Summary
 
-[One paragraph: what we're building and why.]
+Two new tables (`organization_profiles`, `organization_service_times`) carry the address/phone/social-links/service-times/office-hours data a church website template needs but `organizations` doesn't have. A platform admin sets it at `/admin/organizations/[id]`, two new sections below the existing "Set brand" section, same shape as `BrandForm`/`SiteSection`. The anonymous read folds into `presby_published_site()` — the one SECURITY DEFINER function `getPublishedSite()` already calls — so a non-live site still leaks nothing (Phase 1 Gap 5), and every field is independently omittable on the read side so presby-site-kit's components can render or skip a section with no null-checking gymnastics of their own. No new permission, no new flag, no audit event, no history table — all four already settled in Phase 1/2; this phase turns those rulings into exact columns, exact function signatures, and an exact form.
 
 ## Permissions & Flags
 
-- Permission key(s): `area.action`
-- Default role bindings: [list]
-- Feature flag(s): [key, or "not needed"]
+- Permission key(s): `FEATURES.ADMIN_ORGANIZATIONS` (`admin.organizations`) — reused as-is, no new key. Same admin, same surface, same cadence as `organization_brands`.
+- Default role bindings: whichever principals already carry `ADMIN_ORGANIZATIONS` today (platform admin only). No change.
+- Feature flag(s): not needed. The anonymous render path stays gated entirely by `sites.public_render` + `organization_sites.status = 'live'`, both already enforced inside `presby_published_site()`/`getPublishedSite()`. A platform-admin write through `getPlatformDb()` to a field nothing renders while the flag is off is inert by construction (Phase 1's own reasoning, unchanged).
 
 ## API Contract
 
-- `POST /api/...` — purpose, request body, response shape
-- `GET /api/...` — purpose, query params, response shape
-- Or server-action signatures: `async function actionName(input): Promise<Result>`
+All server actions live in `src/app/(admin)/admin/organizations/[id]/actions.ts`, matching `setOrganizationBrandAction`'s exact shape: `FormData` in, `Promise<PolicyResult>` out (`PolicyResult` is already exported from this file — reused, not redefined). Each is a thin wrapper: auth + `hasFeature` + UUID/FormData parsing + `revalidatePath`, delegating the real query/validation/upsert to `src/lib/sites.ts` (matching how `provisionSiteAction`/`setSiteStatusAction` already wrap `provisionSite`/`setSiteStatus`, not how `setOrganizationBrandAction` inlines its own query — this data is "sites" domain per the architect's placement ruling, not "org brand" domain).
+
+```
+// src/app/(admin)/admin/organizations/[id]/actions.ts
+async function setOrganizationProfileAction(formData: FormData): Promise<PolicyResult>
+  // FormData: organizationId (uuid), address, phone, facebookUrl, instagramUrl,
+  // xTwitterUrl, youtubeUrl, otherUrl (all optional strings; empty -> null)
+
+async function setOrganizationServiceTimesAction(formData: FormData): Promise<PolicyResult>
+  // FormData: organizationId (uuid), kind ("service" | "office_hours"),
+  // rows (JSON string: Array<{ dayOfWeek: number; startTime: string; endTime: string; label: string | null }>)
+  // Whole-list replace for that (organizationId, kind) pair — DECISION-092.
+```
+
+```
+// src/lib/sites.ts — new exports, alongside provisionSite/setSiteStatus
+
+interface OrganizationProfileAdminDetail {
+  address: string | null;
+  phone: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  xTwitterUrl: string | null;
+  youtubeUrl: string | null;
+  otherUrl: string | null;
+  updatedAt: string | null;
+}
+async function getOrganizationProfileAdminDetail(organizationId: string): Promise<OrganizationProfileAdminDetail | null>
+
+type SetOrganizationProfileResult = { kind: "ok" } | { kind: "invalid_input"; error: string };
+async function setOrganizationProfile(
+  organizationId: string,
+  input: { address: string; phone: string; facebookUrl: string; instagramUrl: string; xTwitterUrl: string; youtubeUrl: string; otherUrl: string },
+  actorUserId: string,
+): Promise<SetOrganizationProfileResult>
+  // Validates, then upserts (onConflictDoUpdate on organizationId) — exact
+  // upsert shape as setOrganizationBrandAction's, minus history-row insert
+  // (no history table for this feature, resolved Q6).
+
+interface ServiceTimeAdminEntry {
+  id: string; kind: "service" | "office_hours"; dayOfWeek: number;
+  startTime: string; endTime: string; label: string | null;
+}
+async function listOrganizationServiceTimes(organizationId: string): Promise<ServiceTimeAdminEntry[]>
+  // Both kinds, ordered (kind, day_of_week, start_time) — the page splits by kind for the two editors.
+
+type ReplaceServiceTimesResult = { kind: "ok" } | { kind: "invalid_input"; error: string };
+async function replaceOrganizationServiceTimes(
+  organizationId: string,
+  kind: "service" | "office_hours",
+  rows: Array<{ dayOfWeek: number; startTime: string; endTime: string; label: string | null }>,
+  actorUserId: string,
+): Promise<ReplaceServiceTimesResult>
+  // One transaction: delete where (organizationId, kind), then insert rows
+  // (skip insert entirely if rows.length === 0 — "save an empty list" is a
+  // legal way to clear a kind, see Edge Cases).
+```
+
+`getPublishedSite()` (existing, `src/lib/sites.ts`) widens its `PublishedSiteRow`/`PublishedSite` shapes — no new exported function, per Phase 1 Gap 5 ("never a second query or function"):
+
+```
+export interface PublishedSite {
+  // ...unchanged fields (organizationId, organizationName, organizationType,
+  // brand, pages, imageKeys)...
+  profile: {
+    address: string | null;
+    phone: string | null;
+    social: {
+      facebook: string | null;
+      instagram: string | null;
+      xTwitter: string | null;
+      youtube: string | null;
+      other: string | null;
+    };
+  };
+  serviceTimes: OrgServiceTimeEntry[]; // [] if none set
+  officeHours: OrgServiceTimeEntry[];  // [] if none set
+}
+export interface OrgServiceTimeEntry {
+  dayOfWeek: number; // 0=Sunday..6=Saturday, matching JS Date.getDay()
+  startTime: string; // "HH:MM:SS", Postgres `time` literal as returned
+  endTime: string;
+  label: string | null;
+}
+```
+
+**Hard requirement for presby-site-kit's read side, named explicitly (Phase 1 Gap 6):** every one of these fields is independently omittable, and the contract is per-field, not per-object —
+- `profile.address === null` → no "Get Directions" link/section at all, not a blank line.
+- `profile.phone === null` → no phone display at all.
+- Every key of `profile.social` is independently `null`-or-a-URL — a footer/social-icon row renders **only** the non-null entries, and renders **no row at all** if every key is `null`. Never a placeholder icon for an unset platform.
+- `serviceTimes.length === 0` → the `ServiceTimes` section doesn't render.
+- `officeHours.length === 0` → the office-hours section doesn't render.
+- `profile` itself is never `null` — the object always exists, with every leaf independently `null`/`[]`. Components check leaves, not the presence of `profile`.
 
 ## Data Model
 
-[New tables / columns / indexes, or "No schema changes required."]
+Migration `drizzle/0021_presby_site_profile.sql`, hand-written and idempotent (`do $$ ... if not exists ... $$`), matching `0020`'s own structure. Drizzle `pgTable` definitions land in `src/lib/db/domain/sites.ts` (architect's placement ruling — this is "sites" domain, not `org.ts`), RLS/grants/function live in the migration only (DECISION-061 convention).
+
+**`organization_profiles`** — degenerate PK, matching `organization_brands` exactly:
+
+| Column | Type | Notes |
+|---|---|---|
+| `organization_id` | `uuid primary key references organizations(id) on delete cascade` | Degenerate composite key, one row per org. |
+| `address` | `text` | Nullable. Single free-text line (Phase 1 Q4) — URL-encoded into a maps deep link by the reading component; no structured/geocoded shape. |
+| `phone` | `text` | Nullable. Free text — no format CHECK (international formats vary; app-level max-length only). |
+| `facebook_url` | `text` | Nullable. |
+| `instagram_url` | `text` | Nullable. |
+| `x_twitter_url` | `text` | Nullable. |
+| `youtube_url` | `text` | Nullable. |
+| `other_url` | `text` | Nullable. Five fixed columns (Phase 1 Q3 / D8) — no open key-value social-links store. |
+| `updated_by` | `uuid not null references users(id)` | Always human-attributed — no machine writer exists for this table (unlike `organization_sites.updated_by`, which is nullable for ingest). |
+| `updated_at` | `timestamptz not null default now()` | No `created_at` column — matches `organization_brands`' own precedent exactly (first `updated_at` **is** the creation event). No history table (resolved Q6). |
+
+No DB-level length `CHECK`s on the text columns — app-level validation only (`site_contact_messages.body`'s own precedent: a 5000-char bound lives in `submitSiteContactMessage`, not a migration `CHECK`). URL columns get app-level `new URL()` well-formedness validation (must parse, `http:`/`https:` protocol only) in `setOrganizationProfile` — not a platform-domain check (a `facebookUrl` need not literally contain `facebook.com`; a custom Linktree-style URL in that field is legal).
+
+**`organization_service_times`** — genuine child table (DECISION-091), matching `site_contact_messages`' composite-key shape:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid primary key default gen_random_uuid()` | |
+| `organization_id` | `uuid not null references organizations(id) on delete cascade` | |
+| `kind` | `text not null` | `CHECK (kind in ('service', 'office_hours'))`. |
+| `day_of_week` | `smallint not null` | `CHECK (day_of_week between 0 and 6)`. 0=Sunday..6=Saturday — matches JS `Date.getDay()`, stated explicitly so presby-site-kit never has to guess the convention. |
+| `start_time` | `time not null` | No time zone — a congregation's own wall-clock time, not a UTC instant; there is no date component, so no DST math applies. |
+| `end_time` | `time not null` | `CHECK (end_time > start_time)` — per-row ordering only; see Edge Cases for why cross-row overlap is deliberately **not** validated. |
+| `label` | `text` | Nullable — e.g. "Traditional", "Contemporary (Spanish)", "Front office". App-level max length only. |
+| `updated_by` | `uuid not null references users(id)` | Per-row attribution — cheap to keep even under whole-list replace (DECISION-092), and answers "who set the 10:15 service" without a join to `organization_profiles`, which may never have been touched if only service times were ever edited. |
+
+Indexes/constraints: `unique (id, organization_id)` (Composite Tenant Keys convention, architect's ruling — no current composite-FK consumer, kept for consistency per the `site_contact_messages` precedent). `create index organization_service_times_org_kind_idx on organization_service_times (organization_id, kind, day_of_week, start_time)` — backs both the admin list read and the `jsonb_agg` subquery's `order by`.
+
+**RLS + grants** (both tables, in the migration's own `site_tables`-style loop, alongside — not replacing — `0020`'s `site_tables` array, since that array is declared in a prior migration and this is a new one):
+
+```sql
+alter table organization_profiles enable row level security;
+alter table organization_profiles force row level security;
+create policy tenant_isolation on organization_profiles
+  using (organization_id = presby_current_org())
+  with check (organization_id = presby_current_org());
+-- identical block for organization_service_times
+
+grant select, insert, update, delete on organization_profiles, organization_service_times to presby_platform;
+grant select, insert, update, delete on organization_profiles, organization_service_times to presby_app;
+```
+
+FORCE RLS on both even though the only exercised read path (`presby_published_site()`) is SECURITY DEFINER and bypasses RLS by design — matching every tenant table's baseline (F1), and specifically matching `organization_brands`' own reasoning: the `presby_app` grant is forward-looking (DECISION-090), inert until the deferred tenant-editor (`docs/TODO.md`) lands, and FORCE RLS is what keeps "inert" true rather than "a bare grant with no policy," which DECISION-049 already named as the thing to never do.
+
+**`presby_published_site(text)` — drop and recreate, not `create or replace`** (the architect's own gotcha: Postgres refuses to append columns to an existing `RETURNS TABLE(...)` via `CREATE OR REPLACE`):
+
+```sql
+drop function if exists presby_published_site(text);
+
+create function presby_published_site(p_slug text)
+returns table (
+  organization_id           uuid,
+  organization_name         text,
+  organization_type         text,
+  content_bundle_key        uuid,
+  brand_seed_hex            text,
+  brand_type_pairing        text,
+  brand_token_version       integer,
+  profile_address           text,
+  profile_phone             text,
+  profile_facebook_url      text,
+  profile_instagram_url     text,
+  profile_x_twitter_url     text,
+  profile_youtube_url       text,
+  profile_other_url         text,
+  service_times             jsonb,
+  office_hours              jsonb
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select o.id, o.name, o.organization_type::text,
+         s.content_bundle_key,
+         b.seed_hex, b.type_pairing, b.brand_token_version,
+         p.address, p.phone, p.facebook_url, p.instagram_url,
+         p.x_twitter_url, p.youtube_url, p.other_url,
+         (select jsonb_agg(jsonb_build_object(
+                    'dayOfWeek', st.day_of_week, 'startTime', st.start_time,
+                    'endTime', st.end_time, 'label', st.label)
+                  order by st.day_of_week, st.start_time)
+            from organization_service_times st
+           where st.organization_id = o.id and st.kind = 'service') as service_times,
+         (select jsonb_agg(jsonb_build_object(
+                    'dayOfWeek', st.day_of_week, 'startTime', st.start_time,
+                    'endTime', st.end_time, 'label', st.label)
+                  order by st.day_of_week, st.start_time)
+            from organization_service_times st
+           where st.organization_id = o.id and st.kind = 'office_hours') as office_hours
+    from organizations o
+    join organization_sites s on s.organization_id = o.id
+    left join organization_brands b on b.organization_id = o.id
+    left join organization_profiles p on p.organization_id = o.id
+   where o.slug = p_slug
+     and o.status = 'active'
+     and s.status = 'live';
+$$;
+
+revoke all on function presby_published_site(text) from public;
+grant execute on function presby_published_site(text) to presby_app;
+```
+
+`jsonb_agg` over zero matching rows returns `NULL`, not `[]` — the query layer (`getPublishedSite()`) maps `NULL` to `[]` explicitly (see API Contract); the SQL itself does not `coalesce`, since `NULL` is already the correct "nothing to aggregate" signal and coalescing in SQL would just move the same mapping one layer down for no gain.
 
 ## Component / Page Plan
 
-- Pages to create: [list]
-- Components to create: [list]
-- Files to modify: [list]
+- Pages to create: none — everything lands on the existing `/admin/organizations/[id]` route.
+- Components to create:
+  - `src/app/(admin)/admin/organizations/[id]/profile-form.tsx` (client) — address/phone/five social-URL fields, one `useActionState` form, exact structural pattern as `brand-form.tsx` (inline result banner, no toast-only feedback, typed values survive a failed submit because state is client-owned and never reset from the action result).
+  - `src/app/(admin)/admin/organizations/[id]/service-times-section.tsx` (client) — two independent instances of a `TimeRowsEditor` (kind=`service`, kind=`office_hours`), each: a list of rows in `useState` (day-of-week `<select>`, two `<input type="time">`, an optional label `<input>`), add/remove-row buttons, one Save button per kind serializing its row array to JSON into a hidden field and posting through `useActionState` to `setOrganizationServiceTimesAction`. Two saves, not one combined save — a church may set service times without office hours and the reverse; coupling them into one submit would force an all-or-nothing save neither Phase 1 nor Phase 2 asked for.
+- Files to modify:
+  - `src/app/(admin)/admin/organizations/[id]/actions.ts` — add `setOrganizationProfileAction`, `setOrganizationServiceTimesAction` (thin wrappers, see API Contract). Reuses the existing `revalidateLiveSitePath` helper unchanged.
+  - `src/app/(admin)/admin/organizations/[id]/page.tsx` — fetch `getOrganizationProfileAdminDetail` + `listOrganizationServiceTimes` (split by `kind` for the two editors) alongside the existing `getSiteAdminDetail`/brand reads; render two new sections, ordered **Current brand → Set brand → Profile → Service times & office hours → Site** (profile/schedule data belongs with "what the org's public content says" ahead of "is the site even live").
+  - `src/lib/sites.ts` — add the four functions in API Contract; widen `PublishedSiteRow`/`PublishedSite`/`getPublishedSite()`'s mapping logic (parse `service_times`/`office_hours` defensively — `typeof value === "string" ? JSON.parse(value) : value`, wrapped in try/catch degrading to `[]` on malformed data, matching `isStoredSiteBundle`'s own degrade-gracefully posture, never a 500).
+  - `src/lib/db/domain/sites.ts` — add `organizationProfiles`, `organizationServiceTimes` `pgTable` definitions; update the file's own header comment from "two tables" to "four."
+  - `drizzle/0021_presby_site_profile.sql` — new file, per Data Model above.
 
 ## Implementation Order
 
-1. Schema (if any) → `npm run db:push` on a Neon branch
-2. `FEATURE_CATALOG` entry + seed binding
-3. Route handlers / server actions
-4. UI
-5. Audit events for security-sensitive paths
-6. Release notes entry
+1. Schema: `organizationProfiles`/`organizationServiceTimes` in `src/lib/db/domain/sites.ts` + `drizzle/0021_presby_site_profile.sql` (tables, CHECKs, `unique(id, organization_id)`, index, FORCE RLS + grants, `presby_published_site()` drop-and-recreate) → apply via `npm run db:push` on a Neon branch, confirm with `scripts/test-rls.sql`.
+2. `FEATURE_CATALOG` / seed binding: not needed — `FEATURES.ADMIN_ORGANIZATIONS` already exists and is already bound.
+3. Query layer + server actions: the four `src/lib/sites.ts` exports, `getPublishedSite()` widened, the two new `actions.ts` wrappers.
+4. UI: `profile-form.tsx`, `service-times-section.tsx`, `page.tsx` wiring.
+5. Audit events: none — see Edge Cases for why this is deliberate, not an oversight.
+6. Release notes entry: tech-lead, at Phase 6 SHIP IT, per Ownership.
 
 ## Edge Cases & Risks
 
-- [Thing that could fail or that needs special handling]
+- **No audit event, by design (Phase 1 Gap 8).** Neither new action calls `recordAudit`. This is public content, not an access-control or security-sensitive mutation — matches `markSiteContactMessageReadAction`'s identical posture (DECISION-089: "reading your own inbox is not a security-sensitive mutation"; setting a phone number is the same class of routine content edit). `updated_by`/`updated_at` is the whole attribution story, by the user's own Q6 resolution. Mechanically moot either way: `scripts/check-audit-coverage.mjs` only scans `src/app/**/actions.ts` for a literal `db.insert|update|delete` token, and both new actions call into `src/lib/sites.ts` (`platformDb.insert(...)`/`tx.insert(...)`), never a bare `db.` mutation in `actions.ts` itself — the tripwire wouldn't fire regardless, so this is a design choice, not a grep dodge.
+- **Cross-row overlap is not validated; only per-row ordering is.** A CHECK enforces `end_time > start_time` on one row; nothing stops two `'service'` rows on the same `day_of_week` from overlapping. This is deliberate — a real congregation legitimately runs two simultaneous services (a Spanish-language service in the chapel while the sanctuary runs the main service, for instance), and rejecting that as "invalid" would be wrong, not merely permissive.
+- **No overnight/cross-midnight service times.** `time` has no date component, so a Christmas Eve service spanning 11:00pm–12:30am cannot be represented as one row (`end_time > start_time` would reject it). Out of scope for v1 — an admin works around it with two rows and a label, or it's simply not representable yet. Named here so it isn't silently discovered as a bug later.
+- **Saving an emptied row list deletes every row of that kind for the org, with no confirmation step.** `replaceOrganizationServiceTimes` with `rows.length === 0` is a legal, direct "clear all service times/office hours" — no `AlertDialog`, unlike `SuspendControl`'s destructive-confirm pattern. Accepted deliberately: single platform-admin editor, low frequency, fully recoverable by re-adding rows, no cascading effect on other tenants or on the site's live/suspended status. If this proves a real footgun in practice, add a confirm as a follow-up — not preemptively, per "minimum complexity that solves today's problem."
+- **Two open browser tabs on the same org silently clobber each other** — the profile upsert and the whole-list service-time replace both have no optimistic-concurrency check. Accepted for the same reason `organization_brands`' own upsert accepts it: a single low-frequency platform-admin editor, not a multi-writer surface.
+- **Malformed data degrades to empty, never a 500.** A dangling/malformed `service_times`/`office_hours` JSON value (defensive, shouldn't happen given the CHECKs, but the read path assumes nothing) parses to `[]`, not an error — matches `isStoredSiteBundle`'s own posture for the content bundle.
+- **`x_twitter_url` naming consistency across three layers** — DB `x_twitter_url` (snake_case), Drizzle `xTwitterUrl` (camelCase), the read-side JSON key `xTwitter` (no `Url` suffix, since it's nested under `profile.social`). Named explicitly so an implementer doesn't introduce a mismatch between layers.
+- **Existing e2e/unit blast radius — `presby_published_site()`'s signature changes, and two existing specs assert its current behavior:**
+  - `src/lib/sites.test.ts` — exercises `getPublishedSite()` directly across five site-status cases (live/provisioning/suspended/unprovisioned/nonexistent-slug). None of these currently seed `organization_profiles`/`organization_service_times` rows, so the widened function should return `profile: { address: null, phone: null, social: { ...all null } }`, `serviceTimes: []`, `officeHours: []` for every existing fixture — but if any assertion in this file does exact/deep-equality on the full returned `site` object rather than checking specific fields, it will fail on the new keys and needs updating, not just re-running. The implementer must read this file's exact assertions, not assume "it still passes."
+  - `e2e/public-sites.spec.ts` — real browser hits against `/site/alder-creek`, staged via direct SQL against `organization_sites`/`site_contact_messages` (that fixture has no `organization_profiles` row either, at least until this pipeline's own migration/seed work adds one). The rendered page must not error with the widened function in place; presby-site-kit's compiled components (a separate repo/package, not touched by this pipeline) simply have new bundle fields to ignore until presby-site-kit's own consuming pipeline lands, so this is expected to keep passing unmodified — confirm, don't assume.
+  - `src/app/api/sites/ingest/route.test.ts` — does not touch `presby_published_site()` or either new table; not expected to need changes, named here only to rule it out explicitly rather than by omission.
+- **`docs/product/functionality-map.md` and `docs/TODO.md`** — at Phase 6 SHIP IT, the functionality-map line for public sites needs the new profile fields named (Rule 14), and the `docs/TODO.md` deferred-tenant-editor line (already present, added alongside DECISION-090) stays open — this pipeline does not close it.
 
 ## Implementer
 
-[database-admin | api-developer | ux-developer | full-stack-developer]
+**Two commits**, split at the schema/everything-else boundary the public-sites pipeline itself already used:
+
+1. **database-admin** — `src/lib/db/domain/sites.ts` (`pgTable` additions), `drizzle/0021_presby_site_profile.sql` (both tables, CHECKs, composite key, index, FORCE RLS + grants, `presby_published_site()` drop-and-recreate), verified against `scripts/test-rls.sql`. Schema-only, per the Implementer Selection table.
+2. **full-stack-developer** — query layer (`src/lib/sites.ts` additions + `getPublishedSite()` widening), server actions (`actions.ts`), and the admin UI (`profile-form.tsx`, `service-times-section.tsx`, `page.tsx` wiring), all in one commit. Not split into api-developer + ux-developer: the UI here is two more sections bolted onto an existing detail page, reusing `Input`/`Label`/`Button`/`useActionState` wholesale with zero new primitives and zero new routes — the same "small enough that splitting adds overhead" shape the selection table names `full-stack-developer` for, not a compromise between the other two roles. `provisionSiteAction`/`ProvisionForm` already prove this exact server-action-plus-small-form shape doesn't need a three-way split even in the precedent pipeline that otherwise used three commits.
 
 ---
 

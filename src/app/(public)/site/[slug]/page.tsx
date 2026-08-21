@@ -1,7 +1,41 @@
 import { notFound } from "next/navigation";
-import { getPublishedSite } from "@/lib/sites";
-import { renderSiteBundle } from "presby-site-kit";
+import { getPublishedSite, type PublishedSite } from "@/lib/sites";
+import { renderSiteBundle, type RenderSiteBundleProfile, type SocialLink } from "presby-site-kit";
 import { ContactForm } from "./contact-form";
+
+/**
+ * `PublishedSite.profile.social` is a keyed object (one nullable string per
+ * named platform, matching `organization_profiles`' own fixed columns —
+ * DECISION for the org-profile pipeline, docs/work-log/2026-08-21-public-
+ * site-org-profile.md). `presby-site-kit`'s `RenderSiteBundleProfile.
+ * socialLinks` wants an array of only the platforms actually set. This is
+ * the one shape translation between the two — everything else on
+ * `PublishedSite` already matches site-kit's types field-for-field
+ * (`serviceTimes`/`officeHours` are `OrgServiceTimeEntry[]` on one side and
+ * `ScheduleEntry[]` on the other, structurally identical).
+ */
+function toRenderProfile(site: PublishedSite): RenderSiteBundleProfile {
+  const social = site.profile.social;
+  const socialLinks: SocialLink[] = (
+    [
+      ["facebook", social.facebook],
+      ["instagram", social.instagram],
+      ["xTwitter", social.xTwitter],
+      ["youtube", social.youtube],
+      ["other", social.other],
+    ] as const
+  )
+    .filter((entry): entry is [SocialLink["platform"], string] => entry[1] !== null)
+    .map(([platform, url]) => ({ platform, url }));
+
+  return {
+    address: site.profile.address,
+    phone: site.profile.phone,
+    socialLinks,
+    serviceTimes: site.serviceTimes,
+    officeHours: site.officeHours,
+  };
+}
 
 /**
  * `/site/<slug>` — the public render path. See
@@ -47,6 +81,7 @@ export default async function PublicSitePage({
     pages: site.pages,
     currentPath: "/",
     brand: site.brand,
+    profile: toRenderProfile(site),
     imageUrl,
   });
 

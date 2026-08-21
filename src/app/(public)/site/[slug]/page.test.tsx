@@ -63,6 +63,19 @@ const SITE = {
   brand: BRAND,
   pages: [{ path: "/", frontMatter: { title: "Welcome" }, mdxAst: null }],
   imageKeys: { hero: "blob-key-1" },
+  profile: {
+    address: null,
+    phone: null,
+    social: {
+      facebook: null,
+      instagram: null,
+      xTwitter: null,
+      youtube: null,
+      other: null,
+    },
+  },
+  serviceTimes: [],
+  officeHours: [],
 };
 
 describe("PublicSitePage — the enumeration-safe not_found collapse", () => {
@@ -122,6 +135,68 @@ describe("PublicSitePage — the ok path", () => {
     expect(call.imageUrl("missing")).toBe(
       "/site/alder-creek/assets/missing",
     );
+  });
+
+  it("translates PublishedSite.profile.social's keyed object into site-kit's socialLinks array, omitting unset platforms", async () => {
+    getPublishedSite.mockResolvedValue({
+      kind: "ok",
+      site: {
+        ...SITE,
+        profile: {
+          address: "123 Fixture Ln",
+          phone: "555-0100",
+          social: {
+            facebook: "https://facebook.com/fixture",
+            instagram: null,
+            xTwitter: null,
+            youtube: "https://youtube.com/fixture",
+            other: null,
+          },
+        },
+        serviceTimes: [
+          { dayOfWeek: 0, startTime: "10:15", endTime: "11:15", label: "Sunday Worship" },
+        ],
+        officeHours: [],
+      },
+    });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams() });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      profile: {
+        address: string | null;
+        phone: string | null;
+        socialLinks: { platform: string; url: string }[];
+        serviceTimes: unknown[];
+        officeHours: unknown[];
+      };
+    };
+    expect(call.profile.address).toBe("123 Fixture Ln");
+    expect(call.profile.phone).toBe("555-0100");
+    // Only the two set platforms appear, in the fixed platform order — never
+    // a null/undefined entry for facebook/instagram/xTwitter/youtube/other.
+    expect(call.profile.socialLinks).toEqual([
+      { platform: "facebook", url: "https://facebook.com/fixture" },
+      { platform: "youtube", url: "https://youtube.com/fixture" },
+    ]);
+    expect(call.profile.serviceTimes).toEqual([
+      { dayOfWeek: 0, startTime: "10:15", endTime: "11:15", label: "Sunday Worship" },
+    ]);
+    expect(call.profile.officeHours).toEqual([]);
+  });
+
+  it("passes an all-null/empty profile through unchanged when nothing is set — never omitted, never thrown", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams() });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      profile: { address: string | null; socialLinks: unknown[] };
+    };
+    expect(call.profile.address).toBeNull();
+    expect(call.profile.socialLinks).toEqual([]);
   });
 
   it("renders the site-kit output plus a Contact section naming the organization", async () => {

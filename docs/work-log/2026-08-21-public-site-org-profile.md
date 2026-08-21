@@ -46,7 +46,7 @@ than it leaks page content.
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-092; implementer named (database-admin, then full-stack-developer) | 2026-08-21 |
 | 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI, then e2e-gap closure) | Complete (commit 1 + commit 2 + commit 3) | — | 2026-08-21 |
 | 5 — Verification | qa | Complete | FAIL (first pass, e2e gap) → PASS (re-verification after commit 3 closed it) | 2026-08-21 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP IT | 2026-08-21 |
 
 ---
 
@@ -1055,32 +1055,44 @@ The one named gap is closed. Both new tests are real browser-driven CRUD smokes 
 
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+SHIP IT
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A tightly-scoped schema-and-admin-UI slice that delivers exactly what Phase 1 asked for — structured, admin-editable public-site profile data folded into the existing enumeration-safe `presby_published_site()` collapse, with zero shortcuts taken to get QA's FAIL flipped to PASS — and every deliberate non-choice (no audit event, no history table, platform-admin-only editing, upsert-not-delete on profile clear) was named explicitly in the design rather than discovered as a surprise.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The permission gate is real, not asserted.** Both `setOrganizationProfileAction` and `setOrganizationServiceTimesAction` call `auth()` then `hasFeature(FEATURES.ADMIN_ORGANIZATIONS)` before touching the database — matches Phase 1 exactly, no new permission invented.
+- **The single-query enumeration-safety requirement (Phase 1 Gap 5) landed as designed.** `presby_published_site()` folds the new columns and two correlated `jsonb_agg` subqueries into its one existing `SELECT`, still `SECURITY DEFINER`/`STABLE`, still collapsing every "not visible" reason into the same zero-row result. No second query, no second function.
+- **Per-field independent omittability (Phase 1 Gap 6) is a real contract.** `profile.address`/`phone`/each social key/`serviceTimes`/`officeHours` are each independently `null`/`[]`, `profile` itself never absent — exactly what lets a future presby-site-kit component render-or-skip a section with no null-checking gymnastics.
+- **The FAIL→PASS loop-back was a real gap, closed the right way.** QA's first Phase 5 pass caught a genuine precedent violation (no e2e coverage against `admin-organizations.spec.ts`'s own established "Set brand" CRUD-smoke shape), Commit 3 closed exactly that gap, and re-verification independently re-read the new tests against the actual component markup.
+- **A real bug was caught and fixed before it shipped.** `profile-form.tsx`'s first draft used `type="url"` on social inputs, which would let the browser silently block a malformed submission before server-side validation ever ran — defeating Phase 1's explicit server-side-validation requirement. Confirmed fixed: all inputs are `type="text"`.
+- **The upsert-vs-delete asymmetry is real and disclosed, not hidden.** `setOrganizationProfile` is upsert-only (an emptied form leaves an all-null row); `replaceOrganizationServiceTimes` genuinely deletes on an empty list. Confirmed directly against source, not the write-up.
+- **The DECISION-090 grant condition was actually honored.** `docs/TODO.md:72` carries the deferred-tenant-editor line the forward-looking `presby_app` grant was conditioned on.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1: platform-admin-only editing, tenant-self-edit gap named as an explicit deferred item. Shipped: exactly that, with the deferral tracked in `docs/TODO.md`, not just a work-log answer. **Matches.**
+- Phase 1 (user-resolved): structured service times, not free text. Shipped: `organization_service_times`, a genuine child table with real `CHECK` constraints, not a JSONB column dressed up as structured. **Matches.**
+- Phase 1 (user-resolved): five fixed named social-platform columns (D8 compliance). Shipped: exactly that. **Matches.**
+- Phase 1 (user-resolved): free-text address, no geocoding. Shipped: exactly that. **Matches.**
+- Phase 1 Gap 5 (never a second query/function): Shipped: confirmed by direct read of the migration's drop-and-recreate. **Matches.**
+- Phase 1 Gap 6 (concrete per-field empty state): Shipped: named per-field in the API Contract, proven at the query layer by `sites.test.ts`'s empty-then-populated flow. Not yet visually confirmed on the actual public page — **acceptable, named gap, not a regression**: `presby-site-kit` (the component library that would render this data) doesn't exist yet; this pipeline was schema/admin-UI only by design, and the public-rendering half of Phase 1 Flow 2 is explicitly the blocked-on relationship named in Context.
+- Phase 1 Flow 1 (server-side validation, typed values survive a failed submit): Shipped: confirmed via the `type="url"` catch-and-fix plus an explicit test for surviving a failed submit. **Matches**, and the near-miss shows the requirement did real work.
+- Phase 1 Gap 8 (no audit event, `updated_by`/`updated_at` only): Shipped: exactly that, reasoned consistently with DECISION-089's precedent. **Matches.**
+- Phase 1 Out of Scope #1 (tenant self-edit, confirm with user): user resolved platform-admin-only acceptable for v1, deferred as a tracked follow-up. Shipped: matches, and the deferral is load-bearing — it's the reason the new tables got a full CRUD grant now instead of `organization_sites`' "no grant, ever." **Matches, acceptable drift.**
+- Phase 1 Gap 1 (office hours shape, left open): resolved mid-pipeline as a `kind` discriminator on the same table. Shipped: confirmed in the migration. **Matches.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state: pass, with one disclosed asymmetry.** A brand-new org shows both new sections empty/blank. The clear-back-to-empty path is asymmetric between the two sections (`organization_profiles` → all-null row via upsert; `organization_service_times` → zero rows via real delete) — verified against source, disclosed in three places, behaviorally identical to every consumer, but a real inconsistency with the sibling "Set brand"/"Neutralise" pattern on the same page (neutralise genuinely deletes). See Follow-Ups.
+- **Failure microcopy: pass.** Server-side validation on malformed URLs, bad schemes, out-of-range day-of-week, and `end <= start` all return human, field-naming errors, surfaced inline via the same `useActionState` pattern `brand-form.tsx` uses.
+- **Permission gate: pass.** Confirmed directly in `actions.ts`.
+- **Audit event: not applicable**, matching Phase 1's own recommendation — public-content editing, not access control.
+- **Mobile (360px): not verified — a real gap, not a false negative.** Phase 1 explicitly punted mobile-check to the anonymous public-rendering half (correct, since no rendering component exists yet), but `/admin/organizations/[id]`'s two new sections are a real admin-facing page in use today, and no phase checked `TimeRowsEditor` at 360px. Not blocking (admin-only internal tool), but named rather than silently absorbed into Phase 1's narrower punt.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (tracked even though the verdict is SHIP IT — neither is a regression against what Phase 1 promised)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
-
-## Red Flags (if NEEDS REWORK)
-
-- [Specific. What has to change before this ships.]
+- **`organization_profiles`'s clear action leaves an all-null row instead of deleting it**, unlike `organization_service_times`'s empty-list save (a real delete) and unlike `organization_brands`' own "neutralise" action on the same admin page (a real delete). Confirm this is acceptable long-term or add a delete path for symmetry with its two sibling sections.
+- **Verify `/admin/organizations/[id]`'s new Profile and Service-times/office-hours sections at 360px** — `TimeRowsEditor`'s per-row day-select + two time inputs + label is a plausible cramped-layout risk on a real phone, not yet checked by any pipeline phase.

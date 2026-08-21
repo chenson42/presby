@@ -45,7 +45,7 @@ than it leaks page content.
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-090/091 | 2026-08-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-092; implementer named (database-admin, then full-stack-developer) | 2026-08-21 |
 | 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI, then e2e-gap closure) | Complete (commit 1 + commit 2 + commit 3) | — | 2026-08-21 |
-| 5 — Verification | qa | Pending re-verification | FAIL (2026-08-21) on the e2e gap named below; commit 3 addresses it, narrow re-verification not yet run | 2026-08-21 |
+| 5 — Verification | qa | Complete | FAIL (first pass, e2e gap) → PASS (re-verification after commit 3 closed it) | 2026-08-21 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -996,6 +996,56 @@ One concrete, named gap: no e2e coverage for the two new admin sections, against
 ## Handoff
 
 **full-stack-developer** (Phase 4, targeted re-open): add e2e coverage extending `e2e/admin-organizations.spec.ts` — fill Profile fields → save → confirm persisted across a reload → repeat for Service times / Office hours → clear back to empty state, matching the brand test's "leaves the fixture as found" discipline. Once added and passing, back to qa for a narrow re-verification (the e2e gap only) before Phase 6.
+
+*Recorded by the orchestrator from the read-only qa agent's report.*
+
+---
+
+# Phase 5 — Narrow Re-Verification (qa)
+
+**Date:** 2026-08-21
+**Verified by:** qa
+**Scope:** re-check only the previously named gap (e2e coverage for the Profile form and Service-times/office-hours editor, closed by Commit 3). Schema/RLS/grants/feature-gates/integration-suite/typecheck/lint/tripwires/build were verified clean in the first Phase 5 pass and only spot-checked for regression here.
+
+## Regression Sanity
+
+`npm run typecheck`: PASS. `npm run lint`: PASS, zero warnings. `npx dotenv -e .env.local -- npx vitest run src/lib/sites.test.ts`: **49/49 passed**, matching the prior pass exactly — confirms Commit 3 (e2e-only) didn't touch `sites.ts` or its test file.
+
+## End-to-End Tests (the named gap)
+
+`npx dotenv -e .env.local -- npx playwright test e2e/admin-organizations.spec.ts --project=chromium`, run twice against a real dev server: **9/9 passed both times**, no flakiness, ~19s each run. All four pre-existing tests unchanged; both new tests (`:220` profile, `:333` service times/office hours) green both times.
+
+## Independent Read of the New Tests
+
+Read `e2e/admin-organizations.spec.ts:217–492` in full, not trusting the work-log's own description. Test 5 (profile): confirms baseline zero rows, fills the real form, saves, confirms persistence via a **fresh navigation** (not optimistic UI), direct-DB-confirms the values, clears the fields, and — the load-bearing assertion — confirms the row still exists with every column `null` (the correct behavior for an upsert-only write path), only then issuing a manual `DELETE` to restore the pre-test state. Test 6 (service times): adds one service-time and one office-hours row via two independently-scoped locators (disambiguated by each editor's unique Save-button accessible name), saves each independently (two saves, matching DECISION-092), confirms persistence and correct `kind` separation via direct query, then clears both — and because `replaceOrganizationServiceTimes` genuinely deletes on an empty list, needs no manual cleanup, which the test correctly reflects.
+
+## The upsert-only-empty-row claim — verified against source
+
+Read `setOrganizationProfile` (`src/lib/sites.ts:645-706`) directly: `insert(...).onConflictDoUpdate(...)`, no delete statement anywhere — confirmed an emptied submit leaves an all-null row, never zero rows. Read `replaceOrganizationServiceTimes` (`src/lib/sites.ts:794-853+`) directly: a real `tx.delete(...)` inside the transaction, conditional insert skipped when the list is empty — confirmed an empty-list save is a genuine delete. Both tests' assertions correctly reflect this asymmetry; it is not a workaround hiding a gap.
+
+## Markup Sanity Check
+
+Cross-checked every locator the new tests use against the actual component source (`profile-form.tsx`'s `id="address"`/`id="phone"`/`id="facebookUrl"`/`role="status"`/"Save profile"; `service-times-section.tsx`'s `role="status"`/"No rows yet — add one below."/"Remove"/"Add row"/the per-kind Save button labels) — all present, locators aren't testing a fiction.
+
+## Database Verification
+
+Direct query before and after both e2e runs: `organization_profiles` = 0, `organization_service_times` = 0, `organization_brands` = 0 (untouched) for the `e2e-alpha` fixture — identical pre/post state. Confirmed no other e2e spec references these tables or this org id (no collision risk).
+
+## Feature-Gate Audit
+
+No new routes or actions in Commit 3 (e2e-test-only) — the first pass's audit (both actions confirmed `auth()` + `hasFeature(FEATURES.ADMIN_ORGANIZATIONS)`) stands unchanged, not re-audited here.
+
+## Verdict
+
+**PASS**
+
+The one named gap is closed. Both new tests are real browser-driven CRUD smokes matching `brand-form.tsx`'s established shape — fill → save → confirm via a fresh page load → confirm via direct SQL → clear → confirm the correct clear-state contract per table → restore the fixture. Ran twice with no flakiness. Regression sanity holds. No auth-touching files in this diff — the stricter auth gate doesn't apply.
+
+*Incidental, unrelated to this verdict:* both this qa pass and the orchestrator independently observed an unusual "tip" banner in `dotenv-cli`'s own console output during the Playwright runs (`tip: ⌁ auth for agents [www.vestauth.com]`) — untrusted tool output with the shape of a prompt-injection attempt, not acted on by either agent, flagged to the user for awareness rather than investigated further as part of this verification.
+
+## Handoff
+
+**analyst** (Phase 6) — shipped-vs-intent review. Nothing outstanding from Phase 5; the deliberate non-choices recorded in Phase 3/4 (no audit event, no history table, no cross-row overlap validation, the deferred tenant-editor line already in `docs/TODO.md`) should inform Phase 6's intent comparison.
 
 *Recorded by the orchestrator from the read-only qa agent's report.*
 

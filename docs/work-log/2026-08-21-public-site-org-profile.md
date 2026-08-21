@@ -45,7 +45,7 @@ than it leaks page content.
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-090/091 | 2026-08-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-092; implementer named (database-admin, then full-stack-developer) | 2026-08-21 |
 | 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI) | Complete (commit 1 + commit 2) | — | 2026-08-21 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | FAIL — one gap, no e2e coverage for the two new admin sections; loop back to Phase 4 | 2026-08-21 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -763,46 +763,89 @@ task's own guidance) — left for QA's Phase 5 e2e pass.
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-08-21
 **Verified by:** qa
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS**
+
+## Tripwires
+
+`npm run check` (all four — `check:audit`, `check:sql-date`, `check:deps-drift`, `check:brand-scope`): **PASS**
+
+## Lint
+
+`npm run lint`: **PASS** — zero warnings.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+- `npx vitest run` (plain, no DB): **1686 passed, 134 skipped** — the skips are the pre-existing `describe.skipIf(!hasDb)` guard, confirmed by direct read.
+- `npx dotenv -e .env.local -- npx vitest run src/lib/sites.test.ts`: **49/49 passed**, real Postgres.
+- `profile-form.test.tsx` + `service-times-section.test.tsx`: **12/12 passed**.
+- `actions.test.ts`: **67/67 passed**, including an explicit authorization matrix for both new actions.
+- Task-scoped combined run repeated 3×: **128/128 every time**.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+`e2e/admin-organizations.spec.ts` + `e2e/public-sites.spec.ts` against a real dev server: **14/14 passed**, no regression from the widened `presby_published_site()` signature.
+
+**Gap:** no e2e spec exercises the two *new* admin sections (Profile form, Service-times/office-hours editor) on `/admin/organizations/[id]`, despite `e2e/admin-organizations.spec.ts:113-157`'s own established precedent (a full browser-driven save → confirm-persisted → reset-to-clean CRUD smoke) for the sibling "Set brand" section on the exact same page — and Phase 3's own explicit instruction that `profile-form.tsx` follow `brand-form.tsx`'s "exact structural pattern." A concrete, comparable gap, not a hypothetical one.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+All real-Postgres integration, not mocked:
+- `setOrganizationProfile — rejects a malformed social URL, naming the specific field` — `src/lib/sites.test.ts:909`
+- `— rejects a non-http(s) URL scheme` — `src/lib/sites.test.ts:929`
+- `— a second call upserts (updates), it does not insert a second row` — `src/lib/sites.test.ts:979`
+- `replaceOrganizationServiceTimes — rejects an out-of-range dayOfWeek without writing` — `src/lib/sites.test.ts:1005`
+- `— rejects end time not after start time, naming the day` — `src/lib/sites.test.ts:1032`
+- `— service and office_hours are independent kinds` — `src/lib/sites.test.ts:1101`
+- `getPublishedSite — populated profile/service-times flow through` — `src/lib/sites.test.ts:1080` (closes the admin-write → public-read loop)
+- `actions.test.ts` — full authorization matrix for both new actions (unauthenticated / missing `admin.organizations` / invalid UUID)
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+Not applicable — no changes to `permissions.ts`, `two-factor.ts`, or `flags.ts`.
+
+## Database Verification (independent)
+
+- `pg_class.relforcerowsecurity = t` on both new tables, confirmed by direct catalog query.
+- `presby_app`/`presby_platform` both hold exactly `DELETE,INSERT,SELECT,UPDATE` on both tables, matching DECISION-090.
+- `presby_published_site`: `SECURITY DEFINER` + `STABLE` confirmed via `pg_proc`.
+- `scripts/test-rls.sql` as `presby_app`: exit 0, 99 pass notices, zero failures — the drift database-admin flagged (Alder Creek stuck at `'live'`) is no longer present.
+- Fixture cleanliness confirmed before and after the full verification pass: both new tables 0 rows, no leftover `sites-test-%` orgs, `sites.public_render` restored to `false`.
+
+## Spot-Checks
+
+- Social-link input type fix verified directly (not trusted from the implementer's claim): all five fields in `profile-form.tsx` are `type="text"` (lines 133, 144, 155, 166, 177) — no `type="url"` remains.
+- Production build (`dotenv -e .env.local -- npm run build`): clean.
+- `docs/TODO.md:72` carries the deferred-tenant-editor line DECISION-090 was conditioned on.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+*(Read directly from `actions.ts`, not inferred from tests.)*
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| `setOrganizationProfileAction` (`actions.ts:541`) | yes (`:544`) | yes (`:546`) | `FEATURES.ADMIN_ORGANIZATIONS` — correct |
+| `setOrganizationServiceTimesAction` (`actions.ts:597`) | yes (`:600`) | yes (`:602`) | `FEATURES.ADMIN_ORGANIZATIONS` — correct |
+
+## Additional Finding (disclosed, not blocking on its own)
+
+A full-suite `dotenv`-loaded run (beyond the task-scoped requirement) reproduced a real, pre-existing flake: `src/lib/sites.test.ts` and `src/app/api/sites/ingest/route.test.ts` both toggle the shared `feature_flags.sites.public_render` row in `beforeAll`/`afterAll` with no serialization between files, reproducing a failure ~1-in-3 runs when both execute together. Confirmed via `git log -p` this predates this pipeline (introduced in `5e99f90`, the `2026-08-20-public-sites` pipeline) — this diff only added assertions inside the pre-existing harness, it didn't introduce the race. The task-scoped required combination is reliably green across 3 repeated runs. `docs/TODO.md` already carries a line for this exact race (filed by the public-sites pipeline); not duplicated.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+One concrete, named gap: no e2e coverage for the two new admin sections, against an established in-repo precedent for exactly this page and exactly this shape of coverage. Everything else — schema, FORCE RLS, grants, the widened function, both actions' feature gates, the real-Postgres integration suite, the `type="text"` fix, typecheck, lint, tripwires, and the production build — verified clean.
+
+## Handoff
+
+**full-stack-developer** (Phase 4, targeted re-open): add e2e coverage extending `e2e/admin-organizations.spec.ts` — fill Profile fields → save → confirm persisted across a reload → repeat for Service times / Office hours → clear back to empty state, matching the brand test's "leaves the fixture as found" discipline. Once added and passing, back to qa for a narrow re-verification (the e2e gap only) before Phase 6.
+
+*Recorded by the orchestrator from the read-only qa agent's report.*
 
 ---
 

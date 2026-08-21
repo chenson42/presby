@@ -63,7 +63,8 @@ export function TicketList({
             <TableCell className="max-w-xs">
               <Link
                 href={`/o/${slug}/tickets/${ticket.ticketId}`}
-                className="font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="block truncate font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                title={ticket.subject}
               >
                 {ticket.subject}
               </Link>

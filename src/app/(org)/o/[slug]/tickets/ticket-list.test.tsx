@@ -50,4 +50,14 @@ describe("TicketList — populated", () => {
     render(<TicketList tickets={[TICKET]} slug="alder-creek" />);
     expect(screen.getByText("Desmond Okonkwo")).toBeTruthy();
   });
+
+  it("truncates a long subject instead of overflowing the column, keeping the full text available via title", () => {
+    const longSubject =
+      "The projector in the fellowship hall stopped connecting to the laptop during the Wednesday evening potluck and nobody could find the right adapter";
+    const longTicket: TicketListEntry = { ...TICKET, subject: longSubject };
+    render(<TicketList tickets={[longTicket]} slug="alder-creek" />);
+    const link = screen.getByRole("link", { name: longSubject });
+    expect(link.className).toContain("truncate");
+    expect(link.getAttribute("title")).toBe(longSubject);
+  });
 });

@@ -227,7 +227,8 @@ export default async function AdminTicketsPage({
                   <TableCell className="max-w-xs">
                     <Link
                       href={`/admin/tickets/${row.id}`}
-                      className="font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      className="block truncate font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      title={row.subject}
                     >
                       {row.subject}
                     </Link>

@@ -140,4 +140,32 @@ describe("AdminTicketsPage — populated", () => {
     expect(screen.getByText("Alder Creek Presbyterian Church")).toBeTruthy();
     expect(screen.getByText("Unassigned")).toBeTruthy();
   });
+
+  it("truncates a long subject instead of overflowing the column, keeping the full text available via title", async () => {
+    const longSubject =
+      "The projector in the fellowship hall stopped connecting to the laptop during the Wednesday evening potluck and nobody could find the right adapter";
+    mockAuth.mockResolvedValue(OPERATOR_SESSION);
+    rowsRef.current = [
+      {
+        id: "ticket-1",
+        subject: longSubject,
+        status: "new",
+        changeClass: "bug",
+        area: "facilities",
+        priority: "low",
+        createdAt: new Date("2026-08-15T14:22:00Z"),
+        organizationName: "Alder Creek Presbyterian Church",
+        submitterFirstName: "Desmond",
+        submitterLastName: "Okonkwo",
+        submitterPreferredName: null,
+        assigneeEmail: null,
+      },
+    ];
+    const el = await AdminTicketsPage({ searchParams: makeSearchParams() });
+    render(el);
+
+    const link = screen.getByRole("link", { name: longSubject });
+    expect(link.className).toContain("truncate");
+    expect(link.getAttribute("title")).toBe(longSubject);
+  });
 });

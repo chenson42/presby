@@ -3,6 +3,20 @@
 Architectural and implementation decisions for the Claude Code Starter. Newest first. Each decision is numbered; the number does not change once assigned.
 
 ---
+## DECISION-091: Structured service times land in a genuine child table (`organization_service_times`, typed `day_of_week`/`start_time`/`end_time`/`label` columns, composite tenant key), not a JSONB array column on `organization_profiles`
+
+**Status:** Resolved · **Date:** 2026-08-21 · **Feature:** `2026-08-21-public-site-org-profile` (Phase 2)
+
+The user chose structure over the analyst's own free-text recommendation specifically to get real schema, not a nicer-looking admin form — a JSONB array is still schema-less at the database layer (no per-entry `CHECK`, no `time` typing, no planner visibility), and would silently reintroduce the free-text problem one level down inside a column that only *reads* as structured. `presby_published_site()` still satisfies the "one query, never a second function" requirement (Phase 1 Gap 5) via a correlated `jsonb_agg` subquery folded into its existing `SELECT` list, not a second read path.
+
+---
+## DECISION-090: Public-site org profile data lands in a new table (`organization_profiles`), not by extending `organization_sites`; its `presby_app` grant follows the `organization_brands` precedent (forward-looking full CRUD, declared ahead of a named future consumer), not `organization_sites`' "no grant, ever"
+
+**Status:** Resolved · **Date:** 2026-08-21 · **Feature:** `2026-08-21-public-site-org-profile` (Phase 2)
+
+`organization_sites`' own table comment states, in the author's own capitals, "NO PUBLIC GRANT and NO presby_app TABLE GRANT, EVER" — a hard marker on that specific table, not a general policy, and the same comment separately confirms a tenant editor was "confirmed dead" for that table's data. Profile data's tenant editor is the opposite fact: the user resolved Phase 1's Open Question 1 by naming it "deferred as its own future follow-up, same pattern as the brand editor's own deferred slice d" — the same already-scoped-but-deferred shape that earned `organization_brands` its forward-looking `presby_app` grant (`0016_presby_brand_storage.sql`). This ruling is contingent on that deferred tenant-editor follow-up being tracked as a named `docs/TODO.md` line, not left as only a work-log answer nobody re-reads.
+
+---
 ## DECISION-089: `ContactForm`'s read side is a third section on the existing `/o/<slug>/tickets` page, gated by `tickets.file`; no new tenant permission, no platform-side triage surface
 
 **Status:** Resolved · **Date:** 2026-08-20 · **Feature:** `2026-08-20-public-sites` (Phase 3)

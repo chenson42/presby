@@ -44,8 +44,8 @@ than it leaks page content.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-090/091 | 2026-08-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-092; implementer named (database-admin, then full-stack-developer) | 2026-08-21 |
-| 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI) | Complete (commit 1 + commit 2) | — | 2026-08-21 |
-| 5 — Verification | qa | Complete | FAIL — one gap, no e2e coverage for the two new admin sections; loop back to Phase 4 | 2026-08-21 |
+| 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI, then e2e-gap closure) | Complete (commit 1 + commit 2 + commit 3) | — | 2026-08-21 |
+| 5 — Verification | qa | Pending re-verification | FAIL (2026-08-21) on the e2e gap named below; commit 3 addresses it, narrow re-verification not yet run | 2026-08-21 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -456,7 +456,7 @@ grant execute on function presby_published_site(text) to presby_app;
 
 # Phase 4 — Implementation
 
-**Commit 1 of 2 (database-admin, schema only).** Commit 2 (query layer, server actions, admin UI — full-stack-developer) is not started; this section covers commit 1 only, per the Implementer split named in Phase 3.
+**Commit 1 of 3 (database-admin, schema only).** Commits 2 and 3 (full-stack-developer) follow below, per the Implementer split named in Phase 3.
 
 ## Files Created
 
@@ -501,7 +501,7 @@ grant execute on function presby_published_site(text) to presby_app;
 
 ---
 
-## Commit 2 of 2 (full-stack-developer — query layer, server actions, admin UI)
+## Commit 2 of 3 (full-stack-developer — query layer, server actions, admin UI)
 
 Query/mutation layer, server actions, and the admin UI for
 `organization_profiles`/`organization_service_times`, completing Phase 3's
@@ -758,6 +758,158 @@ task's own guidance) — left for QA's Phase 5 e2e pass.
   `hasFeature(FEATURES.ADMIN_ORGANIZATIONS)`, confirmed by direct read of
   `actions.ts` (not inferred from passing tests) — see the code itself for
   qa's own audit table.
+
+---
+
+## Commit 3 of 3 (full-stack-developer — closing qa's Phase 5 e2e gap)
+
+qa's Phase 5 FAIL named one concrete, named gap: no e2e coverage for the two
+new admin sections (Profile form, Service-times/office-hours editor) on
+`/admin/organizations/[id]`, against `e2e/admin-organizations.spec.ts:113-157`'s
+own established precedent for the sibling "Set brand" section on the exact
+same page. This commit closes that gap only — no other files change.
+
+### Files Modified
+
+- `e2e/admin-organizations.spec.ts` — two new `test.describe` blocks (Test 5,
+  Test 6), added after the existing brand CRUD smoke test (Test 4), plus a
+  shared `platformSql()` helper and a widened file-header comment. No
+  existing test in this file was changed in behavior — only the header
+  comment's own description of scope was widened.
+  - **Test 5 — "Admin — set and clear organization profile (leaves the
+    fixture as found)."** Same fixture (`e2e-alpha`,
+    `e2e00000-0000-0000-0000-000000000002`) as every other test in this file.
+    Fills address/phone/Facebook URL → saves → confirms the inline `role=
+    "status"` banner → confirms the three values persist across a full page
+    reload (server re-fetch, not client state) → confirms the same three
+    values plus the four untouched social fields via a **direct
+    `organization_profiles` query** → clears all three fields back to empty
+    → saves → confirms the banner again → **directly queries and asserts**
+    that the row still exists with every field `null` (see "The
+    upsert-only-empty-row finding," below) → issues one direct SQL `DELETE`
+    to restore the true pre-test zero-row state → confirms zero rows by a
+    final direct query.
+  - **Test 6 — "Admin — set and clear service times & office hours (leaves
+    the fixture as found)."** Same fixture. Confirms both `TimeRowsEditor`
+    instances start in the "No rows yet" empty state → adds one Sunday
+    service-times row (start/end/label) and saves it → adds one Monday
+    office-hours row and saves it independently (DECISION-092's "two saves,
+    not one") → confirms both rows persist across a full page reload,
+    scoped per kind so the test can prove the two kinds render
+    independently of each other → confirms the exact values via a **direct
+    `organization_service_times` query**, split by `kind` → removes both
+    rows and saves each kind's now-empty list (the "clear all" contract from
+    Phase 3 Edge Cases — no confirmation dialog) → confirms zero rows for
+    the org by a final direct query. No extra cleanup step needed here (see
+    below) — `replaceOrganizationServiceTimes`'s own empty-list save
+    genuinely `DELETE`s, unlike `organization_profiles`' upsert.
+  - **Locator strategy, named because it isn't obvious from a diff:** the two
+    `TimeRowsEditor` instances share identical `Day`/`Start`/`End`/`Label
+    (optional)` labels, so an unscoped `getByLabel` would be ambiguous with
+    two rows on the page. Each editor is scoped via
+    `page.locator("div.space-y-4").filter({ has: page.getByRole("button", {
+    name: "Save service times" | "Save office hours" }) })` — the one
+    structural marker that is unique per kind (the Save button's own
+    accessible name, which bakes in the section title). Confirmed this
+    resolves to exactly one element per kind despite `div.space-y-4`
+    appearing multiple times on the page (`brand-form.tsx`,
+    `service-times-section.tsx` itself) — `.filter({ has })` narrows to only
+    the ancestor(s) that actually contain the named button, and no other
+    `div.space-y-4` on this page contains either button.
+
+### The upsert-only-empty-row finding (read the code, didn't assume)
+
+`setOrganizationProfile` (`src/lib/sites.ts`) is upsert-only —
+`insert(...).onConflictDoUpdate(...)` on the degenerate `organizationId` PK,
+with no corresponding delete path anywhere in this feature's server actions.
+An emptied Profile form submit therefore still leaves a row in
+`organization_profiles`, with every field `null`, not an absent row —
+confirmed directly against the database in Test 5 (`afterClear` asserts
+exactly this), not inferred from reading the function alone. This is the
+opposite of `organization_brands`' own "neutralise" action
+(`actions.ts:395`), which genuinely `DELETE`s its row — the two sibling
+sections on this same page behave differently on "clear," and Test 5's own
+header comment (and the file's widened top-of-file comment) names this
+explicitly so a future reader doesn't assume they're symmetric. Because the
+UI itself has no path back to zero rows for `organization_profiles`, Test 5
+restores the pre-test fixture state with one direct SQL `DELETE` after
+asserting the real (null-row) behavior — matching
+`e2e/public-sites.spec.ts`'s own precedent of reverting every row a spec
+creates or mutates via direct query in cleanup, confirmed by a follow-up
+`SELECT`, never assumed. `organization_service_times` needed no equivalent
+step: `replaceOrganizationServiceTimes`'s whole-list-replace transaction
+(`src/lib/sites.ts`) skips the insert half entirely when the submitted list
+is empty, so a "clear all" save is a real `DELETE` with no residue.
+
+### Requirement 3 (empty-state contract on the public read side) — already covered, not duplicated
+
+Read `src/lib/sites.test.ts` before writing anything new here, per the task's
+own instruction to check first. Two describe blocks already close this loop
+end-to-end, added in commit 2:
+
+- The widened `getPublishedSite — enumeration safety` "live org" test
+  asserts `profile`/`serviceTimes`/`officeHours` are all-null/`[]` **before**
+  any admin write touches that fixture — the empty-state contract Phase 1
+  required.
+- `getPublishedSite — populated profile/service-times flow through` writes a
+  full profile and both service-time kinds via
+  `setOrganizationProfile`/`replaceOrganizationServiceTimes`, then confirms
+  `getPublishedSite()` returns them through the same `presby_published_site()`
+  call — the admin-write-to-public-read loop.
+
+Both run against the real Postgres integration harness (49/49 passing, see
+Verification below), exercising the exact same `src/lib/sites.ts` functions
+this commit's e2e UI test also drives. Not duplicated in e2e: the `e2e-alpha`
+fixture this spec file uses has no `organization_sites` row (confirmed by
+direct query — it isn't a provisioned/live site), so `getPublishedSite()`'s
+`presby_published_site()` call would return zero rows for it regardless of
+what's in `organization_profiles`/`organization_service_times` — that fixture
+is the wrong one to exercise the public-read side through, and inventing a
+second live fixture solely to re-prove a contract `sites.test.ts` already
+proves end-to-end would be exactly the "don't duplicate coverage" the task
+warned against.
+
+### Verification, run for real
+
+- `npm run typecheck` — clean.
+- `npm run lint` — clean, zero warnings.
+- `npx dotenv -e .env.local -- npx vitest run src/lib/sites.test.ts` — **49/49
+  passed**, real Postgres, unaffected by this commit (no `src/lib/sites.ts`
+  change in this commit).
+- `npx dotenv -e .env.local -- npx playwright test e2e/admin-organizations.spec.ts --project=chromium`
+  — **9/9 passed**, run twice in a row to confirm no flakiness: 9/9 both
+  times (18.7s and 23.0s wall time). No existing test in the file (Tests
+  1–4) changed behavior.
+- Confirmed no collision risk with any other e2e spec: `grep` across
+  `e2e/*.spec.ts` for the fixture org id or either new table name returns
+  only this file.
+- **Fixture left in its exact original state, confirmed by direct query
+  after the full run (not assumed):**
+  `select count(*) from organization_profiles where organization_id =
+  'e2e00000-0000-0000-0000-000000000002'` → `0`;
+  `select count(*) from organization_service_times where organization_id =
+  'e2e00000-0000-0000-0000-000000000002'` → `0`;
+  `select count(*) from organization_brands where organization_id =
+  'e2e00000-0000-0000-0000-000000000002'` → `0` (the unbranded state Test 3's
+  own "never-branded org" assertion and Test 4 of `e2e-presbytery`'s sibling
+  fixture both depend on — unaffected, confirmed rather than assumed).
+
+### Handoff to qa (Phase 5, narrow re-verification)
+
+Only the named gap needs re-checking — schema, actions, unit/integration
+coverage, typecheck, lint, tripwires, and the production build were already
+verified clean in qa's first Phase 5 pass and nothing in this commit touches
+any of that surface. Suggested scope for the re-verification:
+
+- Confirm `e2e/admin-organizations.spec.ts` Tests 5/6 exist, pass, and follow
+  the same "fill → save → confirm persisted across a reload → clear → confirm
+  restored" shape as Test 4.
+- Spot-check the upsert-only-empty-row finding above directly (read
+  `setOrganizationProfile` in `src/lib/sites.ts`, confirm no delete path
+  exists) rather than trusting this write-up.
+- Confirm fixture cleanliness independently, the same way qa did after its
+  first pass: `organization_profiles`/`organization_service_times` both zero
+  rows for `e2e-alpha` after a full suite run.
 
 ---
 

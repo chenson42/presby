@@ -44,7 +44,7 @@ than it leaks page content.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-090/091 | 2026-08-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-092; implementer named (database-admin, then full-stack-developer) | 2026-08-21 |
-| 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI) | Commit 1 (schema) complete, commit 2 (query/actions/UI) pending | — | 2026-08-21 |
+| 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI) | Complete (commit 1 + commit 2) | — | 2026-08-21 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -498,6 +498,266 @@ grant execute on function presby_published_site(text) to presby_app;
 - `src/lib/sites.test.ts` will need updating for any assertion that does exact/deep-equality on the full `getPublishedSite()` return object — read the exact assertions before assuming "still passes," per Phase 3's own Edge Cases note.
 - Local apply for a fresh clone/branch: `npm run db:push` will NOT pick up this migration correctly (Drizzle Kit's snapshot chain stops at 0012, so `db:push` would attempt to diff from a stale baseline against the current `schema.ts`+domain files and is unreliable past that point on this project, per CLAUDE.md's own note) — apply `drizzle/0021_presby_site_profile.sql` directly: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0021_presby_site_profile.sql`. No seed change in this commit (`npm run db:seed` unaffected); commit 2 may want its own fixture row(s) in `scripts/seed-dev.sql` for `organization_profiles`/`organization_service_times` if e2e coverage needs one (none added here, matching how commit 1 of the parent 2026-08-20 pipeline seeded no `site_contact_messages` sample row either).
 - `npm run typecheck` and `npm run check` (all four tripwires) both pass clean on this commit.
+
+---
+
+## Commit 2 of 2 (full-stack-developer — query layer, server actions, admin UI)
+
+Query/mutation layer, server actions, and the admin UI for
+`organization_profiles`/`organization_service_times`, completing Phase 3's
+"Implementer" split. Everything below is additive to commit 1's landed
+schema — no schema change in this commit.
+
+### Files Created
+
+- `src/app/(admin)/admin/organizations/[id]/profile-form.tsx` — client
+  component, one `useActionState` form (address/phone/five social-URL
+  fields), exact structural pattern as `brand-form.tsx` (inline result
+  banner, typed values survive a failed submit — every field is
+  client-owned state, never reset from the action result). Social-URL
+  inputs use `type="text"`, not `type="url"` — the browser's native URL
+  constraint validation silently blocks form submission for a malformed
+  value before it ever reaches the server, which would defeat Phase 1's own
+  "validation errors shown inline, server-side, not just client-side"
+  requirement (caught by a failing jsdom test during this commit; see
+  Implementer Notes).
+- `src/app/(admin)/admin/organizations/[id]/profile-form.test.tsx` — jsdom
+  component tests: initial render (empty + prefilled), FormData field
+  mapping, success/error banner + toast, typed values surviving a failed
+  submit.
+- `src/app/(admin)/admin/organizations/[id]/service-times-section.tsx` —
+  client component, two independent `TimeRowsEditor` instances
+  (`kind="service"` / `kind="office_hours"`), each with its own row list in
+  `useState` (day-of-week `<select>`, two `<input type="time">`, an
+  optional label field), add/remove-row buttons, and its own Save button
+  serializing the row array to JSON into a hidden `rows` field posted via
+  `useActionState` to `setOrganizationServiceTimesAction`. Two independent
+  saves, per Phase 3's explicit ruling — a church may set service times
+  without office hours and the reverse.
+- `src/app/(admin)/admin/organizations/[id]/service-times-section.test.tsx`
+  — jsdom component tests: seeded render from initial entries, empty-state
+  message, Add/Remove row (no action call), per-kind Save posting the right
+  `organizationId`/`kind`/JSON `rows`, an empty-list save (legal "clear
+  all," no confirmation step), and inline error surfacing.
+
+### Files Modified
+
+- `src/lib/sites.ts` —
+  - Imports `organizationProfiles`, `organizationServiceTimes` from
+    `@/lib/db/domain/sites`.
+  - Widened `PublishedSite`/`PublishedSiteRow` and `getPublishedSite()`'s
+    mapping: adds `profile: { address, phone, social: { facebook,
+    instagram, xTwitter, youtube, other } }`, `serviceTimes: []`,
+    `officeHours: []`. Every leaf independently `null`/`[]`, `profile`
+    itself never absent — Phase 1 Gap 6 / Phase 3 API Contract's hard
+    requirement. `jsonb` service-time arrays parse defensively
+    (`typeof value === "string" ? JSON.parse(value) : value`, wrapped in
+    try/catch, malformed/dangling data degrades to `[]`, never a 500) via a
+    new `parseServiceTimeEntries()` + `isServiceTimeEntryShape()` pair. No
+    new exported function, no second query — the same
+    `presby_published_site()` call commit 1 shipped.
+  - New exports, all `getPlatformDb()`, no membership check (same "no
+    tenant membership to verify for a platform operator" posture as
+    `provisionSite`/`setSiteStatus`):
+    - `getOrganizationProfileAdminDetail(organizationId): Promise<OrganizationProfileAdminDetail | null>`
+    - `setOrganizationProfile(organizationId, input, actorUserId): Promise<SetOrganizationProfileResult>`
+      — trims address (500-char bound) and phone (50-char bound), validates
+      each of the five social fields via `new URL()` well-formedness +
+      `http(s):` protocol only (never a platform-domain allowlist — a
+      Linktree-style URL in `otherUrl` is legal, per Phase 3's own note),
+      empty string maps to `null`, upserts via `onConflictDoUpdate` on the
+      degenerate `organizationId` PK. No history row (Q6's resolution).
+    - `listOrganizationServiceTimes(organizationId): Promise<ServiceTimeAdminEntry[]>`
+      — both kinds, ordered `(kind, day_of_week, start_time)`.
+    - `replaceOrganizationServiceTimes(organizationId, kind, rows, actorUserId): Promise<ReplaceServiceTimesResult>`
+      — whole-list replace per `(organizationId, kind)`, DECISION-092: one
+      transaction, delete-then-insert, insert skipped entirely when
+      `rows.length === 0` (a legal "clear all," no confirmation step, per
+      Phase 3 Edge Cases). App-level validation mirrors the DB's own CHECKs
+      (day-of-week 0–6, `"HH:MM"`/`"HH:MM:SS"` time format, `end > start`)
+      so a malformed row bounces with a readable message instead of a raw
+      constraint violation from the DB.
+- `src/app/(admin)/admin/organizations/[id]/actions.ts` — added
+  `setOrganizationProfileAction` and `setOrganizationServiceTimesAction`,
+  both thin `FormData` → `Promise<PolicyResult>` wrappers delegating to
+  `src/lib/sites.ts` (matching `provisionSiteAction`/`setSiteStatusAction`'s
+  wrapping pattern, per Phase 3's explicit placement ruling — NOT
+  `setOrganizationBrandAction`'s inline-query pattern). Each: `auth()` +
+  `hasFeature(FEATURES.ADMIN_ORGANIZATIONS)` + UUID validation +
+  FormData/JSON parsing + `revalidatePath` + the existing
+  `revalidateLiveSitePath` helper (reused unchanged). Neither calls
+  `recordAudit` — deliberate, matching `markSiteContactMessageReadAction`'s
+  posture (DECISION-089), per Phase 1 Gap 8 / Phase 3 Edge Cases.
+  `setOrganizationServiceTimesAction`'s own JSON parsing is limited to "is
+  this well-formed, naming the right fields" — all CHECK-mirroring
+  validation lives in `replaceOrganizationServiceTimes`, never duplicated
+  here.
+- `src/app/(admin)/admin/organizations/[id]/actions.test.ts` — added
+  authorization, FormData-mapping, and result-mapping tests for both new
+  actions (67 tests total in this file now, up from 47), mocking
+  `setOrganizationProfile`/`replaceOrganizationServiceTimes` the same way
+  `provisionSite`/`setSiteStatus` are already mocked.
+- `src/app/(admin)/admin/organizations/[id]/page.tsx` — fetches
+  `getOrganizationProfileAdminDetail` + `listOrganizationServiceTimes`
+  (split by `kind` for the two editors) alongside the existing site/brand
+  reads; renders two new sections in the order Phase 3 specified: Current
+  brand → Set brand → **Profile → Service times & office hours** → Site.
+- `src/lib/sites.test.ts` (Postgres-backed integration suite, run for real
+  against the dev database — see Verification below) —
+  - Widened the existing "live org" assertion to check the new
+    `profile`/`serviceTimes`/`officeHours` fields are all-null/`[]` before
+    any admin write touches that fixture (per-field `toEqual`, not a
+    full-object deep-equal — see the exact-equality risk note below).
+  - New `describe` block `getOrganizationProfileAdminDetail /
+    setOrganizationProfile`: null-when-absent, address/phone length bounds,
+    malformed-social-URL rejection (naming the field), non-http(s) scheme
+    rejection, a full upsert round-trip, and update-not-insert on a second
+    call.
+  - New `describe` block `listOrganizationServiceTimes /
+    replaceOrganizationServiceTimes`: empty-list-when-absent, out-of-range
+    day-of-week rejection, malformed-time rejection, `end <= start`
+    rejection (naming the day), insert + ordering, whole-list replace
+    clearing the prior set, empty-list "clear all," and kind independence
+    (`service` vs `office_hours` never cross-touch).
+  - New `describe` block `getPublishedSite — populated profile/service-
+    times flow through`, placed deliberately last in the file (file-order
+    dependency documented inline): sets a full profile + both service-time
+    kinds on `orgLive`, then confirms `getPublishedSite()` returns them
+    through the same `presby_published_site()` call, closing the loop from
+    admin write to public read.
+
+### Schema Changes
+
+None — commit 1's schema is unchanged. This commit is query/action/UI only.
+
+### Env / Flags
+
+No new env var, no new `FEATURES` entry, no new flag. `FEATURES.ADMIN_ORGANIZATIONS`
+gates both new actions (unchanged, existing key); the anonymous read stays
+gated entirely by `sites.public_render` + `organization_sites.status = 'live'`,
+both already enforced inside `presby_published_site()`/`getPublishedSite()`
+— per Phase 3's own ruling, unchanged in this commit.
+
+### Audit Events
+
+None, in either new action — deliberate, not an oversight. Confirmed
+against `npm run check:audit`: it passes because `actions.ts` already
+contains `recordAudit` calls elsewhere in the file (the tripwire's grep is
+file-scoped, not action-scoped), and independently because neither new
+action contains a bare `db.insert|update|delete` token — both delegate to
+`src/lib/sites.ts`. Matches Phase 3 Edge Cases' own reasoning:
+setting a phone number or a service time is routine content editing, not an
+access-control mutation (DECISION-089's posture, extended here by name).
+
+### Implementer Notes
+
+**Exact-equality risk (flagged by commit 1's Implementer Notes) — checked,
+not a problem.** Read every assertion in the pre-existing `getPublishedSite
+— enumeration safety` describe block before touching it: the "live org"
+test does per-field `expect(result.site.X)` checks (`organizationId`,
+`organizationName`, `organizationType`, `pages`, `imageKeys`, `brand`),
+never a `toEqual` on the whole `result.site` object — so the new fields
+could not have broken it by mere presence. I still added explicit
+`profile`/`serviceTimes`/`officeHours` assertions to that same test
+(all-null/`[]`, matching the state before any admin write), both to close
+the coverage gap for the widened shape and to pin the "before any profile
+row exists" baseline that the later `getPublishedSite — populated
+profile/service-times flow through` block depends on running after it.
+Every other `toEqual` in the file that touches a `getPublishedSite()`
+result checks `{ kind: "not_found" }` only, which is unaffected by the
+widened `ok` shape.
+
+**A real jsdom bug caught before it shipped, not a hypothetical.**
+`profile-form.tsx`'s first draft used `type="url"` on the five social-link
+`<Input>`s (matching the semantic HTML type, and giving mobile users the
+right virtual keyboard). Writing the "surfaces the server's exact error
+string inline" test caught that jsdom's own HTML5 constraint validation
+silently blocks `fireEvent.click()`'s form submission for a syntactically
+invalid `type="url"` value — the mocked action was never called, no error
+ever reached the DOM, and the test failed by design (not a test bug).
+Real browsers behave identically (native constraint validation runs before
+`submit`). Since Phase 1's own flow explicitly requires "validation errors
+shown inline — server-side, not just client-side," a native browser gate
+that can silently block a submission before the server ever sees it is a
+real product bug, not just a test artifact: a user with a browser whose URL
+parser disagrees with `new URL()`'s (or one that lets a subtly-wrong value
+through) would get no server-side feedback at all. Fixed by changing all
+five social fields to `type="text"` (matching `brand-form.tsx`'s own
+seedHex field, which is validated in JS/on the server, never via a native
+`pattern`/`type` constraint) — the browser no longer gatekeeps, and the
+server's validation (`setOrganizationProfile`'s `new URL()` check) is
+always the one that runs. Not deferred as a follow-up: fixed inline in this
+commit, before Phase 5.
+
+**No deviation from Phase 3's API Contract** — function signatures, the
+`PolicyResult`/wrapper shape, the `profile`/`serviceTimes`/`officeHours`
+JSON shape (including the exact `xTwitter` no-`Url`-suffix naming under
+`social`), the two-independent-saves UI shape, and the section ordering on
+`page.tsx` all match Phase 3 exactly.
+
+**Verification, run for real, not inferred from green mocks:**
+- `npx tsc --noEmit` — clean.
+- `npm run check` (all four tripwires) — clean.
+- `npm run lint` — clean, zero warnings.
+- `npx dotenv -e .env.local -- npx vitest run src/lib/sites.test.ts` — the
+  real Postgres-backed integration suite, including every new
+  `describe` block above: **49/49 passed** against the actual dev database
+  (not mocked, not skipped).
+- `npx vitest run` (full unit suite, jsdom + node, DB-backed suites
+  included via `.env.local`) — **1817/1820 passed.** The 3 failures are
+  all in `src/lib/rate-limit.test.ts`, and are a **pre-existing,
+  full-suite-only flake unrelated to this commit** — confirmed by running
+  `src/lib/rate-limit.test.ts` standalone (15/15 pass, both before and
+  after this commit's changes) and by running the full suite against a
+  `git stash` of this commit's changes (the same 3 tests fail identically
+  on unmodified `main`). Not something this commit introduced or should
+  fix — named here so QA doesn't chase it as a regression.
+- `npx dotenv -e .env.local -- npm run build` — production build succeeds
+  cleanly, `/site/[slug]` and `/admin/organizations/[id]` both compile with
+  no new warnings.
+- Database left in its clean fixture state, confirmed by direct query
+  (not assumed): `select count(*) from organization_profiles` and
+  `organization_service_times` both return `0`, and no `sites-test-%`
+  fixture organizations remain — the integration suite's own
+  `beforeAll`/`afterAll` fixture lifecycle (four synthetic orgs, cascade
+  deleted) leaves nothing behind. No Alder Creek row exists in either new
+  table (confirmed the same way) — this commit adds no e2e fixture.
+
+**`e2e/public-sites.spec.ts` — read, not modified; confirmed unaffected,
+not assumed.** Read the full spec. It never destructures or asserts on
+`profile`/`serviceTimes`/`officeHours` — its assertions are page-title
+`<h1>`, the "Content coming soon." placeholder, and the Contact section's
+own form fields, none of which touch the widened bundle shape. The public
+page's own consumer (`src/app/(public)/site/[slug]/page.tsx`) destructures
+only `pages`, `imageKeys`, `brand`, `organizationName` from `site` — the
+three new fields are additive and simply unused there, matching Phase 3's
+own prediction that presby-site-kit (a separate, not-yet-updated package)
+ignores extra bundle fields. Alder Creek has no `organization_profiles` row
+(confirmed above), so the widened `getPublishedSite()` returns
+all-null/`[]` for it regardless — behaviorally identical to before this
+commit for every existing assertion. Not run as part of this commit's own
+verification (no server-mutating change plausibly breaks it, per the
+task's own guidance) — left for QA's Phase 5 e2e pass.
+
+**Handoff to qa (Phase 5):**
+- Browser-check the two new sections on `/admin/organizations/[id]`: empty
+  state (blank org, no address/phone/socials/rows), fill-and-save each of
+  Profile / Service times / Office hours independently, confirm inline
+  error banners for a malformed URL / bad time range, confirm a save
+  survives a page refresh (re-fetches from the DB), confirm the "Get
+  Directions"-style profile data and structured schedule now flow into
+  `getPublishedSite()`'s bundle for a live org (visible via a direct call
+  or the existing `/site/[slug]` route once presby-site-kit's own consuming
+  pipeline lands — not yet rendered as UI on the public page in this
+  repo, since the site-kit components that would render it live in a
+  separate package).
+- No auth-path files touched (`src/auth.ts`, `(auth)`, `api/auth`,
+  `lib/auth/`) — the Phase 4 gate's mandatory e2e-smoke-with-MFA
+  requirement does not apply to this commit.
+- Feature-gate audit: both new actions gate on `auth()` +
+  `hasFeature(FEATURES.ADMIN_ORGANIZATIONS)`, confirmed by direct read of
+  `actions.ts` (not inferred from passing tests) — see the code itself for
+  qa's own audit table.
 
 ---
 

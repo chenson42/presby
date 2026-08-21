@@ -4,7 +4,12 @@ import { db, getPlatformDb } from "@/lib/db";
 import { withOrgContext } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { organizations } from "@/lib/db/domain/org";
-import { organizationSites, siteContactMessages } from "@/lib/db/domain/sites";
+import {
+  organizationSites,
+  siteContactMessages,
+  organizationProfiles,
+  organizationServiceTimes,
+} from "@/lib/db/domain/sites";
 import { getBlobStore } from "@/lib/storage/blob-store";
 import { generateBrandTokens, type BrandTokenSet } from "@/lib/brand/generate";
 import type { ResolvedTypePairing } from "@/lib/brand/fonts";
@@ -51,6 +56,17 @@ import { hasTicketsFile } from "@/lib/tickets";
  *      `@/lib/tickets` rather than re-deriving the permission check — this
  *      module is the third consumer of that exported precedent (see
  *      `tickets.ts`'s own header for why it is exported at all).
+ *
+ * COMMIT 2 ADDITION (docs/work-log/2026-08-21-public-site-org-profile.md
+ * Phase 4, DECISION-090/091/092): `getOrganizationProfileAdminDetail`,
+ * `setOrganizationProfile`, `listOrganizationServiceTimes`, and
+ * `replaceOrganizationServiceTimes` — the platform-admin query/mutation pair
+ * for `organization_profiles`/`organization_service_times`, shaped exactly
+ * like caller-shape 2 above (`getPlatformDb()`, `FEATURES.ADMIN_ORGANIZATIONS`
+ * enforced one layer up in `actions.ts`, never `withOrgContext()` — same "no
+ * membership to verify for a platform operator" reasoning). `getPublishedSite`
+ * itself widens in place — no fifth caller shape, no second query/function,
+ * per Phase 1 Gap 5.
  */
 
 // ---------------------------------------------------------------------------
@@ -120,6 +136,41 @@ export interface PublishedSite {
    * specified.
    */
   imageKeys: Record<string, string>;
+  /**
+   * ADDITION beyond the parent pipeline's own `PublishedSite` shape — see
+   * docs/work-log/2026-08-21-public-site-org-profile.md Phase 3 "API
+   * Contract". EVERY leaf here is independently `null`/`[]`-omittable
+   * (Phase 1 Gap 6, restated as a hard requirement in Phase 3): a component
+   * checks a leaf, never the presence of `profile` itself, which always
+   * exists as an object even when no `organization_profiles` row does.
+   */
+  profile: {
+    address: string | null;
+    phone: string | null;
+    social: {
+      facebook: string | null;
+      instagram: string | null;
+      xTwitter: string | null;
+      youtube: string | null;
+      other: string | null;
+    };
+  };
+  serviceTimes: OrgServiceTimeEntry[];
+  officeHours: OrgServiceTimeEntry[];
+}
+
+/**
+ * `dayOfWeek`: 0=Sunday..6=Saturday, matching JS `Date.getDay()` — stated
+ * here so a presby-site-kit component never has to guess the convention.
+ * `startTime`/`endTime`: `"HH:MM:SS"`, the Postgres `time` literal as
+ * `jsonb_build_object` serialized it — no timezone conversion, a
+ * congregation's own wall-clock time.
+ */
+export interface OrgServiceTimeEntry {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  label: string | null;
 }
 
 export type GetPublishedSiteResult =
@@ -137,6 +188,55 @@ interface PublishedSiteRow {
   brand_seed_hex: string | null;
   brand_type_pairing: string | null;
   brand_token_version: number | null;
+  profile_address: string | null;
+  profile_phone: string | null;
+  profile_facebook_url: string | null;
+  profile_instagram_url: string | null;
+  profile_x_twitter_url: string | null;
+  profile_youtube_url: string | null;
+  profile_other_url: string | null;
+  // `jsonb`, driver-dependent shape — could arrive as a parsed array/object
+  // (node-postgres' own default json/jsonb type parser) or as a raw string,
+  // hence `unknown` and the defensive parse below rather than trusting either.
+  service_times: unknown;
+  office_hours: unknown;
+}
+
+function isServiceTimeEntryShape(value: unknown): value is {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  label?: string | null;
+} {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.dayOfWeek === "number" &&
+    typeof v.startTime === "string" &&
+    typeof v.endTime === "string"
+  );
+}
+
+/**
+ * `jsonb_agg` over zero matching rows returns SQL `NULL` (the migration's own
+ * comment: deliberately not `coalesce`d in SQL). A dangling/malformed value
+ * degrades to `[]`, never a 500 — matches `isStoredSiteBundle`'s own
+ * degrade-gracefully posture for the content bundle (Phase 3 Edge Cases).
+ */
+function parseServiceTimeEntries(value: unknown): OrgServiceTimeEntry[] {
+  if (value === null || value === undefined) return [];
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isServiceTimeEntryShape).map((entry) => ({
+      dayOfWeek: entry.dayOfWeek,
+      startTime: entry.startTime,
+      endTime: entry.endTime,
+      label: entry.label ?? null,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 interface StoredSiteBundle {
@@ -226,6 +326,19 @@ export async function getPublishedSite(
       brand,
       pages: bundle.pages,
       imageKeys: bundle.imageKeys ?? {},
+      profile: {
+        address: row.profile_address,
+        phone: row.profile_phone,
+        social: {
+          facebook: row.profile_facebook_url,
+          instagram: row.profile_instagram_url,
+          xTwitter: row.profile_x_twitter_url,
+          youtube: row.profile_youtube_url,
+          other: row.profile_other_url,
+        },
+      },
+      serviceTimes: parseServiceTimeEntries(row.service_times),
+      officeHours: parseServiceTimeEntries(row.office_hours),
     },
   };
 }
@@ -420,6 +533,346 @@ export async function listSitesForAdmin(): Promise<SiteAdminListEntry[]> {
     lastIngestedAt: row.lastIngestedAt ? row.lastIngestedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Public-site profile + service times — getPlatformDb(),
+// FEATURES.ADMIN_ORGANIZATIONS (enforced one layer up, in actions.ts)
+// docs/work-log/2026-08-21-public-site-org-profile.md Phase 3 "API Contract",
+// DECISION-090/091/092.
+// ---------------------------------------------------------------------------
+
+export interface OrganizationProfileAdminDetail {
+  address: string | null;
+  phone: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  xTwitterUrl: string | null;
+  youtubeUrl: string | null;
+  otherUrl: string | null;
+  updatedAt: string | null;
+}
+
+export async function getOrganizationProfileAdminDetail(
+  organizationId: string,
+): Promise<OrganizationProfileAdminDetail | null> {
+  const platformDb = getPlatformDb();
+  const [row] = await platformDb
+    .select({
+      address: organizationProfiles.address,
+      phone: organizationProfiles.phone,
+      facebookUrl: organizationProfiles.facebookUrl,
+      instagramUrl: organizationProfiles.instagramUrl,
+      xTwitterUrl: organizationProfiles.xTwitterUrl,
+      youtubeUrl: organizationProfiles.youtubeUrl,
+      otherUrl: organizationProfiles.otherUrl,
+      updatedAt: organizationProfiles.updatedAt,
+    })
+    .from(organizationProfiles)
+    .where(eq(organizationProfiles.organizationId, organizationId))
+    .limit(1);
+  if (!row) return null;
+
+  return {
+    address: row.address,
+    phone: row.phone,
+    facebookUrl: row.facebookUrl,
+    instagramUrl: row.instagramUrl,
+    xTwitterUrl: row.xTwitterUrl,
+    youtubeUrl: row.youtubeUrl,
+    otherUrl: row.otherUrl,
+    updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
+  };
+}
+
+// App-level bounds only — no DB CHECK on these text columns (Phase 3 Data
+// Model, matching site_contact_messages.body's own precedent: international
+// address/phone formats vary too widely for a format CHECK to earn its keep).
+const MAX_ADDRESS_LEN = 500;
+const MAX_PHONE_LEN = 50;
+
+const SOCIAL_URL_FIELDS = [
+  { key: "facebookUrl", label: "Facebook" },
+  { key: "instagramUrl", label: "Instagram" },
+  { key: "xTwitterUrl", label: "X / Twitter" },
+  { key: "youtubeUrl", label: "YouTube" },
+  { key: "otherUrl", label: "Other link" },
+] as const;
+
+type SocialUrlKey = (typeof SOCIAL_URL_FIELDS)[number]["key"];
+
+/**
+ * A `facebookUrl` need not literally contain `facebook.com` (Phase 3 Data
+ * Model: "a custom Linktree-style URL in that field is legal") — well-
+ * formedness and an `http(s):` protocol are the whole check, never a
+ * platform-domain allowlist.
+ */
+function normalizeSocialUrl(
+  label: string,
+  raw: string,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return {
+      ok: false,
+      error: `Enter a valid ${label} URL, or leave it blank.`,
+    };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return {
+      ok: false,
+      error: `Enter a valid ${label} URL, or leave it blank.`,
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
+export type SetOrganizationProfileResult =
+  | { kind: "ok" }
+  | { kind: "invalid_input"; error: string };
+
+/**
+ * Upserts the one `organization_profiles` row for this org — degenerate PK,
+ * matching `organization_brands`' own upsert shape (no history row, per the
+ * user's Q6 resolution). Every input field is a plain string (FormData
+ * already flattened) — an empty string maps to `null` here, not in the
+ * caller, so any future non-FormData caller gets the same behavior for free.
+ */
+export async function setOrganizationProfile(
+  organizationId: string,
+  input: {
+    address: string;
+    phone: string;
+    facebookUrl: string;
+    instagramUrl: string;
+    xTwitterUrl: string;
+    youtubeUrl: string;
+    otherUrl: string;
+  },
+  actorUserId: string,
+): Promise<SetOrganizationProfileResult> {
+  const address = input.address.trim();
+  if (address.length > MAX_ADDRESS_LEN) {
+    return {
+      kind: "invalid_input",
+      error: `Address is too long (up to ${MAX_ADDRESS_LEN} characters).`,
+    };
+  }
+  const phone = input.phone.trim();
+  if (phone.length > MAX_PHONE_LEN) {
+    return {
+      kind: "invalid_input",
+      error: `Phone is too long (up to ${MAX_PHONE_LEN} characters).`,
+    };
+  }
+
+  const social: Record<SocialUrlKey, string | null> = {
+    facebookUrl: null,
+    instagramUrl: null,
+    xTwitterUrl: null,
+    youtubeUrl: null,
+    otherUrl: null,
+  };
+  for (const { key, label } of SOCIAL_URL_FIELDS) {
+    const result = normalizeSocialUrl(label, input[key]);
+    if (!result.ok) return { kind: "invalid_input", error: result.error };
+    social[key] = result.value;
+  }
+
+  const platformDb = getPlatformDb();
+  const values: typeof organizationProfiles.$inferInsert = {
+    organizationId,
+    address: address.length > 0 ? address : null,
+    phone: phone.length > 0 ? phone : null,
+    facebookUrl: social.facebookUrl,
+    instagramUrl: social.instagramUrl,
+    xTwitterUrl: social.xTwitterUrl,
+    youtubeUrl: social.youtubeUrl,
+    otherUrl: social.otherUrl,
+    updatedBy: actorUserId,
+  };
+
+  await platformDb
+    .insert(organizationProfiles)
+    .values(values)
+    .onConflictDoUpdate({
+      target: organizationProfiles.organizationId,
+      set: {
+        address: values.address,
+        phone: values.phone,
+        facebookUrl: values.facebookUrl,
+        instagramUrl: values.instagramUrl,
+        xTwitterUrl: values.xTwitterUrl,
+        youtubeUrl: values.youtubeUrl,
+        otherUrl: values.otherUrl,
+        updatedBy: actorUserId,
+        updatedAt: new Date(),
+      },
+    });
+
+  return { kind: "ok" };
+}
+
+export interface ServiceTimeAdminEntry {
+  id: string;
+  kind: "service" | "office_hours";
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  label: string | null;
+}
+
+/**
+ * Both kinds, ordered `(kind, day_of_week, start_time)` — the page splits by
+ * `kind` for the two independent `TimeRowsEditor` instances.
+ */
+export async function listOrganizationServiceTimes(
+  organizationId: string,
+): Promise<ServiceTimeAdminEntry[]> {
+  const platformDb = getPlatformDb();
+  const rows = await platformDb
+    .select({
+      id: organizationServiceTimes.id,
+      kind: organizationServiceTimes.kind,
+      dayOfWeek: organizationServiceTimes.dayOfWeek,
+      startTime: organizationServiceTimes.startTime,
+      endTime: organizationServiceTimes.endTime,
+      label: organizationServiceTimes.label,
+    })
+    .from(organizationServiceTimes)
+    .where(eq(organizationServiceTimes.organizationId, organizationId))
+    .orderBy(
+      organizationServiceTimes.kind,
+      organizationServiceTimes.dayOfWeek,
+      organizationServiceTimes.startTime,
+    );
+
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind as "service" | "office_hours",
+    dayOfWeek: row.dayOfWeek,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    label: row.label,
+  }));
+}
+
+const DAY_OF_WEEK_LABELS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+// "HH:MM" (native <input type="time">'s own format) or "HH:MM:SS".
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+const MAX_LABEL_LEN = 100;
+
+export type ReplaceServiceTimesResult =
+  | { kind: "ok" }
+  | { kind: "invalid_input"; error: string };
+
+/**
+ * Whole-list replace per `(organizationId, kind)` — DECISION-092, not
+ * per-row diffed CRUD. One transaction: delete every existing row for this
+ * `(organizationId, kind)` pair, then insert the submitted rows (skipped
+ * entirely if `rows.length === 0` — "save an empty list" is a legal way to
+ * clear a kind, per Phase 3 Edge Cases; no confirmation step, matching that
+ * same Edge Cases entry).
+ *
+ * Cross-row overlap is deliberately NOT validated here either — only mirrors
+ * the DB's own per-row `end_time > start_time` CHECK, at the app layer, so a
+ * malformed row bounces with a readable message instead of a raw constraint
+ * violation.
+ */
+export async function replaceOrganizationServiceTimes(
+  organizationId: string,
+  kind: "service" | "office_hours",
+  rows: Array<{
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+    label: string | null;
+  }>,
+  actorUserId: string,
+): Promise<ReplaceServiceTimesResult> {
+  const normalizedRows: Array<{
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+    label: string | null;
+  }> = [];
+
+  for (const row of rows) {
+    if (
+      !Number.isInteger(row.dayOfWeek) ||
+      row.dayOfWeek < 0 ||
+      row.dayOfWeek > 6
+    ) {
+      return {
+        kind: "invalid_input",
+        error: "Choose a day of the week for every row.",
+      };
+    }
+    if (!TIME_RE.test(row.startTime) || !TIME_RE.test(row.endTime)) {
+      return {
+        kind: "invalid_input",
+        error: "Enter a start and end time for every row.",
+      };
+    }
+    if (row.endTime <= row.startTime) {
+      return {
+        kind: "invalid_input",
+        error: `End time must be after start time (${DAY_OF_WEEK_LABELS[row.dayOfWeek]}).`,
+      };
+    }
+    const label = row.label?.trim() || null;
+    if (label && label.length > MAX_LABEL_LEN) {
+      return {
+        kind: "invalid_input",
+        error: `Label is too long (up to ${MAX_LABEL_LEN} characters).`,
+      };
+    }
+    normalizedRows.push({
+      dayOfWeek: row.dayOfWeek,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      label,
+    });
+  }
+
+  const platformDb = getPlatformDb();
+  await platformDb.transaction(async (tx) => {
+    await tx
+      .delete(organizationServiceTimes)
+      .where(
+        and(
+          eq(organizationServiceTimes.organizationId, organizationId),
+          eq(organizationServiceTimes.kind, kind),
+        ),
+      );
+    if (normalizedRows.length > 0) {
+      await tx.insert(organizationServiceTimes).values(
+        normalizedRows.map((row) => ({
+          organizationId,
+          kind,
+          dayOfWeek: row.dayOfWeek,
+          startTime: row.startTime,
+          endTime: row.endTime,
+          label: row.label,
+          updatedBy: actorUserId,
+        })),
+      );
+    }
+  });
+
+  return { kind: "ok" };
 }
 
 // ---------------------------------------------------------------------------

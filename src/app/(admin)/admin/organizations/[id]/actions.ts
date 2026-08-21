@@ -19,7 +19,12 @@ import {
   BlobValidationError,
   type BlobRef,
 } from "@/lib/storage/blob-store";
-import { provisionSite, setSiteStatus } from "@/lib/sites";
+import {
+  provisionSite,
+  setSiteStatus,
+  setOrganizationProfile,
+  replaceOrganizationServiceTimes,
+} from "@/lib/sites";
 
 /**
  * The platform operator's brand actions — P0.5 slice c2 (Phase 3 re-run,
@@ -510,6 +515,147 @@ export async function setSiteStatusAction(
   if (orgRow) {
     revalidatePath(`/site/${orgRow.slug}`, "layout");
   }
+
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Public-site profile + service times (docs/work-log/2026-08-21-public-site-
+// org-profile.md Phase 3 "API Contract") — thin wrappers over
+// src/lib/sites.ts's setOrganizationProfile/replaceOrganizationServiceTimes,
+// matching provisionSiteAction/setSiteStatusAction's wrapping pattern (not
+// setOrganizationBrandAction's own inline-query pattern) per Phase 3's
+// explicit placement ruling: this data is "sites" domain, not "org brand"
+// domain. No recordAudit call in either action — deliberate, not an
+// oversight (Phase 1 Gap 8 / Phase 3 Edge Cases: routine content editing,
+// not an access-control mutation, matching markSiteContactMessageReadAction's
+// identical posture, DECISION-089).
+// ---------------------------------------------------------------------------
+
+/**
+ * FormData fields: `organizationId` (uuid), `address`, `phone`,
+ * `facebookUrl`, `instagramUrl`, `xTwitterUrl`, `youtubeUrl`, `otherUrl`
+ * (all optional strings — empty maps to `null` inside setOrganizationProfile,
+ * not here).
+ */
+export async function setOrganizationProfileAction(
+  formData: FormData,
+): Promise<PolicyResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) {
+    return { ok: false, error: "Invalid organization." };
+  }
+
+  const field = (name: string) => String(formData.get(name) ?? "");
+
+  const result = await setOrganizationProfile(
+    organizationId,
+    {
+      address: field("address"),
+      phone: field("phone"),
+      facebookUrl: field("facebookUrl"),
+      instagramUrl: field("instagramUrl"),
+      xTwitterUrl: field("xTwitterUrl"),
+      youtubeUrl: field("youtubeUrl"),
+      otherUrl: field("otherUrl"),
+    },
+    session.user.id,
+  );
+  if (result.kind === "invalid_input") {
+    return { ok: false, error: result.error };
+  }
+
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  const platformDb = getPlatformDb();
+  await revalidateLiveSitePath(platformDb, organizationId);
+
+  return { ok: true };
+}
+
+const SERVICE_TIME_KINDS = ["service", "office_hours"] as const;
+type ServiceTimeKind = (typeof SERVICE_TIME_KINDS)[number];
+
+function isServiceTimeKind(value: string): value is ServiceTimeKind {
+  return (SERVICE_TIME_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Whole-list replace per `(organizationId, kind)` — DECISION-092. FormData
+ * fields: `organizationId` (uuid), `kind` (`"service"` | `"office_hours"`),
+ * `rows` (JSON string: `Array<{ dayOfWeek, startTime, endTime, label }>`).
+ * All row-shape/CHECK-mirroring validation lives in
+ * `replaceOrganizationServiceTimes` — this wrapper's own parsing is limited
+ * to "is this even well-formed JSON naming the right fields," never a
+ * duplicate of the domain validation.
+ */
+export async function setOrganizationServiceTimesAction(
+  formData: FormData,
+): Promise<PolicyResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) {
+    return { ok: false, error: "Invalid organization." };
+  }
+
+  const kindRaw = String(formData.get("kind") ?? "");
+  if (!isServiceTimeKind(kindRaw)) {
+    return { ok: false, error: "Invalid kind." };
+  }
+
+  const rowsRaw = String(formData.get("rows") ?? "[]");
+  let parsedRows: unknown;
+  try {
+    parsedRows = JSON.parse(rowsRaw);
+  } catch {
+    return { ok: false, error: "Malformed row data." };
+  }
+  if (!Array.isArray(parsedRows)) {
+    return { ok: false, error: "Malformed row data." };
+  }
+
+  const rows: Array<{
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+    label: string | null;
+  }> = [];
+  for (const raw of parsedRows) {
+    if (typeof raw !== "object" || raw === null) {
+      return { ok: false, error: "Malformed row data." };
+    }
+    const r = raw as Record<string, unknown>;
+    rows.push({
+      dayOfWeek: Number(r.dayOfWeek),
+      startTime: String(r.startTime ?? ""),
+      endTime: String(r.endTime ?? ""),
+      label: r.label ? String(r.label) : null,
+    });
+  }
+
+  const result = await replaceOrganizationServiceTimes(
+    organizationId,
+    kindRaw,
+    rows,
+    session.user.id,
+  );
+  if (result.kind === "invalid_input") {
+    return { ok: false, error: result.error };
+  }
+
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  const platformDb = getPlatformDb();
+  await revalidateLiveSitePath(platformDb, organizationId);
 
   return { ok: true };
 }

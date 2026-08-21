@@ -82,9 +82,15 @@ vi.mock("@/lib/db", () => ({ getPlatformDb: mockGetPlatformDb }));
 // `next/font/google` import path in a plain Node vitest environment.
 const mockProvisionSite = vi.hoisted(() => vi.fn());
 const mockSetSiteStatus = vi.hoisted(() => vi.fn());
+const mockSetOrganizationProfile = vi.hoisted(() => vi.fn());
+const mockReplaceOrganizationServiceTimes = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/sites", () => ({
   provisionSite: (...args: unknown[]) => mockProvisionSite(...args),
   setSiteStatus: (...args: unknown[]) => mockSetSiteStatus(...args),
+  setOrganizationProfile: (...args: unknown[]) =>
+    mockSetOrganizationProfile(...args),
+  replaceOrganizationServiceTimes: (...args: unknown[]) =>
+    mockReplaceOrganizationServiceTimes(...args),
 }));
 
 // A PRE-EXISTING circular import (org.ts -> schema.ts -> domain/index.ts ->
@@ -106,6 +112,8 @@ import {
   neutralizeOrganizationBrandAction,
   provisionSiteAction,
   setSiteStatusAction,
+  setOrganizationProfileAction,
+  setOrganizationServiceTimesAction,
 } from "./actions";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { FEATURES } from "@/lib/permissions";
@@ -186,6 +194,8 @@ beforeEach(() => {
   });
   mockProvisionSite.mockResolvedValue({ kind: "ok" });
   mockSetSiteStatus.mockResolvedValue({ kind: "ok" });
+  mockSetOrganizationProfile.mockResolvedValue({ kind: "ok" });
+  mockReplaceOrganizationServiceTimes.mockResolvedValue({ kind: "ok" });
 });
 
 // ---------------------------------------------------------------------------
@@ -807,5 +817,209 @@ describe("setSiteStatusAction — input validation and result mapping", () => {
     );
     expect(result).toEqual({ ok: true });
     expect(mockSetSiteStatus).toHaveBeenCalledWith(VALID_ORG, "live", "operator-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setOrganizationProfileAction / setOrganizationServiceTimesAction
+// (docs/work-log/2026-08-21-public-site-org-profile.md Phase 3 "API
+// Contract") — thin wrappers over @/lib/sites' setOrganizationProfile/
+// replaceOrganizationServiceTimes, mocked here; SQL correctness and
+// validation both live in sites.test.ts.
+// ---------------------------------------------------------------------------
+
+describe("setOrganizationProfileAction — authorization", () => {
+  it("rejects an unauthenticated caller without calling setOrganizationProfile", async () => {
+    mockAuth.mockResolvedValue(null);
+    const result = await setOrganizationProfileAction(
+      formData({ organizationId: VALID_ORG, address: "1 Fixture Way" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockSetOrganizationProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in user lacking admin.organizations", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+    const result = await setOrganizationProfileAction(
+      formData({ organizationId: VALID_ORG, address: "1 Fixture Way" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockSetOrganizationProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid organizationId without calling setOrganizationProfile", async () => {
+    const result = await setOrganizationProfileAction(
+      formData({ organizationId: "not-a-uuid" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockSetOrganizationProfile).not.toHaveBeenCalled();
+  });
+});
+
+describe("setOrganizationProfileAction — result mapping", () => {
+  it("passes every field through as plain strings, empty when absent from the FormData", async () => {
+    await setOrganizationProfileAction(
+      formData({ organizationId: VALID_ORG, address: "1 Fixture Way", facebookUrl: "https://facebook.com/fixture" }),
+    );
+    expect(mockSetOrganizationProfile).toHaveBeenCalledWith(
+      VALID_ORG,
+      {
+        address: "1 Fixture Way",
+        phone: "",
+        facebookUrl: "https://facebook.com/fixture",
+        instagramUrl: "",
+        xTwitterUrl: "",
+        youtubeUrl: "",
+        otherUrl: "",
+      },
+      "operator-1",
+    );
+  });
+
+  it("maps invalid_input to a client-visible error, writes no audit row", async () => {
+    mockSetOrganizationProfile.mockResolvedValue({
+      kind: "invalid_input",
+      error: "Enter a valid Facebook URL, or leave it blank.",
+    });
+    const result = await setOrganizationProfileAction(
+      formData({ organizationId: VALID_ORG, facebookUrl: "not a url" }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "Enter a valid Facebook URL, or leave it blank.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("on success, revalidates the admin page and writes no audit row (routine content editing, DECISION-089's posture)", async () => {
+    const result = await setOrganizationProfileAction(
+      formData({ organizationId: VALID_ORG, address: "1 Fixture Way" }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("on success, revalidates the public site path when the site is live", async () => {
+    mockLimit.mockResolvedValue([{ slug: "alder-creek", siteStatus: "live" }]);
+    await setOrganizationProfileAction(
+      formData({ organizationId: VALID_ORG, address: "1 Fixture Way" }),
+    );
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/site/alder-creek", "layout");
+  });
+});
+
+describe("setOrganizationServiceTimesAction — authorization", () => {
+  it("rejects an unauthenticated caller without calling replaceOrganizationServiceTimes", async () => {
+    mockAuth.mockResolvedValue(null);
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: VALID_ORG, kind: "service", rows: "[]" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockReplaceOrganizationServiceTimes).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in user lacking admin.organizations", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: VALID_ORG, kind: "service", rows: "[]" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockReplaceOrganizationServiceTimes).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid organizationId without calling replaceOrganizationServiceTimes", async () => {
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: "not-a-uuid", kind: "service", rows: "[]" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockReplaceOrganizationServiceTimes).not.toHaveBeenCalled();
+  });
+});
+
+describe("setOrganizationServiceTimesAction — kind and rows parsing", () => {
+  it.each(["", "office-hours", "worship"])(
+    "rejects a kind outside service/office_hours (%s) without calling replaceOrganizationServiceTimes",
+    async (kind) => {
+      const result = await setOrganizationServiceTimesAction(
+        formData({ organizationId: VALID_ORG, kind, rows: "[]" }),
+      );
+      expect(result).toEqual({ ok: false, error: "Invalid kind." });
+      expect(mockReplaceOrganizationServiceTimes).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects malformed JSON in rows without calling replaceOrganizationServiceTimes", async () => {
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: VALID_ORG, kind: "service", rows: "not json" }),
+    );
+    expect(result).toEqual({ ok: false, error: "Malformed row data." });
+    expect(mockReplaceOrganizationServiceTimes).not.toHaveBeenCalled();
+  });
+
+  it("rejects rows that parse to a non-array", async () => {
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: VALID_ORG, kind: "service", rows: '{"not":"an array"}' }),
+    );
+    expect(result).toEqual({ ok: false, error: "Malformed row data." });
+    expect(mockReplaceOrganizationServiceTimes).not.toHaveBeenCalled();
+  });
+
+  it("parses well-formed rows and passes organizationId, kind, rows, actorUserId through", async () => {
+    const rows = [
+      { dayOfWeek: 0, startTime: "10:15", endTime: "11:15", label: "Traditional" },
+      { dayOfWeek: 0, startTime: "09:00", endTime: "10:00", label: null },
+    ];
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: VALID_ORG, kind: "service", rows: JSON.stringify(rows) }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mockReplaceOrganizationServiceTimes).toHaveBeenCalledWith(
+      VALID_ORG,
+      "service",
+      rows,
+      "operator-1",
+    );
+  });
+
+  it("maps invalid_input to a client-visible error, writes no audit row", async () => {
+    mockReplaceOrganizationServiceTimes.mockResolvedValue({
+      kind: "invalid_input",
+      error: "End time must be after start time (Sunday).",
+    });
+    const result = await setOrganizationServiceTimesAction(
+      formData({
+        organizationId: VALID_ORG,
+        kind: "service",
+        rows: JSON.stringify([{ dayOfWeek: 0, startTime: "11:00", endTime: "10:00", label: null }]),
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "End time must be after start time (Sunday).",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("an empty rows array is a legal submission (clears a kind)", async () => {
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: VALID_ORG, kind: "office_hours", rows: "[]" }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mockReplaceOrganizationServiceTimes).toHaveBeenCalledWith(
+      VALID_ORG,
+      "office_hours",
+      [],
+      "operator-1",
+    );
+  });
+
+  it("on success, revalidates the admin page and writes no audit row", async () => {
+    const result = await setOrganizationServiceTimesAction(
+      formData({ organizationId: VALID_ORG, kind: "service", rows: "[]" }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+    expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });

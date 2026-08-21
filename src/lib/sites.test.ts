@@ -52,6 +52,10 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   let submitSiteContactMessage: typeof import("./sites").submitSiteContactMessage;
   let listSiteContactMessages: typeof import("./sites").listSiteContactMessages;
   let markSiteContactMessageRead: typeof import("./sites").markSiteContactMessageRead;
+  let getOrganizationProfileAdminDetail: typeof import("./sites").getOrganizationProfileAdminDetail;
+  let setOrganizationProfile: typeof import("./sites").setOrganizationProfile;
+  let listOrganizationServiceTimes: typeof import("./sites").listOrganizationServiceTimes;
+  let replaceOrganizationServiceTimes: typeof import("./sites").replaceOrganizationServiceTimes;
 
   let db: typeof import("@/lib/db").db;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
@@ -102,6 +106,10 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       submitSiteContactMessage,
       listSiteContactMessages,
       markSiteContactMessageRead,
+      getOrganizationProfileAdminDetail,
+      setOrganizationProfile,
+      listOrganizationServiceTimes,
+      replaceOrganizationServiceTimes,
     } = await import("./sites"));
     ({ db, getPlatformDb } = await import("@/lib/db"));
     ({ organizations } = await import("@/lib/db/domain/org"));
@@ -364,6 +372,25 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       // No organization_brands row exists for this fixture — brand must be
       // null regardless of ui.brand_theming, never a crash.
       expect(result.site.brand).toBeNull();
+      // No organization_profiles / organization_service_times rows exist for
+      // this fixture either (yet — see the admin-CRUD describe block near
+      // the end of this file, which sets rows for THIS SAME org and re-reads
+      // through getPublishedSite, run after this test). Every leaf here must
+      // independently be null/[] — the object itself is never absent (Phase
+      // 1 Gap 6 / Phase 3 API Contract's hard requirement).
+      expect(result.site.profile).toEqual({
+        address: null,
+        phone: null,
+        social: {
+          facebook: null,
+          instagram: null,
+          xTwitter: null,
+          youtube: null,
+          other: null,
+        },
+      });
+      expect(result.site.serviceTimes).toEqual([]);
+      expect(result.site.officeHours).toEqual([]);
     });
 
     it("provisioning (never ingested) org: not_found", async () => {
@@ -774,6 +801,340 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       if (after.kind !== "ok") throw new Error("fixture setup error");
       const updated = after.messages.find((m) => m.messageId === target.messageId);
       expect(updated?.status).toBe("read");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Admin profile + service-times CRUD (docs/work-log/2026-08-21-public-
+  // site-org-profile.md Phase 4 commit 2) — getPlatformDb(), no membership
+  // check (the actions.ts layer enforces FEATURES.ADMIN_ORGANIZATIONS one
+  // level up, same as provisionSite/setSiteStatus above). Operates on
+  // orgUnprovisioned (a plain org with no organization_sites row at all) for
+  // the CRUD-shape assertions — profile/service-times data has no
+  // dependency on a site existing. `organizations` ON DELETE CASCADEs
+  // through both new tables, so afterAll's own org deletion is sufficient
+  // cleanup; nothing extra to tear down here.
+  // ---------------------------------------------------------------------
+
+  describe("getOrganizationProfileAdminDetail / setOrganizationProfile", () => {
+    it("returns null when no row exists yet", async () => {
+      const result = await getOrganizationProfileAdminDetail(orgUnprovisioned);
+      expect(result).toBeNull();
+    });
+
+    it("rejects an address over the length bound without writing", async () => {
+      const result = await setOrganizationProfile(
+        orgUnprovisioned,
+        {
+          address: "x".repeat(501),
+          phone: "",
+          facebookUrl: "",
+          instagramUrl: "",
+          xTwitterUrl: "",
+          youtubeUrl: "",
+          otherUrl: "",
+        },
+        grantingUserId,
+      );
+      expect(result.kind).toBe("invalid_input");
+      const after = await getOrganizationProfileAdminDetail(orgUnprovisioned);
+      expect(after).toBeNull();
+    });
+
+    it("rejects a malformed social URL, naming the specific field", async () => {
+      const result = await setOrganizationProfile(
+        orgUnprovisioned,
+        {
+          address: "",
+          phone: "",
+          facebookUrl: "not a url",
+          instagramUrl: "",
+          xTwitterUrl: "",
+          youtubeUrl: "",
+          otherUrl: "",
+        },
+        grantingUserId,
+      );
+      expect(result).toEqual({
+        kind: "invalid_input",
+        error: "Enter a valid Facebook URL, or leave it blank.",
+      });
+    });
+
+    it("rejects a non-http(s) URL scheme", async () => {
+      const result = await setOrganizationProfile(
+        orgUnprovisioned,
+        {
+          address: "",
+          phone: "",
+          facebookUrl: "",
+          instagramUrl: "",
+          xTwitterUrl: "",
+          youtubeUrl: "",
+          otherUrl: "javascript:alert(1)",
+        },
+        grantingUserId,
+      );
+      expect(result).toEqual({
+        kind: "invalid_input",
+        error: "Enter a valid Other link URL, or leave it blank.",
+      });
+    });
+
+    it("upserts a full row, empty strings map to null, and it round-trips through getOrganizationProfileAdminDetail", async () => {
+      const result = await setOrganizationProfile(
+        orgUnprovisioned,
+        {
+          address: "123 Fixture Ln",
+          phone: "555-0100",
+          facebookUrl: "https://facebook.com/fixture",
+          instagramUrl: "",
+          xTwitterUrl: "",
+          youtubeUrl: "",
+          otherUrl: "",
+        },
+        grantingUserId,
+      );
+      expect(result).toEqual({ kind: "ok" });
+
+      const detail = await getOrganizationProfileAdminDetail(orgUnprovisioned);
+      expect(detail).toMatchObject({
+        address: "123 Fixture Ln",
+        phone: "555-0100",
+        facebookUrl: "https://facebook.com/fixture",
+        instagramUrl: null,
+        xTwitterUrl: null,
+        youtubeUrl: null,
+        otherUrl: null,
+      });
+      expect(detail?.updatedAt).not.toBeNull();
+    });
+
+    it("a second call upserts (updates), it does not insert a second row", async () => {
+      await setOrganizationProfile(
+        orgUnprovisioned,
+        {
+          address: "456 Second Fixture Ave",
+          phone: "",
+          facebookUrl: "",
+          instagramUrl: "",
+          xTwitterUrl: "",
+          youtubeUrl: "",
+          otherUrl: "",
+        },
+        grantingUserId,
+      );
+      const detail = await getOrganizationProfileAdminDetail(orgUnprovisioned);
+      expect(detail?.address).toBe("456 Second Fixture Ave");
+      expect(detail?.phone).toBeNull();
+    });
+  });
+
+  describe("listOrganizationServiceTimes / replaceOrganizationServiceTimes", () => {
+    it("returns [] when no rows exist yet", async () => {
+      const result = await listOrganizationServiceTimes(orgProvisioning);
+      expect(result).toEqual([]);
+    });
+
+    it("rejects an out-of-range dayOfWeek without writing", async () => {
+      const result = await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "service",
+        [{ dayOfWeek: 7, startTime: "10:00", endTime: "11:00", label: null }],
+        grantingUserId,
+      );
+      expect(result).toEqual({
+        kind: "invalid_input",
+        error: "Choose a day of the week for every row.",
+      });
+      expect(await listOrganizationServiceTimes(orgProvisioning)).toEqual([]);
+    });
+
+    it("rejects a malformed time string", async () => {
+      const result = await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "service",
+        [{ dayOfWeek: 0, startTime: "not-a-time", endTime: "11:00", label: null }],
+        grantingUserId,
+      );
+      expect(result).toEqual({
+        kind: "invalid_input",
+        error: "Enter a start and end time for every row.",
+      });
+    });
+
+    it("rejects end time not after start time, naming the day", async () => {
+      const result = await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "service",
+        [{ dayOfWeek: 0, startTime: "11:00", endTime: "10:00", label: null }],
+        grantingUserId,
+      );
+      expect(result).toEqual({
+        kind: "invalid_input",
+        error: "End time must be after start time (Sunday).",
+      });
+    });
+
+    it("inserts rows for one kind, listable back in (kind, day, start) order", async () => {
+      const result = await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "service",
+        [
+          { dayOfWeek: 0, startTime: "11:00", endTime: "12:00", label: "Traditional" },
+          { dayOfWeek: 0, startTime: "09:00", endTime: "10:00", label: "Contemporary" },
+        ],
+        grantingUserId,
+      );
+      expect(result).toEqual({ kind: "ok" });
+
+      const rows = await listOrganizationServiceTimes(orgProvisioning);
+      const serviceRows = rows.filter((r) => r.kind === "service");
+      expect(serviceRows).toHaveLength(2);
+      // Ordered by start_time within the same day — 09:00 before 11:00.
+      expect(serviceRows[0]).toMatchObject({
+        dayOfWeek: 0,
+        startTime: "09:00:00",
+        endTime: "10:00:00",
+        label: "Contemporary",
+      });
+      expect(serviceRows[1]).toMatchObject({
+        dayOfWeek: 0,
+        startTime: "11:00:00",
+        endTime: "12:00:00",
+        label: "Traditional",
+      });
+    });
+
+    it("a second replace for the SAME kind clears the first set (whole-list replace, DECISION-092)", async () => {
+      const result = await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "service",
+        [{ dayOfWeek: 3, startTime: "18:00", endTime: "19:00", label: "Wednesday night" }],
+        grantingUserId,
+      );
+      expect(result).toEqual({ kind: "ok" });
+
+      const rows = await listOrganizationServiceTimes(orgProvisioning);
+      const serviceRows = rows.filter((r) => r.kind === "service");
+      expect(serviceRows).toHaveLength(1);
+      expect(serviceRows[0]).toMatchObject({ dayOfWeek: 3, label: "Wednesday night" });
+    });
+
+    it("replacing with an empty list clears every row of that kind — a legal 'clear all'", async () => {
+      const result = await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "service",
+        [],
+        grantingUserId,
+      );
+      expect(result).toEqual({ kind: "ok" });
+      expect(await listOrganizationServiceTimes(orgProvisioning)).toEqual([]);
+    });
+
+    it("service and office_hours are independent kinds — replacing one never touches the other", async () => {
+      await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "service",
+        [{ dayOfWeek: 0, startTime: "10:00", endTime: "11:00", label: null }],
+        grantingUserId,
+      );
+      await replaceOrganizationServiceTimes(
+        orgProvisioning,
+        "office_hours",
+        [{ dayOfWeek: 1, startTime: "09:00", endTime: "17:00", label: "Front office" }],
+        grantingUserId,
+      );
+
+      const rows = await listOrganizationServiceTimes(orgProvisioning);
+      expect(rows.filter((r) => r.kind === "service")).toHaveLength(1);
+      expect(rows.filter((r) => r.kind === "office_hours")).toHaveLength(1);
+
+      // Clearing "service" leaves "office_hours" alone.
+      await replaceOrganizationServiceTimes(orgProvisioning, "service", [], grantingUserId);
+      const after = await listOrganizationServiceTimes(orgProvisioning);
+      expect(after.filter((r) => r.kind === "service")).toHaveLength(0);
+      expect(after.filter((r) => r.kind === "office_hours")).toHaveLength(1);
+
+      // Clean up — leave orgProvisioning's fixture state as this describe
+      // block found it, since it's shared with earlier describe blocks in
+      // this file (afterAll's cascade delete would clean it anyway, but this
+      // keeps the fixture's own invariants true for any test added later in
+      // this file, matching setSiteStatus's own "restore fixture state"
+      // precedent above).
+      await replaceOrganizationServiceTimes(orgProvisioning, "office_hours", [], grantingUserId);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // getPublishedSite — profile/service-times data flows through the SAME
+  // SECURITY DEFINER function, never a second query (Phase 1 Gap 5). Runs
+  // LAST and against orgLive specifically because the "getPublishedSite —
+  // enumeration safety" describe block above asserts orgLive's profile is
+  // all-null BEFORE this describe block ever writes to it — vitest runs
+  // `it`/`describe` blocks in file order within one file, so that ordering
+  // is load-bearing, not incidental.
+  // ---------------------------------------------------------------------
+
+  describe("getPublishedSite — populated profile/service-times flow through", () => {
+    it("a full organization_profiles row and both service-time kinds all appear in the published site read", async () => {
+      const profileResult = await setOrganizationProfile(
+        orgLive,
+        {
+          address: "1 Fixture Way",
+          phone: "555-0199",
+          facebookUrl: "https://facebook.com/fixture-live",
+          instagramUrl: "https://instagram.com/fixture-live",
+          xTwitterUrl: "",
+          youtubeUrl: "",
+          otherUrl: "",
+        },
+        grantingUserId,
+      );
+      expect(profileResult).toEqual({ kind: "ok" });
+
+      const serviceResult = await replaceOrganizationServiceTimes(
+        orgLive,
+        "service",
+        [{ dayOfWeek: 0, startTime: "10:15", endTime: "11:15", label: "Sunday worship" }],
+        grantingUserId,
+      );
+      expect(serviceResult).toEqual({ kind: "ok" });
+
+      const officeHoursResult = await replaceOrganizationServiceTimes(
+        orgLive,
+        "office_hours",
+        [{ dayOfWeek: 2, startTime: "09:00", endTime: "12:00", label: null }],
+        grantingUserId,
+      );
+      expect(officeHoursResult).toEqual({ kind: "ok" });
+
+      const published = await getPublishedSite(orgLiveSlug);
+      expect(published.kind).toBe("ok");
+      if (published.kind !== "ok") return;
+
+      expect(published.site.profile).toEqual({
+        address: "1 Fixture Way",
+        phone: "555-0199",
+        social: {
+          facebook: "https://facebook.com/fixture-live",
+          instagram: "https://instagram.com/fixture-live",
+          xTwitter: null,
+          youtube: null,
+          other: null,
+        },
+      });
+      expect(published.site.serviceTimes).toEqual([
+        {
+          dayOfWeek: 0,
+          startTime: "10:15:00",
+          endTime: "11:15:00",
+          label: "Sunday worship",
+        },
+      ]);
+      expect(published.site.officeHours).toEqual([
+        { dayOfWeek: 2, startTime: "09:00:00", endTime: "12:00:00", label: null },
+      ]);
     });
   });
 });

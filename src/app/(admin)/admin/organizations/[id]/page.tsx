@@ -13,10 +13,16 @@ import {
   platformSchemeTokens,
 } from "@/components/brand/brand-preview-swatch";
 import { OrgMark } from "@/components/brand/org-mark";
-import { getSiteAdminDetail } from "@/lib/sites";
+import {
+  getSiteAdminDetail,
+  getOrganizationProfileAdminDetail,
+  listOrganizationServiceTimes,
+} from "@/lib/sites";
 import { BrandForm } from "./brand-form";
 import { NeutralizeDialog } from "./neutralize-dialog";
 import { SiteSection } from "./site-section";
+import { ProfileForm } from "./profile-form";
+import { ServiceTimesSection } from "./service-times-section";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,6 +79,12 @@ export default async function OrganizationBrandDetailPage({
   if (!org) notFound();
 
   const siteDetail = await getSiteAdminDetail(id);
+  const profileDetail = await getOrganizationProfileAdminDetail(id);
+  const serviceTimes = await listOrganizationServiceTimes(id);
+  const serviceEntries = serviceTimes.filter((entry) => entry.kind === "service");
+  const officeHoursEntries = serviceTimes.filter(
+    (entry) => entry.kind === "office_hours",
+  );
 
   const [brand] = await platformDb
     .select({
@@ -167,6 +179,30 @@ export default async function OrganizationBrandDetailPage({
           />
         </div>
       </section>
+
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Profile
+        </h2>
+        <div className="mt-3">
+          <ProfileForm
+            organizationId={id}
+            initialAddress={profileDetail?.address ?? null}
+            initialPhone={profileDetail?.phone ?? null}
+            initialFacebookUrl={profileDetail?.facebookUrl ?? null}
+            initialInstagramUrl={profileDetail?.instagramUrl ?? null}
+            initialXTwitterUrl={profileDetail?.xTwitterUrl ?? null}
+            initialYoutubeUrl={profileDetail?.youtubeUrl ?? null}
+            initialOtherUrl={profileDetail?.otherUrl ?? null}
+          />
+        </div>
+      </section>
+
+      <ServiceTimesSection
+        organizationId={id}
+        serviceEntries={serviceEntries}
+        officeHoursEntries={officeHoursEntries}
+      />
 
       <SiteSection
         organizationId={id}

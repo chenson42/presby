@@ -826,3 +826,85 @@ begin;
     (select count(*) from presby_published_site('never-provisioned-church')),
     0, 'presby_published_site: a slug with no organization_sites row at all returns zero rows, indistinguishable from provisioning');
 commit;
+
+-- ---------------------------------------------------------------------------
+-- 17. Public-site org profile data. organization_profiles (DECISION-090)
+--     and organization_service_times (DECISION-091) —
+--     drizzle/0021_presby_site_profile.sql.
+--
+--     Unlike section 16's asymmetric pair, BOTH tables here get a real
+--     presby_app grant (DECISION-090 — forward-looking, ahead of the
+--     deferred tenant-editor), so the shape is section 14's ordinary
+--     FORCE-RLS tenant-isolation test for both, not the "no grant at all"
+--     insufficient_privilege test section 16 needed for organization_sites.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq((select count(*) from organization_profiles), 0,
+                   'unset GUC: organization_profiles invisible');
+  select assert_eq((select count(*) from organization_service_times), 0,
+                   'unset GUC: organization_service_times invisible');
+commit;
+
+-- Creates its own rows (Phase 4 seeds none for this fixture yet) inside a
+-- rolled-back transaction, same discipline as section 16's
+-- site_contact_messages block.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into organization_profiles (organization_id, address, phone, updated_by)
+  values (:ALDER, '123 Fixture Lane, Example, ST 00000', '555-0100',
+          (select id from users limit 1));
+  select assert_eq((select count(*) from organization_profiles), 1,
+                   'alder: sees its own profile row');
+
+  insert into organization_service_times
+    (organization_id, kind, day_of_week, start_time, end_time, label, updated_by)
+  values (:ALDER, 'service', 0, '10:15', '11:15', 'Fixture Service',
+          (select id from users limit 1));
+  select assert_eq((select count(*) from organization_service_times), 1,
+                   'alder: sees its own service-time row');
+
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from organization_profiles), 0,
+                   'bramblewood: sees no alder profile row');
+  select assert_eq((select count(*) from organization_service_times), 0,
+                   'bramblewood: sees no alder service-time rows');
+rollback;
+
+-- FORCE RLS specifically (F1) on both new tables.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('organization_profiles', 'organization_service_times')
+        and relforcerowsecurity),
+    2, 'public-site profile tables: FORCE row level security is set on both');
+commit;
+
+-- The presby_app grant shape, proven directly rather than assumed from the
+-- migration's own comment — same discipline that verified organization_sites'
+-- asymmetric NO grant in section 16, applied here to prove the opposite:
+-- full select/insert/update/delete IS granted.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_profiles'
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    4, 'organization_profiles: presby_app has full select/insert/update/delete');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_service_times'
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    4, 'organization_service_times: presby_app has full select/insert/update/delete');
+commit;
+
+-- NOTE: this suite does NOT attempt to flip alder-creek's organization_sites
+-- row to 'live' and re-check presby_published_site() here — presby_app has
+-- NO grant at all on organization_sites (DECISION-081, section 16), so an
+-- UPDATE from inside this presby_app-only suite would fail with
+-- insufficient_privilege regardless of the widened function's correctness.
+-- That check (a live site with no organization_profiles/
+-- organization_service_times rows still returns exactly one row, with every
+-- new column NULL) is instead run once, ad hoc, as the database owner
+-- immediately after applying drizzle/0021_presby_site_profile.sql — see the
+-- work-log's Phase 4 Implementer Notes.

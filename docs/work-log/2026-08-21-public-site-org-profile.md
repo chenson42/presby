@@ -44,7 +44,7 @@ than it leaks page content.
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-08-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions — DECISION-090/091 | 2026-08-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete — DECISION-092; implementer named (database-admin, then full-stack-developer) | 2026-08-21 |
-| 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI) | Pending | — | — |
+| 4 — Implementation | database-admin (schema), full-stack-developer (query/actions/UI) | Commit 1 (schema) complete, commit 2 (query/actions/UI) pending | — | 2026-08-21 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -456,26 +456,48 @@ grant execute on function presby_published_site(text) to presby_app;
 
 # Phase 4 — Implementation
 
+**Commit 1 of 2 (database-admin, schema only).** Commit 2 (query layer, server actions, admin UI — full-stack-developer) is not started; this section covers commit 1 only, per the Implementer split named in Phase 3.
+
 ## Files Created
 
-- `path/to/file` — purpose
+- `drizzle/0021_presby_site_profile.sql` — `organization_profiles` and `organization_service_times` tables, their FORCE-RLS/tenant-isolation policies, `presby_platform`/`presby_app` grants, and `presby_published_site()`'s drop-and-recreate with the widened 16-column return shape (DECISION-090/091/092), exactly per Phase 3's Data Model.
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `src/lib/db/domain/sites.ts` — added `organizationProfiles`, `organizationServiceTimes` `pgTable` definitions (schema only, no query logic — DECISION-061's convention). Updated the file's header comment from "two tables" to "four," describing all four tables' grant shapes in one place.
+- `scripts/test-rls.sql` — new section 17: unset-GUC invisibility, tenant isolation (Alder Creek sees its own rows, Bramblewood sees none), FORCE RLS confirmed via `pg_class.relforcerowsecurity`, and the `presby_app` full-CRUD grant confirmed directly via `information_schema.role_table_grants` — matching how section 16 verified `organization_sites`' asymmetric *no*-grant shape, applied here to prove the opposite (a real grant exists). Not explicitly named under Phase 3's "Files to modify," but "RLS verification" was named in-scope for this commit, and every prior schema commit (sections 14/15/16) added its own suite section — this follows that precedent rather than introducing a new one.
+- `drizzle/meta/_journal.json` — appended the `0021_presby_site_profile` entry (idx 21), matching how 0013–0020 were each hand-registered despite `drizzle-kit generate`'s broken snapshot chain past 0012 (see the migration file's own header comment, and CLAUDE.md).
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- **`organization_profiles`** (new table) — degenerate PK (`organization_id`, references `organizations(id)` cascade), `address`/`phone`/`facebook_url`/`instagram_url`/`x_twitter_url`/`youtube_url`/`other_url` (all nullable `text`, no DB-level format/length `CHECK` — app-level only, per `site_contact_messages.body`'s precedent), `updated_by` (`uuid not null references users(id)` — always human-attributed, unlike `organization_sites.updated_by`), `updated_at` (no `created_at` — first `updated_at` *is* the creation event, matching `organization_brands`). FORCE RLS + `tenant_isolation` policy. Grants: `presby_platform` and `presby_app` both get full `select, insert, update, delete` (DECISION-090 — forward-looking, contingent on the `docs/TODO.md` deferred-tenant-editor line, which already exists).
+- **`organization_service_times`** (new table) — `id` PK (`gen_random_uuid()`), `organization_id` (not null, cascade), `kind` (`CHECK (kind in ('service','office_hours'))`), `day_of_week` (`smallint`, `CHECK (day_of_week between 0 and 6)`, 0=Sunday matching JS `Date.getDay()`), `start_time`/`end_time` (`time`, no timezone, `CHECK (end_time > start_time)` — per-row ordering only, cross-row overlap deliberately unvalidated per Phase 3 Edge Cases), `label` (nullable text), `updated_by` (not null, per-row attribution — DECISION-092's whole-list-replace still keeps per-row provenance). `unique (id, organization_id)` (Composite Tenant Keys convention, no current composite-FK consumer, matching `site_contact_messages`' precedent). Index `organization_service_times_org_kind_idx (organization_id, kind, day_of_week, start_time)` backs both the future admin list read and `presby_published_site()`'s `jsonb_agg ... order by`. FORCE RLS + `tenant_isolation` policy. Same `presby_platform`/`presby_app` full-CRUD grant shape as `organization_profiles`.
+- **`presby_published_site(text)`** — dropped (`CREATE OR REPLACE` cannot widen a `RETURNS TABLE` signature) and recreated with 9 new trailing columns: `profile_address`, `profile_phone`, `profile_facebook_url`, `profile_instagram_url`, `profile_x_twitter_url`, `profile_youtube_url`, `profile_other_url` (scalars, `LEFT JOIN organization_profiles`, nullable exactly like the existing `brand_*` columns), `service_times`, `office_hours` (`jsonb`, two independently correlated `jsonb_agg` subqueries filtered by `kind`, per DECISION-092 — never a second query/function, satisfying Phase 1 Gap 5). Still `security definer`, `stable`, `revoke all from public` / `grant execute to presby_app` — unchanged posture, wider column list only.
+- Applied via: hand-written SQL, `psql "$MIGRATE_DATABASE_URL" -f drizzle/0021_presby_site_profile.sql` against the shared dev database — **not** `npm run db:push` and **not** `npm run db:generate`, matching this repo's own established convention for every migration since 0012 (`db:generate`'s snapshot chain is broken, tracked in `docs/TODO.md`; every migration past 0012 is hand-authored and idempotent, applied by direct `psql` execution against the same connection `db:migrate` targets). Idempotent throughout: `create table if not exists`, `do $$ ... if not exists ... $$` guards on every constraint, `drop function if exists` before recreate — safe to re-run.
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+- None. This commit writes no mutation code (schema only) — no `actions.ts` change, no `recordAudit` call to make. For the record, Phase 3's Edge Cases already ruled the eventual write path (next commit) audit-exempt: setting a phone number or service time is routine content editing, not an access-control mutation, matching `markSiteContactMessageReadAction`'s identical posture (DECISION-089).
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+**RLS and grant verification, done three ways, not just "the suite passed":**
+1. `scripts/test-rls.sql` section 17 (new, presby_app-only, as required) — unset-GUC invisibility, tenant isolation both directions, FORCE RLS via `pg_class`, and the grant shape via `information_schema.role_table_grants`. All 9 new assertions pass.
+2. Direct catalog query as the migration owner (`MIGRATE_DATABASE_URL`, outside the presby_app-only suite): `pg_class.relforcerowsecurity = t` on both tables; `information_schema.role_table_grants` shows both `presby_app` and `presby_platform` holding `DELETE,INSERT,SELECT,UPDATE` on both tables (no partial grant, no missing verb); `pg_proc.prosecdef = t` on `presby_published_site`.
+3. A live call to `presby_published_site('alder-creek')` (see below) confirming the widened return shape in practice, not just in the catalog.
+
+**Known pre-existing dev-branch drift, unrelated to this commit — flagged, not fixed here.** `scripts/seed-dev.sql` declares Alder Creek's `organization_sites.status = 'provisioning'`, and section 16's existing assertion (`presby_published_site: provisioning (not yet live) alder-creek returns zero rows`) expects that. The live dev database instead shows `status = 'live'`, a real `content_bundle_key`, and `last_ingested_commit_sha = 'local-view-only'` — evidence of an earlier manual/e2e verification session (predating this commit) that provisioned and ingested against this branch and never reset the fixture row back to match the seed script. Confirmed unrelated to this migration: the mismatch is entirely between the live row's `status` column and the seed script's `INSERT`, nothing this migration touches. **Consequence for running the suite:** `scripts/test-rls.sql` as committed has `\set ON_ERROR_STOP on` and genuinely aborts at that pre-existing assertion (line 824) — correct behavior for that script. To get past it and confirm my own section 17 assertions independently, I ran a throwaway scratch copy with that one directive flipped off (never touching the committed file) — all 9 new assertions passed, and the only failure anywhere in the suite is the one pre-existing, out-of-scope line. Next agent/qa: either reseed `scripts/seed-dev.sql` fresh on this branch, or treat the drift as expected given real ingest testing happened here — this commit does not resolve it, since resetting another pipeline's fixture state is outside a schema-only commit's scope.
+
+**Functional check of the widened function (task requirement, satisfied via the drift above rather than a faked transaction):** because Alder Creek's `organization_sites` row is genuinely `'live'` on this branch (see above), `presby_published_site('alder-creek')` returns exactly one row today with no faking required — `content_bundle_key` and `organization_name`/`organization_type` populated as before; `brand_seed_hex`/`brand_type_pairing`/`brand_token_version` all `NULL` (no `organization_brands` row for this org — pre-existing, unaffected by this commit); and all 9 new columns present and `NULL` — `profile_address`, `profile_phone`, and all five social columns `NULL` (no `organization_profiles` row exists for Alder Creek yet), `service_times` and `office_hours` both SQL `NULL` (no `organization_service_times` rows exist yet). This is exactly the "every field independently omittable, `profile` itself never absent" contract Phase 3's API Contract specifies — the next commit's `getPublishedSite()` must map these `NULL`s to `[]` (arrays) and `null` (scalars/social leaves), never throw or 500 on the absence.
+
+**No deviation from Phase 3's Data Model** — table shapes, constraints, index, grant verbs, and the function's column list and two-subquery shape were implemented exactly as specified, including the deliberate non-choices (no length `CHECK`s, no cross-row overlap `CHECK`, no history table, no audit event).
+
+**Handoff to full-stack-developer (commit 2):**
+- New tables available: `organizationProfiles` and `organizationServiceTimes`, exported from `src/lib/db/domain/sites.ts` (import alongside `organizationSites`/`siteContactMessages`).
+- `presby_published_site()`'s TypeScript-side caller (`getPublishedSite()` in `src/lib/sites.ts`) needs its row-mapping widened to read the 9 new columns and produce the `profile`/`serviceTimes`/`officeHours` shape Phase 3's API Contract defines — including the `NULL`-safe `jsonb` parsing Phase 3 calls out (`typeof value === "string" ? JSON.parse(value) : value`, try/catch degrading to `[]`, matching `isStoredSiteBundle`'s posture).
+- `src/lib/sites.test.ts` will need updating for any assertion that does exact/deep-equality on the full `getPublishedSite()` return object — read the exact assertions before assuming "still passes," per Phase 3's own Edge Cases note.
+- Local apply for a fresh clone/branch: `npm run db:push` will NOT pick up this migration correctly (Drizzle Kit's snapshot chain stops at 0012, so `db:push` would attempt to diff from a stale baseline against the current `schema.ts`+domain files and is unreliable past that point on this project, per CLAUDE.md's own note) — apply `drizzle/0021_presby_site_profile.sql` directly: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0021_presby_site_profile.sql`. No seed change in this commit (`npm run db:seed` unaffected); commit 2 may want its own fixture row(s) in `scripts/seed-dev.sql` for `organization_profiles`/`organization_service_times` if e2e coverage needs one (none added here, matching how commit 1 of the parent 2026-08-20 pipeline seeded no `site_contact_messages` sample row either).
+- `npm run typecheck` and `npm run check` (all four tripwires) both pass clean on this commit.
 
 ---
 

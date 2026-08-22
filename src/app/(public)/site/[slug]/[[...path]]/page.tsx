@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getPublishedSite, type PublishedSite } from "@/lib/sites";
 import { renderSiteBundle, type RenderSiteBundleProfile, type SocialLink } from "presby-site-kit";
-import { ContactForm } from "./contact-form";
+import { ContactForm } from "../contact-form";
 
 /**
  * `PublishedSite.profile.social` is a keyed object (one nullable string per
@@ -38,20 +38,22 @@ function toRenderProfile(site: PublishedSite): RenderSiteBundleProfile {
 }
 
 /**
- * `/site/<slug>` — the public render path. See
- * docs/work-log/2026-08-20-public-sites.md Phase 3, "Component / Page Plan".
+ * `/site/<slug>` and `/site/<slug>/<...path>` — the public render path. See
+ * docs/work-log/2026-08-20-public-sites.md Phase 3, "Component / Page Plan",
+ * and docs/work-log/2026-08-21-public-site-org-profile.md for the follow-on
+ * that added real sub-routing (this file's own optional catch-all segment,
+ * `[[...path]]`) — Phase 3 originally scoped this to a single top-level page
+ * per slug and named the catch-all as a deferred follow-on; this is it.
  *
  * `getPublishedSite()` ALREADY checks `sites.public_render` internally and
  * collapses the flag being off into the same `{ kind: "not_found" }` as
  * every other miss case — this page does not re-check the flag itself, it
  * simply trusts that result, matching the enumeration-safety property
  * Phase 1 Gap 5 requires (a probe cannot distinguish "flag off" from
- * "never provisioned" from "suspended").
- *
- * v1 SHIPS A SINGLE TOP-LEVEL PAGE PER SLUG (Phase 3's own scoping) —
- * `currentPath` is always `"/"`. A `[...path]` catch-all for real
- * sub-routing (`/site/<slug>/about`, etc.) is a named, deferred follow-on,
- * not built here.
+ * "never provisioned" from "suspended"). `renderSiteBundle()` returning
+ * `null` (no bundle page matches `currentPath`) is the SAME `notFound()` —
+ * a congregation that never authored `/about` 404s there exactly like a
+ * nonexistent slug does, not a distinguishable error.
  *
  * `imageUrl` NEVER hands `site-kit` a raw blob key or bytes — it builds a
  * same-origin, content-addressed URL through this route's own asset route
@@ -61,13 +63,18 @@ function toRenderProfile(site: PublishedSite): RenderSiteBundleProfile {
  * literal interface). A manifestKey with no entry in that map falls back to
  * the manifestKey itself, which the asset route then fails to resolve as a
  * blob id — a broken image, never a crash.
+ *
+ * `pageUrl` is the same closure discipline as `imageUrl` — `site-kit`'s
+ * `Nav` never assumes a `/site/<slug>` prefix, this route is the one place
+ * that knows it.
  */
 export default async function PublicSitePage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ slug: string; path?: string[] }>;
 }) {
-  const { slug } = await params;
+  const { slug, path } = await params;
+  const currentPath = path && path.length > 0 ? `/${path.join("/")}` : "/";
 
   const result = await getPublishedSite(slug);
   if (result.kind === "not_found") notFound();
@@ -77,12 +84,16 @@ export default async function PublicSitePage({
   const imageUrl = (manifestKey: string): string =>
     `/site/${slug}/assets/${site.imageKeys[manifestKey] ?? manifestKey}`;
 
+  const pageUrl = (bundlePath: string): string =>
+    bundlePath === "/" ? `/site/${slug}` : `/site/${slug}${bundlePath}`;
+
   const rendered = renderSiteBundle({
     pages: site.pages,
-    currentPath: "/",
+    currentPath,
     brand: site.brand,
     profile: toRenderProfile(site),
     imageUrl,
+    pageUrl,
   });
 
   // renderSiteBundle() returning null means no page in the bundle matches

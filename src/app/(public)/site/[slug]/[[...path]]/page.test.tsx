@@ -27,7 +27,7 @@ vi.mock("presby-site-kit", () => ({
   renderSiteBundle: (...args: unknown[]) => renderSiteBundle(...args),
 }));
 
-vi.mock("./actions", () => ({
+vi.mock("../actions", () => ({
   submitContactMessageAction: vi.fn(),
 }));
 
@@ -47,8 +47,8 @@ afterEach(() => {
   notFoundMock.mockClear();
 });
 
-function makeParams(slug = "alder-creek") {
-  return Promise.resolve({ slug });
+function makeParams(slug = "alder-creek", path?: string[]) {
+  return Promise.resolve({ slug, path });
 }
 
 const BRAND = {
@@ -113,8 +113,55 @@ describe("PublicSitePage — the ok path", () => {
         currentPath: "/",
         brand: SITE.brand,
         imageUrl: expect.any(Function),
+        pageUrl: expect.any(Function),
       }),
     );
+  });
+
+  it("derives currentPath from the catch-all path segments — a sub-page, not just the root", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek", ["about"]) });
+
+    expect(renderSiteBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ currentPath: "/about" }),
+    );
+  });
+
+  it("joins multiple path segments with a leading slash for a nested sub-page", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek", ["ministries", "food-pantry"]) });
+
+    expect(renderSiteBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ currentPath: "/ministries/food-pantry" }),
+    );
+  });
+
+  it("an empty path array (not undefined) still resolves to the root, not an empty string", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek", []) });
+
+    expect(renderSiteBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ currentPath: "/" }),
+    );
+  });
+
+  it("builds pageUrl() as a same-origin /site/<slug>/<path> link, root path collapsing to no trailing path", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      pageUrl: (path: string) => string;
+    };
+    expect(call.pageUrl("/")).toBe("/site/alder-creek");
+    expect(call.pageUrl("/about")).toBe("/site/alder-creek/about");
   });
 
   it("builds imageUrl() from the site's own imageKeys map, resolving through this route's asset route", async () => {

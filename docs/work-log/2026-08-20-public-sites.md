@@ -3081,3 +3081,35 @@ blocker — do not run two flag-mutating DB-backed suites in the same
 ## Feedback Row (Rule 12)
 
 Not applicable — this pipeline originated from the functionality map's own "sites" gap and direct user/session direction, not an in-app feedback submission.
+
+---
+
+## Post-ship addendum (2026-08-21) — real sub-page routing
+
+Phase 3's own scoping shipped a single top-level page per slug and named a
+`[...path]` catch-all as "a named, deferred follow-on, not built here." This
+is that follow-on, done at the user's direction after the org-profile
+pipeline landed (`docs/work-log/2026-08-21-public-site-org-profile.md`).
+
+- `src/app/(public)/site/[slug]/page.tsx` moved into an optional catch-all
+  segment (`[slug]/[[...path]]/page.tsx`); `currentPath` now derives from the
+  URL's own path segments instead of a hardcoded `"/"`. A page not in the
+  bundle still 404s exactly like a nonexistent slug does — the same
+  `renderSiteBundle()` → `null` → `notFound()` collapse, unchanged.
+- `presby-site-kit` v2.0.0 (breaking: `RenderSiteBundleInput` gains a
+  required `pageUrl` closure, same never-assume-a-URL-prefix discipline as
+  `imageUrl`) adds `Nav` — chrome composed automatically above every page's
+  blocks, listing any page with `frontMatter.navLabel` set, omitted entirely
+  below two navigable pages. v2.0.1 fixes `build-bundle.mjs` to always sort
+  the root page first, so "Home" doesn't land alphabetically in the middle
+  of the nav.
+- Verified with a full real end-to-end run (genuine GitHub Actions ingest
+  through a local tunnel into a running dev server, four real pages), plus a
+  real headless-browser click-through confirming Nav links actually
+  navigate between `/site/<slug>`, `/about`, and `/worship`, and that
+  enumeration safety holds for both a nonexistent sub-page and a nonexistent
+  org at any sub-path. Cleaned up: DB fixture reverted, GitHub repo
+  variables removed, tunnel killed.
+- `docs/product/functionality-map.md`/`docs/TODO.md` not updated for this
+  addendum — `sites.public_render` stays off, this is still pre-rollout
+  local verification, not a new user-visible surface.

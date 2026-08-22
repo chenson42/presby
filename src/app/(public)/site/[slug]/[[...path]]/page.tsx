@@ -66,7 +66,11 @@ function toRenderProfile(site: PublishedSite): RenderSiteBundleProfile {
  *
  * `pageUrl` is the same closure discipline as `imageUrl` — `site-kit`'s
  * `Nav` never assumes a `/site/<slug>` prefix, this route is the one place
- * that knows it.
+ * that knows it. `portalUrl` points `Nav`'s "Member Login" link at
+ * `/o/<slug>` — the `(org)` route group's own Edge gate (`src/proxy.ts`)
+ * already redirects an unauthenticated visit there to `/signin` with the
+ * right `callbackUrl`, so this route needs no auth-awareness of its own to
+ * wire the link correctly either way.
  */
 export default async function PublicSitePage({
   params,
@@ -94,6 +98,7 @@ export default async function PublicSitePage({
     profile: toRenderProfile(site),
     imageUrl,
     pageUrl,
+    portalUrl: `/o/${slug}`,
   });
 
   // renderSiteBundle() returning null means no page in the bundle matches

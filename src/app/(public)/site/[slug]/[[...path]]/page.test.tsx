@@ -114,7 +114,19 @@ describe("PublicSitePage — the ok path", () => {
         brand: SITE.brand,
         imageUrl: expect.any(Function),
         pageUrl: expect.any(Function),
+        portalUrl: "/o/alder-creek",
       }),
+    );
+  });
+
+  it("points portalUrl at /o/<slug>, unaffected by which sub-page is being rendered", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek", ["about"]) });
+
+    expect(renderSiteBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ portalUrl: "/o/alder-creek" }),
     );
   });
 

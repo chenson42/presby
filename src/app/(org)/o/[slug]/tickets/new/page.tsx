@@ -61,11 +61,12 @@ export default async function NewTicketPage({
         <OrgAccessDenied
           name={resolved.name}
           organizationType={resolved.organizationType}
+          slug={slug}
         />
       );
     case "ended":
       return (
-        <OrgAccessEnded name={resolved.name} endedOn={resolved.endedOn} />
+        <OrgAccessEnded name={resolved.name} endedOn={resolved.endedOn} slug={slug} />
       );
     case "ok":
       break;

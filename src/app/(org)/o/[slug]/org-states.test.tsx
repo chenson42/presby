@@ -1,19 +1,57 @@
 // @vitest-environment jsdom
 /**
- * Tests for <OrgPortalStub>'s P1 directory link, P9 administration link, and
- * the support-tickets pipeline's Tickets / Give feedback links.
+ * Tests for <OrgPortalStub>'s P1 directory link, P9 administration link, the
+ * support-tickets pipeline's Tickets / Give feedback links, and
+ * <OrgAccessDenied> / <OrgAccessEnded>'s "Visit the public site" link.
  *
- * `<OrgAccessDenied>` / `<OrgAccessEnded>` are UNCHANGED by this commit and
- * are covered by e2e/post-login-routing.spec.ts test 9 (the DECISION-040
- * byte-identical-copy regression) — not duplicated here.
+ * The DECISION-040 byte-identical-copy property (managed/invited/unmanaged
+ * render the same string) is covered by e2e/post-login-routing.spec.ts test
+ * 9, unaffected by the new link since it's identical for every status — not
+ * duplicated here.
  *
  * No jest-dom matchers — see directory-states.test.tsx's header.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { OrgPortalStub } from "./org-states";
+import { OrgAccessDenied, OrgAccessEnded, OrgPortalStub } from "./org-states";
 
 afterEach(cleanup);
+
+describe("OrgAccessDenied — a way back to the public site", () => {
+  it("links to /site/<slug> alongside the existing 'back to your organizations' link", () => {
+    render(
+      <OrgAccessDenied
+        name="Alder Creek Presbyterian Church"
+        organizationType="congregation"
+        slug="alder-creek"
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: "Back to your organizations" }).getAttribute("href"),
+    ).toBe("/orgs");
+    expect(
+      screen.getByRole("link", { name: "Visit the public site" }).getAttribute("href"),
+    ).toBe("/site/alder-creek");
+  });
+});
+
+describe("OrgAccessEnded — a way back to the public site", () => {
+  it("links to /site/<slug> alongside the existing 'back to your organizations' link", () => {
+    render(
+      <OrgAccessEnded
+        name="Alder Creek Presbyterian Church"
+        endedOn="2026-06-30"
+        slug="alder-creek"
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: "Back to your organizations" }).getAttribute("href"),
+    ).toBe("/orgs");
+    expect(
+      screen.getByRole("link", { name: "Visit the public site" }).getAttribute("href"),
+    ).toBe("/site/alder-creek");
+  });
+});
 
 describe("OrgPortalStub — directory discoverability link", () => {
   it("shows a Directory link to /o/<slug>/directory when the flag is on", () => {

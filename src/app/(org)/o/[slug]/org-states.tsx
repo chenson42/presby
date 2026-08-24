@@ -38,9 +38,22 @@ import { Button } from "@/components/ui/button";
 export function OrgAccessDenied({
   name,
   organizationType,
+  slug,
 }: {
   name: string;
   organizationType: OrganizationType;
+  /**
+   * Same enumeration-safety property as the rest of this component: the org
+   * tree (and therefore its slug) is already public, and this exact page
+   * already names the organization, so a link built from it discloses
+   * nothing new. `/site/<slug>` collapses "not provisioned" into the same
+   * 404 every other not-live reason produces (`getPublishedSite()`), so the
+   * link is safe to render unconditionally rather than fetching
+   * `sites.public_render`/`organization_sites.status` to decide whether to
+   * show it — doing that would be a second, redundant status check of
+   * exactly the kind DECISION-040 forbids this component from making.
+   */
+  slug: string;
 }) {
   return (
     <section className="max-w-xl">
@@ -54,9 +67,14 @@ export function OrgAccessDenied({
         If you should have access, ask an administrator at that organization to
         add you. They will need the email address you signed in with.
       </p>
-      <Button asChild className="mt-6 min-h-11">
-        <Link href="/orgs">Back to your organizations</Link>
-      </Button>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Button asChild className="min-h-11">
+          <Link href="/orgs">Back to your organizations</Link>
+        </Button>
+        <Button asChild variant="outline" className="min-h-11">
+          <Link href={`/site/${slug}`}>Visit the public site</Link>
+        </Button>
+      </div>
     </section>
   );
 }
@@ -70,10 +88,14 @@ export function OrgAccessDenied({
 export function OrgAccessEnded({
   name,
   endedOn,
+  slug,
 }: {
   name: string;
   /** 'YYYY-MM-DD'. A calendar date, never a Date — see FormattedDate. */
   endedOn: string;
+  /** See `OrgAccessDenied`'s own `slug` doc comment — the same reasoning
+   * applies here unchanged. */
+  slug: string;
 }) {
   return (
     <section className="max-w-xl">
@@ -83,9 +105,14 @@ export function OrgAccessEnded({
         <FormattedDate value={endedOn} mode="date" />. If that is not right, ask
         an administrator there to restore it.
       </p>
-      <Button asChild className="mt-6 min-h-11">
-        <Link href="/orgs">Back to your organizations</Link>
-      </Button>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Button asChild className="min-h-11">
+          <Link href="/orgs">Back to your organizations</Link>
+        </Button>
+        <Button asChild variant="outline" className="min-h-11">
+          <Link href={`/site/${slug}`}>Visit the public site</Link>
+        </Button>
+      </div>
     </section>
   );
 }

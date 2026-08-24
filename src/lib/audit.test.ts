@@ -121,6 +121,9 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   SITE_PROVISIONED: "site.provisioned",
   SITE_STATUS_CHANGED: "site.status_changed",
   SITE_CONTENT_INGESTED: "site.content_ingested",
+  // Org creation (2026-08-24) — written from
+  // src/app/(admin)/admin/organizations/new/actions.ts
+  ORG_CREATED: "org.created",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

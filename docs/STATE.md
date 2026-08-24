@@ -3,7 +3,191 @@
 **Read this first in a new session.** Then `docs/schema-design.md` for rationale
 and the findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-08-19.
+Updated 2026-08-24.
+
+---
+
+## Session handoff — 2026-08-24 (read this before anything else below)
+
+Mid-session restart. Three things happened this session, in order, and the
+third is **in flight, blocked on the user, not on Claude**.
+
+### 1. Public-site manual testing — shipped, verified live
+
+Set up a local, browsable instance of the P3 public-site feature
+(`/site/<slug>`) using a synthetic "Alder Creek Presbyterian Church" /
+"Fixture Hollow" fixture staged in the **local dev database only** — no
+migration, no seed script, no repo change. **Left staged on purpose**; do
+not revert until the user says they're done testing.
+
+Found and fixed three real defects in `presby-site-kit` (the external,
+separately-versioned component-library repo — NOT this repo), each verified
+against a real running server, not just unit tests:
+
+- **v3.1.0–v3.1.1**: the package had never had any CSS at all. Wrote a real
+  stylesheet (`src/styles.css`, plain CSS, brand-aware via
+  `var(--primary)` etc., same DECISION-046 cascade-override model this repo
+  already uses); fixed a CSS-Grid auto-placement bug in `Callout`.
+- **v3.2.0**: every content-authored internal link (FeatureGrid cards,
+  Hero/Callout CTAs, EventList entries, DonateLink) rendered as a raw
+  bundle-relative path instead of being resolved through the `pageUrl`
+  closure `Nav` already used — a "Worship" card 404'd against presby's own
+  root instead of landing on `/site/<slug>/worship`. Also added the
+  package's first `@media` breakpoints (it had none).
+- **v3.3.0**: the "responsive" nav from v3.2.0 only stopped overflow, it
+  didn't actually collapse — rebuilt `Nav` as the package's one client
+  component with a real hamburger toggle (`aria-expanded`, closes on link
+  click). Hit and fixed a real RSC boundary bug along the way (a closure
+  prop can't cross into a client component — resolved nav hrefs
+  server-side into plain data instead).
+
+All three pushed and tagged in `presby-site-kit`. **presby's own
+`package.json`/`package-lock.json` are pinned to v3.3.0 but this bump is
+UNCOMMITTED** — `git status` shows it modified, sitting on top of the one
+pre-existing unpushed local commit (`a9f91d5`, "feat(sites): import
+presby-site-kit's real stylesheet", never released-noted/version-bumped).
+
+### 2. Bug fix — implemented, tested, UNCOMMITTED
+
+User report: from the member-login flow, landing on the access-denied /
+relationship-ended pages under `/o/<slug>` had no link back to the public
+site (only "Back to your organizations", to `/orgs`). Confirmed real via
+code read; the "no sign-out option" half of the same report was checked
+live and found to be a false alarm (the avatar menu's Sign Out already
+works there — not fixed, intentionally, to stay consistent with the one
+sign-out mechanism used everywhere else).
+
+Fixed: `OrgAccessDenied` / `OrgAccessEnded`
+(`src/app/(org)/o/[slug]/org-states.tsx`) gained a `slug` prop and a second
+"Visit the public site" button → `/site/<slug>`. Turned out to be shared by
+**seven** pages, not one (`tsc` caught all of them once the prop went
+required) — `page.tsx`, `admin/roles/page.tsx`, `directory/page.tsx`,
+`feedback/page.tsx`, and all three `tickets/*` pages, all updated.
+
+Full pipeline followed (bug-fix variant): work-log at
+`docs/work-log/2026-08-24-org-access-back-to-site-link.md`, two new
+regression tests, typecheck/tripwires/unit suite (1695 tests) all green,
+verified live via a real sign-in as the seeded `admin@presby.invalid` user
+hitting a real access-denied page and clicking through to the real public
+site. **Not committed — waiting on the user.**
+
+### 3. Westerville First Presbyterian site recreation — org provisioned, real photos are the only thing left
+
+User wants to recreate `https://westervillefirstpresbyterian.org/` on
+presby "as verbatim as possible." Confirmed: authorized to use the real
+content (their own church); Claude does not scrape the live site — content
+came from a real WordPress `Tools → Export` XML the user supplied
+(`scratch/firstpresbyterianchurchofwesterville.WordPress.2026-08-24.xml`,
+19,950 lines, ACF flexible-content page builder, not the classic editor).
+The `~/Downloads` sandbox-access gap noted in an earlier version of this
+entry resolved itself this session (readable directly; copied into
+`scratch/` anyway per the plan already written here).
+
+**presby-site-kit bumped to v3.4.0** (pushed, tagged, presby's own
+`package.json`/`package-lock.json` pinned to it) — two real gaps found
+building against this real site's actual content, not fixture testing:
+`featureGrid`/`valuesGrid`/`ministryList` items gained an optional
+`imageUrl`/`imageAlt` (previously only `hero`/`callout`/`staffList` could
+carry an image at all — a real gap, the single most common non-hero layout
+on this real site), and a new `gallery` block (single-image auto-playing
+carousel, a play/pause toggle + pause-on-hover/focus +
+`prefers-reduced-motion` support, site-kit's second client component after
+`Nav`) closes the multi-image case hero/callout never covered. 109/109
+site-kit tests pass; presby's own 1695 non-DB unit tests pass unaffected by
+the bump.
+
+**New private content repo pushed**: `github.com/chenson42/site-fpcw`
+(confirmed `PRIVATE`), org slug will be `fpcw` (matches the church's own
+staff email domain, `@fpcw.us`). 14 pages migrated by hand from the WP
+export — not auto-converted — covering Home, Who We Are, Ministries,
+Committees, Mobility Assistance Program, Children & Youth, Music, Groups,
+Worship, Leadership, Contact, Newsletter, Upcoming Events, and a restored
+Give page (the real page was an empty WP stub; the real Vanco giving URL
+was only findable in the nav menu). Every block was validated by actually
+rendering it through the real `renderSiteBundle()` (not just JSON-valid) —
+zero silently-dropped blocks, zero images resolving to a typo'd or
+invented manifestKey (all 78 cross-checked against the WXR export's real
+attachment list). Full extraction tooling and the write-up proposal live
+in `scratch/` (gitignored, never committed): `extract_wp.py`,
+`wp_extracted.json`, `proposal.md`, `validate-bundle.mjs`.
+
+**Deliberately dropped or degraded, all noted in `site-fpcw`'s own
+README**: Gravity Forms (newsletter signup, contact form — presby's own
+`<ContactForm>` already renders below every page for free); per-department
+`?subject=` query-param routing (kept in hrefs, inert until presby's
+contact form reads one); Upcoming Events' live Google Calendar embed
+(no static event data existed to migrate — thin page links out to the
+same calendar; `eventList` is available whenever specific events are
+worth hand-authoring, no live sync — that would be a real separate
+feature, out of scope); one image with no accompanying text.
+
+**A real blocker turned up provisioning this: presby had no way anywhere to
+create a new `organizations` row** — every existing org came from raw SQL,
+and `/admin/organizations/[id]`'s Brand/Profile/Site sections only ever
+managed an *existing* org. Last session's claim that provisioning "needs
+zero presby code changes" was wrong on this one point. Built it properly
+through the full pipeline (not a raw-SQL workaround) —
+`docs/work-log/2026-08-24-admin-org-create.md`, SHIP WITH NOTES:
+`/admin/organizations/new`, `src/lib/org-provisioning.ts`
+(`createOrganization()`), `src/lib/reserved-slugs.ts`, F16 derived-group
+seeding (Session/Board of Deacons/Active Membership, conditional on org
+type) folded into the same transaction so officer-term recording works
+immediately rather than needing a manual SQL follow-up. Two real bugs
+found and fixed building it: `group_types`' platform-wide template rows
+need the platform DB connection, not the tenant one (same RLS discipline
+as everywhere else); and the originally-designed `.onConflictDoNothing()`
+seed pattern wasn't actually idempotent (`group_types` has no unique
+constraint) — the same bug already existed, undetected, in
+`sites.test.ts`'s own setup, now tracked in `docs/TODO.md`.
+
+**Using the shipped feature, the real organization now exists** in the dev
+database: First Presbyterian Church of Westerville, slug `fpcw`, id
+`4315666c-d344-4a73-99a1-dfb7944cc29e`, type `congregation`, platform
+status `managed`. All three F16 groups seeded (Session, Board of Deacons,
+Active Membership). Real profile data entered:
+`organization_profiles.address` = "41 W. College Avenue, Westerville, Ohio
+43081", `.phone` = "614-882-3155"; one real `organization_service_times`
+row (Sunday, 10:15 AM). Site linked: `organization_sites.repo` =
+`chenson42/site-fpcw`, `status` = `provisioning` (never ingested yet —
+correct, no CI has run against it).
+
+**Still open, in order:**
+1. **78 real photos** — `site-fpcw/MANIFEST.md` lists every needed
+   `images/<manifestKey>.<ext>` mapped back to its original WordPress
+   upload. Zero image bytes exist in the repo yet; the user supplies these
+   (not scraped by Claude, per standing instruction). The site can't
+   actually go live and look right without them.
+2. Set the two GitHub repo variables `site-fpcw` needs
+   (`PRESBY_INGEST_URL`, `PRESBY_OIDC_AUDIENCE`) once presby's deployed
+   domain and `SITES_INGEST_OIDC_AUDIENCE` are known — this is what turns
+   a push to `site-fpcw`'s `main` into a real ingest, flipping
+   `organization_sites.status` from `provisioning` to `live`.
+3. **`sites.public_render` is still off** — a global flag, not per-org, so
+   flipping it makes every provisioned+live site publicly reachable, not
+   just fpcw's. Deliberately not flipped without asking the user first;
+   still an open decision.
+4. `docs/TODO.md`'s "site-`<slug>` content-repo visibility" open question
+   (Phase 1 of `2026-08-20-public-sites.md`) is now resolved in practice —
+   `site-fpcw` is private — the TODO line itself still needs closing out
+   in the same housekeeping pass as whichever commit ships this work.
+5. **Nothing from this session is committed.** `package.json`'s site-kit
+   pin bump, the new `admin-org-create` feature (12+ new/modified files),
+   release notes (v0.13.0 drafted in `docs/release-notes/v0.12.md`,
+   package.json bumped to match), and the functionality-map/TODO
+   housekeeping are all sitting in the working tree awaiting the user's
+   explicit commit approval, per standing workflow rules.
+
+### Orientation for a fresh session
+
+- Dev server may or may not still be running on `:3000` — check before
+  starting another (`lsof -ti:3000`).
+- `git status` on this repo right now: `package.json` +
+  `package-lock.json` (site-kit v3.3.0 pin) and nine files under
+  `src/app/(org)/o/[slug]/` modified, plus one new work-log file —
+  all from items 1–2 above, all uncommitted, all verified working.
+- Nothing has been pushed to presby's own `origin/main` this session.
+  `origin/main` is one commit behind local `HEAD` (`a9f91d5`), which
+  itself predates this session.
 
 ---
 

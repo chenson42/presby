@@ -1,8 +1,9 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "../src/lib/db/schema";
+import { groupTypes } from "../src/lib/db/domain/groups";
 import {
   ADMIN_ROLE,
   FEATURE_CATALOG,
@@ -13,6 +14,13 @@ import {
 
 if (!process.env.DATABASE_URL) {
   throw new Error("Set DATABASE_URL in .env.local before running the seed.");
+}
+if (!process.env.PLATFORM_DATABASE_URL) {
+  throw new Error(
+    "Set PLATFORM_DATABASE_URL in .env.local before running the seed — " +
+      "seedGroupTypes() needs the RLS-bypassing platform connection (see " +
+      "its own comment for why).",
+  );
 }
 
 const initialAdmins = (process.env.INITIAL_ADMIN_EMAILS ?? "")
@@ -31,6 +39,18 @@ if (initialAdmins.length === 0) {
 
 const sql = neon(process.env.DATABASE_URL);
 const db = drizzle(sql, { schema });
+
+// RLS-bypassing connection (presby_platform role), used ONLY by
+// seedGroupTypes() below — group_types is a FORCE-RLS tenant table
+// (drizzle/0009_presby_rls.sql) whose tenant_isolation policy is
+// `organization_id = presby_current_org()`. A platform-wide template row has
+// `organization_id IS NULL`, and NULL never equals anything under standard
+// SQL equality — not even under a matching org context — so `db` (the plain
+// presby_app connection every other seed function here correctly uses) can
+// NEVER insert one; confirmed by running this script against a real database
+// before this comment was written (see work-log Phase 4 Implementer Notes).
+const platformSql = neon(process.env.PLATFORM_DATABASE_URL);
+const platformDb = drizzle(platformSql, { schema });
 
 async function seedRoles() {
   const defs = [
@@ -169,6 +189,56 @@ async function seedFlags() {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();
   }
   console.log(`seeded ${defaults.length} feature flags`);
+}
+
+/**
+ * Platform-wide `group_types` templates (`organization_id IS NULL`) — the two
+ * this codebase's own F16 group-seeding needs: `court` (Session, Board of
+ * Deacons) and `roster` (Active Membership). `committee` is deliberately NOT
+ * seeded here (docs/work-log/2026-08-24-admin-org-create.md Phase 2/3): no
+ * admin surface creates a `committee`-type group yet, so nothing in presby
+ * needs that row in a production-reachable seed path today.
+ *
+ * Without this, `createOrganization()` (src/lib/org-provisioning.ts) cannot
+ * function against a real database at all — it fails closed with
+ * `{ kind: "provisioning_incomplete" }` rather than create an org with no
+ * derived groups. This is a ONE-TIME PLATFORM BOOTSTRAP: run `npm run
+ * db:seed` once against a target database before the first
+ * createOrganization() call there, not on every deploy.
+ *
+ * NOT `.onConflictDoNothing()` (the design doc's literal suggestion, matching
+ * the `roles`/`features` pattern elsewhere in this file) — `group_types` has
+ * NO unique constraint on `(organization_id, key)`, only a non-unique index
+ * (`group_types_org_idx`). `id` is the sole unique column and is always a
+ * fresh `defaultRandom()` UUID, so `ON CONFLICT DO NOTHING` would never
+ * actually fire and re-running this script would insert a second `court`/
+ * `roster` row every time. Explicit find-or-create instead, confirmed
+ * idempotent by running twice against the dev database (see work-log Phase 4
+ * Implementer Notes).
+ */
+async function seedGroupTypes() {
+  const defs = [
+    { key: "court", name: "Court" },
+    { key: "roster", name: "Roster" },
+  ];
+  for (const g of defs) {
+    // Both the read and the write use platformDb, not db — group_types is a
+    // FORCE-RLS tenant table (see this function's own header comment). db
+    // (presby_app, no org context) would see ZERO rows for a null-org-id
+    // template even if one already exists, fail-closed by construction, and
+    // would then fail the INSERT with a real RLS violation.
+    const [existing] = await platformDb
+      .select({ id: groupTypes.id })
+      .from(groupTypes)
+      .where(and(isNull(groupTypes.organizationId), eq(groupTypes.key, g.key)))
+      .limit(1);
+    if (!existing) {
+      await platformDb
+        .insert(groupTypes)
+        .values({ organizationId: null, key: g.key, name: g.name });
+    }
+  }
+  console.log(`seeded ${defs.length} platform-wide group_types`);
 }
 
 async function bindAdminFeatures() {
@@ -392,6 +462,7 @@ async function main() {
   await seedRoles();
   await seedFeatures();
   await seedFlags();
+  await seedGroupTypes();
   await bindAdminFeatures();
   await bindSupportOperatorFeatures();
   await seedLocalAdmin();

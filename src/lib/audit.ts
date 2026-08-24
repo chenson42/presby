@@ -95,6 +95,13 @@ export const AUDIT_ACTIONS = {
   SITE_PROVISIONED: "site.provisioned",
   SITE_STATUS_CHANGED: "site.status_changed",
   SITE_CONTENT_INGESTED: "site.content_ingested",
+  // Org creation (docs/work-log/2026-08-24-admin-org-create.md) — written
+  // from src/app/(admin)/admin/organizations/new/actions.ts. F18 (same
+  // precedent as ORG_BRAND_SET): a platform action against a tenant carries
+  // that tenant's organization_id as resourceId, so the church can
+  // eventually see platform actions against it, even though there is no
+  // tenant to see it yet at the moment of creation.
+  ORG_CREATED: "org.created",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

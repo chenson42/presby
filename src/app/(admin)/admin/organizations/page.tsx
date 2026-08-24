@@ -104,18 +104,23 @@ export default async function OrganizationsListPage({
         abusive tenant&apos;s brand is neutralised.
       </p>
 
-      <div className="mt-6 flex flex-wrap gap-2 border-b border-border pb-3">
-        <Button asChild variant={!onlyUnbranded ? "default" : "ghost"} size="sm">
-          <Link href="/admin/organizations">All ({allRows.length})</Link>
-        </Button>
-        <Button
-          asChild
-          variant={onlyUnbranded ? "default" : "ghost"}
-          size="sm"
-        >
-          <Link href="/admin/organizations?filter=unbranded">
-            Still on default palette ({unbrandedCount})
-          </Link>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant={!onlyUnbranded ? "default" : "ghost"} size="sm">
+            <Link href="/admin/organizations">All ({allRows.length})</Link>
+          </Button>
+          <Button
+            asChild
+            variant={onlyUnbranded ? "default" : "ghost"}
+            size="sm"
+          >
+            <Link href="/admin/organizations?filter=unbranded">
+              Still on default palette ({unbrandedCount})
+            </Link>
+          </Button>
+        </div>
+        <Button asChild size="sm">
+          <Link href="/admin/organizations/new">New organization</Link>
         </Button>
       </div>
 

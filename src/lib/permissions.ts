@@ -52,7 +52,7 @@ export const FEATURE_CATALOG: Array<{
     key: FEATURES.ADMIN_ORGANIZATIONS,
     name: "Manage organization branding",
     description:
-      "Set a congregation's brand colour, logo and type pairing at onboarding; neutralise an abusive tenant's brand.",
+      "Create organizations; set a congregation's brand colour, logo and type pairing at onboarding; neutralise an abusive tenant's brand.",
     category: "admin",
   },
   {

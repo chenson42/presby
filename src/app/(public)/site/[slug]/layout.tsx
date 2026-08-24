@@ -1,6 +1,7 @@
 import { BrandTokens } from "@/components/brand/brand-tokens";
 import { getPublishedSite } from "@/lib/sites";
 import { cn } from "@/lib/utils";
+import "presby-site-kit/styles.css";
 
 /**
  * `/site/<slug>` — the second (previously dormant) `<BrandTokens>` emitter

@@ -88,7 +88,15 @@ test("3 — an MFA-required user is walked from /admin into enrolment", async ({
   await signInAndLand(page, "mfa-admin");
 
   await expect(page).toHaveURL(/\/account\/2fa/);
-  expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe("/admin");
+  // CONTRACT CHANGE (docs/work-log/2026-08-24-totp-callback-bypass-fix.md):
+  // signInWithCredentials now evaluates the 2FA predicate itself and
+  // redirects straight to /totp with the RAW callbackUrl this sign-in
+  // submitted ("/launch" — no explicit callbackUrl was on the /signin URL),
+  // skipping the /launch hop entirely rather than letting /launch compute
+  // "/admin" first. /totp then forwards that same value on to /account/2fa
+  // unenrolled. Not a security change — see actions.ts's IMPLEMENTATION NOTE
+  // and member-home.spec.ts's matching assertion for the full trace.
+  expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe("/launch");
 });
 
 test("4 — a deep link to an organization survives the sign-in round trip", async ({

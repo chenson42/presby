@@ -182,10 +182,26 @@ test.describe("Member home and routing invariants", () => {
     // policy protects. The chain itself is unchanged; where it starts is not.
     await expect(page).toHaveURL(/\/account\/2fa/);
     const afterAdminUrl = new URL(page.url());
+    // CONTRACT CHANGE (docs/work-log/2026-08-24-totp-callback-bypass-fix.md):
+    // signInWithCredentials now evaluates the 2FA predicate itself and
+    // redirects straight to /totp (skipping the /launch hop entirely, since
+    // it no longer needs signIn()'s own redirect to reach it) using the RAW
+    // callbackUrl this test's sign-in submitted with, which is "/launch" —
+    // /launch's own value, not the "/admin" /launch would have gone on to
+    // compute. /totp then forwards that same value to /account/2fa
+    // unenrolled. Pre-fix, the chain was signin → /launch (soft-nav) →
+    // /admin (real redirect, since /launch always redirects) → proxy
+    // intercept → /totp?callbackUrl=/admin → /account/2fa?callbackUrl=/admin
+    // — one more hop, but the same "/admin" value baked in along the way.
+    // Post-fix there's no /launch computation before /totp at all, so
+    // "/launch" (the value actually submitted) is what's threaded through.
+    // Not a security change: completing enrolment + verification still ends
+    // at /admin, via one extra /launch recomputation — see actions.ts's
+    // IMPLEMENTATION NOTE and the work-log's Edge Cases section.
     expect(
       afterAdminUrl.searchParams.get("callbackUrl"),
-      "callbackUrl should be /admin",
-    ).toBe("/admin");
+      "callbackUrl should be /launch (see comment above)",
+    ).toBe("/launch");
   });
 
   // test 7: access-pending page has a Back to home link

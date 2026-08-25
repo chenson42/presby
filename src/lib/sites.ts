@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { and, eq, desc, sql } from "drizzle-orm";
 import { db, getPlatformDb } from "@/lib/db";
 import { withOrgContext } from "@/lib/authz";
@@ -67,6 +68,20 @@ import { hasTicketsFile } from "@/lib/tickets";
  * membership to verify for a platform operator" reasoning). `getPublishedSite`
  * itself widens in place — no fifth caller shape, no second query/function,
  * per Phase 1 Gap 5.
+ *
+ * COMMIT 3 ADDITION (docs/work-log/2026-08-24-branded-signin.md Phase 4,
+ * amends DECISION-047): `getPublishedSiteBrand` — a fourth member of caller
+ * shape 1, the cheapest sibling yet. Runs the IDENTICAL
+ * `presby_published_site()` query `getPublishedSite`/`resolvePublishedOrganization`
+ * already run (never a second function — the enumeration-safety property
+ * depends on every caller sharing one latency profile), reading only the
+ * `organization_*`/`brand_*` columns — no blob fetch, no JSON parse. Exists
+ * because `getPublishedSite()` 404s on a missing content bundle, which is the
+ * wrong collapse for `/signin`: an org can be brand-configured with a live
+ * `organization_sites` row and no site content published yet, and this
+ * function must still surface that brand. See its own doc comment for the
+ * logo-URL read, which is NOT gated on `ui.brand_theming` (DECISION-047: "un-
+ * brandable does not mean logo-free").
  */
 
 // ---------------------------------------------------------------------------
@@ -119,7 +134,15 @@ export interface PublishedSite {
   organizationId: string;
   organizationName: string;
   organizationType: string;
-  brand: { tokens: BrandTokenSet; fontPairing: ResolvedTypePairing } | null;
+  brand: {
+    tokens: BrandTokenSet;
+    fontPairing: ResolvedTypePairing;
+    /** `organization_brands.light_only`, projected through
+     * `presby_published_site()` as `brand_light_only` — see docs/work-log/
+     * 2026-08-24-light-only-brand.md. `null`/no brand row collapses to
+     * `false` below, same as every other brand leaf here. */
+    lightOnly: boolean;
+  } | null;
   pages: PublishedSiteBundlePage[];
   /**
    * ADDITION beyond Phase 3's literal `PublishedSite` interface — see this
@@ -188,6 +211,7 @@ interface PublishedSiteRow {
   brand_seed_hex: string | null;
   brand_type_pairing: string | null;
   brand_token_version: number | null;
+  brand_light_only: boolean | null;
   profile_address: string | null;
   profile_phone: string | null;
   profile_facebook_url: string | null;
@@ -260,7 +284,7 @@ function isStoredSiteBundle(value: unknown): value is StoredSiteBundle {
  * dangling bundle — collapses to the same `{ kind: "not_found" }`, never a
  * 500 and never a distinguishable error (Phase 1 Gap 5).
  */
-export async function getPublishedSite(
+export const getPublishedSite = cache(async function getPublishedSite(
   slug: string,
 ): Promise<GetPublishedSiteResult> {
   if (!(await isFlagEnabled("sites.public_render"))) {
@@ -308,7 +332,11 @@ export async function getPublishedSite(
       // call site that needs it; in the real Next.js server process this
       // resolves through the same compiled module graph either way.
       const { resolveTypePairing } = await import("@/lib/brand/fonts");
-      brand = { tokens, fontPairing: resolveTypePairing(pairingKey) };
+      brand = {
+        tokens,
+        fontPairing: resolveTypePairing(pairingKey),
+        lightOnly: row.brand_light_only ?? false,
+      };
     } catch {
       // A stored seed that no longer parses degrades to the platform
       // default rather than taking the page down — same posture as
@@ -341,7 +369,7 @@ export async function getPublishedSite(
       officeHours: parseServiceTimeEntries(row.office_hours),
     },
   };
-}
+});
 
 /**
  * Cheaper sibling for the asset route — skips the blob fetch + JSON.parse.
@@ -360,6 +388,95 @@ export async function resolvePublishedOrganization(
     result as unknown as { rows?: Array<{ organization_id: string }> }
   ).rows?.[0];
   return row ? { organizationId: row.organization_id } : null;
+}
+
+export interface PublishedSiteBrandLite {
+  organizationId: string;
+  organizationName: string;
+  brand: {
+    tokens: BrandTokenSet;
+    fontPairing: ResolvedTypePairing;
+    lightOnly: boolean;
+  } | null;
+  /** `/site/<slug>/assets/<markAssetKey>`, or `null` if the org has no
+   * uploaded mark. `OrgMark` already degrades to typographic initials when
+   * this is `null` — no new fallback needed at any call site. */
+  logoUrl: string | null;
+}
+
+/**
+ * The `/signin` brand lookup (docs/work-log/2026-08-24-branded-signin.md
+ * Phase 3 "API Contract"). Anonymous, same caller shape as `getPublishedSite`
+ * — no personId, no organizationId supplied by the caller. The ENTIRE BODY is
+ * one `try { … } catch { return null; }`: this is the one place that owns the
+ * fallback contract (any error, timeout, missing row, or bad seed renders
+ * byte-identical platform-default `/signin` chrome), so `signin/page.tsx`
+ * needs no try/catch of its own.
+ */
+export async function getPublishedSiteBrand(
+  slug: string,
+): Promise<PublishedSiteBrandLite | null> {
+  try {
+    if (!(await isFlagEnabled("sites.public_render"))) return null;
+
+    const result = await db.execute(
+      sql`select * from presby_published_site(${slug})`,
+    );
+    const row = (result as unknown as { rows?: PublishedSiteRow[] }).rows?.[0];
+    if (!row) return null;
+
+    let brand: PublishedSiteBrandLite["brand"] = null;
+    if (row.brand_seed_hex && (await isFlagEnabled("ui.brand_theming"))) {
+      const { tokens } = generateBrandTokens(row.brand_seed_hex);
+      const pairingKey = isTypePairingKey(row.brand_type_pairing ?? "")
+        ? (row.brand_type_pairing as TypePairingKey)
+        : "classic";
+      // Dynamically imported — see getPublishedSite()'s own comment on
+      // resolveTypePairing() for why: next/font/google resolves at MODULE
+      // SCOPE under Next's compiler only, and a static import here would
+      // crash this whole module under plain Node (this file's own Vitest
+      // suite, and every other caller that never touches brand).
+      const { resolveTypePairing } = await import("@/lib/brand/fonts");
+      brand = {
+        tokens,
+        fontPairing: resolveTypePairing(pairingKey),
+        lightOnly: row.brand_light_only ?? false,
+      };
+    }
+
+    // Logo read: the same narrow, non-sensitive organization_brands.mark_
+    // asset_key lookup (public)/site/[slug]/[[...path]]/page.tsx's own
+    // resolveLogoUrl() performs, reusing the SAME public asset route that
+    // already serves it anonymously. NOT gated on ui.brand_theming — a logo
+    // is content on a neutral plate (OrgMark), never brand chrome
+    // (DECISION-047: "un-brandable does not mean logo-free"). Dynamically
+    // imported for the same "@/lib/db's module-scope pool construction
+    // shouldn't run for every caller of this file" reason as above.
+    const { getPlatformDb } = await import("@/lib/db");
+    const { organizationBrands } = await import("@/lib/db/domain/org");
+    const { eq } = await import("drizzle-orm");
+    const platformDb = getPlatformDb();
+    const [brandRow] = await platformDb
+      .select({ markAssetKey: organizationBrands.markAssetKey })
+      .from(organizationBrands)
+      .where(eq(organizationBrands.organizationId, row.organization_id))
+      .limit(1);
+    const logoUrl = brandRow?.markAssetKey
+      ? `/site/${slug}/assets/${brandRow.markAssetKey}`
+      : null;
+
+    return {
+      organizationId: row.organization_id,
+      organizationName: row.organization_name,
+      brand,
+      logoUrl,
+    };
+  } catch {
+    // Branding failure must never block or degrade the ability to sign in
+    // (Phase 1 Flow 1) — a bad seed, a DB blip, or anything else unforeseen
+    // collapses to the platform-default page, same as a genuine miss.
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

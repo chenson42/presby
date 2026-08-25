@@ -36,12 +36,40 @@ import { eq } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
+// `next/font/google`'s real export is populated only by Next's SWC compiler
+// plugin at build time — `fonts.test.ts`'s own header comment documents this
+// at length. `getPublishedSite`'s existing fixture works around it by simply
+// never giving any org a `brand_seed_hex` row, so the branch that dynamically
+// imports `@/lib/brand/fonts` never runs. `getPublishedSiteBrand — with a
+// real brand row` below deliberately DOES exercise that branch (Phase 3
+// wants the real `getPublishedSiteBrand` code path proven, not just its
+// null-collapse), so this file mocks the loader one level closer to the
+// boundary, exactly `fonts.test.ts`'s own approach — each fake loader
+// returns the same `{ className, variable }` shape the real one does.
+vi.mock("next/font/google", () => {
+  const fakeLoader = (name: string) => (opts: { variable: string }) => ({
+    className: `mock-${name}-${opts.variable}`,
+    variable: opts.variable,
+  });
+  return {
+    Lora: fakeLoader("lora"),
+    Source_Sans_3: fakeLoader("source-sans-3"),
+    Libre_Franklin: fakeLoader("libre-franklin"),
+    Public_Sans: fakeLoader("public-sans"),
+    Bitter: fakeLoader("bitter"),
+    Karla: fakeLoader("karla"),
+    Montserrat: fakeLoader("montserrat"),
+    Open_Sans: fakeLoader("open-sans"),
+  };
+});
+
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
 );
 
 describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   let getPublishedSite: typeof import("./sites").getPublishedSite;
+  let getPublishedSiteBrand: typeof import("./sites").getPublishedSiteBrand;
   let resolvePublishedOrganization: typeof import("./sites").resolvePublishedOrganization;
   let getSiteAdminDetail: typeof import("./sites").getSiteAdminDetail;
   let provisionSite: typeof import("./sites").provisionSite;
@@ -72,7 +100,9 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   let featureFlags: typeof import("@/lib/db/schema").featureFlags;
   let organizationSites: typeof import("@/lib/db/domain/sites").organizationSites;
   let siteContactMessages: typeof import("@/lib/db/domain/sites").siteContactMessages;
+  let organizationBrands: typeof import("@/lib/db/domain/org").organizationBrands;
   let getBlobStore: typeof import("@/lib/storage/blob-store").getBlobStore;
+  let generateBrandTokens: typeof import("@/lib/brand/generate").generateBrandTokens;
 
   const stamp = Date.now();
 
@@ -96,6 +126,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   beforeAll(async () => {
     ({
       getPublishedSite,
+      getPublishedSiteBrand,
       resolvePublishedOrganization,
       getSiteAdminDetail,
       provisionSite,
@@ -112,7 +143,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       replaceOrganizationServiceTimes,
     } = await import("./sites"));
     ({ db, getPlatformDb } = await import("@/lib/db"));
-    ({ organizations } = await import("@/lib/db/domain/org"));
+    ({ organizations, organizationBrands } = await import("@/lib/db/domain/org"));
     ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
     ({ people, memberships } = await import("@/lib/db/domain/people"));
     ({ permissions, appRoles, appRolePermissions, roleGrants } = await import(
@@ -123,6 +154,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       "@/lib/db/domain/sites"
     ));
     ({ getBlobStore } = await import("@/lib/storage/blob-store"));
+    ({ generateBrandTokens } = await import("@/lib/brand/generate"));
 
     const platform = getPlatformDb();
 
@@ -444,6 +476,153 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
     it("nonexistent slug: null", async () => {
       const result = await resolvePublishedOrganization(NONEXISTENT_SLUG);
       expect(result).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // getPublishedSiteBrand — the /signin fourth caller-shape-1 sibling
+  // (docs/work-log/2026-08-24-branded-signin.md Phase 3). Same enumeration-
+  // safe collapse as getPublishedSite/resolvePublishedOrganization, proven
+  // against the SAME fixture orgs. Runs AFTER "getPublishedSite —
+  // enumeration safety" above (whose own orgLive assertions depend on no
+  // organization_brands row existing yet) and stages/tears down its own
+  // organization_brands + blob_assets rows within this describe block only,
+  // so no later block (including "getPublishedSite — populated profile/
+  // service-times flow through," which re-reads orgLive) observes a brand
+  // that wasn't there when it made its own assertions.
+  // ---------------------------------------------------------------------
+
+  describe("getPublishedSiteBrand — the /signin brand lookup", () => {
+    let originalBrandThemingEnabled: boolean;
+    let logoBlobKey: string;
+
+    beforeAll(async () => {
+      const existing = await db.query.featureFlags.findFirst({
+        where: eq(featureFlags.key, "ui.brand_theming"),
+      });
+      originalBrandThemingEnabled = existing?.enabled ?? false;
+      await db
+        .insert(featureFlags)
+        .values({ key: "ui.brand_theming", enabled: true })
+        .onConflictDoUpdate({
+          target: featureFlags.key,
+          set: { enabled: true },
+        });
+
+      // A real logo blob, referenced by organization_brands.mark_asset_key —
+      // that column carries a genuine composite FK to blob_assets(id,
+      // organization_id) (drizzle/0016), so a fabricated uuid would fail the
+      // insert below rather than degrade gracefully.
+      const logoBlob = await getBlobStore().store({
+        organizationId: orgLive,
+        bytes: Buffer.from("not a real image, just fixture bytes", "utf-8"),
+        contentType: "image/png",
+      });
+      logoBlobKey = logoBlob.key;
+
+      // organizationBrands is FORCE RLS with no app.current_org_id set on
+      // the plain `db` connection here — inserted via getPlatformDb(),
+      // exactly the write path the real admin actions.ts uses (never
+      // withOrgContext(): no personId/membership to verify for a fixture
+      // write, same "platform operator" shape that module's own header
+      // documents).
+      const { tokens } = generateBrandTokens("#336699");
+      const platform = getPlatformDb();
+      await platform.insert(organizationBrands).values({
+        organizationId: orgLive,
+        seedHex: "#336699",
+        typePairing: "classic",
+        markAssetKey: logoBlobKey,
+        brandTokenVersion: tokens.version,
+        updatedBy: grantingUserId,
+      });
+    });
+
+    afterAll(async () => {
+      const platform = getPlatformDb();
+      await platform
+        .delete(organizationBrands)
+        .where(eq(organizationBrands.organizationId, orgLive));
+      const { blobAssets } = await import("@/lib/db/domain/assets");
+      await platform.delete(blobAssets).where(eq(blobAssets.id, logoBlobKey));
+      await db
+        .update(featureFlags)
+        .set({ enabled: originalBrandThemingEnabled })
+        .where(eq(featureFlags.key, "ui.brand_theming"));
+    });
+
+    it("live org with a brand row + logo: returns tokens, fontPairing, lightOnly, and the asset-route logoUrl", async () => {
+      const result = await getPublishedSiteBrand(orgLiveSlug);
+      expect(result).not.toBeNull();
+      if (!result) return;
+      expect(result.organizationId).toBe(orgLive);
+      expect(result.organizationName).toBe(
+        "Fixture Congregation Live for sites.test.ts",
+      );
+      expect(result.brand).not.toBeNull();
+      expect(result.brand?.lightOnly).toBe(false);
+      expect(result.brand?.fontPairing).toBeTruthy();
+      expect(result.logoUrl).toBe(`/site/${orgLiveSlug}/assets/${logoBlobKey}`);
+    });
+
+    it("ui.brand_theming off: brand is null but logoUrl and organization fields still resolve (a logo is content, not brand chrome)", async () => {
+      await db
+        .update(featureFlags)
+        .set({ enabled: false })
+        .where(eq(featureFlags.key, "ui.brand_theming"));
+      try {
+        const result = await getPublishedSiteBrand(orgLiveSlug);
+        expect(result).not.toBeNull();
+        if (!result) return;
+        expect(result.brand).toBeNull();
+        expect(result.logoUrl).toBe(`/site/${orgLiveSlug}/assets/${logoBlobKey}`);
+      } finally {
+        await db
+          .update(featureFlags)
+          .set({ enabled: true })
+          .where(eq(featureFlags.key, "ui.brand_theming"));
+      }
+    });
+
+    it("suspended org (content live, no brand row of its own): null via the same collapse", async () => {
+      // orgSuspended has a live-then-suspended content bundle but no
+      // organization_brands row of its own — this exercises the same miss
+      // collapse from a second angle (a suspended org, not merely an
+      // unprovisioned or nonexistent one), whole-result null, never a
+      // partially-populated object.
+      const result = await getPublishedSiteBrand(orgSuspendedSlug);
+      expect(result).toBeNull();
+    });
+
+    it("provisioning (never ingested) org: null — same collapse as getPublishedSite", async () => {
+      const result = await getPublishedSiteBrand(orgProvisioningSlug);
+      expect(result).toBeNull();
+    });
+
+    it("never-provisioned org (no organization_sites row): null", async () => {
+      const result = await getPublishedSiteBrand(orgUnprovisionedSlug);
+      expect(result).toBeNull();
+    });
+
+    it("nonexistent slug: null, byte-identical to every other miss", async () => {
+      const result = await getPublishedSiteBrand(NONEXISTENT_SLUG);
+      expect(result).toBeNull();
+    });
+
+    it("sites.public_render off: null even for the live, brand-configured org", async () => {
+      await db
+        .update(featureFlags)
+        .set({ enabled: false })
+        .where(eq(featureFlags.key, "sites.public_render"));
+      try {
+        const result = await getPublishedSiteBrand(orgLiveSlug);
+        expect(result).toBeNull();
+      } finally {
+        await db
+          .update(featureFlags)
+          .set({ enabled: true })
+          .where(eq(featureFlags.key, "sites.public_render"));
+      }
     });
   });
 

@@ -13,12 +13,24 @@
  * IS the `:root`-scoped `<style>` element, so grep-presence and
  * behaviour-presence are one fact rather than two facts that can disagree.
  *
+ * DECISION-047's AMENDMENT (docs/work-log/2026-08-24-branded-signin.md,
+ * DECISION-09x): brand emission reaches THREE specific files, not route
+ * groups — `(org)/o/[slug]/layout.tsx`, `(public)/site/[slug]/layout.tsx`,
+ * and `(auth)/signin/page.tsx`. The third is a single PAGE, not a layout:
+ * `(auth)` also hosts `/totp`, `/forgot-password`, and `/reset-password`,
+ * which stay platform-chrome in this increment. Everything else in `(auth)`
+ * and every other listed group remains un-brandable.
+ *
  * Four rules. E1, E3, C1 and, as of commit a8 (2026-08-19), C2 are live
  * tree-wide. E2 went live for `(org)/o/[slug]/layout.tsx` at commit c4
  * (2026-08-19) — that layout renders `<BrandTokens>` for real now. E2 went
  * live for `(public)/site/[slug]/layout.tsx` too, in the public-sites
  * pipeline's Phase 4 commit 3/3 (2026-08-20) — that layout now renders
- * `<BrandTokens>` for real, fed by `getPublishedSite()`'s own brand fields:
+ * `<BrandTokens>` for real, fed by `getPublishedSite()`'s own brand fields.
+ * E2 went live for `(auth)/signin/page.tsx` too, in the branded-signin
+ * pipeline's Phase 4 commit (2026-08-24), landed `required: true` in the
+ * same commit as the emission itself — unlike the earlier "file doesn't
+ * exist yet" dormant pattern the other two entries once had:
  *
  *   E1 — emitter containment. `<BrandTokens` appears in no file outside
  *        EMITTERS. Live. At a1 it appears nowhere, so this is a ratchet placed
@@ -79,13 +91,17 @@ const SRC = path.join(ROOT, "src");
 // ── The allowlists ───────────────────────────────────────────────────────────
 
 /**
- * The only two layouts that may emit the brand. `(org)`'s `required` flipped
- * to `true` at commit `c4` (2026-08-19) — see E2 below. `(public)`'s stays
- * `false`: P3 has not created that file yet.
+ * The only three files that may emit the brand — two layouts and one page
+ * (DECISION-047's amendment; see this file's header). `(org)`'s `required`
+ * flipped to `true` at commit `c4` (2026-08-19); `(public)`'s at the
+ * public-sites pipeline's Phase 4 commit 3/3 (2026-08-20); `(auth)/signin`'s
+ * at the branded-signin pipeline's Phase 4 commit (2026-08-24) — see E2
+ * below for all three.
  */
 export const EMITTERS = [
   { path: "src/app/(org)/o/[slug]/layout.tsx", required: true },
   { path: "src/app/(public)/site/[slug]/layout.tsx", required: true },
+  { path: "src/app/(auth)/signin/page.tsx", required: true },
 ];
 
 /** The only two route groups a `*-brand` utility may appear in (C1). */

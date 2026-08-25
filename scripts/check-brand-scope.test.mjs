@@ -23,12 +23,15 @@ const f = (path, content) => ({ path, content });
 const rules = (violations) => violations.map((v) => v.rule);
 
 describe("EMITTERS allowlist", () => {
-  // DECISION-047: the brand reaches exactly two layouts. A third appearing here
-  // should be a deliberate edit with a decision behind it, not a quiet append.
-  it("is exactly the two brandable layouts", () => {
+  // DECISION-047 as amended by the branded-signin pipeline
+  // (docs/work-log/2026-08-24-branded-signin.md): the brand reaches exactly
+  // three files, two layouts and one page. A fourth appearing here should be
+  // a deliberate edit with a decision behind it, not a quiet append.
+  it("is exactly the three brandable files", () => {
     expect(EMITTERS.map((e) => e.path)).toEqual([
       "src/app/(org)/o/[slug]/layout.tsx",
       "src/app/(public)/site/[slug]/layout.tsx",
+      "src/app/(auth)/signin/page.tsx",
     ]);
   });
 });
@@ -166,6 +169,29 @@ describe("E2 — emitter presence", () => {
       f(
         "src/app/(public)/site/[slug]/layout.tsx",
         "<BrandTokens brand={brand?.tokens ?? null} />\nreturn <main>{children}</main>;",
+      ),
+    ]);
+    expect(v).toEqual([]);
+  });
+
+  // Live against the REAL (default) EMITTERS array as of the branded-signin
+  // pipeline's Phase 4 commit (2026-08-24) — the third emitter,
+  // `(auth)/signin/page.tsx`, landed `required: true` in the same commit as
+  // the emission itself (no "file doesn't exist yet" dormant period, unlike
+  // the earlier two entries).
+  it("flags the real /signin page under the default EMITTERS array if the marker is ever removed", () => {
+    const v = checkBrandScope([
+      f("src/app/(auth)/signin/page.tsx", "return <main>Sign in</main>;"),
+    ]);
+    expect(rules(v)).toEqual(["E2"]);
+    expect(v[0].file).toBe("src/app/(auth)/signin/page.tsx");
+  });
+
+  it("passes under the default EMITTERS array now that the real /signin page renders the marker", () => {
+    const v = checkBrandScope([
+      f(
+        "src/app/(auth)/signin/page.tsx",
+        "<BrandTokens brand={siteBrand?.brand?.tokens ?? null} />\nreturn <main>Sign in</main>;",
       ),
     ]);
     expect(v).toEqual([]);

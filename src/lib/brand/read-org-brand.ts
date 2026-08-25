@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { OrgAccessError, withOrgContext } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { organizationBrands } from "@/lib/db/domain/org";
+import { getBlobStore } from "@/lib/storage/blob-store";
 import { generateBrandTokens, type BrandTokenSet } from "./generate";
 import { resolveTypePairing, type ResolvedTypePairing } from "./fonts";
 import { TYPE_PAIRINGS, type TypePairingKey } from "./contract";
@@ -87,6 +88,10 @@ export type OrgBrandForLayout = {
    * one element so `next-themes` can select between them with zero re-render. */
   tokens: BrandTokenSet;
   fontPairing: ResolvedTypePairing;
+  /** `organization_brands.light_only` — see docs/work-log/2026-08-24-
+   * light-only-brand.md. Passed straight through to `<BrandTokens
+   * lightOnly>`; this function doesn't interpret it. */
+  lightOnly: boolean;
 };
 
 const TYPE_PAIRING_KEYS = new Set<string>(TYPE_PAIRINGS.map((p) => p.key));
@@ -134,6 +139,85 @@ export const getOrgBrandForLayout = cache(
       ? row.typePairing
       : "classic";
 
-    return { tokens, fontPairing: resolveTypePairing(pairingKey) };
+    return { tokens, fontPairing: resolveTypePairing(pairingKey), lightOnly: row.lightOnly };
+  },
+);
+
+/**
+ * The `(org)` header-mark read — portal-chrome pipeline (docs/work-log/
+ * 2026-08-25-portal-chrome.md), `GlobalNav`'s `orgMark` prop.
+ *
+ * DELIBERATELY NOT GATED ON `ui.brand_theming`, unlike `getOrgBrandForLayout`
+ * above — a logo is identity, not brand chrome (DECISION-047's "un-brandable
+ * does not mean logo-free", G7). An organization's mark should still swap in
+ * for the platform wordmark even with the colour/font rollback switch off;
+ * the two flags answer different questions and this function does not
+ * conflate them. It IS gated on `org_portal.chrome_v2` — but by the caller
+ * (`(org)/o/[slug]/layout.tsx`), not here, the same division of labor
+ * `getOrgBrandForLayout` already has with `ui.brand_theming`: this function
+ * is a plain data read, and the flag check belongs where the flag is defined
+ * to gate ("Org-identity header ... in (org)").
+ *
+ * MEMBERSHIP-VERIFIED, same pattern as `getOrgBrandForLayout`: the caller
+ * must have already resolved an ACTIVE relationship (`resolveOrgContext()`
+ * returning `"ok"`) and hands in THAT resolution's `organizationId`/
+ * `personId` pair, not a raw session id. `withOrgContext()` re-verifies
+ * inside the transaction regardless of what the caller already found — same
+ * F26-motivated discipline, not a redundant check.
+ *
+ * INLINES THE LOGO AS A `data:` URI AT RENDER TIME, exactly like
+ * `/admin/organizations/[id]/page.tsx` already does — NOT the public
+ * `/site/<slug>/assets/<key>` route, which is gated on `sites.public_render`
+ * + site publication (an unrelated feature) and would 404 a portal header for
+ * any organization without a published public site. The header is an
+ * authenticated, server-rendered page; there is nothing to gain here from a
+ * second asset route this pipeline doesn't otherwise need.
+ *
+ * Returns `null` on: no `organization_brands` row, a row with no
+ * `markAssetKey`, an unresolvable blob (a stale key from a deleted asset —
+ * `resolve()` itself returns `null` rather than throwing), or the same
+ * `OrgAccessError` race `getOrgBrandForLayout` documents. The caller treats
+ * `null` as "no mark, render initials" — `OrgMark` already does that
+ * fallback, so this function does not need a separate "not found" shape.
+ *
+ * `cache()`-wrapped for the same reason as `getOrgBrandForLayout`: a second
+ * call with the same arguments within one RSC render pass costs nothing
+ * further.
+ */
+export type OrgMarkForLayout = {
+  markSrc: string | null;
+};
+
+export const getOrgMarkForLayout = cache(
+  async (
+    organizationId: string,
+    personId: string,
+  ): Promise<OrgMarkForLayout | null> => {
+    let row;
+    try {
+      row = await withOrgContext(personId, organizationId, async (tx) => {
+        const [r] = await tx
+          .select({ markAssetKey: organizationBrands.markAssetKey })
+          .from(organizationBrands)
+          .where(eq(organizationBrands.organizationId, organizationId))
+          .limit(1);
+        return r ?? null;
+      });
+    } catch (err) {
+      if (err instanceof OrgAccessError) return null;
+      throw err;
+    }
+
+    if (!row?.markAssetKey) return null;
+
+    const resolved = await getBlobStore().resolve({
+      organizationId,
+      key: row.markAssetKey,
+    });
+    if (!resolved) return null;
+
+    return {
+      markSrc: `data:${resolved.contentType};base64,${resolved.bytes.toString("base64")}`,
+    };
   },
 );

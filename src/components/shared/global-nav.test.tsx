@@ -201,6 +201,108 @@ describe("GlobalNav — the healthy path", () => {
   });
 });
 
+describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-portal-chrome.md)", () => {
+  it("renders the platform 'presby' wordmark, linking to /, when orgMark is absent — byte-identical to today", async () => {
+    cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({ session: session(), currentOrgSlug: WRENFIELD.slug });
+
+    const wordmark = screen.getByRole("link", { name: "presby" });
+    expect(wordmark.getAttribute("href")).toBe("/");
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("swaps to OrgMark, linking to /o/<slug>, when orgMark and currentOrgSlug are both present", async () => {
+    cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({
+      session: session(),
+      currentOrgSlug: WRENFIELD.slug,
+      orgMark: { name: "Fixture Congregation", markSrc: "data:image/png;base64,xyz" },
+    });
+
+    expect(screen.queryByRole("link", { name: "presby" })).toBeNull();
+    const image = screen.getByRole("img", { name: "Fixture Congregation logo" });
+    expect(image.getAttribute("src")).toBe("data:image/png;base64,xyz");
+    const wordmarkLink = screen.getByRole("link", {
+      name: "Fixture Congregation home",
+    });
+    expect(wordmarkLink.getAttribute("href")).toBe(`/o/${WRENFIELD.slug}`);
+  });
+
+  it("falls back to initials when orgMark carries no markSrc — no logo, never a crash", async () => {
+    cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({
+      session: session(),
+      currentOrgSlug: WRENFIELD.slug,
+      orgMark: { name: "Fixture Congregation", markSrc: null },
+    });
+
+    expect(screen.queryByRole("img")).toBeNull();
+    const wordmarkLink = screen.getByRole("link", {
+      name: "Fixture Congregation home",
+    });
+    expect(wordmarkLink.textContent).toBe("FC");
+  });
+
+  it("falls back to the platform wordmark when orgMark is present but currentOrgSlug is not (defensive — the caller never actually does this)", async () => {
+    cachedAvailableOrganizations.mockResolvedValue([]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({
+      session: session(),
+      orgMark: { name: "Fixture Congregation", markSrc: null },
+    });
+
+    const wordmark = screen.getByRole("link", { name: "presby" });
+    expect(wordmark.getAttribute("href")).toBe("/");
+  });
+
+  it("keeps the truncate mechanism wired for a name long enough to need it, even after the OrgMark swap frees width in the row", async () => {
+    // Phase 5 FIRST PASS finding (docs/work-log/2026-08-25-portal-chrome.md):
+    // swapping the "presby" TEXT wordmark for OrgMark (a small square
+    // logo/initials, no restated name) frees enough width that
+    // "Presbytery of the Eastern Fells" — the longest name any e2e fixture
+    // org carries — now fits at 360px WITHOUT clipping. That's the correct
+    // behavior (a name that fits should show in full), so
+    // e2e/header-controls.spec.ts no longer asserts real pixel clipping for
+    // it, and no current e2e fixture name is long enough to force real
+    // clipping in the new, wider-fitting layout.
+    //
+    // This test exists to pin the OTHER half of that contract: the safety
+    // valve itself — the `truncate` class on the org-name span — has to stay
+    // wired for the day a name IS too long, regardless of how much width the
+    // OrgMark swap frees. jsdom does no real layout (scrollWidth/clientWidth
+    // are always 0 here), so this can't measure actual pixel clipping — that
+    // proof is e2e's job, gated on a name long enough to need it. What this
+    // pins is structural: given a name well past anything a real 360px
+    // header could fit, the CSS mechanism that would clip it is still
+    // present in the DOM GlobalNav renders with orgMark set.
+    const LONG_NAME =
+      "Presbytery of the Eastern Fells and the Western Territorial " +
+      "Council of Consolidated Congregations";
+    const longFixture = { ...FELLS, name: LONG_NAME };
+    cachedAvailableOrganizations.mockResolvedValue([WRENFIELD, longFixture]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({
+      session: session(),
+      currentOrgSlug: longFixture.slug,
+      orgMark: { name: LONG_NAME, markSrc: null },
+    });
+
+    const trigger = screen.getByTestId("org-switcher-trigger");
+    const nameSpan = trigger.querySelector("span.truncate");
+    expect(nameSpan).not.toBeNull();
+    expect(nameSpan!.textContent).toBe(LONG_NAME);
+    expect(nameSpan!.className).toContain("truncate");
+  });
+});
+
 describe("GlobalNav — the organization list cannot be read", () => {
   it("falls back to the public org tree for the name, and renders it as plain text", async () => {
     // Flow 1's failure case. The two reads hit different tables — the list goes

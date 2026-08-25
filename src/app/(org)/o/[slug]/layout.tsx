@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import { resolveOrgContext } from "@/lib/authz";
-import { getOrgBrandForLayout } from "@/lib/brand/read-org-brand";
+import { getOrgBrandForLayout, getOrgMarkForLayout } from "@/lib/brand/read-org-brand";
+import { isFlagEnabled } from "@/lib/flags";
 import { BrandTokens } from "@/components/brand/brand-tokens";
 import { GlobalNav } from "@/components/shared/global-nav";
+import { PortalNav } from "./portal-nav";
 import { cn } from "@/lib/utils";
 
 /**
@@ -39,6 +41,17 @@ import { cn } from "@/lib/utils";
  * re-verifies membership inside `withOrgContext()` regardless of what this
  * resolve found, so a relationship that vanishes in the gap degrades to
  * `null`, not to a crash or to someone else's colours.
+ *
+ * PORTAL CHROME (docs/work-log/2026-08-25-portal-chrome.md, Phase 3) hangs
+ * off the SAME "active relationship only" gate, behind its own flag
+ * (`org_portal.chrome_v2`) so the header-identity swap and the persistent
+ * nav row ship — and roll back — as one unit. The flag is read in parallel
+ * with `resolveOrgContext()` (nothing about it depends on that resolve), but
+ * `orgMark`/the `<PortalNav>` row are only ever populated inside the SAME
+ * `resolved.kind === "ok"` branch `orgBrand` already uses — flag ON with a
+ * `forbidden`/`ended`/`not-found`/no-session outcome renders neither, same
+ * as brand emission, so DECISION-040's byte-identical copy on those pages
+ * stays untouched.
  */
 export default async function OrgSlugLayout({
   children,
@@ -51,28 +64,47 @@ export default async function OrgSlugLayout({
   const session = await cachedAuth();
 
   let orgBrand: Awaited<ReturnType<typeof getOrgBrandForLayout>> = null;
+  let orgMark: { name: string; markSrc: string | null } | null = null;
+  let showPortalNav = false;
   if (session?.user) {
-    const resolved = await resolveOrgContext(session.user.id, slug);
+    const [resolved, chromeV2Enabled] = await Promise.all([
+      resolveOrgContext(session.user.id, slug),
+      isFlagEnabled("org_portal.chrome_v2"),
+    ]);
     if (resolved.kind === "ok") {
       // BOTH ids from the SAME resolution, not `session.user.id` — see
       // read-org-brand.ts's header comment for why that distinction is
       // load-bearing (`users.id` vs. `people.id`) and not a style choice.
-      orgBrand = await getOrgBrandForLayout(
-        resolved.org.organizationId,
-        resolved.org.personId,
-      );
+      if (chromeV2Enabled) {
+        const [brand, mark] = await Promise.all([
+          getOrgBrandForLayout(resolved.org.organizationId, resolved.org.personId),
+          getOrgMarkForLayout(resolved.org.organizationId, resolved.org.personId),
+        ]);
+        orgBrand = brand;
+        orgMark = { name: resolved.org.name, markSrc: mark?.markSrc ?? null };
+        showPortalNav = true;
+      } else {
+        orgBrand = await getOrgBrandForLayout(
+          resolved.org.organizationId,
+          resolved.org.personId,
+        );
+      }
     }
   }
 
   return (
     <>
-      <BrandTokens brand={orgBrand?.tokens ?? null} />
+      <BrandTokens brand={orgBrand?.tokens ?? null} lightOnly={orgBrand?.lightOnly ?? false} />
       {session?.user ? (
-        <GlobalNav
-          session={session}
-          currentOrgSlug={slug}
-          contentWidthClassName="max-w-4xl"
-        />
+        <>
+          <GlobalNav
+            session={session}
+            currentOrgSlug={slug}
+            contentWidthClassName="max-w-4xl"
+            orgMark={orgMark}
+          />
+          {showPortalNav ? <PortalNav slug={slug} /> : null}
+        </>
       ) : (
         // Unreachable in practice — every page under here redirects a signed-out
         // visitor to /signin. Rendered anyway so that a future route which

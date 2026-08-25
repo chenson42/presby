@@ -125,12 +125,32 @@ test.describe("org switcher — a user with two organizations", () => {
     ).toBeFocused();
   });
 
-  test("stays on one row at 360px, truncating the organization name", async ({
+  test("stays on one row at 360px, and keeps the truncation safety valve wired", async ({
     page,
   }) => {
-    // THE 360px REQUIREMENT. "Presbytery of the Eastern Fells" is longer than
-    // the space available, and the failure mode is a header that wraps and
-    // pushes the avatar onto a second line.
+    // THE 360px REQUIREMENT. The failure mode this test guards against is a
+    // header that WRAPS to a second line or OVERFLOWS the viewport
+    // horizontally — either pushes the avatar off-screen or off-row.
+    //
+    // WHY THIS NO LONGER ASSERTS `scrollWidth > clientWidth` (it did, until
+    // portal-chrome: docs/work-log/2026-08-25-portal-chrome.md, Phase 5 FIRST
+    // PASS finding). Swapping the "presby" TEXT wordmark for the org's own
+    // OrgMark (a small square logo/initials, no restated name) frees enough
+    // width in the flex row that "Presbytery of the Eastern Fells" — the
+    // longest name any e2e fixture organization carries — now fits on one
+    // line WITHOUT clipping. Deliberate call, not a bug: a name that fits
+    // should be shown in FULL. Truncation is a safety valve for names that
+    // don't fit, not a mandate that every name be clipped regardless of
+    // available width. So the real contract is: no wrap, no page overflow,
+    // AND the safety valve (the `truncate` class on the name span) stays
+    // wired for the day a longer name shows up — asserted below.
+    //
+    // Proving the valve actually CLIPS pixels needs a name longer than any
+    // current e2e fixture provides at this width; rather than inventing an
+    // unrealistically long fixture org name, that proof is a component-level
+    // unit test instead — see global-nav.test.tsx, "keeps the truncate
+    // mechanism wired for a name long enough to need it" — which isn't
+    // constrained by fixture data.
     await page.setViewportSize(NARROW);
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}`);
 
@@ -146,13 +166,29 @@ test.describe("org switcher — a user with two organizations", () => {
     expect(headerBox!.height).toBeLessThan(72);
     // Nothing has been pushed off the right edge.
     expect(avatarBox!.x + avatarBox!.width).toBeLessThanOrEqual(360);
-    // The name is clipped by CSS rather than wrapped: the rendered box is
-    // narrower than the text it holds would need.
-    const clipped = await page
+    // No horizontal scroll anywhere on the page — the wrap/overflow failure
+    // mode this test exists to catch, independent of whether any one name
+    // happens to clip today.
+    const documentWidth = await page.evaluate(
+      () => document.documentElement.scrollWidth,
+    );
+    expect(documentWidth).toBeLessThanOrEqual(360);
+
+    // The org name is un-clipped at this width now — confirming the better
+    // behavior actually shipped, not just that the old assertion is gone.
+    const fullyVisible = await page
       .getByTestId(SWITCHER)
       .locator("span.truncate")
-      .evaluate((el) => el.scrollWidth > el.clientWidth);
-    expect(clipped).toBe(true);
+      .evaluate((el) => el.scrollWidth <= el.clientWidth);
+    expect(fullyVisible).toBe(true);
+
+    // The safety valve stays wired even though it isn't visually clipping
+    // this name today — see global-nav.test.tsx for the proof it engages.
+    const nameSpanClass = await page
+      .getByTestId(SWITCHER)
+      .locator("span.truncate")
+      .getAttribute("class");
+    expect(nameSpanClass).toContain("truncate");
   });
 });
 

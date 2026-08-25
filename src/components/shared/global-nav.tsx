@@ -9,6 +9,7 @@ import { sessionCanAccessAdmin } from "@/lib/platform-admin";
 import { cn } from "@/lib/utils";
 import { AvatarMenu } from "@/components/shared/avatar-menu";
 import { OrgSwitcher } from "@/components/shared/org-switcher";
+import { OrgMark } from "@/components/brand/org-mark";
 
 /**
  * The signed-in header: brand, organization switcher, avatar menu.
@@ -41,12 +42,25 @@ export async function GlobalNav({
   session,
   currentOrgSlug = null,
   contentWidthClassName = "max-w-2xl",
+  orgMark = null,
 }: {
   session: Session;
   /** Set inside `(org)`; the switcher renders this organization as current. */
   currentOrgSlug?: string | null;
   /** Match the width of the `<main>` the shell renders underneath. */
   contentWidthClassName?: string;
+  /**
+   * Portal-chrome pipeline (docs/work-log/2026-08-25-portal-chrome.md,
+   * Phase 3). Set ONLY by `(org)/o/[slug]/layout.tsx`, and only when
+   * `org_portal.chrome_v2` is ON and the slug resolved to an active
+   * relationship — every other caller (and `(org)` itself when the flag is
+   * OFF) passes nothing, and the "presby" wordmark renders exactly as it
+   * does today. GlobalNav does NOT gate on the flag itself and reads no
+   * brand data of its own — it stays brand-blind for `(member)`/`(admin)`;
+   * the caller already did both the flag check and the membership-verified
+   * read (`getOrgMarkForLayout`) before handing this prop over.
+   */
+  orgMark?: { name: string; markSrc: string | null } | null;
 }) {
   const userId = session.user.id;
 
@@ -87,9 +101,19 @@ export async function GlobalNav({
         )}
       >
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
-          <Link href="/" className={WORDMARK_LINK_CLASS}>
-            presby
-          </Link>
+          {orgMark && currentOrgSlug ? (
+            <Link
+              href={`/o/${currentOrgSlug}`}
+              className={cn(WORDMARK_LINK_CLASS, "px-0 py-0")}
+              aria-label={`${orgMark.name} home`}
+            >
+              <OrgMark name={orgMark.name} markSrc={orgMark.markSrc} size="sm" />
+            </Link>
+          ) : (
+            <Link href="/" className={WORDMARK_LINK_CLASS}>
+              presby
+            </Link>
+          )}
           <OrgSwitcher
             currentName={currentName}
             currentSlug={currentOrgSlug}

@@ -172,6 +172,10 @@ export const orgUnits = pgTable(
  * the composite FK is enforced in the migration only. See `./assets.ts`'s
  * comment on `blobAssets` for why it is not expressible here (it would
  * require a circular module dependency between this file and assets.ts).
+ *
+ * `lightOnly` (drizzle/0023_presby_brand_light_only.sql,
+ * docs/work-log/2026-08-24-light-only-brand.md): opts this org's brand out
+ * of dark mode entirely. See the column's own comment below.
  */
 export const organizationBrands = pgTable("organization_brands", {
   organizationId: uuid("organization_id")
@@ -190,6 +194,18 @@ export const organizationBrands = pgTable("organization_brands", {
   // D8: pinned per org so a generator improvement never silently re-skins
   // every congregation on a Tuesday with no audit row (A13).
   brandTokenVersion: integer("brand_token_version").notNull(),
+  // Per-Organization Light-Only Brand Mode
+  // (docs/work-log/2026-08-24-light-only-brand.md). When true, this org's
+  // public site and member portal never render the dark theme, regardless
+  // of visitor system preference — a deliberate, narrow exception to
+  // DECISION-050 ("the brand style element always emits both ramps"): both
+  // ramps still get generated/stored, this only stops `.dark` from ever
+  // being SELECTED for the org's pages. Enforced in
+  // src/components/brand/brand-tokens.tsx (out of scope for this file) by
+  // widening its existing `:root:root.dark` emission block to also
+  // re-declare the platform-fixed tokens at their light values. Default
+  // false, so every existing brand keeps today's behavior.
+  lightOnly: boolean("light_only").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

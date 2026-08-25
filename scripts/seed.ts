@@ -150,6 +150,37 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.home_v2",
+      // ON: `/o/<slug>` renders the rebuilt portal home (greeting,
+      // find-a-person, the "yours" zone, the flag-gated tile grid) instead
+      // of `OrgPortalStub`. Checked bare, no DECISION-026 fail-open wrapper
+      // — a toggle, not an auth path (Phase 3, docs/work-log/
+      // 2026-08-24-portal-home-directory.md, Increment 1). Never
+      // substitutes for any tile's own permission — the tile grid mirrors
+      // each destination route's `hasFeature()`/`directory.view`-shaped
+      // gate rather than duplicating it (DECISION-003). Seeded OFF: the
+      // stub stays the regression floor until a later increment turns this
+      // on; both branches coexist in page.tsx until then.
+      description:
+        "Portal home rebuild in (org). OFF = /o/<slug> renders the original P0 landing stub regardless of what the rebuilt home would otherwise show.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.directory_v2",
+      // ON: `/o/<slug>/directory` renders the search box + card grid
+      // instead of today's flat `DirectoryList`. Checked bare, no
+      // DECISION-026 fail-open wrapper — a toggle, not an auth path (Phase
+      // 3, docs/work-log/2026-08-24-portal-home-directory.md, Increment 2).
+      // Never substitutes for directory.view — the grid calls the same
+      // `getDirectory()` permission check the flat list already makes
+      // (DECISION-003). Seeded OFF: the flat list stays the regression
+      // floor until this increment ships; both branches coexist in
+      // directory/page.tsx until then.
+      description:
+        "Directory search + card-grid redesign in (org). OFF = /o/<slug>/directory renders today's flat member list regardless of search params in the URL.",
+      enabled: false,
+    },
+    {
       key: "org_portal.tickets",
       // ON: /o/<slug>/tickets* AND /o/<slug>/feedback are reachable at all —
       // ONE flag gates both, deliberately (support-tickets pipeline, Phase
@@ -163,6 +194,44 @@ async function seedFlags() {
       // until the page lands" reasoning as org_portal.directory/roles.
       description:
         "Support-ticket filing/triage and the congregation-feedback on-ramp in (org). OFF = /o/<slug>/tickets* and /o/<slug>/feedback render 'isn't turned on yet' regardless of the viewer's tickets.file grant.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.chrome_v2",
+      // ON: `GlobalNav`'s wordmark swaps to the organization's own `OrgMark`
+      // (logo or initials) linking to `/o/<slug>` instead of the "presby"
+      // link to `/`, AND the persistent portal-nav row (Home / Directory /
+      // Administration / Tickets / Give feedback, flag-filtered) renders
+      // below the header on every `/o/<slug>*` page. ONE flag for both,
+      // deliberately — they are one visual unit and a rollback of one without
+      // the other reads as half-finished chrome (docs/work-log/
+      // 2026-08-25-portal-chrome.md, Phase 3). Checked bare, no DECISION-026
+      // fail-open wrapper — a toggle, not an auth path. Never substitutes for
+      // any tile's own permission — the nav row mirrors each destination
+      // route's own gate the same way the home tile grid already does
+      // (DECISION-003). Seeded OFF: flag-OFF is byte-identical to today's
+      // header, the regression floor this pipeline pins with a test.
+      description:
+        "Org-identity header + persistent portal nav in (org). OFF = the header keeps the platform 'presby' wordmark and no nav row renders inside /o/<slug>.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.feedback",
+      // ON: /o/<slug>/feedback is reachable at all. Its own flag as of this
+      // pipeline — it previously borrowed org_portal.tickets (support-tickets
+      // pipeline's "ship the on-ramp with the destination" reasoning), which
+      // was fine while the feedback tile was cosmetic (the home tile grid)
+      // but became consequential once portal-nav promotes it to a persistent
+      // header link (Phase 2 architect ruling, docs/work-log/
+      // 2026-08-25-portal-chrome.md). org_portal.tickets keeps gating
+      // /o/<slug>/tickets* alone. Checked bare, no DECISION-026 fail-open
+      // wrapper — a toggle, not an auth path. Never substitutes for
+      // tickets.file/whatever the feedback page's own grant is — the page
+      // remains the sole authority (DECISION-003). Seeded OFF, same "ships
+      // dark until the page lands" reasoning as its sibling org_portal.*
+      // flags.
+      description:
+        "Congregation-feedback page in (org). OFF = /o/<slug>/feedback renders 'isn't turned on yet' regardless of the viewer's own grant.",
       enabled: false,
     },
     {
@@ -182,6 +251,22 @@ async function seedFlags() {
       // org_portal.directory/roles/tickets.
       description:
         "Public per-org website render + ingest. OFF = /site/<slug> 404s and ingest is rejected, regardless of organization_sites.status.",
+      enabled: false,
+    },
+    {
+      key: "ui.branded_signin",
+      // ON: /signin renders the origin org's brand when reached via a live
+      // public site's /o/<slug> callback. Checked bare, no DECISION-026
+      // fail-open wrapper — this is a cosmetic toggle, not an auth path: the
+      // fail direction here is the OPPOSITE of auth.local_login/
+      // auth.require_2fa. isFlagEnabled()'s existing "false on missing row
+      // or DB error" behavior is the SAFE default (falls to platform
+      // chrome), so wrapping it would be reflexive, not correct (Phase 1/2,
+      // docs/work-log/2026-08-24-branded-signin.md). Seeded OFF, same
+      // "ships dark until the page lands" reasoning as org_portal.directory/
+      // roles/tickets and sites.public_render.
+      description:
+        "ON: /signin renders the origin org's brand when reached via a live public site's /o/<slug> callback. OFF = /signin always renders platform-default chrome regardless of callbackUrl.",
       enabled: false,
     },
   ];

@@ -151,31 +151,34 @@ row (Sunday, 10:15 AM). Site linked: `organization_sites.repo` =
 `chenson42/site-fpcw`, `status` = `provisioning` (never ingested yet —
 correct, no CI has run against it).
 
+**Session complete on presby's side. Three commits landed** (`fix:` the
+access-denied back-link, `chore(deps):` the site-kit v3.4.0 bump,
+`feat(admin):` create organization — all with clean typecheck, `git status`
+clean). **All 78 real photos are downloaded and pushed to `site-fpcw`**,
+at the user's explicit direction, overriding the earlier "Claude does not
+scrape" default for this one case — `git log` on `site-fpcw` now shows two
+commits (content, then photos), both pushed.
+
 **Still open, in order:**
-1. **78 real photos** — `site-fpcw/MANIFEST.md` lists every needed
-   `images/<manifestKey>.<ext>` mapped back to its original WordPress
-   upload. Zero image bytes exist in the repo yet; the user supplies these
-   (not scraped by Claude, per standing instruction). The site can't
-   actually go live and look right without them.
-2. Set the two GitHub repo variables `site-fpcw` needs
+1. Set the two GitHub repo variables `site-fpcw` needs
    (`PRESBY_INGEST_URL`, `PRESBY_OIDC_AUDIENCE`) once presby's deployed
    domain and `SITES_INGEST_OIDC_AUDIENCE` are known — this is what turns
    a push to `site-fpcw`'s `main` into a real ingest, flipping
-   `organization_sites.status` from `provisioning` to `live`.
-3. **`sites.public_render` is still off** — a global flag, not per-org, so
-   flipping it makes every provisioned+live site publicly reachable, not
-   just fpcw's. Deliberately not flipped without asking the user first;
-   still an open decision.
-4. `docs/TODO.md`'s "site-`<slug>` content-repo visibility" open question
-   (Phase 1 of `2026-08-20-public-sites.md`) is now resolved in practice —
-   `site-fpcw` is private — the TODO line itself still needs closing out
-   in the same housekeeping pass as whichever commit ships this work.
-5. **Nothing from this session is committed.** `package.json`'s site-kit
-   pin bump, the new `admin-org-create` feature (12+ new/modified files),
-   release notes (v0.13.0 drafted in `docs/release-notes/v0.12.md`,
-   package.json bumped to match), and the functionality-map/TODO
-   housekeeping are all sitting in the working tree awaiting the user's
-   explicit commit approval, per standing workflow rules.
+   `organization_sites.status` from `provisioning` to `live`. Both pushes
+   so far (content, then photos) triggered `.github/workflows/deploy.yml`
+   and both failed for exactly this reason — expected, harmless (private
+   repo, no real consequence), not a sign anything is broken.
+2. `sites.public_render` **is already on** (discovered mid-session, not
+   something this session flipped — worth confirming with the user whether
+   that was intentional, since it's a global flag: on means every
+   provisioned+`live` site is publicly reachable, not just fpcw's).
+3. `docs/TODO.md`'s "site-`<slug>` content-repo visibility" open question
+   (Phase 1 of `2026-08-20-public-sites.md`) is resolved in practice —
+   `site-fpcw` is private — the TODO line itself still needs closing out.
+4. Once the repo variables are set and a real ingest succeeds,
+   `/site/fpcw` will actually render — confirmed 404 as of this session
+   (correctly: `organization_sites.status` was still `provisioning`, no
+   `content_bundle_key` yet).
 
 ### Orientation for a fresh session
 

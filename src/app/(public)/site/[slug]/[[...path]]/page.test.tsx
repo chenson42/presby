@@ -23,13 +23,34 @@ vi.mock("@/lib/sites", () => ({
 }));
 
 const renderSiteBundle = vi.fn();
+const buildPageMetadata = vi.fn();
 vi.mock("presby-site-kit", () => ({
   renderSiteBundle: (...args: unknown[]) => renderSiteBundle(...args),
+  buildPageMetadata: (...args: unknown[]) => buildPageMetadata(...args),
 }));
 
 vi.mock("../actions", () => ({
   submitContactMessageAction: vi.fn(),
 }));
+
+// resolveLogoUrl()'s dynamically-imported getPlatformDb() chain — mocked
+// the same way @/lib/sites is mocked above, and for the identical reason:
+// @/lib/db's module-scope pool construction throws outside a real
+// DATABASE_URL. Resolves to "no brand row" (empty array) by default; the
+// logo-specific test below overrides this per-case.
+const orgBrandsSelectMock = vi.fn(() => Promise.resolve([] as { markAssetKey: string | null }[]));
+vi.mock("@/lib/db", () => ({
+  getPlatformDb: () => ({
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => orgBrandsSelectMock(),
+        }),
+      }),
+    }),
+  }),
+}));
+vi.mock("@/lib/db/domain/org", () => ({ organizationBrands: {} }));
 
 const notFoundMock = vi.fn(() => {
   throw new Error("NOT_FOUND");
@@ -38,13 +59,16 @@ vi.mock("next/navigation", () => ({
   notFound: () => notFoundMock(),
 }));
 
-import PublicSitePage from "./page";
+import PublicSitePage, { generateMetadata } from "./page";
 
 afterEach(() => {
   cleanup();
   getPublishedSite.mockReset();
   renderSiteBundle.mockReset();
+  buildPageMetadata.mockReset();
   notFoundMock.mockClear();
+  orgBrandsSelectMock.mockReset();
+  orgBrandsSelectMock.mockImplementation(() => Promise.resolve([]));
 });
 
 function makeParams(slug = "alder-creek", path?: string[]) {
@@ -109,12 +133,16 @@ describe("PublicSitePage — the ok path", () => {
 
     expect(renderSiteBundle).toHaveBeenCalledWith(
       expect.objectContaining({
+        organizationName: SITE.organizationName,
+        origin: "http://localhost:3000",
         pages: SITE.pages,
         currentPath: "/",
         brand: SITE.brand,
         imageUrl: expect.any(Function),
         pageUrl: expect.any(Function),
         portalUrl: "/o/alder-creek",
+        portalNavGroup: "Connect",
+        portalLabel: "Our Directory",
       }),
     );
   });
@@ -196,6 +224,28 @@ describe("PublicSitePage — the ok path", () => {
     );
   });
 
+  it("resolves logoUrl through the same generic asset route when the org has a brand mark", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+    orgBrandsSelectMock.mockResolvedValue([{ markAssetKey: "mark-blob-key" }]);
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as { logoUrl: string | null };
+    expect(call.logoUrl).toBe("/site/alder-creek/assets/mark-blob-key");
+  });
+
+  it("passes logoUrl as null when the org has no brand row or no mark set — never a broken image", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+    orgBrandsSelectMock.mockResolvedValue([]);
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as { logoUrl: string | null };
+    expect(call.logoUrl).toBeNull();
+  });
+
   it("translates PublishedSite.profile.social's keyed object into site-kit's socialLinks array, omitting unset platforms", async () => {
     getPublishedSite.mockResolvedValue({
       kind: "ok",
@@ -258,18 +308,92 @@ describe("PublicSitePage — the ok path", () => {
     expect(call.profile.socialLinks).toEqual([]);
   });
 
-  it("renders the site-kit output plus a Contact section naming the organization", async () => {
+  it("returns the site-kit output alone — no page-level chrome bolted around it", async () => {
     getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<h1>Welcome page content</h1>);
 
     const el = await PublicSitePage({ params: makeParams() });
-    render(el);
+    const { container } = render(<>{el}</>);
 
     expect(screen.getByText("Welcome page content")).toBeTruthy();
-    expect(
-      screen.getByRole("heading", {
-        name: /contact alder creek presbyterian church/i,
+    // The contact form no longer renders on every page below the bundle —
+    // it rides site-kit's own contactForm block now (next test). Nothing
+    // else may wrap or trail the bundle's own output.
+    expect(container.textContent).toBe("Welcome page content");
+  });
+
+  it("passes the interactive ContactForm element into renderSiteBundle() for the contactForm block to place", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams() });
+
+    const call = renderSiteBundle.mock.calls[0][0] as { contactForm?: unknown };
+    expect(call.contactForm).toBeTruthy();
+  });
+});
+
+describe("generateMetadata", () => {
+  it("returns {} (no title override) when the site is not_found — never a distinguishable error page title", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    const meta = await generateMetadata({ params: makeParams() });
+    expect(meta).toEqual({});
+    expect(buildPageMetadata).not.toHaveBeenCalled();
+  });
+
+  it("passes organizationName, origin, pages, currentPath, pageUrl, and the resolved logoUrl to buildPageMetadata()", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    buildPageMetadata.mockReturnValue({
+      title: "Welcome",
+      description: undefined,
+      canonicalUrl: "http://localhost:3000/site/alder-creek",
+      openGraph: { type: "website", title: "Welcome", url: "x", siteName: "x", images: [] },
+      twitter: { card: "summary", title: "Welcome", description: undefined },
+      robots: { index: true, follow: true },
+    });
+    orgBrandsSelectMock.mockResolvedValue([{ markAssetKey: "mark-blob-key" }]);
+
+    await generateMetadata({ params: makeParams("alder-creek", ["about"]) });
+
+    expect(buildPageMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationName: SITE.organizationName,
+        origin: "http://localhost:3000",
+        pages: SITE.pages,
+        currentPath: "/about",
+        pageUrl: expect.any(Function),
+        logoUrl: "/site/alder-creek/assets/mark-blob-key",
       }),
-    ).toBeTruthy();
+    );
+  });
+
+  it("translates buildPageMetadata()'s result into Next's Metadata shape, with an absolute title that bypasses the root layout's own template", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    buildPageMetadata.mockReturnValue({
+      title: "Worship — Alder Creek Presbyterian Church",
+      description: "Join us Sundays.",
+      canonicalUrl: "http://localhost:3000/site/alder-creek/worship",
+      openGraph: {
+        type: "website",
+        title: "Worship — Alder Creek Presbyterian Church",
+        description: "Join us Sundays.",
+        url: "http://localhost:3000/site/alder-creek/worship",
+        siteName: "Alder Creek Presbyterian Church",
+        images: [],
+      },
+      twitter: {
+        card: "summary",
+        title: "Worship — Alder Creek Presbyterian Church",
+        description: "Join us Sundays.",
+      },
+      robots: { index: true, follow: true },
+    });
+
+    const meta = await generateMetadata({ params: makeParams("alder-creek", ["worship"]) });
+
+    expect(meta.title).toEqual({ absolute: "Worship — Alder Creek Presbyterian Church" });
+    expect(meta.description).toBe("Join us Sundays.");
+    expect(meta.alternates).toEqual({ canonical: "http://localhost:3000/site/alder-creek/worship" });
+    expect(meta.robots).toEqual({ index: true, follow: true });
   });
 });

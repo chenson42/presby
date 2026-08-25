@@ -1,7 +1,84 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPublishedSite, type PublishedSite } from "@/lib/sites";
-import { renderSiteBundle, type RenderSiteBundleProfile, type SocialLink } from "presby-site-kit";
+import {
+  buildPageMetadata,
+  renderSiteBundle,
+  type RenderSiteBundleProfile,
+  type SocialLink,
+} from "presby-site-kit";
 import { ContactForm } from "../contact-form";
+
+/**
+ * Origin only (scheme + host, no trailing slash) — the same
+ * `NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"` pattern already
+ * established for email links (`src/lib/email/send.ts`) and password-reset/
+ * account links, reused here for `presby-site-kit`'s `origin` input
+ * (`buildPageMetadata`/the JSON-LD `buildOrganizationJsonLd` it composes
+ * both need an absolute URL, which nothing else on this route otherwise
+ * needs).
+ */
+function siteOrigin(): string {
+  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+}
+
+/**
+ * A member area reached the same way any other page is, from inside a nav
+ * group, is the real pattern presby's own recreation of a real congregation
+ * site (First Presbyterian Church of Westerville) found: its "Connect" nav
+ * group's own "Our Directory" entry is what points to a member-only area,
+ * not a separate standalone login link. Applied unconditionally (every
+ * organization gets this, not just the one it was found on) as a
+ * deliberate, named simplification — a "Connect"-style group is a
+ * reasonable default shape for a congregation site in general, and an org
+ * with no existing "Connect" group just gets one created with this single
+ * entry, which degrades gracefully rather than breaking. True per-org
+ * configurability (which group, whether to group at all, a custom label)
+ * is real future work — see docs/TODO.md.
+ */
+const PORTAL_NAV_GROUP = "Connect";
+const PORTAL_LABEL = "Our Directory";
+/** Slots the portal entry into the content's own navOrder sequence — fpcw's
+ * real menu places "Our Directory" mid-group (between "Our Newsletter" at
+ * 22 and "Upcoming Events" at 24), not trailing the group. Same
+ * named-simplification status as PORTAL_NAV_GROUP above: one platform-wide
+ * value for now, per-org configurability is the tracked follow-up. */
+const PORTAL_NAV_ORDER = 23;
+
+/**
+ * Resolves the organization's brand mark to a same-origin, content-
+ * addressed URL through the existing `/site/<slug>/assets/[key]` route —
+ * that route is generic (resolves any blob key for the org, not scoped to
+ * the content bundle's own `imageKeys` map), so no new asset route is
+ * needed. `organizationBrands` has no public grant of its own, but
+ * `markAssetKey` itself carries no sensitive information (the same
+ * platform-set mark already renders on `(org)`'s own admin-facing pages)
+ * — reading it via `getPlatformDb()` here is a narrow, read-only lookup of
+ * one non-sensitive column, not a bypass of anything RLS protects. A
+ * missing key or brand row degrades to `null` — same discipline as every
+ * other org-supplied piece of this page (`brand`, `profile`).
+ *
+ * Dynamically imported, deliberately not a static top-level import — the
+ * same reasoning `src/lib/sites.ts`'s own `getPublishedSite()` documents
+ * for `resolveTypePairing()`: `@/lib/db`'s module-scope pool construction
+ * runs at import time, which crashes any test file that doesn't mock it
+ * (confirmed: `page.test.tsx` mocks `@/lib/sites` and `presby-site-kit`
+ * but never had reason to mock `@/lib/db` before this page had no direct
+ * dependency on it). Deferred to exactly the one call site that needs it.
+ */
+async function resolveLogoUrl(organizationId: string, slug: string): Promise<string | null> {
+  const { getPlatformDb } = await import("@/lib/db");
+  const { organizationBrands } = await import("@/lib/db/domain/org");
+  const { eq } = await import("drizzle-orm");
+  const platformDb = getPlatformDb();
+  const [brand] = await platformDb
+    .select({ markAssetKey: organizationBrands.markAssetKey })
+    .from(organizationBrands)
+    .where(eq(organizationBrands.organizationId, organizationId))
+    .limit(1);
+  if (!brand?.markAssetKey) return null;
+  return `/site/${slug}/assets/${brand.markAssetKey}`;
+}
 
 /**
  * `PublishedSite.profile.social` is a keyed object (one nullable string per
@@ -66,12 +143,51 @@ function toRenderProfile(site: PublishedSite): RenderSiteBundleProfile {
  *
  * `pageUrl` is the same closure discipline as `imageUrl` — `site-kit`'s
  * `Nav` never assumes a `/site/<slug>` prefix, this route is the one place
- * that knows it. `portalUrl` points `Nav`'s "Member Login" link at
- * `/o/<slug>` — the `(org)` route group's own Edge gate (`src/proxy.ts`)
- * already redirects an unauthenticated visit there to `/signin` with the
- * right `callbackUrl`, so this route needs no auth-awareness of its own to
- * wire the link correctly either way.
+ * that knows it. `portalUrl` points at `/o/<slug>` — the `(org)` route
+ * group's own Edge gate (`src/proxy.ts`) already redirects an
+ * unauthenticated visit there to `/signin` with the right `callbackUrl`, so
+ * this route needs no auth-awareness of its own to wire the link correctly
+ * either way. `portalNavGroup`/`portalLabel` (see the constants above) fold
+ * that link into an existing content-authored nav group instead of
+ * rendering it as `Nav`'s own separate flat link.
  */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string; path?: string[] }>;
+}): Promise<Metadata> {
+  const { slug, path } = await params;
+  const currentPath = path && path.length > 0 ? `/${path.join("/")}` : "/";
+  const result = await getPublishedSite(slug);
+  if (result.kind === "not_found") return {};
+
+  const { site } = result;
+  const pageUrl = (bundlePath: string): string =>
+    bundlePath === "/" ? `/site/${slug}` : `/site/${slug}${bundlePath}`;
+  const logoUrl = await resolveLogoUrl(site.organizationId, slug);
+
+  const meta = buildPageMetadata({
+    pages: site.pages,
+    currentPath,
+    organizationName: site.organizationName,
+    origin: siteOrigin(),
+    pageUrl,
+    logoUrl,
+  });
+
+  // `title: { absolute: ... }` bypasses the root layout's own
+  // `"%s · presby"` template (src/app/layout.tsx) — a congregation's own
+  // public page title should never carry platform branding.
+  return {
+    title: { absolute: meta.title },
+    description: meta.description,
+    alternates: { canonical: meta.canonicalUrl },
+    openGraph: meta.openGraph,
+    twitter: meta.twitter,
+    robots: meta.robots,
+  };
+}
+
 export default async function PublicSitePage({
   params,
 }: {
@@ -91,14 +207,30 @@ export default async function PublicSitePage({
   const pageUrl = (bundlePath: string): string =>
     bundlePath === "/" ? `/site/${slug}` : `/site/${slug}${bundlePath}`;
 
+  const logoUrl = await resolveLogoUrl(site.organizationId, slug);
+
+  // The contact form is no longer bolted onto every page below the
+  // rendered bundle (the original shape here — it appeared after the
+  // Footer on every single page, which matched no real site's structure
+  // and let no content author control placement). It now rides site-kit's
+  // `contactForm` block: this page passes the interactive element once,
+  // and whichever content page authors a `{"type": "contactForm"}` block
+  // renders it exactly there. Content with no such block gets no form.
   const rendered = renderSiteBundle({
+    organizationName: site.organizationName,
+    origin: siteOrigin(),
     pages: site.pages,
     currentPath,
     brand: site.brand,
     profile: toRenderProfile(site),
     imageUrl,
     pageUrl,
+    logoUrl,
     portalUrl: `/o/${slug}`,
+    portalNavGroup: PORTAL_NAV_GROUP,
+    portalLabel: PORTAL_LABEL,
+    portalNavOrder: PORTAL_NAV_ORDER,
+    contactForm: <ContactForm slug={slug} />,
   });
 
   // renderSiteBundle() returning null means no page in the bundle matches
@@ -110,19 +242,11 @@ export default async function PublicSitePage({
   // getPublishedSite() found the flag on (it's one of the reasons a
   // not_found collapse happens above) — re-checking would be a second,
   // redundant call for a fact already established.
-  return (
-    <div className="mx-auto max-w-3xl px-6 py-12">
-      {rendered}
-
-      <section className="mt-16 border-t border-border pt-10">
-        <h2 className="text-xl font-semibold">Contact {site.organizationName}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Send a message and someone will follow up.
-        </p>
-        <div className="mt-4 max-w-md">
-          <ContactForm slug={slug} />
-        </div>
-      </section>
-    </div>
-  );
+  // No wrapping max-width either: `{rendered}` is presby-site-kit's own
+  // bundle, which governs its own layout (most blocks cap at site-kit's
+  // --site-max-width and center themselves; Nav/Hero/Callout/Footer are
+  // deliberately full-bleed bands). A `max-w-3xl` wrapper around the whole
+  // page — the original shape here — silently capped EVERY block to a
+  // 768px reading column regardless of what site-kit's own CSS said.
+  return rendered;
 }

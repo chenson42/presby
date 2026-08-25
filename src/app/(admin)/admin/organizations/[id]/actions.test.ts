@@ -178,6 +178,7 @@ const EXISTING_ROW = {
   markAssetKey: "aaaaaaaa-0000-0000-0000-000000000000",
   wordmarkAssetKey: null,
   brandTokenVersion: 1,
+  lightOnly: false,
 };
 
 beforeEach(() => {
@@ -340,6 +341,32 @@ describe("setOrganizationBrandAction — creating a brand (no prior row)", () =>
     );
   });
 
+  it("upserts lightOnly: false when the checkbox field is absent (unchecked), never a crash on a missing field", async () => {
+    await setOrganizationBrandAction(
+      formData({ organizationId: VALID_ORG, seedHex: VALID_HEX, typePairing: "classic" }),
+    );
+    expect(mockBrandsValues).toHaveBeenCalledWith(
+      expect.objectContaining({ lightOnly: false }),
+    );
+  });
+
+  it("upserts lightOnly: true when the checkbox submitted \"on\"", async () => {
+    await setOrganizationBrandAction(
+      formData({
+        organizationId: VALID_ORG,
+        seedHex: VALID_HEX,
+        typePairing: "classic",
+        lightOnly: "on",
+      }),
+    );
+    expect(mockBrandsValues).toHaveBeenCalledWith(
+      expect.objectContaining({ lightOnly: true }),
+    );
+    expect(mockOnConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ set: expect.objectContaining({ lightOnly: true }) }),
+    );
+  });
+
   it("audits ORG_BRAND_SET with seedHex, typePairing and adjustmentCount", async () => {
     await setOrganizationBrandAction(
       formData({ organizationId: VALID_ORG, seedHex: VALID_HEX, typePairing: "classic" }),
@@ -437,6 +464,30 @@ describe("setOrganizationBrandAction — logo upload validation (E-c1)", () => {
     // Colour/pairing unchanged and the file was rejected before store() —
     // nothing landed in the database for this no-op-but-for-the-logo resubmit.
     expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("still commits when ONLY lightOnly changed (same seedHex/typePairing), even alongside a rejected file — not treated as a no-op resubmit", async () => {
+    const big = new File([toBlobPart(Buffer.alloc(3 * 1024 * 1024, 1))], "big.png", {
+      type: "image/png",
+    });
+    const result = await setOrganizationBrandAction(
+      formData(
+        {
+          organizationId: VALID_ORG,
+          seedHex: EXISTING_ROW.seedHex,
+          typePairing: EXISTING_ROW.typePairing,
+          lightOnly: "on",
+        },
+        big,
+      ),
+    );
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockBrandsValues).toHaveBeenCalledWith(
+      expect.objectContaining({ lightOnly: true }),
+    );
+    // Partial-save phrasing, same as a colour change alongside a bad logo.
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("The logo could not be stored");
   });
 
   it("rejects a wrong-type file by sniffing magic bytes, not the browser's declared MIME type", async () => {

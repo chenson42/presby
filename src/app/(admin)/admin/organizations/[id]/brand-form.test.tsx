@@ -51,7 +51,7 @@ afterEach(() => {
   toastWarning.mockReset();
 });
 
-function renderForm() {
+function renderForm(overrides: { initialLightOnly?: boolean } = {}) {
   return render(
     <BrandForm
       organizationId="22222222-2222-2222-2222-222222222222"
@@ -59,6 +59,7 @@ function renderForm() {
       initialSeedHex="#2563eb"
       initialTypePairing="classic"
       initialMarkSrc={null}
+      initialLightOnly={overrides.initialLightOnly ?? false}
     />,
   );
 }
@@ -152,5 +153,41 @@ describe("BrandForm — submission outcomes (E-c1/E-c2)", () => {
     expect(banner.className).not.toMatch(/red/);
     expect(toastWarning).toHaveBeenCalledWith(partialError);
     expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe("BrandForm — light mode only", () => {
+  it("reflects the initial value and submits \"on\" when checked", async () => {
+    setOrganizationBrandAction.mockResolvedValue({ ok: true });
+    renderForm({ initialLightOnly: false });
+
+    const checkbox = screen.getByLabelText("Light mode only") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save brand/i }));
+    });
+
+    const submitted = setOrganizationBrandAction.mock.calls[0]?.[0] as FormData;
+    expect(submitted.get("lightOnly")).toBe("on");
+  });
+
+  it("starts checked when initialLightOnly is true, and omits the field from FormData when unchecked", async () => {
+    setOrganizationBrandAction.mockResolvedValue({ ok: true });
+    renderForm({ initialLightOnly: true });
+
+    const checkbox = screen.getByLabelText("Light mode only") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save brand/i }));
+    });
+
+    const submitted = setOrganizationBrandAction.mock.calls[0]?.[0] as FormData;
+    expect(submitted.get("lightOnly")).toBeNull();
   });
 });

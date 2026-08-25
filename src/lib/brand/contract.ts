@@ -607,6 +607,13 @@ export const TYPE_PAIRINGS = [
     body: "Karla",
     why: "Bitter's slab serif is grounded and warm, evoking a hymnal or bulletin insert rather than a corporate report, and Karla's rounded humanist letterforms carry the same warmth into body copy while holding a large x-height at the dense role.",
   },
+  {
+    key: "contemporary",
+    label: "Contemporary",
+    heading: "Montserrat",
+    body: "Open Sans",
+    why: "Montserrat's geometric, even-stroke caps give headings and a hero band a confident, current voice without tipping into corporate or trend-chasing, and Open Sans's open apertures and near-ubiquitous familiarity keep body copy calm and easy to scan, holding a large x-height at the dense role.",
+  },
 ] as const satisfies readonly TypePairing[];
 
 /** For `fonts.ts` (slice e1) to import as a type-only reference. */

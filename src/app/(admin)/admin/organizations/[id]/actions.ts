@@ -143,6 +143,7 @@ type ExistingBrand = {
   markAssetKey: string | null;
   wordmarkAssetKey: string | null;
   brandTokenVersion: number;
+  lightOnly: boolean;
 };
 
 async function fetchExistingBrand(
@@ -156,6 +157,7 @@ async function fetchExistingBrand(
       markAssetKey: organizationBrands.markAssetKey,
       wordmarkAssetKey: organizationBrands.wordmarkAssetKey,
       brandTokenVersion: organizationBrands.brandTokenVersion,
+      lightOnly: organizationBrands.lightOnly,
     })
     .from(organizationBrands)
     .where(eq(organizationBrands.organizationId, organizationId))
@@ -220,6 +222,10 @@ export async function setOrganizationBrandAction(
     return { ok: false, error: "Choose one of the curated type pairings." };
   }
 
+  // Native checkbox semantics: present with value "on" when checked, absent
+  // entirely from FormData when unchecked — never a literal "false" to parse.
+  const lightOnly = formData.get("lightOnly") === "on";
+
   // Only reject if the generator itself throws — it shouldn't for a
   // validated 6-digit hex. The property test (commit b1) is what guarantees
   // every legal pair clears the accessibility floor; re-checking contrast
@@ -278,7 +284,8 @@ export async function setOrganizationBrandAction(
   const hexOrPairingChanged =
     !existing ||
     existing.seedHex !== seedHex ||
-    existing.typePairing !== typePairing;
+    existing.typePairing !== typePairing ||
+    existing.lightOnly !== lightOnly;
 
   // E-c2: a logo failure that is the ONLY thing this submission changed
   // touches nothing — no dangling half-applied row for a no-op resubmit.
@@ -304,6 +311,7 @@ export async function setOrganizationBrandAction(
       organizationId,
       seedHex,
       typePairing,
+      lightOnly,
       brandTokenVersion: generated.tokens.version,
       updatedBy: session.user.id,
       ...(newMarkAssetKey ? { markAssetKey: newMarkAssetKey } : {}),
@@ -321,6 +329,7 @@ export async function setOrganizationBrandAction(
         set: {
           seedHex,
           typePairing,
+          lightOnly,
           brandTokenVersion: generated.tokens.version,
           updatedBy: session.user.id,
           updatedAt: new Date(),
@@ -336,6 +345,7 @@ export async function setOrganizationBrandAction(
     metadata: {
       seedHex,
       typePairing,
+      lightOnly,
       adjustmentCount: generated.adjustments.length,
     },
   });

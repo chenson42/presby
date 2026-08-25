@@ -26,6 +26,7 @@ interface BrandFormProps {
   initialSeedHex: string | null;
   initialTypePairing: TypePairingKey;
   initialMarkSrc: string | null;
+  initialLightOnly: boolean;
 }
 
 /** E-c2: the server's partial-success phrasing, matched verbatim so the UI
@@ -46,11 +47,13 @@ export function BrandForm({
   initialSeedHex,
   initialTypePairing,
   initialMarkSrc,
+  initialLightOnly,
 }: BrandFormProps) {
   const [seedHex, setSeedHex] = useState(initialSeedHex ?? DEFAULT_SEED_HEX);
   const [typePairing, setTypePairing] = useState<TypePairingKey>(
     initialTypePairing,
   );
+  const [lightOnly, setLightOnly] = useState(initialLightOnly);
   const [result, formAction, isPending] = useActionState(
     submitBrand,
     null as PolicyResult | null,
@@ -168,6 +171,27 @@ export function BrandForm({
               {selectedPairing.why}
             </p>
           )}
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2">
+            <input
+              id="lightOnly"
+              name="lightOnly"
+              type="checkbox"
+              checked={lightOnly}
+              onChange={(e) => setLightOnly(e.target.checked)}
+              className="size-4 rounded border-input"
+            />
+            <Label htmlFor="lightOnly" className="cursor-pointer font-normal">
+              Light mode only
+            </Label>
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            This organization&apos;s brand was never designed against a dark
+            background — its public site and member portal always render
+            light, regardless of a visitor&apos;s system preference.
+          </p>
         </div>
 
         {/* Door 3 — upload the logo (G10). Wordmark upload is not wired in

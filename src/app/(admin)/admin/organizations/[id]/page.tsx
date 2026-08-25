@@ -92,6 +92,7 @@ export default async function OrganizationBrandDetailPage({
       typePairing: organizationBrands.typePairing,
       markAssetKey: organizationBrands.markAssetKey,
       updatedAt: organizationBrands.updatedAt,
+      lightOnly: organizationBrands.lightOnly,
     })
     .from(organizationBrands)
     .where(eq(organizationBrands.organizationId, id))
@@ -176,6 +177,7 @@ export default async function OrganizationBrandDetailPage({
             initialSeedHex={brand?.seedHex ?? null}
             initialTypePairing={(brand?.typePairing as TypePairingKey) ?? "classic"}
             initialMarkSrc={markSrc}
+            initialLightOnly={brand?.lightOnly ?? false}
           />
         </div>
       </section>

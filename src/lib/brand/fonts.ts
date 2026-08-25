@@ -1,5 +1,5 @@
 /**
- * Font RESOLUTION for the three curated type pairings (`TYPE_PAIRINGS` in
+ * Font RESOLUTION for the four curated type pairings (`TYPE_PAIRINGS` in
  * `contract.ts`).
  *
  * This file is deliberately NOT `contract.ts`. `next/font/google` calls must
@@ -7,7 +7,7 @@
  * them at build time by static analysis, not at runtime, so a family cannot
  * be selected by a runtime variable, a function argument, or a switch keyed
  * on one. `contract.ts`'s zero-runtime-imports rule forbids a `next/font`
- * import outright, so the two constraints point at the same design: six
+ * import outright, so the two constraints point at the same design: eight
  * `next/font/google` calls live here, at module scope, one per (pairing x
  * heading/body); `resolveTypePairing()` is a plain object lookup over
  * already-instantiated results, never a dynamic font call.
@@ -31,10 +31,14 @@
  * Validated per A10 / Edge Case (Phase 3, slice e) against the real UI at
  * 360px, both colour schemes, via `/admin/design-system`'s "Type pairings"
  * section and the visual-parity harness (`e2e/support/routes.ts`) — see the
- * `e1` work-log entry for the screenshot findings.
+ * `e1` work-log entry for the screenshot findings. The fourth pairing
+ * (`contemporary`, Montserrat / Open Sans) got its own A10 pass at the same
+ * route — see `docs/work-log/2026-08-24-custom-brand-fonts.md` Phase 4 for
+ * that record.
  *
  * Design: docs/work-log/2026-08-19-brand-foundation.md, Phase 3 (re-run),
- * commit `e1`.
+ * commit `e1`. `contemporary` added by
+ * docs/work-log/2026-08-24-custom-brand-fonts.md, Phase 4.
  */
 
 import {
@@ -44,6 +48,8 @@ import {
   Public_Sans,
   Bitter,
   Karla,
+  Montserrat,
+  Open_Sans,
 } from "next/font/google";
 import type { TypePairingKey } from "./contract";
 
@@ -102,6 +108,29 @@ const warmBody = Karla({
 });
 
 /* -------------------------------------------------------------------------
+ * contemporary — Montserrat / Open Sans
+ * ---------------------------------------------------------------------- */
+
+const contemporaryHeading = Montserrat({
+  subsets: ["latin"],
+  // 800 included (unlike the other three pairings' heading faces): the
+  // reference site this pairing recreates sets its h1s at weight 800, and
+  // without the real cut the browser would fake-bold 700 — visibly lighter
+  // and rounder than the genuine ExtraBold. site-kit's hero h1 asks for
+  // 800 with a 700 fallback for the other pairings.
+  weight: ["400", "600", "700", "800"],
+  display: "swap",
+  variable: "--font-heading-contemporary",
+});
+
+const contemporaryBody = Open_Sans({
+  subsets: ["latin"],
+  weight: ["400", "600"],
+  display: "swap",
+  variable: "--font-body-contemporary",
+});
+
+/* -------------------------------------------------------------------------
  * Resolution
  * ---------------------------------------------------------------------- */
 
@@ -141,6 +170,12 @@ const RESOLVED_PAIRINGS = {
     bodyClassName: warmBody.className,
     headingVariable: "--font-heading-warm",
     bodyVariable: "--font-body-warm",
+  },
+  contemporary: {
+    headingClassName: contemporaryHeading.className,
+    bodyClassName: contemporaryBody.className,
+    headingVariable: "--font-heading-contemporary",
+    bodyVariable: "--font-body-contemporary",
   },
 } as const satisfies Record<TypePairingKey, ResolvedTypePairing>;
 

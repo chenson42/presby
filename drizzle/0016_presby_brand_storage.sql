@@ -112,8 +112,9 @@ begin
 end $$;
 
 -- Curated set (src/lib/brand/contract.ts TYPE_PAIRINGS): classic, modern,
--- warm. Adding a pairing later is a migration, deliberately — a curated set
--- that grows silently isn't curated.
+-- warm, contemporary — see 0022_presby_brand_pairing_expansion.sql for the
+-- widening migration. Adding a pairing later is a migration, deliberately —
+-- a curated set that grows silently isn't curated.
 do $$
 begin
   if not exists (

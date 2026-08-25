@@ -55,12 +55,16 @@ commit;
 -- ---------------------------------------------------------------------------
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  select assert_eq((select count(*) from memberships), 6, 'alder: sees own memberships');
+  -- Portal home + directory v2, Increment 4: +2 memberships (Aldous
+  -- Fennimore, Wren Thackeray — the two new district households' heads) = 8.
+  select assert_eq((select count(*) from memberships), 8, 'alder: sees own memberships');
   select assert_eq((select count(*) from memberships where organization_id <> :ALDER), 0,
                    'alder: sees NO foreign memberships');
   -- P9-role-catalog: 5 base + treasurer + installed_pastor = 7. support_contact
   -- carries no officer_terms row by design (no PC(USA) office corresponds to it).
-  select assert_eq((select count(*) from officer_terms), 7, 'alder: sees own officer terms');
+  -- Portal home + directory v2, Increment 4: +2 district-scoped deacon terms
+  -- for Priya Balakrishnan (one ended/South, one active/North) = 9.
+  select assert_eq((select count(*) from officer_terms), 9, 'alder: sees own officer terms');
 commit;
 
 begin;
@@ -76,7 +80,9 @@ commit;
 -- ---------------------------------------------------------------------------
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  select assert_eq((select count(*) from people), 6, 'alder: sees people it holds memberships for');
+  -- Portal home + directory v2, Increment 4: +2 people (Aldous Fennimore,
+  -- Wren Thackeray) = 8.
+  select assert_eq((select count(*) from people), 8, 'alder: sees people it holds memberships for');
   -- The pastor holds memberships at BOTH the presbytery and Alder Creek.
   select assert_eq((select count(*) from people where id = :PASTOR), 1, 'alder: sees its pastor');
 commit;
@@ -896,6 +902,99 @@ begin;
         and grantee = 'presby_app'
         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
     4, 'organization_service_times: presby_app has full select/insert/update/delete');
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 18. Deacon linkage (Portal home + directory v2, Increment 4 / DECISION-095).
+--     officer_terms.org_unit_id — drizzle/0025_presby_deacon_linkage.sql.
+--
+--     org_units is already in the standard tenant_isolation table list
+--     (drizzle/0009_presby_rls.sql), so its own isolation is covered by the
+--     generic mechanism proven in section 2 — asserted directly here anyway,
+--     since this is the first time the fixture has any org_units rows to
+--     prove it against. officer_terms' own tenant isolation is ALREADY
+--     re-proven every run by section 2's count (7 -> 9 above); this section
+--     adds what's genuinely NEW: the CHECK and the composite FK this
+--     migration introduced, plus the derivation query Increment 4b's
+--     DeaconCard and getParishRoster() will both depend on.
+-- ---------------------------------------------------------------------------
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq((select count(*) from org_units), 2,
+                   'alder: sees its own two districts');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from org_units), 0,
+                   'bramblewood: sees no alder districts');
+commit;
+
+-- CHECK: a term for any office other than 'deacon' must not carry district
+-- scoping (officer_terms_org_unit_deacon_check). Uses Hallie Vandermeer, who
+-- holds NO existing officer_terms row of any office at Alder Creek — picked
+-- specifically so officer_terms_no_overlap (section 7) cannot also fire and
+-- make which constraint actually rejected the row ambiguous.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    insert into officer_terms (organization_id, person_id, office, org_unit_id, starts_on)
+    values ('22222222-2222-2222-2222-222222222222',
+            'c0000000-0000-0000-0000-000000000005', -- Hallie Vandermeer
+            'trustee', 'a2000000-0000-0000-0000-000000000001', -- North District
+            '2026-01-01');
+    raise exception 'FAIL — a non-deacon office accepted a district assignment';
+  exception when check_violation then
+    raise notice 'pass  officer_terms_org_unit_deacon_check: non-deacon office with org_unit_id rejected';
+  end $$;
+rollback;
+
+-- Composite FK (F2): a deacon term at Alder Creek must not reference a
+-- district that belongs to another org, even one that genuinely exists.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  insert into org_units (id, organization_id, unit_type, name)
+  values ('a2000000-0000-0000-0000-0000000000ff', '33333333-3333-3333-3333-333333333333',
+          'district', 'Bramblewood Fixture District');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    insert into officer_terms (organization_id, person_id, office, org_unit_id, starts_on)
+    values ('22222222-2222-2222-2222-222222222222',
+            'c0000000-0000-0000-0000-000000000002', -- Tobias Renwick
+            'deacon', 'a2000000-0000-0000-0000-0000000000ff', -- Bramblewood's district
+            '2026-01-01');
+    raise exception 'FAIL F2 — an alder-creek officer term referenced another org''s district';
+  exception when foreign_key_violation then
+    raise notice 'pass  officer_terms_org_unit_fk: cross-org district reference rejected (F2)';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  delete from org_units where id = 'a2000000-0000-0000-0000-0000000000ff';
+commit;
+
+-- The derivation itself: North District has an open ('vacant'-free) deacon
+-- term; South District's term ENDED with no successor recorded, so the same
+-- query returns nothing for it — the exact predicate DeaconCard and
+-- getParishRoster() (Increment 4b) will both run.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from officer_terms
+      where office = 'deacon' and ends_on is null
+        and org_unit_id = 'a2000000-0000-0000-0000-000000000001'), -- North District
+    1, 'North District: derivation finds one active deacon');
+  select assert_eq(
+    (select count(*) from officer_terms
+      where office = 'deacon' and ends_on is null
+        and org_unit_id = 'a2000000-0000-0000-0000-000000000002'), -- South District
+    0, 'South District: derivation finds no active deacon (vacant)');
 commit;
 
 -- NOTE: this suite does NOT attempt to flip alder-creek's organization_sites

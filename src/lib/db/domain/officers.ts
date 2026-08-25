@@ -9,8 +9,10 @@ import {
   index,
   unique,
   foreignKey,
+  check,
 } from "drizzle-orm/pg-core";
-import { organizations } from "./org";
+import { sql } from "drizzle-orm";
+import { organizations, orgUnits } from "./org";
 import { memberships } from "./people";
 import { users } from "../schema";
 
@@ -104,6 +106,15 @@ export const officerTerms = pgTable(
     recordedAt: timestamp("recorded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Portal home + directory v2, Increment 4 (docs/work-log/
+    // 2026-08-24-portal-home-directory.md, Phase 2/3): a household's deacon is
+    // a pure DERIVATION from this column, never a hand-editable FK on
+    // households/orgUnits (Phase 2 rejected exactly that shape — it repeats
+    // F15's shepherd_person_id mistake). Nullable: only district-scoped
+    // offices (today, only 'deacon') set it; every other office leaves it
+    // null. Composite FK mirrors memberships.orgUnitId's existing pattern
+    // (F2) — see the CHECK below binding this to office = 'deacon'.
+    orgUnitId: uuid("org_unit_id"),
   },
   (t) => [
     index("officer_terms_org_office_idx").on(
@@ -119,11 +130,29 @@ export const officerTerms = pgTable(
       t.office,
       t.startsOn,
     ),
+    // Serves "the active deacon for org_unit X" — getParishRoster()'s and
+    // DeaconCard's derivation query (Increment 4).
+    index("officer_terms_org_unit_idx").on(
+      t.organizationId,
+      t.orgUnitId,
+      t.office,
+      t.startsOn,
+      t.endsOn,
+    ),
     unique("officer_terms_id_org_key").on(t.id, t.organizationId),
     foreignKey({
       columns: [t.personId, t.organizationId],
       foreignColumns: [memberships.personId, memberships.organizationId],
       name: "officer_terms_person_fk",
     }),
+    foreignKey({
+      columns: [t.orgUnitId, t.organizationId],
+      foreignColumns: [orgUnits.id, orgUnits.organizationId],
+      name: "officer_terms_org_unit_fk",
+    }),
+    check(
+      "officer_terms_org_unit_deacon_check",
+      sql`${t.orgUnitId} is null or ${t.office} = 'deacon'`,
+    ),
   ],
 );

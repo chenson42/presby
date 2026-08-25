@@ -243,7 +243,10 @@ insert into permissions (key, module, description, sensitivity_tier) values
   -- P9 / DECISION-066: duplicates drizzle/0018_presby_role_administration.sql's
   -- own insert, same "both use on conflict do nothing" pattern directory.view
   -- already established between 0017 and this file.
-  ('role_grants.manage','authz','Grant or revoke a role at this organization',1)
+  ('role_grants.manage','authz','Grant or revoke a role at this organization',1),
+  -- Portal home + directory v2, Increment 4: duplicates
+  -- drizzle/0025_presby_deacon_linkage.sql's own insert, same pattern.
+  ('directory.view_hidden','directory','See directory-hidden rows and the deacon roster',1)
 on conflict (key) do nothing;
 
 insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
@@ -279,7 +282,14 @@ insert into app_roles (id, organization_id, key, name, role_kind, is_protected) 
   -- protected. Key names the pastoral relationship, never the presiding
   -- (Moderator) function, per DECISION-079's tier-3 constraint.
   ('f0000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222',
-   'installed_pastor','Installed Pastor','constitutional',true);
+   'installed_pastor','Installed Pastor','constitutional',true),
+  -- Portal home + directory v2, Increment 4 / DECISION-095: the honest
+  -- Session/Diaconate mirror of session_member (f...0001) — constitutional,
+  -- protected, bound to the DERIVED Board of Deacons group below, never to a
+  -- person. Carries directory.view_hidden (elevated visibility + the
+  -- parishes roster), not a wildcard.
+  ('f0000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222',
+   'diaconate_member','Diaconate Member','constitutional',true);
 
 insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000001','roll.approve'),
@@ -296,7 +306,17 @@ insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000005','roll.propose'),
   ('f0000000-0000-0000-0000-000000000006','tickets.file'),
   ('f0000000-0000-0000-0000-000000000007','ledger.approve'),
-  ('f0000000-0000-0000-0000-000000000008','pastoral.notes.view');
+  ('f0000000-0000-0000-0000-000000000008','pastoral.notes.view'),
+  ('f0000000-0000-0000-0000-000000000009','directory.view_hidden'),
+  -- Portal home + directory v2, Increment 4 / DECISION-095: the "Church
+  -- Administrator" half of Phase 1's recommended binding — no such role
+  -- exists in the catalog (authz.ts's comment names it aspirationally;
+  -- src/lib/db/domain/authz.ts:31). stated_clerk (f...0005) is the closest
+  -- existing office, already holding role_grants.manage, and gets
+  -- directory.view_hidden directly. Tobias Renwick's existing stated_clerk
+  -- grant (below) already carries this — no new role_grants row needed, same
+  -- reasoning as roll.propose's own comment two lines above.
+  ('f0000000-0000-0000-0000-000000000005','directory.view_hidden');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would
@@ -362,6 +382,16 @@ insert into role_grants (organization_id, role_id, person_id, starts_on) values
   ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000008',
    'c0000000-0000-0000-0000-000000000006', -- Rowan Thistlewood
    '2015-08-01');
+
+-- Portal home + directory v2, Increment 4 / DECISION-095: diaconate_member,
+-- granted to the DERIVED Board of Deacons group (b...0002), not to a person —
+-- the same F3 shape as session_member's own grant above (line ~314): if the
+-- roster were a view rather than materialized officer_terms rows, the
+-- resolver would find nobody here. starts_on matches session_member's own
+-- floor (2020-01-01) — the mechanism's floor, not a term boundary.
+insert into role_grants (organization_id, role_id, group_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000009',
+   'b0000000-0000-0000-0000-000000000002','2020-01-01');
 
 -- An administrative commission: the one case where a council reaches DOWN into
 -- a congregation. Its members are a group AT THE PRESBYTERY, which is why the
@@ -632,5 +662,110 @@ insert into congregation_feedback (id, organization_id, person_id, body, status,
 insert into organization_sites (organization_id, repo, status, updated_by) values
   ('22222222-2222-2222-2222-222222222222', 'presby-churches/site-alder-creek',
    'provisioning', null);
+
+-- ---------------------------------------------------------------------------
+-- Portal home + directory v2, Increment 3 (2026-08-24-portal-home-directory,
+-- Phase 4, full-stack-developer) — a mailing address for one of the two
+-- households the roll fixture already wires up (`households` and
+-- `memberships.household_id`/`household_role` were seeded well before this
+-- pipeline, as part of the roll/household fixture above — Increment 3 needed
+-- no new households or membership wiring, only something for the
+-- households-view card's city/state line and the household-detail page's
+-- address block to show).
+--
+-- Reuses Tobias Renwick's own existing person (household head of "The
+-- Renwick Family") rather than inventing a new one. "Marguerite Ashcombe"'s
+-- one-member household deliberately gets NO mailing address, so a fresh dev
+-- database still exercises the "omitted when null" rendering path on both
+-- the households grid and the household-detail page.
+-- ---------------------------------------------------------------------------
+insert into addresses (id, person_id, address_type, line1, city, region, postal_code, is_primary) values
+  ('a1000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000002',
+   'home', '142 Maple Ridge Lane', 'Alder Creek', 'OH', '44201', true);
+
+update households
+   set mailing_address_id = 'a1000000-0000-0000-0000-000000000001'
+ where id = 'd0000000-0000-0000-0000-000000000001'; -- The Renwick Family
+
+-- ---------------------------------------------------------------------------
+-- Portal home + directory v2, Increment 4 (2026-08-24-portal-home-directory,
+-- Phase 4, database-admin) — deacon districts, and the officer_terms rows
+-- that make one active and one vacant.
+--
+-- Two org_units (unit_type = 'district'), the first rows in this table in the
+-- fixture. Two new households, one per district, so a fresh dev database
+-- exercises both the "active deacon" and "vacant district" render paths
+-- Increment 4b needs, alongside the two PRE-EXISTING households (The Renwick
+-- Family, Marguerite Ashcombe) which stay org_unit_id NULL — the "no district
+-- assigned at all" case, unchanged, no edit needed to get it for free.
+--
+-- Both deacon terms reuse Priya Balakrishnan (c0000000-...-0003) rather than
+-- inventing a new deacon-ordained person: she is the fixture's only person
+-- with a 'deacon' ordination row, and the story reads naturally as F22's own
+-- non-consecutive-terms pattern applied to the diaconate instead of session —
+-- a second, district-scoped deacon term at South District that ended, then a
+-- third at North District that is still open. Neither new term overlaps her
+-- PRE-EXISTING, undistricted deacon term (e0000000-...-0004, 2022-01-09 to
+-- 2025-01-12) or each other — officer_terms_no_overlap
+-- (drizzle/0009_presby_rls.sql) would reject any date range that did.
+-- ---------------------------------------------------------------------------
+insert into org_units (id, organization_id, unit_type, name) values
+  ('a2000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
+   'district', 'North District'),
+  ('a2000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222',
+   'district', 'South District');
+
+insert into people (id, first_name, last_name, date_of_birth) values
+  ('c0000000-0000-0000-0000-000000000007', 'Aldous', 'Fennimore', '1979-05-14'),
+  ('c0000000-0000-0000-0000-000000000008', 'Wren',   'Thackeray', '1988-11-02');
+
+insert into households (id, organization_id, name, is_giving_unit, org_unit_id) values
+  ('d0000000-0000-0000-0000-000000000003', '22222222-2222-2222-2222-222222222222',
+   'The Fennimore Family', true, 'a2000000-0000-0000-0000-000000000001'), -- North District
+  ('d0000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222',
+   'The Thackeray Family', true, 'a2000000-0000-0000-0000-000000000002'); -- South District (vacant)
+
+insert into memberships (organization_id, person_id, household_id, household_role, engagement_status, current_roll, current_roll_since) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000007',
+   'd0000000-0000-0000-0000-000000000003', 'head', 'regular', 'active', '2010-03-01'),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000008',
+   'd0000000-0000-0000-0000-000000000004', 'head', 'regular', 'active', '2015-07-20');
+
+insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, age_at_action, approval_status, minute_reference, approved_on) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000007',
+   'opening_balance', '2010-03-01', 'active', 30, 'approved', 'Imported baseline', '2010-03-01'),
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000008',
+   'opening_balance', '2015-07-20', 'active', 26, 'approved', 'Imported baseline', '2015-07-20');
+
+-- South District: an ended term, no successor recorded -> the derivation
+-- (office = 'deacon', org_unit_id = ..., ends_on is null) finds nothing, so
+-- Increment 4b's DeaconCard renders the "vacant" state for The Thackeray
+-- Family.
+-- North District: still open -> The Fennimore Family's DeaconCard shows Priya.
+insert into officer_terms (id, organization_id, person_id, office, class_year, org_unit_id, starts_on, ends_on, end_reason, recorded_by) values
+  ('e0000000-0000-0000-0000-000000000008', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000003', -- Priya Balakrishnan
+   'deacon', null, 'a2000000-0000-0000-0000-000000000002', -- South District
+   '2025-02-01', '2025-08-31', 'completed', null),
+  ('e0000000-0000-0000-0000-000000000009', '22222222-2222-2222-2222-222222222222',
+   'c0000000-0000-0000-0000-000000000003', -- Priya Balakrishnan
+   'deacon', null, 'a2000000-0000-0000-0000-000000000001', -- North District
+   '2025-09-01', null, null, null);
+
+-- ---------------------------------------------------------------------------
+-- Portal home + directory v2, Increment 4b (2026-08-24-portal-home-directory,
+-- Phase 4, full-stack-developer) — one `directory_hidden = true` fixture
+-- person, so the elevated (`directory.view_hidden`) path is exercisable
+-- through a real browser session. None of the increment 1-3 fixture rows
+-- carried this before now (confirmed by query before writing this block).
+-- Desmond Okonkwo (c0000000-...-0004): an existing "other_participant"
+-- person with no household — marking him hidden has no narrative
+-- side-effects on any other increment's fixture story or tests.
+-- `on conflict (person_id) do update` makes this idempotent against a
+-- database that already has a person_privacy row for him.
+-- ---------------------------------------------------------------------------
+insert into person_privacy (person_id, organization_id, directory_hidden)
+values ('c0000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222', true)
+on conflict (person_id) do update set directory_hidden = true;
 
 commit;

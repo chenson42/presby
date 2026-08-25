@@ -29,19 +29,26 @@ const hasDb = Boolean(
 
 describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () => {
   let getDirectory: typeof import("./directory").getDirectory;
+  let getHouseholds: typeof import("./directory").getHouseholds;
+  let getHouseholdDetail: typeof import("./directory").getHouseholdDetail;
+  let getPersonDetail: typeof import("./directory").getPersonDetail;
+  let getParishRoster: typeof import("./directory").getParishRoster;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
+  let orgUnits: typeof import("@/lib/db/domain/org").orgUnits;
   let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
   let groups: typeof import("@/lib/db/domain/groups").groups;
   let people: typeof import("@/lib/db/domain/people").people;
   let memberships: typeof import("@/lib/db/domain/people").memberships;
   let contactMethods: typeof import("@/lib/db/domain/people").contactMethods;
   let addresses: typeof import("@/lib/db/domain/people").addresses;
+  let households: typeof import("@/lib/db/domain/people").households;
   let personPrivacy: typeof import("@/lib/db/domain/privacy").personPrivacy;
   let permissions: typeof import("@/lib/db/domain/authz").permissions;
   let appRoles: typeof import("@/lib/db/domain/authz").appRoles;
   let appRolePermissions: typeof import("@/lib/db/domain/authz").appRolePermissions;
   let roleGrants: typeof import("@/lib/db/domain/authz").roleGrants;
+  let officerTerms: typeof import("@/lib/db/domain/officers").officerTerms;
 
   // orgA: has the baseline directory.view binding — the grantee/content/
   // privacy fixture. orgB: has an active_membership group (required for the
@@ -60,18 +67,51 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
   let fieldPhoto: string;
   let forbiddenPerson: string; // orgB — no directory.view grant
 
+  // Increment 3 fixture — households.
+  let householdVisible: string; // orgA, 2 eligible members
+  let householdHiddenOnly: string; // orgA, 1 member, directory_hidden -> 0 visible
+  let householdOrgB: string; // orgB, 1 eligible member — cross-org isolation
+  let hhPerson1: string;
+  let hhPerson2: string;
+  let hhHiddenPerson: string;
+  let hhOrgBPerson: string;
+
+  // Increment 4 fixture — deacon linkage / directory.view_hidden.
+  let elevatedPerson: string; // orgA, holds directory.view AND directory.view_hidden
+  let orgUnitActive: string; // orgA district, one active deacon term
+  let orgUnitVacant: string; // orgA district, only an ENDED deacon term
+  let orgUnitOrgB: string; // orgB district, its own active deacon
+  let deaconActive1: string; // active at orgUnitActive
+  let deaconActive2: string; // ALSO active at orgUnitActive — tie-break fixture
+  let deaconEnded: string; // ended-only term at orgUnitVacant
+  let deaconOrgB: string; // active at orgUnitOrgB
+  let householdWithDeacon: string; // orgA, org_unit_id = orgUnitActive
+  let householdVacantDistrict: string; // orgA, org_unit_id = orgUnitVacant
+  let householdOrgBWithDeacon: string; // orgB, org_unit_id = orgUnitOrgB
+  let revokedGrantPerson: string; // orgA — a directory.view_hidden grant that has ENDED
+  // The three eligible household-head persons created alongside the three
+  // households above — collected here so `afterAll` can clean them up
+  // without a separate `let` per person.
+  const directory4ExtraPeople: string[] = [];
+
   beforeAll(async () => {
-    ({ getDirectory } = await import("./directory"));
+    ({
+      getDirectory,
+      getHouseholds,
+      getHouseholdDetail,
+      getPersonDetail,
+      getParishRoster,
+    } = await import("./directory"));
     ({ getPlatformDb } = await import("@/lib/db"));
-    ({ organizations } = await import("@/lib/db/domain/org"));
+    ({ organizations, orgUnits } = await import("@/lib/db/domain/org"));
     ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
-    ({ people, memberships, contactMethods, addresses } = await import(
-      "@/lib/db/domain/people"
-    ));
+    ({ people, memberships, contactMethods, addresses, households } =
+      await import("@/lib/db/domain/people"));
     ({ personPrivacy } = await import("@/lib/db/domain/privacy"));
     ({ permissions, appRoles, appRolePermissions, roleGrants } = await import(
       "@/lib/db/domain/authz"
     ));
+    ({ officerTerms } = await import("@/lib/db/domain/officers"));
 
     const platform = getPlatformDb();
     const stamp = Date.now();
@@ -275,6 +315,317 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       postalCode: "00000",
       isPrimary: true,
     });
+
+    // ------------------------------------------------------------------
+    // Increment 3 fixture — households, for getHouseholds()/
+    // getHouseholdDetail()/getPersonDetail().
+    // ------------------------------------------------------------------
+    hhPerson1 = await person("Odalys", "Winterbourne", null);
+    hhPerson2 = await person("Ptolemy", "Winterbourne", null);
+    hhHiddenPerson = await person("Ines", "Kirkbride", null);
+    hhOrgBPerson = await person("Emeric", "Ravensworth", null);
+
+    const [hhVisible] = await platform
+      .insert(households)
+      .values({
+        organizationId: orgA,
+        name: "The Winterbourne Family",
+        isGivingUnit: true,
+      })
+      .returning({ id: households.id });
+    householdVisible = hhVisible!.id;
+
+    const [hhHidden] = await platform
+      .insert(households)
+      .values({
+        organizationId: orgA,
+        name: "The Kirkbride Household",
+        isGivingUnit: true,
+      })
+      .returning({ id: households.id });
+    householdHiddenOnly = hhHidden!.id;
+
+    const [hhB] = await platform
+      .insert(households)
+      .values({
+        organizationId: orgB,
+        name: "The Ravensworth Household",
+        isGivingUnit: true,
+      })
+      .returning({ id: households.id });
+    householdOrgB = hhB!.id;
+
+    await platform.insert(memberships).values([
+      {
+        organizationId: orgA,
+        personId: hhPerson1,
+        householdId: householdVisible,
+        householdRole: "head",
+        engagementStatus: "regular",
+        currentRoll: "active",
+      },
+      {
+        organizationId: orgA,
+        personId: hhPerson2,
+        householdId: householdVisible,
+        householdRole: "spouse",
+        engagementStatus: "regular",
+        currentRoll: "active",
+      },
+      // directory_hidden: an eligible membership, but the household it
+      // belongs to has ZERO VISIBLE members once the privacy row below
+      // excludes this one — getHouseholds() must drop it entirely, and
+      // getHouseholdDetail()/getPersonDetail() must both return "not-found".
+      {
+        organizationId: orgA,
+        personId: hhHiddenPerson,
+        householdId: householdHiddenOnly,
+        householdRole: "head",
+        engagementStatus: "regular",
+        currentRoll: "active",
+      },
+      // orgB's household — proves cross-org isolation: orgA's context must
+      // never surface this household or this person, even by id.
+      {
+        organizationId: orgB,
+        personId: hhOrgBPerson,
+        householdId: householdOrgB,
+        householdRole: "head",
+        engagementStatus: "regular",
+        currentRoll: "active",
+      },
+    ]);
+
+    await platform.insert(personPrivacy).values({
+      personId: hhHiddenPerson,
+      organizationId: orgA,
+      directoryHidden: true,
+    });
+
+    // ------------------------------------------------------------------
+    // Increment 4 fixture — deacon linkage / directory.view_hidden.
+    // ------------------------------------------------------------------
+    elevatedPerson = await person("Esperanza", "Villareal", null);
+    deaconActive1 = await person("Rosalind", "Fairweather", null);
+    deaconActive2 = await person("Thaddeus", "Okonkwo", null);
+    deaconEnded = await person("Marisol", "Bellweather", null);
+    deaconOrgB = await person("Cassius", "Duvernay", null);
+    const hhDeaconHead = await person("Ottoline", "Marchetti", null);
+    const hhVacantHead = await person("Silas", "Prendergast", null);
+    const hhOrgBDeaconHead = await person("Ines", "Thackeray-Voss", null);
+
+    await membership(orgA, elevatedPerson, "regular", "active");
+    await membership(orgA, deaconActive1, "regular", "active");
+    await membership(orgA, deaconActive2, "regular", "active");
+    await membership(orgA, deaconEnded, "regular", "active");
+    await membership(orgB, deaconOrgB, "regular", "active");
+
+    // `presby_sync_derived_group()` (drizzle/0009_presby_rls.sql) requires a
+    // `derived_from = 'diaconate'` group to exist BEFORE any `office =
+    // 'deacon'` officer_terms row can be inserted, at BOTH orgs — F16, fails
+    // loudly rather than silently dropping the roster projection.
+    await platform.insert(groups).values({
+      organizationId: orgA,
+      groupTypeId,
+      name: "Board of Deacons",
+      membershipSource: "derived",
+      derivedFrom: "diaconate",
+      isProtected: true,
+    });
+    await platform.insert(groups).values({
+      organizationId: orgB,
+      groupTypeId,
+      name: "Board of Deacons",
+      membershipSource: "derived",
+      derivedFrom: "diaconate",
+      isProtected: true,
+    });
+
+    const [unitActive] = await platform
+      .insert(orgUnits)
+      .values({
+        organizationId: orgA,
+        unitType: "district",
+        name: "Fixture North District",
+      })
+      .returning({ id: orgUnits.id });
+    orgUnitActive = unitActive!.id;
+
+    const [unitVacant] = await platform
+      .insert(orgUnits)
+      .values({
+        organizationId: orgA,
+        unitType: "district",
+        name: "Fixture South District",
+      })
+      .returning({ id: orgUnits.id });
+    orgUnitVacant = unitVacant!.id;
+
+    const [unitOrgB] = await platform
+      .insert(orgUnits)
+      .values({
+        organizationId: orgB,
+        unitType: "district",
+        name: "Fixture Other-Org District",
+      })
+      .returning({ id: orgUnits.id });
+    orgUnitOrgB = unitOrgB!.id;
+
+    const [hhDeacon] = await platform
+      .insert(households)
+      .values({
+        organizationId: orgA,
+        name: "The Fixture-Active Household",
+        isGivingUnit: true,
+        orgUnitId: orgUnitActive,
+      })
+      .returning({ id: households.id });
+    householdWithDeacon = hhDeacon!.id;
+
+    const [hhVacant] = await platform
+      .insert(households)
+      .values({
+        organizationId: orgA,
+        name: "The Fixture-Vacant Household",
+        isGivingUnit: true,
+        orgUnitId: orgUnitVacant,
+      })
+      .returning({ id: households.id });
+    householdVacantDistrict = hhVacant!.id;
+
+    const [hhOrgBDeacon] = await platform
+      .insert(households)
+      .values({
+        organizationId: orgB,
+        name: "The Fixture OrgB Household",
+        isGivingUnit: true,
+        orgUnitId: orgUnitOrgB,
+      })
+      .returning({ id: households.id });
+    householdOrgBWithDeacon = hhOrgBDeacon!.id;
+
+    // Each new household needs ONE eligible member to be surfaced at all by
+    // getHouseholds()/getHouseholdDetail() — reuse the "head" shape the
+    // Increment 3 fixture above already established.
+    await platform.insert(memberships).values([
+      {
+        organizationId: orgA,
+        personId: hhDeaconHead,
+        householdId: householdWithDeacon,
+        householdRole: "head",
+        engagementStatus: "regular",
+        currentRoll: "active",
+      },
+      {
+        organizationId: orgA,
+        personId: hhVacantHead,
+        householdId: householdVacantDistrict,
+        householdRole: "head",
+        engagementStatus: "regular",
+        currentRoll: "active",
+      },
+      {
+        organizationId: orgB,
+        personId: hhOrgBDeaconHead,
+        householdId: householdOrgBWithDeacon,
+        householdRole: "head",
+        engagementStatus: "regular",
+        currentRoll: "active",
+      },
+    ]);
+
+    await platform.insert(officerTerms).values([
+      // orgUnitActive: TWO active terms for DIFFERENT people — the
+      // deterministic tie-break fixture. deaconActive2 starts LATER, so
+      // `starts_on desc` must pick it.
+      {
+        organizationId: orgA,
+        personId: deaconActive1,
+        office: "deacon",
+        orgUnitId: orgUnitActive,
+        startsOn: "2020-01-01",
+        endsOn: null,
+      },
+      {
+        organizationId: orgA,
+        personId: deaconActive2,
+        office: "deacon",
+        orgUnitId: orgUnitActive,
+        startsOn: "2022-06-01",
+        endsOn: null,
+      },
+      // orgUnitVacant: an ENDED-only term — the vacant-district fixture.
+      {
+        organizationId: orgA,
+        personId: deaconEnded,
+        office: "deacon",
+        orgUnitId: orgUnitVacant,
+        startsOn: "2015-01-01",
+        endsOn: "2019-12-31",
+        endReason: "completed",
+      },
+      // orgUnitOrgB: its own active deacon, in a DIFFERENT organization —
+      // the cross-org-isolation fixture.
+      {
+        organizationId: orgB,
+        personId: deaconOrgB,
+        office: "deacon",
+        orgUnitId: orgUnitOrgB,
+        startsOn: "2021-01-01",
+        endsOn: null,
+      },
+    ]);
+
+    await platform
+      .insert(permissions)
+      .values({
+        key: "directory.view_hidden",
+        module: "directory",
+        description: "See directory-hidden rows and the deacon roster",
+        sensitivityTier: 1,
+      })
+      .onConflictDoNothing();
+
+    const [hiddenRole] = await platform
+      .insert(appRoles)
+      .values({
+        organizationId: orgA,
+        key: "diaconate_fixture",
+        name: "Diaconate (fixture)",
+        roleKind: "custom",
+        isProtected: false,
+      })
+      .returning({ id: appRoles.id });
+
+    await platform
+      .insert(appRolePermissions)
+      .values({ roleId: hiddenRole!.id, permissionKey: "directory.view_hidden" });
+
+    // A direct grant to elevatedPerson (not a group) — simplest fixture
+    // shape for a single elevated viewer; the F3 "granted to a derived
+    // group, never a person" discipline governs the REAL diaconate_member
+    // role (scripts/seed-dev.sql), not this test's own throwaway role.
+    await platform.insert(roleGrants).values({
+      organizationId: orgA,
+      roleId: hiddenRole!.id,
+      personId: elevatedPerson,
+      startsOn: "2000-01-01",
+    });
+
+    // A grant that has ENDED — the permission resolver reads dates, so this
+    // is functionally identical to a grant revoked mid-session (Phase 3's
+    // own edge case) without needing to mutate a shared row mid-test-run.
+    revokedGrantPerson = await person("Fenwick", "Delacroix-Muir", null);
+    await membership(orgA, revokedGrantPerson, "regular", "active");
+    await platform.insert(roleGrants).values({
+      organizationId: orgA,
+      roleId: hiddenRole!.id,
+      personId: revokedGrantPerson,
+      startsOn: "2000-01-01",
+      endsOn: "2001-01-01",
+    });
+
+    directory4ExtraPeople.push(hhDeaconHead, hhVacantHead, hhOrgBDeaconHead);
   });
 
   afterAll(async () => {
@@ -299,6 +650,17 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       fieldBirthday,
       fieldPhoto,
       forbiddenPerson,
+      hhPerson1,
+      hhPerson2,
+      hhHiddenPerson,
+      hhOrgBPerson,
+      elevatedPerson,
+      deaconActive1,
+      deaconActive2,
+      deaconEnded,
+      deaconOrgB,
+      revokedGrantPerson,
+      ...directory4ExtraPeople,
     ].filter(Boolean);
 
     for (const id of allPeople) {
@@ -406,6 +768,531 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     // A person with no relationship to orgA at all.
     await expect(getDirectory(randomUUID(), orgA)).rejects.toMatchObject({
       name: "OrgAccessError",
+    });
+  });
+
+  describe("opts.search (Increment 2)", () => {
+    it("matches by first name, case-insensitive", async () => {
+      const result = await getDirectory(control, orgA, { search: "ophel" });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).toEqual([control]);
+    });
+
+    it("matches by last name, case-insensitive", async () => {
+      const result = await getDirectory(control, orgA, {
+        search: "MARCHBANKS",
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).toContain(control);
+    });
+
+    it("matches by (primary) email", async () => {
+      const result = await getDirectory(control, orgA, {
+        search: "control@example",
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).toEqual([control]);
+    });
+
+    it("matches by (primary) phone", async () => {
+      const result = await getDirectory(control, orgA, { search: "0199" });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).toEqual([control]);
+    });
+
+    it("trims surrounding whitespace before matching", async () => {
+      const result = await getDirectory(control, orgA, {
+        search: "  ophel  ",
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).toContain(control);
+    });
+
+    it("empty/whitespace-only search behaves exactly like omitting opts entirely", async () => {
+      const withOpts = await getDirectory(control, orgA, { search: "   " });
+      const withoutOpts = await getDirectory(control, orgA);
+      if (withOpts.kind !== "ok" || withoutOpts.kind !== "ok") {
+        throw new Error("expected ok");
+      }
+      expect(withOpts.entries.map((e) => e.personId).sort()).toEqual(
+        withoutOpts.entries.map((e) => e.personId).sort(),
+      );
+    });
+
+    it("a directory_hidden row is never returned, regardless of a matching search", async () => {
+      const result = await getDirectory(control, orgA, { search: "Blythe" });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).not.toContain(
+        hiddenPerson,
+      );
+      expect(result.entries).toHaveLength(0);
+    });
+
+    it("a match on a hidden field's raw stored value still nulls that field in the returned row", async () => {
+      // fieldEmail's own fixture email is `${fieldEmail}@example.invalid` —
+      // searching the person's own id therefore matches only via the RAW
+      // (hidden) email column, never via name. The row still comes back
+      // with `email: null` — the CASE WHEN in the SELECT list runs
+      // regardless of how the row was found by the WHERE clause.
+      const result = await getDirectory(control, orgA, { search: fieldEmail });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const matched = result.entries.find((e) => e.personId === fieldEmail);
+      expect(matched).toBeDefined();
+      expect(matched?.email).toBeNull();
+    });
+
+    it("someone with no directory.view grant still gets forbidden, search or not", async () => {
+      const result = await getDirectory(forbiddenPerson, orgB, {
+        search: "anything",
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+  });
+
+  describe("getHouseholds (Increment 3)", () => {
+    it("lists a household with visible members, with the correct memberCount", async () => {
+      const result = await getHouseholds(control, orgA);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      const winterbourne = result.households.find(
+        (h) => h.householdId === householdVisible,
+      );
+      expect(winterbourne).toBeDefined();
+      expect(winterbourne?.name).toBe("The Winterbourne Family");
+      expect(winterbourne?.memberCount).toBe(2);
+      // Increment 4 not built yet — always null.
+      expect(winterbourne?.deaconName).toBeNull();
+    });
+
+    it("drops a household whose only member is directory_hidden — zero visible members, not a household with a note", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(
+        result.households.some((h) => h.householdId === householdHiddenOnly),
+      ).toBe(false);
+    });
+
+    it("never surfaces another organization's household", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(
+        result.households.some((h) => h.householdId === householdOrgB),
+      ).toBe(false);
+    });
+
+    it("matches by household name, case-insensitive, trimmed", async () => {
+      const result = await getHouseholds(control, orgA, {
+        search: "  WINTERBOURNE  ",
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.households.map((h) => h.householdId)).toEqual([
+        householdVisible,
+      ]);
+    });
+
+    it("someone with no directory.view grant gets forbidden, not an empty list", async () => {
+      const result = await getHouseholds(forbiddenPerson, orgB);
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("does not swallow OrgAccessError into a result variant", async () => {
+      await expect(
+        getHouseholds(randomUUID(), orgA),
+      ).rejects.toMatchObject({ name: "OrgAccessError" });
+    });
+  });
+
+  describe("getHouseholdDetail (Increment 3)", () => {
+    it("returns the household's name and its visible members", async () => {
+      const result = await getHouseholdDetail(control, orgA, householdVisible);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(result.household.name).toBe("The Winterbourne Family");
+      expect(result.household.memberCount).toBe(2);
+      expect(result.household.deaconName).toBeNull();
+      expect(
+        result.household.members.map((m) => m.personId).sort(),
+      ).toEqual([hhPerson1, hhPerson2].sort());
+    });
+
+    it("returns not-found for a household whose only member is directory_hidden — indistinguishable from nonexistent", async () => {
+      const result = await getHouseholdDetail(
+        control,
+        orgA,
+        householdHiddenOnly,
+      );
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("returns not-found for a genuinely nonexistent household id", async () => {
+      const result = await getHouseholdDetail(control, orgA, randomUUID());
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("returns not-found (never forbidden, never a thrown error) for another organization's household id — cross-org isolation", async () => {
+      const result = await getHouseholdDetail(control, orgA, householdOrgB);
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("returns not-found for a malformed id, rather than throwing a Postgres cast error", async () => {
+      const result = await getHouseholdDetail(control, orgA, "not-a-uuid");
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("a directory_hidden household member never appears in another household's member list either — the shared predicate applies uniformly", async () => {
+      const result = await getHouseholdDetail(control, orgA, householdVisible);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(
+        result.household.members.map((m) => m.personId),
+      ).not.toContain(hhHiddenPerson);
+    });
+
+    it("someone with no directory.view grant gets forbidden, not not-found", async () => {
+      const result = await getHouseholdDetail(
+        forbiddenPerson,
+        orgB,
+        householdOrgB,
+      );
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+  });
+
+  describe("getPersonDetail (Increment 3)", () => {
+    it("returns the person's entry, including household linkage", async () => {
+      const result = await getPersonDetail(control, orgA, hhPerson1);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(result.entry.firstName).toBe("Odalys");
+      expect(result.entry.householdId).toBe(householdVisible);
+      expect(result.entry.householdRole).toBe("head");
+    });
+
+    it("a directory_hidden person appears in NEITHER the members list, NOR any household's member list, NOR person detail", async () => {
+      const directoryResult = await getDirectory(control, orgA);
+      if (directoryResult.kind !== "ok") throw new Error("expected ok");
+      expect(
+        directoryResult.entries.map((e) => e.personId),
+      ).not.toContain(hhHiddenPerson);
+
+      const personResult = await getPersonDetail(control, orgA, hhHiddenPerson);
+      expect(personResult).toEqual({ kind: "not-found" });
+
+      const householdResult = await getHouseholdDetail(
+        control,
+        orgA,
+        householdHiddenOnly,
+      );
+      expect(householdResult).toEqual({ kind: "not-found" });
+    });
+
+    it("returns not-found for a visitor with no roll status — a grantee, but not content, same as getDirectory()", async () => {
+      const result = await getPersonDetail(control, orgA, visitorPerson);
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("returns not-found for a genuinely nonexistent person id", async () => {
+      const result = await getPersonDetail(control, orgA, randomUUID());
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("returns not-found (never forbidden, never a thrown error) for another organization's person id — cross-org isolation", async () => {
+      const result = await getPersonDetail(control, orgA, hhOrgBPerson);
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("returns not-found for a malformed id, rather than throwing a Postgres cast error", async () => {
+      const result = await getPersonDetail(control, orgA, "not-a-uuid");
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("hidden fields stay hidden in getPersonDetail() too — a hidden email is never returned", async () => {
+      const result = await getPersonDetail(control, orgA, fieldEmail);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entry.email).toBeNull();
+      expect(result.entry.phone).not.toBeNull();
+    });
+
+    it("someone with no directory.view grant gets forbidden, not not-found", async () => {
+      const result = await getPersonDetail(forbiddenPerson, orgB, hhOrgBPerson);
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("does not swallow OrgAccessError into a result variant", async () => {
+      await expect(
+        getPersonDetail(randomUUID(), orgA, control),
+      ).rejects.toMatchObject({ name: "OrgAccessError" });
+    });
+  });
+
+  describe("includeHidden re-verification (Increment 4)", () => {
+    it("getDirectory(): an ordinary caller's includeHidden:true request is silently ignored", async () => {
+      const result = await getDirectory(control, orgA, { includeHidden: true });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).not.toContain(hiddenPerson);
+    });
+
+    it("getDirectory(): a grant that has ENDED is treated identically to never having been granted", async () => {
+      const result = await getDirectory(revokedGrantPerson, orgA, {
+        includeHidden: true,
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).not.toContain(hiddenPerson);
+    });
+
+    it("getDirectory(): an elevated caller's includeHidden:true surfaces a directory_hidden row, with isHidden true", async () => {
+      const result = await getDirectory(elevatedPerson, orgA, {
+        includeHidden: true,
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const entry = result.entries.find((e) => e.personId === hiddenPerson);
+      expect(entry).toBeDefined();
+      expect(entry?.isHidden).toBe(true);
+    });
+
+    it("getDirectory(): the SAME elevated caller omitting includeHidden sees exactly the ordinary result — the request, not just the grant, decides", async () => {
+      const withOptIn = await getDirectory(elevatedPerson, orgA, {
+        includeHidden: true,
+      });
+      const withoutOptIn = await getDirectory(elevatedPerson, orgA);
+      if (withOptIn.kind !== "ok" || withoutOptIn.kind !== "ok") {
+        throw new Error("expected ok");
+      }
+      expect(withoutOptIn.entries.map((e) => e.personId)).not.toContain(
+        hiddenPerson,
+      );
+      expect(withOptIn.entries.map((e) => e.personId)).toContain(hiddenPerson);
+    });
+
+    it("getDirectory(): field-level hides are UNCHANGED for an elevated caller — includeHidden only lifts the row-level (directory_hidden) exclusion", async () => {
+      const result = await getDirectory(elevatedPerson, orgA, {
+        includeHidden: true,
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const entry = result.entries.find((e) => e.personId === fieldEmail);
+      expect(entry?.email).toBeNull();
+    });
+
+    it("an ordinary entry's isHidden is always false, never undefined-as-truthy", async () => {
+      const result = await getDirectory(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const entry = result.entries.find((e) => e.personId === control);
+      expect(entry?.isHidden).toBe(false);
+    });
+
+    it("getHouseholds(): an ordinary caller's includeHidden:true is ignored — a hidden-only household stays dropped", async () => {
+      const result = await getHouseholds(control, orgA, {
+        includeHidden: true,
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(
+        result.households.some((h) => h.householdId === householdHiddenOnly),
+      ).toBe(false);
+    });
+
+    it("getHouseholds(): an elevated caller's includeHidden:true surfaces the previously-dropped household", async () => {
+      const result = await getHouseholds(elevatedPerson, orgA, {
+        includeHidden: true,
+      });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const hh = result.households.find(
+        (h) => h.householdId === householdHiddenOnly,
+      );
+      expect(hh).toBeDefined();
+      expect(hh?.memberCount).toBe(1);
+    });
+
+    it("getHouseholdDetail(): an ordinary caller's includeHidden:true is ignored — stays not-found", async () => {
+      const result = await getHouseholdDetail(
+        control,
+        orgA,
+        householdHiddenOnly,
+        { includeHidden: true },
+      );
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("getHouseholdDetail(): an elevated caller's includeHidden:true reveals the household, with the member's isHidden true", async () => {
+      const result = await getHouseholdDetail(
+        elevatedPerson,
+        orgA,
+        householdHiddenOnly,
+        { includeHidden: true },
+      );
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(result.household.memberCount).toBe(1);
+      expect(result.household.members[0]?.isHidden).toBe(true);
+    });
+
+    it("getPersonDetail(): an ordinary caller's includeHidden:true is ignored — stays not-found", async () => {
+      const result = await getPersonDetail(control, orgA, hhHiddenPerson, {
+        includeHidden: true,
+      });
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("getPersonDetail(): an elevated caller's includeHidden:true reveals the person, with isHidden true", async () => {
+      const result = await getPersonDetail(
+        elevatedPerson,
+        orgA,
+        hhHiddenPerson,
+        { includeHidden: true },
+      );
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(result.entry.isHidden).toBe(true);
+    });
+  });
+
+  describe("deacon derivation (Increment 4)", () => {
+    it("getHouseholds(): an active district's household shows its deacon", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const hh = result.households.find(
+        (h) => h.householdId === householdWithDeacon,
+      );
+      expect(hh?.deaconName).toBe("Thaddeus Okonkwo");
+    });
+
+    it("getHouseholds(): two active deacon terms on one district are resolved by the deterministic tie-break (starts_on desc), not by returning both", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const hh = result.households.find(
+        (h) => h.householdId === householdWithDeacon,
+      );
+      // deaconActive2 (Thaddeus, starts 2022-06-01) beats deaconActive1
+      // (Rosalind, starts 2020-01-01) — the later starts_on wins.
+      expect(hh?.deaconName).not.toBe("Rosalind Fairweather");
+      expect(hh?.deaconName).toBe("Thaddeus Okonkwo");
+    });
+
+    it("getHouseholds(): a vacant district (ended term, no successor) derives deaconName null, never a stale name", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const hh = result.households.find(
+        (h) => h.householdId === householdVacantDistrict,
+      );
+      expect(hh?.deaconName).toBeNull();
+    });
+
+    it("getHouseholds(): a household with no district assigned renders the same null as a vacant one", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const hh = result.households.find(
+        (h) => h.householdId === householdVisible,
+      );
+      expect(hh?.deaconName).toBeNull();
+    });
+
+    it("getHouseholds(): never surfaces another organization's deacon", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.households.map((h) => h.deaconName)).not.toContain(
+        "Cassius Duvernay",
+      );
+    });
+
+    it("getHouseholdDetail() matches getHouseholds()'s own deaconName for the same household — no drift between the two surfaces", async () => {
+      const listResult = await getHouseholds(control, orgA);
+      const detailResult = await getHouseholdDetail(
+        control,
+        orgA,
+        householdWithDeacon,
+      );
+      if (listResult.kind !== "ok" || detailResult.kind !== "ok") {
+        throw new Error("expected ok");
+      }
+      const fromList = listResult.households.find(
+        (h) => h.householdId === householdWithDeacon,
+      )?.deaconName;
+      expect(detailResult.household.deaconName).toBe(fromList);
+      expect(detailResult.household.deaconName).toBe("Thaddeus Okonkwo");
+    });
+
+    it("getHouseholdDetail(): an ended term with no successor derives null (vacant)", async () => {
+      const result = await getHouseholdDetail(
+        control,
+        orgA,
+        householdVacantDistrict,
+      );
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.household.deaconName).toBeNull();
+    });
+
+    it("cross-org isolation: an orgA context can never reach orgB's deacon-bearing household by id, even requesting includeHidden", async () => {
+      const result = await getHouseholdDetail(
+        elevatedPerson,
+        orgA,
+        householdOrgBWithDeacon,
+        { includeHidden: true },
+      );
+      expect(result).toEqual({ kind: "not-found" });
+    });
+  });
+
+  describe("getParishRoster (Increment 4)", () => {
+    it("forbidden for a caller without directory.view_hidden — even one who holds plain directory.view", async () => {
+      const result = await getParishRoster(control, orgA);
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("forbidden for a caller whose directory.view_hidden grant has ENDED", async () => {
+      const result = await getParishRoster(revokedGrantPerson, orgA);
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("lists the active district with its deacon and household count", async () => {
+      const result = await getParishRoster(elevatedPerson, orgA);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      const active = result.parishes.find(
+        (p) => p.orgUnitId === orgUnitActive,
+      );
+      expect(active?.orgUnitName).toBe("Fixture North District");
+      expect(active?.deaconName).toBe("Thaddeus Okonkwo");
+      expect(active?.householdCount).toBe(1);
+    });
+
+    it("lists a vacant district with deaconName null but a correct household count", async () => {
+      const result = await getParishRoster(elevatedPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const vacant = result.parishes.find(
+        (p) => p.orgUnitId === orgUnitVacant,
+      );
+      expect(vacant?.orgUnitName).toBe("Fixture South District");
+      expect(vacant?.deaconName).toBeNull();
+      expect(vacant?.householdCount).toBe(1);
+    });
+
+    it("household counts never drift from getHouseholds()'s own count for the same district", async () => {
+      const rosterResult = await getParishRoster(elevatedPerson, orgA);
+      const householdsResult = await getHouseholds(elevatedPerson, orgA, {
+        includeHidden: true,
+      });
+      if (rosterResult.kind !== "ok" || householdsResult.kind !== "ok") {
+        throw new Error("expected ok");
+      }
+      const fromRoster = rosterResult.parishes.find(
+        (p) => p.orgUnitId === orgUnitActive,
+      )?.householdCount;
+      const fromHouseholds = householdsResult.households.filter(
+        (h) => h.householdId === householdWithDeacon,
+      ).length;
+      expect(fromRoster).toBe(fromHouseholds);
+    });
+
+    it("never surfaces another organization's district", async () => {
+      const result = await getParishRoster(elevatedPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(
+        result.parishes.some((p) => p.orgUnitId === orgUnitOrgB),
+      ).toBe(false);
+    });
+
+    it("does not swallow OrgAccessError into a result variant", async () => {
+      await expect(
+        getParishRoster(randomUUID(), orgA),
+      ).rejects.toMatchObject({ name: "OrgAccessError" });
     });
   });
 });

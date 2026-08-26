@@ -1,10 +1,11 @@
+import Link from "next/link";
 import { signIn } from "@/auth";
 import { sanitizeCallbackUrl } from "@/lib/auth/safe-callback";
 import { isLocalLoginEnabled } from "@/lib/auth/local-login";
 import { isFlagEnabled } from "@/lib/flags";
 import { getPublishedSiteBrand } from "@/lib/sites";
 import { BrandTokens } from "@/components/brand/brand-tokens";
-import { OrgMark } from "@/components/brand/org-mark";
+import { OrgWordmark } from "@/components/brand/org-mark";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { SignInCredentialsForm } from "./signin-credentials-form";
@@ -69,13 +70,24 @@ export default async function SignInPage({
         brand={siteBrand?.brand?.tokens ?? null}
         lightOnly={siteBrand?.brand?.lightOnly ?? false}
       />
-      {siteBrand && (
-        <OrgMark
-          name={siteBrand.organizationName}
-          markSrc={siteBrand.logoUrl}
-          size="md"
-          className="mb-4"
-        />
+      {siteBrand && orgSlug && (
+        // Unboxed and linked back to the public site — same treatment as
+        // GlobalNav's own header wordmark (2026-08-26 portal-chrome
+        // refinement: "the logo doesn't need to be in a card"). `OrgMark`'s
+        // fixed neutral plate (G7) is right for a small header lockup
+        // sitting next to other chrome; here the logo IS the page's own
+        // identity, so it renders at its natural size with no card around it.
+        <Link
+          href={`/site/${orgSlug}`}
+          className="mb-4 inline-block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          aria-label={`${siteBrand.organizationName} public site`}
+        >
+          <OrgWordmark
+            name={siteBrand.organizationName}
+            markSrc={siteBrand.logoUrl}
+            plate={false}
+          />
+        </Link>
       )}
       <h1
         className={cn(

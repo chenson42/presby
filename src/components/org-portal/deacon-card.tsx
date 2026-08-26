@@ -31,10 +31,19 @@ import { PersonAvatar } from "@/app/(org)/o/[slug]/directory/person-avatar";
  * marks a DIRECTORY row an elevated viewer is seeing that an ordinary viewer
  * wouldn't — it has no meaning for a deacon shown by office to every viewer
  * who can reach this card at all.
+ *
+ * CARD HOVER TREATMENT (docs/work-log/2026-08-26-portal-fpcw-directory-ux.md
+ * Phase 3, Increment 1): `hover:shadow-md transition-shadow`, COSMETIC ONLY
+ * — this card has no link and no click target of its own. Added purely so
+ * the three cards that always render together (person/household detail
+ * pages) read as one consistent visual family rather than one flat card
+ * among two "lifted" ones. No `cursor-pointer`, no `tabindex`, no
+ * interactive `role` — Phase 3 Edge Cases flags this explicitly for QA to
+ * confirm none was introduced.
  */
 export function DeaconCard({ deaconName }: { deaconName: string | null }) {
   return (
-    <Card className="py-4">
+    <Card className="py-4 transition-shadow hover:shadow-md">
       <CardContent className="flex items-center gap-3">
         {deaconName ? (
           <>

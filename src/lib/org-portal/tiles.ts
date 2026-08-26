@@ -62,6 +62,13 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     flagKey: "org_portal.roles",
   },
   {
+    key: "officers",
+    label: "Officers",
+    description: "Record officer terms and view the session/diaconate roster.",
+    href: (slug) => `/o/${slug}/admin/officers`,
+    flagKey: "org_portal.officers",
+  },
+  {
     key: "tickets",
     label: "Tickets",
     description: "File and track support tickets.",

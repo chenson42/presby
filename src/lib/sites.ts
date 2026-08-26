@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { and, eq, desc, sql } from "drizzle-orm";
 import { db, getPlatformDb } from "@/lib/db";
-import { withOrgContext } from "@/lib/authz";
+import { OrgAccessError, withOrgContext } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { organizations } from "@/lib/db/domain/org";
 import {
@@ -82,6 +82,20 @@ import { hasTicketsFile } from "@/lib/tickets";
  * function must still surface that brand. See its own doc comment for the
  * logo-URL read, which is NOT gated on `ui.brand_theming` (DECISION-047: "un-
  * brandable does not mean logo-free").
+ *
+ * COMMIT 4 ADDITION (docs/work-log/2026-08-26-portal-fpcw-directory-ux.md
+ * Phase 3/4): `getOrgProfileForFooter` — a FIFTH caller shape, distinct from
+ * all four above: the genuine tenant-MEMBER read of `organization_profiles`,
+ * membership-verified via `withOrgContext()`. Neither existing reader of this
+ * table is legal at this call site — `getOrganizationProfileAdminDetail` uses
+ * `getPlatformDb()` (a platform operator's admin-console read, forbidden
+ * inside the `(org)` route group per that contract), and the anonymous
+ * `getPublishedSite`/`getPublishedSiteBrand` path has no membership to check
+ * at all. Structurally a near-verbatim copy of
+ * `src/lib/brand/read-org-brand.ts`'s `getOrgMarkForLayout()`: `cache()`-
+ * wrapped, `withOrgContext()`-based, collapses `OrgAccessError` (and any
+ * no-row case) to `null` so `<PortalFooter>` degrades to its contact-info-
+ * omitted empty state rather than crashing the page.
  */
 
 // ---------------------------------------------------------------------------
@@ -701,6 +715,67 @@ export async function getOrganizationProfileAdminDetail(
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// (org) member footer read — withOrgContext(), membership-verified
+// docs/work-log/2026-08-26-portal-fpcw-directory-ux.md Phase 3 "API Contract"
+// ---------------------------------------------------------------------------
+
+/**
+ * Address/phone only — NOT the five social-link columns
+ * (`getOrganizationProfileAdminDetail`'s full shape). Phase 1's working
+ * proposal, confirmed by the operator, named "org name + address/phone"
+ * specifically; the org name is already available to the caller
+ * (`resolved.org.name`) and is not re-fetched here. Widening this later to
+ * include social links is a pure additive change to the `select` and return
+ * type, not a reshape.
+ *
+ * FLAG-CHECK LOCATION IS DELIBERATELY THE CALLER, NOT HERE — mirrors
+ * `getOrgMarkForLayout()` (checked by `org_portal.chrome_v2` at the call
+ * site), not `getOrgBrandForLayout()` (which checks `ui.brand_theming`
+ * internally). `org_portal.chrome_v3` is a rollout/rollback lever over
+ * whether this read and render happen at all, not a property of the data
+ * itself — `layout.tsx` is already the one place that flag is read. A future
+ * caller that imports this function directly without checking the flag first
+ * gets live address/phone data regardless of rollout state: a paper
+ * contract, same class as several `/developer`-marked invariants.
+ */
+export type OrgProfileForFooter = {
+  address: string | null;
+  phone: string | null;
+};
+
+export const getOrgProfileForFooter = cache(
+  async (
+    organizationId: string,
+    personId: string,
+  ): Promise<OrgProfileForFooter | null> => {
+    let row;
+    try {
+      row = await withOrgContext(personId, organizationId, async (tx) => {
+        const [r] = await tx
+          .select({
+            address: organizationProfiles.address,
+            phone: organizationProfiles.phone,
+          })
+          .from(organizationProfiles)
+          .where(eq(organizationProfiles.organizationId, organizationId))
+          .limit(1);
+        return r ?? null;
+      });
+    } catch (err) {
+      // Same rare race `getOrgBrandForLayout`/`getOrgMarkForLayout` already
+      // document: a membership that vanishes between the caller's own
+      // `resolveOrgContext()` and this function's re-check degrades to
+      // `null` (empty-state footer), never a crash and never someone else's
+      // data.
+      if (err instanceof OrgAccessError) return null;
+      throw err;
+    }
+    if (!row) return null;
+    return { address: row.address, phone: row.phone };
+  },
+);
 
 // App-level bounds only — no DB CHECK on these text columns (Phase 3 Data
 // Model, matching site_contact_messages.body's own precedent: international

@@ -21,6 +21,33 @@ describe("TileGrid — tiles present", () => {
     expect(link.getAttribute("href")).toBe("/o/alder-creek/directory");
     expect(screen.getByText("Browse the congregation directory.")).toBeTruthy();
   });
+
+  it("applies the shadow-lift hover treatment alongside the existing accent color-shift", () => {
+    render(<TileGrid slug="alder-creek" tiles={[DIRECTORY_TILE]} />);
+    const link = screen.getByRole("link", { name: /directory/i });
+    expect(link.className).toContain("hover:shadow-md");
+    expect(link.className).toContain("transition-shadow");
+    expect(link.className).toContain("hover:bg-accent");
+    expect(link.className).toContain("hover:text-accent-foreground");
+  });
+
+  it("renders a mapped icon for a known tile key", () => {
+    render(<TileGrid slug="alder-creek" tiles={[DIRECTORY_TILE]} />);
+    expect(document.querySelector("svg")).toBeTruthy();
+  });
+
+  it("Tile-icon map staleness: falls back to a default icon (never crashes) for an unmapped tile key", () => {
+    const futureTile: PortalTile = {
+      key: "a-future-tile-key-with-no-icon-mapping",
+      label: "Future Tile",
+      description: "Not yet in the icon map.",
+      href: (slug) => `/o/${slug}/future`,
+      flagKey: "org_portal.future",
+    };
+    render(<TileGrid slug="alder-creek" tiles={[futureTile]} />);
+    const link = screen.getByRole("link", { name: /future tile/i });
+    expect(link.querySelector("svg")).toBeTruthy();
+  });
 });
 
 describe("TileGrid — no tiles visible", () => {

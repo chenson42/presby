@@ -33,6 +33,7 @@ const KNOWN_SEEDED_ORG_PORTAL_FLAG_KEYS = new Set([
   "org_portal.home_v2",
   "org_portal.directory",
   "org_portal.roles",
+  "org_portal.officers",
   "org_portal.tickets",
   "org_portal.feedback",
   "org_portal.chrome_v2",
@@ -60,9 +61,9 @@ describe("PORTAL_TILES — flag-key shape", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("mirrors OrgPortalStub's four links plus the members-management tile (2026-08-26)", () => {
+  it("mirrors OrgPortalStub's four links plus the members-management and officers tiles (2026-08-26)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
-      ["directory", "feedback", "members", "roles", "tickets"].sort(),
+      ["directory", "feedback", "members", "officers", "roles", "tickets"].sort(),
     );
   });
 });
@@ -112,6 +113,14 @@ describe("visiblePortalTiles() — flag-only filtering", () => {
     );
     const tiles = await visiblePortalTiles();
     expect(tiles.map((t) => t.key)).toEqual(["members"]);
+  });
+
+  it("officers tile is independent — org_portal.officers on, everything else off", async () => {
+    isFlagEnabled.mockImplementation(async (key: string) =>
+      key === "org_portal.officers",
+    );
+    const tiles = await visiblePortalTiles();
+    expect(tiles.map((t) => t.key)).toEqual(["officers"]);
   });
 
   it("preserves PORTAL_TILES declaration order among the visible subset", async () => {

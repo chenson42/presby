@@ -229,6 +229,33 @@ describe("DirectoryGrid — card content", () => {
   });
 });
 
+describe("DirectoryGrid — card hover treatment (Increment 1, DECISION-099)", () => {
+  it("applies the shadow-lift hover treatment to each card, WITHOUT cursor-pointer or an accent color flood", async () => {
+    await renderGrid({ entries: [entry()] });
+    const card = document.querySelector('[data-slot="card"]') as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.className).toContain("hover:shadow-md");
+    expect(card.className).toContain("transition-shadow");
+    expect(card.className).not.toContain("cursor-pointer");
+    expect(card.className).not.toContain("hover:bg-accent");
+  });
+
+  it("renders Mail/Phone/MapPin icons inline before each present contact field", async () => {
+    await renderGrid({
+      entries: [
+        entry({
+          email: "m.ashcombe@example.invalid",
+          phone: "555-0100",
+          address: { line1: "1 Way", city: "Fixtureville", region: "OH", postalCode: "00000" },
+        }),
+      ],
+    });
+    // Three inline icons: Mail, Phone, MapPin (the Lock badge icon only
+    // appears for isHidden entries, exercised separately above).
+    expect(document.querySelectorAll("svg").length).toBe(3);
+  });
+});
+
 describe("DirectoryGrid — responsive grid layout", () => {
   it("renders one card per entry in a responsive 1/2/3-column grid", async () => {
     await renderGrid({

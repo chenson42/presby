@@ -84,6 +84,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   let setOrganizationProfile: typeof import("./sites").setOrganizationProfile;
   let listOrganizationServiceTimes: typeof import("./sites").listOrganizationServiceTimes;
   let replaceOrganizationServiceTimes: typeof import("./sites").replaceOrganizationServiceTimes;
+  let getOrgProfileForFooter: typeof import("./sites").getOrgProfileForFooter;
 
   let db: typeof import("@/lib/db").db;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
@@ -141,6 +142,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       setOrganizationProfile,
       listOrganizationServiceTimes,
       replaceOrganizationServiceTimes,
+      getOrgProfileForFooter,
     } = await import("./sites"));
     ({ db, getPlatformDb } = await import("@/lib/db"));
     ({ organizations, organizationBrands } = await import("@/lib/db/domain/org"));
@@ -1314,6 +1316,142 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       expect(published.site.officeHours).toEqual([
         { dayOfWeek: 2, startTime: "09:00:00", endTime: "12:00:00", label: null },
       ]);
+    });
+  });
+
+  /**
+   * `getOrgProfileForFooter` — docs/work-log/2026-08-26-
+   * portal-fpcw-directory-ux.md Phase 3/4, the `(org)` member-footer read.
+   * A SELF-CONTAINED fixture (own orgs/people/cleanup), deliberately not
+   * reusing `orgLive`/`orgUnprovisioned` above — those are mutated by the
+   * `getOrganizationProfileAdminDetail`/`setOrganizationProfile` and
+   * `getPublishedSite — populated profile` describes earlier in this file,
+   * and this suite would otherwise depend on running after them in file
+   * order to see (or not see) a profile row. Same "one person per org"
+   * discipline `read-org-brand.test.ts` documents (the global-person model's
+   * `presby_claim_person()` guard against a second membership elsewhere).
+   */
+  describe("getOrgProfileForFooter", () => {
+    let orgWithRow: string;
+    let orgNoRow: string;
+    let orgOutsider: string;
+    let memberWithRow: string;
+    let memberNoRow: string;
+    let outsiderPerson: string;
+
+    beforeAll(async () => {
+      const platform = getPlatformDb();
+      const footerStamp = Date.now();
+
+      async function makeFooterOrg(label: string): Promise<string> {
+        const [row] = await platform
+          .insert(organizations)
+          .values({
+            organizationType: "congregation",
+            name: `Fixture ${label} for getOrgProfileForFooter`,
+            slug: `sites-test-footer-${label.toLowerCase()}-${footerStamp}`,
+            path: `sites_test_footer_${label.toLowerCase()}_${footerStamp}`,
+            platformStatus: "unmanaged",
+          })
+          .returning({ id: organizations.id });
+        return row!.id;
+      }
+
+      orgWithRow = await makeFooterOrg("WithRow");
+      orgNoRow = await makeFooterOrg("NoRow");
+      orgOutsider = await makeFooterOrg("Outsider");
+
+      // drizzle/0017's sync trigger requires the active_membership derived
+      // group before ANY memberships insert (this file's own established
+      // precedent, restated per-fixture here rather than reused across
+      // describes).
+      const [gt] = await platform
+        .insert(groupTypes)
+        .values({ organizationId: null, key: "roster", name: "Roster" })
+        .onConflictDoNothing()
+        .returning({ id: groupTypes.id });
+      let groupTypeId = gt?.id;
+      if (!groupTypeId) {
+        const [existing] = await platform
+          .select({ id: groupTypes.id })
+          .from(groupTypes)
+          .where(eq(groupTypes.key, "roster"))
+          .limit(1);
+        groupTypeId = existing!.id;
+      }
+      for (const orgId of [orgWithRow, orgNoRow, orgOutsider]) {
+        await platform.insert(groups).values({
+          organizationId: orgId,
+          groupTypeId,
+          name: "Active Membership",
+          membershipSource: "derived",
+          derivedFrom: "active_membership",
+          isProtected: true,
+        });
+      }
+
+      async function personActiveAt(label: string, organizationId: string) {
+        const [p] = await platform
+          .insert(people)
+          .values({ firstName: "Fixture", lastName: label })
+          .returning({ id: people.id });
+        await platform.insert(memberships).values({
+          personId: p!.id,
+          organizationId,
+          engagementStatus: "regular",
+          currentRoll: "active",
+        });
+        return p!.id;
+      }
+
+      memberWithRow = await personActiveAt("MemberWithRow", orgWithRow);
+      memberNoRow = await personActiveAt("MemberNoRow", orgNoRow);
+      outsiderPerson = await personActiveAt("Outsider", orgOutsider);
+
+      const profileResult = await setOrganizationProfile(
+        orgWithRow,
+        {
+          address: "42 Fixture Lane",
+          phone: "555-0142",
+          facebookUrl: "",
+          instagramUrl: "",
+          xTwitterUrl: "",
+          youtubeUrl: "",
+          otherUrl: "",
+        },
+        grantingUserId,
+      );
+      expect(profileResult).toEqual({ kind: "ok" });
+
+      // orgNoRow: deliberately no organization_profiles row at all.
+    });
+
+    afterAll(async () => {
+      const platform = getPlatformDb();
+      for (const orgId of [orgWithRow, orgNoRow, orgOutsider]) {
+        await platform.delete(organizations).where(eq(organizations.id, orgId));
+      }
+      for (const personId of [memberWithRow, memberNoRow, outsiderPerson]) {
+        await platform.delete(people).where(eq(people.id, personId));
+      }
+    });
+
+    it("returns address/phone for a member with an active relationship and a real organization_profiles row", async () => {
+      const result = await getOrgProfileForFooter(orgWithRow, memberWithRow);
+      expect(result).toEqual({ address: "42 Fixture Lane", phone: "555-0142" });
+    });
+
+    it("returns null when the organization has no organization_profiles row at all", async () => {
+      const result = await getOrgProfileForFooter(orgNoRow, memberNoRow);
+      expect(result).toBeNull();
+    });
+
+    it("returns null (never someone else's data) for a person with no active membership at the organization — cross-org isolation, RLS not just a WHERE clause", async () => {
+      // outsiderPerson's only membership is at orgOutsider, never orgWithRow
+      // — this exercises withOrgContext()'s OrgAccessError collapse, proving
+      // RLS (not an app-layer filter) is what refuses the row.
+      const result = await getOrgProfileForFooter(orgWithRow, outsiderPerson);
+      expect(result).toBeNull();
     });
   });
 });

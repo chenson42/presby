@@ -129,6 +129,35 @@ describe("HouseholdsGrid — card content", () => {
     expect(screen.queryByText(/deacon/i)).toBeNull();
   });
 
+  it("applies the shadow-lift hover treatment WITHOUT cursor-pointer or an accent color flood (Increment 1, DECISION-099)", () => {
+    render(
+      <HouseholdsGrid
+        households={[household()]}
+        search=""
+        orgName="Alder Creek Presbyterian Church"
+        slug="alder-creek"
+      />,
+    );
+    const card = document.querySelector('[data-slot="card"]') as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.className).toContain("hover:shadow-md");
+    expect(card.className).toContain("transition-shadow");
+    expect(card.className).not.toContain("cursor-pointer");
+    expect(card.className).not.toContain("hover:bg-accent");
+  });
+
+  it("renders a MapPin icon inline before the city/state line", () => {
+    render(
+      <HouseholdsGrid
+        households={[household()]}
+        search=""
+        orgName="Alder Creek Presbyterian Church"
+        slug="alder-creek"
+      />,
+    );
+    expect(document.querySelector("svg")).toBeTruthy();
+  });
+
   it("renders one card per household in a responsive 1/2/3-column grid", () => {
     render(
       <HouseholdsGrid

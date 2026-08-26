@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { Lock, Mail, MapPin, Phone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { DirectoryEntry } from "@/lib/directory";
@@ -33,6 +33,16 @@ import { PersonAvatar } from "./person-avatar";
  * caller actually requested and was granted; an ordinary caller's entries
  * never carry a hidden row at all, so no separate permission prop is needed
  * here.
+ *
+ * CARD HOVER TREATMENT (docs/work-log/2026-08-26-portal-fpcw-directory-ux.md
+ * Phase 3, Increment 1): `hover:shadow-md transition-shadow` on the outer
+ * `<Card>` — the shadow-lift ONLY, deliberately no `cursor-pointer` and no
+ * full-card `hover:bg-accent` color flood. This card holds MULTIPLE
+ * independent link targets (the name, `mailto:`, `tel:`) plus inert text
+ * (city) — unlike `TileGrid`'s single whole-card link, `cursor-pointer` here
+ * would misrepresent hovering over inert whitespace as clickable, and an
+ * accent-color flood would fight the `Badge`'s own background (Phase 3 Edge
+ * Cases, DECISION-099).
  */
 export function PersonCard({
   entry,
@@ -47,7 +57,7 @@ export function PersonCard({
   const city = entry.address?.city ?? null;
 
   return (
-    <Card className="py-4">
+    <Card className="py-4 transition-shadow hover:shadow-md">
       <CardContent className="flex items-start gap-3">
         <PersonAvatar
           photoSrc={photoSrc}
@@ -72,20 +82,27 @@ export function PersonCard({
           {entry.email && (
             <a
               href={`mailto:${entry.email}`}
-              className="flex min-h-11 max-w-full items-center truncate text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="flex min-h-11 max-w-full items-center gap-1.5 truncate text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
+              <Mail className="size-3 shrink-0 text-muted-foreground" aria-hidden />
               {entry.email}
             </a>
           )}
           {entry.phone && (
             <a
               href={`tel:${entry.phone}`}
-              className="flex min-h-11 max-w-full items-center truncate text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="flex min-h-11 max-w-full items-center gap-1.5 truncate text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
+              <Phone className="size-3 shrink-0 text-muted-foreground" aria-hidden />
               {entry.phone}
             </a>
           )}
-          {city && <p className="text-sm text-muted-foreground">{city}</p>}
+          {city && (
+            <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <MapPin className="size-3 shrink-0" aria-hidden />
+              {city}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>

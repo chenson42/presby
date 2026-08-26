@@ -20,8 +20,9 @@ import { describe, expect, it, afterEach, beforeAll, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 
+const signOutAction = vi.fn(async (_redirectTo?: string) => {});
 vi.mock("@/lib/auth/sign-out-action", () => ({
-  signOutAction: vi.fn(async () => {}),
+  signOutAction: (redirectTo?: string) => signOutAction(redirectTo),
 }));
 
 import { AvatarMenu } from "./avatar-menu";
@@ -37,7 +38,10 @@ beforeAll(() => {
   Element.prototype.releasePointerCapture ??= () => {};
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  signOutAction.mockClear();
+});
 
 const ADA = { name: "Ada Lovelace", email: "ada@presby.invalid" };
 
@@ -46,6 +50,13 @@ function renderMenu({
   email = ADA.email as string | null,
   canAccessAdmin = false,
   isPlatformAdmin = false,
+  signOutRedirectTo,
+}: {
+  name?: string | null;
+  email?: string | null;
+  canAccessAdmin?: boolean;
+  isPlatformAdmin?: boolean;
+  signOutRedirectTo?: string;
 } = {}) {
   return render(
     <AvatarMenu
@@ -53,6 +64,7 @@ function renderMenu({
       email={email}
       canAccessAdmin={canAccessAdmin}
       isPlatformAdmin={isPlatformAdmin}
+      signOutRedirectTo={signOutRedirectTo}
     />,
   );
 }
@@ -229,5 +241,31 @@ describe("AvatarMenu — sign out", () => {
 
     expect(screen.queryByRole("menu")).not.toBeNull();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
+  });
+
+  it("defaults to redirecting to \"/\" when no signOutRedirectTo is given", async () => {
+    renderMenu();
+
+    await open();
+    const button = screen.getByRole("menuitem", { name: "Sign out" });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(signOutAction).toHaveBeenCalledTimes(1);
+    expect(signOutAction.mock.calls[0]?.[0]).toBe("/");
+  });
+
+  it("redirects to the given signOutRedirectTo — the (org) shell's own public site", async () => {
+    renderMenu({ signOutRedirectTo: "/site/fpcw" });
+
+    await open();
+    const button = screen.getByRole("menuitem", { name: "Sign out" });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(signOutAction).toHaveBeenCalledTimes(1);
+    expect(signOutAction.mock.calls[0]?.[0]).toBe("/site/fpcw");
   });
 });

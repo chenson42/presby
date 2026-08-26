@@ -215,9 +215,14 @@ test.describe.serial("Org-branded /signin", () => {
     expect(styleText).not.toBeNull();
     expect(styleText).toContain(tokens.light.brand);
 
-    // OrgMark — no uploaded logo for this fixture, so the typographic
-    // initials fallback ("Alder Creek Presbyterian Church" -> "AC").
-    await expect(page.getByText("AC", { exact: true })).toBeVisible();
+    // OrgWordmark, unboxed and linked to the public site (2026-08-26
+    // portal-papercuts refinement) — no uploaded logo for this fixture, so
+    // the typographic fallback is the organization's own name in full,
+    // not initials.
+    await expect(page.getByText(ALDER_CREEK_NAME, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: `${ALDER_CREEK_NAME} public site` }),
+    ).toHaveAttribute("href", `/site/${ALDER_CREEK_SLUG}`);
 
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 
@@ -287,7 +292,7 @@ test.describe.serial("Org-branded /signin", () => {
     await page.goto(
       `/signin?callbackUrl=${encodeURIComponent(`/o/${ALDER_CREEK_SLUG}/directory`)}`,
     );
-    await expect(page.getByText("AC", { exact: true })).toBeVisible();
+    await expect(page.getByText(ALDER_CREEK_NAME, { exact: true })).toBeVisible();
 
     // Step 2 — the full TOTP-verified login, on the default (safe) callback,
     // exactly totp-full-login.spec.ts's own proven pattern.
@@ -330,7 +335,7 @@ test.describe.serial("Org-branded /signin", () => {
     );
 
     expect(await findBrandStyleText(page)).toBeNull();
-    await expect(page.getByText("AC", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(ALDER_CREEK_NAME, { exact: true })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   });
 
@@ -348,7 +353,7 @@ test.describe.serial("Org-branded /signin", () => {
         `/signin?callbackUrl=${encodeURIComponent(`/o/${ALDER_CREEK_SLUG}/directory`)}`,
       );
       expect(await findBrandStyleText(page)).toBeNull();
-      await expect(page.getByText("AC", { exact: true })).toHaveCount(0);
+      await expect(page.getByText(ALDER_CREEK_NAME, { exact: true })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
     } finally {
       await setFlag(sql, "ui.branded_signin", true);

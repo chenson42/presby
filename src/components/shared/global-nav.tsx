@@ -43,12 +43,16 @@ export async function GlobalNav({
   currentOrgSlug = null,
   contentWidthClassName = "max-w-2xl",
   orgMark = null,
+  signOutRedirectTo,
 }: {
   session: Session;
   /** Set inside `(org)`; the switcher renders this organization as current. */
   currentOrgSlug?: string | null;
   /** Match the width of the `<main>` the shell renders underneath. */
   contentWidthClassName?: string;
+  /** Passed straight through to `AvatarMenu` — see its own doc comment.
+   * Omitted by every caller except `(org)/o/[slug]/layout.tsx`. */
+  signOutRedirectTo?: string;
   /**
    * Portal-chrome pipeline (docs/work-log/2026-08-25-portal-chrome.md,
    * Phase 3). Set ONLY by `(org)/o/[slug]/layout.tsx`, and only when
@@ -141,6 +145,7 @@ export async function GlobalNav({
             email={session.user.email}
             canAccessAdmin={sessionCanAccessAdmin(session.user)}
             isPlatformAdmin={isPlatformAdmin}
+            signOutRedirectTo={signOutRedirectTo}
           />
         </nav>
       </div>

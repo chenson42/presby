@@ -62,3 +62,15 @@ describe("DeaconCard — deaconName === null (vacant OR no district — indistin
     expect(container.querySelector("svg")).toBeTruthy();
   });
 });
+
+describe("DeaconCard — hover treatment is cosmetic only (Phase 3 Edge Cases)", () => {
+  it("applies the shadow-lift class but introduces no tabindex or interactive role", () => {
+    const { container } = render(<DeaconCard deaconName="Priya Balakrishnan" />);
+    const card = container.firstElementChild as HTMLElement;
+    expect(card.className).toContain("hover:shadow-md");
+    expect(card.className).toContain("transition-shadow");
+    expect(card.getAttribute("tabindex")).toBeNull();
+    expect(card.getAttribute("role")).not.toBe("button");
+    expect(container.querySelector("a")).toBeNull();
+  });
+});

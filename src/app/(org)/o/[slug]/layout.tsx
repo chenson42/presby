@@ -3,8 +3,10 @@ import { cachedAuth } from "@/lib/auth/cached-auth";
 import { resolveOrgContext } from "@/lib/authz";
 import { getOrgBrandForLayout, getOrgMarkForLayout } from "@/lib/brand/read-org-brand";
 import { isFlagEnabled } from "@/lib/flags";
+import { getOrgProfileForFooter, type OrgProfileForFooter } from "@/lib/sites";
 import { BrandTokens } from "@/components/brand/brand-tokens";
 import { GlobalNav } from "@/components/shared/global-nav";
+import { PortalFooter } from "@/components/org-portal/portal-footer";
 import { PortalNav } from "./portal-nav";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +54,17 @@ import { cn } from "@/lib/utils";
  * `forbidden`/`ended`/`not-found`/no-session outcome renders neither, same
  * as brand emission, so DECISION-040's byte-identical copy on those pages
  * stays untouched.
+ *
+ * PORTAL FOOTER (docs/work-log/2026-08-26-portal-fpcw-directory-ux.md, Phase
+ * 3, Increment 3) is a THIRD, INDEPENDENT flag (`org_portal.chrome_v3`) —
+ * deliberately NOT folded into `chrome_v2`, which is already fully rolled
+ * out with no partial-rollout room to extend (Phase 1's own finding). Read
+ * in the SAME `Promise.all` as `resolveOrgContext()`/`chrome_v2`, and — same
+ * DECISION-040 discipline as `orgBrand`/`orgMark`/`showPortalNav` — the
+ * footer's data fetch (`getOrgProfileForFooter`) and its render both happen
+ * ONLY inside the `resolved.kind === "ok"` branch. `<PortalFooter>` renders
+ * as a sibling after `<main>`, inside the `session?.user` branch only —
+ * never on the no-session fallback header.
  */
 export default async function OrgSlugLayout({
   children,
@@ -66,10 +79,14 @@ export default async function OrgSlugLayout({
   let orgBrand: Awaited<ReturnType<typeof getOrgBrandForLayout>> = null;
   let orgMark: { name: string; markSrc: string | null } | null = null;
   let showPortalNav = false;
+  let showFooter = false;
+  let footerProfile: OrgProfileForFooter | null = null;
+  let footerOrgName = "";
   if (session?.user) {
-    const [resolved, chromeV2Enabled] = await Promise.all([
+    const [resolved, chromeV2Enabled, chromeV3Enabled] = await Promise.all([
       resolveOrgContext(session.user.id, slug),
       isFlagEnabled("org_portal.chrome_v2"),
+      isFlagEnabled("org_portal.chrome_v3"),
     ]);
     if (resolved.kind === "ok") {
       // BOTH ids from the SAME resolution, not `session.user.id` — see
@@ -89,6 +106,17 @@ export default async function OrgSlugLayout({
           resolved.org.personId,
         );
       }
+
+      // Footer is gated on its OWN flag, independently of chrome_v2 — see
+      // this file's header comment.
+      if (chromeV3Enabled) {
+        footerProfile = await getOrgProfileForFooter(
+          resolved.org.organizationId,
+          resolved.org.personId,
+        );
+        footerOrgName = resolved.org.name;
+        showFooter = true;
+      }
     }
   }
 
@@ -100,8 +128,9 @@ export default async function OrgSlugLayout({
           <GlobalNav
             session={session}
             currentOrgSlug={slug}
-            contentWidthClassName="max-w-4xl"
+            contentWidthClassName="max-w-6xl"
             orgMark={orgMark}
+            signOutRedirectTo={`/site/${slug}`}
           />
           {showPortalNav ? <PortalNav slug={slug} /> : null}
         </>
@@ -111,7 +140,7 @@ export default async function OrgSlugLayout({
         // forgets to, or a render that races a sign-out in another tab, gets a
         // header with a way home instead of a crash on `session.user`.
         <header className="border-b border-border bg-background">
-          <div className="mx-auto flex max-w-4xl items-center px-4 py-3 sm:px-6">
+          <div className="mx-auto flex max-w-6xl items-center px-4 py-3 sm:px-6">
             <Link href="/" className="text-sm font-semibold">
               presby
             </Link>
@@ -120,12 +149,19 @@ export default async function OrgSlugLayout({
       )}
       <main
         className={cn(
-          "mx-auto max-w-4xl px-6 py-12",
+          "mx-auto max-w-6xl px-6 py-12",
           orgBrand?.fontPairing.bodyClassName,
         )}
       >
         {children}
       </main>
+      {session?.user && showFooter ? (
+        <PortalFooter
+          slug={slug}
+          organizationName={footerOrgName}
+          profile={footerProfile}
+        />
+      ) : null}
     </>
   );
 }

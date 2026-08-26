@@ -41,6 +41,10 @@ export interface AvatarMenuProps {
   canAccessAdmin: boolean;
   /** `users.is_platform_admin`, read live — gates `/developer`. */
   isPlatformAdmin: boolean;
+  /** Where sign-out lands. Omit for the default (`/`, the marketing home) —
+   * `(org)/o/[slug]/layout.tsx` passes the org's own public site so leaving
+   * the portal doesn't strand the visitor on generic platform chrome. */
+  signOutRedirectTo?: string;
 }
 
 export function AvatarMenu({
@@ -48,6 +52,7 @@ export function AvatarMenu({
   email,
   canAccessAdmin,
   isPlatformAdmin,
+  signOutRedirectTo,
 }: AvatarMenuProps) {
   const initials = initialsFrom(name, email);
   const who = accountLabel(name, email);
@@ -119,7 +124,7 @@ export function AvatarMenu({
         )}
 
         <DropdownMenuSeparator />
-        <form action={signOutAction}>
+        <form action={signOutAction.bind(null, signOutRedirectTo ?? "/")}>
           <SignOutItem />
         </form>
       </DropdownMenuContent>

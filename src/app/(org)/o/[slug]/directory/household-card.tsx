@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { HouseholdSummary } from "@/lib/directory";
@@ -9,6 +10,13 @@ import type { HouseholdSummary } from "@/lib/directory";
  * 4 lands the deacon↔care-unit derivation; the slot is left here (rendered
  * only when non-null) so that increment is a pure addition, not a rewrite
  * of this component.
+ *
+ * CARD HOVER TREATMENT (docs/work-log/2026-08-26-portal-fpcw-directory-ux.md
+ * Phase 3, Increment 1): `hover:shadow-md transition-shadow` on the outer
+ * `<Card>` — shadow-lift only, no `cursor-pointer`, for the same reason
+ * `PersonCard` withholds it: this card holds a name `<Link>` alongside
+ * inert text (city/state, member-count badge), not one whole clickable
+ * surface (Phase 3 Edge Cases, DECISION-099).
  */
 export function HouseholdCard({
   household,
@@ -22,7 +30,7 @@ export function HouseholdCard({
     .join(", ");
 
   return (
-    <Card className="py-4">
+    <Card className="py-4 transition-shadow hover:shadow-md">
       <CardContent>
         <Link
           href={`/o/${slug}/directory/households/${household.householdId}`}
@@ -33,7 +41,10 @@ export function HouseholdCard({
           </h3>
         </Link>
         {cityState && (
-          <p className="mt-1 text-sm text-muted-foreground">{cityState}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+            <MapPin className="size-3 shrink-0" aria-hidden />
+            {cityState}
+          </p>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Badge variant="secondary">

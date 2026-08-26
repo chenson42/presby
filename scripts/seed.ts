@@ -216,6 +216,29 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.chrome_v3",
+      // ON: (1) directory/home card set (TileGrid, PersonCard, HouseholdCard,
+      // DeaconCard) gets a `hover:shadow-md transition-shadow` lift and
+      // TileGrid/PersonCard/HouseholdCard get inline lucide-react icons, AND
+      // (2) a new `<PortalFooter>` (org contact info from
+      // `organization_profiles`, a nav-link recap, a copyright line) renders
+      // below `<main>` on every `/o/<slug>*` page. Bundled as ONE flag,
+      // deliberately NOT extending the already-fully-live `org_portal.chrome_v2`
+      // (docs/work-log/2026-08-26-portal-fpcw-directory-ux.md, Phase 1: "checked
+      // live: chrome_v2 is enabled=true with no per-org exceptions — effectively
+      // fully rolled out already") — this rework gets its own atomic rollback
+      // boundary. Checked bare, no DECISION-026 fail-open wrapper — a toggle,
+      // not an auth path. The footer's nav recap mirrors each destination
+      // route's own gate the same way the tile grid and portal-nav row already
+      // do (DECISION-003) — it adds no permission check of its own. Seeded
+      // OFF: flag-OFF is byte-identical to today's card treatment/icons/footer
+      // (i.e. no footer, plain cards), the regression floor this pipeline
+      // pins with a test.
+      description:
+        "Card hover/icon treatment + portal footer in (org). OFF = cards keep today's plain styling and no <PortalFooter> renders below /o/<slug>*'s <main>.",
+      enabled: false,
+    },
+    {
       key: "org_portal.feedback",
       // ON: /o/<slug>/feedback is reachable at all. Its own flag as of this
       // pipeline — it previously borrowed org_portal.tickets (support-tickets

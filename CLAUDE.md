@@ -129,6 +129,7 @@ sandbox.)
 | **ux-developer** | Phase 4 (client) | React components, admin pages, forms. |
 | **full-stack-developer** | Phase 4 (small/coupled) | Features small enough that splitting adds overhead. |
 | **deployment-engineer** | Pre-deploy | Production build verification, env vars, build failures. |
+| **site-recreator** | N/A — outside the six-phase pipeline, works only in gitignored `scratch/` site-kit/site-content repos | Recreating a real organization's existing website as a presby-hosted public site, and any visual-parity bug report against one already in progress. |
 | **qa** | Phase 5 | Runs the suites and the feature-gate audit; verifies regression coverage exists. Read-only — it authors no tests. |
 
 **Every feature flows through the six-phase pipeline below. Work is not complete until analyst issues SHIP IT in Phase 6.**

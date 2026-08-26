@@ -22,8 +22,24 @@
  * not gated (the hook only runs inside Claude Code sessions), which matches
  * Rule 5's intent: the AGENT never pushes unchecked.
  *
+ * Scoped to THIS repo only: a Bash `git push` run against some other git
+ * repository entirely (e.g. a working checkout under the gitignored
+ * `scratch/` directory — presby-site-kit, site-fpcw) is not gated by presby's
+ * own marker. Found live: an agent pushing a scratch/ checkout was blocked by
+ * a stale marker that had nothing to do with that repository, because the
+ * hook checked presby's own HEAD regardless of which repo the command
+ * actually targeted. `resolvePushTargetRepoRoot()` walks the command's `cd`
+ * segments (from the hook payload's own `cwd`) and any inline `git -C` on the
+ * push segment itself to find the real target directory, then resolves ITS
+ * git toplevel — only when that equals presby's own repo root does the
+ * marker check apply. Undeterminable (no payload cwd, `git` not runnable in
+ * the resolved directory, etc.) fails toward gating — the conservative,
+ * pre-existing behavior for presby's own pushes — not toward silently
+ * ungating an unrecognized command.
+ *
  * Exported for unit-testing:
  *   commandContainsGitPush(command: string): boolean
+ *   resolvePushTargetRepoRoot(command: string, cwd: string): string | null
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -78,6 +94,83 @@ export function commandContainsGitPush(command) {
   });
 }
 
+// ── Push target resolution ───────────────────────────────────────────────────
+
+/**
+ * Resolves a directory `arg` (as passed to `cd` or `git -C`) against `base`.
+ * Handles `~` for HOME since a real shell would too.
+ */
+function resolveDir(base, arg) {
+  let target = arg;
+  if (target === "~" || target.startsWith("~/")) {
+    target = path.join(process.env.HOME ?? "", target.slice(1));
+  }
+  return path.resolve(base, target);
+}
+
+/**
+ * Finds the git repository root a `git push` command in `command` would
+ * actually act against, starting from `cwd`. Walks segments in order,
+ * tracking directory changes from `cd`; a `-C <path>` on the push segment
+ * itself (git's own precedence) overrides the tracked directory for that
+ * push. Returns the resolved `git rev-parse --show-toplevel` for the
+ * directory the push runs in, or `null` if it can't be determined (not a
+ * git repo, `cd` to a nonexistent path, etc.) — callers should treat `null`
+ * as "assume it's this repo" (fail toward gating).
+ *
+ * @param {string} command
+ * @param {string} cwd
+ * @returns {string | null}
+ */
+export function resolvePushTargetRepoRoot(command, cwd) {
+  let dir = cwd;
+  const segments = command.split(/[;&|\n]+/);
+
+  for (const segment of segments) {
+    const tokens = segment.trim().replace(/^[({\s]+/, "").split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) continue;
+
+    if (tokens[0] === "cd" && tokens[1]) {
+      dir = resolveDir(dir, tokens[1]);
+      continue;
+    }
+
+    if (tokens[0] === "git") {
+      let pushDir = dir;
+      let i = 1;
+      let isPush = false;
+      while (i < tokens.length) {
+        const t = tokens[i];
+        if (t === "-C" && tokens[i + 1]) {
+          pushDir = resolveDir(dir, tokens[i + 1]);
+          i += 2;
+          continue;
+        }
+        if (t === "-c" || t === "--git-dir" || t === "--work-tree" || t === "--namespace") {
+          i += 2;
+          continue;
+        }
+        if (t.startsWith("-")) {
+          i += 1;
+          continue;
+        }
+        isPush = t === "push";
+        break;
+      }
+      if (isPush) {
+        try {
+          return execFileSync("git", ["-C", pushDir, "rev-parse", "--show-toplevel"], {
+            encoding: "utf8",
+          }).trim();
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 // ── Modes ────────────────────────────────────────────────────────────────────
 
 function currentHead() {
@@ -99,14 +192,24 @@ function stamp() {
 
 function hook() {
   let command = "";
+  let payloadCwd = REPO_ROOT;
   try {
     const payload = JSON.parse(readFileSync(0, "utf8"));
     command = payload?.tool_input?.command ?? "";
+    payloadCwd = payload?.cwd || REPO_ROOT;
   } catch {
     process.exit(0); // fail open — never brick Bash on a malformed payload
   }
 
   if (!commandContainsGitPush(command)) process.exit(0);
+
+  // Only gate pushes that actually target THIS repo. `null` (undeterminable)
+  // falls through to the existing gated path — conservative, matches
+  // pre-existing behavior for presby's own pushes.
+  const targetRoot = resolvePushTargetRepoRoot(command, payloadCwd);
+  if (targetRoot !== null && path.resolve(targetRoot) !== REPO_ROOT) {
+    process.exit(0);
+  }
 
   let marker = null;
   try {

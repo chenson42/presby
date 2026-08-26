@@ -30,13 +30,37 @@ import { isFlagEnabled } from "@/lib/flags";
  * which point a shared key becomes consequential (rolling back tickets would
  * silently take feedback with it). It now has its own `org_portal.feedback`
  * flag; `org_portal.tickets` keeps gating `tickets` alone.
+ *
+ * `category` (docs/work-log/2026-08-26-portal-reorg-and-modernization.md,
+ * Phase 3) is a SECOND, ORTHOGONAL routing question added on top of the
+ * flag-only design above — "which page renders this tile" (`/o/<slug>` for
+ * `"operate"`, `/o/<slug>/admin` for `"administer"`), never "may this viewer
+ * click it." It is presentational routing metadata ONLY. It must NEVER
+ * become a second permission check, the same rule `flagKey` already follows:
+ * a viewer with zero tenant permissions still sees every flag-enabled
+ * `"administer"` tile on the hub, and gets that destination's own honest
+ * `Forbidden` state on click — the hub performs no permission check of any
+ * kind, only the flag check (architect's Phase 2 ruling, resolving Phase 1's
+ * Gap 2). "operate" tiles are the day-to-day tools meaningful to every
+ * member regardless of permission (Directory, Members, Officers, feedback);
+ * "administer" tiles are setting up or governing this org rather than running
+ * it day to day (Roles, Features, Branding, Tickets) and all gate their own
+ * destination on a `*.manage`/`*.file` tenant permission. Operator correction
+ * 2026-08-26: Members and Officers moved administer→operate (they're routine
+ * congregational work, not org setup) and Tickets moved operate→administer
+ * (filing a platform-support ticket is closer to administering the org's
+ * platform relationship than day-to-day ministry).
  */
+export type PortalTileCategory = "operate" | "administer";
+
 export interface PortalTile {
   key: string;
   label: string;
   description: string;
   href: (slug: string) => string;
   flagKey: string;
+  /** Routing only — which page renders the tile. Never a permission check. */
+  category: PortalTileCategory;
 }
 
 export const PORTAL_TILES: readonly PortalTile[] = [
@@ -46,6 +70,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     description: "Add a person and record roll actions.",
     href: (slug) => `/o/${slug}/admin/members`,
     flagKey: "org_portal.members_create",
+    category: "operate",
   },
   {
     key: "directory",
@@ -53,13 +78,15 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     description: "Browse the congregation directory.",
     href: (slug) => `/o/${slug}/directory`,
     flagKey: "org_portal.directory",
+    category: "operate",
   },
   {
     key: "roles",
-    label: "Administration",
+    label: "Roles",
     description: "Manage roles and permissions for this organization.",
     href: (slug) => `/o/${slug}/admin/roles`,
     flagKey: "org_portal.roles",
+    category: "administer",
   },
   {
     key: "officers",
@@ -67,6 +94,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     description: "Record officer terms and view the session/diaconate roster.",
     href: (slug) => `/o/${slug}/admin/officers`,
     flagKey: "org_portal.officers",
+    category: "operate",
   },
   {
     key: "tickets",
@@ -74,6 +102,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     description: "File and track support tickets.",
     href: (slug) => `/o/${slug}/tickets`,
     flagKey: "org_portal.tickets",
+    category: "administer",
   },
   {
     key: "feedback",
@@ -81,20 +110,47 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     description: "Share feedback about your congregation's portal.",
     href: (slug) => `/o/${slug}/feedback`,
     flagKey: "org_portal.feedback",
+    category: "operate",
+  },
+  {
+    key: "features",
+    label: "Features",
+    description: "Turn optional portal features on or off for this organization.",
+    href: (slug) => `/o/${slug}/admin/features`,
+    flagKey: "org_portal.features",
+    category: "administer",
+  },
+  {
+    key: "branding",
+    label: "Branding",
+    description: "Set your organization's colour, type pairing, and logo.",
+    href: (slug) => `/o/${slug}/admin/branding`,
+    flagKey: "org_portal.branding",
+    category: "administer",
   },
 ] as const;
 
 /**
- * The tiles a viewer sees — filtered by flag only, nothing else. Order
- * follows `PORTAL_TILES`'s declaration order, which the tile grid renders
- * as-is (no re-sorting at the render layer).
+ * The tiles a viewer sees for one category — filtered by category, then by
+ * flag alone, nothing else. Order follows `PORTAL_TILES`'s declaration order,
+ * which the tile grid renders as-is (no re-sorting at the render layer).
+ *
+ * ONE SHARED IMPLEMENTATION, TWO CALLERS: `/o/<slug>/page.tsx` calls
+ * `visiblePortalTiles("operate")`, `/o/<slug>/admin/page.tsx` calls
+ * `visiblePortalTiles("administer")`. There is no unparameterized overload
+ * and no default category — an ungoverned call is exactly the bug this
+ * signature makes impossible to write by accident (Phase 3 design).
  */
-export async function visiblePortalTiles(): Promise<PortalTile[]> {
+export async function visiblePortalTiles(
+  category: PortalTileCategory,
+): Promise<PortalTile[]> {
   const checks = await Promise.all(
-    PORTAL_TILES.map(async (tile) => ({
-      tile,
-      enabled: await isFlagEnabled(tile.flagKey),
-    })),
+    PORTAL_TILES.filter((tile) => tile.category === category).map(
+      async (tile) => ({
+        tile,
+        enabled: await isFlagEnabled(tile.flagKey),
+      }),
+    ),
   );
   return checks.filter((c) => c.enabled).map((c) => c.tile);
 }

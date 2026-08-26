@@ -339,6 +339,25 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.admin_hub",
+      // ON: /o/<slug>/admin (the net-new Organization Administration hub
+      // index) is reachable at all, and the persistent PortalNav row grows a
+      // trailing "Administration" entry pointing at it. Checked bare, no
+      // DECISION-026 fail-open wrapper — a toggle, not an auth path
+      // (docs/work-log/2026-08-26-portal-reorg-and-modernization.md, Phase
+      // 3). This is the SOLE reachability gate for the hub page and the nav
+      // entry; it never substitutes for any destination tile's own flag or
+      // permission — the hub shows every flag-enabled "administer" tile
+      // regardless of the viewer's own grants, and each destination page
+      // remains the sole authority on "may THIS person" (DECISION-003). Not
+      // a `PORTAL_TILES` flagKey itself — the hub is a route, not a tile.
+      // Seeded OFF, same "ships dark until the page lands" reasoning as its
+      // org_portal.* siblings.
+      description:
+        "Organization Administration hub index in (org). OFF = /o/<slug>/admin renders 'isn't turned on yet' and the persistent nav shows no Administration entry, regardless of any individual admin tile's own flag or the viewer's grants.",
+      enabled: false,
+    },
+    {
       key: "org_portal.branding",
       // ON: /o/<slug>/admin/branding (the tenant self-service brand editor —
       // seed colour, curated type pairing, optional logo, light-only toggle)

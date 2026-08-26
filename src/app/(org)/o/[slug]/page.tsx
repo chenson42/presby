@@ -119,6 +119,13 @@ export default async function OrgPage({
   // both already treat as "nothing to show" rather than an error. Only
   // OrgAccessError (the relationship vanishing mid-request) re-throws, so
   // error.tsx's copy — not a silent "Welcome." — is what a member sees.
+  //
+  // org_portal.motion (Phase 3, docs/work-log/
+  // 2026-08-26-portal-visual-modernization.md) gates ONLY the greeting
+  // band's mount fade-in, read alongside the home-data fetch below and
+  // threaded through as Greeting's required `motionEnabled` prop.
+  const motionEnabled = await isFlagEnabled("org_portal.motion");
+
   let homeData: Awaited<ReturnType<typeof getPortalHomeData>> | null = null;
   try {
     homeData = await getPortalHomeData(
@@ -132,11 +139,14 @@ export default async function OrgPage({
     homeData = null;
   }
 
-  const tiles = await visiblePortalTiles();
+  const tiles = await visiblePortalTiles("operate");
 
   return (
     <div className="space-y-8">
-      <Greeting displayName={homeData?.displayName ?? null} />
+      <Greeting
+        displayName={homeData?.displayName ?? null}
+        motionEnabled={motionEnabled}
+      />
       <FindPersonForm slug={resolved.org.slug} />
       <YoursZone slug={resolved.org.slug} household={homeData?.household ?? null} />
       <TileGrid slug={resolved.org.slug} tiles={tiles} />

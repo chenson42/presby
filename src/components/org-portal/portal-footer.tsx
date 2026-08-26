@@ -29,7 +29,14 @@ import type { OrgProfileForFooter } from "@/lib/sites";
  *      data copy (Phase 1 Gap 3 / Phase 3 Edge Cases). Checked as
  *      `profile?.address || profile?.phone` (truthy on either), never
  *      `!!profile` alone, so a row with only ONE of the two fields set still
- *      renders that one line.
+ *      renders that one line. The address/phone lines render at `text-base`
+ *      (`TYPE_SCALE`'s `body` role), an explicit override of the wrapping
+ *      div's ambient `text-sm` — `TYPE_SCALE` itself forbids `dense`/
+ *      `text-sm` for a paragraph a member needs to read (docs/work-log/
+ *      2026-08-26-portal-visual-modernization.md Phase 3). The org-name
+ *      label, the nav recap, and the copyright line stay `text-sm` — all
+ *      legitimate label/metadata/legal-boilerplate uses `TYPE_SCALE`'s
+ *      `dense` role explicitly permits.
  *   2. Nav recap — `<nav aria-label="Footer">`, plain `<Link>`s, Home
  *      prepended unconditionally (matching `PortalNav`'s own "Home is
  *      hardcoded, not a PORTAL_TILES row" convention) followed by
@@ -53,6 +60,14 @@ import type { OrgProfileForFooter } from "@/lib/sites";
  * only renders `<PortalFooter>` inside its `resolved.kind === "ok"` branch,
  * behind `org_portal.chrome_v3` — this component itself performs no
  * membership or flag check, matching `PortalNav`'s own division of labor.
+ *
+ * CALLS `visiblePortalTiles("operate")`, NOT `"administer"` (portal-reorg
+ * pipeline, docs/work-log/2026-08-26-portal-reorg-and-modernization.md) — a
+ * fourth call site the Phase 3 design didn't separately enumerate, updated
+ * here for the same reason `PortalNav`'s own persistent-nav call was: the
+ * footer recap is a day-to-day-tools surface, matching what `PortalNav` and
+ * the main portal page show, not the permission-gated setup tools now on the
+ * `/o/<slug>/admin` hub.
  */
 export async function PortalFooter({
   slug,
@@ -63,7 +78,7 @@ export async function PortalFooter({
   organizationName: string;
   profile: OrgProfileForFooter | null;
 }) {
-  const tiles = await visiblePortalTiles();
+  const tiles = await visiblePortalTiles("operate");
   const hasContactInfo = Boolean(profile?.address || profile?.phone);
 
   return (
@@ -72,11 +87,13 @@ export async function PortalFooter({
         {hasContactInfo && (
           <div className="space-y-1">
             <p className="font-medium text-foreground">{organizationName}</p>
-            {profile?.address && <p>{profile.address}</p>}
+            {profile?.address && (
+              <p className="text-base">{profile.address}</p>
+            )}
             {profile?.phone && (
               <a
                 href={`tel:${profile.phone}`}
-                className="flex min-h-11 w-fit items-center hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="flex min-h-11 w-fit items-center text-base hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 {profile.phone}
               </a>

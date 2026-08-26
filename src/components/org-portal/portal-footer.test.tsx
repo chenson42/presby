@@ -21,7 +21,7 @@ import type { PortalTile } from "@/lib/org-portal/tiles";
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
-  visiblePortalTiles: () => visiblePortalTiles(),
+  visiblePortalTiles: (category: string) => visiblePortalTiles(category),
 }));
 
 import { PortalFooter } from "./portal-footer";
@@ -40,6 +40,7 @@ const DIRECTORY_TILE: PortalTile = {
   description: "Browse the congregation directory.",
   href: (slug) => `/o/${slug}/directory`,
   flagKey: "org_portal.directory",
+  category: "operate",
 };
 
 async function renderFooter(
@@ -63,6 +64,16 @@ describe("PortalFooter — contact info", () => {
     expect(screen.getByText("1 Fixture Way, Fixtureville, OH")).toBeTruthy();
     const phoneLink = screen.getByRole("link", { name: "555-0100" });
     expect(phoneLink.getAttribute("href")).toBe("tel:555-0100");
+  });
+
+  it("renders the address and phone at the body TYPE_SCALE role (text-base), not dense", async () => {
+    await renderFooter({
+      profile: { address: "1 Fixture Way, Fixtureville, OH", phone: "555-0100" },
+    });
+    const address = screen.getByText("1 Fixture Way, Fixtureville, OH");
+    const phoneLink = screen.getByRole("link", { name: "555-0100" });
+    expect(address.className).toContain("text-base");
+    expect(phoneLink.className).toContain("text-base");
   });
 
   it("renders only the phone line when address is null", async () => {
@@ -102,6 +113,12 @@ describe("PortalFooter — nav recap", () => {
     const homeLink = screen.getByRole("link", { name: "Home" });
     expect(nav.contains(homeLink)).toBe(true);
     expect(homeLink.getAttribute("href")).toBe("/o/alder-creek");
+  });
+
+  it("calls visiblePortalTiles with the 'operate' category, never 'administer'", async () => {
+    visiblePortalTiles.mockResolvedValue([]);
+    await renderFooter();
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate");
   });
 
   it("recaps every visible tile from visiblePortalTiles(), built from the slug", async () => {

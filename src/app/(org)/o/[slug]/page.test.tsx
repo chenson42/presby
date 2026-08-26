@@ -55,7 +55,7 @@ vi.mock("@/lib/org-portal/home-data", () => ({
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
-  visiblePortalTiles: () => visiblePortalTiles(),
+  visiblePortalTiles: (category: string) => visiblePortalTiles(category),
 }));
 
 vi.mock("@/components/org-portal/find-person-form", () => ({
@@ -142,6 +142,42 @@ describe("OrgPage — org_portal.home_v2 ON", () => {
     );
     expect(screen.getByText("The Fennimore Family")).toBeTruthy();
     expect(screen.queryByText(/you're in/i)).toBeNull();
+    // Guards against an accidental swap to "administer" here, which would
+    // silently list permission-gated setup tools on the main page instead of
+    // the day-to-day tools (Phase 3 design, page.test.tsx call-site note).
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate");
+    // org_portal.motion (docs/work-log/2026-08-26-portal-visual-modernization.md)
+    // must be read alongside org_portal.home_v2, and — mocked false here — must
+    // NOT leave the greeting band's mount fade-in classes present. This is the
+    // wiring itself, not just the flag's own on/off behavior (covered in
+    // greeting.test.tsx): a future refactor that drops this read, swaps the
+    // key, or inverts the boolean would otherwise ship with every test green.
+    expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.motion");
+    const bandOff = screen.getByRole("heading", { level: 1 }).parentElement;
+    expect(bandOff?.className).not.toContain("animate-in");
+    expect(bandOff?.className).not.toContain("fade-in-0");
+  });
+
+  it("threads org_portal.motion ON to Greeting's motionEnabled prop", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockImplementation(
+      async (key: string) =>
+        key === "org_portal.home_v2" || key === "org_portal.motion",
+    );
+    getPortalHomeData.mockResolvedValue({
+      displayName: "Sam",
+      household: null,
+    });
+    visiblePortalTiles.mockResolvedValue([]);
+
+    const el = await OrgPage({ params: makeParams() });
+    render(el);
+
+    expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.motion");
+    const bandOn = screen.getByRole("heading", { level: 1 }).parentElement;
+    expect(bandOn?.className).toContain("animate-in");
+    expect(bandOn?.className).toContain("fade-in-0");
   });
 
   it("degrades to a null home data (no crash) on a non-OrgAccessError failure", async () => {

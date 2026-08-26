@@ -36,6 +36,10 @@ e2e/.visual/
 # Pre-push gate marker (scripts/pre-push-gate.mjs --stamp) — per-machine, never committed
 .claude/pre-push-ok.json
 
+# Status-line "last prompt submitted" marker (scripts/mark-user-prompt.mjs) —
+# per-machine, per-session-moment, never committed
+.claude/last-user-prompt.json
+
 # Real congregation data, exports, credentials. NEVER committed.
 # Also hard-blocked by scripts/pre-commit-private.mjs — belt and braces,
 # because .gitignore is bypassable with `git add -f`.

@@ -57,6 +57,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/mark-user-prompt.mjs"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

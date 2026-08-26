@@ -4,7 +4,7 @@
  *
  * Renders one line, refreshed continuously by Claude Code:
  *
- *   presby ● main ✎3 │ ⚙ 2 agents · brand contract 4m · tooling 3m │ 📋 4 unread
+ *   presby ● main ✎3 │ ⚙ 2 agents · brand contract 4m · tooling 3m │ ✓ role admin design │ 📋 4 unread
  *
  * WHY THIS EXISTS. Subagents run in the background for minutes at a time and
  * the only way to know what is in flight was to ask. Now it is on screen.
@@ -29,13 +29,35 @@
  * Reads session JSON on stdin (Claude Code supplies it). Never fails loudly:
  * any error prints the minimal segment, because a status line that throws is
  * worse than a status line that says less.
+ *
+ * FINISHED AGENTS, SHOWN UNTIL YOUR NEXT PROMPT. An agent whose transcript
+ * has gone quiet (mtime older than LIVE_WINDOW_S) just vanished from this
+ * line with no trace it ever ran — fine if you were watching, wrong if you
+ * were away, since background agents are exactly the ones that finish while
+ * you're away. `mark-user-prompt.mjs` (a `UserPromptSubmit` hook) stamps
+ * `.claude/last-user-prompt.json` every time you submit a prompt from the
+ * command line. A finished agent shows in a separate "✓ done" segment only
+ * while its transcript's mtime is NEWER than that marker — i.e. it finished
+ * after your last prompt, so you haven't seen it here yet. The next prompt
+ * you submit moves the marker forward past that mtime, and the entry stops
+ * appearing on the very next render — not on a timer, on your next command.
  */
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const LIVE_WINDOW_S = 90;
+const REPO_ROOT = path_resolve_repo_root();
+const LAST_PROMPT_MARKER = join(REPO_ROOT, ".claude", "last-user-prompt.json");
+
+function path_resolve_repo_root() {
+  // Mirrors pre-push-gate.mjs's own REPO_ROOT resolution (this file's parent
+  // directory) — no new dependency for a one-line path join.
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  return join(here, "..");
+}
 
 const read = (p) => {
   try {
@@ -65,13 +87,31 @@ function ago(seconds) {
   return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
 }
 
+/** The current epoch-seconds value of the last-user-prompt marker, or 0 if
+ * it doesn't exist yet (a fresh session, or the hook hasn't fired once) — 0
+ * means "never seen anything," so no finished agent is treated as already
+ * seen, which is the safe default (show it rather than hide it wrongly). */
+function lastPromptAt() {
+  const raw = read(LAST_PROMPT_MARKER);
+  if (!raw) return 0;
+  try {
+    return Number(JSON.parse(raw)?.at) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
- * Running subagents, newest first.
+ * Every subagent transcript in this session, newest first, each carrying
+ * enough to classify as running (mtime within LIVE_WINDOW_S) or finished
+ * (older) by the caller — one directory read serving both status-line
+ * segments instead of two.
  *
- * The description is pulled from the agent's own transcript rather than tracked
- * separately — derived, so it cannot drift from what is actually running.
+ * The description is pulled from the agent's own meta.json rather than
+ * tracked separately — derived, so it cannot drift from what is actually
+ * running.
  */
-function runningAgents(sessionId, projectDir) {
+function collectAgents(sessionId, projectDir) {
   if (!sessionId || !projectDir) return [];
   const dir = join(
     homedir(),
@@ -95,8 +135,8 @@ function runningAgents(sessionId, projectDir) {
     } catch {
       continue;
     }
-    const idle = now - st.mtimeMs / 1000;
-    if (idle > LIVE_WINDOW_S) continue;
+    const mtimeS = st.mtimeMs / 1000;
+    const idle = now - mtimeS;
 
     // Prefer meta.json's own `description` — the short label the orchestrator
     // gave this agent when spawning it. Only fall back to scraping the
@@ -125,7 +165,12 @@ function runningAgents(sessionId, projectDir) {
         : basename(name, ".jsonl").slice(6, 14);
     }
 
-    out.push({ desc, age: Math.floor(now - st.birthtimeMs / 1000) });
+    out.push({
+      desc,
+      idle,
+      mtimeS,
+      age: Math.floor(now - st.birthtimeMs / 1000),
+    });
   }
   return out.sort((a, b) => b.age - a.age);
 }
@@ -152,17 +197,33 @@ function main() {
     `${repo}${branch ? ` ● ${branch}` : ""}${dirty ? ` ✎${dirty}` : ""}`,
   );
 
-  // 2. What is running
-  const agents = runningAgents(sessionId, projectDir);
-  if (agents.length) {
-    const shown = agents
+  // 2. What is running, and what just finished while I wasn't looking
+  const all = collectAgents(sessionId, projectDir);
+  const running = all.filter((a) => a.idle <= LIVE_WINDOW_S);
+  const promptAt = lastPromptAt();
+  // "Finished" = gone quiet, AND finished after the last prompt I submitted —
+  // otherwise I already saw it end on some earlier render of this same line.
+  const finished = all.filter(
+    (a) => a.idle > LIVE_WINDOW_S && a.mtimeS > promptAt,
+  );
+
+  if (running.length) {
+    const shown = running
       .slice(0, 2)
       .map((a) => `${a.desc} ${ago(a.age)}`)
       .join(" · ");
-    const more = agents.length > 2 ? ` +${agents.length - 2}` : "";
+    const more = running.length > 2 ? ` +${running.length - 2}` : "";
     segments.push(
-      `⚙ ${agents.length} agent${agents.length === 1 ? "" : "s"} · ${shown}${more}`,
+      `⚙ ${running.length} agent${running.length === 1 ? "" : "s"} · ${shown}${more}`,
     );
+  }
+  if (finished.length) {
+    const shown = finished
+      .slice(0, 2)
+      .map((a) => a.desc)
+      .join(" · ");
+    const more = finished.length > 2 ? ` +${finished.length - 2}` : "";
+    segments.push(`✓ ${shown}${more}`);
   }
 
   // 3. What is waiting for me

@@ -44,12 +44,19 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
       ? pathname === entry.href
       : pathname === entry.href || pathname?.startsWith(`${entry.href}/`);
 
+  // The `border-b-2` accent (docs/work-log/
+  // 2026-08-26-portal-visual-modernization.md Phase 3) is applied
+  // UNCONDITIONALLY — `border-primary` when active, `border-transparent`
+  // when not — never omitted for either state. An active-only border would
+  // shift every link's vertical position by 2px when its active state
+  // toggles, at both the desktop wrapped-row and mobile stacked-menu
+  // presentations.
   const linkClassName = (isActive: boolean) =>
     cn(
-      "flex min-h-11 items-center rounded-md px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:min-h-0 sm:px-1 sm:py-1",
+      "flex min-h-11 items-center rounded-md border-b-2 px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:min-h-0 sm:px-1 sm:py-1",
       isActive
-        ? "font-semibold text-foreground"
-        : "text-muted-foreground hover:text-foreground",
+        ? "border-primary font-semibold text-foreground"
+        : "border-transparent text-muted-foreground hover:text-foreground",
     );
 
   return (

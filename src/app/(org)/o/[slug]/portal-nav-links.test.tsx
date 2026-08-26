@@ -93,6 +93,20 @@ describe("PortalNavLinks — active state", () => {
     ).toBeNull();
   });
 
+  it("applies an unconditional border-b-2 accent, border-primary only when active", () => {
+    usePathname.mockReturnValue("/o/acme");
+
+    render(<PortalNavLinks entries={ENTRIES} />);
+
+    const homeLink = screen.getByRole("link", { name: "Home" });
+    const directoryLink = screen.getByRole("link", { name: "Directory" });
+
+    expect(homeLink.className).toContain("border-b-2");
+    expect(homeLink.className).toContain("border-primary");
+    expect(directoryLink.className).toContain("border-b-2");
+    expect(directoryLink.className).toContain("border-transparent");
+  });
+
   it("renders every entry as a link to its href, in order", () => {
     usePathname.mockReturnValue("/o/acme");
 

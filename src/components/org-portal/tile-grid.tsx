@@ -1,14 +1,17 @@
 import Link from "next/link";
 import {
   BookOpen,
+  ChevronRight,
   LayoutGrid,
   Landmark,
   MessageSquare,
   Settings,
+  SlidersHorizontal,
   Ticket,
   UserPlus,
   type LucideIcon,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { PortalTile } from "@/lib/org-portal/tiles";
 
 /**
@@ -27,6 +30,7 @@ const TILE_ICONS: Record<string, LucideIcon> = {
   officers: Landmark,
   tickets: Ticket,
   feedback: MessageSquare,
+  features: SlidersHorizontal,
 };
 
 /**
@@ -34,6 +38,24 @@ const TILE_ICONS: Record<string, LucideIcon> = {
  * every flag behind `tiles` is off, per Phase 3's edge case: "all tile
  * flags off → home renders greeting + search only." 360px: single column,
  * per Phase 3's mobile note; `sm:` widens to two.
+ *
+ * ELEVATED CARD, ICON BADGE (docs/work-log/2026-08-26-portal-visual-
+ * modernization.md Phase 3 / DECISION-104, revised same day on direct
+ * operator feedback that the original full-bleed solid fill looked flat):
+ * each tile is a `Button asChild variant="tile"` wrapping the real `<Link>`
+ * — a `GET` navigation, not a client action — so the multi-line
+ * icon+heading+description+chevron layout goes through the `Button`
+ * primitive and its `tile` variant (Component Rule 5/C2) instead of a
+ * hand-rolled `className` string. The icon sits in a small rounded
+ * `bg-primary/10 text-primary` badge — that's where the brand color now
+ * lives, not the whole card — and the description uses the `body`/
+ * `text-base` `TYPE_SCALE` role in `text-muted-foreground`. The trailing
+ * chevron mirrors presby-site-kit's arrow-at-the-bottom convention
+ * (`styles.css:617-624`) with a real `lucide-react` icon, nudging toward the
+ * edge on hover (`group-hover:translate-x-0.5`) as the one piece of motion
+ * riding the card's own hover state — unconditional, like the shadow/lift it
+ * accompanies, per Phase 3's ruling that only the greeting band's mount
+ * fade-in is gated behind `org_portal.motion`.
  */
 export function TileGrid({
   slug,
@@ -53,19 +75,29 @@ export function TileGrid({
         {tiles.map((tile) => {
           const Icon = TILE_ICONS[tile.key] ?? LayoutGrid;
           return (
-            <Link
+            <Button
               key={tile.key}
-              href={tile.href(slug)}
-              className="block min-h-11 rounded-lg border border-border p-4 transition-shadow hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              asChild
+              variant="tile"
+              size="lg"
+              className="group h-auto w-full min-h-11 gap-3 p-5"
             >
-              <h3 className="flex items-center gap-2 text-lg font-medium">
-                <Icon className="size-4 shrink-0" aria-hidden />
-                {tile.label}
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {tile.description}
-              </p>
-            </Link>
+              <Link href={tile.href(slug)}>
+                <span className="flex items-center justify-center rounded-xl bg-primary/10 p-2 text-primary">
+                  <Icon className="size-5 shrink-0" aria-hidden />
+                </span>
+                <h3 className="text-lg font-semibold text-card-foreground">
+                  {tile.label}
+                </h3>
+                <p className="text-base text-muted-foreground">
+                  {tile.description}
+                </p>
+                <ChevronRight
+                  className="mt-auto size-4 self-end text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                  aria-hidden
+                />
+              </Link>
+            </Button>
           );
         })}
       </div>

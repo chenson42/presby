@@ -12,6 +12,7 @@ const DIRECTORY_TILE: PortalTile = {
   description: "Browse the congregation directory.",
   href: (slug) => `/o/${slug}/directory`,
   flagKey: "org_portal.directory",
+  category: "operate",
 };
 
 describe("TileGrid — tiles present", () => {
@@ -22,13 +23,27 @@ describe("TileGrid — tiles present", () => {
     expect(screen.getByText("Browse the congregation directory.")).toBeTruthy();
   });
 
-  it("applies the shadow-lift hover treatment alongside the existing accent color-shift", () => {
+  it("applies the tile Button variant's elevated card and hover-lift treatment", () => {
     render(<TileGrid slug="alder-creek" tiles={[DIRECTORY_TILE]} />);
     const link = screen.getByRole("link", { name: /directory/i });
-    expect(link.className).toContain("hover:shadow-md");
-    expect(link.className).toContain("transition-shadow");
-    expect(link.className).toContain("hover:bg-accent");
-    expect(link.className).toContain("hover:text-accent-foreground");
+    expect(link.className).toContain("bg-card");
+    expect(link.className).toContain("shadow-sm");
+    expect(link.className).toContain("hover:shadow-lg");
+  });
+
+  it("renders the description at the body TYPE_SCALE role, not dense", () => {
+    render(<TileGrid slug="alder-creek" tiles={[DIRECTORY_TILE]} />);
+    const description = screen.getByText("Browse the congregation directory.");
+    expect(description.className).toContain("text-base");
+    expect(description.className).not.toContain("text-sm");
+  });
+
+  it("renders a trailing chevron icon pinned to the bottom", () => {
+    render(<TileGrid slug="alder-creek" tiles={[DIRECTORY_TILE]} />);
+    const link = screen.getByRole("link", { name: /directory/i });
+    const icons = link.querySelectorAll("svg");
+    // one leading icon (tile-icon map) + one trailing chevron
+    expect(icons.length).toBe(2);
   });
 
   it("renders a mapped icon for a known tile key", () => {
@@ -43,6 +58,7 @@ describe("TileGrid — tiles present", () => {
       description: "Not yet in the icon map.",
       href: (slug) => `/o/${slug}/future`,
       flagKey: "org_portal.future",
+      category: "operate",
     };
     render(<TileGrid slug="alder-creek" tiles={[futureTile]} />);
     const link = screen.getByRole("link", { name: /future tile/i });

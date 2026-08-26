@@ -7,14 +7,34 @@ afterEach(cleanup);
 
 describe("Greeting — the portal home's <h1>", () => {
   it("greets by name when a display name is available", () => {
-    render(<Greeting displayName="Sam" />);
+    render(<Greeting displayName="Sam" motionEnabled={false} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toMatch(/^good (morning|afternoon|evening), Sam\.$/i);
   });
 
   it("degrades to a generic welcome when displayName is null (missing row or a degraded read)", () => {
-    render(<Greeting displayName={null} />);
+    render(<Greeting displayName={null} motionEnabled={false} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe("Welcome.");
+  });
+
+  it("renders the bg-card band with a primary accent stripe unconditionally", () => {
+    render(<Greeting displayName={null} motionEnabled={false} />);
+    const heading = screen.getByRole("heading", { level: 1 });
+    const band = heading.parentElement;
+    expect(band?.className).toContain("bg-card");
+    expect(band?.className).toContain("border-l-primary");
+  });
+
+  it("adds the mount fade-in class only when motionEnabled is true (org_portal.motion)", () => {
+    const { rerender } = render(<Greeting displayName="Sam" motionEnabled={true} />);
+    let band = screen.getByRole("heading", { level: 1 }).parentElement;
+    expect(band?.className).toContain("animate-in");
+    expect(band?.className).toContain("fade-in-0");
+
+    rerender(<Greeting displayName="Sam" motionEnabled={false} />);
+    band = screen.getByRole("heading", { level: 1 }).parentElement;
+    expect(band?.className).not.toContain("animate-in");
+    expect(band?.className).not.toContain("fade-in-0");
   });
 });

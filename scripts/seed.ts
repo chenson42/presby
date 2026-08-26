@@ -375,6 +375,26 @@ async function seedFlags() {
         "Tenant self-service brand editor in (org). OFF = /o/<slug>/admin/branding renders 'isn't available yet' regardless of the viewer's branding.manage grant.",
       enabled: false,
     },
+    {
+      key: "org_portal.motion",
+      // ON: the portal home's greeting band (`Greeting`, rendered only when
+      // org_portal.home_v2 is already on) plays a one-time CSS mount
+      // fade-in (`animate-in fade-in-0`, tw-animate-css) on load. Checked
+      // bare, no DECISION-026 fail-open wrapper — a toggle, not an auth path
+      // (docs/work-log/2026-08-26-portal-visual-modernization.md, Phase 3).
+      // Gates ONLY the entrance animation, never the band's card/border
+      // treatment itself — that renders unconditionally once
+      // org_portal.home_v2 is on, flag or no flag (DECISION-003: a flag
+      // never gates a permission, and here it doesn't even gate a whole
+      // surface, just one animation layered on top of an always-rendered
+      // one). `prefers-reduced-motion` still neutralizes the animation via
+      // globals.css's existing tree-wide rule regardless of this flag's
+      // state. Seeded OFF: rolled back independently of the rest of this
+      // pipeline's unflagged color/type changes (DECISION-104).
+      description:
+        "Portal-home greeting band CSS mount fade-in. OFF = the band renders with no entrance animation (still its usual card/border treatment); ON = it fades in once on load, subject to prefers-reduced-motion.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

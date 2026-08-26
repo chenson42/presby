@@ -22,6 +22,25 @@
 //      reason) — and the corrected dark `--destructive` (globals.css slice 0)
 //      makes the alpha composite unnecessary; the token now clears its own
 //      floor without it.
+//   4. Added a `tile` variant, not part of the stock registry output
+//      (DECISION-104, docs/work-log/2026-08-26-portal-visual-modernization.md
+//      Phase 3, revised same day on direct operator visual feedback — the
+//      original full-bleed solid `bg-primary` fill read as a flat, unpleasant
+//      block of color rather than "modern"). The portal home's tool tiles
+//      (`TileGrid`) need a multi-line icon+heading+description+chevron layout
+//      — building that as a one-off `className` string on a hand-rolled
+//      `<Link>` would fail Component Rule 5/C2 (`check:brand-scope` bans a
+//      button/table shape reconstructed outside `src/components/ui/`).
+//      `tile` is now a `bg-card` surface with a border and a soft shadow that
+//      deepens and lifts slightly on hover — depth communicated by elevation
+//      instead of a saturated fill; the brand color moves to the icon badge
+//      (`TileGrid` wraps the icon in a small `bg-primary/10 text-primary`
+//      chip) so `--primary` still reads on every tile without painting the
+//      whole card. `tile` adds the same layout properties as before
+//      (`flex-col`, `items-start`, `h-auto`, `whitespace-normal`, `text-left`)
+//      plus `rounded-xl` (operator feedback, same day) — a noticeably
+//      rounder corner than the base variant's `rounded-md`, since `cn()`'s
+//      `twMerge` keeps the later same-group utility.
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import * as Slot from "@radix-ui/react-slot"
@@ -43,6 +62,7 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
+        tile: "bg-card text-card-foreground border shadow-sm hover:shadow-lg hover:-translate-y-0.5 hover:border-primary/40 flex-col items-start h-auto whitespace-normal text-left rounded-xl",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",

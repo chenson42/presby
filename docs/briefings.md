@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=068 commit=895d436 -->
+<!-- covers: decision=097 commit=078e7fb -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -21,6 +21,211 @@ if decisions or feat/fix commits have landed since. Move it when you write new
 entries — that is the one piece of discipline this file needs, and it is checked.*
 
 ---
+
+## 2026-08-26
+
+- [ ] **`decision` · Editing a member's details, and paging/searching/filtering
+  long member lists, both shipped today — but built solo, without the usual
+  second set of eyes.** You can now open an existing person's record and
+  update their name, contact info, address, and household (their membership
+  status and any life-event history stay off that screen entirely — those
+  still only change through the formal roll process, on purpose). Both the
+  members list and the public-facing directory also gained real paging,
+  search, and a filter by membership status, so a congregation with hundreds
+  of members doesn't load them all onto one screen at once. Both pieces of
+  work were designed, built, and checked by a single AI working session that
+  couldn't split the work across this project's usual separate
+  reviewer roles — disclosed honestly in both cases rather than presented as
+  a full independent check. A real hands-on test in a phone-sized browser
+  window is still owed before either goes in front of real members.
+
+- [ ] **`finding` · The portal's header and mobile menu got two small but
+  real fixes, at your direct request.** The header now shows only a
+  congregation's logo (no redundant text name next to it), and clicking that
+  logo takes you to the congregation's *public* website rather than back
+  into the portal. The mobile menu — which used to just wrap its links onto
+  a second line of plain text — now behaves like an actual menu: a
+  tap-to-open button that closes itself once you've picked something.
+
+- [ ] **`finding` · A "make the portal look and feel like fpcw-directory"
+  redesign is underway, but only at the planning stage — nothing has
+  shipped from it yet.** What's a straightforward visual port (card
+  hover effects, icons) is now scoped apart from what has to be designed
+  from scratch for the first time (dropdown navigation menus, a page
+  footer).
+
+- [ ] **`finding` · Two of this session's own working folders moved, to fix
+  a mix-up between different projects.** The two companion projects used to
+  build the Westerville First Presbyterian church website (its content, and
+  the shared design-template library behind it) were nested inside this
+  project's own folder in a way that occasionally confused this project's
+  own safety tooling — twice, a push meant for one of those side projects
+  got mistakenly evaluated as if it were a push to this project itself.
+  Moved out to sit alongside this project instead of inside it, which also
+  surfaced and fixed a related, unrelated build glitch.
+
+## 2026-08-25
+
+- [ ] **`decision` · Congregations can now add a brand-new person to their
+  roll, not just view people already on it — the very first "write" the
+  roll has ever had.** A guided, step-by-step form (built with older and
+  less tech-savvy users specifically in mind — one thing per screen, big
+  buttons, nothing lost if you go back a step) checks for a possible
+  duplicate first, then collects the person's details, and records the
+  action for a designated reviewer to approve. A newly added person shows
+  up in the directory the moment they're placed in a household, not only
+  after the paperwork is formally approved — a stronger guarantee than
+  originally planned. Congregations can also now turn specific features on
+  or off for themselves individually, not just via a platform-wide switch —
+  a new mechanism future features can build on.
+
+- [ ] **`defect` · Building that "add a person" feature caught two real
+  gaps in the database's own safety rules, before either could touch a real
+  congregation.** The database's row-level protection had never actually
+  been given permission to let a brand-new person's record be created in
+  the first place — confirmed broken, not just untested, and fixed
+  carefully so a congregation still can't attach details to someone else's
+  already-existing member record, only to a genuinely unclaimed one.
+  Separately, a safety trigger meant to stop an already-approved roll entry
+  from ever being deleted was also, by a small coding slip, blocking the
+  deletion of a still-pending (not yet approved) one — which should be
+  allowed. Both caught and fixed before shipping.
+
+- [ ] **`decision` · Inside a congregation's portal, the header now shows
+  that congregation's own identity instead of the platform's** — its logo
+  and name where "presby" used to sit — plus a menu that's present on
+  every portal page, not just the home screen. A brief visual regression
+  (a long congregation name no longer got visibly truncated at phone
+  width, because the smaller logo freed up space in the header) was caught
+  by the test suite and fixed the same day; the fix was judged the better
+  outcome — an untruncated name that fits is better than one clipped for
+  no reason — not a workaround.
+
+- [ ] **`decision` · A congregation can now be set to "light mode only,"**
+  for congregations — like Westerville First Presbyterian — whose real
+  branding was never designed with a dark background in mind. Forcing dark
+  mode on a brand that was never built for it would look genuinely wrong,
+  not just different.
+
+- [ ] **`decision` · The sign-in page can now show a visiting congregation's
+  own logo, colors, and fonts** when someone arrives from that
+  congregation's public website looking to sign in — but only for
+  congregations that already have a public website live, so the feature
+  can never be used to probe which organizations are or aren't real
+  tenants. A real defect was caught before shipping: the Google sign-in
+  button briefly picked up the congregation's brand color instead of
+  staying Google's own required blue — fixed and verified.
+
+- [ ] **`defect` · A serious, since-fixed bug let a member skip two-factor
+  verification entirely, under one specific condition that happens
+  routinely today.** Anyone signing in via a link that pointed *directly*
+  at a protected page — which is exactly what happens every time a
+  session expires while someone is browsing a congregation's portal —
+  could land on that protected page without ever being asked for their
+  two-factor code. The cause was a technical quirk in how the sign-in
+  page hands off to the next page, which meant the usual security
+  checkpoint never got the chance to run. Found by the team's own testing,
+  not by an outside party, and fixed the same day. A related, narrower
+  version of the same quirk — affecting some feature-specific
+  restrictions rather than two-factor login itself — is tracked as a known
+  follow-up, not yet fixed.
+
+- [ ] **`decision` · Platform staff can now create a brand-new congregation
+  from scratch** through the admin screen — surprisingly, nothing in the
+  platform could do this before today; every congregation that existed had
+  been added by hand directly in the database. Building it also caught two
+  real bugs in how a brand-new congregation's default internal groups (its
+  Session, its Board of Deacons, etc.) get set up. The very first real,
+  non-fixture congregation — First Presbyterian Church of Westerville — was
+  created using this new tool as part of bringing their real website
+  onto the platform. **Worth your attention:** a platform-wide switch
+  controlling whether *any* congregation's public website is reachable
+  from the open internet was found already turned on partway through this
+  work, and it is not yet confirmed whether that was intentional.
+
+- [ ] **`decision` · A fourth font-pairing option ("Contemporary" —
+  Montserrat and Open Sans) was added to the branding system**,
+  specifically because Westerville First Presbyterian's real site uses
+  that exact pairing and none of the three existing options fit it. Every
+  congregation gets the wider choice now, not just this one.
+
+- [ ] **`defect` · A member bounced to an "access denied" or "your
+  membership here has ended" page had no way back to the congregation's
+  public website** — only a link to their list of organizations, which
+  isn't useful if they arrived from that congregation's own site directly.
+  Fixed. A second complaint in the same report (no way to sign out from
+  that page) turned out to already work fine — a discoverability issue,
+  not a missing feature.
+
+- [ ] **`finding` · A handful of small polish fixes landed on the public
+  congregation-website pages**: the browser tab was showing "presby"
+  instead of each page's own real title, and a "Member Login" link was
+  appearing as its own separate top-level menu item instead of folded into
+  a congregation's existing navigation — the way the real Westerville site
+  actually does it.
+
+## 2026-08-21
+
+- [ ] **`decision` · A congregation's public website can now show its
+  street address, phone number, service times, and office hours** —
+  entered by platform staff for now (a congregation's own admin doing this
+  themselves is a named, deliberately deferred follow-up, not forgotten).
+  Built as real structured data rather than a free-text blob, so each piece
+  can be checked for sense (an end time has to be after its start time, a
+  day has to be a real day of the week) and shown or hidden independently.
+
+- [ ] **`finding` · While verifying that feature, an automated tool the
+  team runs printed an odd, unsolicited "tip" in its console output that
+  read like an attempt to get an AI agent to visit an external site and
+  authenticate.** Neither reviewing agent acted on it or investigated
+  further — it was disclosed for your awareness rather than treated as
+  part of the actual verification. Worth knowing that this kind of thing
+  can show up in ordinary tool output.
+
+- [ ] **`defect` · A ticket's subject line could stretch a whole
+  admin or member table sideways** if it was long enough — the column was
+  told to have a maximum width, but the text inside it never actually
+  respected that limit. Fixed on both the staff-facing and
+  congregation-facing ticket lists (the same bug existed, unreported, on
+  the second one).
+
+## 2026-08-20
+
+- [ ] **`decision` · A full support-ticket system shipped: members and
+  congregations can now report a problem or request, and a designated
+  person reviews and works it — deliberately with no AI given its own
+  write access to anything.** Filing, replying, categorizing, and
+  resolving all go through a real, accountable reviewer; a simpler "just
+  leave feedback" option feeds into the same queue when appropriate. Email
+  notifications fire at every real status change (a new ticket, a reply, a
+  resolution) but not on routine internal housekeeping. Turned off for
+  now — no congregation is live enough yet to need it.
+
+- [ ] **`decision` · Filled in the platform's role catalog with three new
+  offices that had never actually been given to anyone: Treasurer, an
+  installed Pastor, and a new "Support Contact" role for filing tickets** —
+  previously, every new capability had been landing on one existing office
+  (the Stated Clerk) purely because it was the only one that existed,
+  which risked quietly turning that one office into a catch-all
+  super-admin. Correction made in the same pass: ticket-filing, which had
+  been bound to the Stated Clerk out of pure expediency, was moved off to
+  its own dedicated role instead.
+
+- [ ] **`decision` · Congregations can now have a real public website,
+  hosted by presby, built from managed content rather than a drag-and-drop
+  page builder** — a congregation's own content lives in its own private
+  repository, is automatically checked and published every time it's
+  updated, and renders through one shared, versioned template so every
+  congregation's site benefits from the same fixes and improvements at
+  once. A visitor gets an anonymous contact form; a designated
+  congregation reviewer sees what comes in. Shipped with its safety
+  properties genuinely tested — a suspended or de-provisioned site can't
+  be told apart from one that never existed, and an outside party can't
+  forge the automated publish step — and two real test-coverage gaps were
+  caught and closed before the team signed off. Turned off for now; real
+  open questions remain about exactly who can see the underlying private
+  content repositories and whether the hosting provider's own size limits
+  will hold up once real content is flowing.
 
 ## 2026-08-19
 

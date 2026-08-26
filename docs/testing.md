@@ -46,7 +46,7 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 | `org1-org2@presby.invalid` | A congregation **and** a presbytery | the chooser, two cards |
 | `org3-unmanaged@presby.invalid` | Only an `unmanaged` congregation | `/no-organization` |
 | `org2-ended@presby.invalid` | A relationship that **ended** 31 Mar 2026 | `/no-organization` |
-| `clerk.fixture@example.invalid` | Tobias Renwick at Alder Creek — holds `stated_clerk` (`role_grants.manage`), P9 | `/o/alder-creek` — try `/o/alder-creek/admin/roles` by hand, `org_portal.roles` flag permitting |
+| `clerk.fixture@example.invalid` | Tobias Renwick at Alder Creek — holds `stated_clerk` (`role_grants.manage`, and — groups-and-officers, 2026-08-26 — `officers.manage`) | `/o/alder-creek` — try `/o/alder-creek/admin/roles` (`org_portal.roles` flag permitting) and `/o/alder-creek/admin/officers` (`org_portal.officers` flag permitting) by hand |
 | `elder.fixture@example.invalid` | Marguerite Ashcombe at Alder Creek — holds `support_contact` (`tickets.file`), support-tickets pipeline | `/o/alder-creek` — try `/o/alder-creek/tickets` and `/o/alder-creek/feedback` by hand, `org_portal.tickets` flag permitting |
 
 `clerk.fixture` and `elder.fixture` are provisioned by `scripts/seed-dev.sql`

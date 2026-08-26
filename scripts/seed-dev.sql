@@ -345,7 +345,17 @@ insert into app_role_permissions (role_id, permission_key) values
   -- direct-to-Tobias-Renwick pattern as roll.propose/people.manage/
   -- org_features.manage above — the one office now holds every permission
   -- Increment 1's own wizard (propose+approve folded together) needs.
-  ('f0000000-0000-0000-0000-000000000005','roll.approve');
+  ('f0000000-0000-0000-0000-000000000005','roll.approve'),
+  -- Officer-terms administration (docs/work-log/2026-08-26-groups-and-
+  -- officers.md) Phase 4 commit 1 / DECISION-078's test, applied per Phase
+  -- 3's own words: officer-term recording IS the register G-3.0204(b)
+  -- requires the Clerk of Session to keep, a tighter fit than roll.propose
+  -- already passed. No new role minted, no new role_grants row needed —
+  -- Tobias Renwick's existing direct stated_clerk grant already carries
+  -- officers.manage for free, same "no new grant row" outcome as
+  -- roll.propose/people.manage/org_features.manage/directory.view_hidden
+  -- immediately above.
+  ('f0000000-0000-0000-0000-000000000005','officers.manage');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would

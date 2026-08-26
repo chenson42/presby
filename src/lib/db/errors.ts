@@ -44,3 +44,40 @@ export function isUniqueViolation(err: unknown): boolean {
     /duplicate key value violates unique constraint/i.test(err.message)
   );
 }
+
+/**
+ * Returns true when `err` is a Postgres exclusion-constraint violation
+ * (23P01) — e.g. `officer_terms_no_overlap` (`drizzle/0009_presby_rls.sql`),
+ * a GIST exclusion over `daterange(starts_on, coalesce(ends_on, 'infinity'))`
+ * that rejects a second open term for the same person/office/org.
+ *
+ * Sibling to `isUniqueViolation()`, same cause-depth/locale bounds (see this
+ * file's header) and the same "23503/23514/23P01 never collide" property
+ * `docs/work-log/2026-07-01-unique-violation-helper.md` already confirmed
+ * for FK/check/exclusion violations — this helper cannot mistake a
+ * `officer_terms_org_unit_deacon_check` (23514) or an FK violation (23503)
+ * for the exclusion case it exists to detect.
+ *
+ * Callers must wrap their INSERT in try/catch and pass the caught value here.
+ * On `true`, return a user-facing error naming the conflicting term. On
+ * `false`, re-throw — don't swallow genuine unexpected errors.
+ */
+export function isExclusionViolation(err: unknown): boolean {
+  const codeOf = (e: unknown): string | undefined =>
+    typeof e === "object" && e !== null && "code" in e
+      ? String((e as { code?: unknown }).code)
+      : undefined;
+  if (codeOf(err) === "23P01") return true;
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "cause" in err &&
+    codeOf((err as { cause?: unknown }).cause) === "23P01"
+  ) {
+    return true;
+  }
+  return (
+    err instanceof Error &&
+    /conflicting key value violates exclusion constraint/i.test(err.message)
+  );
+}

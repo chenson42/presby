@@ -37,7 +37,6 @@
 \set TREASURER_ROLE '\'f0000000-0000-0000-0000-000000000007\''
 \set INSTALLED_PASTOR_ROLE '\'f0000000-0000-0000-0000-000000000008\''
 \set SUPPORT_CONTACT_ROLE '\'f0000000-0000-0000-0000-000000000006\''
-
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
 
@@ -1275,3 +1274,75 @@ begin;
     raise notice 'pass  finding 2: an approved roll_actions row DELETE is still rejected, not silently no-op''d';
   end $$;
 rollback;
+
+-- ---------------------------------------------------------------------------
+-- 22. Officer-terms administration, database-admin schema layer
+--     (docs/work-log/2026-08-26-groups-and-officers.md, Phase 4 commit 1).
+--     drizzle/0029_presby_officers_permission.sql seeds the officers.manage
+--     permission-catalog row; scripts/seed-dev.sql binds it to stated_clerk
+--     (f0000000-...-0005) alongside its existing role_grants.manage/
+--     roll.propose/roll.approve/directory.view_hidden/org_features.manage/
+--     people.manage grant — no new app_role_permissions/role_grants row for
+--     a role that doesn't exist (DECISION-078's test, applied per Phase 3's
+--     own wording; same "no new grant row" shape section 19's Deliverable B
+--     proved for org_features.manage/people.manage).
+--
+--     `permissions` carries no organization_id and no RLS (src/lib/db/domain/
+--     authz.ts) — this migration introduces no NEW row-level isolation
+--     surface of its own; the catalog row itself is queryable with no GUC
+--     set, same as section 19's Deliverable B assertion. What this section
+--     proves is the SAME shape section 19 already established: the
+--     permission resolves through stated_clerk at Alder Creek and resolves
+--     to nothing for the same person at Bramblewood, where Tobias Renwick
+--     holds no role_grants row at all (deliberately — DECISION-063's "prove
+--     the mechanism once" reasoning, restated at seed-dev.sql's stated_clerk
+--     grant comment).
+--
+--     NOT covered here, and not closeable until commit 2 lands: an
+--     assertion that officers.manage actually GATES an `officer_terms`
+--     mutation end to end (i.e. that stated_clerk at Bramblewood — who holds
+--     no officers.manage grant there — is rejected by the application layer
+--     when attempting to start/end a term at Alder Creek, or that a
+--     cross-org `officer_terms` row is invisible the way section 2's count
+--     and section 18's org_units/check-constraint tests already prove for
+--     the table's OWN tenant isolation). `officer_terms`' table-level RLS is
+--     unchanged by this migration and already exercised by sections 2/7/18 —
+--     what's net-new here is a permission-catalog fact, not a new RLS
+--     policy, so there is no new DB-level officer_terms isolation surface
+--     for this section to add. The genuinely new thing to test once commit 2
+--     lands is `src/lib/officers.ts`'s own `officers.manage` gate check
+--     (mirroring `hasRoleGrantsManage`'s placement) — that belongs in
+--     vitest against the query/mutation module, not in this SQL suite,
+--     matching every other permission-gated module in this codebase (none of
+--     role-grants.ts/roll.ts/people.ts's own permission checks are re-proven
+--     here either). Flagged explicitly per this pipeline's Phase 3 Data
+--     Model note rather than left as a silent gap.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'officers.manage'),
+    1, 'permissions: officers.manage catalog row exists');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :ALDER, 'officers.manage')),
+    1, 'presby_has_permission: stated_clerk holds officers.manage at alder');
+  -- Re-proven alongside, same discipline as section 19's roll.propose
+  -- re-check: pin that this migration didn't disturb the existing bindings.
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :ALDER, 'role_grants.manage')),
+    1, 'presby_has_permission: stated_clerk still holds role_grants.manage (unchanged)');
+commit;
+
+-- Cross-org: the SAME person, at an org where they hold no grant at all,
+-- must not read as having the permission — Tobias Renwick has no role_grants
+-- row at bramblewood (seed-dev.sql's stated_clerk grant is deliberately
+-- Alder-Creek-only).
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :BRAMBLE, 'officers.manage')),
+    0, 'presby_has_permission: stated_clerk holds NOTHING at bramblewood (no grant there)');
+commit;

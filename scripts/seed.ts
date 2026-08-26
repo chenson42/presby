@@ -301,6 +301,20 @@ async function seedFlags() {
         "ON: /signin renders the origin org's brand when reached via a live public site's /o/<slug> callback. OFF = /signin always renders platform-default chrome regardless of callbackUrl.",
       enabled: false,
     },
+    {
+      key: "org_portal.officers",
+      // ON: /o/<slug>/admin/officers is reachable at all. Checked bare, no
+      // DECISION-026 fail-open wrapper — it's a toggle, not an auth path
+      // (docs/work-log/2026-08-26-groups-and-officers.md, Phase 3). Never
+      // substitutes for officers.manage: a stated clerk with the flag on
+      // and no grant still sees the in-shell "you don't have permission"
+      // state, not the officers page itself (DECISION-003: a flag never
+      // gates a permission). Seeded OFF, same "ships dark until the page
+      // lands" reasoning as org_portal.directory/roles.
+      description:
+        "Officer-term administration page in (org). OFF = /o/<slug>/admin/officers renders 'isn't available yet' regardless of the viewer's officers.manage grant.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

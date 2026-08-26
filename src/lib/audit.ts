@@ -124,6 +124,15 @@ export const AUDIT_ACTIONS = {
   // same tier as ORG_FEATURE_TOGGLED, not elevated to the roll actions'
   // constitutional weight.
   PERSON_UPDATED: "tenant.person.updated",
+  // Officer-terms administration (docs/work-log/
+  // 2026-08-26-groups-and-officers.md, Phase 3/4 commit 2) — written from
+  // src/app/(org)/o/[slug]/admin/officers/actions.ts. Starting or ending a
+  // Session/Diaconate term is a de facto access change (it flows through
+  // the derived group into whatever that group's role_grants carry), so
+  // these are audited like TENANT_ROLE_GRANTED/REVOKED even though the
+  // written row is officer_terms, not role_grants.
+  OFFICER_TERM_STARTED: "tenant.officer_term.started",
+  OFFICER_TERM_ENDED: "tenant.officer_term.ended",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

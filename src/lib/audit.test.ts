@@ -134,6 +134,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Member management, Increment 2 (2026-08-26) — written from
   // src/app/(org)/o/[slug]/admin/members/[id]/edit/actions.ts
   PERSON_UPDATED: "tenant.person.updated",
+  // Officer-terms administration (2026-08-26, groups-and-officers) —
+  // written from src/app/(org)/o/[slug]/admin/officers/actions.ts
+  OFFICER_TERM_STARTED: "tenant.officer_term.started",
+  OFFICER_TERM_ENDED: "tenant.officer_term.ended",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

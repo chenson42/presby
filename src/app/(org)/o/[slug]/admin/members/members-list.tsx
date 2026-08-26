@@ -14,10 +14,12 @@ export function MembersList({
   slug,
   entries,
   canCreate,
+  canEdit,
 }: {
   slug: string;
   entries: DirectoryEntry[];
   canCreate: boolean;
+  canEdit: boolean;
 }) {
   if (entries.length === 0) {
     return (
@@ -39,7 +41,7 @@ export function MembersList({
     <ul className="space-y-3">
       {entries.map((entry) => (
         <li key={entry.personId}>
-          <MemberCard slug={slug} entry={entry} />
+          <MemberCard slug={slug} entry={entry} canEdit={canEdit} />
         </li>
       ))}
     </ul>
@@ -49,24 +51,37 @@ export function MembersList({
 function MemberCard({
   slug,
   entry,
+  canEdit,
 }: {
   slug: string;
   entry: DirectoryEntry;
+  canEdit: boolean;
 }) {
   const displayName = `${entry.preferredName ?? entry.firstName} ${entry.lastName}`;
 
   return (
     <Card className="py-4">
-      <CardContent>
+      {/* Two sibling links, never nested (invalid HTML) — the card body
+       * links to the existing directory detail page (unchanged), Edit is
+       * its own control alongside it, gated on `people.manage` same as the
+       * "Add person" CTA above. */}
+      <CardContent className="flex items-center justify-between gap-3">
         <Link
           href={`/o/${slug}/directory/${entry.personId}`}
-          className="block space-y-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="block flex-1 space-y-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <h3 className="text-lg font-medium">{displayName}</h3>
           {entry.email && (
             <p className="text-sm text-muted-foreground">{entry.email}</p>
           )}
         </Link>
+        {canEdit && (
+          <Button asChild variant="outline" className="min-h-11 shrink-0">
+            <Link href={`/o/${slug}/admin/members/${entry.personId}/edit`}>
+              Edit
+            </Link>
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

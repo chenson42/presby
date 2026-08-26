@@ -116,6 +116,14 @@ export const AUDIT_ACTIONS = {
   // access does not.
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+  // Member management, Increment 2 (docs/work-log/
+  // 2026-08-26-member-management-edit-person.md) — written from
+  // src/app/(org)/o/[slug]/admin/members/[id]/edit/actions.ts. Identity,
+  // contact, address, and household are tier-1 data, but still
+  // identity-adjacent and worth a record of who changed what and when —
+  // same tier as ORG_FEATURE_TOGGLED, not elevated to the roll actions'
+  // constitutional weight.
+  PERSON_UPDATED: "tenant.person.updated",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

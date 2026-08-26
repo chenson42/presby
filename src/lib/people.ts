@@ -415,3 +415,359 @@ export async function createPerson(
     throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// updatePerson — Increment 2 (docs/work-log/2026-08-26-member-management-
+// edit-person.md)
+// ---------------------------------------------------------------------------
+
+export interface UpdatePersonInput {
+  personId: string;
+  identity: {
+    firstName: string;
+    lastName: string;
+    middleName?: string;
+    preferredName?: string;
+    suffix?: string;
+  };
+  contact: { email?: string; phone?: string };
+  address?: {
+    line1?: string;
+    city?: string;
+    region?: string;
+    postalCode?: string;
+  };
+  household:
+    | { mode: "new"; name: string }
+    | { mode: "existing"; householdId: string }
+    | { mode: "none" };
+}
+
+export type UpdatePersonResult =
+  | { kind: "ok" }
+  | { kind: "forbidden" }
+  | { kind: "not_found" }
+  | { kind: "invalid_household" };
+
+/**
+ * Edits an already-visible person's name variants, contact methods, address,
+ * and household — the Increment 1 wizard's "identity/contact/household"
+ * shape, minus everything roll-related. Gated on `people.manage` ONLY —
+ * `roll.propose` is deliberately not required, since nothing here touches
+ * `roll_actions`/`current_roll`/death-as-status (Phase 1's explicit
+ * boundary: no "Status" field on this form, ever).
+ *
+ * `personId` must already be visible through THIS org's RLS (i.e. already
+ * hold a `memberships` row here) — `not_found` covers both "no such person"
+ * and "exists, but not visible in this org," which are indistinguishable
+ * from inside an org-scoped transaction and, per F21's enumeration
+ * discipline, meant to be: a `people.manage` holder must not learn a person
+ * exists in some OTHER org from this form's error message.
+ *
+ * Contact methods and the address are each a single PRIMARY row, mirroring
+ * `createPerson()`'s own "one primary email/phone/address" shape (Increment
+ * 1 never created a second of any of them, so Increment 2 doesn't need to
+ * manage multiples either). A blank value clears (deletes) the primary row
+ * if one exists; a non-blank value updates it if present, else inserts a
+ * new primary row.
+ */
+export async function updatePerson(
+  actingPersonId: string,
+  organizationId: string,
+  input: UpdatePersonInput,
+): Promise<UpdatePersonResult> {
+  const result = await withOrgContext<UpdatePersonResult>(actingPersonId, organizationId, async (tx) => {
+    if (!(await hasPermission(tx, actingPersonId, organizationId, PEOPLE_MANAGE))) {
+      return { kind: "forbidden" };
+    }
+
+    // RLS-scoped by construction: `people`'s SELECT policy only shows rows
+    // with a `memberships` row in THIS org (drizzle/0028_presby_people_
+    // write_rls_fix.sql's `USING` clause, untouched by that migration) — a
+    // zero-row result here is already the correct "not visible to me"
+    // answer, no separate cross-org check needed the way createPerson's
+    // existing-member-elsewhere path required.
+    const [existing] = await tx
+      .select({ id: people.id })
+      .from(people)
+      .innerJoin(
+        memberships,
+        and(
+          eq(memberships.personId, people.id),
+          eq(memberships.organizationId, organizationId),
+        ),
+      )
+      .where(eq(people.id, input.personId))
+      .limit(1);
+    if (!existing) {
+      return { kind: "not_found" };
+    }
+
+    await tx
+      .update(people)
+      .set({
+        firstName: input.identity.firstName,
+        lastName: input.identity.lastName,
+        middleName: input.identity.middleName ?? null,
+        preferredName: input.identity.preferredName ?? null,
+        suffix: input.identity.suffix ?? null,
+      })
+      .where(eq(people.id, input.personId));
+
+    await upsertPrimaryContactMethod(tx, input.personId, "email", input.contact.email);
+    await upsertPrimaryContactMethod(tx, input.personId, "phone", input.contact.phone);
+    await upsertPrimaryAddress(tx, input.personId, input.address);
+
+    if (input.household.mode === "new") {
+      const [household] = await tx
+        .insert(households)
+        .values({ organizationId, name: input.household.name })
+        .returning({ id: households.id });
+      await tx
+        .update(memberships)
+        .set({ householdId: household!.id })
+        .where(
+          and(
+            eq(memberships.personId, input.personId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        );
+    } else if (input.household.mode === "existing") {
+      const [household] = await tx
+        .select({ id: households.id })
+        .from(households)
+        .where(
+          and(
+            eq(households.id, input.household.householdId),
+            eq(households.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      if (!household) {
+        return { kind: "invalid_household" };
+      }
+      await tx
+        .update(memberships)
+        .set({ householdId: household.id })
+        .where(
+          and(
+            eq(memberships.personId, input.personId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        );
+    } else {
+      await tx
+        .update(memberships)
+        .set({ householdId: null })
+        .where(
+          and(
+            eq(memberships.personId, input.personId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        );
+    }
+
+    return { kind: "ok" };
+  });
+
+  if (result.kind === "ok") {
+    await recordAudit({
+      action: AUDIT_ACTIONS.PERSON_UPDATED,
+      resourceType: "person",
+      resourceId: input.personId,
+      metadata: { organizationId },
+    });
+  }
+
+  return result;
+}
+
+async function upsertPrimaryContactMethod(
+  tx: OrgTx,
+  personId: string,
+  kind: "email" | "phone",
+  value: string | undefined,
+): Promise<void> {
+  const [primary] = await tx
+    .select({ id: contactMethods.id })
+    .from(contactMethods)
+    .where(
+      and(
+        eq(contactMethods.personId, personId),
+        eq(contactMethods.kind, kind),
+        eq(contactMethods.isPrimary, true),
+      ),
+    )
+    .limit(1);
+
+  if (!value) {
+    if (primary) {
+      await tx.delete(contactMethods).where(eq(contactMethods.id, primary.id));
+    }
+    return;
+  }
+
+  if (primary) {
+    await tx
+      .update(contactMethods)
+      .set({ value })
+      .where(eq(contactMethods.id, primary.id));
+  } else {
+    await tx.insert(contactMethods).values({ personId, kind, value, isPrimary: true });
+  }
+}
+
+async function upsertPrimaryAddress(
+  tx: OrgTx,
+  personId: string,
+  address: UpdatePersonInput["address"],
+): Promise<void> {
+  const [primary] = await tx
+    .select({ id: addresses.id })
+    .from(addresses)
+    .where(and(eq(addresses.personId, personId), eq(addresses.isPrimary, true)))
+    .limit(1);
+
+  const hasAnyField = !!(
+    address &&
+    (address.line1 || address.city || address.region || address.postalCode)
+  );
+
+  if (!hasAnyField) {
+    if (primary) {
+      await tx.delete(addresses).where(eq(addresses.id, primary.id));
+    }
+    return;
+  }
+
+  const values = {
+    line1: address!.line1 ?? null,
+    city: address!.city ?? null,
+    region: address!.region ?? null,
+    postalCode: address!.postalCode ?? null,
+  };
+
+  if (primary) {
+    await tx.update(addresses).set(values).where(eq(addresses.id, primary.id));
+  } else {
+    await tx.insert(addresses).values({
+      personId,
+      addressType: "home",
+      isPrimary: true,
+      ...values,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getPersonForEdit — read side for the edit form
+// ---------------------------------------------------------------------------
+
+export interface PersonForEdit {
+  personId: string;
+  firstName: string;
+  lastName: string;
+  middleName: string | null;
+  preferredName: string | null;
+  suffix: string | null;
+  email: string | null;
+  phone: string | null;
+  address: {
+    line1: string | null;
+    city: string | null;
+    region: string | null;
+    postalCode: string | null;
+  } | null;
+  householdId: string | null;
+}
+
+export type GetPersonForEditResult =
+  | { kind: "ok"; person: PersonForEdit }
+  | { kind: "forbidden" }
+  | { kind: "not_found" };
+
+/** Gated on `people.manage`, same visibility discipline as `updatePerson`. */
+export async function getPersonForEdit(
+  viewerPersonId: string,
+  organizationId: string,
+  personId: string,
+): Promise<GetPersonForEditResult> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasPermission(tx, viewerPersonId, organizationId, PEOPLE_MANAGE))) {
+      return { kind: "forbidden" };
+    }
+
+    const [row] = await tx
+      .select({
+        id: people.id,
+        firstName: people.firstName,
+        lastName: people.lastName,
+        middleName: people.middleName,
+        preferredName: people.preferredName,
+        suffix: people.suffix,
+        householdId: memberships.householdId,
+      })
+      .from(people)
+      .innerJoin(
+        memberships,
+        and(
+          eq(memberships.personId, people.id),
+          eq(memberships.organizationId, organizationId),
+        ),
+      )
+      .where(eq(people.id, personId))
+      .limit(1);
+    if (!row) {
+      return { kind: "not_found" };
+    }
+
+    const [email] = await tx
+      .select({ value: contactMethods.value })
+      .from(contactMethods)
+      .where(
+        and(
+          eq(contactMethods.personId, personId),
+          eq(contactMethods.kind, "email"),
+          eq(contactMethods.isPrimary, true),
+        ),
+      )
+      .limit(1);
+    const [phone] = await tx
+      .select({ value: contactMethods.value })
+      .from(contactMethods)
+      .where(
+        and(
+          eq(contactMethods.personId, personId),
+          eq(contactMethods.kind, "phone"),
+          eq(contactMethods.isPrimary, true),
+        ),
+      )
+      .limit(1);
+    const [address] = await tx
+      .select({
+        line1: addresses.line1,
+        city: addresses.city,
+        region: addresses.region,
+        postalCode: addresses.postalCode,
+      })
+      .from(addresses)
+      .where(and(eq(addresses.personId, personId), eq(addresses.isPrimary, true)))
+      .limit(1);
+
+    return {
+      kind: "ok",
+      person: {
+        personId: row.id,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        middleName: row.middleName,
+        preferredName: row.preferredName,
+        suffix: row.suffix,
+        email: email?.value ?? null,
+        phone: phone?.value ?? null,
+        address: address ?? null,
+        householdId: row.householdId,
+      },
+    };
+  });
+}

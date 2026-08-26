@@ -138,6 +138,7 @@ export default async function MembersPage({
         slug={slug}
         entries={result.entries}
         canCreate={canCreate}
+        canEdit={canCreate}
       />
     </section>
   );

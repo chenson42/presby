@@ -1,12 +1,13 @@
 "use client";
 
 import type { UseFormReturn } from "react-hook-form";
+import { ChevronDown } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { WizardField } from "./wizard-field";
 import type { MemberWizardValues } from "./member-wizard-schema";
 
 const SELECT_CLASSES =
-  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 export function HouseholdStep({
   form,
@@ -71,18 +72,24 @@ export function HouseholdStep({
         ) : (
           <div>
             <Label htmlFor="member-wizard-household-id">Household</Label>
-            <select
-              id="member-wizard-household-id"
-              className={SELECT_CLASSES}
-              {...register("household.householdId")}
-            >
-              <option value="">Choose a household…</option>
-              {households.map((h) => (
-                <option key={h.householdId} value={h.householdId}>
-                  {h.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative mt-1">
+              <select
+                id="member-wizard-household-id"
+                className={SELECT_CLASSES}
+                {...register("household.householdId")}
+              >
+                <option value="">Choose a household…</option>
+                {households.map((h) => (
+                  <option key={h.householdId} value={h.householdId}>
+                    {h.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
             {errors.household?.householdId && (
               <p className="mt-1 text-sm text-destructive">
                 {errors.household.householdId.message}

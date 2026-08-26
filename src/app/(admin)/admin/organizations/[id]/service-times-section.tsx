@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useId, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -160,20 +161,26 @@ function TimeRowsEditor({
           >
             <div>
               <Label htmlFor={`${formId}-${row.key}-day`}>Day</Label>
-              <select
-                id={`${formId}-${row.key}-day`}
-                value={row.dayOfWeek}
-                onChange={(e) =>
-                  updateRow(row.key, { dayOfWeek: Number(e.target.value) })
-                }
-                className="mt-1 h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                {DAY_LABELS.map((label, i) => (
-                  <option key={label} value={i}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+              <div className="relative mt-1">
+                <select
+                  id={`${formId}-${row.key}-day`}
+                  value={row.dayOfWeek}
+                  onChange={(e) =>
+                    updateRow(row.key, { dayOfWeek: Number(e.target.value) })
+                  }
+                  className="h-9 appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  {DAY_LABELS.map((label, i) => (
+                    <option key={label} value={i}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden
+                />
+              </div>
             </div>
             <div>
               <Label htmlFor={`${formId}-${row.key}-start`}>Start</Label>

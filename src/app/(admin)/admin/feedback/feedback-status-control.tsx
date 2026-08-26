@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { updateFeedbackStatus } from "./actions";
@@ -72,21 +73,27 @@ export function FeedbackStatusControl({
   }
 
   return (
-    <select
-      value={status}
-      onChange={handleChange}
-      disabled={isPending}
-      aria-label="Update feedback status"
-      className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-50"
-    >
-      {/* Current status — always shown as selected */}
-      <option value={status}>{STATUS_LABELS[status] ?? status}</option>
-      {/* Legal forward transitions only */}
-      {allowedTransitions.map((next) => (
-        <option key={next} value={next}>
-          {STATUS_LABELS[next] ?? next}
-        </option>
-      ))}
-    </select>
+    <div className="relative inline-block">
+      <select
+        value={status}
+        onChange={handleChange}
+        disabled={isPending}
+        aria-label="Update feedback status"
+        className="appearance-none rounded-md border border-input bg-background py-1 pr-6 pl-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-50"
+      >
+        {/* Current status — always shown as selected */}
+        <option value={status}>{STATUS_LABELS[status] ?? status}</option>
+        {/* Legal forward transitions only */}
+        {allowedTransitions.map((next) => (
+          <option key={next} value={next}>
+            {STATUS_LABELS[next] ?? next}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute top-1/2 right-1.5 size-3 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
+    </div>
   );
 }

@@ -6,6 +6,7 @@
 // the schema already supports it.
 
 import { redirect } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -174,29 +175,35 @@ export default async function AdminAuditPage({
       <form className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/30 p-4">
         <div className="flex flex-col gap-1">
           <Label htmlFor="action-select">Action</Label>
-          <select
-            id="action-select"
-            name="action"
-            defaultValue={validAction ?? ""}
-            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="">All actions</option>
-            {ACTION_GROUPS.map(({ label, prefix }) => {
-              const options = Object.values(AUDIT_ACTIONS)
-                .filter((v) => v.startsWith(prefix))
-                .sort();
-              if (options.length === 0) return null;
-              return (
-                <optgroup key={prefix} label={label}>
-                  {options.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
-          </select>
+          <div className="relative">
+            <select
+              id="action-select"
+              name="action"
+              defaultValue={validAction ?? ""}
+              className="appearance-none rounded-md border border-input bg-background px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">All actions</option>
+              {ACTION_GROUPS.map(({ label, prefix }) => {
+                const options = Object.values(AUDIT_ACTIONS)
+                  .filter((v) => v.startsWith(prefix))
+                  .sort();
+                if (options.length === 0) return null;
+                return (
+                  <optgroup key={prefix} label={label}>
+                    {options.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
 
         <div className="flex flex-col gap-1">

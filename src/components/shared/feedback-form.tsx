@@ -7,6 +7,7 @@
 // and pass it as a prop: <FeedbackForm flagEnabled={flagEnabled} />
 
 import { useState, useTransition } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -70,18 +71,24 @@ export function FeedbackForm({ onSuccess }: FeedbackFormProps) {
           <span className="font-normal text-muted-foreground">(optional)</span>
         </Label>
         {/* "none" sentinel (empty string maps to null in the action) per ui-standards.md */}
-        <select
-          id="feedback-category"
-          value={category}
-          onChange={(e) => setCategory(e.target.value as Category)}
-          disabled={isPending}
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
-        >
-          <option value="">No preference</option>
-          <option value="suggestion">Suggestion</option>
-          <option value="bug">Bug report</option>
-          <option value="other">General feedback</option>
-        </select>
+        <div className="relative mt-1">
+          <select
+            id="feedback-category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value as Category)}
+            disabled={isPending}
+            className="w-full appearance-none rounded-md border border-border bg-background px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
+          >
+            <option value="">No preference</option>
+            <option value="suggestion">Suggestion</option>
+            <option value="bug">Bug report</option>
+            <option value="other">General feedback</option>
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+        </div>
       </div>
 
       {/* Bug context — auto-captured, read-only */}

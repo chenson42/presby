@@ -48,3 +48,13 @@ Added `appearance-none` plus a manually-positioned `lucide-react` `ChevronDown` 
 ## Phase 6 — Shipped vs Intent
 
 Matches: the operator's two follow-up reports ("dashboard has white and members and directory have gray") are both explained by the same root cause and both fixed by the same change, verified on both affected pages.
+
+## Follow-up increment 2026-08-26 (same day) — retrofit the rest of the app
+
+Operator reported the inconsistency was still visible elsewhere and asked for the deferred `docs/TODO.md` retrofit line to be done now, calling it a quick win. Extending this same work-log rather than opening a new one — same root cause, same fix, just the remaining call sites. Files retrofitted (every native `<select>` in the tree that lacked `appearance-none`, per a full-tree grep):
+
+- `(org)`: `tickets/file-ticket-form.tsx`, `admin/branding/branding-form.tsx`, `admin/officers/add-officer-term-form.tsx`, `admin/officers/end-term-dialog.tsx`, `admin/roles/grant-role-form.tsx`, `admin/members/new/household-step.tsx`, `admin/members/new/roll-action-step.tsx`, `admin/members/[id]/edit/edit-person-form.tsx`
+- `(admin)`: `organizations/new/create-organization-form.tsx`, `organizations/[id]/service-times-section.tsx`, `organizations/[id]/brand-form.tsx`, `admin/tickets/{area,status,classify,priority,assign}-control.tsx`, `admin/tickets/page.tsx`, `admin/feedback/feedback-status-control.tsx`, `admin/audit/page.tsx`, `admin/users/page.tsx`
+- `shared/feedback-form.tsx`
+
+Same fix as the original increment: `appearance-none` + a `pr-8` and a `pointer-events-none` absolutely-positioned `ChevronDown` in a `relative` wrapper. `docs/TODO.md`'s retrofit line closes with this increment.

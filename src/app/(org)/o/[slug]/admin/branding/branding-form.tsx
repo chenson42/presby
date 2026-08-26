@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,19 +196,27 @@ export function BrandingForm({
           {/* Native <select>, not a shadcn Select — matches the platform
               form's own choice: a plain three-option filter, no consumer
               justifying a generated primitive. */}
-          <select
-            id="typePairing"
-            name="typePairing"
-            value={typePairing}
-            onChange={(e) => setTypePairing(e.target.value as TypePairingKey)}
-            className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            {TYPE_PAIRINGS.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="typePairing"
+              name="typePairing"
+              value={typePairing}
+              onChange={(e) =>
+                setTypePairing(e.target.value as TypePairingKey)
+              }
+              className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              {TYPE_PAIRINGS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
           {selectedPairing && (
             <p className="mt-1.5 text-xs text-muted-foreground">
               {selectedPairing.why}

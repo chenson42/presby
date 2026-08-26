@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { ChangeClass } from "@/lib/tickets";
 import { CHANGE_CLASSES, CHANGE_CLASS_LABELS } from "@/lib/tickets-labels";
@@ -38,18 +39,24 @@ export function ClassifyControl({
   }
 
   return (
-    <select
-      value={value}
-      onChange={handleChange}
-      disabled={isPending}
-      aria-label="Update ticket category"
-      className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
-    >
-      {CHANGE_CLASSES.map((c) => (
-        <option key={c} value={c}>
-          {CHANGE_CLASS_LABELS[c]}
-        </option>
-      ))}
-    </select>
+    <div className="relative mt-1">
+      <select
+        value={value}
+        onChange={handleChange}
+        disabled={isPending}
+        aria-label="Update ticket category"
+        className="w-full appearance-none rounded-md border border-input bg-background px-2 py-1.5 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+      >
+        {CHANGE_CLASSES.map((c) => (
+          <option key={c} value={c}>
+            {CHANGE_CLASS_LABELS[c]}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
+    </div>
   );
 }

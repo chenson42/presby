@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +14,7 @@ import { editPersonSchema, type EditPersonValues } from "./edit-person-schema";
 import { updatePersonAction } from "./actions";
 
 const SELECT_CLASSES =
-  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 function initialHouseholdMode(
   person: PersonForEdit,
@@ -184,18 +185,24 @@ export function EditPersonForm({
         ) : (
           <div>
             <Label htmlFor="edit-person-household-id">Household</Label>
-            <select
-              id="edit-person-household-id"
-              className={SELECT_CLASSES}
-              {...register("household.householdId")}
-            >
-              <option value="">Choose a household…</option>
-              {households.map((h) => (
-                <option key={h.householdId} value={h.householdId}>
-                  {h.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative mt-1">
+              <select
+                id="edit-person-household-id"
+                className={SELECT_CLASSES}
+                {...register("household.householdId")}
+              >
+                <option value="">Choose a household…</option>
+                {households.map((h) => (
+                  <option key={h.householdId} value={h.householdId}>
+                    {h.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
             {errors.household?.householdId && (
               <p className="mt-1 text-sm text-destructive">
                 {errors.household.householdId.message}

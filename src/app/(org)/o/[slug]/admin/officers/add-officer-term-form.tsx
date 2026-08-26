@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ import {
 import { startOfficerTermAction } from "./actions";
 
 const SELECT_CLASSES =
-  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 function defaultValues(options: OfficerFormOptions): OfficerTermFormValues {
   return {
@@ -128,17 +129,23 @@ export function AddOfficerTermForm({
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
       <div>
         <Label htmlFor="officer-term-person">Person</Label>
-        <select
-          id="officer-term-person"
-          className={SELECT_CLASSES}
-          {...register("personId")}
-        >
-          {options.people.map((person) => (
-            <option key={person.personId} value={person.personId}>
-              {person.displayName}
-            </option>
-          ))}
-        </select>
+        <div className="relative mt-1">
+          <select
+            id="officer-term-person"
+            className={SELECT_CLASSES}
+            {...register("personId")}
+          >
+            {options.people.map((person) => (
+              <option key={person.personId} value={person.personId}>
+                {person.displayName}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+        </div>
         {errors.personId && (
           <p className="mt-1 text-sm text-destructive">
             {errors.personId.message}
@@ -148,17 +155,23 @@ export function AddOfficerTermForm({
 
       <div>
         <Label htmlFor="officer-term-office">Office</Label>
-        <select
-          id="officer-term-office"
-          className={SELECT_CLASSES}
-          {...register("office")}
-        >
-          {OFFICER_OFFICES.map((value) => (
-            <option key={value} value={value}>
-              {OFFICE_LABELS[value]}
-            </option>
-          ))}
-        </select>
+        <div className="relative mt-1">
+          <select
+            id="officer-term-office"
+            className={SELECT_CLASSES}
+            {...register("office")}
+          >
+            {OFFICER_OFFICES.map((value) => (
+              <option key={value} value={value}>
+                {OFFICE_LABELS[value]}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+        </div>
       </div>
 
       {isDeacon &&
@@ -170,18 +183,24 @@ export function AddOfficerTermForm({
         ) : (
           <div>
             <Label htmlFor="officer-term-org-unit">District</Label>
-            <select
-              id="officer-term-org-unit"
-              className={SELECT_CLASSES}
-              {...register("orgUnitId")}
-            >
-              <option value="">Choose a district…</option>
-              {options.orgUnits.map((orgUnit) => (
-                <option key={orgUnit.orgUnitId} value={orgUnit.orgUnitId}>
-                  {orgUnit.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative mt-1">
+              <select
+                id="officer-term-org-unit"
+                className={SELECT_CLASSES}
+                {...register("orgUnitId")}
+              >
+                <option value="">Choose a district…</option>
+                {options.orgUnits.map((orgUnit) => (
+                  <option key={orgUnit.orgUnitId} value={orgUnit.orgUnitId}>
+                    {orgUnit.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
             {errors.orgUnitId && (
               <p className="mt-1 text-sm text-destructive">
                 {errors.orgUnitId.message}

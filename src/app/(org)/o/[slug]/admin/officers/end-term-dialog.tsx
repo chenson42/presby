@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -29,7 +30,7 @@ const END_REASONS = [
 ] as const;
 
 const SELECT_CLASSES =
-  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -131,20 +132,28 @@ export function EndTermDialog({
           </div>
           <div>
             <Label htmlFor={`end-term-reason-${termId}`}>Reason</Label>
-            <select
-              id={`end-term-reason-${termId}`}
-              value={endReason}
-              onChange={(e) =>
-                setEndReason(e.target.value as (typeof END_REASONS)[number]["value"])
-              }
-              className={SELECT_CLASSES}
-            >
-              {END_REASONS.map((reason) => (
-                <option key={reason.value} value={reason.value}>
-                  {reason.label}
-                </option>
-              ))}
-            </select>
+            <div className="relative mt-1">
+              <select
+                id={`end-term-reason-${termId}`}
+                value={endReason}
+                onChange={(e) =>
+                  setEndReason(
+                    e.target.value as (typeof END_REASONS)[number]["value"],
+                  )
+                }
+                className={SELECT_CLASSES}
+              >
+                {END_REASONS.map((reason) => (
+                  <option key={reason.value} value={reason.value}>
+                    {reason.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
           </div>
         </div>
 

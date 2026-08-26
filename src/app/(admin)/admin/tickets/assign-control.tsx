@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { TicketOperator } from "@/lib/tickets-notifications";
 import { assignTicketAction } from "./actions";
@@ -45,19 +46,25 @@ export function AssignControl({
   }
 
   return (
-    <select
-      value={value}
-      onChange={handleChange}
-      disabled={isPending}
-      aria-label="Update ticket assignee"
-      className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
-    >
-      <option value={UNASSIGNED}>Unassigned</option>
-      {operators.map((operator) => (
-        <option key={operator.userId} value={operator.userId}>
-          {operator.name ?? operator.email}
-        </option>
-      ))}
-    </select>
+    <div className="relative mt-1">
+      <select
+        value={value}
+        onChange={handleChange}
+        disabled={isPending}
+        aria-label="Update ticket assignee"
+        className="w-full appearance-none rounded-md border border-input bg-background px-2 py-1.5 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+      >
+        <option value={UNASSIGNED}>Unassigned</option>
+        {operators.map((operator) => (
+          <option key={operator.userId} value={operator.userId}>
+            {operator.name ?? operator.email}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
+    </div>
   );
 }

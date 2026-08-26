@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { GrantFormOptions, RoleGrantee } from "@/lib/role-grants";
@@ -10,7 +11,7 @@ import { grantRoleAction } from "./actions";
 type TargetKind = RoleGrantee["kind"];
 
 const SELECT_CLASSES =
-  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 /**
  * Grants an existing role to an existing person or group. No `Dialog`
@@ -113,18 +114,24 @@ export function GrantRoleForm({
         <label htmlFor="grant-role" className="block text-sm font-medium">
           Role
         </label>
-        <select
-          id="grant-role"
-          value={roleId}
-          onChange={(e) => setRoleId(e.target.value)}
-          className={SELECT_CLASSES}
-        >
-          {options.roles.map((role) => (
-            <option key={role.id} value={role.id}>
-              {role.name}
-            </option>
-          ))}
-        </select>
+        <div className="relative mt-1">
+          <select
+            id="grant-role"
+            value={roleId}
+            onChange={(e) => setRoleId(e.target.value)}
+            className={SELECT_CLASSES}
+          >
+            {options.roles.map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+        </div>
       </div>
 
       {targetKind === "person" ? (
@@ -137,18 +144,24 @@ export function GrantRoleForm({
               Nobody has a current membership at this organization yet.
             </p>
           ) : (
-            <select
-              id="grant-person"
-              value={personId}
-              onChange={(e) => setPersonId(e.target.value)}
-              className={SELECT_CLASSES}
-            >
-              {options.people.map((person) => (
-                <option key={person.personId} value={person.personId}>
-                  {person.displayName}
-                </option>
-              ))}
-            </select>
+            <div className="relative mt-1">
+              <select
+                id="grant-person"
+                value={personId}
+                onChange={(e) => setPersonId(e.target.value)}
+                className={SELECT_CLASSES}
+              >
+                {options.people.map((person) => (
+                  <option key={person.personId} value={person.personId}>
+                    {person.displayName}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
           )}
         </div>
       ) : (
@@ -161,19 +174,25 @@ export function GrantRoleForm({
               No groups exist at this organization yet.
             </p>
           ) : (
-            <select
-              id="grant-group"
-              value={groupId}
-              onChange={(e) => setGroupId(e.target.value)}
-              className={SELECT_CLASSES}
-            >
-              {options.groups.map((group) => (
-                <option key={group.groupId} value={group.groupId}>
-                  {group.name}
-                  {group.derived ? " (derived)" : ""}
-                </option>
-              ))}
-            </select>
+            <div className="relative mt-1">
+              <select
+                id="grant-group"
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                className={SELECT_CLASSES}
+              >
+                {options.groups.map((group) => (
+                  <option key={group.groupId} value={group.groupId}>
+                    {group.name}
+                    {group.derived ? " (derived)" : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
           )}
         </div>
       )}

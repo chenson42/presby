@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { users, roles, userRoles } from "@/lib/db/schema";
 import { desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import Link from "next/link";
+import { ChevronDown } from "lucide-react";
 import { assignRoleAction, removeRoleAction, unlockUserAction } from "./actions";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { Badge } from "@/components/ui/badge";
@@ -186,16 +187,23 @@ export default async function UsersPage({
                 <TableCell>
                   <form action={assignRoleAction} className="flex gap-2">
                     <input type="hidden" name="userId" value={u.id} />
-                    <select
-                      name="roleId"
-                      className="rounded border border-input bg-background px-2 py-1 text-xs"
-                    >
-                      {allRoles.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.displayName}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        name="roleId"
+                        aria-label="Assign role"
+                        className="appearance-none rounded border border-input bg-background py-1 pr-6 pl-2 text-xs"
+                      >
+                        {allRoles.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.displayName}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        className="pointer-events-none absolute top-1/2 right-1.5 size-3 -translate-y-1/2 text-muted-foreground"
+                        aria-hidden
+                      />
+                    </div>
                     <Button type="submit" size="sm">
                       Add
                     </Button>

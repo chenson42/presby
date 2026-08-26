@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,34 +104,46 @@ export function CreateOrganizationForm() {
 
       <div>
         <Label htmlFor="organizationType">Organization type</Label>
-        <select
-          id="organizationType"
-          name="organizationType"
-          defaultValue="congregation"
-          className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        >
-          {ORG_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {organizationTypeLabel(t)}
-            </option>
-          ))}
-        </select>
+        <div className="relative mt-1">
+          <select
+            id="organizationType"
+            name="organizationType"
+            defaultValue="congregation"
+            className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            {ORG_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {organizationTypeLabel(t)}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+        </div>
       </div>
 
       <div>
         <Label htmlFor="platformStatus">Platform status</Label>
-        <select
-          id="platformStatus"
-          name="platformStatus"
-          defaultValue="managed"
-          className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        >
-          {PLATFORM_STATUSES.map((s) => (
-            <option key={s} value={s} className="capitalize">
-              {s.charAt(0).toUpperCase() + s.slice(1)}
-            </option>
-          ))}
-        </select>
+        <div className="relative mt-1">
+          <select
+            id="platformStatus"
+            name="platformStatus"
+            defaultValue="managed"
+            className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            {PLATFORM_STATUSES.map((s) => (
+              <option key={s} value={s} className="capitalize">
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+        </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
           Managed: a real tenant. Unmanaged: in the hierarchy, records
           stewarded by a parent council. Invited: onboarding, pending

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getPlatformDb } from "@/lib/db";
@@ -130,55 +131,73 @@ export default async function AdminTicketsPage({
           <label htmlFor="filter-status" className="block text-sm font-medium">
             Status
           </label>
-          <select
-            id="filter-status"
-            name="status"
-            defaultValue={status}
-            className="mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <option value="all">All statuses</option>
-            {TICKET_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {TICKET_STATUS_LABELS[s]}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="filter-status"
+              name="status"
+              defaultValue={status}
+              className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <option value="all">All statuses</option>
+              {TICKET_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {TICKET_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
         <div>
           <label htmlFor="filter-area" className="block text-sm font-medium">
             Area
           </label>
-          <select
-            id="filter-area"
-            name="area"
-            defaultValue={area}
-            className="mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <option value="all">All areas</option>
-            {TICKET_AREAS.map((a) => (
-              <option key={a} value={a}>
-                {TICKET_AREA_LABELS[a]}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="filter-area"
+              name="area"
+              defaultValue={area}
+              className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <option value="all">All areas</option>
+              {TICKET_AREAS.map((a) => (
+                <option key={a} value={a}>
+                  {TICKET_AREA_LABELS[a]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
         <div>
           <label htmlFor="filter-priority" className="block text-sm font-medium">
             Priority
           </label>
-          <select
-            id="filter-priority"
-            name="priority"
-            defaultValue={priority}
-            className="mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <option value="all">All priorities</option>
-            {TICKET_PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {TICKET_PRIORITY_LABELS[p]}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="filter-priority"
+              name="priority"
+              defaultValue={priority}
+              className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <option value="all">All priorities</option>
+              {TICKET_PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {TICKET_PRIORITY_LABELS[p]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
         <Button type="submit" variant="outline">
           Apply

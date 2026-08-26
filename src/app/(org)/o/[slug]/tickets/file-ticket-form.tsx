@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,7 @@ import {
 import { fileTicketAction, promoteFeedbackAction } from "./actions";
 
 const SELECT_CLASSES =
-  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 // Client-side hint only — mirrors the server's own accepted set
 // (src/lib/storage/blob-store.ts's ALLOWED_CONTENT_TYPES / MAX_BYTE_SIZE,
@@ -162,51 +163,69 @@ export function FileTicketForm({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div>
           <Label htmlFor="ticket-category">Category</Label>
-          <select
-            id="ticket-category"
-            value={changeClass}
-            onChange={(e) => setChangeClass(e.target.value as ChangeClass)}
-            disabled={pending}
-            className={SELECT_CLASSES}
-          >
-            {CHANGE_CLASSES.map((c) => (
-              <option key={c} value={c}>
-                {CHANGE_CLASS_LABELS[c]}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="ticket-category"
+              value={changeClass}
+              onChange={(e) => setChangeClass(e.target.value as ChangeClass)}
+              disabled={pending}
+              className={SELECT_CLASSES}
+            >
+              {CHANGE_CLASSES.map((c) => (
+                <option key={c} value={c}>
+                  {CHANGE_CLASS_LABELS[c]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
         <div>
           <Label htmlFor="ticket-area">Area</Label>
-          <select
-            id="ticket-area"
-            value={area}
-            onChange={(e) => setArea(e.target.value as TicketArea)}
-            disabled={pending}
-            className={SELECT_CLASSES}
-          >
-            {TICKET_AREAS.map((a) => (
-              <option key={a} value={a}>
-                {TICKET_AREA_LABELS[a]}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="ticket-area"
+              value={area}
+              onChange={(e) => setArea(e.target.value as TicketArea)}
+              disabled={pending}
+              className={SELECT_CLASSES}
+            >
+              {TICKET_AREAS.map((a) => (
+                <option key={a} value={a}>
+                  {TICKET_AREA_LABELS[a]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
         <div>
           <Label htmlFor="ticket-priority">Priority</Label>
-          <select
-            id="ticket-priority"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as TicketPriority)}
-            disabled={pending}
-            className={SELECT_CLASSES}
-          >
-            {TICKET_PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {TICKET_PRIORITY_LABELS[p]}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="ticket-priority"
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as TicketPriority)}
+              disabled={pending}
+              className={SELECT_CLASSES}
+            >
+              {TICKET_PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {TICKET_PRIORITY_LABELS[p]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
       </div>
 

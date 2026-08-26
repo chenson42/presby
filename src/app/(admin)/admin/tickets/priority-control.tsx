@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { TicketPriority } from "@/lib/tickets";
 import { TICKET_PRIORITIES, TICKET_PRIORITY_LABELS } from "@/lib/tickets-labels";
@@ -34,18 +35,24 @@ export function PriorityControl({
   }
 
   return (
-    <select
-      value={value}
-      onChange={handleChange}
-      disabled={isPending}
-      aria-label="Update ticket priority"
-      className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
-    >
-      {TICKET_PRIORITIES.map((p) => (
-        <option key={p} value={p}>
-          {TICKET_PRIORITY_LABELS[p]}
-        </option>
-      ))}
-    </select>
+    <div className="relative mt-1">
+      <select
+        value={value}
+        onChange={handleChange}
+        disabled={isPending}
+        aria-label="Update ticket priority"
+        className="w-full appearance-none rounded-md border border-input bg-background px-2 py-1.5 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+      >
+        {TICKET_PRIORITIES.map((p) => (
+          <option key={p} value={p}>
+            {TICKET_PRIORITY_LABELS[p]}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
+    </div>
   );
 }

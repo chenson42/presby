@@ -4,8 +4,10 @@
  *   1. A slug `getPublishedSite()` can't resolve (never provisioned,
  *      suspended, nonexistent, or the render flag off — all collapsed
  *      identically) 404s, never a crash.
- *   2. On success: valid XML, one <url><loc> per bundle page, each an
- *      absolute `/site/<slug>/...` URL.
+ *   2. On success: valid XML, one <url><loc> per bundle page that opts into
+ *      nav (`frontMatter.navLabel` set — same signal `Nav` itself uses),
+ *      each an absolute `/site/<slug>/...` URL. A page with no `navLabel`
+ *      is excluded, per `buildSitemapEntries`'s own documented contract.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -38,8 +40,8 @@ describe("GET /site/<slug>/sitemap.xml", () => {
       kind: "ok",
       site: {
         pages: [
-          { path: "/", frontMatter: {}, mdxAst: null },
-          { path: "/worship", frontMatter: {}, mdxAst: null },
+          { path: "/", frontMatter: { navLabel: "Home" }, mdxAst: null },
+          { path: "/worship", frontMatter: { navLabel: "Worship" }, mdxAst: null },
         ],
       },
     });
@@ -51,5 +53,24 @@ describe("GET /site/<slug>/sitemap.xml", () => {
     expect(body).toContain("<loc>http://localhost:3000/site/alder-creek</loc>");
     expect(body).toContain("<loc>http://localhost:3000/site/alder-creek/worship</loc>");
     expect(body.match(/<url>/g)?.length).toBe(2);
+  });
+
+  it("excludes a page with no frontMatter.navLabel", async () => {
+    getPublishedSite.mockResolvedValue({
+      kind: "ok",
+      site: {
+        pages: [
+          { path: "/", frontMatter: { navLabel: "Home" }, mdxAst: null },
+          { path: "/draft", frontMatter: {}, mdxAst: null },
+        ],
+      },
+    });
+
+    const res = await GET(new Request("http://x/site/alder-creek/sitemap.xml"), makeParams("alder-creek"));
+
+    const body = await res.text();
+    expect(body).toContain("<loc>http://localhost:3000/site/alder-creek</loc>");
+    expect(body).not.toContain("/draft");
+    expect(body.match(/<url>/g)?.length).toBe(1);
   });
 });

@@ -138,6 +138,9 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // written from src/app/(org)/o/[slug]/admin/officers/actions.ts
   OFFICER_TERM_STARTED: "tenant.officer_term.started",
   OFFICER_TERM_ENDED: "tenant.officer_term.ended",
+  // Tenant-facing brand editor (2026-08-26, tenant-branding-permission) —
+  // written from src/app/(org)/o/[slug]/admin/branding/actions.ts
+  TENANT_BRAND_SET: "tenant.brand.set",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

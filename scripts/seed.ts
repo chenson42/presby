@@ -338,6 +338,24 @@ async function seedFlags() {
         "Officer-term administration page in (org). OFF = /o/<slug>/admin/officers renders 'isn't available yet' regardless of the viewer's officers.manage grant.",
       enabled: false,
     },
+    {
+      key: "org_portal.branding",
+      // ON: /o/<slug>/admin/branding (the tenant self-service brand editor —
+      // seed colour, curated type pairing, optional logo, light-only toggle)
+      // is reachable at all. Checked bare, no DECISION-026 fail-open wrapper
+      // — a toggle, not an auth path (docs/work-log/
+      // 2026-08-26-tenant-branding-permission.md, Phase 3). Never
+      // substitutes for branding.manage: a brand_admin holder with the flag
+      // off still sees "isn't available yet," not the editor (DECISION-003:
+      // a flag never gates a permission). Seeded OFF, same "ships dark until
+      // the page lands" reasoning as its org_portal.* siblings. The platform
+      // admin's own /admin/organizations/[id] brand form is unaffected by
+      // this flag — it stays live as an unconditional override regardless of
+      // whether this flag or branding.manage exist for a given org.
+      description:
+        "Tenant self-service brand editor in (org). OFF = /o/<slug>/admin/branding renders 'isn't available yet' regardless of the viewer's branding.manage grant.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

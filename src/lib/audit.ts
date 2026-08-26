@@ -133,6 +133,19 @@ export const AUDIT_ACTIONS = {
   // written row is officer_terms, not role_grants.
   OFFICER_TERM_STARTED: "tenant.officer_term.started",
   OFFICER_TERM_ENDED: "tenant.officer_term.ended",
+  // Tenant-facing brand editor (docs/work-log/
+  // 2026-08-26-tenant-branding-permission.md, Phase 3/4 commit 2) — written
+  // from src/app/(org)/o/[slug]/admin/branding/actions.ts. A DISTINCT key
+  // from ORG_BRAND_SET, not a reuse: every existing audit key distinguishes
+  // which axis the actor is on by prefix — `org.*` for platform-initiated
+  // actions against a tenant, `tenant.*` for tenant-initiated self-service
+  // actions (same convention TENANT_ROLE_GRANTED/ORG_FEATURE_TOGGLED/
+  // OFFICER_TERM_STARTED already establish). Reusing ORG_BRAND_SET here
+  // would collapse the one signal ("who changed our brand, the platform or
+  // the church") an audit reader exists to answer for this resource. No
+  // tenant-side neutralize key exists or should be built — neutralize stays
+  // platform-only (DECISION-101).
+  TENANT_BRAND_SET: "tenant.brand.set",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

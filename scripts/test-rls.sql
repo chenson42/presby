@@ -1394,3 +1394,66 @@ begin;
     (select count(*) where presby_has_permission(:CLERK, :BRAMBLE, 'officers.manage')),
     0, 'presby_has_permission: stated_clerk holds NOTHING at bramblewood (no grant there)');
 commit;
+
+-- ---------------------------------------------------------------------------
+-- 23. Tenant branding permission, database-admin schema layer (docs/work-log/
+--     2026-08-26-tenant-branding-permission.md, Phase 4 commit 1).
+--     drizzle/0030_presby_branding_permission.sql seeds the branding.manage
+--     permission-catalog row; scripts/seed-dev.sql mints a NEW role,
+--     brand_admin (f0000000-...-000a, Alder Creek only), binds it to
+--     branding.manage, and direct-grants it to Marguerite Ashcombe (:ELDER —
+--     the same person id every earlier section already uses for her) —
+--     deliberately NOT stated_clerk/Tobias Renwick (DECISION-101/DECISION-103:
+--     branding has no defensible fit in stated_clerk's constitutional duty,
+--     and piling a seventh permission onto that office would recreate the
+--     "one office, every capability" concentration DECISION-080/DECISION-101
+--     exist to interrupt).
+--
+--     `permissions` carries no organization_id and no RLS (src/lib/db/domain/
+--     authz.ts) — this migration introduces no NEW row-level isolation
+--     surface of its own; the catalog row itself is queryable with no GUC
+--     set, same as sections 19/22's own Deliverable-B-shaped assertion. What
+--     this section proves is the SAME shape sections 19/22 already
+--     established: the permission resolves through brand_admin at Alder
+--     Creek and resolves to nothing for the same person at Bramblewood,
+--     where Marguerite Ashcombe holds no role_grants row at all (deliberately
+--     — DECISION-063's "prove the mechanism once" reasoning, restated at
+--     every new-role fixture grant comment in this file).
+--
+--     NOT covered here, and not closeable until commit 2 lands: an assertion
+--     that branding.manage actually GATES a `src/lib/tenant-branding.ts`
+--     mutation end to end — that belongs in vitest against the query/
+--     mutation module once it exists, matching every other permission-gated
+--     module in this codebase (same posture section 22's own closing note
+--     states for officers.manage/src/lib/officers.ts).
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'branding.manage'),
+    1, 'permissions: branding.manage catalog row exists');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:ELDER, :ALDER, 'branding.manage')),
+    1, 'presby_has_permission: brand_admin holder (Marguerite Ashcombe) holds branding.manage at alder');
+  -- Re-proven alongside, same discipline as section 22's role_grants.manage
+  -- re-check: pin that this migration didn't disturb Marguerite's existing
+  -- support_contact / tickets.file grant.
+  select assert_eq(
+    (select count(*) where presby_has_permission(:ELDER, :ALDER, 'tickets.file')),
+    1, 'presby_has_permission: Marguerite Ashcombe still holds tickets.file (support_contact, unchanged)');
+commit;
+
+-- Cross-org: the SAME person, at an org where they hold no grant at all,
+-- must not read as having the permission — Marguerite Ashcombe has no
+-- role_grants row at bramblewood (seed-dev.sql's brand_admin grant is
+-- deliberately Alder-Creek-only, same "prove the mechanism once" posture as
+-- every other new-role fixture grant in this file).
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:ELDER, :BRAMBLE, 'branding.manage')),
+    0, 'presby_has_permission: brand_admin holder holds NOTHING at bramblewood (no grant there)');
+commit;

@@ -294,7 +294,21 @@ insert into app_roles (id, organization_id, key, name, role_kind, is_protected) 
   -- person. Carries directory.view_hidden (elevated visibility + the
   -- parishes roster), not a wildcard.
   ('f0000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222',
-   'diaconate_member','Diaconate Member','constitutional',true);
+   'diaconate_member','Diaconate Member','constitutional',true),
+  -- Tenant branding permission (docs/work-log/2026-08-26-tenant-branding-
+  -- permission.md) / DECISION-101 (architect) / DECISION-103 (tech-lead): a
+  -- NEW role, deliberately not bound to stated_clerk — piling a seventh
+  -- permission onto that office (which already carries role_grants.manage,
+  -- roll.propose, roll.approve, directory.view_hidden, org_features.manage,
+  -- people.manage, officers.manage) would recreate exactly the "one office,
+  -- every capability" wildcard concentration DECISION-080/DECISION-101 exist
+  -- to interrupt. Constitutional and protected, mirroring member's shape
+  -- (f...0004) — every organization should end up with this role available,
+  -- not a staff-invented custom one, even though no production
+  -- role-auto-provisioning surface creates it yet (same bootstrap-gap
+  -- posture as stated_clerk/officers.manage, tracked in docs/TODO.md).
+  ('f0000000-0000-0000-0000-00000000000a','22222222-2222-2222-2222-222222222222',
+   'brand_admin','Brand Administrator','constitutional',true);
 
 insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000001','roll.approve'),
@@ -355,7 +369,11 @@ insert into app_role_permissions (role_id, permission_key) values
   -- officers.manage for free, same "no new grant row" outcome as
   -- roll.propose/people.manage/org_features.manage/directory.view_hidden
   -- immediately above.
-  ('f0000000-0000-0000-0000-000000000005','officers.manage');
+  ('f0000000-0000-0000-0000-000000000005','officers.manage'),
+  -- Tenant branding permission, Phase 4 commit 1: brand_admin ->
+  -- branding.manage. The ONLY permission this role carries — a
+  -- single-purpose office, not a wildcard.
+  ('f0000000-0000-0000-0000-00000000000a','branding.manage');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would
@@ -431,6 +449,29 @@ insert into role_grants (organization_id, role_id, person_id, starts_on) values
 insert into role_grants (organization_id, role_id, group_id, starts_on) values
   ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-000000000009',
    'b0000000-0000-0000-0000-000000000002','2020-01-01');
+
+-- Tenant branding permission (docs/work-log/2026-08-26-tenant-branding-
+-- permission.md) / Phase 3 DECISION-103: brand_admin, direct-granted to
+-- Marguerite Ashcombe (c0000000-...-0001) — deliberately NOT Tobias Renwick,
+-- who already holds property_chair + stated_clerk; a third role on the same
+-- fixture person would recreate the "one person, every capability"
+-- concentration support_contact's own binding (DECISION-080) was written to
+-- interrupt. Marguerite already holds support_contact (the external-facing
+-- point of contact with outside software support) — a second, distinct,
+-- administrative role on the same person is a reasonable single-office
+-- pairing, not a wildcard accretion onto one already-overloaded office
+-- (Phase 3's own reasoning). Person-arm, direct-granted (not group-arm): an
+-- ordinary single-accountable-office action — one person picks a colour and
+-- uploads a file — with no polity body whose vote approves a brand change,
+-- so there is nothing for a group grant to represent that a direct grant
+-- doesn't already cover. starts_on is the date this pipeline's grant lands,
+-- not an office date — there is no officer_terms row behind this role, by
+-- design (no PC(USA) office corresponds to it), same shape as
+-- support_contact's own grant above.
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-00000000000a',
+   'c0000000-0000-0000-0000-000000000001', -- Marguerite Ashcombe
+   '2026-08-26');
 
 -- An administrative commission: the one case where a council reaches DOWN into
 -- a congregation. Its members are a group AT THE PRESBYTERY, which is why the

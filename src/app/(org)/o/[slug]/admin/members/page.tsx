@@ -7,7 +7,11 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
-import { getDirectory } from "@/lib/directory";
+import {
+  DIRECTORY_STATUSES,
+  getDirectory,
+  type DirectoryStatus,
+} from "@/lib/directory";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
 import { Button } from "@/components/ui/button";
@@ -37,12 +41,37 @@ const MEMBERS_CREATE_FLAG = "org_portal.members_create";
  * `directory.view` sees `getDirectory()`'s own forbidden state on the list
  * even though they could still reach `/new` directly. Not fixed here.
  */
+/** Increment 5. Same default `directory/page.tsx` uses — one number, not
+ * two independently-tuned constants for the same underlying list shape. */
+const MEMBERS_PAGE_SIZE = 25;
+
+function parseStatus(raw: string | undefined): DirectoryStatus | undefined {
+  return (DIRECTORY_STATUSES as readonly string[]).includes(raw ?? "")
+    ? (raw as DirectoryStatus)
+    : undefined;
+}
+
+function parsePage(raw: string | undefined): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 1;
+}
+
 export default async function MembersPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ search?: string; status?: string; page?: string }>;
 }) {
   const { slug } = await params;
+  const {
+    search: rawSearch,
+    status: rawStatus,
+    page: rawPage,
+  } = await searchParams;
+  const search = rawSearch?.trim() ?? "";
+  const status = parseStatus(rawStatus);
+  const page = parsePage(rawPage);
 
   const session = await cachedAuth();
   if (!session?.user) {
@@ -92,10 +121,12 @@ export default async function MembersPage({
 
   let result;
   try {
-    result = await getDirectory(
-      resolved.org.personId,
-      resolved.org.organizationId,
-    );
+    result = await getDirectory(resolved.org.personId, resolved.org.organizationId, {
+      search,
+      status,
+      page,
+      pageSize: MEMBERS_PAGE_SIZE,
+    });
   } catch (err) {
     if (err instanceof OrgAccessError) {
       throw err;
@@ -139,6 +170,9 @@ export default async function MembersPage({
         entries={result.entries}
         canCreate={canCreate}
         canEdit={canCreate}
+        search={search}
+        status={status ?? ""}
+        pagination={result.pagination}
       />
     </section>
   );

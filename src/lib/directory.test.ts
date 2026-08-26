@@ -1296,3 +1296,359 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     });
   });
 });
+
+/**
+ * Increment 5 (`2026-08-26-members-directory-pagination-search.md`) —
+ * status filter, pagination, and the two regressions that matter most: the
+ * RLS boundary must still hold under a filtered/paginated query, and the
+ * three narrower `queryDirectoryRows()` callers (`getHouseholdDetail`,
+ * `getPersonDetail`, `getParishRoster`) must be completely unaffected when
+ * they don't ask for either option. A SEPARATE, self-contained fixture
+ * (own org, own people) rather than extending the shared one above —
+ * `org-features.test.ts`'s own precedent for exactly this reason: isolating
+ * a new increment's fixture avoids any risk of silently perturbing the
+ * existing suite's row counts.
+ */
+describe.skipIf(!hasDb)(
+  "getDirectory — Increment 5: status filter + pagination (Postgres-backed, real dev database)",
+  () => {
+    let getDirectory: typeof import("./directory").getDirectory;
+    let getHouseholdDetail: typeof import("./directory").getHouseholdDetail;
+    let getPersonDetail: typeof import("./directory").getPersonDetail;
+    let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
+    let organizations: typeof import("@/lib/db/domain/org").organizations;
+    let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
+    let groups: typeof import("@/lib/db/domain/groups").groups;
+    let people: typeof import("@/lib/db/domain/people").people;
+    let memberships: typeof import("@/lib/db/domain/people").memberships;
+    let households: typeof import("@/lib/db/domain/people").households;
+    let permissions: typeof import("@/lib/db/domain/authz").permissions;
+    let appRoles: typeof import("@/lib/db/domain/authz").appRoles;
+    let appRolePermissions: typeof import("@/lib/db/domain/authz").appRolePermissions;
+    let roleGrants: typeof import("@/lib/db/domain/authz").roleGrants;
+
+    let orgA: string;
+    let orgB: string;
+    let viewerA: string; // orgA — holds directory.view via the derived group
+    let viewerB: string; // orgB — same, isolated fixture for the RLS test
+    let household: string; // orgA — for the narrower-caller regression
+
+    // 5 orgA people: 2 active, 1 baptized, 1 affiliate, 1 other_participant
+    // — enough to prove status narrows correctly AND to paginate with a
+    // small pageSize without a huge fixture.
+    let active1: string;
+    let active2: string;
+    let baptized1: string;
+    let affiliate1: string;
+    let otherParticipant1: string;
+    let orgBPerson: string; // orgB — the RLS-isolation proof
+
+    const allPeople: string[] = [];
+
+    beforeAll(async () => {
+      ({ getDirectory, getHouseholdDetail, getPersonDetail } =
+        await import("./directory"));
+      ({ getPlatformDb } = await import("@/lib/db"));
+      ({ organizations } = await import("@/lib/db/domain/org"));
+      ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
+      ({ people, memberships, households } = await import(
+        "@/lib/db/domain/people"
+      ));
+      ({ permissions, appRoles, appRolePermissions, roleGrants } =
+        await import("@/lib/db/domain/authz"));
+
+      const platform = getPlatformDb();
+      const stamp = Date.now();
+
+      async function makeOrg(label: string) {
+        const [row] = await platform
+          .insert(organizations)
+          .values({
+            organizationType: "congregation",
+            name: `Fixture Congregation ${label} for directory.test.ts Increment 5`,
+            slug: `directory-inc5-${label.toLowerCase()}-${stamp}`,
+            path: `directory_inc5_${label.toLowerCase()}_${stamp}`,
+            platformStatus: "unmanaged",
+          })
+          .returning({ id: organizations.id });
+        return row!.id;
+      }
+      orgA = await makeOrg("A");
+      orgB = await makeOrg("B");
+
+      const [gt] = await platform
+        .insert(groupTypes)
+        .values({ organizationId: null, key: "roster", name: "Roster" })
+        .onConflictDoNothing()
+        .returning({ id: groupTypes.id });
+      let groupTypeId = gt?.id;
+      if (!groupTypeId) {
+        const [existing] = await platform
+          .select({ id: groupTypes.id })
+          .from(groupTypes)
+          .where(eq(groupTypes.key, "roster"))
+          .limit(1);
+        groupTypeId = existing!.id;
+      }
+
+      async function activeMembershipGroup(organizationId: string) {
+        const [row] = await platform
+          .insert(groups)
+          .values({
+            organizationId,
+            groupTypeId,
+            name: "Active Membership",
+            membershipSource: "derived",
+            derivedFrom: "active_membership",
+            isProtected: true,
+          })
+          .returning({ id: groups.id });
+        return row!.id;
+      }
+      const groupA = await activeMembershipGroup(orgA);
+      const groupB = await activeMembershipGroup(orgB);
+
+      await platform
+        .insert(permissions)
+        .values({
+          key: "directory.view",
+          module: "directory",
+          description: "Browse the congregation directory",
+          sensitivityTier: 1,
+        })
+        .onConflictDoNothing();
+
+      async function grantDirectoryView(organizationId: string, groupId: string) {
+        const [role] = await platform
+          .insert(appRoles)
+          .values({
+            organizationId,
+            key: "member",
+            name: "Member",
+            roleKind: "constitutional",
+            isProtected: true,
+          })
+          .returning({ id: appRoles.id });
+        await platform
+          .insert(appRolePermissions)
+          .values({ roleId: role!.id, permissionKey: "directory.view" });
+        await platform.insert(roleGrants).values({
+          organizationId,
+          roleId: role!.id,
+          groupId,
+          startsOn: "2000-01-01",
+        });
+      }
+      await grantDirectoryView(orgA, groupA);
+      await grantDirectoryView(orgB, groupB);
+
+      async function person(first: string, last: string) {
+        const [p] = await platform
+          .insert(people)
+          .values({ firstName: first, lastName: last })
+          .returning({ id: people.id });
+        allPeople.push(p!.id);
+        return p!.id;
+      }
+
+      viewerA = await person("Wren", "Castellane");
+      viewerB = await person("Idris", "Fennimore");
+      active1 = await person("Aldric", "Bramwell");
+      active2 = await person("Beatrix", "Coldharbor");
+      baptized1 = await person("Corvina", "Delacroix");
+      affiliate1 = await person("Dashiell", "Everhart");
+      otherParticipant1 = await person("Fenwick", "Goodwin");
+      orgBPerson = await person("Griselda", "Haverford");
+
+      const [hh] = await platform
+        .insert(households)
+        .values({ organizationId: orgA, name: "Bramwell Household" })
+        .returning({ id: households.id });
+      household = hh!.id;
+
+      async function membership(
+        organizationId: string,
+        personId: string,
+        currentRoll: string,
+        householdId?: string,
+      ) {
+        await platform.insert(memberships).values({
+          organizationId,
+          personId,
+          engagementStatus: "regular",
+          currentRoll,
+          ...(householdId ? { householdId } : {}),
+        });
+      }
+
+      await membership(orgA, viewerA, "active");
+      await membership(orgA, active1, "active", household);
+      await membership(orgA, active2, "active");
+      await membership(orgA, baptized1, "baptized");
+      await membership(orgA, affiliate1, "affiliate");
+      await membership(orgA, otherParticipant1, "other_participant");
+      await membership(orgB, viewerB, "active");
+      await membership(orgB, orgBPerson, "active");
+    });
+
+    afterAll(async () => {
+      const platform = getPlatformDb();
+      await platform.delete(organizations).where(eq(organizations.id, orgA));
+      await platform.delete(organizations).where(eq(organizations.id, orgB));
+      for (const id of allPeople) {
+        await platform.delete(people).where(eq(people.id, id));
+      }
+    });
+
+    describe("status filter", () => {
+      it("narrows to exactly the matching current_roll value", async () => {
+        const result = await getDirectory(viewerA, orgA, { status: "baptized" });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.entries.map((e) => e.personId).sort()).toEqual(
+          [baptized1].sort(),
+        );
+      });
+
+      it("each of the four statuses returns exactly its own fixture person", async () => {
+        const affiliateResult = await getDirectory(viewerA, orgA, {
+          status: "affiliate",
+        });
+        const otherResult = await getDirectory(viewerA, orgA, {
+          status: "other_participant",
+        });
+        if (affiliateResult.kind !== "ok" || otherResult.kind !== "ok") {
+          throw new Error("expected ok");
+        }
+        expect(affiliateResult.entries.map((e) => e.personId)).toEqual([
+          affiliate1,
+        ]);
+        expect(otherResult.entries.map((e) => e.personId)).toEqual([
+          otherParticipant1,
+        ]);
+      });
+
+      it("status='active' returns both active fixture people, never the other statuses", async () => {
+        const result = await getDirectory(viewerA, orgA, { status: "active" });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        const ids = result.entries.map((e) => e.personId);
+        expect(ids).toEqual(expect.arrayContaining([viewerA, active1, active2]));
+        expect(ids).not.toContain(baptized1);
+        expect(ids).not.toContain(affiliate1);
+        expect(ids).not.toContain(otherParticipant1);
+      });
+
+      it("omitting status returns every eligible row regardless of current_roll (today's unfiltered behavior, unchanged)", async () => {
+        const result = await getDirectory(viewerA, orgA);
+        if (result.kind !== "ok") throw new Error("expected ok");
+        const ids = result.entries.map((e) => e.personId);
+        expect(ids).toEqual(
+          expect.arrayContaining([
+            viewerA,
+            active1,
+            active2,
+            baptized1,
+            affiliate1,
+            otherParticipant1,
+          ]),
+        );
+      });
+    });
+
+    describe("pagination", () => {
+      it("returns the correct slice and pagination metadata for page 1", async () => {
+        const result = await getDirectory(viewerA, orgA, {
+          page: 1,
+          pageSize: 2,
+        });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.entries).toHaveLength(2);
+        expect(result.pagination).toEqual({
+          page: 1,
+          pageSize: 2,
+          total: 6,
+          totalPages: 3,
+        });
+      });
+
+      it("returns a different, non-overlapping slice for page 2", async () => {
+        const page1 = await getDirectory(viewerA, orgA, { page: 1, pageSize: 2 });
+        const page2 = await getDirectory(viewerA, orgA, { page: 2, pageSize: 2 });
+        if (page1.kind !== "ok" || page2.kind !== "ok") {
+          throw new Error("expected ok");
+        }
+        const page1Ids = page1.entries.map((e) => e.personId);
+        const page2Ids = page2.entries.map((e) => e.personId);
+        expect(page1Ids.some((id) => page2Ids.includes(id))).toBe(false);
+      });
+
+      it("clamps an out-of-range page to the last valid page rather than erroring or returning empty", async () => {
+        const result = await getDirectory(viewerA, orgA, {
+          page: 99,
+          pageSize: 2,
+        });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.pagination?.page).toBe(3); // 6 rows / pageSize 2 = 3 pages
+        expect(result.entries.length).toBeGreaterThan(0);
+      });
+
+      it("search + status + pagination compose together correctly", async () => {
+        const result = await getDirectory(viewerA, orgA, {
+          search: "Bramwell",
+          status: "active",
+          page: 1,
+          pageSize: 10,
+        });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.entries.map((e) => e.personId)).toEqual([active1]);
+        expect(result.pagination?.total).toBe(1);
+      });
+
+      it("omitting page/pageSize returns no pagination field at all and every row, byte-identical to pre-Increment-5 behavior", async () => {
+        const result = await getDirectory(viewerA, orgA);
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.pagination).toBeUndefined();
+        expect(result.entries.length).toBeGreaterThanOrEqual(6);
+      });
+    });
+
+    describe("RLS regression — a filtered, paginated, searched query never leaks another org's rows", () => {
+      it("orgA's paginated+filtered+searched call returns zero orgB rows", async () => {
+        const result = await getDirectory(viewerA, orgA, {
+          search: "",
+          status: "active",
+          page: 1,
+          pageSize: 50,
+        });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.entries.map((e) => e.personId)).not.toContain(orgBPerson);
+        expect(result.entries.map((e) => e.personId)).not.toContain(viewerB);
+      });
+
+      it("orgB's own paginated call returns only orgB's own people", async () => {
+        const result = await getDirectory(viewerB, orgB, { page: 1, pageSize: 50 });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        const ids = result.entries.map((e) => e.personId);
+        expect(ids).toEqual(expect.arrayContaining([viewerB, orgBPerson]));
+        expect(ids).not.toContain(active1);
+        expect(ids).not.toContain(baptized1);
+      });
+    });
+
+    describe("narrower-caller regression — getHouseholdDetail/getPersonDetail unaffected by the new options they never pass", () => {
+      it("getHouseholdDetail() still returns every eligible household member with no truncation", async () => {
+        const result = await getHouseholdDetail(viewerA, orgA, household);
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.household.members.map((m) => m.personId)).toContain(
+          active1,
+        );
+      });
+
+      it("getPersonDetail() is unaffected by the status filter's existence — a baptized person's own detail still resolves with no status option passed", async () => {
+        const result = await getPersonDetail(viewerA, orgA, baptized1);
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") return;
+        expect(result.entry.personId).toBe(baptized1);
+      });
+    });
+  },
+);

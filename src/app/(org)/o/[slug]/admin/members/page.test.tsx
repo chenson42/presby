@@ -45,6 +45,7 @@ vi.mock("@/lib/org-features", () => ({
 const getDirectory = vi.fn();
 vi.mock("@/lib/directory", () => ({
   getDirectory: (...args: unknown[]) => getDirectory(...args),
+  DIRECTORY_STATUSES: ["active", "baptized", "affiliate", "other_participant"],
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -90,13 +91,19 @@ function makeParams(slug = "alder-creek") {
   return Promise.resolve({ slug });
 }
 
+function makeSearchParams(
+  overrides: { search?: string; status?: string; page?: string } = {},
+) {
+  return Promise.resolve(overrides);
+}
+
 describe("MembersPage — gate composition (flag AND org toggle, DECISION-097)", () => {
   it("flag off, toggle never checked → renders flag-off state", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     isFlagEnabled.mockResolvedValue(false);
 
-    const el = await MembersPage({ params: makeParams() });
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
     render(el);
 
     expect(isOrgFeatureEnabled).not.toHaveBeenCalled();
@@ -110,7 +117,7 @@ describe("MembersPage — gate composition (flag AND org toggle, DECISION-097)",
     isFlagEnabled.mockResolvedValue(true);
     isOrgFeatureEnabled.mockResolvedValue(false);
 
-    const el = await MembersPage({ params: makeParams() });
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
     render(el);
 
     expect(isOrgFeatureEnabled).toHaveBeenCalledWith(
@@ -130,7 +137,7 @@ describe("MembersPage — gate composition (flag AND org toggle, DECISION-097)",
     getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
     hasPermission.mockResolvedValue(true);
 
-    const el = await MembersPage({ params: makeParams() });
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
     render(el);
 
     expect(screen.getByRole("heading", { name: /^members$/i })).toBeTruthy();
@@ -148,7 +155,7 @@ describe("MembersPage — getDirectory() error handling", () => {
     isOrgFeatureEnabled.mockResolvedValue(true);
     getDirectory.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
 
-    await expect(MembersPage({ params: makeParams() })).rejects.toThrow(
+    await expect(MembersPage({ params: makeParams(), searchParams: makeSearchParams() })).rejects.toThrow(
       "mock: no active membership",
     );
   });
@@ -160,7 +167,7 @@ describe("MembersPage — getDirectory() error handling", () => {
     isOrgFeatureEnabled.mockResolvedValue(true);
     getDirectory.mockRejectedValue(new Error("connection reset"));
 
-    const el = await MembersPage({ params: makeParams() });
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
     render(el);
 
     expect(screen.getByText(/couldn.t load this right now/i)).toBeTruthy();
@@ -173,7 +180,7 @@ describe("MembersPage — getDirectory() error handling", () => {
     isOrgFeatureEnabled.mockResolvedValue(true);
     getDirectory.mockResolvedValue({ kind: "forbidden" });
 
-    const el = await MembersPage({ params: makeParams() });
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
     render(el);
 
     expect(screen.getByText(/don.t have permission to do that/i)).toBeTruthy();
@@ -189,7 +196,7 @@ describe("MembersPage — 'Add person' CTA gated on people.manage", () => {
     getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
     hasPermission.mockResolvedValue(false);
 
-    const el = await MembersPage({ params: makeParams() });
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
     render(el);
 
     expect(screen.queryAllByRole("link", { name: /add person/i })).toHaveLength(0);
@@ -199,7 +206,7 @@ describe("MembersPage — 'Add person' CTA gated on people.manage", () => {
 describe("MembersPage — the shared four-way miss response", () => {
   it("redirects to /signin when unauthenticated", async () => {
     cachedAuth.mockResolvedValue(null);
-    await expect(MembersPage({ params: makeParams() })).rejects.toThrow(
+    await expect(MembersPage({ params: makeParams(), searchParams: makeSearchParams() })).rejects.toThrow(
       "REDIRECT:/signin?callbackUrl=%2Fo%2Falder-creek%2Fadmin%2Fmembers",
     );
   });
@@ -207,7 +214,7 @@ describe("MembersPage — the shared four-way miss response", () => {
   it("calls notFound() for a slug with no organization", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue({ kind: "not-found" });
-    await expect(MembersPage({ params: makeParams() })).rejects.toThrow(
+    await expect(MembersPage({ params: makeParams(), searchParams: makeSearchParams() })).rejects.toThrow(
       "NOT_FOUND",
     );
   });
@@ -218,5 +225,86 @@ describe("MembersPage — reuses getDirectory(), no bespoke reader", () => {
     const source = readFileSync(resolve(__dirname, "page.tsx"), "utf-8");
     expect(source).toMatch(/getDirectory/);
     expect(source).toMatch(/@\/lib\/directory/);
+  });
+});
+
+describe("MembersPage — Increment 5: searchParams parsing (search/status/page)", () => {
+  async function run(overrides: {
+    search?: string;
+    status?: string;
+    page?: string;
+  }) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
+    hasPermission.mockResolvedValue(true);
+    await MembersPage({
+      params: makeParams(),
+      searchParams: makeSearchParams(overrides),
+    });
+  }
+
+  it("passes a trimmed search string through to getDirectory()", async () => {
+    await run({ search: "  Nora  " });
+    expect(getDirectory).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      expect.objectContaining({ search: "Nora" }),
+    );
+  });
+
+  it("passes a valid status value through unchanged", async () => {
+    await run({ status: "baptized" });
+    expect(getDirectory).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      expect.objectContaining({ status: "baptized" }),
+    );
+  });
+
+  it("drops an unrecognized status value (undefined, not a garbage-in passthrough)", async () => {
+    await run({ status: "not-a-real-status" });
+    expect(getDirectory).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      expect.objectContaining({ status: undefined }),
+    );
+  });
+
+  it("defaults to page 1 when page is missing", async () => {
+    await run({});
+    expect(getDirectory).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      expect.objectContaining({ page: 1, pageSize: 25 }),
+    );
+  });
+
+  it("defaults to page 1 for a non-numeric or zero/negative page value", async () => {
+    await run({ page: "not-a-number" });
+    expect(getDirectory).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      expect.objectContaining({ page: 1 }),
+    );
+
+    getDirectory.mockClear();
+    await run({ page: "0" });
+    expect(getDirectory).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      expect.objectContaining({ page: 1 }),
+    );
+  });
+
+  it("parses a valid page number", async () => {
+    await run({ page: "3" });
+    expect(getDirectory).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      expect.objectContaining({ page: 3 }),
+    );
   });
 });

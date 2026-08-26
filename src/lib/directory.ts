@@ -122,8 +122,21 @@ export interface DirectoryEntry {
   isHidden?: boolean;
 }
 
+export interface DirectoryPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 export type DirectoryResult =
-  | { kind: "ok"; entries: DirectoryEntry[] }
+  | {
+      kind: "ok";
+      entries: DirectoryEntry[];
+      /** Present only when the caller passed `page`+`pageSize` — omitted is
+       * byte-identical to every pre-Increment-5 result shape. */
+      pagination?: DirectoryPagination;
+    }
   | { kind: "forbidden" };
 
 export interface GetDirectoryOptions {
@@ -156,7 +169,34 @@ export interface GetDirectoryOptions {
    * depends on.
    */
   includeHidden?: boolean;
+  /**
+   * Increment 5 (pagination/search/status). Narrows to ONE `current_roll`
+   * value, replacing the default OR-of-four eligibility branch entirely
+   * for this call (does NOT also require `engagement_status = 'regular'` —
+   * that is a separate admission path, not a sub-case of any one roll
+   * value). Omitted = today's unfiltered eligibility, unchanged.
+   */
+  status?: DirectoryStatus;
+  /**
+   * Increment 5. Both `page` and `pageSize` must be given together to
+   * paginate at all — omitting either is byte-identical to omitting both,
+   * which returns every eligible row with no LIMIT, exactly as every
+   * pre-Increment-5 call did. `page` is 1-indexed and clamped server-side
+   * to `[1, totalPages]` before the row query runs, so a stale bookmark or
+   * back-button to a since-shrunk result set shows the new last page
+   * rather than a confusing empty one.
+   */
+  page?: number;
+  pageSize?: number;
 }
+
+/** Defined in `./directory-status.ts` (no `server-only` guard) so plain
+ * presentational components can import the value without transitively
+ * pulling in this whole DB-access module — re-exported here so every
+ * existing `@/lib/directory` caller (this file's own server-side readers)
+ * sees no difference. */
+export { DIRECTORY_STATUSES, type DirectoryStatus } from "./directory-status";
+import type { DirectoryStatus } from "./directory-status";
 
 /** `Parameters<Parameters<typeof db.transaction>[0]>[0]` — see authz.ts. */
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -201,15 +241,22 @@ const UUID_RE =
  * `queryDirectoryRows()` trusts `opts` — the re-verification itself lives in
  * `checkViewHidden()`, one layer up.
  */
-function directoryEligibilityWhereSql(includeHidden: boolean) {
+function directoryEligibilityWhereSql(
+  includeHidden: boolean,
+  status?: DirectoryStatus,
+) {
   return sql`
     ${includeHidden ? sql`true` : sql`coalesce(pp.directory_hidden, false) = false`}
     and p.merged_into_id is null
     and p.date_of_death is null
-    and (
+    and ${
+      status
+        ? sql`m.current_roll = ${status}`
+        : sql`(
       m.current_roll in ('active', 'baptized', 'affiliate', 'other_participant')
       or m.engagement_status = 'regular'
-    )
+    )`
+    }
   `;
 }
 
@@ -222,21 +269,91 @@ interface QueryDirectoryRowsOptions {
   /** See `GetDirectoryOptions.includeHidden`. Already re-verified by the
    * caller — this function only threads it into the WHERE clause. */
   includeHidden?: boolean;
+  /** Increment 5 — see `GetDirectoryOptions.status`. */
+  status?: DirectoryStatus;
+  /** Increment 5 — see `GetDirectoryOptions.page`/`pageSize`. Both required
+   * together to actually LIMIT/OFFSET; either alone is ignored. */
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * THE shared FROM/JOIN/WHERE fragment `queryDirectoryRows()` and
+ * `countDirectoryRows()` both build on — written once so a paginated count
+ * can never drift out of sync with the rows it's counting (Increment 5's
+ * own risk: a mismatched WHERE between the two would show "Page 1 of 3"
+ * against a result that actually has 2 pages, or vice versa).
+ */
+function directoryFromWhereSql(
+  organizationId: string,
+  opts: QueryDirectoryRowsOptions,
+) {
+  const trimmedSearch = opts.search?.trim();
+  return sql`
+      from memberships m
+      join people p on p.id = m.person_id
+      left join person_privacy pp
+             on pp.person_id = m.person_id
+            and pp.organization_id = m.organization_id
+      left join lateral (
+        select value from contact_methods
+         where person_id = p.id and kind = 'email'
+         order by is_primary desc, id
+         limit 1
+      ) cm_email on true
+      left join lateral (
+        select value from contact_methods
+         where person_id = p.id and kind = 'phone'
+         order by is_primary desc, id
+         limit 1
+      ) cm_phone on true
+      left join lateral (
+        select line1, city, region, postal_code from addresses
+         where person_id = p.id
+         order by is_primary desc, id
+         limit 1
+      ) addr on true
+     where m.organization_id = ${organizationId}::uuid
+       and ${directoryEligibilityWhereSql(Boolean(opts.includeHidden), opts.status)}
+       ${
+         trimmedSearch
+           ? sql`and (
+               p.first_name ilike ${`%${trimmedSearch}%`}
+               or p.last_name ilike ${`%${trimmedSearch}%`}
+               or p.preferred_name ilike ${`%${trimmedSearch}%`}
+               or cm_email.value ilike ${`%${trimmedSearch}%`}
+               or cm_phone.value ilike ${`%${trimmedSearch}%`}
+             )`
+           : sql``
+       }
+       ${
+         opts.householdId
+           ? sql`and m.household_id = ${opts.householdId}::uuid`
+           : sql``
+       }
+       ${
+         opts.personId ? sql`and m.person_id = ${opts.personId}::uuid` : sql``
+       }
+  `;
 }
 
 /**
  * THE shared row query. Same SELECT list, same JOINs, same eligibility
  * predicate, same ORDER BY `getDirectory()` has always used — `opts`
- * narrows the result set (search text, one household, one person) without
- * touching the privacy/eligibility logic itself, so there is exactly one
- * place that logic can drift out of sync with `getDirectory()`.
+ * narrows the result set (search text, status, one household, one person)
+ * without touching the privacy/eligibility logic itself, so there is
+ * exactly one place that logic can drift out of sync with `getDirectory()`.
+ * `page`/`pageSize` (Increment 5) LIMIT/OFFSET only when BOTH are given —
+ * every pre-existing caller that passes neither gets every eligible row,
+ * exactly as before.
  */
 async function queryDirectoryRows(
   tx: OrgTx,
   organizationId: string,
   opts: QueryDirectoryRowsOptions = {},
 ): Promise<DirectoryRow[]> {
-  const trimmedSearch = opts.search?.trim();
+  const paginate =
+    typeof opts.page === "number" && typeof opts.pageSize === "number";
   const result = await tx.execute(sql`
     select
       m.person_id                                          as person_id,
@@ -264,54 +381,36 @@ async function queryDirectoryRows(
       case when coalesce(pp.hide_photo, false) then null
            else p.photo_key end                              as photo_key,
       coalesce(pp.directory_hidden, false)                    as is_hidden
-      from memberships m
-      join people p on p.id = m.person_id
-      left join person_privacy pp
-             on pp.person_id = m.person_id
-            and pp.organization_id = m.organization_id
-      left join lateral (
-        select value from contact_methods
-         where person_id = p.id and kind = 'email'
-         order by is_primary desc, id
-         limit 1
-      ) cm_email on true
-      left join lateral (
-        select value from contact_methods
-         where person_id = p.id and kind = 'phone'
-         order by is_primary desc, id
-         limit 1
-      ) cm_phone on true
-      left join lateral (
-        select line1, city, region, postal_code from addresses
-         where person_id = p.id
-         order by is_primary desc, id
-         limit 1
-      ) addr on true
-     where m.organization_id = ${organizationId}::uuid
-       and ${directoryEligibilityWhereSql(Boolean(opts.includeHidden))}
-       ${
-         trimmedSearch
-           ? sql`and (
-               p.first_name ilike ${`%${trimmedSearch}%`}
-               or p.last_name ilike ${`%${trimmedSearch}%`}
-               or p.preferred_name ilike ${`%${trimmedSearch}%`}
-               or cm_email.value ilike ${`%${trimmedSearch}%`}
-               or cm_phone.value ilike ${`%${trimmedSearch}%`}
-             )`
-           : sql``
-       }
-       ${
-         opts.householdId
-           ? sql`and m.household_id = ${opts.householdId}::uuid`
-           : sql``
-       }
-       ${
-         opts.personId ? sql`and m.person_id = ${opts.personId}::uuid` : sql``
-       }
+      ${directoryFromWhereSql(organizationId, opts)}
      order by p.last_name, p.first_name, m.person_id
+     ${
+       paginate
+         ? sql`limit ${opts.pageSize} offset ${(opts.page! - 1) * opts.pageSize!}`
+         : sql``
+     }
   `);
 
   return (result as unknown as { rows?: DirectoryRow[] }).rows ?? [];
+}
+
+/**
+ * Increment 5. Total ELIGIBLE row count for `opts`, ignoring `opts.page`/
+ * `opts.pageSize` themselves (a count query is never itself paginated) but
+ * sharing `directoryFromWhereSql()` with `queryDirectoryRows()` so the two
+ * can never disagree about which rows are being counted vs. returned.
+ */
+async function countDirectoryRows(
+  tx: OrgTx,
+  organizationId: string,
+  opts: QueryDirectoryRowsOptions = {},
+): Promise<number> {
+  const result = await tx.execute(sql`
+    select count(*)::int as total
+      ${directoryFromWhereSql(organizationId, opts)}
+  `);
+  const row = (result as unknown as { rows?: Array<{ total: number }> })
+    .rows?.[0];
+  return row?.total ?? 0;
 }
 
 /**
@@ -512,11 +611,39 @@ export async function getDirectory(
       Boolean(opts?.includeHidden) &&
       (await checkViewHidden(tx, personId, organizationId));
 
-    const rows = await queryDirectoryRows(tx, organizationId, {
+    const wantsPagination =
+      typeof opts?.page === "number" && typeof opts?.pageSize === "number";
+
+    if (!wantsPagination) {
+      const rows = await queryDirectoryRows(tx, organizationId, {
+        search: opts?.search,
+        status: opts?.status,
+        includeHidden,
+      });
+      return { kind: "ok", entries: rows.map(mapRow) };
+    }
+
+    const pageSize = opts!.pageSize!;
+    const total = await countDirectoryRows(tx, organizationId, {
       search: opts?.search,
+      status: opts?.status,
       includeHidden,
     });
-    return { kind: "ok", entries: rows.map(mapRow) };
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(Math.max(1, opts!.page!), totalPages);
+
+    const rows = await queryDirectoryRows(tx, organizationId, {
+      search: opts?.search,
+      status: opts?.status,
+      includeHidden,
+      page,
+      pageSize,
+    });
+    return {
+      kind: "ok",
+      entries: rows.map(mapRow),
+      pagination: { page, pageSize, total, totalPages },
+    };
   });
 }
 

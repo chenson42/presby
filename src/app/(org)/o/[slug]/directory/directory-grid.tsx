@@ -1,9 +1,23 @@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import type { DirectoryEntry } from "@/lib/directory";
+import { Pagination } from "@/components/shared/pagination";
+import type { DirectoryEntry, DirectoryPagination } from "@/lib/directory";
+import {
+  DIRECTORY_STATUSES,
+  type DirectoryStatus,
+} from "@/lib/directory-status";
 import { resolvePhotoSrc } from "./person-avatar";
 import { PersonCard } from "./person-card";
+
+/** Plain-language labels for the `DIRECTORY_STATUSES` filter — never the
+ * raw `current_roll` enum value in front of a member. */
+const STATUS_LABELS: Record<DirectoryStatus, string> = {
+  active: "Active",
+  baptized: "Baptized",
+  affiliate: "Affiliate",
+  other_participant: "Other participant",
+};
 
 /**
  * `org_portal.directory_v2`'s ON path: a card grid with a search box, in
@@ -39,18 +53,33 @@ export async function DirectoryGrid({
   entries,
   organizationId,
   search,
+  status,
+  pagination,
   orgName,
   slug,
 }: {
   entries: DirectoryEntry[];
   organizationId: string;
   search: string;
+  /** Increment 5. Empty string = "All" (the pre-existing, unfiltered
+   * behavior). */
+  status: DirectoryStatus | "";
+  /** Increment 5. Absent when the caller didn't paginate this call. */
+  pagination?: DirectoryPagination;
   orgName: string;
   slug: string;
 }) {
   const photoSrcs = await Promise.all(
     entries.map((entry) => resolvePhotoSrc(organizationId, entry.photoKey)),
   );
+
+  const buildHref = (targetPage: number) => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (status) params.set("status", status);
+    params.set("page", String(targetPage));
+    return `/o/${slug}/directory?${params.toString()}`;
+  };
 
   return (
     <div className="mt-6 space-y-6">
@@ -68,6 +97,24 @@ export async function DirectoryGrid({
             className="mt-1 min-h-11"
           />
         </div>
+        <div>
+          <Label htmlFor="directory-status" className="text-sm">
+            Status
+          </Label>
+          <select
+            id="directory-status"
+            name="status"
+            defaultValue={status}
+            className="mt-1 flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs sm:w-auto"
+          >
+            <option value="">All</option>
+            {DIRECTORY_STATUSES.map((value) => (
+              <option key={value} value={value}>
+                {STATUS_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </div>
         <Button type="submit" className="min-h-11 sm:w-auto">
           Search
         </Button>
@@ -75,10 +122,11 @@ export async function DirectoryGrid({
 
       <p className="text-sm text-muted-foreground" aria-live="polite">
         Showing {entries.length} {entries.length === 1 ? "member" : "members"}
+        {pagination ? ` of ${pagination.total}` : ""}
       </p>
 
       {entries.length === 0 ? (
-        <EmptyState search={search} orgName={orgName} />
+        <EmptyState search={search} status={status} orgName={orgName} />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries.map((entry, i) => (
@@ -91,16 +139,36 @@ export async function DirectoryGrid({
           ))}
         </div>
       )}
+
+      {pagination && (
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          buildHref={buildHref}
+        />
+      )}
     </div>
   );
 }
 
-function EmptyState({ search, orgName }: { search: string; orgName: string }) {
-  if (search) {
+function EmptyState({
+  search,
+  status,
+  orgName,
+}: {
+  search: string;
+  status: DirectoryStatus | "";
+  orgName: string;
+}) {
+  if (search || status) {
+    const statusLabel = status ? STATUS_LABELS[status] : null;
     return (
       <p className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-        No matches for &ldquo;{search}&rdquo;. Try a different name, email,
-        or phone number.
+        {search && statusLabel
+          ? `No matches for "${search}" with status "${statusLabel}".`
+          : search
+            ? `No matches for "${search}". Try a different name, email, or phone number.`
+            : `No members with status "${statusLabel}".`}
       </p>
     );
   }

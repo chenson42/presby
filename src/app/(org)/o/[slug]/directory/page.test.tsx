@@ -82,6 +82,7 @@ const getHouseholds = vi.fn();
 vi.mock("@/lib/directory", () => ({
   getDirectory: (...args: unknown[]) => getDirectory(...args),
   getHouseholds: (...args: unknown[]) => getHouseholds(...args),
+  DIRECTORY_STATUSES: ["active", "baptized", "affiliate", "other_participant"],
 }));
 
 vi.mock("@/lib/storage/blob-store", () => ({
@@ -319,6 +320,9 @@ describe("DirectoryPage — org_portal.directory_v2 ON", () => {
 
     expect(getDirectory).toHaveBeenCalledWith("person-1", "org-1", {
       search: "marguerite",
+      status: undefined,
+      page: 1,
+      pageSize: 25,
     });
     expect(getHouseholds).not.toHaveBeenCalled();
     expect(screen.getByText("Marguerite Ashcombe")).toBeTruthy();
@@ -485,6 +489,9 @@ describe("DirectoryPage — Increment 4 (directory.view_hidden, Parishes tab)", 
     expect(screen.queryByRole("link", { name: "Parishes" })).toBeNull();
     expect(getDirectory).toHaveBeenCalledWith("person-1", "org-1", {
       search: "",
+      status: undefined,
+      page: 1,
+      pageSize: 25,
     });
   });
 
@@ -512,6 +519,9 @@ describe("DirectoryPage — Increment 4 (directory.view_hidden, Parishes tab)", 
     );
     expect(getDirectory).toHaveBeenCalledWith("person-1", "org-1", {
       search: "",
+      status: undefined,
+      page: 1,
+      pageSize: 25,
       includeHidden: true,
     });
   });

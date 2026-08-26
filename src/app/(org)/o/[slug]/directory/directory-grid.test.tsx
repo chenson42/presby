@@ -54,6 +54,7 @@ async function renderGrid(props: Partial<Parameters<typeof DirectoryGrid>[0]> = 
     entries: [],
     organizationId: "org-1",
     search: "",
+    status: "",
     orgName: "Alder Creek Presbyterian Church",
     slug: "alder-creek",
     ...props,
@@ -187,6 +188,48 @@ describe("DirectoryGrid — card content", () => {
     expect(screen.queryByText(/hidden from the directory/i)).toBeNull();
   });
 
+  it("Increment 5: renders a status select with every DIRECTORY_STATUSES option, defaulting to All", async () => {
+    await renderGrid();
+    const select = screen.getByLabelText(/^status$/i) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      "",
+      "active",
+      "baptized",
+      "affiliate",
+      "other_participant",
+    ]);
+    expect(select.value).toBe("");
+  });
+
+  it("Increment 5: the status select round-trips the current status as its default value", async () => {
+    await renderGrid({ status: "affiliate" });
+    const select = screen.getByLabelText(/^status$/i) as HTMLSelectElement;
+    expect(select.value).toBe("affiliate");
+  });
+
+  it("Increment 5: shows a status-specific empty message when a status filter matched nobody", async () => {
+    await renderGrid({ entries: [], search: "", status: "baptized" });
+    expect(
+      screen.getByText(/no members with status "baptized"/i),
+    ).toBeTruthy();
+  });
+
+  it("Increment 5: renders Pagination when a pagination prop is passed", async () => {
+    await renderGrid({
+      entries: [entry()],
+      pagination: { page: 2, pageSize: 25, total: 60, totalPages: 3 },
+    });
+    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+    expect(screen.getByText(/showing 1 member of 60/i)).toBeTruthy();
+  });
+
+  it("Increment 5: renders no pagination controls when pagination is omitted", async () => {
+    await renderGrid({ entries: [entry()] });
+    expect(screen.queryByText(/page \d+ of \d+/i)).toBeNull();
+  });
+});
+
+describe("DirectoryGrid — responsive grid layout", () => {
   it("renders one card per entry in a responsive 1/2/3-column grid", async () => {
     await renderGrid({
       entries: [

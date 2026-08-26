@@ -6,7 +6,12 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
-import { getDirectory, getHouseholds } from "@/lib/directory";
+import {
+  DIRECTORY_STATUSES,
+  getDirectory,
+  getHouseholds,
+  type DirectoryStatus,
+} from "@/lib/directory";
 import { isFlagEnabled } from "@/lib/flags";
 import { OrgAccessDenied, OrgAccessEnded } from "../org-states";
 import {
@@ -58,16 +63,44 @@ import { DirectoryNav } from "./directory-nav";
  * branch (not in addition to it) — one privacy-filtered read either way, the
  * same discipline the members/grid split already established.
  */
+/** Increment 5. Matches the member-management wizard's own elderly/mobile-
+ * first UX research: enough rows to make a scan worthwhile without a wall
+ * of cards on a phone. */
+const DIRECTORY_PAGE_SIZE = 25;
+
+function parseStatus(raw: string | undefined): DirectoryStatus | undefined {
+  return (DIRECTORY_STATUSES as readonly string[]).includes(raw ?? "")
+    ? (raw as DirectoryStatus)
+    : undefined;
+}
+
+function parsePage(raw: string | undefined): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 1;
+}
+
 export default async function DirectoryPage({
   params,
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ search?: string; view?: string }>;
+  searchParams: Promise<{
+    search?: string;
+    view?: string;
+    status?: string;
+    page?: string;
+  }>;
 }) {
   const { slug } = await params;
-  const { search: rawSearch, view: rawView } = await searchParams;
+  const {
+    search: rawSearch,
+    view: rawView,
+    status: rawStatus,
+    page: rawPage,
+  } = await searchParams;
   const search = rawSearch?.trim() ?? "";
+  const status = parseStatus(rawStatus);
+  const page = parsePage(rawPage);
 
   const session = await cachedAuth();
   if (!session?.user) {
@@ -173,9 +206,16 @@ export default async function DirectoryPage({
 
   let result;
   try {
-    const directoryOpts = canViewHidden
-      ? { search, includeHidden: true }
-      : { search };
+    // Increment 5's status/page/pageSize ride the SAME directoryV2Enabled
+    // gate search already does — v1's DirectoryList regression floor never
+    // sees any of this, byte-identical to before this increment.
+    const directoryOpts = {
+      search,
+      status,
+      page,
+      pageSize: DIRECTORY_PAGE_SIZE,
+      ...(canViewHidden ? { includeHidden: true } : {}),
+    };
     result = await getDirectory(
       resolved.org.personId,
       resolved.org.organizationId,
@@ -203,6 +243,8 @@ export default async function DirectoryPage({
       entries: result.entries,
       organizationId: resolved.org.organizationId,
       search,
+      status: status ?? "",
+      pagination: result.pagination,
       orgName: resolved.org.name,
       slug,
     });

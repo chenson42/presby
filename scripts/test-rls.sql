@@ -37,6 +37,13 @@
 \set TREASURER_ROLE '\'f0000000-0000-0000-0000-000000000007\''
 \set INSTALLED_PASTOR_ROLE '\'f0000000-0000-0000-0000-000000000008\''
 \set SUPPORT_CONTACT_ROLE '\'f0000000-0000-0000-0000-000000000006\''
+-- Org-provisioning baseline-role fixture (section 21). The `member` role and
+-- its group-arm grant to Alder Creek's own active_membership group
+-- (b0000000-...-007) — this is the exact shape createOrganization() now
+-- seeds for every future org (docs/work-log/2026-08-26-org-provisioning-
+-- baseline-roles.md).
+\set MEMBER_ROLE '\'f0000000-0000-0000-0000-000000000004\''
+\set ALDER_ACTIVE_MEMBERSHIP_GROUP '\'b0000000-0000-0000-0000-000000000007\''
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
 
@@ -1274,6 +1281,47 @@ begin;
     raise notice 'pass  finding 2: an approved roll_actions row DELETE is still rejected, not silently no-op''d';
   end $$;
 rollback;
+
+-- ---------------------------------------------------------------------------
+-- 21. Org-provisioning baseline roles (docs/work-log/2026-08-26-org-
+--     provisioning-baseline-roles.md / DECISION-100). createOrganization()
+--     now seeds a constitutional `member` app_roles row bound to
+--     `directory.view`, granted via role_grants' GROUP arm to the org's own
+--     active_membership group, for every future org. That exact shape has
+--     existed in the Alder Creek fixture since P1/G-A (DECISION-060/063) but
+--     never had its own isolation assertion — same shape as section 15's
+--     proof for treasurer/installed_pastor/support_contact, applied here.
+-- ---------------------------------------------------------------------------
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from app_roles where key = 'member'),
+    1, 'alder: sees its own member role');
+  select assert_eq(
+    (select count(*) from role_grants
+      where role_id = :MEMBER_ROLE and group_id = :ALDER_ACTIVE_MEMBERSHIP_GROUP
+        and person_id is null),
+    1, 'alder: sees its own member role''s group-arm grant, person_id null');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) from app_roles where key = 'member' and id = :MEMBER_ROLE),
+    0, 'bramblewood: does not see alder''s member role');
+  select assert_eq(
+    (select count(*) from role_grants where role_id = :MEMBER_ROLE),
+    0, 'bramblewood: sees no grants for alder''s member role');
+  -- Known-id cross-org read, same discipline as sections 14 and 15: querying
+  -- by the KNOWN role/group ids from a foreign org returns zero, not a 403
+  -- that would confirm the ids are real.
+  select assert_eq(
+    (select count(*) from app_roles where id = :MEMBER_ROLE),
+    0, 'bramblewood: cross-org read of alder''s member role by known id returns zero');
+  select assert_eq(
+    (select count(*) from groups where id = :ALDER_ACTIVE_MEMBERSHIP_GROUP),
+    0, 'bramblewood: cross-org read of alder''s active_membership group by known id returns zero');
+commit;
 
 -- ---------------------------------------------------------------------------
 -- 22. Officer-terms administration, database-admin schema layer

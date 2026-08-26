@@ -34,6 +34,9 @@ describe.skipIf(!hasDb)(
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
     let groups: typeof import("@/lib/db/domain/groups").groups;
+    let appRoles: typeof import("@/lib/db/domain/authz").appRoles;
+    let appRolePermissions: typeof import("@/lib/db/domain/authz").appRolePermissions;
+    let roleGrants: typeof import("@/lib/db/domain/authz").roleGrants;
 
     const stamp = Date.now();
     const createdOrgIds: string[] = [];
@@ -45,6 +48,9 @@ describe.skipIf(!hasDb)(
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
+      ({ appRoles, appRolePermissions, roleGrants } = await import(
+        "@/lib/db/domain/authz"
+      ));
 
       // This test's own precondition, exercised for real rather than
       // assumed: createOrganization() fails closed with
@@ -127,6 +133,7 @@ describe.skipIf(!hasDb)(
 
         const groupRows = await platform
           .select({
+            id: groups.id,
             name: groups.name,
             derivedFrom: groups.derivedFrom,
             membershipSource: groups.membershipSource,
@@ -148,6 +155,48 @@ describe.skipIf(!hasDb)(
           expect(g.membershipSource).toBe("derived");
           expect(g.isProtected).toBe(true);
         }
+
+        // Baseline role seed (DECISION-100): a constitutional, protected
+        // `member` role bound to `directory.view`, granted through the
+        // GROUP arm to this org's own `active_membership` group.
+        const [roleRow] = await platform
+          .select({
+            key: appRoles.key,
+            name: appRoles.name,
+            roleKind: appRoles.roleKind,
+            isProtected: appRoles.isProtected,
+          })
+          .from(appRoles)
+          .where(eq(appRoles.organizationId, result.organizationId));
+        expect(roleRow?.key).toBe("member");
+        expect(roleRow?.name).toBe("Member");
+        expect(roleRow?.roleKind).toBe("constitutional");
+        expect(roleRow?.isProtected).toBe(true);
+
+        const permissionRows = await platform
+          .select({ permissionKey: appRolePermissions.permissionKey })
+          .from(appRolePermissions)
+          .innerJoin(appRoles, eq(appRolePermissions.roleId, appRoles.id))
+          .where(eq(appRoles.organizationId, result.organizationId));
+        expect(permissionRows).toHaveLength(1);
+        expect(permissionRows[0].permissionKey).toBe("directory.view");
+
+        const activeMembershipGroupId = groupRows.find(
+          (g) => g.derivedFrom === "active_membership",
+        )?.id;
+        expect(activeMembershipGroupId).toBeDefined();
+
+        const grantRows = await platform
+          .select({
+            personId: roleGrants.personId,
+            groupId: roleGrants.groupId,
+          })
+          .from(roleGrants)
+          .innerJoin(appRoles, eq(roleGrants.roleId, appRoles.id))
+          .where(eq(appRoles.organizationId, result.organizationId));
+        expect(grantRows).toHaveLength(1);
+        expect(grantRows[0].personId).toBeNull();
+        expect(grantRows[0].groupId).toBe(activeMembershipGroupId);
       });
 
       it("creates a presbytery with only Active Membership (no Session, no Board of Deacons)", async () => {
@@ -164,13 +213,103 @@ describe.skipIf(!hasDb)(
 
         const platform = getPlatformDb();
         const groupRows = await platform
-          .select({ name: groups.name, derivedFrom: groups.derivedFrom })
+          .select({
+            id: groups.id,
+            name: groups.name,
+            derivedFrom: groups.derivedFrom,
+          })
           .from(groups)
           .where(eq(groups.organizationId, result.organizationId));
 
         expect(groupRows).toHaveLength(1);
         expect(groupRows[0].derivedFrom).toBe("active_membership");
         expect(groupRows[0].name).toBe("Active Membership");
+
+        // Same baseline role seed as the congregation case above — the
+        // non-congregation plan has a single group, but the role/permission/
+        // group-arm-grant shape is identical (DECISION-100: one uniform plan
+        // for every organizationType today).
+        const [roleRow] = await platform
+          .select({ key: appRoles.key })
+          .from(appRoles)
+          .where(eq(appRoles.organizationId, result.organizationId));
+        expect(roleRow?.key).toBe("member");
+
+        const grantRows = await platform
+          .select({
+            personId: roleGrants.personId,
+            groupId: roleGrants.groupId,
+          })
+          .from(roleGrants)
+          .innerJoin(appRoles, eq(roleGrants.roleId, appRoles.id))
+          .where(eq(appRoles.organizationId, result.organizationId));
+        expect(grantRows).toHaveLength(1);
+        expect(grantRows[0].personId).toBeNull();
+        expect(grantRows[0].groupId).toBe(groupRows[0].id);
+      });
+
+      it("does not leak one organization's baseline role/grant rows into another's (composite-key discipline, F2-style)", async () => {
+        const slugA = `org-prov-test-noleak-a-${stamp}`;
+        const slugB = `org-prov-test-noleak-b-${stamp}`;
+
+        const resultA = await createOrganization({
+          name: "Fixture No-Leak Org A",
+          slug: slugA,
+          organizationType: "congregation",
+          platformStatus: "managed",
+        });
+        expect(resultA.kind).toBe("ok");
+        if (resultA.kind !== "ok") return;
+        createdOrgIds.push(resultA.organizationId);
+
+        const resultB = await createOrganization({
+          name: "Fixture No-Leak Org B",
+          slug: slugB,
+          organizationType: "congregation",
+          platformStatus: "managed",
+        });
+        expect(resultB.kind).toBe("ok");
+        if (resultB.kind !== "ok") return;
+        createdOrgIds.push(resultB.organizationId);
+
+        const platform = getPlatformDb();
+
+        const rolesA = await platform
+          .select({ id: appRoles.id, organizationId: appRoles.organizationId })
+          .from(appRoles)
+          .where(eq(appRoles.organizationId, resultA.organizationId));
+        const rolesB = await platform
+          .select({ id: appRoles.id, organizationId: appRoles.organizationId })
+          .from(appRoles)
+          .where(eq(appRoles.organizationId, resultB.organizationId));
+        expect(rolesA).toHaveLength(1);
+        expect(rolesB).toHaveLength(1);
+        expect(rolesA[0].id).not.toBe(rolesB[0].id);
+        // Each org's own query returns exactly its own row — no cross-org id
+        // shows up under the other org's filter.
+        expect(
+          rolesA.some((r) => r.organizationId === resultB.organizationId),
+        ).toBe(false);
+        expect(
+          rolesB.some((r) => r.organizationId === resultA.organizationId),
+        ).toBe(false);
+
+        const grantsA = await platform
+          .select({ groupId: roleGrants.groupId, roleId: roleGrants.roleId })
+          .from(roleGrants)
+          .where(eq(roleGrants.organizationId, resultA.organizationId));
+        const grantsB = await platform
+          .select({ groupId: roleGrants.groupId, roleId: roleGrants.roleId })
+          .from(roleGrants)
+          .where(eq(roleGrants.organizationId, resultB.organizationId));
+        expect(grantsA).toHaveLength(1);
+        expect(grantsB).toHaveLength(1);
+        // The two orgs' grants point at two different roles and two
+        // different (org-scoped) active_membership groups — never the same
+        // id, which would indicate a copy-paste of the wrong org's id.
+        expect(grantsA[0].roleId).toBe(rolesA[0].id);
+        expect(grantsB[0].roleId).toBe(rolesB[0].id);
+        expect(grantsA[0].groupId).not.toBe(grantsB[0].groupId);
       });
 
       it("rejects a slug that is already taken", async () => {

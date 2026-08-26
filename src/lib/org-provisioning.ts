@@ -3,6 +3,7 @@ import { eq, isNull } from "drizzle-orm";
 import { getPlatformDb } from "@/lib/db";
 import { organizations } from "@/lib/db/domain/org";
 import { groupTypes, groups } from "@/lib/db/domain/groups";
+import { appRoles, appRolePermissions, roleGrants } from "@/lib/db/domain/authz";
 import { isReservedSlug } from "@/lib/reserved-slugs";
 import type { OrganizationType, PlatformStatus } from "@/lib/authz";
 
@@ -109,6 +110,45 @@ function groupSeedPlan(
 }
 
 /**
+ * The baseline `app_roles` to seed for a freshly-created org — sibling to
+ * `groupSeedPlan()`, same inline-conditional shape. Per DECISION-100 /
+ * Phase 2's ruling, this returns the SAME one-item plan for every
+ * `organizationType` today (congregation, presbytery, synod,
+ * general_assembly, new_worshiping_community all get exactly `member` /
+ * `directory.view` / `active_membership`). `organizationType` is accepted —
+ * and unused in the body — purely so this helper stays call-compatible with
+ * `groupSeedPlan()`'s shape and is ready to branch the day a genuinely
+ * type-varying baseline role is proposed, without a signature change at that
+ * point. Do not add a conditional branch pre-emptively.
+ *
+ * Byte-for-byte the same SHAPE as `scripts/seed-dev.sql`'s own Alder Creek
+ * `member` role fixture (`f0000000-0000-0000-0000-000000000004`, lines
+ * ~266-267, 303, 372-373): same key, same name, same `role_kind`/
+ * `is_protected`, same permission, same derived-group target. This does NOT
+ * wire `app_roles.organizationTypeScope`/`organizationId IS NULL` template
+ * columns — confirmed out of scope (DECISION-100).
+ */
+function baselineRoleSeedPlan(
+  // Unused today — kept for call-compatibility with groupSeedPlan(); see the
+  // doc comment above.
+  organizationType: OrganizationType,
+): Array<{
+  key: string;
+  name: string;
+  permissionKey: string;
+  boundToDerivedFrom: "active_membership";
+}> {
+  return [
+    {
+      key: "member",
+      name: "Member",
+      permissionKey: "directory.view",
+      boundToDerivedFrom: "active_membership",
+    },
+  ];
+}
+
+/**
  * Creates the `organizations` row plus its F16 derived groups in one
  * `platformDb.transaction()`. Field-shape validation (name length, slug
  * format, reserved-slug, enum membership) is the CALLER's job
@@ -175,16 +215,67 @@ export async function createOrganization(
         })
         .returning({ id: organizations.id });
 
-      await tx.insert(groups).values(
-        plan.map((g) => ({
+      const groupRows = await tx
+        .insert(groups)
+        .values(
+          plan.map((g) => ({
+            organizationId: orgRow.id,
+            groupTypeId: typeIdByKey[g.groupTypeKey],
+            name: g.name,
+            membershipSource: "derived" as const,
+            derivedFrom: g.derivedFrom,
+            isProtected: true,
+          })),
+        )
+        .returning({ id: groups.id, derivedFrom: groups.derivedFrom });
+
+      // Baseline role seed (DECISION-100). The bound group is found by
+      // `derivedFrom`, never by array position — a congregation's plan has
+      // three groups, a non-congregation's plan has one, at different
+      // positions.
+      const rolePlan = baselineRoleSeedPlan(input.organizationType);
+      for (const r of rolePlan) {
+        const boundGroup = groupRows.find(
+          (g) => g.derivedFrom === r.boundToDerivedFrom,
+        );
+        if (!boundGroup) {
+          // groupSeedPlan() always includes the active_membership entry for
+          // every organizationType (see its own doc comment) — this is
+          // unreachable in practice, but throwing here (rather than
+          // silently skipping the role seed) fails the whole transaction
+          // loudly instead of shipping an org with no working directory
+          // access.
+          throw new Error(
+            `org-provisioning: no "${r.boundToDerivedFrom}" group was seeded; cannot bind the "${r.key}" baseline role`,
+          );
+        }
+
+        const [roleRow] = await tx
+          .insert(appRoles)
+          .values({
+            organizationId: orgRow.id,
+            key: r.key,
+            name: r.name,
+            roleKind: "constitutional",
+            isProtected: true,
+          })
+          .returning({ id: appRoles.id });
+
+        await tx.insert(appRolePermissions).values({
+          roleId: roleRow.id,
+          permissionKey: r.permissionKey,
+        });
+
+        // Group arm only — `personId` stays null. The person arm would
+        // FK-violate `role_grants_person_fk`, which requires an existing
+        // `(person_id, organization_id)` row in `memberships`; a brand-new
+        // org has none yet.
+        await tx.insert(roleGrants).values({
           organizationId: orgRow.id,
-          groupTypeId: typeIdByKey[g.groupTypeKey],
-          name: g.name,
-          membershipSource: "derived" as const,
-          derivedFrom: g.derivedFrom,
-          isProtected: true,
-        })),
-      );
+          roleId: roleRow.id,
+          groupId: boundGroup.id,
+        });
+      }
 
       return orgRow.id;
     });

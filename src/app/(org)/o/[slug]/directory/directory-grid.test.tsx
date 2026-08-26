@@ -251,8 +251,11 @@ describe("DirectoryGrid — card hover treatment (Increment 1, DECISION-099)", (
       ],
     });
     // Three inline icons: Mail, Phone, MapPin (the Lock badge icon only
-    // appears for isHidden entries, exercised separately above).
-    expect(document.querySelectorAll("svg").length).toBe(3);
+    // appears for isHidden entries, exercised separately above). Scoped to
+    // the card itself — the page-level svg count also includes the status
+    // filter's chevron indicator, which isn't this test's concern.
+    const card = document.querySelector('[data-slot="card"]') as HTMLElement;
+    expect(card.querySelectorAll("svg").length).toBe(3);
   });
 });
 

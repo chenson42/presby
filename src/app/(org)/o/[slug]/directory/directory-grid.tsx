@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -101,19 +102,25 @@ export async function DirectoryGrid({
           <Label htmlFor="directory-status" className="text-sm">
             Status
           </Label>
-          <select
-            id="directory-status"
-            name="status"
-            defaultValue={status}
-            className="mt-1 flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs sm:w-auto"
-          >
-            <option value="">All</option>
-            {DIRECTORY_STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {STATUS_LABELS[value]}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="directory-status"
+              name="status"
+              defaultValue={status}
+              className="flex min-h-11 w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm shadow-xs sm:w-auto"
+            >
+              <option value="">All</option>
+              {DIRECTORY_STATUSES.map((value) => (
+                <option key={value} value={value}>
+                  {STATUS_LABELS[value]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
         <Button type="submit" className="min-h-11 sm:w-auto">
           Search

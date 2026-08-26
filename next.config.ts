@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -47,6 +49,20 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Widens Turbopack's project-root inference to this repo's own PARENT
+  // directory — not a hardcoded absolute path, so this is safe to commit
+  // and harmless for anyone who clones presby anywhere. Needed for local
+  // dev where presby-site-kit is npm-linked from a sibling repo
+  // (~/git/presby-platform/presby-site-kit convention): that's a real
+  // symlink pointing OUTSIDE presby's own directory, and Turbopack's
+  // default root inference refuses to resolve a symlinked module living
+  // outside the inferred workspace root, even though Node's own
+  // require.resolve() finds it without any trouble. In CI/production,
+  // presby-site-kit installs normally (no symlink) and this setting has
+  // no effect either way.
+  turbopack: {
+    root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

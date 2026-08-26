@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export interface PaginationProps {
   page: number;
@@ -12,10 +12,10 @@ export interface PaginationProps {
   buildHref: (targetPage: number) => string;
 }
 
-const LINK_CLASSES =
-  "flex min-h-11 min-w-11 items-center justify-center rounded-md px-4 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
-const DISABLED_CLASSES =
-  "flex min-h-11 min-w-11 items-center justify-center rounded-md px-4 text-sm font-medium text-muted-foreground/50";
+/** `min-h-11`/`min-w-11` throughout, matching every other control on this
+ * elderly/mobile-first surface — wider than the `<Button>` primitive's own
+ * `default` size, so it's layered on via `className` (cn merges last). */
+const TOUCH_TARGET_CLASSES = "min-h-11 min-w-11 px-4";
 
 /**
  * Server-rendered, zero-client-JS pager — plain `<Link>`s with an updated
@@ -39,13 +39,18 @@ export function Pagination({ page, totalPages, buildHref }: PaginationProps) {
       className="flex items-center justify-between gap-4 pt-2"
     >
       {hasPrevious ? (
-        <Link href={buildHref(page - 1)} className={LINK_CLASSES}>
-          Previous
-        </Link>
+        <Button variant="ghost" asChild className={TOUCH_TARGET_CLASSES}>
+          <Link href={buildHref(page - 1)}>Previous</Link>
+        </Button>
       ) : (
-        <span className={cn(DISABLED_CLASSES)} aria-hidden="true">
+        <Button
+          variant="ghost"
+          disabled
+          aria-hidden="true"
+          className={TOUCH_TARGET_CLASSES}
+        >
           Previous
-        </span>
+        </Button>
       )}
 
       <span className="text-sm text-muted-foreground">
@@ -53,13 +58,18 @@ export function Pagination({ page, totalPages, buildHref }: PaginationProps) {
       </span>
 
       {hasNext ? (
-        <Link href={buildHref(page + 1)} className={LINK_CLASSES}>
-          Next
-        </Link>
+        <Button variant="ghost" asChild className={TOUCH_TARGET_CLASSES}>
+          <Link href={buildHref(page + 1)}>Next</Link>
+        </Button>
       ) : (
-        <span className={cn(DISABLED_CLASSES)} aria-hidden="true">
+        <Button
+          variant="ghost"
+          disabled
+          aria-hidden="true"
+          className={TOUCH_TARGET_CLASSES}
+        >
           Next
-        </span>
+        </Button>
       )}
     </nav>
   );

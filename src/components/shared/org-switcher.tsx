@@ -67,6 +67,16 @@ export interface OrgSwitcherProps {
    * in the data and must never look identical on screen.
    */
   unavailable?: boolean;
+  /**
+   * Portal-chrome refinements (docs/work-log/2026-08-26-portal-chrome-
+   * refinements.md): a real org logo is already visible beside this control,
+   * so the redundant text name is suppressed to screen-reader-only. The
+   * SWITCHING affordance survives — a multi-org viewer still gets a
+   * chevron-only trigger, never a silently-removed dropdown; only the
+   * single-organization static label (which has nowhere to switch to
+   * anyway) goes fully invisible.
+   */
+  compact?: boolean;
 }
 
 // A Radix DropdownMenuTrigger — already the accessible primitive, not a
@@ -85,13 +95,14 @@ export function OrgSwitcher({
   currentSlug = null,
   organizations,
   unavailable = false,
+  compact = false,
 }: OrgSwitcherProps) {
   const others = organizations.filter((org) => org.slug !== currentSlug);
 
   // Rendering 3, then 1: a failed read with a known name still says where you
   // are; a failed read with no name says nothing rather than guessing.
   if (unavailable) {
-    return currentName ? <CurrentOrgLabel name={currentName} /> : null;
+    return currentName ? <CurrentOrgLabel name={currentName} compact={compact} /> : null;
   }
 
   // Rendering 1 — no relationship anywhere, and no context either.
@@ -99,7 +110,7 @@ export function OrgSwitcher({
 
   // Rendering 2 — one organization, and you are in it.
   if (currentName && others.length === 0) {
-    return <CurrentOrgLabel name={currentName} />;
+    return <CurrentOrgLabel name={currentName} compact={compact} />;
   }
 
   const label = currentName ?? "Organizations";
@@ -116,7 +127,7 @@ export function OrgSwitcher({
          * Wrenfield Presbyterian Church" would find nothing to click.
          */}
         {currentName && <span className="sr-only">Current organization: </span>}
-        <span className="truncate">{label}</span>
+        <span className={compact ? "sr-only" : "truncate"}>{label}</span>
         <ChevronsUpDown
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
@@ -172,10 +183,20 @@ export function OrgSwitcher({
  * `truncate` rather than wrap: at 360px "Presbytery of the Eastern Fells" would
  * otherwise push the header to two lines and shove the avatar off the row.
  */
-function CurrentOrgLabel({ name }: { name: string }) {
+function CurrentOrgLabel({
+  name,
+  compact = false,
+}: {
+  name: string;
+  compact?: boolean;
+}) {
   return (
     <span
-      className="min-w-0 truncate px-2 py-1.5 text-sm font-medium text-foreground"
+      className={
+        compact
+          ? "sr-only"
+          : "min-w-0 truncate px-2 py-1.5 text-sm font-medium text-foreground"
+      }
       data-testid="org-switcher-static"
     >
       <span className="sr-only">Current organization: </span>

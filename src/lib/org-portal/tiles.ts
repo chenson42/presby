@@ -41,6 +41,13 @@ export interface PortalTile {
 
 export const PORTAL_TILES: readonly PortalTile[] = [
   {
+    key: "members",
+    label: "Members",
+    description: "Add a person and record roll actions.",
+    href: (slug) => `/o/${slug}/admin/members`,
+    flagKey: "org_portal.members_create",
+  },
+  {
     key: "directory",
     label: "Directory",
     description: "Browse the congregation directory.",

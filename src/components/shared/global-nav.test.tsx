@@ -213,7 +213,9 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
     expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it("swaps to OrgMark, linking to /o/<slug>, when orgMark and currentOrgSlug are both present", async () => {
+  it("swaps to OrgMark, linking to /site/<slug> (the public site, not the portal home), when orgMark and currentOrgSlug are both present", async () => {
+    // 2026-08-26 refinement: the logo now points at the organization's
+    // public-facing identity, not the portal shell it's chrome for.
     cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
     cachedIsPlatformAdmin.mockResolvedValue(false);
 
@@ -227,12 +229,12 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
     const image = screen.getByRole("img", { name: "Fixture Congregation logo" });
     expect(image.getAttribute("src")).toBe("data:image/png;base64,xyz");
     const wordmarkLink = screen.getByRole("link", {
-      name: "Fixture Congregation home",
+      name: "Fixture Congregation public site",
     });
-    expect(wordmarkLink.getAttribute("href")).toBe(`/o/${WRENFIELD.slug}`);
+    expect(wordmarkLink.getAttribute("href")).toBe(`/site/${WRENFIELD.slug}`);
   });
 
-  it("falls back to initials when orgMark carries no markSrc — no logo, never a crash", async () => {
+  it("falls back to the org's typographic name (never initials, never a generic glyph — G7) when orgMark carries no markSrc", async () => {
     cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
     cachedIsPlatformAdmin.mockResolvedValue(false);
 
@@ -244,9 +246,29 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
 
     expect(screen.queryByRole("img")).toBeNull();
     const wordmarkLink = screen.getByRole("link", {
-      name: "Fixture Congregation home",
+      name: "Fixture Congregation public site",
     });
-    expect(wordmarkLink.textContent).toBe("FC");
+    expect(wordmarkLink.textContent).toBe("Fixture Congregation");
+  });
+
+  it("suppresses the redundant text name next to a real logo, but keeps it screen-reader-accessible and keeps the switcher usable", async () => {
+    // 2026-08-26 refinement: "no need for the organization name in text if
+    // you have the logo" -- the switcher's compact mode hides the VISIBLE
+    // name (sr-only survives for a11y) without removing the multi-org
+    // switching affordance itself.
+    cachedAvailableOrganizations.mockResolvedValue([WRENFIELD, FELLS]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({
+      session: session(),
+      currentOrgSlug: WRENFIELD.slug,
+      orgMark: { name: WRENFIELD.name, markSrc: null },
+    });
+
+    const trigger = screen.getByTestId("org-switcher-trigger");
+    const visibleName = trigger.querySelector("span.truncate");
+    expect(visibleName).toBeNull();
+    expect(trigger.textContent).toContain(WRENFIELD.name); // sr-only text still present
   });
 
   it("falls back to the platform wordmark when orgMark is present but currentOrgSlug is not (defensive — the caller never actually does this)", async () => {
@@ -262,26 +284,13 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
     expect(wordmark.getAttribute("href")).toBe("/");
   });
 
-  it("keeps the truncate mechanism wired for a name long enough to need it, even after the OrgMark swap frees width in the row", async () => {
-    // Phase 5 FIRST PASS finding (docs/work-log/2026-08-25-portal-chrome.md):
-    // swapping the "presby" TEXT wordmark for OrgMark (a small square
-    // logo/initials, no restated name) frees enough width that
-    // "Presbytery of the Eastern Fells" — the longest name any e2e fixture
-    // org carries — now fits at 360px WITHOUT clipping. That's the correct
-    // behavior (a name that fits should show in full), so
-    // e2e/header-controls.spec.ts no longer asserts real pixel clipping for
-    // it, and no current e2e fixture name is long enough to force real
-    // clipping in the new, wider-fitting layout.
-    //
-    // This test exists to pin the OTHER half of that contract: the safety
-    // valve itself — the `truncate` class on the org-name span — has to stay
-    // wired for the day a name IS too long, regardless of how much width the
-    // OrgMark swap frees. jsdom does no real layout (scrollWidth/clientWidth
-    // are always 0 here), so this can't measure actual pixel clipping — that
-    // proof is e2e's job, gated on a name long enough to need it. What this
-    // pins is structural: given a name well past anything a real 360px
-    // header could fit, the CSS mechanism that would clip it is still
-    // present in the DOM GlobalNav renders with orgMark set.
+  it("a name too long to ever fit still reaches assistive tech in full, even though it's visually suppressed by the logo swap", async () => {
+    // Supersedes the Phase 5 FIRST PASS truncate-class pin (docs/work-log/
+    // 2026-08-25-portal-chrome.md): that test predates the 2026-08-26
+    // "no redundant name text next to a real logo" refinement, which makes
+    // the visible name span disappear entirely (sr-only) rather than
+    // truncate. The surviving contract: the full, untruncated name is still
+    // in the DOM for a screen-reader user, however long it is.
     const LONG_NAME =
       "Presbytery of the Eastern Fells and the Western Territorial " +
       "Council of Consolidated Congregations";
@@ -296,10 +305,8 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
     });
 
     const trigger = screen.getByTestId("org-switcher-trigger");
-    const nameSpan = trigger.querySelector("span.truncate");
-    expect(nameSpan).not.toBeNull();
-    expect(nameSpan!.textContent).toBe(LONG_NAME);
-    expect(nameSpan!.className).toContain("truncate");
+    expect(trigger.querySelector("span.truncate")).toBeNull();
+    expect(trigger.textContent).toContain(LONG_NAME);
   });
 });
 

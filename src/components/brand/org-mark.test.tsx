@@ -78,4 +78,31 @@ describe("OrgWordmark", () => {
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByText("Quillhaven Presbyterian Church")).toBeTruthy();
   });
+
+  it("carries the neutral plate (G7) by default — no caller has to remember to ask for it", () => {
+    render(
+      <OrgWordmark
+        name="Bramblewood Presbyterian Church"
+        markSrc="data:image/png;base64,MARK"
+      />,
+    );
+    const img = screen.getByRole("img", {
+      name: "Bramblewood Presbyterian Church logo",
+    });
+    expect(img.closest("div")?.className).toContain("bg-white");
+  });
+
+  it("drops the plate only when a caller explicitly opts out (plate={false})", () => {
+    render(
+      <OrgWordmark
+        name="Bramblewood Presbyterian Church"
+        markSrc="data:image/png;base64,MARK"
+        plate={false}
+      />,
+    );
+    const img = screen.getByRole("img", {
+      name: "Bramblewood Presbyterian Church logo",
+    });
+    expect(img.closest("div")?.className).not.toContain("bg-white");
+  });
 });

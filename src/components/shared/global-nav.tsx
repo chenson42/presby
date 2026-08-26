@@ -9,7 +9,7 @@ import { sessionCanAccessAdmin } from "@/lib/platform-admin";
 import { cn } from "@/lib/utils";
 import { AvatarMenu } from "@/components/shared/avatar-menu";
 import { OrgSwitcher } from "@/components/shared/org-switcher";
-import { OrgMark } from "@/components/brand/org-mark";
+import { OrgWordmark } from "@/components/brand/org-mark";
 
 /**
  * The signed-in header: brand, organization switcher, avatar menu.
@@ -102,12 +102,25 @@ export async function GlobalNav({
       >
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
           {orgMark && currentOrgSlug ? (
+            // Links to the PUBLIC site, not the portal home (2026-08-26
+            // refinement) -- the logo is this organization's mark first,
+            // portal chrome second; a visitor clicking it expects the
+            // public-facing identity it represents, and the portal itself
+            // stays one click away via the account/nav surfaces already on
+            // the page.
             <Link
-              href={`/o/${currentOrgSlug}`}
+              href={`/site/${currentOrgSlug}`}
               className={cn(WORDMARK_LINK_CLASS, "px-0 py-0")}
-              aria-label={`${orgMark.name} home`}
+              aria-label={`${orgMark.name} public site`}
             >
-              <OrgMark name={orgMark.name} markSrc={orgMark.markSrc} size="sm" />
+              {/* The uploaded asset is a wide lockup (icon + name), not a
+               * square icon -- OrgMark would crop it; OrgWordmark renders it
+               * un-cropped at its own aspect ratio (G7), inline with the nav
+               * row the same way fpcw-directory's own header does.
+               * plate={false}: this header already sits on plain
+               * bg-background, never brand-tinted or dark, so G7's neutral
+               * card is redundant chrome here (2026-08-26 refinement). */}
+              <OrgWordmark name={orgMark.name} markSrc={orgMark.markSrc} plate={false} />
             </Link>
           ) : (
             <Link href="/" className={WORDMARK_LINK_CLASS}>
@@ -119,6 +132,7 @@ export async function GlobalNav({
             currentSlug={currentOrgSlug}
             organizations={organizations ?? []}
             unavailable={organizations === null}
+            compact={!!orgMark}
           />
         </div>
         <nav aria-label="Account" className="flex shrink-0 items-center">

@@ -111,16 +111,28 @@ export function OrgWordmark({
   name,
   markSrc,
   wordmarkSrc,
+  plate = true,
   className,
-}: Omit<OrgMarkProps, "size">) {
+}: Omit<OrgMarkProps, "size"> & {
+  /**
+   * G7's neutral plate, on by default everywhere (the admin surface, and
+   * any future dark-context caller, both rely on it being the DEFAULT so a
+   * new call site can't forget it). Set `false` only where a caller has
+   * explicit product direction that the raw logo belongs directly on the
+   * page background — presby-repo header chrome sitting on its own
+   * `bg-background`, not a brand-coloured or dark surface, per the
+   * 2026-08-26 portal-chrome refinement ("the logo doesn't need to be in a
+   * card"). Never flip this for a surface that can be dark or brand-tinted.
+   */
+  plate?: boolean;
+}) {
   const src = wordmarkSrc ?? markSrc ?? null;
 
   return (
     <div
       className={cn(
-        "flex h-10 max-w-[220px] shrink-0 items-center overflow-hidden rounded-md",
-        NEUTRAL_PLATE,
-        src ? "px-2" : "px-3",
+        "flex h-10 max-w-[220px] shrink-0 items-center overflow-hidden",
+        plate ? cn("rounded-md", NEUTRAL_PLATE, src ? "px-2" : "px-3") : null,
         className,
       )}
     >

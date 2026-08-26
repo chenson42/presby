@@ -1007,3 +1007,271 @@ commit;
 -- new column NULL) is instead run once, ad hoc, as the database owner
 -- immediately after applying drizzle/0021_presby_site_profile.sql — see the
 -- work-log's Phase 4 Implementer Notes.
+
+-- ---------------------------------------------------------------------------
+-- 19. Member management, database-admin schema layer (docs/work-log/
+--     2026-08-25-member-management.md Phase 4, following section 18's own
+--     precedent of a numbered section for schema-only verification before
+--     the server/client layers land). Two things, neither with any fixture
+--     rows to lean on:
+--
+--       Deliverable A  organization_feature_toggles — drizzle/
+--                      0026_presby_org_feature_toggles.sql. Same shape as
+--                      section 17's ordinary FORCE-RLS tenant-isolation
+--                      test (a real presby_app grant, not section 16's
+--                      "no grant at all" asymmetric case) — creates its own
+--                      row inside a rolled-back transaction, same discipline.
+--
+--       Deliverable B  the org_features.manage / people.manage
+--                      permission-catalog rows — drizzle/
+--                      0026_presby_org_feature_toggles.sql and
+--                      drizzle/0027_presby_member_management.sql — proven
+--                      queryable through presby_has_permission() against the
+--                      stated_clerk fixture binding scripts/seed-dev.sql
+--                      adds to Tobias Renwick's existing grant (section 15's
+--                      own stated_clerk/CLERK fixture).
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq((select count(*) from organization_feature_toggles), 0,
+                   'unset GUC: organization_feature_toggles invisible');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  -- ON CONFLICT DO UPDATE, not a bare INSERT (docs/TODO.md follow-up, Phase 5
+  -- QA, 2026-08-25-member-management.md): a prior manual/browser-walkthrough
+  -- toggle write for this exact (organization_id, feature_key) composite PK
+  -- would otherwise abort a re-run of this section with a duplicate-key
+  -- error under ON_ERROR_STOP=1 — this section creates its own state and
+  -- must be safe to run indefinitely, same discipline as every other
+  -- section's rolled-back transaction.
+  insert into organization_feature_toggles (organization_id, feature_key, enabled, updated_by)
+  values (:ALDER, 'org_portal.members_create', true, (select id from users limit 1))
+  on conflict (organization_id, feature_key) do update
+    set enabled = excluded.enabled, updated_by = excluded.updated_by;
+  select assert_eq((select count(*) from organization_feature_toggles), 1,
+                   'alder: sees its own toggle row');
+  -- assert_eq is bigint-only (no boolean overload) — every boolean check in
+  -- this section goes through the FROM-less `count(*) WHERE <bool>` idiom
+  -- (one virtual row; 1 if the predicate holds, 0 if not), same discipline
+  -- the rest of this file already applies via row counts.
+  select assert_eq(
+    (select count(*) from organization_feature_toggles
+      where organization_id = :ALDER and feature_key = 'org_portal.members_create'
+        and enabled = true),
+    1, 'alder: the toggle it just wrote reads back enabled');
+
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from organization_feature_toggles), 0,
+                   'bramblewood: sees no alder toggle rows');
+  -- Known cross-org read, same discipline as sections 14/15's known-id check
+  -- (a composite PK here, not a surrogate id — same property either way): a
+  -- foreign org querying by ALDER's exact org id + feature key returns zero,
+  -- not a 403 that would confirm the row exists.
+  select assert_eq(
+    (select count(*) from organization_feature_toggles
+      where organization_id = :ALDER and feature_key = 'org_portal.members_create'),
+    0, 'bramblewood: cross-org read of alder''s toggle by known (org, key) returns zero');
+rollback;
+
+-- The write side of tenant isolation: bramblewood cannot plant a toggle row
+-- for alder by naming alder's organization_id in the INSERT, even while its
+-- own GUC is set to bramblewood — the WITH CHECK clause on tenant_isolation
+-- rejects it, same F21-shaped guarantee section 4 proved for memberships.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  do $$
+  begin
+    insert into organization_feature_toggles (organization_id, feature_key, enabled)
+    values ('22222222-2222-2222-2222-222222222222', 'org_portal.members_create', true);
+    raise exception 'FAIL — bramblewood wrote a toggle row into alder''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_feature_toggles tenant_isolation: cross-org write rejected';
+  end $$;
+rollback;
+
+-- FORCE RLS specifically (F1).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'organization_feature_toggles' and relforcerowsecurity),
+    1, 'organization_feature_toggles: FORCE row level security is set');
+commit;
+
+-- The presby_app grant shape, proven directly — full select/insert/update/
+-- delete, same discipline as section 17's organization_profiles check.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_feature_toggles'
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    4, 'organization_feature_toggles: presby_app has full select/insert/update/delete');
+commit;
+
+-- Deliverable B: the permission-catalog rows exist. `permissions` carries no
+-- organization_id and no RLS (src/lib/db/domain/authz.ts) — queryable with
+-- no GUC set.
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'org_features.manage'),
+    1, 'permissions: org_features.manage catalog row exists');
+  select assert_eq(
+    (select count(*) from permissions where key = 'people.manage'),
+    1, 'permissions: people.manage catalog row exists');
+commit;
+
+-- And queryable through presby_has_permission() — not just present as a row.
+-- Tobias Renwick (:CLERK) holds stated_clerk at Alder Creek, which
+-- scripts/seed-dev.sql binds to both new keys alongside its existing
+-- role_grants.manage/roll.propose/directory.view_hidden grant.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :ALDER, 'org_features.manage')),
+    1, 'presby_has_permission: stated_clerk holds org_features.manage at alder');
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :ALDER, 'people.manage')),
+    1, 'presby_has_permission: stated_clerk holds people.manage at alder');
+  -- roll.propose/roll.approve already existed (DECISION-078) — re-proven here
+  -- only to pin that this migration didn't disturb the existing split.
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :ALDER, 'roll.propose')),
+    1, 'presby_has_permission: stated_clerk still holds roll.propose (DECISION-078, unchanged)');
+commit;
+
+-- Cross-org: the SAME person, at an org where they hold no grant at all,
+-- must not read as having the permission. presby_effective_permissions()
+-- joins through role_grants/group_memberships, which are FORCE RLS on
+-- organization_id — Tobias has no role_grants row at bramblewood.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :BRAMBLE, 'org_features.manage')),
+    0, 'presby_has_permission: stated_clerk holds NOTHING at bramblewood (no grant there)');
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 20. Two schema-layer defects found while building member management's
+--     server logic (docs/work-log/2026-08-25-member-management.md, "Two
+--     schema-layer findings, verified live"), fixed by drizzle/
+--     0028_presby_people_write_rls_fix.sql. Both were pre-existing gaps in
+--     drizzle/0009_presby_rls.sql, unrelated to that pipeline's own code.
+--
+--     Finding 1 — `people`'s `visible_via_membership` policy had no WITH
+--     CHECK, so it defaulted to reusing USING for writes: an INSERT of a
+--     brand-new person required an EXISTING membership referencing a
+--     `people.id` that, by construction, cannot exist yet. This blocked
+--     `createPerson()`'s `identity.mode === "new"` branch categorically.
+--     Fixed by splitting the single FOR ALL policy into command-scoped
+--     policies, with INSERT gated by a NEW SECURITY DEFINER helper,
+--     `presby_person_unclaimed_or_own_org()` — SECURITY DEFINER is
+--     load-bearing here, not decoration: a first draft wrote the case
+--     (a)/(b) check as a literal SQL predicate directly in the policy, and
+--     it was silently wrong for the exact reason F26 already names — a
+--     plain `select ... from memberships` evaluated as presby_app inside
+--     the ACTING org's own context is RLS-blind to that person's
+--     memberships at any OTHER org, so "not exists anywhere" always read as
+--     "not exists AT THIS ORG" and let any org attach a child row
+--     (address/contact_method/etc) to a person it had no relationship to
+--     at all. Caught by running it, not by review — see this section's own
+--     assertion 20b below, which is the regression pin.
+--
+--     Finding 2 — `presby_freeze_approved_roll_action()`'s BEFORE DELETE
+--     path unconditionally `return new`ed, which is always NULL on DELETE
+--     in Postgres and means "silently skip deleting this row" — no
+--     exception, for a `pending` row exactly as much as an `approved` one.
+--     Fixed by returning OLD on the DELETE path (after the existing
+--     approved-row guard, which now genuinely runs for DELETE too, not
+--     just UPDATE). A second live-caught bug surfaced fixing this one:
+--     `TG_OP` is always UPPERCASE ('DELETE'), so an initial `tg_op =
+--     'delete'` (lowercase) silently never matched and reproduced the
+--     exact original bug for PENDING rows specifically — assertion 20d
+--     below pins the fixed, case-correct behavior.
+-- ---------------------------------------------------------------------------
+
+-- 20a. Finding 1, happy path: a brand-new person, invisible until a
+--      membership links it, matching the SAME "insert-permissive,
+--      read-restrictive" shape this table's SELECT policy always had.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  create temporary table t20_fresh_person as select gen_random_uuid() as id;
+  insert into people (id, first_name, last_name)
+    select id, 'Fixture', 'FreshPersonT20' from t20_fresh_person;
+  select assert_eq(
+    (select count(*) from people where id = (select id from t20_fresh_person)),
+    0, 'finding 1: a freshly-inserted person is invisible before any membership links it');
+  insert into memberships (organization_id, person_id, engagement_status)
+    select :ALDER, id, 'visitor' from t20_fresh_person;
+  select assert_eq(
+    (select count(*) from people where id = (select id from t20_fresh_person)),
+    1, 'finding 1: the same person becomes visible once alder holds a membership for them');
+  -- Case (b): a SECOND child row for a person this org already holds a
+  -- membership for must also succeed (not just brand-new persons).
+  insert into addresses (person_id, address_type, line1)
+    select id, 'home', 'One Fixture Way' from t20_fresh_person;
+  select assert_eq(
+    (select count(*) from addresses where person_id = (select id from t20_fresh_person)),
+    1, 'finding 1: an address insert for a person this org already holds a membership for succeeds');
+rollback;
+
+-- 20b. Finding 1, THE regression pin: an org with NO relationship to a real,
+--      already-claimed person must not be able to attach a child row to
+--      them — the exact vandalism shape the naive (non-SECURITY-DEFINER)
+--      first draft of this fix silently allowed, caught only by running it.
+--      :PASTOR holds real memberships at :ALDER and :PRESBY, none at
+--      :BRAMBLE.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  do $$
+  begin
+    insert into addresses (person_id, address_type, line1)
+    values ('c0000000-0000-0000-0000-000000000006', 'home', 'Should Never Be Written');
+    raise exception 'FAIL finding 1 regression — bramblewood attached an address to a person it has no relationship with';
+  exception when insufficient_privilege then
+    raise notice 'pass  finding 1: cross-org child-row insert onto an unrelated, already-claimed person rejected';
+  end $$;
+rollback;
+
+-- 20c. F21 itself, re-proven unaffected by the policy split above (same
+--      assertion shape as section 4).
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  do $$
+  begin
+    insert into memberships (organization_id, person_id, engagement_status)
+    values ('33333333-3333-3333-3333-333333333333',
+            'c0000000-0000-0000-0000-000000000006', 'visitor');
+    raise exception 'FAIL F21 regression (post finding-1 fix) — unauthorized link succeeded';
+  exception when insufficient_privilege then
+    raise notice 'pass  F21 unaffected: unauthorized link to an existing person still rejected';
+  end $$;
+rollback;
+
+-- 20d. Finding 2: a PENDING roll_actions row can be DELETEd (working-state
+--      cleanup, same latitude invariant 4's own text grants pending rows
+--      for UPDATE); an APPROVED row's DELETE is still rejected, not
+--      silently no-op'ed.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into roll_actions (id, organization_id, person_id, kind, effective_date,
+                            resulting_roll, approval_status)
+  values ('aaaaaaaa-0000-0000-0000-0000000000a2', :ALDER, :ELDER, 'other_gain',
+          current_date, 'active', 'pending');
+  delete from roll_actions where id = 'aaaaaaaa-0000-0000-0000-0000000000a2';
+  select assert_eq(
+    (select count(*) from roll_actions where id = 'aaaaaaaa-0000-0000-0000-0000000000a2'),
+    0, 'finding 2: a pending roll_actions row can now be deleted (was silently no-op''d before the fix)');
+
+  insert into roll_actions (id, organization_id, person_id, kind, effective_date,
+                            resulting_roll, approval_status)
+  values ('bbbbbbbb-0000-0000-0000-0000000000b2', :ALDER, :ELDER, 'other_gain',
+          current_date, 'active', 'approved');
+  do $$
+  begin
+    delete from roll_actions where id = 'bbbbbbbb-0000-0000-0000-0000000000b2';
+    raise exception 'FAIL finding 2 — an approved roll_actions row was deleted';
+  exception when check_violation then
+    raise notice 'pass  finding 2: an approved roll_actions row DELETE is still rejected, not silently no-op''d';
+  end $$;
+rollback;

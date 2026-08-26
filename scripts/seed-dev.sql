@@ -246,7 +246,12 @@ insert into permissions (key, module, description, sensitivity_tier) values
   ('role_grants.manage','authz','Grant or revoke a role at this organization',1),
   -- Portal home + directory v2, Increment 4: duplicates
   -- drizzle/0025_presby_deacon_linkage.sql's own insert, same pattern.
-  ('directory.view_hidden','directory','See directory-hidden rows and the deacon roster',1)
+  ('directory.view_hidden','directory','See directory-hidden rows and the deacon roster',1),
+  -- Member management (docs/work-log/2026-08-25-member-management.md):
+  -- duplicates drizzle/0026_presby_org_feature_toggles.sql's and
+  -- drizzle/0027_presby_member_management.sql's own inserts, same pattern.
+  ('org_features.manage','org_features','Turn optional portal features on or off for this organization',1),
+  ('people.manage','people','Create and edit people, households, and contact/address detail',1)
 on conflict (key) do nothing;
 
 insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
@@ -316,7 +321,31 @@ insert into app_role_permissions (role_id, permission_key) values
   -- directory.view_hidden directly. Tobias Renwick's existing stated_clerk
   -- grant (below) already carries this — no new role_grants row needed, same
   -- reasoning as roll.propose's own comment two lines above.
-  ('f0000000-0000-0000-0000-000000000005','directory.view_hidden');
+  ('f0000000-0000-0000-0000-000000000005','directory.view_hidden'),
+  -- Member management, Deliverable A / DECISION-097: the fixture binding the
+  -- architect's ruling named directly ("stated_clerk (f0000000-...-0005),
+  -- which already holds role_grants.manage — no new app_role_permissions/
+  -- role_grants row is invented for a role that doesn't exist"). Tobias
+  -- Renwick's existing stated_clerk grant already carries this — no new
+  -- role_grants row needed, same reasoning as roll.propose's own comment
+  -- above.
+  ('f0000000-0000-0000-0000-000000000005','org_features.manage'),
+  -- Member management, Deliverable B: "people.manage added to stated_clerk's
+  -- existing grant (already holds roll.propose) — creating a person and
+  -- proposing their first roll action is one wizard submit, so the same
+  -- office holds both permissions in the fixture" (Phase 3). Same
+  -- no-new-role_grants-row reasoning as the two bindings immediately above.
+  ('f0000000-0000-0000-0000-000000000005','people.manage'),
+  -- docs/TODO.md follow-up (Phase 5 QA, 2026-08-25-member-management.md):
+  -- roll.approve was only ever bound to session_member (f...0001), a
+  -- GROUP-bound role with no loginable fixture person behind it — the
+  -- pending-approval worklist had no fixture account that could exercise it
+  -- end-to-end (temporarily hand-granted to stated_clerk during Phase 4
+  -- browser verification, then removed). Bound here permanently, same
+  -- direct-to-Tobias-Renwick pattern as roll.propose/people.manage/
+  -- org_features.manage above — the one office now holds every permission
+  -- Increment 1's own wizard (propose+approve folded together) needs.
+  ('f0000000-0000-0000-0000-000000000005','roll.approve');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would

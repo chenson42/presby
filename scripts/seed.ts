@@ -254,6 +254,38 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.features",
+      // ON: /o/<slug>/admin/features (the per-org feature-toggle admin
+      // surface, DECISION-097) is reachable at all. Checked bare, no
+      // DECISION-026 fail-open wrapper — a toggle, not an auth path
+      // (docs/work-log/2026-08-25-member-management.md Deliverable A, Phase
+      // 3). Never substitutes for org_features.manage: a stated clerk with
+      // the flag on and no grant still sees the in-shell "you don't have
+      // permission" state, not the features page itself (DECISION-003).
+      // Seeded OFF, same "ships dark until the page lands" reasoning as
+      // org_portal.directory/roles/tickets.
+      description:
+        "Per-org feature-toggle admin page in (org). OFF = /o/<slug>/admin/features renders 'isn't available yet' regardless of the viewer's org_features.manage grant.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.members_create",
+      // ON: /o/<slug>/admin/members* (create-person wizard + the pending
+      // roll-action approve/deny worklist) is reachable at all — gated
+      // ADDITIONALLY by the org-level org_portal.members_create toggle
+      // (organization_feature_toggles), per DECISION-097's three-axis gate
+      // order: this flag -> the org toggle of the same key -> the
+      // people.manage/roll.propose/roll.approve permission checks
+      // (docs/work-log/2026-08-25-member-management.md Deliverable B, Phase
+      // 3). Checked bare, no DECISION-026 fail-open wrapper — a toggle, not
+      // an auth path. Never substitutes for any of those permissions
+      // (DECISION-003). Seeded OFF, same "ships dark until the page lands"
+      // reasoning as its org_portal.* siblings.
+      description:
+        "Member-creation wizard + roll-action approval worklist in (org). OFF = /o/<slug>/admin/members* renders 'isn't turned on yet' regardless of the org toggle or the viewer's grants.",
+      enabled: false,
+    },
+    {
       key: "ui.branded_signin",
       // ON: /signin renders the origin org's brand when reached via a live
       // public site's /o/<slug> callback. Checked bare, no DECISION-026

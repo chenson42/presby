@@ -1,0 +1,57 @@
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+
+/**
+ * The three non-data-bearing answers `/o/<slug>/admin/features` can give (a
+ * fourth — an unauthorized org, or a 404 slug — is handled one level up by
+ * `org-states.tsx` / `not-found.tsx`, reused as-is). Modeled directly on
+ * `admin/roles/roles-states.tsx`, same three-block structure and copy
+ * register — see that file's header for why the three are deliberately not
+ * collapsed into one shared copy block.
+ */
+
+/** `org_portal.features` is off. A product-not-here message, not a denial. */
+export function FeaturesFlagOff({ name }: { name: string }) {
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold">Features</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Feature administration isn&apos;t turned on for {name} yet.
+      </p>
+    </section>
+  );
+}
+
+/**
+ * `listFeatureToggles()` returned `{ kind: "forbidden" }` — the viewer has
+ * an active relationship with the organization but holds no
+ * `org_features.manage` grant.
+ */
+export function FeaturesForbidden({ name }: { name: string }) {
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold">Features</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        You don&apos;t have permission to manage features at {name}. If you
+        think this is a mistake, ask your stated clerk or another
+        administrator there.
+      </p>
+    </section>
+  );
+}
+
+/** A genuine, non-`OrgAccessError` failure reading feature toggles. */
+export function FeaturesLoadError({ slug }: { slug: string }) {
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold">Features</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        We couldn&apos;t load feature settings right now. Try again in a
+        moment.
+      </p>
+      <Button asChild className="mt-6 min-h-11">
+        <Link href={`/o/${slug}/admin/features`}>Try again</Link>
+      </Button>
+    </section>
+  );
+}

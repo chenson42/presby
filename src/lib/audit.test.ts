@@ -124,6 +124,13 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Org creation (2026-08-24) — written from
   // src/app/(admin)/admin/organizations/new/actions.ts
   ORG_CREATED: "org.created",
+  // Per-org feature toggles (2026-08-25, DECISION-097) — written from
+  // src/app/(org)/o/[slug]/admin/features/actions.ts
+  ORG_FEATURE_TOGGLED: "tenant.org_feature.toggled",
+  // Member management, Increment 1 (2026-08-25) — written from
+  // src/app/(org)/o/[slug]/admin/members/pending/actions.ts
+  ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
+  ROLL_ACTION_DENIED: "tenant.roll_action.denied",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

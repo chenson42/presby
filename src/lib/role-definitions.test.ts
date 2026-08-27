@@ -30,7 +30,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
@@ -578,6 +578,185 @@ describe.skipIf(!hasDb)(
         const result = await listTemplateRoles(adminPerson, orgA);
         if (result.kind !== "ok") throw new Error("expected ok");
         expect(result.templates.map((t) => t.id)).not.toContain(customRoleA);
+      });
+    });
+
+    // -----------------------------------------------------------------
+    // listTemplateRoles — organization_type_scope filtering
+    //
+    // Phase 5 (QA, docs/work-log/2026-08-26-presbytery-functionality.md) FAIL
+    // finding: drizzle/0037 shipped this codebase's first-ever non-null
+    // `organization_type_scope` template row (`presbytery_stated_clerk`, real
+    // key in the live dev DB), and NOTHING exercised the type-scope filter
+    // both `listTemplateRoles` and `adoptTemplate` share
+    // (role-definitions.ts:432-438 / :791-796) against a non-null scope —
+    // the suite only ever proved the NULL-scope (`organizationTypeScope:
+    // null`) path via `templateRoleId` above. This block seeds its OWN
+    // presbytery-scoped template row (self-contained, not the live 0037 row
+    // — matches this file's own stated convention of not depending on
+    // migration-seeded fixed-id rows) and proves both directions.
+    // -----------------------------------------------------------------
+
+    describe("listTemplateRoles — organization_type_scope filtering", () => {
+      let orgPresbytery: string;
+      let presbyteryAdminPerson: string;
+      let presbyteryTemplateRoleId: string;
+
+      beforeAll(async () => {
+        const platform = getPlatformDb();
+        const stamp = Date.now();
+
+        const [orgRow] = await platform
+          .insert(organizations)
+          .values({
+            organizationType: "presbytery",
+            name: `Fixture Presbytery for role-definitions.test.ts scope filtering`,
+            slug: `role-definitions-test-presbytery-${stamp}`,
+            path: `role_definitions_test_presbytery_${stamp}`,
+            platformStatus: "unmanaged",
+          })
+          .returning({ id: organizations.id });
+        orgPresbytery = orgRow!.id;
+
+        // drizzle/0017's sync trigger requires an active_membership derived
+        // group before any memberships insert at this org. The "roster"
+        // groupType row already exists from the outer beforeAll above.
+        const [gt] = await platform
+          .select({ id: groupTypes.id })
+          .from(groupTypes)
+          .where(eq(groupTypes.key, "roster"))
+          .limit(1);
+        await platform.insert(groups).values({
+          organizationId: orgPresbytery,
+          groupTypeId: gt!.id,
+          name: "Active Membership",
+          membershipSource: "derived",
+          derivedFrom: "active_membership",
+          isProtected: true,
+        });
+
+        const [personRow] = await platform
+          .insert(people)
+          .values({ firstName: "Wilhelmina", lastName: "Adeyemi-Okoro" })
+          .returning({ id: people.id });
+        presbyteryAdminPerson = personRow!.id;
+        await platform.insert(memberships).values({
+          organizationId: orgPresbytery,
+          personId: presbyteryAdminPerson,
+          engagementStatus: "regular",
+          currentRoll: "active",
+        });
+
+        const [roleRow] = await platform
+          .insert(appRoles)
+          .values({
+            organizationId: orgPresbytery,
+            key: "presbytery_role_admin_test",
+            name: "Presbytery Role Administrator (test)",
+            roleKind: "constitutional",
+            isProtected: true,
+          })
+          .returning({ id: appRoles.id });
+        await platform
+          .insert(appRolePermissions)
+          .values({ roleId: roleRow!.id, permissionKey: "roles.manage" });
+        await platform.insert(roleGrants).values({
+          organizationId: orgPresbytery,
+          roleId: roleRow!.id,
+          personId: presbyteryAdminPerson,
+          startsOn: "2020-01-01",
+          grantedBy: grantingUserId,
+        });
+
+        // The presbytery-scoped template — the fixture analog of drizzle/
+        // 0037's real `presbytery_stated_clerk` row, self-seeded so this
+        // file doesn't depend on that migration having landed.
+        const [templateRow] = await platform
+          .insert(appRoles)
+          .values({
+            organizationId: null,
+            organizationTypeScope: "presbytery",
+            key: `presbytery_template_test_${stamp}`,
+            name: "Presbytery Template Role (test)",
+            roleKind: "constitutional",
+            isProtected: true,
+          })
+          .returning({ id: appRoles.id });
+        presbyteryTemplateRoleId = templateRow!.id;
+        await platform.insert(appRolePermissions).values({
+          roleId: presbyteryTemplateRoleId,
+          permissionKey: "directory.view",
+        });
+      });
+
+      afterAll(async () => {
+        const platform = getPlatformDb();
+        // organizationId IS NULL — not cascaded by deleting orgPresbytery.
+        await platform
+          .delete(appRoles)
+          .where(eq(appRoles.id, presbyteryTemplateRoleId));
+        // Same trigger-disable dance as the outer afterAll: deleting
+        // orgPresbytery cascades to this fixture's own active_membership
+        // derived group's group_memberships rows.
+        await platform.execute(
+          sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+        );
+        try {
+          await platform
+            .delete(organizations)
+            .where(eq(organizations.id, orgPresbytery));
+        } finally {
+          await platform.execute(
+            sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+          );
+        }
+        await platform
+          .delete(people)
+          .where(eq(people.id, presbyteryAdminPerson));
+      });
+
+      it("a congregation-context caller does NOT see the presbytery-scoped template, but DOES see the NULL-scope one", async () => {
+        const result = await listTemplateRoles(adminPerson, orgA);
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") return;
+        const ids = result.templates.map((t) => t.id);
+        expect(ids).not.toContain(presbyteryTemplateRoleId);
+        // templateRoleId (outer fixture, organizationTypeScope: null) is
+        // this suite's own stand-in for the NULL-scope committee_chair row.
+        expect(ids).toContain(templateRoleId);
+      });
+
+      it("a presbytery-context caller DOES see the presbytery-scoped template, alongside the NULL-scope one", async () => {
+        const result = await listTemplateRoles(
+          presbyteryAdminPerson,
+          orgPresbytery,
+        );
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") return;
+        const ids = result.templates.map((t) => t.id);
+        expect(ids).toContain(presbyteryTemplateRoleId);
+        expect(ids).toContain(templateRoleId);
+      });
+
+      it("adoptTemplate rejects adopting the presbytery-scoped template from a congregation context, writing nothing", async () => {
+        const result = await adoptTemplate(adminPerson, orgA, {
+          templateRoleId: presbyteryTemplateRoleId,
+          key: "should_not_adopt_presbytery_template",
+        });
+        expect(result).toEqual({ kind: "template_not_found" });
+
+        const platform = getPlatformDb();
+        const [row] = await platform
+          .select({ id: appRoles.id })
+          .from(appRoles)
+          .where(
+            and(
+              eq(appRoles.organizationId, orgA),
+              eq(appRoles.key, "should_not_adopt_presbytery_template"),
+            ),
+          )
+          .limit(1);
+        expect(row).toBeUndefined();
       });
     });
 

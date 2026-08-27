@@ -39,7 +39,7 @@ export const ORG_FEATURE_CATALOG = [
     key: "org_portal.members_create",
     name: "Add & approve members",
     description:
-      "Lets this congregation's admins create people and approve roll actions.",
+      "Lets this organization's admins create people and approve roll actions.",
   },
   // Member edit: tiered sensitive information (docs/work-log/
   // 2026-08-26-member-sensitive-info.md, Phase 3/DECISION-108). A DEDICATED
@@ -50,7 +50,7 @@ export const ORG_FEATURE_CATALOG = [
     key: "org_portal.sensitive_info",
     name: "Tiered sensitive information",
     description:
-      "Lets this congregation enter pastoral notes, demographics, medical/allergy info, and disability records for its members, subject to each viewer's own tier-3 permission grants.",
+      "Lets this organization enter pastoral notes, demographics, medical/allergy info, and disability records for its members, subject to each viewer's own tier-3 permission grants.",
   },
 ] as const;
 

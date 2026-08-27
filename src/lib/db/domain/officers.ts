@@ -32,6 +32,25 @@ export const orderedMinistry = pgEnum("ordered_ministry", [
   "minister_of_word_and_sacrament",
 ]);
 
+/**
+ * Ministry credentials & pastoral appointments (docs/work-log/
+ * 2026-08-26-presbytery-functionality.md, Increment 2 / DECISION-112 /
+ * DECISION-116). Distinct from `endedOn`/`endedReason` below: those model
+ * TRUE removal from ordered ministry (rare); `status` models everything
+ * short of that — a retired or on-leave minister is still ordained.
+ * Values adapted verbatim from psvonline-portal's `credentialStatusEnum`
+ * (proven prior art, no reason to diverge).
+ */
+export const credentialStatus = pgEnum("credential_status", [
+  "active",
+  "honorably_retired",
+  "on_leave",
+  "exempt_from_active_service",
+  "disciplined",
+  "removed",
+  "deceased",
+]);
+
 export const ordinations = pgTable(
   "ordinations",
   {
@@ -47,6 +66,7 @@ export const ordinations = pgTable(
     // Removal from ordered ministry. Rare, but it exists.
     endedOn: date("ended_on"),
     endedReason: text("ended_reason"),
+    status: credentialStatus("status").notNull().default("active"),
     recordedAt: timestamp("recorded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -154,5 +174,87 @@ export const officerTerms = pgTable(
       "officer_terms_org_unit_deacon_check",
       sql`${t.orgUnitId} is null or ${t.office} = 'deacon'`,
     ),
+  ],
+);
+
+/**
+ * Pastoral appointments (docs/work-log/2026-08-26-presbytery-functionality.md,
+ * Increment 2 / DECISION-112). The third "who serves in what capacity" shape
+ * in this file, after ordinations (an event) and officerTerms (a session/
+ * diaconate term). A pastoral call is an ecclesiastical office, not a
+ * software permission — deliberately NOT expressed through role_grants/
+ * app_roles (the same clerk_of_session-stays-a-data-value conflation the
+ * officers pipeline already refused) and NOT through officerTerms (its
+ * derived-court-roster trigger semantics don't apply to a pastoral call).
+ *
+ * OWNED BY THE PRESBYTERY, forced structurally rather than chosen
+ * stylistically: the composite person FK (personId, organizationId ->
+ * memberships) that F2-safety requires can only resolve at the presbytery,
+ * since a minister's membership is at the presbytery per D1 — exactly like
+ * ordinations' own FK. servingOrgId references organizations directly (a
+ * plain FK is legal here: organizations is the one cross-tenant-readable
+ * structural table, schema-design.md section 17).
+ *
+ * The congregation-side read of an appointment recorded about it is
+ * explicitly NOT built by this table alone (DECISION-112) — deferred to a
+ * future publication mechanism, not solved with a bespoke cross-org RLS
+ * policy. No DB-level overlap-exclusion constraint (unlike
+ * officer_terms_no_overlap): a pastoral call carries none of the quorum/
+ * minute-validity stakes that justified the GIST exclusion there, so an
+ * app-level check-before-insert is proportionate (same reasoning
+ * DECISION-110 accepted for group_memberships).
+ */
+export const appointmentCallType = pgEnum("appointment_call_type", [
+  "installed_pastor",
+  "designated_pastor",
+  "stated_supply",
+  "interim_pastor",
+  "temporary_supply",
+  "parish_associate",
+]);
+
+export const appointments = pgTable(
+  "appointments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // The PRESBYTERY, forced (D1/F2) — never the serving congregation.
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    personId: uuid("person_id").notNull(),
+    // Plain FK — organizations is the one cross-tenant-readable structural
+    // table (section 17). Validated at the application layer to be an
+    // actual member congregation of this presbytery (parentId +
+    // organizationType check) before insert; the DB does not enforce that
+    // relationship itself.
+    servingOrgId: uuid("serving_org_id")
+      .notNull()
+      .references(() => organizations.id),
+    callType: appointmentCallType("call_type").notNull(),
+    startsOn: date("starts_on").notNull(),
+    // null = current/open-ended appointment.
+    endsOn: date("ends_on"),
+    endReason: text("end_reason"),
+    minuteReference: text("minute_reference"),
+    // Nullable: same F24 reasoning as officerTerms.recordedBy — an imported
+    // historical appointment has no acting user to attribute it to.
+    recordedBy: uuid("recorded_by").references(() => users.id),
+    recordedAt: timestamp("recorded_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("appointments_org_person_idx").on(t.organizationId, t.personId),
+    index("appointments_serving_org_idx").on(
+      t.servingOrgId,
+      t.startsOn,
+      t.endsOn,
+    ),
+    unique("appointments_id_org_key").on(t.id, t.organizationId),
+    foreignKey({
+      columns: [t.personId, t.organizationId],
+      foreignColumns: [memberships.personId, memberships.organizationId],
+      name: "appointments_person_fk",
+    }),
   ],
 );

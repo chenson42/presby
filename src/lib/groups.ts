@@ -16,7 +16,7 @@ import { memberships, people } from "@/lib/db/domain/people";
  * `hasGroupsManage` helper, typed `GroupsResult` variants instead of thrown
  * exceptions for every expected/denied outcome.
  *
- * THIS MODULE NEVER TOUCHES A DERIVED GROUP. "The Court Is Not a Group"
+ * THIS MODULE NEVER WRITES TO A DERIVED GROUP. "The Court Is Not a Group"
  * (CLAUDE.md) — Session, Board of Deacons, and Active Membership are
  * populated only by the `officer_terms`/`memberships` triggers
  * (`drizzle/0009_presby_rls.sql`, `drizzle/0017`). Every read here filters to
@@ -123,6 +123,16 @@ export interface GroupListEntry {
   name: string;
   groupTypeName: string;
   memberCount: number;
+}
+
+export type DerivedFromKey = "session" | "diaconate" | "active_membership";
+
+export interface DerivedGroupListEntry {
+  groupId: string;
+  name: string;
+  groupTypeName: string;
+  memberCount: number;
+  derivedFrom: DerivedFromKey;
 }
 
 export interface GroupRosterEntry {
@@ -251,6 +261,80 @@ async function groupTypeNamesByIds(
     .from(groupTypes)
     .where(inArray(groupTypes.id, distinctIds));
   return new Map(rows.map((row) => [row.id, row.name]));
+}
+
+// ---------------------------------------------------------------------------
+// listDerivedGroups
+// ---------------------------------------------------------------------------
+
+interface DerivedGroupListRow {
+  group_id: string;
+  name: string;
+  group_type_id: string;
+  derived_from: string;
+  member_count: string;
+}
+
+/**
+ * Every `membership_source = 'derived'` group at this org (Session, Board of
+ * Deacons, Active Membership), with a CURRENT (`ends_on is null`) member
+ * count — added by docs/work-log/2026-08-26-groups-show-derived.md, the
+ * operator-requested follow-up to the CRUD pipeline above ("should groups
+ * show the dynamic groups? ... i think it should").
+ *
+ * READ-ONLY, ON PURPOSE. This is a second, separate query from `listGroups`
+ * (rather than one query returning both kinds) so the two never share a
+ * result shape a caller could accidentally feed into `updateGroup`/
+ * `addGroupMember`/`endGroupMembership` — those three still resolve a
+ * `groupId` through their OWN `membership_source = 'managed'` filter
+ * regardless of what this function returns, so this addition introduces
+ * zero new write paths and does not touch "The Court Is Not a Group"'s
+ * enforcement at all (CLAUDE.md; DECISION-110).
+ *
+ * Same `getPlatformDb()` group-type-name lookup as `listGroups`, for the
+ * identical reason (`group_types` platform-template rows are invisible
+ * under `tx` — see this file's header).
+ */
+export async function listDerivedGroups(
+  viewerPersonId: string,
+  organizationId: string,
+): Promise<GroupsResult<DerivedGroupListEntry[]>> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasGroupsManage(tx, viewerPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    const result = await tx.execute(sql`
+      select g.id as group_id,
+             g.name as name,
+             g.group_type_id as group_type_id,
+             g.derived_from as derived_from,
+             count(gm.id) filter (where gm.ends_on is null) as member_count
+        from groups g
+        left join group_memberships gm
+          on gm.group_id = g.id and gm.organization_id = g.organization_id
+       where g.organization_id = ${organizationId}
+         and g.membership_source = 'derived'
+       group by g.id, g.name, g.group_type_id, g.derived_from
+       order by g.name
+    `);
+
+    const rows =
+      (result as unknown as { rows?: DerivedGroupListRow[] }).rows ?? [];
+    const groupTypeNames = await groupTypeNamesByIds(
+      rows.map((row) => row.group_type_id),
+    );
+
+    const data: DerivedGroupListEntry[] = rows.map((row) => ({
+      groupId: row.group_id,
+      name: row.name,
+      groupTypeName: groupTypeNames.get(row.group_type_id) ?? "Group",
+      memberCount: Number(row.member_count),
+      derivedFrom: row.derived_from as DerivedFromKey,
+    }));
+
+    return { kind: "ok", data };
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -6,12 +6,12 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
-import { listGroups } from "@/lib/groups";
+import { listDerivedGroups, listGroups } from "@/lib/groups";
 import { isFlagEnabled } from "@/lib/flags";
 import { Button } from "@/components/ui/button";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import { GroupsFlagOff, GroupsForbidden, GroupsLoadError } from "./groups-states";
-import { GroupsList } from "./groups-list";
+import { DerivedGroupsList, GroupsList } from "./groups-list";
 
 const GROUPS_FLAG = "org_portal.groups";
 
@@ -102,6 +102,31 @@ export default async function GroupsPage({
     return <GroupsLoadError slug={slug} />;
   }
 
+  // listDerivedGroups() is only called once listGroups() has already
+  // confirmed groups.manage — same permission, same page, so calling it
+  // unconditionally on every render (including a forbidden/error one above)
+  // would be a wasted read at best and a confusing double-error at worst.
+  // docs/work-log/2026-08-26-groups-show-derived.md.
+  let derivedResult;
+  try {
+    derivedResult = await listDerivedGroups(
+      resolved.org.personId,
+      resolved.org.organizationId,
+    );
+  } catch (err) {
+    if (err instanceof OrgAccessError) {
+      throw err;
+    }
+    return <GroupsLoadError slug={slug} />;
+  }
+
+  if (derivedResult.kind === "forbidden") {
+    return <GroupsForbidden name={resolved.org.name} />;
+  }
+  if (derivedResult.kind !== "ok") {
+    return <GroupsLoadError slug={slug} />;
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -117,6 +142,7 @@ export default async function GroupsPage({
       </div>
 
       <GroupsList slug={slug} entries={result.data} />
+      <DerivedGroupsList slug={slug} entries={derivedResult.data} />
     </section>
   );
 }

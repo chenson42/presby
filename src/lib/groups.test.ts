@@ -38,6 +38,7 @@ const hasDb = Boolean(
 
 describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => {
   let listGroups: typeof import("./groups").listGroups;
+  let listDerivedGroups: typeof import("./groups").listDerivedGroups;
   let getGroup: typeof import("./groups").getGroup;
   let getGroupFormOptions: typeof import("./groups").getGroupFormOptions;
   let createGroup: typeof import("./groups").createGroup;
@@ -84,6 +85,7 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
   beforeAll(async () => {
     ({
       listGroups,
+      listDerivedGroups,
       getGroup,
       getGroupFormOptions,
       createGroup,
@@ -588,6 +590,66 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
           );
         }
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // listDerivedGroups — docs/work-log/2026-08-26-groups-show-derived.md
+  // ---------------------------------------------------------------------
+
+  describe("listDerivedGroups — read-only visibility of Session/Board of Deacons/Active Membership", () => {
+    it("forbidden for a person holding no groups.manage", async () => {
+      const result = await listDerivedGroups(narrowPerson, orgA);
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("returns this org's derived groups, each with its derivedFrom key, group-type name, and a member count — and never the managed fixture group", async () => {
+      const result = await listDerivedGroups(clerkPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+
+      expect(result.data.some((g) => g.groupId === managedGroupA)).toBe(false);
+
+      const session = result.data.find((g) => g.groupId === sessionGroupA);
+      expect(session).toEqual({
+        groupId: sessionGroupA,
+        name: "Session",
+        groupTypeName: "court",
+        memberCount: 0,
+        derivedFrom: "session",
+      });
+
+      const activeMembership = result.data.find(
+        (g) => g.groupId === activeMembershipGroupA,
+      );
+      // memberCount is NOT 0 here, unlike Session — this fixture's own
+      // `membership()` inserts (clerkPerson/narrowPerson/targetPerson/
+      // overlapPerson, all still open; lapsedPerson excluded) each fire
+      // `presby_sync_derived_membership_group()` (drizzle/0017), which adds
+      // a real `group_memberships` row to Active Membership as a SIDE
+      // EFFECT of creating an ordinary membership — this is the trigger
+      // this whole feature exists to surface, so asserting a real count
+      // here (not asserting it away as 0) is the point.
+      expect(activeMembership).toEqual({
+        groupId: activeMembershipGroupA,
+        name: "Active Membership",
+        groupTypeName: "roster",
+        memberCount: 4,
+        derivedFrom: "active_membership",
+      });
+    });
+
+    it("cross-org isolation: never returns another org's derived group, even one with the identical name", async () => {
+      const result = await listDerivedGroups(clerkPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+
+      // orgB was seeded with its own "Active Membership" derived group
+      // (same name, different row) in this file's own beforeAll — confirm
+      // only orgA's own row (by id) comes back.
+      const activeMembershipRows = result.data.filter(
+        (g) => g.name === "Active Membership",
+      );
+      expect(activeMembershipRows).toHaveLength(1);
+      expect(activeMembershipRows[0]!.groupId).toBe(activeMembershipGroupA);
     });
   });
 

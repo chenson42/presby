@@ -36,8 +36,10 @@ vi.mock("@/lib/flags", () => ({
 }));
 
 const listGroups = vi.fn();
+const listDerivedGroups = vi.fn();
 vi.mock("@/lib/groups", () => ({
   listGroups: (...args: unknown[]) => listGroups(...args),
+  listDerivedGroups: (...args: unknown[]) => listDerivedGroups(...args),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -61,6 +63,7 @@ afterEach(() => {
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
   listGroups.mockReset();
+  listDerivedGroups.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -163,6 +166,7 @@ describe("GroupsPage — result branches", () => {
         },
       ],
     });
+    listDerivedGroups.mockResolvedValue({ kind: "ok", data: [] });
 
     const el = await GroupsPage({ params: makeParams() });
     render(el);
@@ -181,11 +185,82 @@ describe("GroupsPage — result branches", () => {
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     isFlagEnabled.mockResolvedValue(true);
     listGroups.mockResolvedValue({ kind: "ok", data: [] });
+    listDerivedGroups.mockResolvedValue({ kind: "ok", data: [] });
 
     const el = await GroupsPage({ params: makeParams() });
     render(el);
 
     expect(screen.getByText(/no committees or groups yet/i)).toBeTruthy();
+  });
+});
+
+describe("GroupsPage — listDerivedGroups() renders the 'Automatic rosters' section", () => {
+  it("only calls listDerivedGroups() after listGroups() resolves ok", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGroups.mockResolvedValue({ kind: "forbidden" });
+
+    await GroupsPage({ params: makeParams() });
+
+    expect(listDerivedGroups).not.toHaveBeenCalled();
+  });
+
+  it("renders derived rows with their member counts and no 'New group'-style affordance beside them", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGroups.mockResolvedValue({ kind: "ok", data: [] });
+    listDerivedGroups.mockResolvedValue({
+      kind: "ok",
+      data: [
+        {
+          groupId: "session-1",
+          name: "Session",
+          groupTypeName: "Court",
+          memberCount: 7,
+          derivedFrom: "session",
+        },
+        {
+          groupId: "roster-1",
+          name: "Active Membership",
+          groupTypeName: "Roster",
+          memberCount: 210,
+          derivedFrom: "active_membership",
+        },
+      ],
+    });
+
+    const el = await GroupsPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByRole("heading", { name: /automatic rosters/i }),
+    ).toBeTruthy();
+    expect(screen.getByText("Session")).toBeTruthy();
+    expect(screen.getByText("7")).toBeTruthy();
+    const officersLink = screen.getByRole("link", { name: /officers/i });
+    expect(officersLink.getAttribute("href")).toBe(
+      "/o/alder-creek/admin/officers",
+    );
+    expect(
+      screen.queryByRole("link", { name: /^session$/i }),
+    ).toBeNull();
+  });
+
+  it("renders the load-error state when listDerivedGroups() throws a non-OrgAccessError", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGroups.mockResolvedValue({ kind: "ok", data: [] });
+    listDerivedGroups.mockRejectedValue(new Error("connection reset"));
+
+    const el = await GroupsPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByText(/couldn.t load group records right now/i),
+    ).toBeTruthy();
   });
 });
 

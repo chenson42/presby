@@ -81,7 +81,7 @@ export function MembersList({
             type="search"
             defaultValue={search}
             placeholder="Name, email, or phone"
-            className="mt-1 min-h-11 bg-background"
+            className="mt-1 min-h-11"
           />
         </div>
         <div>

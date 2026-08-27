@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Lock, Mail, MapPin, Phone } from "lucide-react";
+import { ChevronRight, Lock, Mail, MapPin, Phone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { DirectoryEntry } from "@/lib/directory";
@@ -43,6 +43,14 @@ import { PersonAvatar } from "./person-avatar";
  * would misrepresent hovering over inert whitespace as clickable, and an
  * accent-color flood would fight the `Badge`'s own background (Phase 3 Edge
  * Cases, DECISION-099).
+ *
+ * CHEVRON AFFORDANCE (docs/work-log/2026-08-26-portal-ux-fixes.md, Wave 1B,
+ * finding L1): a real navigable card with no visual "this goes somewhere"
+ * cue read as inert. The name `<Link>` grows a trailing `ChevronRight` that
+ * nudges right on hover — the SAME `group`/`group-hover:translate-x-0.5`
+ * pattern `TileGrid` already established, scoped to the name's own `<Link>`
+ * (not the whole `<Card>`) since this card, unlike a tile, holds sibling
+ * link targets the chevron must not imply are also part of one big link.
  */
 export function PersonCard({
   entry,
@@ -67,11 +75,15 @@ export function PersonCard({
         <div className="min-w-0 flex-1 space-y-1">
           <Link
             href={`/o/${slug}/directory/${entry.personId}`}
-            className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="group flex items-center gap-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            <h3 className="text-lg font-medium break-words hover:underline">
+            <h3 className="min-w-0 break-words text-lg font-medium hover:underline">
               {displayName}
             </h3>
+            <ChevronRight
+              className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+              aria-hidden
+            />
           </Link>
           {entry.isHidden && (
             <Badge variant="outline" className="gap-1">

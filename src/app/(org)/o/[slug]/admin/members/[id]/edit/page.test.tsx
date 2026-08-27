@@ -223,7 +223,7 @@ describe("EditMemberPage — gate composition (DECISION-097)", () => {
 
     expect(screen.getByRole("heading", { name: /edit person/i })).toBeTruthy();
     expect(
-      (screen.getByLabelText(/^first name$/i) as HTMLInputElement).value,
+      (screen.getByLabelText(/^first name/i) as HTMLInputElement).value,
     ).toBe("Nora");
   });
 });
@@ -435,5 +435,42 @@ describe("EditMemberPage — sensitive-info link (docs/work-log/2026-08-26-membe
     expect((link.closest("a") as HTMLAnchorElement).getAttribute("href")).toBe(
       "/o/alder-creek/admin/members/p-1/edit/sensitive",
     );
+  });
+});
+
+describe("EditMemberPage — card-separated visual structure (M2, docs/reviews/2026-08-26-portal-ux.md)", () => {
+  it("wraps Profile, the roll-action form, and the sensitive-info link in their own bg-card panels", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, rollActionEdit: true, sensitiveInfo: true });
+    mockToggles({ membersCreate: true, sensitiveInfo: true });
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getPendingRollActionsForPerson.mockResolvedValue({ kind: "ok", actions: [] });
+    getSensitiveInfoGrants.mockResolvedValue({
+      pastoralNotes: true,
+      demographics: false,
+      medical: false,
+      disabilities: false,
+    });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    const { container } = render(el);
+
+    const cards = container.querySelectorAll(".bg-card");
+    // Profile, Record a roll action, and the sensitive-info link each get
+    // their own panel — three, not one undifferentiated scroll.
+    expect(cards.length).toBe(3);
+
+    const profileHeading = screen.getByRole("heading", { name: /^profile$/i });
+    expect(profileHeading.closest(".bg-card")).not.toBeNull();
+
+    const rollHeading = screen.getByRole("heading", {
+      name: /record a roll action/i,
+    });
+    expect(rollHeading.closest(".bg-card")).not.toBeNull();
+
+    const sensitiveLink = screen.getByText(/pastoral notes, demographics/i);
+    expect(sensitiveLink.closest(".bg-card")).not.toBeNull();
   });
 });

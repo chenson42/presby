@@ -30,6 +30,7 @@ export function IdentityStep({
         register={register}
         errors={errors}
         autoComplete="off"
+        required
       />
       <WizardField
         name="identity.lastName"
@@ -37,6 +38,7 @@ export function IdentityStep({
         register={register}
         errors={errors}
         autoComplete="off"
+        required
       />
       <WizardField
         name="identity.middleName"

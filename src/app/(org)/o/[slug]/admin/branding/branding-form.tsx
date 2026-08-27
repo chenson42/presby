@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OrgMark } from "@/components/brand/org-mark";
 import { BrandPreviewSwatch } from "@/components/brand/brand-preview-swatch";
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import { generateBrandTokens } from "@/lib/brand/generate";
 import { TYPE_PAIRINGS, type TypePairingKey } from "@/lib/brand/contract";
 import { setOrgBrandAction, type PolicyResult } from "./actions";
@@ -84,6 +86,11 @@ export function BrandingForm({
     initialTypePairing,
   );
   const [lightOnly, setLightOnly] = useState(initialLightOnly);
+  // Tracks the (uncontrolled) file input separately — a `type="file"` input
+  // can't be a controlled component, so "did the user pick a new logo" is
+  // its own boolean rather than a comparable value.
+  const [logoSelected, setLogoSelected] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   // THE FIX: re-seed local state whenever the server's own answer changes —
   // this is what makes a just-saved value show up without a real navigation.
@@ -95,11 +102,38 @@ export function BrandingForm({
     setLightOnly(initialLightOnly);
   }, [initialSeedHex, initialTypePairing, initialLightOnly]);
 
+  // H3 (docs/reviews/2026-08-26-portal-ux.md) — the review's OTHER confirmed
+  // data-loss repro (alongside edit-person): dirtying a field here and
+  // clicking the admin shell's "Back to portal" link lost the change with no
+  // warning. This form has no in-form Back/Cancel of its own — the guard's
+  // document-level click interception (see the hook's header) is what
+  // catches that shared link without this file needing to know it exists.
+  const isDirty =
+    seedHex !== (initialSeedHex ?? DEFAULT_SEED_HEX) ||
+    typePairing !== initialTypePairing ||
+    lightOnly !== initialLightOnly ||
+    logoSelected;
+  const { discardOpen, setDiscardOpen, confirmDiscard } =
+    useUnsavedChangesGuard(isDirty);
+
   async function submitBrand(
     _prev: PolicyResult | null,
     formData: FormData,
   ): Promise<PolicyResult> {
-    return setOrgBrandAction(slug, formData);
+    const outcome = await setOrgBrandAction(slug, formData);
+    // Reset the logo-dirty tracking HERE — inside the action itself, which
+    // runs as part of the form submission, not inside a `useEffect` reacting
+    // to `result` changing. Doing it in an effect keyed on `result` would be
+    // a `setState` call synchronized to another state change rather than to
+    // a real event, which is exactly what React's `react-hooks/set-state-
+    // in-effect` rule flags.
+    if (outcome.ok) {
+      setLogoSelected(false);
+      if (logoInputRef.current) {
+        logoInputRef.current.value = "";
+      }
+    }
+    return outcome;
   }
 
   const [result, formAction, isPending] = useActionState(
@@ -252,12 +286,25 @@ export function BrandingForm({
           <Label htmlFor="logo">Logo (optional)</Label>
           <div className="mt-1 flex items-center gap-3">
             <OrgMark name={organizationName} markSrc={initialMarkSrc} />
+            {/* L2 (docs/reviews/2026-08-26-portal-ux.md): the native file
+                input's OS-drawn "Choose file" button read as unstyled chrome
+                next to `seedHex`/`typePairing`'s custom-styled controls. The
+                `file:*` Tailwind variants style exactly that pseudo-element
+                (no wrapper markup, no visually-hidden-input trick needed) to
+                match the `Button` `variant="outline"` look; the filename
+                text after it keeps the same `border-input`/`bg-background`
+                treatment every other field on this form uses. */}
             <Input
               id="logo"
               name="logo"
               type="file"
               accept="image/png,image/jpeg,image/webp"
-              className="max-w-xs"
+              // ui-ok: file:* variants style the native file input's own selector-button pseudo-element, not a real <button> — no element here <Button> could replace.
+              className="max-w-xs file:mr-3 file:h-8 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
+              ref={logoInputRef}
+              onChange={(e) =>
+                setLogoSelected((e.target.files?.length ?? 0) > 0)
+              }
             />
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">
@@ -315,6 +362,11 @@ export function BrandingForm({
           </p>
         )}
       </div>
+      <UnsavedChangesDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirmDiscard={confirmDiscard}
+      />
     </div>
   );
 }

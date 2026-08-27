@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type {
   PermissionCatalogEntry,
   RoleDefinitionEntry,
@@ -139,6 +141,20 @@ export function EditRoleForm({
     new Set(role.permissionKeys),
   );
   const [pending, setPending] = useState(false);
+  const [savedKeys, setSavedKeys] = useState<Set<string>>(
+    new Set(role.permissionKeys),
+  );
+
+  // H3 (docs/reviews/2026-08-26-portal-ux.md) — no in-form Back link;
+  // `page.tsx`'s "Back to roles" link and the Danger-zone deactivate dialog
+  // both sit above/below this form, and the guard's document-level click
+  // interception (see the hook's header) catches the former without this
+  // file needing to know it exists.
+  const isDirty =
+    selectedKeys.size !== savedKeys.size ||
+    [...selectedKeys].some((k) => !savedKeys.has(k));
+  const { discardOpen, setDiscardOpen, confirmDiscard } =
+    useUnsavedChangesGuard(isDirty);
 
   function toggleKey(k: string) {
     setSelectedKeys((prev) => {
@@ -161,6 +177,7 @@ export function EditRoleForm({
     setPending(false);
     if (result.ok) {
       toast.success("Role permissions updated.");
+      setSavedKeys(new Set(selectedKeys));
       router.refresh();
     } else {
       toast.error(result.error);
@@ -201,6 +218,11 @@ export function EditRoleForm({
       <Button type="submit" disabled={pending} className="min-h-11">
         {pending ? "Saving…" : "Save changes"}
       </Button>
+      <UnsavedChangesDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirmDiscard={confirmDiscard}
+      />
     </form>
   );
 }

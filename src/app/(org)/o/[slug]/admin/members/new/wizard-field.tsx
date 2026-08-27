@@ -3,6 +3,7 @@
 import type { FieldErrors, Path, UseFormRegister } from "react-hook-form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RequiredMark } from "@/components/shared/required-mark";
 import type { MemberWizardValues } from "./member-wizard-schema";
 
 /**
@@ -37,6 +38,7 @@ export function WizardField({
   register,
   errors,
   type = "text",
+  required,
   ...rest
 }: {
   name: Path<MemberWizardValues>;
@@ -44,6 +46,11 @@ export function WizardField({
   register: UseFormRegister<MemberWizardValues>;
   errors: FieldErrors<MemberWizardValues>;
   type?: string;
+  /** L3 (docs/reviews/2026-08-26-portal-ux.md) — renders a `RequiredMark`
+   * beside the label and `aria-required` on the input. Every other field in
+   * the wizard already reads "(optional)" in its own label text; this is
+   * the missing other half of that convention. */
+  required?: boolean;
 } & Omit<
   React.InputHTMLAttributes<HTMLInputElement>,
   "name" | "type" | "id"
@@ -52,12 +59,16 @@ export function WizardField({
   const id = `member-wizard-${name.replace(/\./g, "-")}`;
   return (
     <div>
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>
+        {label}
+        {required && <RequiredMark />}
+      </Label>
       <Input
         id={id}
         type={type}
         aria-invalid={error ? "true" : undefined}
         aria-describedby={error ? `${id}-error` : undefined}
+        aria-required={required ? "true" : undefined}
         className="mt-1"
         {...register(name)}
         {...rest}

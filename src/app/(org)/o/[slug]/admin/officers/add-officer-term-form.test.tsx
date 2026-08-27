@@ -43,8 +43,9 @@ vi.mock("sonner", () => ({
 }));
 
 const mockRouterRefresh = vi.hoisted(() => vi.fn());
+const mockRouterPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mockRouterRefresh }),
+  useRouter: () => ({ refresh: mockRouterRefresh, push: mockRouterPush }),
 }));
 
 import { AddOfficerTermForm } from "./add-officer-term-form";
@@ -56,6 +57,7 @@ afterEach(() => {
   toastSuccess.mockReset();
   toastError.mockReset();
   mockRouterRefresh.mockReset();
+  mockRouterPush.mockReset();
 });
 
 const OPTIONS: OfficerFormOptions = {
@@ -85,24 +87,24 @@ describe("AddOfficerTermForm — zero-people state", () => {
 describe("AddOfficerTermForm — the org_unit conditional field", () => {
   it("does not render a district select for the default (non-deacon) office", () => {
     render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
-    expect(screen.queryByLabelText(/^district$/i)).toBeNull();
+    expect(screen.queryByLabelText(/^district/i)).toBeNull();
   });
 
   it("renders the district select the instant 'Deacon' is chosen", () => {
     render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
-    fireEvent.change(screen.getByLabelText(/^office$/i), {
+    fireEvent.change(screen.getByLabelText(/^office/i), {
       target: { value: "deacon" },
     });
-    expect(screen.getByLabelText(/^district$/i)).toBeTruthy();
+    expect(screen.getByLabelText(/^district/i)).toBeTruthy();
   });
 
   it("hides the district select again when switching back to a non-deacon office", () => {
     render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
-    const officeSelect = screen.getByLabelText(/^office$/i);
+    const officeSelect = screen.getByLabelText(/^office/i);
     fireEvent.change(officeSelect, { target: { value: "deacon" } });
-    expect(screen.getByLabelText(/^district$/i)).toBeTruthy();
+    expect(screen.getByLabelText(/^district/i)).toBeTruthy();
     fireEvent.change(officeSelect, { target: { value: "trustee" } });
-    expect(screen.queryByLabelText(/^district$/i)).toBeNull();
+    expect(screen.queryByLabelText(/^district/i)).toBeNull();
   });
 
   it("shows a no-districts message and disables submit when office is deacon but no districts exist", () => {
@@ -112,7 +114,7 @@ describe("AddOfficerTermForm — the org_unit conditional field", () => {
         options={{ ...OPTIONS, orgUnits: [] }}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/^office$/i), {
+    fireEvent.change(screen.getByLabelText(/^office/i), {
       target: { value: "deacon" },
     });
     expect(screen.getByText(/no districts exist/i)).toBeTruthy();
@@ -165,13 +167,13 @@ describe("AddOfficerTermForm — submit and error surfacing", () => {
 
     render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
 
-    fireEvent.change(screen.getByLabelText(/^office$/i), {
+    fireEvent.change(screen.getByLabelText(/^office/i), {
       target: { value: "deacon" },
     });
     fireEvent.change(screen.getByLabelText(/start date/i), {
       target: { value: "2026-01-08" },
     });
-    fireEvent.change(screen.getByLabelText(/^district$/i), {
+    fireEvent.change(screen.getByLabelText(/^district/i), {
       target: { value: "org-unit-1" },
     });
 
@@ -252,5 +254,71 @@ describe("AddOfficerTermForm — submit and error surfacing", () => {
     expect(toastError).toHaveBeenCalledWith(
       "You don't have permission to manage officer terms here.",
     );
+  });
+});
+
+describe("AddOfficerTermForm — required-field markers (L3)", () => {
+  it("marks Person, Office, and Start date as required", () => {
+    render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
+
+    expect(
+      screen.getByLabelText(/^person/i).getAttribute("aria-required"),
+    ).toBe("true");
+    expect(
+      screen.getByLabelText(/^office/i).getAttribute("aria-required"),
+    ).toBe("true");
+    expect(
+      screen.getByLabelText(/start date/i).getAttribute("aria-required"),
+    ).toBe("true");
+  });
+
+  it("marks District as required once it appears for a deacon term", () => {
+    render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
+    fireEvent.change(screen.getByLabelText(/^office/i), {
+      target: { value: "deacon" },
+    });
+    expect(
+      screen.getByLabelText(/^district/i).getAttribute("aria-required"),
+    ).toBe("true");
+  });
+
+  it("does NOT mark an optional field (minute reference) as required", () => {
+    render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
+    expect(
+      screen.getByLabelText(/minute reference/i).getAttribute("aria-required"),
+    ).toBeNull();
+  });
+});
+
+describe("AddOfficerTermForm — unsaved-changes guard (H3)", () => {
+  it("intercepts a same-origin link click while the draft is dirty and shows the discard dialog", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/officers">Back to officers</a>
+        <AddOfficerTermForm slug="alder-creek" options={OPTIONS} />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/start date/i), {
+      target: { value: "2026-01-08" },
+    });
+    fireEvent.click(screen.getByRole("link", { name: /back to officers/i }));
+
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(mockRouterPush).toHaveBeenCalledWith("/o/alder-creek/admin/officers");
+  });
+
+  it("does not intercept a link click when the form is untouched", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/officers">Back to officers</a>
+        <AddOfficerTermForm slug="alder-creek" options={OPTIONS} />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: /back to officers/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
   });
 });

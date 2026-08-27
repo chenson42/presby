@@ -74,6 +74,21 @@ describe("RecordRollActionForm — pending notice", () => {
   });
 });
 
+describe("RecordRollActionForm — select chevron (H2)", () => {
+  it("wraps the 'Roll action' select with a relative wrapper carrying a decorative chevron icon", () => {
+    render(
+      <RecordRollActionForm slug="alder-creek" personId="p-1" pendingActions={[]} />,
+    );
+    const select = screen.getByLabelText(/roll action/i);
+    const wrapper = select.parentElement as HTMLElement;
+    expect(wrapper.className).toMatch(/relative/);
+    const chevron = wrapper.querySelector("svg");
+    expect(chevron).not.toBeNull();
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(select.className).toMatch(/appearance-none/);
+  });
+});
+
 describe("RecordRollActionForm — submit", () => {
   it("blank effective date blocks submit", async () => {
     render(

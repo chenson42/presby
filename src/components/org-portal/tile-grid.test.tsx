@@ -66,6 +66,46 @@ describe("TileGrid — tiles present", () => {
   });
 });
 
+describe("TileGrid — icon map (regression for M6, groups/branding sharing LayoutGrid)", () => {
+  const GROUPS_TILE: PortalTile = {
+    key: "groups",
+    label: "Groups",
+    description: "Manage committees, small groups, choirs, and teams.",
+    href: (slug) => `/o/${slug}/admin/groups`,
+    flagKey: "org_portal.groups",
+    category: "operate",
+  };
+  const BRANDING_TILE: PortalTile = {
+    key: "branding",
+    label: "Branding",
+    description: "Set your organization's colour, type pairing, and logo.",
+    href: (slug) => `/o/${slug}/admin/branding`,
+    flagKey: "org_portal.branding",
+    category: "administer",
+  };
+
+  it("gives Groups and Branding their own, distinct icon glyphs — not the same LayoutGrid fallback", () => {
+    render(<TileGrid slug="alder-creek" tiles={[GROUPS_TILE, BRANDING_TILE]} />);
+
+    const groupsLink = screen.getByRole("link", { name: /groups/i });
+    const brandingLink = screen.getByRole("link", { name: /branding/i });
+    const groupsIconSvg = groupsLink.querySelector("svg");
+    const brandingIconSvg = brandingLink.querySelector("svg");
+
+    expect(groupsIconSvg).toBeTruthy();
+    expect(brandingIconSvg).toBeTruthy();
+    // lucide-react sets a `class` derived from the component's display name
+    // e.g. "lucide-users-round" / "lucide-palette" — comparing these confirms
+    // the two glyphs differ, and neither is "lucide-layout-grid" (the shared
+    // fallback this finding was about).
+    const groupsClass = groupsIconSvg?.getAttribute("class") ?? "";
+    const brandingClass = brandingIconSvg?.getAttribute("class") ?? "";
+    expect(groupsClass).not.toBe(brandingClass);
+    expect(groupsClass).not.toContain("lucide-layout-grid");
+    expect(brandingClass).not.toContain("lucide-layout-grid");
+  });
+});
+
 describe("TileGrid — no tiles visible", () => {
   it("renders nothing when every flag is off — not an empty section", () => {
     const { container } = render(<TileGrid slug="alder-creek" tiles={[]} />);

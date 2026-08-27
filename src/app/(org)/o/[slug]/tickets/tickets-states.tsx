@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Lock } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -28,6 +30,12 @@ export function TicketsFlagOff({ name }: { name: string }) {
  * `tickets.file` grant. Worded deliberately unlike `OrgAccessDenied`'s "you
  * don't have access to {org}" — a member reading this should understand ONE
  * capability is unavailable, not that their whole portal access was revoked.
+ *
+ * LOCK BADGE (docs/work-log/2026-08-26-portal-ux-fixes.md, Wave 1B, finding
+ * L6): visual-only — the copy below is untouched. Reuses `PersonCard`'s
+ * lock-badge language (`Badge variant="outline"` + a `Lock` icon) so a
+ * permission-denied capability reads the same way everywhere in the portal
+ * instead of as plain unstyled text here and a styled badge elsewhere.
  */
 export function TicketsForbidden({
   name,
@@ -45,6 +53,10 @@ export function TicketsForbidden({
   return (
     <section>
       <h1 className="text-2xl font-semibold">Tickets</h1>
+      <Badge variant="outline" className="mt-3 gap-1">
+        <Lock className="size-3" aria-hidden />
+        Restricted
+      </Badge>
       <p className="mt-3 text-sm text-muted-foreground">
         You don&apos;t have permission to file or manage support tickets at{" "}
         {name}. If you have a problem to report, use{" "}

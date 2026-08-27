@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type {
   PermissionCatalogEntry,
   TemplateRoleEntry,
@@ -165,6 +167,21 @@ export function CreateRoleForm({
   const [templateKey, setTemplateKey] = useState(templates[0]?.key ?? "");
   const [templateName, setTemplateName] = useState(templates[0]?.name ?? "");
   const [adopting, setAdopting] = useState(false);
+
+  // H3 (docs/reviews/2026-08-26-portal-ux.md) — two independent forms on one
+  // page (create / adopt-a-template), one guard: either draft counts as
+  // "dirty." Neither form has its own in-form Back link — `page.tsx`'s
+  // "Back to roles" link sits above both; the guard's document-level click
+  // interception (see the hook's header) is what catches it.
+  const selectedTemplateForDirty = templates.find((t) => t.id === templateId);
+  const isDirty =
+    key.trim() !== "" ||
+    name.trim() !== "" ||
+    selectedKeys.size > 0 ||
+    templateKey.trim() !== (selectedTemplateForDirty?.key ?? "") ||
+    templateName.trim() !== (selectedTemplateForDirty?.name ?? "");
+  const { discardOpen, setDiscardOpen, confirmDiscard } =
+    useUnsavedChangesGuard(isDirty);
 
   function toggleKey(k: string) {
     setSelectedKeys((prev) => {
@@ -357,6 +374,11 @@ export function CreateRoleForm({
           </Button>
         </form>
       )}
+      <UnsavedChangesDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirmDiscard={confirmDiscard}
+      />
     </div>
   );
 }

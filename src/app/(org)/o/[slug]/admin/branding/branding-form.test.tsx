@@ -28,6 +28,11 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PolicyResult } from "./actions";
 
+const mockRouterPush = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockRouterPush }),
+}));
+
 const setOrgBrandAction =
   vi.fn<(slug: string, fd: FormData) => Promise<PolicyResult>>();
 
@@ -55,6 +60,7 @@ afterEach(() => {
   toastSuccess.mockReset();
   toastError.mockReset();
   toastWarning.mockReset();
+  mockRouterPush.mockReset();
 });
 
 function renderForm(overrides: {
@@ -304,5 +310,132 @@ describe("BrandingForm — staleness-bug fix (docs/TODO.md, carried forward as f
     // survive, proving the effect only re-seeds on an actual prop change,
     // not on every render.
     expect(hexInput.value).toBe("#123abc");
+  });
+});
+
+describe("BrandingForm — unsaved-changes guard (H3)", () => {
+  it("intercepts a same-origin link click (standing in for the admin shell's 'Back to portal') once the colour is dirtied", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <BrandingForm
+          slug="alder-creek"
+          organizationName="Invented Fixture Congregation"
+          initialSeedHex="#2563eb"
+          initialTypePairing="classic"
+          initialMarkSrc={null}
+          initialLightOnly={false}
+        />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/brand colour/i), {
+      target: { value: "#7a1f2b" },
+    });
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(mockRouterPush).toHaveBeenCalledWith("/o/alder-creek");
+  });
+
+  it("does not intercept the link when nothing has changed from the initial brand", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <BrandingForm
+          slug="alder-creek"
+          organizationName="Invented Fixture Congregation"
+          initialSeedHex="#2563eb"
+          initialTypePairing="classic"
+          initialMarkSrc={null}
+          initialLightOnly={false}
+        />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+
+  it("selecting a logo file also dirties the form", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <BrandingForm
+          slug="alder-creek"
+          organizationName="Invented Fixture Congregation"
+          initialSeedHex="#2563eb"
+          initialTypePairing="classic"
+          initialMarkSrc={null}
+          initialLightOnly={false}
+        />
+      </div>,
+    );
+
+    const file = new File(["logo-bytes"], "logo.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText(/logo \(optional\)/i), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+  });
+
+  it("becomes clean again once the post-save prop re-sync lands (the same automatic Server-Action re-render the staleness-bug-fix test above simulates)", async () => {
+    setOrgBrandAction.mockResolvedValue({ ok: true });
+    const { rerender } = render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <BrandingForm
+          slug="alder-creek"
+          organizationName="Invented Fixture Congregation"
+          initialSeedHex="#2563eb"
+          initialTypePairing="classic"
+          initialMarkSrc={null}
+          initialLightOnly={false}
+        />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/brand colour/i), {
+      target: { value: "#7a1f2b" },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save brand/i }));
+    });
+
+    // Next re-renders this component with fresh `initial*` props once the
+    // Server Action's own `revalidatePath()` resolves — the SAME mechanism
+    // the staleness-bug-fix tests above pin, simulated here explicitly since
+    // this unit test has no real Server Component tree to re-fetch from.
+    rerender(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <BrandingForm
+          slug="alder-creek"
+          organizationName="Invented Fixture Congregation"
+          initialSeedHex="#7a1f2b"
+          initialTypePairing="classic"
+          initialMarkSrc={null}
+          initialLightOnly={false}
+        />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+});
+
+describe("BrandingForm — logo file input styling (L2)", () => {
+  it("styles the file input's selector-button pseudo-element to match the form's other controls", () => {
+    renderForm();
+    const logoInput = screen.getByLabelText(/logo \(optional\)/i);
+    expect(logoInput.className).toMatch(/file:rounded-md/);
+    expect(logoInput.className).toMatch(/file:border/);
+    expect(logoInput.className).toMatch(/file:bg-background/);
   });
 });

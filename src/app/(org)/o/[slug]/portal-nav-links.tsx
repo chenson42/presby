@@ -30,6 +30,18 @@ export interface PortalNavEntry {
  * lines of plain text under the header, not a menu. This keeps the same
  * link set and active-state logic; only the narrow-viewport presentation
  * changes.
+ *
+ * OVERLAY, NOT IN-FLOW (docs/work-log/2026-08-26-portal-ux-fixes.md, Wave
+ * 1B, finding L5): below `sm`, the open menu is `absolute` (positioned off
+ * the toggle row's `relative` parent, `top-full` so it sits directly under
+ * it) and `z-20` so it draws over whatever the page renders next, instead of
+ * pushing that content down. No Radix `Sheet` — this is a pure
+ * positioning/layering change to the SAME single link list `sm:` already
+ * repositions between "in-flow flex" and "always visible"; the mechanism
+ * generalizes from "flex vs hidden" to "flex-and-absolute vs hidden", one
+ * more class each side of the same `open` boolean. `shadow-lg` + `bg-
+ * background` + `border-border` give it a visible edge over whatever page
+ * content now sits directly beneath it instead of being pushed away.
  */
 export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
   const pathname = usePathname();
@@ -77,7 +89,10 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
     );
 
   return (
-    <nav aria-label="Portal" className="border-b border-border sm:px-6">
+    <nav
+      aria-label="Portal"
+      className="relative border-b border-border sm:px-6"
+    >
       <div className="flex items-center justify-between px-4 py-2 sm:hidden">
         <span className="text-sm font-semibold text-foreground">Menu</span>
         <button
@@ -101,7 +116,7 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
       <div
         id="portal-nav-menu"
         className={cn(
-          "flex-col gap-1 border-t border-border px-4 pb-3 text-sm sm:flex sm:flex-row sm:flex-wrap sm:gap-4 sm:border-t-0 sm:px-6 sm:py-2",
+          "absolute inset-x-0 top-full z-20 flex-col gap-1 border border-border bg-background px-4 pt-3 pb-3 text-sm shadow-lg sm:static sm:flex sm:flex-row sm:flex-wrap sm:gap-4 sm:border-0 sm:bg-transparent sm:px-6 sm:py-2 sm:shadow-none",
           open ? "flex" : "hidden",
         )}
       >

@@ -153,6 +153,26 @@ describe("PortalNavLinks — active state", () => {
     ).toBeNull();
   });
 
+  it("renders the mobile menu positioned as an overlay, not in-flow — regression for L5, push-down mobile nav", () => {
+    usePathname.mockReturnValue("/o/acme");
+
+    render(<PortalNavLinks entries={ENTRIES} />);
+
+    const menu = document.getElementById("portal-nav-menu");
+    expect(menu).toBeTruthy();
+    expect(menu?.className).toContain("absolute");
+    expect(menu?.className).toContain("top-full");
+    expect(menu?.className).toContain("z-20");
+    // ...and resets to the original in-flow, unstyled-panel presentation at
+    // `sm` and up — the desktop wrapped row is unchanged by this fix.
+    expect(menu?.className).toContain("sm:static");
+    expect(menu?.className).toContain("sm:border-0");
+    expect(menu?.className).toContain("sm:shadow-none");
+
+    const nav = menu?.closest("nav");
+    expect(nav?.className).toContain("relative");
+  });
+
   it("renders every entry as a link to its href, in order", () => {
     usePathname.mockReturnValue("/o/acme");
 

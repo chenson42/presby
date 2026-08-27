@@ -42,6 +42,13 @@ describe("TicketsForbidden", () => {
     const link = screen.getByRole("link", { name: /the feedback form/i });
     expect(link.getAttribute("href")).toBe("/o/bramblewood/feedback");
   });
+
+  it("carries the lock-badge visual — regression for L6, bare unstyled text", () => {
+    render(<TicketsForbidden name="Bramblewood Presbyterian Church" slug="bramblewood" />);
+    const lockIcon = document.querySelector("svg.lucide-lock");
+    expect(lockIcon).toBeTruthy();
+    expect(screen.getByText("Restricted")).toBeTruthy();
+  });
 });
 
 describe("TicketsLoadError", () => {

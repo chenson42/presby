@@ -33,8 +33,9 @@ vi.mock("sonner", () => ({
 }));
 
 const mockRouterRefresh = vi.hoisted(() => vi.fn());
+const mockRouterPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mockRouterRefresh }),
+  useRouter: () => ({ refresh: mockRouterRefresh, push: mockRouterPush }),
 }));
 
 import { EditRoleForm } from "./edit-role-form";
@@ -45,6 +46,7 @@ afterEach(() => {
   toastSuccess.mockReset();
   toastError.mockReset();
   mockRouterRefresh.mockReset();
+  mockRouterPush.mockReset();
 });
 
 const CATALOG = [
@@ -178,5 +180,70 @@ describe("EditRoleForm — submit and error surfacing", () => {
     expect(toastError).toHaveBeenCalledWith(
       "Removing this would leave nobody able to create or edit roles at this organization. Contact support if you need to change this.",
     );
+  });
+});
+
+describe("EditRoleForm — unsaved-changes guard (H3)", () => {
+  it("intercepts a same-origin link click (standing in for page.tsx's 'Back to roles' link) once a permission is toggled", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByLabelText(/branding\.manage/i));
+    fireEvent.click(screen.getByRole("link", { name: /back to roles/i }));
+
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(mockRouterPush).toHaveBeenCalledWith("/o/alder-creek/admin/roles");
+  });
+
+  it("does not intercept the link when the checklist is untouched", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("link", { name: /back to roles/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+
+  it("re-checking the box back to its original state clears the guard again", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
+      </div>,
+    );
+    const checkbox = screen.getByLabelText(/branding\.manage/i);
+    fireEvent.click(checkbox);
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("link", { name: /back to roles/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+
+  it("saving successfully clears the guard for the new permission set", async () => {
+    mockSetRolePermissionsAction.mockResolvedValueOnce({
+      ok: true,
+      data: { addedKeys: ["branding.manage"], removedKeys: [] },
+    });
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
+      </div>,
+    );
+    fireEvent.click(screen.getByLabelText(/branding\.manage/i));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: /back to roles/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
   });
 });

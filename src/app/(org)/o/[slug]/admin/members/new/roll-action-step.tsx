@@ -3,6 +3,7 @@
 import type { UseFormReturn } from "react-hook-form";
 import { ChevronDown } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { RequiredMark } from "@/components/shared/required-mark";
 import { WizardField } from "./wizard-field";
 import type { MemberWizardValues } from "./member-wizard-schema";
 import {
@@ -28,11 +29,15 @@ export function RollActionStep({
   return (
     <div className="space-y-4">
       <div>
-        <Label htmlFor="member-wizard-roll-kind">Roll action</Label>
+        <Label htmlFor="member-wizard-roll-kind">
+          Roll action
+          <RequiredMark />
+        </Label>
         <div className="relative mt-1">
           <select
             id="member-wizard-roll-kind"
             className={SELECT_CLASSES}
+            aria-required="true"
             {...register("rollAction.kind")}
           >
             {/* Allow-list, not the full label map (Phase 2 Note 3): the
@@ -56,6 +61,7 @@ export function RollActionStep({
         type="date"
         register={register}
         errors={errors}
+        required
       />
       <WizardField
         name="rollAction.minuteReference"

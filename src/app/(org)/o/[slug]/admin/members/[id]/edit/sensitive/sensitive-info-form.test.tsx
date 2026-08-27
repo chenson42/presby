@@ -5,11 +5,12 @@
  * the `./actions` boundary, same posture as `edit-person-form.test.tsx`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const mockRefresh = vi.hoisted(() => vi.fn());
+const mockPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: mockRefresh }),
+  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
 }));
 
 const mockAddPersonNoteAction = vi.hoisted(() => vi.fn());
@@ -48,6 +49,7 @@ const BASE_DATA: SensitiveInfoForEdit = {
 afterEach(() => {
   cleanup();
   mockRefresh.mockClear();
+  mockPush.mockClear();
   mockAddPersonNoteAction.mockReset();
   mockSetPersonDemographicsAction.mockReset();
   mockSetPersonMedicalAction.mockReset();
@@ -111,6 +113,64 @@ describe("SensitiveInfoForm — per-section rendering", () => {
     );
 
     expect(screen.getByText(/^disabilities$/i)).toBeTruthy();
+  });
+});
+
+describe("SensitiveInfoForm — restricted indicator (M3)", () => {
+  it("renders a lock-badge restricted indicator at the top of the form", () => {
+    render(<SensitiveInfoForm slug="alder-creek" personId="p-1" data={BASE_DATA} />);
+    expect(screen.getByText(/restricted/i)).toBeTruthy();
+  });
+});
+
+describe("SensitiveInfoForm — select chevrons (H1)", () => {
+  const DATA: SensitiveInfoForEdit = {
+    ...BASE_DATA,
+    grants: { ...BASE_DATA.grants, pastoralNotes: true, demographics: true },
+    notes: [],
+    demographics: null,
+  };
+
+  function expectChevronWrapped(select: HTMLElement) {
+    const wrapper = select.parentElement as HTMLElement;
+    expect(wrapper.className).toMatch(/relative/);
+    const chevron = wrapper.querySelector("svg");
+    expect(chevron).not.toBeNull();
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(select.className).toMatch(/appearance-none/);
+  }
+
+  it("wraps the note-type select with a relative wrapper + chevron", () => {
+    render(<SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />);
+    expectChevronWrapped(screen.getByLabelText(/note type/i));
+  });
+
+  it("wraps the visibility select with a relative wrapper + chevron", () => {
+    render(<SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />);
+    expectChevronWrapped(screen.getByLabelText(/^visibility$/i));
+  });
+
+  it("wraps the demographics source select with a relative wrapper + chevron", () => {
+    render(<SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />);
+    expectChevronWrapped(screen.getByLabelText(/^source$/i));
+  });
+});
+
+describe("SensitiveInfoForm — pastoral notes empty state (M5)", () => {
+  it("shows the dashed-card empty state, not a bare muted-text line, when there are no notes", () => {
+    render(
+      <SensitiveInfoForm
+        slug="alder-creek"
+        personId="p-1"
+        data={{
+          ...BASE_DATA,
+          grants: { ...BASE_DATA.grants, pastoralNotes: true },
+          notes: [],
+        }}
+      />,
+    );
+    expect(screen.getByText(/no notes recorded yet/i)).toBeTruthy();
+    expect(screen.getByText(/add the first pastoral care note below/i)).toBeTruthy();
   });
 });
 
@@ -209,6 +269,59 @@ describe("SensitiveInfoForm — demographics section", () => {
   });
 });
 
+describe("SensitiveInfoForm — racial/ethnic filter (M4)", () => {
+  it("narrows the 9-option checklist to matches, case-insensitively, and restores on clear", () => {
+    render(
+      <SensitiveInfoForm
+        slug="alder-creek"
+        personId="p-1"
+        data={{
+          ...BASE_DATA,
+          grants: { ...BASE_DATA.grants, demographics: true },
+          demographics: null,
+        }}
+      />,
+    );
+
+    // All 9 options visible unfiltered.
+    expect(screen.getByLabelText(/^asian$/i)).toBeTruthy();
+    expect(screen.getByLabelText(/^white$/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText(/filter options/i), {
+      target: { value: "AFR" },
+    });
+
+    expect(screen.getByLabelText(/^african$/i)).toBeTruthy();
+    expect(screen.getByLabelText(/^african american$/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/^asian$/i)).toBeNull();
+    expect(screen.queryByLabelText(/^white$/i)).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText(/filter options/i), {
+      target: { value: "" },
+    });
+    expect(screen.getByLabelText(/^asian$/i)).toBeTruthy();
+    expect(screen.getByLabelText(/^white$/i)).toBeTruthy();
+  });
+
+  it("shows a no-matches message when the filter matches nothing", () => {
+    render(
+      <SensitiveInfoForm
+        slug="alder-creek"
+        personId="p-1"
+        data={{
+          ...BASE_DATA,
+          grants: { ...BASE_DATA.grants, demographics: true },
+          demographics: null,
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(/filter options/i), {
+      target: { value: "zzz" },
+    });
+    expect(screen.getByText(/no options match/i)).toBeTruthy();
+  });
+});
+
 describe("SensitiveInfoForm — medical section", () => {
   it("saves the four fields on submit", async () => {
     mockSetPersonMedicalAction.mockResolvedValueOnce({ ok: true, data: { personId: "p-1" } });
@@ -266,5 +379,110 @@ describe("SensitiveInfoForm — disabilities section", () => {
     await waitFor(() => expect(mockSetPersonDisabilitiesAction).toHaveBeenCalled());
     const [, , input] = mockSetPersonDisabilitiesAction.mock.calls[0];
     expect(input.categories.sort()).toEqual(["hearing", "mobility"]);
+  });
+});
+
+describe("SensitiveInfoForm — unsaved-changes guard (H3)", () => {
+  const DATA: SensitiveInfoForEdit = {
+    ...BASE_DATA,
+    grants: { ...BASE_DATA.grants, pastoralNotes: true, demographics: true },
+    notes: [],
+    demographics: null,
+  };
+
+  it("intercepts a same-origin link click (standing in for the shared 'Back to portal' link) once ANY section is dirtied", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/^note$/i), {
+      target: { value: "A draft note." },
+    });
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(mockPush).toHaveBeenCalledWith("/o/alder-creek");
+  });
+
+  it("does not intercept the link when nothing has been touched", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+
+  it("a dirty demographics field alone (no note typed) still triggers the guard", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/gender/i), {
+      target: { value: "woman" },
+    });
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+  });
+
+  it("saving the dirty section successfully clears the guard again", async () => {
+    mockSetPersonDemographicsAction.mockResolvedValueOnce({
+      ok: true,
+      data: { personId: "p-1" },
+    });
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/gender/i), {
+      target: { value: "woman" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save demographics/i }));
+
+    await waitFor(() => expect(mockSetPersonDemographicsAction).toHaveBeenCalled());
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    // The section clearing its own dirty flag, the parent recomputing the
+    // combined guard, and the guard's own ref-sync effect are cascaded
+    // render passes — flush them before clicking, rather than assuming
+    // `toastSuccess` having fired means every downstream effect already has.
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+
+  it("Stay keeps the draft note intact", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek">Back to portal</a>
+        <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/^note$/i), {
+      target: { value: "Don't lose me." },
+    });
+    fireEvent.click(screen.getByRole("link", { name: /back to portal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^stay$/i }));
+
+    expect(mockPush).not.toHaveBeenCalled();
+    expect((screen.getByLabelText(/^note$/i) as HTMLTextAreaElement).value).toBe(
+      "Don't lose me.",
+    );
   });
 });

@@ -9,6 +9,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RequiredMark } from "@/components/shared/required-mark";
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type {
   OfficerFormOptions,
   StartOfficerTermInput,
@@ -80,10 +83,18 @@ export function AddOfficerTermForm({
 
   const {
     register,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = form;
   const office = useWatch({ control: form.control, name: "office" });
   const isDeacon = office === "deacon";
+
+  // H3 (docs/reviews/2026-08-26-portal-ux.md) — this form has no in-form
+  // Back/Cancel link of its own; the guard's document-level click
+  // interception (see the hook's header) is what protects a dirty draft
+  // from the surrounding page's own navigation while this component is
+  // mounted.
+  const { discardOpen, setDiscardOpen, confirmDiscard } =
+    useUnsavedChangesGuard(isDirty);
 
   if (options.people.length === 0) {
     return (
@@ -128,11 +139,15 @@ export function AddOfficerTermForm({
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
       <div>
-        <Label htmlFor="officer-term-person">Person</Label>
+        <Label htmlFor="officer-term-person">
+          Person
+          <RequiredMark />
+        </Label>
         <div className="relative mt-1">
           <select
             id="officer-term-person"
             className={SELECT_CLASSES}
+            aria-required="true"
             {...register("personId")}
           >
             {options.people.map((person) => (
@@ -154,11 +169,15 @@ export function AddOfficerTermForm({
       </div>
 
       <div>
-        <Label htmlFor="officer-term-office">Office</Label>
+        <Label htmlFor="officer-term-office">
+          Office
+          <RequiredMark />
+        </Label>
         <div className="relative mt-1">
           <select
             id="officer-term-office"
             className={SELECT_CLASSES}
+            aria-required="true"
             {...register("office")}
           >
             {OFFICER_OFFICES.map((value) => (
@@ -182,11 +201,15 @@ export function AddOfficerTermForm({
           </p>
         ) : (
           <div>
-            <Label htmlFor="officer-term-org-unit">District</Label>
+            <Label htmlFor="officer-term-org-unit">
+              District
+              <RequiredMark />
+            </Label>
             <div className="relative mt-1">
               <select
                 id="officer-term-org-unit"
                 className={SELECT_CLASSES}
+                aria-required="true"
                 {...register("orgUnitId")}
               >
                 <option value="">Choose a district…</option>
@@ -210,7 +233,10 @@ export function AddOfficerTermForm({
         ))}
 
       <div>
-        <Label htmlFor="officer-term-starts-on">Start date</Label>
+        <Label htmlFor="officer-term-starts-on">
+          Start date
+          <RequiredMark />
+        </Label>
         <Input
           id="officer-term-starts-on"
           type="date"
@@ -218,6 +244,7 @@ export function AddOfficerTermForm({
           aria-describedby={
             errors.startsOn ? "officer-term-starts-on-error" : undefined
           }
+          aria-required="true"
           className="mt-1"
           {...register("startsOn")}
         />
@@ -298,6 +325,11 @@ export function AddOfficerTermForm({
       >
         {submitting ? "Recording…" : "Add officer term"}
       </Button>
+      <UnsavedChangesDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirmDiscard={confirmDiscard}
+      />
     </form>
   );
 }

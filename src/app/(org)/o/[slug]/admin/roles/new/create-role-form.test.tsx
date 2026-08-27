@@ -240,3 +240,47 @@ describe("CreateRoleForm — adopt a template", () => {
     );
   });
 });
+
+describe("CreateRoleForm — unsaved-changes guard (H3)", () => {
+  it("intercepts a same-origin link click (standing in for page.tsx's 'Back to roles' link) once a key is typed", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <CreateRoleForm slug="alder-creek" catalog={CATALOG} templates={[]} />
+      </div>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/^key$/i), {
+      target: { value: "worship_committee" },
+    });
+    fireEvent.click(screen.getByRole("link", { name: /back to roles/i }));
+
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(mockRouterPush).toHaveBeenCalledWith("/o/alder-creek/admin/roles");
+  });
+
+  it("does not intercept the link on an untouched form", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <CreateRoleForm slug="alder-creek" catalog={CATALOG} templates={[]} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("link", { name: /back to roles/i }));
+    expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
+  });
+
+  it("toggling a permission checkbox alone also counts as dirty", () => {
+    render(
+      <div>
+        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <CreateRoleForm slug="alder-creek" catalog={CATALOG} templates={[]} />
+      </div>,
+    );
+    fireEvent.click(screen.getByLabelText(/directory\.view/i));
+    fireEvent.click(screen.getByRole("link", { name: /back to roles/i }));
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+  });
+});

@@ -3,6 +3,7 @@
 import type { UseFormReturn } from "react-hook-form";
 import { ChevronDown } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { RequiredMark } from "@/components/shared/required-mark";
 import { WizardField } from "./wizard-field";
 import type { MemberWizardValues } from "./member-wizard-schema";
 
@@ -71,11 +72,15 @@ export function HouseholdStep({
           </p>
         ) : (
           <div>
-            <Label htmlFor="member-wizard-household-id">Household</Label>
+            <Label htmlFor="member-wizard-household-id">
+              Household
+              <RequiredMark />
+            </Label>
             <div className="relative mt-1">
               <select
                 id="member-wizard-household-id"
                 className={SELECT_CLASSES}
+                aria-required="true"
                 {...register("household.householdId")}
               >
                 <option value="">Choose a household…</option>
@@ -106,6 +111,7 @@ export function HouseholdStep({
           register={register}
           errors={errors}
           autoComplete="off"
+          required
         />
       )}
     </div>

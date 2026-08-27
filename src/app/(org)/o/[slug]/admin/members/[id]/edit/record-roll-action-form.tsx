@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,8 +21,13 @@ import {
 } from "./record-roll-action-schema";
 import { recordRollActionAction } from "./actions";
 
+// Same standard treatment as the household select in `edit-person-form.tsx`
+// on the same page (H2, docs/reviews/2026-08-26-portal-ux.md) — without
+// `appearance-none` + a manual chevron, the browser's native control chrome
+// paints over the box and this select reads as a different, greyer control
+// than its neighbor.
 const SELECT_CLASSES =
-  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "mt-1 w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 /**
  * A second, independent form beside `EditPersonForm` (Phase 2's placement
@@ -80,7 +86,11 @@ export function RecordRollActionForm({
   }
 
   return (
-    <div className="space-y-4 border-t pt-6">
+    // M2 (docs/reviews/2026-08-26-portal-ux.md): the `border-t pt-6` divider
+    // this wrapper used to carry is gone — `page.tsx` now wraps this form in
+    // its own `bg-card` panel, which supplies the visual separation from
+    // `EditPersonForm` above it.
+    <div className="space-y-4">
       <div>
         <h2 className="text-lg font-medium">Record a roll action</h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -111,21 +121,27 @@ export function RecordRollActionForm({
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <div>
           <Label htmlFor="record-roll-action-kind">Roll action</Label>
-          <select
-            id="record-roll-action-kind"
-            className={SELECT_CLASSES}
-            aria-invalid={errors.kind ? "true" : undefined}
-            aria-describedby={
-              errors.kind ? "record-roll-action-kind-error" : undefined
-            }
-            {...register("kind")}
-          >
-            {EDIT_TIME_ROLL_ACTION_KINDS.map((kind) => (
-              <option key={kind} value={kind}>
-                {ROLL_ACTION_KIND_LABELS[kind]}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              id="record-roll-action-kind"
+              className={SELECT_CLASSES}
+              aria-invalid={errors.kind ? "true" : undefined}
+              aria-describedby={
+                errors.kind ? "record-roll-action-kind-error" : undefined
+              }
+              {...register("kind")}
+            >
+              {EDIT_TIME_ROLL_ACTION_KINDS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {ROLL_ACTION_KIND_LABELS[kind]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
           {errors.kind && (
             <p
               id="record-roll-action-kind-error"

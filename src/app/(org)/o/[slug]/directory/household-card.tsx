@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { MapPin } from "lucide-react";
+import { ChevronRight, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { HouseholdSummary } from "@/lib/directory";
@@ -17,6 +17,10 @@ import type { HouseholdSummary } from "@/lib/directory";
  * `PersonCard` withholds it: this card holds a name `<Link>` alongside
  * inert text (city/state, member-count badge), not one whole clickable
  * surface (Phase 3 Edge Cases, DECISION-099).
+ *
+ * CHEVRON AFFORDANCE (docs/work-log/2026-08-26-portal-ux-fixes.md, Wave 1B,
+ * finding L1) — see `PersonCard`'s matching comment; same `group`/
+ * `group-hover:translate-x-0.5` pattern, scoped to the name `<Link>` only.
  */
 export function HouseholdCard({
   household,
@@ -34,11 +38,15 @@ export function HouseholdCard({
       <CardContent>
         <Link
           href={`/o/${slug}/directory/households/${household.householdId}`}
-          className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="group flex items-center gap-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
-          <h3 className="text-lg font-medium break-words hover:underline">
+          <h3 className="min-w-0 break-words text-lg font-medium hover:underline">
             {household.name}
           </h3>
+          <ChevronRight
+            className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+            aria-hidden
+          />
         </Link>
         {cityState && (
           <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">

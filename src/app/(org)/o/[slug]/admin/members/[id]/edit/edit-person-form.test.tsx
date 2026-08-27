@@ -50,8 +50,8 @@ describe("EditPersonForm — prefill", () => {
   it("prefills every known field from the person prop", () => {
     render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
 
-    expect((screen.getByLabelText(/^first name$/i) as HTMLInputElement).value).toBe("Nora");
-    expect((screen.getByLabelText(/^last name$/i) as HTMLInputElement).value).toBe("Ashgrove");
+    expect((screen.getByLabelText(/^first name/i) as HTMLInputElement).value).toBe("Nora");
+    expect((screen.getByLabelText(/^last name/i) as HTMLInputElement).value).toBe("Ashgrove");
     expect((screen.getByLabelText(/^email/i) as HTMLInputElement).value).toBe(
       "nora@example.invalid",
     );
@@ -76,7 +76,7 @@ describe("EditPersonForm — prefill", () => {
 describe("EditPersonForm — save", () => {
   it("blank first/last name blocks submit", async () => {
     render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
-    fireEvent.change(screen.getByLabelText(/^first name$/i), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(/^first name/i), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => {
@@ -89,7 +89,7 @@ describe("EditPersonForm — save", () => {
     mockUpdatePersonAction.mockResolvedValueOnce({ ok: true, data: { personId: "p-1" } });
     render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
 
-    fireEvent.change(screen.getByLabelText(/^first name$/i), { target: { value: "Nora-Jean" } });
+    fireEvent.change(screen.getByLabelText(/^first name/i), { target: { value: "Nora-Jean" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => {
@@ -114,7 +114,7 @@ describe("EditPersonForm — save", () => {
     });
     render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
 
-    fireEvent.change(screen.getByLabelText(/^first name$/i), { target: { value: "Nora-Jean" } });
+    fireEvent.change(screen.getByLabelText(/^first name/i), { target: { value: "Nora-Jean" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => {
@@ -122,7 +122,7 @@ describe("EditPersonForm — save", () => {
     });
     expect(mockPush).not.toHaveBeenCalled();
     expect(
-      (screen.getByLabelText(/^first name$/i) as HTMLInputElement).value,
+      (screen.getByLabelText(/^first name/i) as HTMLInputElement).value,
     ).toBe("Nora-Jean");
   });
 
@@ -131,5 +131,65 @@ describe("EditPersonForm — save", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(mockPush).toHaveBeenCalledWith("/o/alder-creek/admin/members");
     expect(mockUpdatePersonAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("EditPersonForm — unsaved-changes guard (H3)", () => {
+  it("Cancel opens the discard dialog instead of navigating once the form is dirty", () => {
+    render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
+    fireEvent.change(screen.getByLabelText(/^first name/i), {
+      target: { value: "Nora-Jean" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
+  });
+
+  it("Stay keeps the user on the page with the edit intact", () => {
+    render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
+    fireEvent.change(screen.getByLabelText(/^first name/i), {
+      target: { value: "Nora-Jean" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^stay$/i }));
+
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(
+      (screen.getByLabelText(/^first name/i) as HTMLInputElement).value,
+    ).toBe("Nora-Jean");
+  });
+
+  it("Discard completes the navigation the Cancel click intended", () => {
+    render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
+    fireEvent.change(screen.getByLabelText(/^first name/i), {
+      target: { value: "Nora-Jean" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+
+    expect(mockPush).toHaveBeenCalledWith("/o/alder-creek/admin/members");
+  });
+});
+
+describe("EditPersonForm — required-field markers (L3)", () => {
+  it("marks First name and Last name as required, visually and via aria-required", () => {
+    render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
+
+    const firstName = screen.getByLabelText(/^first name/i);
+    const lastName = screen.getByLabelText(/^last name/i);
+    expect(firstName.getAttribute("aria-required")).toBe("true");
+    expect(lastName.getAttribute("aria-required")).toBe("true");
+
+    // The label text carries a visible marker too — asserted as an
+    // aria-hidden character so the accessible name is untouched.
+    const firstNameLabel = document.querySelector('label[for="edit-person-firstName"]');
+    expect(firstNameLabel?.querySelector('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it("does NOT mark an optional field (e.g. suffix) as required", () => {
+    render(<EditPersonForm slug="alder-creek" person={PERSON} households={[]} />);
+    const suffix = screen.getByLabelText(/suffix/i);
+    expect(suffix.getAttribute("aria-required")).toBeNull();
   });
 });

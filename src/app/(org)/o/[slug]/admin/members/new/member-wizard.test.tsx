@@ -47,10 +47,10 @@ afterEach(() => {
 });
 
 function fillSearch(firstName = "Nora", lastName = "Ashgrove") {
-  fireEvent.change(screen.getByLabelText(/^first name$/i), {
+  fireEvent.change(screen.getByLabelText(/^first name/i), {
     target: { value: firstName },
   });
-  fireEvent.change(screen.getByLabelText(/^last name$/i), {
+  fireEvent.change(screen.getByLabelText(/^last name/i), {
     target: { value: lastName },
   });
 }
@@ -77,10 +77,10 @@ describe("MemberWizard — search with no match", () => {
       expect(screen.getByText(/name & birth date/i)).toBeTruthy();
     });
     expect(
-      (screen.getByLabelText(/^first name$/i) as HTMLInputElement).value,
+      (screen.getByLabelText(/^first name/i) as HTMLInputElement).value,
     ).toBe("Nora");
     expect(
-      (screen.getByLabelText(/^last name$/i) as HTMLInputElement).value,
+      (screen.getByLabelText(/^last name/i) as HTMLInputElement).value,
     ).toBe("Ashgrove");
   });
 });
@@ -156,7 +156,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
 
     expect(screen.getByText(/name & birth date/i)).toBeTruthy();
     expect(
-      (screen.getByLabelText(/^first name$/i) as HTMLInputElement).value,
+      (screen.getByLabelText(/^first name/i) as HTMLInputElement).value,
     ).toBe("Nora");
   });
 });
@@ -171,10 +171,10 @@ describe("MemberWizard — validation blocks Next", () => {
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
     await waitFor(() => screen.getByText(/name & birth date/i));
 
-    fireEvent.change(screen.getByLabelText(/^first name$/i), {
+    fireEvent.change(screen.getByLabelText(/^first name/i), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText(/^last name$/i), {
+    fireEvent.change(screen.getByLabelText(/^last name/i), {
       target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
@@ -206,7 +206,7 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
     await waitFor(() => screen.getByText(/name & birth date/i));
 
     // Overwrite the prefilled values with something distinguishable.
-    fireEvent.change(screen.getByLabelText(/^first name$/i), {
+    fireEvent.change(screen.getByLabelText(/^first name/i), {
       target: { value: "Nora-Jean" },
     });
     fireEvent.change(screen.getByLabelText(/middle name/i), {
@@ -223,7 +223,7 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
 
     await waitFor(() => screen.getByText(/name & birth date/i));
     expect(
-      (screen.getByLabelText(/^first name$/i) as HTMLInputElement).value,
+      (screen.getByLabelText(/^first name/i) as HTMLInputElement).value,
     ).toBe("Nora-Jean");
     expect(
       (screen.getByLabelText(/middle name/i) as HTMLInputElement).value,
@@ -290,7 +290,7 @@ describe("MemberWizard — roll action kind options — regression for wizard-se
 
     await waitFor(() => screen.getByText(/step \d+ of \d+: roll action/i));
 
-    const select = screen.getByLabelText(/^roll action$/i) as HTMLSelectElement;
+    const select = screen.getByLabelText(/^roll action/i) as HTMLSelectElement;
     const optionValues = Array.from(select.options).map((option) => option.value);
 
     // Exact match, not just "doesn't contain death" — proves the <select>
@@ -300,6 +300,43 @@ describe("MemberWizard — roll action kind options — regression for wizard-se
     expect(optionValues).not.toContain("death");
     expect(optionValues).not.toContain("void");
     expect(optionValues).not.toContain("certificate_dismissed");
+  });
+});
+
+describe("MemberWizard — required-field markers (L3)", () => {
+  it("marks First name and Last name as required on the Search step", () => {
+    render(<MemberWizard slug="alder-creek" households={[]} />);
+
+    const firstName = screen.getByLabelText(/^first name/i);
+    const lastName = screen.getByLabelText(/^last name/i);
+    expect(firstName.getAttribute("aria-required")).toBe("true");
+    expect(lastName.getAttribute("aria-required")).toBe("true");
+
+    // An optional field on the same step carries no such marker.
+    const email = screen.getByLabelText(/^email/i);
+    expect(email.getAttribute("aria-required")).toBeNull();
+  });
+
+  it("marks the Roll action select and Effective date as required", async () => {
+    mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
+    render(<MemberWizard slug="alder-creek" households={[]} />);
+
+    fillSearch("Nora", "Ashgrove");
+    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+    await waitFor(() => screen.getByText(/name & birth date/i));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    await waitFor(() => screen.getByText(/contact & address/i));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    await waitFor(() => screen.getByText(/^household$/i));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    await waitFor(() => screen.getByText(/step \d+ of \d+: roll action/i));
+
+    expect(
+      screen.getByLabelText(/^roll action/i).getAttribute("aria-required"),
+    ).toBe("true");
+    expect(
+      screen.getByLabelText(/effective date/i).getAttribute("aria-required"),
+    ).toBe("true");
   });
 });
 

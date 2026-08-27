@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { Lock } from "lucide-react";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import {
   assertOrgAccess,
@@ -185,25 +186,45 @@ export default async function EditMemberPage({
           {resolved.org.name}
         </p>
       </div>
-      <EditPersonForm
-        slug={slug}
-        person={personResult.person}
-        households={households}
-      />
-      {rollActionEditFlagOn && (
-        <RecordRollActionForm
+
+      {/* M2 (docs/reviews/2026-08-26-portal-ux.md): the three concerns on
+          this page — editing the profile, recording a roll action, and the
+          gated link into sensitive information — each get their own
+          `bg-card` panel instead of sharing one undifferentiated scroll
+          separated by a bare divider. Cards, not tabs (out of scope for a
+          polish batch per the task brief). */}
+      <div className="rounded-xl border bg-card p-6 shadow-sm">
+        <h2 className="mb-4 text-lg font-semibold">Profile</h2>
+        <EditPersonForm
           slug={slug}
-          personId={id}
-          pendingActions={pendingRollActions}
+          person={personResult.person}
+          households={households}
         />
+      </div>
+
+      {rollActionEditFlagOn && (
+        <div className="rounded-xl border bg-card p-6 shadow-sm">
+          {/* `RecordRollActionForm` supplies its own "Record a roll action"
+              heading + description — the card is a plain wrapper, not a
+              second header. */}
+          <RecordRollActionForm
+            slug={slug}
+            personId={id}
+            pendingActions={pendingRollActions}
+          />
+        </div>
       )}
+
       {showSensitiveInfoLink && (
-        <Link
-          href={`/o/${slug}/admin/members/${id}/edit/sensitive`}
-          className="inline-block text-sm underline underline-offset-2"
-        >
-          Pastoral notes, demographics, medical & disability information
-        </Link>
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <Link
+            href={`/o/${slug}/admin/members/${id}/edit/sensitive`}
+            className="flex items-center gap-2 text-sm underline underline-offset-2"
+          >
+            <Lock className="size-4 shrink-0" aria-hidden />
+            Pastoral notes, demographics, medical & disability information
+          </Link>
+        </div>
       )}
     </section>
   );

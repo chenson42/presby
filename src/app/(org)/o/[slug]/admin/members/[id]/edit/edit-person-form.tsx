@@ -9,6 +9,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RequiredMark } from "@/components/shared/required-mark";
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type { PersonForEdit, UpdatePersonInput } from "@/lib/people";
 import { editPersonSchema, type EditPersonValues } from "./edit-person-schema";
 import { updatePersonAction } from "./actions";
@@ -71,9 +74,18 @@ export function EditPersonForm({
 
   const {
     register,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = form;
   const householdMode = useWatch({ control: form.control, name: "household.mode" });
+
+  // H3 (docs/reviews/2026-08-26-portal-ux.md) — this is the exact form the
+  // review reproduced live data loss on. RHF's own `formState.isDirty`
+  // already tracks every field change; see the hook's own header for what
+  // "guarded" covers (this form's Cancel button, PLUS any same-origin link
+  // clicked anywhere on the page while dirty, PLUS a hard navigation/tab
+  // close).
+  const { discardOpen, setDiscardOpen, guardedNavigate, confirmDiscard } =
+    useUnsavedChangesGuard(isDirty);
 
   async function onSubmit(values: EditPersonValues) {
     const input: UpdatePersonInput = {
@@ -126,8 +138,8 @@ export function EditPersonForm({
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
       <div className="space-y-4">
         <h2 className="text-lg font-medium">Name</h2>
-        <TextField id="firstName" label="First name" register={register} name="identity.firstName" error={errors.identity?.firstName?.message} />
-        <TextField id="lastName" label="Last name" register={register} name="identity.lastName" error={errors.identity?.lastName?.message} />
+        <TextField id="firstName" label="First name" register={register} name="identity.firstName" error={errors.identity?.firstName?.message} required />
+        <TextField id="lastName" label="Last name" register={register} name="identity.lastName" error={errors.identity?.lastName?.message} required />
         <TextField id="middleName" label="Middle name (optional)" register={register} name="identity.middleName" />
         <TextField id="preferredName" label="Preferred name (optional)" register={register} name="identity.preferredName" />
         <TextField id="suffix" label="Suffix (optional)" register={register} name="identity.suffix" />
@@ -184,11 +196,15 @@ export function EditPersonForm({
           </p>
         ) : (
           <div>
-            <Label htmlFor="edit-person-household-id">Household</Label>
+            <Label htmlFor="edit-person-household-id">
+              Household
+              <RequiredMark />
+            </Label>
             <div className="relative mt-1">
               <select
                 id="edit-person-household-id"
                 className={SELECT_CLASSES}
+                aria-required="true"
                 {...register("household.householdId")}
               >
                 <option value="">Choose a household…</option>
@@ -218,6 +234,7 @@ export function EditPersonForm({
           register={register}
           name="household.name"
           error={errors.household?.name?.message}
+          required
         />
       )}
 
@@ -230,11 +247,16 @@ export function EditPersonForm({
           variant="outline"
           disabled={submitting}
           className="min-h-[44px] min-w-[44px]"
-          onClick={() => router.push(`/o/${slug}/admin/members`)}
+          onClick={() => guardedNavigate(`/o/${slug}/admin/members`)}
         >
           Cancel
         </Button>
       </div>
+      <UnsavedChangesDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirmDiscard={confirmDiscard}
+      />
     </form>
   );
 }
@@ -246,6 +268,7 @@ function TextField({
   name,
   type = "text",
   error,
+  required,
 }: {
   id: string;
   label: string;
@@ -253,16 +276,21 @@ function TextField({
   name: Parameters<ReturnType<typeof useForm<EditPersonValues>>["register"]>[0];
   type?: string;
   error?: string;
+  required?: boolean;
 }) {
   const fieldId = `edit-person-${id}`;
   return (
     <div>
-      <Label htmlFor={fieldId}>{label}</Label>
+      <Label htmlFor={fieldId}>
+        {label}
+        {required && <RequiredMark />}
+      </Label>
       <Input
         id={fieldId}
         type={type}
         aria-invalid={error ? "true" : undefined}
         aria-describedby={error ? `${fieldId}-error` : undefined}
+        aria-required={required ? "true" : undefined}
         className="mt-1"
         autoComplete="off"
         {...register(name)}

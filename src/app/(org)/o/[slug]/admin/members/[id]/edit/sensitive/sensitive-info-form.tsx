@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { ChevronDown, Lock } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type { SensitiveInfoForEdit } from "@/lib/person-sensitive";
 import {
   addPersonNoteAction,
@@ -15,8 +19,11 @@ import {
   setPersonDisabilitiesAction,
 } from "./actions";
 
+// H1 (docs/reviews/2026-08-26-portal-ux.md): `pr-8` reserves room for the
+// manual chevron every select on this page now renders — see
+// `directory-grid.tsx`'s status select for the reference implementation.
 const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 const NOTE_TYPES = [
   { value: "general", label: "General" },
@@ -72,13 +79,42 @@ export function SensitiveInfoForm({
   personId: string;
   data: SensitiveInfoForEdit;
 }) {
+  // H3 (docs/reviews/2026-08-26-portal-ux.md) — four independent sub-forms,
+  // each with its own submit button, share ONE guard: a change in ANY
+  // section marks the whole page dirty, and each section clears its own key
+  // once ITS save succeeds (a saved demographics section doesn't force a
+  // still-unsaved pastoral note to stop guarding the page).
+  const [sectionDirty, setSectionDirty] = useState<Record<string, boolean>>(
+    {},
+  );
+  const isDirty = Object.values(sectionDirty).some(Boolean);
+  const { discardOpen, setDiscardOpen, confirmDiscard } =
+    useUnsavedChangesGuard(isDirty);
+
+  const handleSectionDirtyChange = useCallback(
+    (key: string, dirty: boolean) => {
+      setSectionDirty((prev) =>
+        prev[key] === dirty ? prev : { ...prev, [key]: dirty },
+      );
+    },
+    [],
+  );
+
   return (
     <div className="space-y-10">
+      <Badge variant="outline" className="gap-1.5 py-1">
+        <Lock className="size-3" aria-hidden />
+        Restricted — visible only to the offices holding each section&apos;s
+        permission
+      </Badge>
       {data.grants.pastoralNotes && (
         <PastoralNotesSection
           slug={slug}
           personId={personId}
           notes={data.notes ?? []}
+          onDirtyChange={(dirty) =>
+            handleSectionDirtyChange("pastoralNotes", dirty)
+          }
         />
       )}
       {data.grants.demographics && (
@@ -86,6 +122,9 @@ export function SensitiveInfoForm({
           slug={slug}
           personId={personId}
           initial={data.demographics ?? null}
+          onDirtyChange={(dirty) =>
+            handleSectionDirtyChange("demographics", dirty)
+          }
         />
       )}
       {data.grants.medical && (
@@ -93,6 +132,7 @@ export function SensitiveInfoForm({
           slug={slug}
           personId={personId}
           initial={data.medical ?? null}
+          onDirtyChange={(dirty) => handleSectionDirtyChange("medical", dirty)}
         />
       )}
       {data.grants.disabilities && data.disabilityTrackingEnabled && (
@@ -100,8 +140,16 @@ export function SensitiveInfoForm({
           slug={slug}
           personId={personId}
           initial={data.disabilities ?? []}
+          onDirtyChange={(dirty) =>
+            handleSectionDirtyChange("disabilities", dirty)
+          }
         />
       )}
+      <UnsavedChangesDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirmDiscard={confirmDiscard}
+      />
     </div>
   );
 }
@@ -114,10 +162,12 @@ function PastoralNotesSection({
   slug,
   personId,
   notes,
+  onDirtyChange,
 }: {
   slug: string;
   personId: string;
   notes: NonNullable<SensitiveInfoForEdit["notes"]>;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -128,6 +178,13 @@ function PastoralNotesSection({
     useState<(typeof VISIBILITIES)[number]["value"]>("staff");
   const [body, setBody] = useState("");
   const [occurredOn, setOccurredOn] = useState("");
+
+  // A blank draft (nothing typed yet) is never "dirty" — noteType/visibility
+  // stay at their sensible defaults until there's a body to go with them.
+  const isDirty = body.trim() !== "" || occurredOn !== "";
+  useEffect(() => {
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -160,9 +217,12 @@ function PastoralNotesSection({
       <h2 className="text-lg font-medium">Pastoral care notes</h2>
 
       {notes.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No notes recorded yet.
-        </p>
+        <div className="rounded-lg border border-dashed border-border py-10 text-center">
+          <p className="text-sm font-medium">No notes recorded yet</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Add the first pastoral care note below.
+          </p>
+        </div>
       ) : (
         <ul className="space-y-3">
           {notes.map((note) => (
@@ -196,40 +256,54 @@ function PastoralNotesSection({
       <form onSubmit={onSubmit} className="space-y-3 border-t border-border pt-4">
         <div>
           <Label htmlFor="note-type">Note type</Label>
-          <select
-            id="note-type"
-            className={`${SELECT_CLASSES} mt-1`}
-            value={noteType}
-            onChange={(e) =>
-              setNoteType(e.target.value as (typeof NOTE_TYPES)[number]["value"])
-            }
-          >
-            {NOTE_TYPES.map((n) => (
-              <option key={n.value} value={n.value}>
-                {n.label}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="note-type"
+              className={SELECT_CLASSES}
+              value={noteType}
+              onChange={(e) =>
+                setNoteType(
+                  e.target.value as (typeof NOTE_TYPES)[number]["value"],
+                )
+              }
+            >
+              {NOTE_TYPES.map((n) => (
+                <option key={n.value} value={n.value}>
+                  {n.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
 
         <div>
           <Label htmlFor="note-visibility">Visibility</Label>
-          <select
-            id="note-visibility"
-            className={`${SELECT_CLASSES} mt-1`}
-            value={visibility}
-            onChange={(e) =>
-              setVisibility(
-                e.target.value as (typeof VISIBILITIES)[number]["value"],
-              )
-            }
-          >
-            {VISIBILITIES.map((v) => (
-              <option key={v.value} value={v.value}>
-                {v.label}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="note-visibility"
+              className={SELECT_CLASSES}
+              value={visibility}
+              onChange={(e) =>
+                setVisibility(
+                  e.target.value as (typeof VISIBILITIES)[number]["value"],
+                )
+              }
+            >
+              {VISIBILITIES.map((v) => (
+                <option key={v.value} value={v.value}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
 
         <div>
@@ -271,10 +345,12 @@ function DemographicsSection({
   slug,
   personId,
   initial,
+  onDirtyChange,
 }: {
   slug: string;
   personId: string;
   initial: NonNullable<SensitiveInfoForEdit["demographics"]> | null;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -284,6 +360,36 @@ function DemographicsSection({
   );
   const [source, setSource] = useState<"self" | "staff">(
     (initial?.source as "self" | "staff") ?? "self",
+  );
+  const [racialEthnicFilter, setRacialEthnicFilter] = useState("");
+
+  // A "saved snapshot" in STATE, not a ref, and not a straight comparison
+  // against `initial` — this section's own successful save doesn't re-fetch
+  // new `initial` props (only `router.refresh()`, which re-renders the
+  // SERVER tree but not this already-mounted client instance's props), so
+  // the dirty check has to move its own goalposts forward on save rather
+  // than rely on a prop that never changes underneath it. State, not a ref,
+  // because the comparison below reads it during render — reading (or
+  // writing) a ref's `.current` during render is impure.
+  const [saved, setSaved] = useState({
+    gender: initial?.gender ?? "",
+    racialEthnic: initial?.racialEthnic ?? [],
+    source: (initial?.source as "self" | "staff") ?? "self",
+  });
+  const isDirty =
+    gender !== saved.gender ||
+    source !== saved.source ||
+    racialEthnic.length !== saved.racialEthnic.length ||
+    racialEthnic.some((v) => !saved.racialEthnic.includes(v));
+  useEffect(() => {
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  const filteredRacialEthnicOptions = RACIAL_ETHNIC_OPTIONS.filter((option) =>
+    option
+      .replaceAll("_", " ")
+      .toLowerCase()
+      .includes(racialEthnicFilter.trim().toLowerCase()),
   );
 
   function toggleRacialEthnic(value: string) {
@@ -304,6 +410,7 @@ function DemographicsSection({
 
     if (result.ok) {
       toast.success("Demographics saved.");
+      setSaved({ gender, racialEthnic: [...racialEthnic], source });
       router.refresh();
     } else {
       toast.error(result.error);
@@ -329,35 +436,59 @@ function DemographicsSection({
           <legend className="text-sm font-medium">
             Racial / ethnic (optional, select all that apply)
           </legend>
+          {/* M4 (docs/reviews/2026-08-26-portal-ux.md): 9 options crosses
+              ui-standards.md § Multi-select's ~6-option filter threshold. */}
+          <Label htmlFor="demographics-racial-ethnic-filter" className="sr-only">
+            Filter racial / ethnic options
+          </Label>
+          <Input
+            id="demographics-racial-ethnic-filter"
+            type="text"
+            placeholder="Filter options…"
+            value={racialEthnicFilter}
+            onChange={(e) => setRacialEthnicFilter(e.target.value)}
+          />
           <div className="flex flex-col gap-2">
-            {RACIAL_ETHNIC_OPTIONS.map((option) => (
-              <label
-                key={option}
-                className="inline-flex min-h-11 items-center gap-2 text-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={racialEthnic.includes(option)}
-                  onChange={() => toggleRacialEthnic(option)}
-                  className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                />
-                {option.replaceAll("_", " ")}
-              </label>
-            ))}
+            {filteredRacialEthnicOptions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No options match &quot;{racialEthnicFilter}&quot;.
+              </p>
+            ) : (
+              filteredRacialEthnicOptions.map((option) => (
+                <label
+                  key={option}
+                  className="inline-flex min-h-11 items-center gap-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={racialEthnic.includes(option)}
+                    onChange={() => toggleRacialEthnic(option)}
+                    className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  />
+                  {option.replaceAll("_", " ")}
+                </label>
+              ))
+            )}
           </div>
         </fieldset>
 
         <div>
           <Label htmlFor="demographics-source">Source</Label>
-          <select
-            id="demographics-source"
-            className={`${SELECT_CLASSES} mt-1`}
-            value={source}
-            onChange={(e) => setSource(e.target.value as "self" | "staff")}
-          >
-            <option value="self">Self-reported</option>
-            <option value="staff">Staff-observed</option>
-          </select>
+          <div className="relative mt-1">
+            <select
+              id="demographics-source"
+              className={SELECT_CLASSES}
+              value={source}
+              onChange={(e) => setSource(e.target.value as "self" | "staff")}
+            >
+              <option value="self">Self-reported</option>
+              <option value="staff">Staff-observed</option>
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
         </div>
 
         <Button type="submit" disabled={submitting} className="min-h-11">
@@ -376,10 +507,12 @@ function MedicalSection({
   slug,
   personId,
   initial,
+  onDirtyChange,
 }: {
   slug: string;
   personId: string;
   initial: NonNullable<SensitiveInfoForEdit["medical"]> | null;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -389,6 +522,23 @@ function MedicalSection({
   const [authorizedPickup, setAuthorizedPickup] = useState(
     initial?.authorizedPickup ?? "",
   );
+
+  // Same "saved snapshot" reasoning as `DemographicsSection` above (state,
+  // not a ref — the comparison below reads it during render).
+  const [saved, setSaved] = useState({
+    allergies: initial?.allergies ?? "",
+    medicalNotes: initial?.medicalNotes ?? "",
+    medications: initial?.medications ?? "",
+    authorizedPickup: initial?.authorizedPickup ?? "",
+  });
+  const isDirty =
+    allergies !== saved.allergies ||
+    medicalNotes !== saved.medicalNotes ||
+    medications !== saved.medications ||
+    authorizedPickup !== saved.authorizedPickup;
+  useEffect(() => {
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -403,6 +553,12 @@ function MedicalSection({
 
     if (result.ok) {
       toast.success("Medical information saved.");
+      setSaved({
+        allergies,
+        medicalNotes,
+        medications,
+        authorizedPickup,
+      });
       router.refresh();
     } else {
       toast.error(result.error);
@@ -479,14 +635,26 @@ function DisabilitiesSection({
   slug,
   personId,
   initial,
+  onDirtyChange,
 }: {
   slug: string;
   personId: string;
   initial: string[];
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [categories, setCategories] = useState<string[]>(initial);
+
+  // Same "saved snapshot" reasoning as the two sections above (state, not a
+  // ref).
+  const [saved, setSaved] = useState<string[]>(initial);
+  const isDirty =
+    categories.length !== saved.length ||
+    categories.some((c) => !saved.includes(c));
+  useEffect(() => {
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   function toggleCategory(value: string) {
     setCategories((prev) =>
@@ -504,6 +672,7 @@ function DisabilitiesSection({
 
     if (result.ok) {
       toast.success("Disability records saved.");
+      setSaved([...categories]);
       router.refresh();
     } else {
       toast.error(result.error);

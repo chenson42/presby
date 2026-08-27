@@ -53,6 +53,7 @@ export function SearchStep({
         register={register}
         errors={errors}
         autoComplete="off"
+        required
       />
       <WizardField
         name="search.lastName"
@@ -60,6 +61,7 @@ export function SearchStep({
         register={register}
         errors={errors}
         autoComplete="off"
+        required
       />
       <WizardField
         name="search.dateOfBirth"

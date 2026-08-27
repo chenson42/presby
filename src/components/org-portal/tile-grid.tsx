@@ -5,10 +5,12 @@ import {
   LayoutGrid,
   Landmark,
   MessageSquare,
+  Palette,
   Settings,
   SlidersHorizontal,
   Ticket,
   UserPlus,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,12 @@ import type { PortalTile } from "@/lib/org-portal/tiles";
  * An unmapped key (a future `PORTAL_TILES` addition this map hasn't caught
  * up to yet) falls back to `LayoutGrid` rather than crashing the render —
  * named explicitly in Phase 3 Edge Cases as worth its own regression test.
+ *
+ * `groups` and `branding` (docs/work-log/2026-08-26-portal-ux-fixes.md,
+ * Wave 1B, finding M6) previously had no entry here and both silently fell
+ * back to the same `LayoutGrid` glyph — indistinguishable in the grid.
+ * `UsersRound` and `Palette` are distinct, semantically-fitting glyphs
+ * already available from `lucide-react`; no new dependency.
  */
 const TILE_ICONS: Record<string, LucideIcon> = {
   members: UserPlus,
@@ -31,6 +39,8 @@ const TILE_ICONS: Record<string, LucideIcon> = {
   tickets: Ticket,
   feedback: MessageSquare,
   features: SlidersHorizontal,
+  groups: UsersRound,
+  branding: Palette,
 };
 
 /**

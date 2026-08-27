@@ -39,8 +39,8 @@ export default async function FlagsPage() {
         <TableBody>
           {flags.map((f) => (
             <TableRow key={f.key}>
-              <TableCell className="font-mono text-xs">{f.key}</TableCell>
-              <TableCell className="text-xs">{f.description ?? "—"}</TableCell>
+              <TableCell className="font-mono text-xs whitespace-nowrap">{f.key}</TableCell>
+              <TableCell className="max-w-md min-w-64 text-xs whitespace-normal">{f.description ?? "—"}</TableCell>
               <TableCell>
                 {f.enabled ? (
                   <Badge

@@ -107,6 +107,52 @@ describe("PortalNavLinks — active state", () => {
     expect(directoryLink.className).toContain("border-transparent");
   });
 
+  it("resolves overlapping prefixes to the single most-specific entry — regression for 'Groups' also lighting up 'Administration'", () => {
+    // Found live: "Administration" (`/o/acme/admin`) is a *prefix* of
+    // "Groups" (`/o/acme/admin/groups`) purely because Groups happens to be
+    // an "operate"-category tile routed through /admin/*, not because it's an
+    // Organization Administration hub destination. Both entries' independent
+    // `startsWith`/exact checks used to pass simultaneously; only the longest
+    // matching href should ever end up "current."
+    const entriesWithAdminOverlap: PortalNavEntry[] = [
+      { label: "Home", href: "/o/acme", exact: true },
+      { label: "Groups", href: "/o/acme/admin/groups", exact: false },
+      { label: "Administration", href: "/o/acme/admin", exact: false },
+    ];
+    usePathname.mockReturnValue("/o/acme/admin/groups");
+
+    render(<PortalNavLinks entries={entriesWithAdminOverlap} />);
+
+    expect(
+      screen.getByRole("link", { name: "Groups" }).getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      screen
+        .getByRole("link", { name: "Administration" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
+  it("still marks Administration current on its own index page, with no more-specific entry matching", () => {
+    const entriesWithAdminOverlap: PortalNavEntry[] = [
+      { label: "Home", href: "/o/acme", exact: true },
+      { label: "Groups", href: "/o/acme/admin/groups", exact: false },
+      { label: "Administration", href: "/o/acme/admin", exact: false },
+    ];
+    usePathname.mockReturnValue("/o/acme/admin");
+
+    render(<PortalNavLinks entries={entriesWithAdminOverlap} />);
+
+    expect(
+      screen
+        .getByRole("link", { name: "Administration" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      screen.getByRole("link", { name: "Groups" }).getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
   it("renders every entry as a link to its href, in order", () => {
     usePathname.mockReturnValue("/o/acme");
 

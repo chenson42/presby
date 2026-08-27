@@ -39,10 +39,27 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
     setOpen(false);
   }, [pathname]);
 
-  const isEntryActive = (entry: PortalNavEntry) =>
+  const matchesEntry = (entry: PortalNavEntry) =>
     entry.exact
       ? pathname === entry.href
       : pathname === entry.href || pathname?.startsWith(`${entry.href}/`);
+
+  // MOST-SPECIFIC MATCH WINS, not "every entry whose href happens to be a
+  // pathname prefix." Found live: several "operate" tiles route through
+  // `/o/<slug>/admin/*` (Members, Officers, Groups) even though they aren't
+  // Organization Administration hub destinations — on `/o/<slug>/admin/groups`,
+  // both "Groups" (`/o/<slug>/admin/groups`, exact-equal) and "Administration"
+  // (`/o/<slug>/admin`, a prefix of that same path) satisfied `matchesEntry`,
+  // so both lit up at once. Resolving to the single longest-href match, same
+  // algorithm most routers use for nested-route active state, means a more
+  // specific route always shadows a shorter one that merely happens to share
+  // its URL prefix — no per-tile special-casing needed here or in tiles.ts.
+  const activeHref = entries.reduce<string | null>((best, entry) => {
+    if (!matchesEntry(entry)) return best;
+    if (best === null || entry.href.length > best.length) return entry.href;
+    return best;
+  }, null);
+  const isEntryActive = (entry: PortalNavEntry) => entry.href === activeHref;
 
   // The `border-b-2` accent (docs/work-log/
   // 2026-08-26-portal-visual-modernization.md Phase 3) is applied

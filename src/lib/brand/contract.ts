@@ -34,8 +34,19 @@
  * Pinned so that a generator improvement cannot silently re-skin every
  * congregation (D8, A13). Each org stores the version its tokens were derived
  * under; a bump is a deliberate, audited migration, never a dependency upgrade.
+ *
+ * 1 -> 2 (docs/work-log/2026-08-27-button-modernization.md, Phase 2/3):
+ * `searchBrandLightness`'s light-scheme stopping condition changed — it now
+ * also requires white-on-`brand` to clear D2 (4.5:1), not just D3
+ * (brand-on-surface >=3:1), so `on-brand` resolves to white rather than
+ * black for most light-scheme seeds. A materially different derivation, not
+ * a bugfix-in-place. Per architect ruling (Phase 2 #2), `getOrgBrandForLayout()`
+ * calls `generateBrandTokens()` unconditionally on every request and never
+ * reads the stored `brand_token_version` column, so this bump does NOT gate
+ * a migration the way the comment above implies it should — see the
+ * read/write-asymmetry item in docs/TODO.md.
  */
-export const BRAND_TOKEN_VERSION = 1;
+export const BRAND_TOKEN_VERSION = 2;
 
 /* -------------------------------------------------------------------------
  * Token policy — the three-way partition

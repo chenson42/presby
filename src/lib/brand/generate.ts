@@ -39,8 +39,20 @@
  *      lightness search along the SEED'S OWN HUE (darken toward black for
  *      light scheme, lighten toward white for dark scheme) until D3 (`brand`
  *      on `surface` >=3:1) clears, gamut-clamping chroma at each candidate
- *      lightness; `on-brand` resolved by the same achromatic search as steps
- *      3-5 (always resolves >=4.5:1, independent of `brand`'s lightness).
+ *      lightness. LIGHT SCHEME ONLY (architect ruling #6, D11): the search
+ *      does not stop at D3 alone — it keeps darkening until
+ *      `pickAchromaticForeground` would actually resolve to white for that
+ *      candidate (NOT merely until white clears D2's 4.5:1 floor — see the
+ *      implementation-deviation comment on `clearsWhiteFloor` in
+ *      `searchBrandLightness` for the narrow luminance band where both
+ *      black and white clear 4.5:1 but black still wins), so `on-brand`
+ *      legitimately resolves to white rather than black for a mid-lightness
+ *      seed. Dark scheme's stopping condition is unchanged (its added
+ *      clause short-circuits to `true`). `on-brand` is then resolved by the
+ *      same achromatic search as steps
+ *      3-5 (always resolves >=4.5:1, independent of `brand`'s lightness) —
+ *      the search only moves where `brand` itself lands; it never
+ *      special-cases or hard-codes the foreground.
  *   7. Apply the D10 minimum-chroma floor for a near-grey seed, and a bounded
  *      hue nudge (+-5..20 degrees) ONLY as a fallback when gamut clipping
  *      still collapsed a non-near-grey seed's chroma near zero at the
@@ -75,6 +87,17 @@
  * discipline, and the bounded hue nudge in step 7 is a documented safety net,
  * not the primary mechanism. See Phase 4 notes for whether the property test
  * grid ever exercised it.
+ *
+ * Button-modernization pipeline note (docs/work-log/2026-08-27-button-
+ * modernization.md, Phase 2/3): the paragraph above says text never HAS to
+ * move to satisfy D2 — it does not say the generator is indifferent to
+ * WHICH of black/white gets picked. Step 6's light-scheme search now keeps
+ * moving `brand`'s own lightness one clause further than D3 alone requires,
+ * specifically so that white — not merely "some achromatic colour" — is the
+ * one `pickAchromaticForeground` finds. `on-brand` is still computed, never
+ * hard-coded: the search only changes where `brand` stops, and
+ * `pickAchromaticForeground` is untouched. Dark scheme's stopping condition
+ * is unchanged (D11: independent derivation, not a mirror of light's).
  *
  * D9 ("the ramp is monotone in lightness") is not asserted by this module:
  * the closed `BrandRole` vocabulary (`contract.ts`) has no hover/pressed
@@ -329,7 +352,29 @@ function searchBrandLightness(
 
   for (let i = 0; i < 100; i++) {
     const { hex, C: usedC } = oklchToHexClamped(L, C, H);
-    if (contrastRatio(hex, surfaceHex) >= 3) return { hex, L, C: usedC };
+    const clearsD3 = contrastRatio(hex, surfaceHex) >= 3;
+    // Light scheme only (architect ruling #6, D11): D3 alone is not
+    // sufficient for this scheme's chosen text color to be white. Keep
+    // darkening until `pickAchromaticForeground` would ACTUALLY choose
+    // white for this candidate — not merely until white clears D2 (4.5:1).
+    // Implementation deviation from the Phase 3 design's exact sample
+    // (`contrastRatio("#ffffff", hex) >= 4.5`): the WCAG luminance-gap proof
+    // in this module's header shows black-on-bg and white-on-bg BOTH clear
+    // 4.5:1 for `relLum(bg)` in the narrow band [0.175, 0.1833) — the two
+    // FAILURE conditions are mutually exclusive, but the two PASS
+    // conditions are not. `pickAchromaticForeground` picks whichever ratio
+    // is strictly larger, so a `hex` inside that band already clears
+    // white's 4.5:1 floor while still resolving to black (black's ratio is
+    // marginally higher there). A pure `>= 4.5` stopping condition let the
+    // search return early on that band's leading edge and property-tested
+    // false — 87 seeds resolved `on-brand: "#000000"` despite passing the
+    // 4.5:1 floor. Calling the real selector directly is both correct and
+    // the smaller diff. Dark scheme's condition is UNCHANGED —
+    // `clearsWhiteFloor` short-circuits to `true` for "dark", so the
+    // expression reduces algebraically to today's `clearsD3` alone.
+    const clearsWhiteFloor =
+      scheme === "dark" || pickAchromaticForeground(hex) === "#ffffff";
+    if (clearsD3 && clearsWhiteFloor) return { hex, L, C: usedC };
     L += direction * BRAND_LIGHTNESS_STEP;
     if (L <= 0 || L >= 1) break;
   }

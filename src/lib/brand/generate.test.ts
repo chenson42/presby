@@ -9,6 +9,7 @@ import {
 } from "./contract";
 import { contrastRatio, relativeLuminance, parseColor } from "./contrast";
 import { generateBrandTokens, oklchOf, type SchemeTokens } from "./generate";
+import darkSchemeGolden from "./__fixtures__/dark-scheme-golden.json";
 
 /**
  * The generator's own proof — the single highest-value artifact in this
@@ -97,6 +98,23 @@ function hueDistanceDeg(a: number, b: number): number {
   return d > 180 ? 360 - d : d;
 }
 
+/**
+ * Key-order-independent stringify, for byte-identity comparisons against a
+ * fixture serialized by a different process (JSON key insertion order is
+ * not semantically meaningful and must not make an otherwise-identical
+ * object fail an equality check).
+ */
+function stableStringify(obj: Record<string, unknown>): string {
+  return JSON.stringify(
+    Object.keys(obj)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = obj[key];
+        return acc;
+      }, {}),
+  );
+}
+
 describe(`property grid: ${GRID_SEEDS.length} grid seeds (${HUES.length} hues x ${BANDS.length} bands) + ${EDGE_SEEDS.length} named edge seeds, x ${SCHEMES.length} schemes`, () => {
   for (const seed of ALL_SEEDS) {
     for (const scheme of SCHEMES) {
@@ -152,6 +170,29 @@ describe(`property grid: ${GRID_SEEDS.length} grid seeds (${HUES.length} hues x 
             `${distance.toFixed(1)} deg from danger hue ${dangerHue.toFixed(1)} ` +
             `(floor ${MIN_BRAND_DANGER_HUE_DISTANCE_DEG}), and no adjustment names it`,
         ).toBe(true);
+
+        // Button-modernization (docs/work-log/2026-08-27-button-
+        // modernization.md, Phase 3(d)(1)(2)): light scheme ONLY —
+        // searchBrandLightness's tightened stopping condition means white
+        // text must clear D2 (4.5:1) against `brand`, and
+        // pickAchromaticForeground must legitimately resolve to white, not
+        // merely "some achromatic colour clears 4.5:1" (which the generic
+        // LEGAL_PAIRS loop above already proves, but does not distinguish
+        // black from white). Dark scheme is untouched by this change — see
+        // the separate golden-fixture byte-identity describe block below.
+        if (scheme === "light") {
+          const whiteRatio = contrastRatio("#ffffff", tokens.brand);
+          expect(
+            whiteRatio,
+            `seed ${seed.hex} (${seed.label}) light: white-on-brand (${tokens.brand}) ` +
+              `is ${whiteRatio.toFixed(2)}:1, expected >=4.5 (D2, button-modernization)`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            tokens["on-brand"],
+            `seed ${seed.hex} (${seed.label}) light: on-brand resolved to ` +
+              `${tokens["on-brand"]}, expected "#ffffff"`,
+          ).toBe("#ffffff");
+        }
       });
     }
   }
@@ -285,6 +326,74 @@ describe("malformed input", () => {
     expect(() => generateBrandTokens("#fff")).toThrow();
     expect(() => generateBrandTokens("rgb(1,2,3)")).toThrow();
     expect(() => generateBrandTokens("#gggggg")).toThrow();
+  });
+});
+
+describe("button-modernization (docs/work-log/2026-08-27-button-modernization.md): dark scheme untouched", () => {
+  /**
+   * Golden-fixture byte-identity check, per Phase 3(d)(3) — the strongest
+   * available proof that the light-scheme-only stopping-condition change in
+   * `searchBrandLightness` did not leak into dark. `dark-scheme-golden.json`
+   * was captured from the PRE-change generator (git HEAD at the start of
+   * this commit) for every entry in `ALL_SEEDS`, before the stopping
+   * condition was tightened. A regression that accidentally applied
+   * white-forcing (or anything else) to dark would change at least one
+   * seed's `tokens.dark` and fail this loop.
+   */
+  it("every seed's tokens.dark is byte-identical to the pre-change golden fixture", () => {
+    for (const seed of ALL_SEEDS) {
+      const generated = generateBrandTokens(seed.hex);
+      const golden = (darkSchemeGolden as Record<string, SchemeTokens>)[
+        seed.hex
+      ];
+      expect(
+        golden,
+        `seed ${seed.hex} (${seed.label}) has no golden fixture entry — ` +
+          `dark-scheme-golden.json and ALL_SEEDS have drifted apart`,
+      ).toBeDefined();
+      expect(
+        stableStringify(generated.tokens.dark),
+        `seed ${seed.hex} (${seed.label}): tokens.dark differs from the ` +
+          `pre-change golden fixture — the light-scheme-only stopping ` +
+          `condition change leaked into dark`,
+      ).toBe(stableStringify(golden));
+    }
+  });
+
+  /**
+   * Fallback-condition sanity check (Phase 3(d)(3)(ii)): confirm the dark
+   * golden fixture itself is falsifiable — i.e. it is NOT the case that
+   * every edge seed's dark on-brand already resolved to white before this
+   * change (which would make a naive "dark still resolves white sometimes"
+   * check unable to catch a white-forcing regression). At least one edge
+   * seed's dark on-brand is black in the golden fixture.
+   */
+  it("the golden fixture is falsifiable: at least one edge seed's dark on-brand is black", () => {
+    const anyBlack = EDGE_SEEDS.some(
+      (seed) =>
+        (darkSchemeGolden as Record<string, SchemeTokens>)[seed.hex][
+          "on-brand"
+        ] === "#000000",
+    );
+    expect(anyBlack).toBe(true);
+  });
+});
+
+describe("button-modernization: no-op case for a seed already darker than the white floor", () => {
+  /**
+   * Phase 3(a)'s "no-op case" argument, made concrete: hue 240 vivid-deep
+   * (#0404ae, a GRID_SEEDS entry) already clears both D3 and the white
+   * floor at its OWN starting lightness pre-change (white-on-brand measured
+   * ~12.85:1 against the pre-change generator) — `searchBrandLightness`
+   * returns on its first iteration (i=0, L=startL) both before and after
+   * this change, so `tokens.light.brand` is untouched and byte-identical to
+   * the seed's own raw hex (recomputed through the same OKLCH round-trip,
+   * not merely echoed).
+   */
+  it("#0404ae (hue 240, vivid-deep): light.brand is unchanged — zero-iteration return", () => {
+    const g = generateBrandTokens("#0404ae");
+    expect(g.tokens.light.brand).toBe("#0404ae");
+    expect(g.tokens.light["brand-raw"]).toBe("#0404ae");
   });
 });
 

@@ -78,11 +78,13 @@ async function seedFeatures() {
 
 async function seedFlags() {
   const defaults = [
-    {
-      key: "demo.new_dashboard",
-      description: "Demo flag wired into /admin to show the pattern.",
-      enabled: false,
-    },
+    // demo.new_dashboard REMOVED (docs/work-log/
+    // 2026-08-27-platform-home-and-portal.md, Phase 3): the teaching banner
+    // it gated on /admin is retired — it never gated a real "new dashboard,"
+    // and the codebase has since accumulated real isFlagEnabled() examples
+    // (org_portal.*, this very pipeline's own platform.merged_home). Leaving
+    // the row while deleting the banner would strand a dead flag whose own
+    // description promises a UI that no longer exists.
     {
       key: "auth.local_login",
       // ON: credentials sign-in (email + password) is available. Seeded ON —
@@ -508,6 +510,85 @@ async function seedFlags() {
         "Ministry credentials & pastoral appointments page in (org). OFF = /o/<slug>/admin/credentials renders 'isn't turned on yet' regardless of the viewer's credentials.manage grant.",
       enabled: false,
     },
+    {
+      key: "org_portal.oversight",
+      // ON: /o/<slug>/admin/oversight (presbytery congregation-oversight —
+      // viability, buildings/insurance) is reachable at all. Checked bare,
+      // no DECISION-026 fail-open wrapper — a toggle, not an auth path.
+      // GRADUATED OUT of the product-IA placeholder block below (docs/
+      // work-log/2026-08-27-presbytery-program.md, Phase 3): Q1's
+      // cross-org-RLS block dissolved by reframing (Phase 1) and this is
+      // now a real feature (schema landed drizzle/0038_presby_presbytery_
+      // program.sql) — same flag KEY reused verbatim per the "one durable
+      // key across iterations" rule, its ComingSoon stub body replaced by
+      // the real page under the SAME flag. Never substitutes for
+      // congregation_oversight.manage. Seeded OFF, same "ships dark until
+      // the page lands" reasoning as every other real org_portal.* flag —
+      // flip manually in dev the same way org_portal.credentials is.
+      description:
+        "Presbytery congregation-oversight page in (org). OFF = /o/<slug>/admin/oversight renders 'isn't turned on yet' regardless of the viewer's congregation_oversight.manage grant.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.reports",
+      // ON: /o/<slug>/admin/reports (presbytery congregation statistics +
+      // per-capita) is reachable at all. GRADUATED OUT of the placeholder
+      // block below for the same reason as org_portal.oversight — the
+      // publication mechanism (presby_publish_sasr_snapshot()) and its
+      // schema landed in this same migration. Never substitutes for
+      // statistics.manage/per_capita.manage. Seeded OFF.
+      description:
+        "Presbytery per-capita/SASR statistics page in (org). OFF = /o/<slug>/admin/reports renders 'isn't turned on yet' regardless of the viewer's statistics.manage/per_capita.manage grants.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.insights",
+      // ON: /o/<slug>/admin/insights (presbytery rollup dashboard) is
+      // reachable at all. GRADUATED OUT of the placeholder block below —
+      // Increment 4b builds the `presbytery` branch on top of this same
+      // schema commit; every other org type keeps rendering ComingSoon
+      // unchanged regardless of this flag. Seeded OFF.
+      description:
+        "Insights & analytics dashboards page in (org). OFF = /o/<slug>/admin/insights renders 'isn't turned on yet'. ON with the presbytery branch unbuilt = 'coming soon' stub for every non-presbytery org type.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.statistical_publication",
+      // ON: /o/<slug>/admin/statistics (the CONGREGATION-side annual
+      // statistical publication page — Increment 4a) is reachable at all.
+      // NEW flag, not a graduated placeholder — no existing scaffold stub
+      // covers a congregation-scoped route (the three scaffold placeholders
+      // above are all presbytery-only or universal-with-presbytery-only
+      // content). Never substitutes for statistics.publish. Ships dark per
+      // Operator Answer 2 (publication ships against seeded fixtures ahead
+      // of real congregation onboarding) — seeded OFF.
+      description:
+        "Congregation annual statistical publication page in (org). OFF = /o/<slug>/admin/statistics renders 'isn't turned on yet' regardless of the viewer's statistics.publish grant.",
+      enabled: false,
+    },
+    {
+      key: "platform.merged_home",
+      // ON: /home renders the merged post-chooser landing content — "Your
+      // organizations" (enterable org cards), "Platform" (Admin card iff
+      // canAccessAdmin, Developer card iff isPlatformAdmin, independently —
+      // DECISION-044), and "Still being set up" (pending invited orgs) —
+      // above the pre-existing quick-links/what's-new/feedback content
+      // (docs/work-log/2026-08-27-platform-home-and-portal.md, Phase 3,
+      // DECISION-124). REQUIRED, not optional — its blast radius is every
+      // authenticated sign-in through /launch's chooser reason, which now
+      // computes "/home" unconditionally (the flag was deliberately never
+      // threaded into computeDestination; see destination.ts's own header
+      // comment). Checked bare, no DECISION-026 fail-open wrapper — a
+      // content toggle, not an auth path: OFF is a full, correct fallback
+      // (/home's exact pre-merge shape), not a denial. Seeded ON — this is a
+      // live-ship, not a dark launch; disabling it in an incident is a
+      // content-only rollback, not a routing change (/orgs itself no longer
+      // exists as a page — it is a next.config.ts permanent redirect to
+      // /home regardless of this flag's value).
+      description:
+        "Merged post-chooser landing content on /home. OFF = /home renders exactly its pre-merge shape (greeting, Account settings + Admin dashboard quick links, what's-new, feedback) regardless of the viewer's organizations or platform access.",
+      enabled: true,
+    },
     // ============================================================
     // PRODUCT-IA SCAFFOLD PLACEHOLDER FLAGS — SEEDED ON, TEMPORARILY.
     // docs/work-log/2026-08-27-product-ia-scaffold.md (DECISION-117).
@@ -519,7 +600,13 @@ async function seedFlags() {
     // page lands" default).
     //
     // *** GO-LIVE GATE: BEFORE THE FIRST REAL CONGREGATION OR PRESBYTERY IS
-    // ONBOARDED, FLIP EVERY FLAG IN THIS BLOCK TO `enabled: false`. ***
+    // ONBOARDED, FLIP EVERY FLAG IN THIS BLOCK TO `enabled: false`. *** The
+    // go-live task SHRANK BY THREE (docs/work-log/2026-08-27-presbytery-
+    // program.md, Phase 3): org_portal.oversight/.reports/.insights
+    // graduated out of this block above — real features now sit behind
+    // them, so they follow the ordinary "seeded off" convention instead of
+    // waiting for the go-live sweep. Four flags remain in this block, not
+    // seven.
     // Tracked in docs/TODO.md ("Go-live: flip placeholder flags off," same
     // commit). Do NOT remove a flag key when its real feature ships — flip
     // it deliberately at that point and delete its entry from this block
@@ -542,24 +629,6 @@ async function seedFlags() {
       key: "org_portal.committees",
       description:
         "Presbytery committees & commissions placeholder area in (org). Presbytery-scoped tile (orgTypeScope). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
-      enabled: true, // GO-LIVE: false
-    },
-    {
-      key: "org_portal.oversight",
-      description:
-        "Presbytery congregation-oversight placeholder area in (org). Presbytery-scoped tile (orgTypeScope), BLOCKED on Q1's cross-org RLS ruling before real work can start (docs/TODO.md). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
-      enabled: true, // GO-LIVE: false
-    },
-    {
-      key: "org_portal.reports",
-      description:
-        "Presbytery per-capita/SASR + data-imports placeholder area in (org). Presbytery-scoped tile (orgTypeScope), BLOCKED on a real publication mechanism before real work can start (docs/TODO.md). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
-      enabled: true, // GO-LIVE: false
-    },
-    {
-      key: "org_portal.insights",
-      description:
-        "Insights & analytics dashboards placeholder area in (org). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
       enabled: true, // GO-LIVE: false
     },
     {
@@ -657,13 +726,26 @@ async function bindSupportOperatorFeatures() {
     where: eq(schema.roles.name, SUPPORT_OPERATOR_ROLE),
   });
   if (!role) return;
-  for (const key of [FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK]) {
+  // ADMIN_DASHBOARD (docs/work-log/2026-08-27-platform-home-and-portal.md,
+  // Phase 3, DECISION-123): a data-seed fix, not a new key or schema change.
+  // Previously support_operator held ADMIN_TICKETS/ADMIN_FEEDBACK only,
+  // which — because ADMIN_DASHBOARD is the platform axis's single "door"
+  // feature (src/proxy.ts's catch-all PROTECTION_RULES entry) — left this
+  // role bounced to /access-pending on /admin, /admin/tickets, and
+  // /admin/feedback alike, before any RSC-level hasFeature() check ever
+  // ran. This is what makes "a support_operator-features session sees
+  // exactly two tiles" verifiable in a browser at all.
+  for (const key of [
+    FEATURES.ADMIN_DASHBOARD,
+    FEATURES.ADMIN_TICKETS,
+    FEATURES.ADMIN_FEEDBACK,
+  ]) {
     await db
       .insert(schema.roleFeatures)
       .values({ roleId: role.id, featureKey: key })
       .onConflictDoNothing();
   }
-  console.log("bound tickets + feedback features to support_operator");
+  console.log("bound dashboard + tickets + feedback features to support_operator");
 }
 
 async function seedLocalAdmin() {

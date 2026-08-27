@@ -20,11 +20,19 @@ worked partly by AI.
 Open source. **No real congregation, person, or credential ever enters the
 repository** — see Key Invariants → No Real Data.
 
-**The project is not named yet**, so `presby` is threaded through the database
-role (`presby_app`), the SQL functions (`presby_roll_as_of`), and the migration
-filenames — while `package.json` still carries the starter's name
-(`claudecode-nextjs-starter`). Both are deliberate placeholders, not naming
-decisions; don't "fix" either one piecemeal. Candidates are in `docs/STATE.md`.
+**The project is named PresbyPortal** (`presbyportal.org`, DECISION-126). Use
+that name on every public-facing surface — the marketing home page, README,
+external docs. `presby` still threads through the database role (`presby_app`),
+the SQL functions (`presby_roll_as_of`), and every migration filename, and
+`package.json` still carries the starter's name (`claudecode-nextjs-starter`) —
+this is now deliberate continuity, not an unresolved placeholder: `presby_app`
+is a live Postgres role every `FORCE ROW LEVEL SECURITY` policy and
+`SECURITY DEFINER` function references by name, so renaming it is a coordinated
+migration with real operational risk, not a find-and-replace. **Don't rename
+either one piecemeal** — the full rename (DB role, function prefix, migration
+filenames, `package.json`, directory/doc mentions) is its own future scoped
+pipeline, tracked in `docs/TODO.md`. See `docs/STATE.md` for the naming
+decision's history.
 
 Seeded from `chenson42/claudecode-nextjs-starter`, which is why the platform
 shell (auth, flags, audit, feedback, what's-new) arrived pre-built and the

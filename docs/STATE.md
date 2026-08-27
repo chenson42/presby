@@ -209,13 +209,19 @@ repos and is worth reading before designing anything: `../fpcw-directory`
 public repo), `../psvonline-portal` (presbytery, already org-scoped),
 `../synod-portal` (public learn layer, AI spend gate).
 
-**Not named yet.** `/personalize-starter` is deliberately un-run, so `presby`
-threads through the database role, thirteen `presby_*` SQL functions and every
-migration filename. Leading candidate: **Presbyter** — but it is taken on `.org`,
-`.church`, `.app` and `.com`, as are `kirk`, `knox`, `presbytery` and `polity`.
-Free and defensible: `presbyterial.org`. Standing advice: keep the name, take
-`presbyterhq.org`, and inquire on the exact match. This gets more expensive every
-week it stays a placeholder.
+**Named: PresbyPortal** (decided 2026-08-27, DECISION-126; domain
+`presbyportal.org`). `/personalize-starter` is still deliberately un-run —
+`presby` continues to thread through the database role, thirteen `presby_*` SQL
+functions, and every migration filename, and `package.json` still carries the
+starter's name. **This is now deliberate continuity, not an unresolved
+placeholder**: renaming the DB role, the `presby_*` function prefix, and every
+migration filename is a large, high-blast-radius mechanical effort (a live
+Postgres role rename has session/connection implications; RLS policies and
+`SECURITY DEFINER` functions reference the role by name) that deserves its own
+scoped pipeline, not a piecemeal edit — tracked in `docs/TODO.md`. Public-facing
+copy (the marketing home page, README, external docs) uses **PresbyPortal**
+starting now; internal code identifiers do not change until that pipeline
+runs.
 
 ---
 

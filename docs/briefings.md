@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=097 commit=078e7fb -->
+<!-- covers: decision=122 commit=be9b6ef -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -22,7 +22,278 @@ entries — that is the one piece of discipline this file needs, and it is check
 
 ---
 
+## 2026-08-27
+
+- [ ] **`decision` · The next phase of work for presbyteries — not just a
+  login screen, but real functionality — is fully designed, though nothing
+  has shipped from it yet.** The central problem: a presbytery obviously
+  needs to see its member congregations' basic statistics (membership counts,
+  gains and losses, giving), but this platform's own privacy rule says one
+  organization's records are never directly reachable by another — even a
+  presbytery reaching into its own member congregations. The answer: a
+  congregation's own clerk will annually "publish" a summary snapshot
+  upward — a deliberate, one-way, aggregates-only handoff (no names, no
+  individual member records) through a narrow purpose-built mechanism, not a
+  new "presbyteries can read into congregations" back door — and once a
+  year's snapshot is published it's frozen; any correction has to be a new,
+  superseding publication, never a silent edit to the old one. For
+  congregations too small or not yet fully set up to publish for themselves,
+  the presbytery can enter or import estimated numbers on their behalf,
+  clearly labeled as an estimate so it's never confused with a real
+  self-report. Per-capita billing (what a congregation owes per member) was
+  researched against actual denominational practice rather than guessed at:
+  presbyteries genuinely bill off a membership count from two years earlier,
+  because the current year's statistics aren't compiled until partway
+  through the following year — that two-year lag is now the built-in
+  default, adjustable if a presbytery's own practice differs. The planned map
+  showing where every member congregation sits was going to use a more
+  polished third-party mapping library, until its license terms turned out to
+  be incompatible with this project's rules — caught before anything was
+  installed, so the plan now uses a smaller, permissively licensed library
+  directly instead. The actual screens (presbytery notes on each
+  congregation, statistics entry, and the rollup dashboard) are designed and
+  queued to be built next.
+
+- [ ] **`decision` · The portal's home page and navigation were reorganized
+  around named categories — People & Membership, Worship & Events, Giving &
+  Finance, Governance & Courts, Reports & Insights, Communications,
+  Administration — because the old flat list of tools was starting to run
+  out of room as more features shipped.** Every part of the product that's
+  planned but not yet built (giving, worship planning, insights,
+  communications, and, for presbyteries, committees/oversight/reports) now
+  has its own honest "coming soon" page, so the shape of where this is all
+  headed is visible today instead of hidden until it's ready.
+  **Worth your attention:** those coming-soon pages are deliberately switched
+  on in the development environment right now, specifically so the roadmap
+  stays visible while more of it gets built — they need to be switched off
+  again before any real organization sees this. Separately, "Give feedback"
+  moved out of the main tool list and into the account menu, plus a
+  dismissible reminder card at the bottom of the portal home — the same
+  reminder card the platform's own home page already uses.
+
+- [ ] **`decision` · Buttons got a bolder, more modern look, chosen from two
+  live mockups you reviewed directly.** On a congregation with its own
+  colors, a button's fill now automatically deepens until white text is
+  genuinely legible on it (checked against the real accessibility contrast
+  requirement, not eyeballed), buttons gained a subtle shadow that lifts
+  slightly on hover, and a disabled button now reads clearly as "turned off"
+  — a flat gray — instead of a washed-out, ghostly version of its normal
+  color. **Because this lives in the shared color math, not a per-congregation
+  setting, every branded congregation's buttons repainted automatically the
+  moment this went out — nobody has to re-save their branding for it to take
+  effect.** A real asymmetry was found and put to you rather than silently
+  shipped: dark mode computes its own, separate color pairing (it searches in
+  the opposite lightness direction from light mode), which can legitimately
+  mean dark text on a lighter version of the same brand color — you reviewed
+  a live dark-mode screenshot and accepted that result as correct rather than
+  it being an overlooked bug. Separately, since this audience skews older,
+  every text box, dropdown, and button across the whole app now renders
+  larger (16-point) and buttons render in a bolder weight — which also closed
+  the last visible difference between the home page's search box and every
+  other search box in the app.
+
+- [ ] **`finding` · Building the button-color change surfaced a pre-existing
+  gap worth knowing about, unrelated to anything broken today.** The code
+  that renders a congregation's brand colors regenerates them fresh from
+  that congregation's saved color on every single page view — it never
+  checks a version marker that's supposed to track which color "recipe"
+  produced them. Practically: today's button-color change, and any future
+  change to the color math, silently changes the appearance of every
+  already-branded congregation the instant it goes live, with no version
+  bump, no history record, and no re-save required. Whether that's the
+  permanently intended design, or whether a congregation's colors should
+  instead stay pinned until they explicitly re-save, is still an open
+  decision — tracked, not resolved, by this finding.
+
+- [ ] **`defect` · A separate, real bug surfaced the same day: in
+  Chrome-family browsers (including Arc), a search box the browser had
+  auto-filled for you rendered with the browser's own gray-blue tint,
+  visibly different from an identical, empty field right beside it.** This
+  had nothing to do with the form-field fix described below — Chrome's
+  autofill paints its own color directly on top of the page, in a way
+  ordinary page styling cannot override. Fixed by having the page
+  counter-paint an autofilled field with the app's own background color, so
+  an autofilled field now looks the same as an empty one. Confirmed directly
+  with you, on the exact browser where you'd seen it.
+
+- [ ] **`finding` · While double-checking this batch of work, seven small
+  code-quality warnings already present on the main line of development
+  before any of it started were noticed and left alone, rather than folded
+  into an unrelated fix.** Two are a repeated pattern flagged on two
+  already-existing files; five are on the brand-new children's-roster
+  screens, from a stylistic rule about how a certain kind of code is written.
+  None of these currently block anything from being pushed live; they're
+  tracked for their own cleanup pass instead of being silently absorbed into
+  this batch's commits.
+
+- [ ] **`defect` · Very shortly after the new presbytery credentials feature
+  shipped, every ordinary congregation's portal was found to be showing a
+  "Credentials" tile that led nowhere useful.** Clicking it produced a
+  permission-denied message telling the member to "ask your stated clerk" —
+  which is actively bad advice, because no congregation-level role can ever
+  unlock this tool; it's presbytery-only by design. Root cause: the part of
+  the system deciding which tiles a congregation sees knew whether a feature
+  was turned on at all, but had no notion of "is this type of organization
+  even supposed to see this" — so a presbytery-only feature bled onto every
+  congregation regardless of type. Fixed the same day: the tile now only
+  appears for presbyteries, and a congregation that navigates straight to the
+  web address anyway now sees an honest "this is a presbytery-level tool,
+  not something your kind of organization uses" message, instead of the
+  misleading "ask your clerk" one. Caught by you using the live product, not
+  by an automated test — a reminder that this class of "who should even see
+  this" gap doesn't reliably show up in test suites.
+
+- [ ] **`defect` · Form fields had been rendering white on some screens and
+  gray on others — most noticeably, boxes on white card-style panels looked
+  different from the search boxes sitting right next to them.** Root cause:
+  the reusable, auto-generated building blocks behind every text box had
+  quietly kept an inherited default that lets the color of whatever's behind
+  a field show through, instead of following this project's own documented
+  "every field gets the same background" rule — and a couple of screens had
+  been individually patched around the problem in the past, which only
+  deepened the inconsistency everywhere else. Fixed by making the shared
+  building blocks follow the documented rule themselves, and removing the
+  old patches. **Also found, and deliberately not fixed in this same pass:**
+  in dark mode specifically, a text field and the dropdown sitting beside it
+  still don't match — a separate, pre-existing gap, tracked on its own for a
+  later pass.
+
+- [ ] **`decision` · The first feature built specifically for presbyteries,
+  rather than congregations, shipped: a presbytery's stated clerk can now
+  record a minister's ordination, track their current standing over time,
+  and record which congregation a minister is serving as pastor.** The
+  design carefully separates two things that sound similar but aren't:
+  ordination is permanent once it happens — a minister doesn't stop being
+  ordained just because they retire or take a leave of absence — while a
+  minister's current standing (active, retired, on leave) and their specific
+  pastoral assignment can both change, and the screens make that distinction
+  explicit instead of conflating "end this assignment" with "end this
+  ordination." A minister has to already be a recognized member of the
+  presbytery before either record can be created; rather than allow a
+  shortcut, the system points staff to the existing member-creation process
+  first, so a credential can never quietly attach to someone who was never
+  actually processed onto the roll. Separately, this work double-checked
+  that the ordinary portal — directory, members, groups, officers, feedback,
+  branding — already works correctly for a presbytery and not just a
+  congregation; a handful of screens whose wording had assumed "your
+  congregation" were reworded to fit both kinds of organization.
+
+- [ ] **`decision` · A real events/calendar feature shipped for staff use —
+  one-time events or recurring series (weekly, or monthly-by-weekday, capped
+  at 52 occurrences so nobody can accidentally generate a runaway series),
+  with every actual date stored as its own real record so cancelling one
+  Sunday's meeting never disturbs the rest of the series.** Events cancel
+  rather than delete, so the history stays intact rather than disappearing.
+  As with a couple of other recent features, no single congregation office
+  was assumed to be the automatic owner of "who's allowed to manage the
+  calendar" — each congregation decides for itself who gets that permission.
+  **A commitment between two different pieces of work-in-progress, worth
+  knowing about:** six specific pieces of information on every event (its
+  identity, its organization, start and end time, whether it's cancelled,
+  and whether check-in is allowed) are now formally frozen and promised to
+  the not-yet-built children's-ministry check-in feature — meaning nobody
+  can casually change or remove those six fields later without a joint
+  review with whoever eventually builds check-in on top of them.
+
+- [ ] **`decision` · Congregations can now keep a roster of every child in
+  the congregation — computed automatically from birthdate, so nobody has to
+  remember to manually flag someone as "a kid" — and record who each child's
+  parents, guardians, and emergency contacts are.** Linking to a person's
+  existing directory record is preferred over typing a name in free text, so
+  their phone number and email come along automatically. A new "Children's
+  Ministry Administrator" role holds this, deliberately kept separate from
+  the role that can see a child's medical and allergy information, so a
+  Sunday-school volunteer can be trusted with the roster without
+  automatically being trusted with health details too. **Worth your
+  attention:** anyone holding this new role sees a child's actual, real
+  birthdate on the roster — even for a family that has otherwise asked the
+  congregation not to show their birthday anywhere public — because the
+  entire point of the roster is computing age, which is impossible to do
+  from a hidden birthdate. This was a deliberate, narrow decision made in the
+  open, not an oversight, and the description shown to whoever is being
+  granted the role says so plainly.
+
 ## 2026-08-26
+
+- [ ] **`decision` · Congregations can now create and manage their own
+  committees, small groups, choirs, and teams** — genuinely useful,
+  member-managed groups, distinct from the Session and the Board of Deacons,
+  which the system still builds and maintains for you automatically from
+  officer records and does not let anyone edit by hand.
+
+- [ ] **`defect` · Building that groups feature turned up two real,
+  narrow holes in the automatic protection around the Session and Board of
+  Deacons rosters, which had existed since those rosters were first
+  automated and were only now discovered and closed.** The safety rule
+  meant to stop someone from deleting an already-approved Session or
+  Deacon-board membership record only checked for an *edit* that tried to
+  quietly reclassify the record — an outright delete could have slipped
+  through the same door unblocked. Separately, there was no rule at all
+  stopping someone from directly renaming the Session itself or changing
+  when it meets, bypassing the formal officer-terms process that's supposed
+  to be the only legitimate way that ever happens. Both closed at the
+  database level — the layer that's supposed to make this kind of bypass
+  structurally impossible, not just discouraged — with tests specifically
+  written to attempt the bad action and confirm it's now refused.
+
+- [ ] **`decision` · Congregation staff can now record certain kinds of roll
+  actions — like a transfer received or a reaffirmation of faith — directly
+  from a member's own edit screen, instead of needing a separate flow for
+  it** — but deliberately not every kind. Anything that could end someone's
+  membership, or that touches their offices or roles, stays off this
+  quick-edit screen and still has to go through the more deliberate,
+  fuller process. Separately, the platform now recognizes genuinely
+  different tiers of sensitive information about a member — pastoral care
+  notes, the demographic and disability details used for annual
+  denominational reporting, and medical/safety information — and each got
+  its own dedicated permission and its own gatekeeper role, so a
+  congregation can hand out narrower access instead of one all-or-nothing
+  button. A new "Member Care Administrator" role was created specifically to
+  hold the medical/safety keys, kept apart from the pastor's own confidential
+  notes. **A small housekeeping note:** while building this, an older
+  permission — meant, since an earlier pass, to let an installed pastor see
+  confidential notes — turned out to have never actually been connected to
+  anything; it's being retired in favor of the new one rather than running
+  two overlapping permissions side by side.
+
+- [ ] **`decision` · Congregations can now define their own custom
+  administrative roles — deciding exactly which permissions each one carries
+  — instead of only using the roles the system ships with.** A new,
+  dedicated "Role Administrator" office was created specifically to hold
+  this power, deliberately not handed to the Clerk of Session role, which
+  was already accumulating more and more capabilities one addition at a
+  time. Deactivating a role now correctly ends everyone's access granted
+  through it in the same step, so a revoked role can't leave people quietly
+  holding on to abandoned permissions.
+
+- [ ] **`defect` · Building the custom-roles feature caught a real
+  self-escalation gap before it ever reached a real congregation.** Someone
+  holding the power to define what a role contains could have edited a role
+  they already held to quietly add a more powerful permission to it, and
+  because that's editing an existing role rather than creating a brand-new
+  grant, none of the existing safeguards against "don't hand out more power
+  than you have yourself" would have noticed. Closed by reusing the exact
+  same check that already governs the separate "grant a role to someone
+  else" action, so both paths are held to the identical standard. Found in
+  review before anything shipped, with a new test that recreates the
+  exploit and confirms it's now blocked.
+
+- [ ] **`decision` · The "make the portal look and feel like fpcw-directory"
+  redesign, which an earlier note in this log said was still just at the
+  planning stage, has now actually shipped:** card hover effects, real
+  shadows and depth on buttons and tiles, and — going further than a pure
+  visual port — congregations can now set their own logo, colors, and fonts
+  themselves rather than needing a platform staffer to do it for them. The
+  main portal tools were also reorganized between the everyday home screen
+  and the "administer this org" section. **A correction disclosed rather
+  than quietly folded in:** you caught, and had fixed the same day before
+  anything shipped, two things that had been gotten wrong on the first pass
+  — routine day-to-day tasks like adding a member or recording an officer's
+  term had been mis-filed under "org setup" instead of "ordinary ministry
+  work" (moved back), and an early full-color tile design that had been
+  built to read as "bolder and more modern" instead read as flat and
+  unpleasant to look at — replaced with a subtler card-and-shadow look that
+  better matched what was actually being asked for.
 
 - [ ] **`decision` · Editing a member's details, and paging/searching/filtering
   long member lists, both shipped today — but built solo, without the usual

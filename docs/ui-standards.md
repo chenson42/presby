@@ -131,6 +131,22 @@ Seven roles, declared in `src/lib/brand/contract.ts` (`TYPE_SCALE`). Every size 
 | `body` | 1 / 16 | `text-base` | **all body copy — the floor** |
 | `dense` | 0.875 / 14 | `text-sm` | tabular cells, metadata, form labels. Never a paragraph. |
 | `micro` | 0.75 / 12 | `text-xs` | **`(admin)` and `/developer` only. Forbidden on any member-facing surface.** |
+| `hero` | 3 / 48 → 3.75 / 60 | `text-5xl md:text-6xl` | **marketing/landing hero only — never used in-app; `/` (`src/app/page.tsx`) is the only consumer.** |
+
+**`hero` is a documented exception, not a silent violation.** The seven roles
+above are an app-UI scale — `display` (`text-3xl`/30px) is the ceiling for any
+authenticated surface, and it stays there. The public marketing landing page
+(`/`) is the one page in the whole app that needs a real marketing-scale
+headline to "sell itself," so it gets an eighth role, `hero`
+(`text-5xl md:text-6xl`, 48px at the mobile floor scaling to 60px at `md:`),
+used ONLY on that page's single `<h1>`. Added 2026-08-27 (docs/work-log/
+2026-08-27-platform-home-and-portal.md, "Commit 3 correction") after the
+operator rejected a plain functional-description first pass as needing
+"marketing flare." Do not reach for `hero` on a second page without updating
+this row first — every other piece of text on `/` uses the existing seven
+roles correctly (`section` for its `<h2>`s, `subhead` for its `<h3>`s, `body`
+for paragraph copy, `dense` for the pre-release note and the diagram's court
+labels).
 
 **16px is the body floor, everywhere.** Nothing below 14px (`dense`) is legal on a member-facing surface — `micro` is a platform-operator-only allowance, because a 12px table cell in `/admin/audit` is a different audience than a 12px timestamp in a congregation's directory. When a page mixes both audiences, use `dense` as the floor and treat `micro` as unavailable.
 
@@ -142,7 +158,7 @@ Pick a role by what the text *is*, not by what looks right on your monitor: a pa
 
 Every page has a single `<h1>`, set at the **`title`** role (see [Type Scale](#type-scale)) — `text-2xl font-semibold`.
 
-- `<h1>` → `title`. A standalone hero, outside the app shell, → `display`. `<h2>` → `section`. `<h3>` → `subhead`.
+- `<h1>` → `title`. A standalone marketing hero (currently only `/`) → `hero`. Any other standalone hero outside the app shell → `display`. `<h2>` → `section`. `<h3>` → `subhead`.
 - Follow `<h1>` immediately with a `<p>` at the **`dense`** role (`text-sm`) description when the purpose of the page is not self-evident — a page description is metadata about the page, not body content, even where it reads fine at either size.
 - Use `text-muted-foreground` (not `text-gray-600` or any other palette literal) for secondary text — the starter uses CSS variable tokens throughout.
 - Never use `CardTitle` for listing-card headings; use a bare `<h3>` at the `subhead` role so size is controlled explicitly.

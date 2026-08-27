@@ -75,7 +75,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   {
     key: "directory",
     label: "Directory",
-    description: "Browse the congregation directory.",
+    description: "Browse the directory.",
     href: (slug) => `/o/${slug}/directory`,
     flagKey: "org_portal.directory",
     category: "operate",
@@ -107,7 +107,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   {
     key: "feedback",
     label: "Give feedback",
-    description: "Share feedback about your congregation's portal.",
+    description: "Share feedback about your organization's portal.",
     href: (slug) => `/o/${slug}/feedback`,
     flagKey: "org_portal.feedback",
     category: "operate",
@@ -135,6 +135,31 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/admin/branding`,
     flagKey: "org_portal.branding",
     category: "administer",
+  },
+  {
+    key: "events",
+    label: "Events",
+    description: "Create and manage calendar events, including repeating series.",
+    href: (slug) => `/o/${slug}/admin/events`,
+    // docs/work-log/2026-08-26-events-model.md, Phase 3 / DECISION-115
+    // ruling 4: `operate` (DECISION-113 ruling 7, DECISION-105's routine-work
+    // test) — putting events on the calendar is day-to-day congregational
+    // work, not org setup/governance.
+    flagKey: "org_portal.events",
+    category: "operate",
+  },
+  {
+    key: "credentials",
+    label: "Credentials",
+    description:
+      "Record ministry credential status changes and pastoral appointments.",
+    href: (slug) => `/o/${slug}/admin/credentials`,
+    // docs/work-log/2026-08-26-presbytery-functionality.md, Increment 2,
+    // Phase 3 Component/Page Plan: "operate" (routine polity work,
+    // DECISION-105's own test) — the same posture as officers/groups/events,
+    // not org setup/governance.
+    flagKey: "org_portal.credentials",
+    category: "operate",
   },
 ] as const;
 

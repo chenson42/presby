@@ -375,6 +375,24 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.events",
+      // ON: /o/<slug>/admin/events is reachable at all. Checked bare, no
+      // DECISION-026 fail-open wrapper — it's a toggle, not an auth path,
+      // same posture as org_portal.groups/officers (docs/work-log/
+      // 2026-08-26-events-model.md, Phase 3 / DECISION-115 ruling 4). Never
+      // substitutes for events.manage: a viewer with the flag on and no
+      // grant still sees the in-page "you don't have permission" state, not
+      // the events page itself (DECISION-003: a flag never gates a
+      // permission). This is the standing PORTAL_TILES tile-registry
+      // convention every entry opts into — orthogonal to, and not a reopening
+      // of, DECISION-113's own "no feature-existence flag this increment"
+      // ruling. Seeded OFF, same "ships dark until the page lands" reasoning
+      // as org_portal.directory/roles/officers/groups.
+      description:
+        "Calendar-event administration page in (org). OFF = /o/<slug>/admin/events renders 'isn't turned on yet' regardless of the viewer's events.manage grant.",
+      enabled: false,
+    },
+    {
       key: "org_portal.admin_hub",
       // ON: /o/<slug>/admin (the net-new Organization Administration hub
       // index) is reachable at all, and the persistent PortalNav row grows a
@@ -450,6 +468,44 @@ async function seedFlags() {
       // dark until the page lands" reasoning as its org_portal.* siblings.
       description:
         "Tiered sensitive-info sub-screen (pastoral notes, demographics, medical, disabilities) in (org). OFF = /o/<slug>/admin/members/<id>/edit/sensitive renders 'isn't turned on yet' regardless of the org toggle or the viewer's grants.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.children_ministry",
+      // ON: /o/<slug>/admin/members/children (the children's roster) and
+      // /o/<slug>/admin/members/<id>/edit/guardians (guardian-link
+      // management) are reachable at all. Checked BARE, no per-org
+      // organization_feature_toggles row and no DECISION-026 fail-open
+      // wrapper — a toggle, not an auth path (docs/work-log/
+      // 2026-08-26-childrens-ministry.md, Phase 3): this is a brand-new
+      // admin surface reachable only via the new `children.roster`
+      // permission, the same shape as org_portal.officers/org_portal.groups
+      // (a toggle, not an auth path, no per-org opt-in needed beyond the
+      // flag itself) — NOT org_portal.members_create's toggle-composing
+      // shape, which exists because that page shares surface with
+      // people.manage more broadly. Never substitutes for children.roster: a
+      // viewer with the flag on and no grant still sees MembersForbidden,
+      // not the roster/guardians pages themselves (DECISION-003: a flag
+      // never gates a permission). Seeded OFF, same "ships dark until the
+      // page lands" reasoning as its org_portal.* siblings.
+      description:
+        "Children's roster + guardian-link management in (org). OFF = /o/<slug>/admin/members/children and .../edit/guardians render 'isn't turned on yet' regardless of the viewer's children.roster grant.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.credentials",
+      // ON: /o/<slug>/admin/credentials (ministry credentials & pastoral
+      // appointments) is reachable at all. Checked bare, no DECISION-026
+      // fail-open wrapper — a toggle, not an auth path (docs/work-log/
+      // 2026-08-26-presbytery-functionality.md, Increment 2, mirroring
+      // org_portal.officers's own block). Never substitutes for
+      // credentials.manage: a stated clerk with the flag on and no grant
+      // still sees the in-page "you don't have permission" state, not the
+      // credentials page itself (DECISION-003: a flag never gates a
+      // permission). Seeded OFF, same "ships dark until the page lands"
+      // reasoning as its org_portal.* siblings.
+      description:
+        "Ministry credentials & pastoral appointments page in (org). OFF = /o/<slug>/admin/credentials renders 'isn't turned on yet' regardless of the viewer's credentials.manage grant.",
       enabled: false,
     },
   ];

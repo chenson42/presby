@@ -59,6 +59,17 @@
 \set SESSION_DERIVED_TERM '\'e0000000-0000-0000-0000-000000000002\''
 \set ALDER_SESSION_GROUP '\'b0000000-0000-0000-0000-000000000001\''
 \set ALDER_MANAGED_GROUP '\'b0000000-0000-0000-0000-000000000004\''
+-- Ministry credentials & pastoral appointments (section 28). Idris Calloway,
+-- the fresh fixture person the presbytery_stated_clerk ADOPTED copy binds to
+-- (DECISION-112/DECISION-116); the global TEMPLATE row (drizzle/
+-- 0037_presby_ministry_credentials.sql, organization_id IS NULL); the
+-- org-scoped adopted copy at northern reach; and the one real appointments
+-- row (Rowan Thistlewood/:PASTOR, serving Alder Creek, recorded by the
+-- presbytery).
+\set CREDENTIALS_CLERK '\'c0000000-0000-0000-0000-00000000000a\''
+\set PRESBYTERY_STATED_CLERK_TEMPLATE_ROLE '\'00000000-0000-0000-0000-000000000002\''
+\set PRESBYTERY_STATED_CLERK_ROLE '\'f0000000-0000-0000-0000-00000000000e\''
+\set APPOINTMENT '\'e2000000-0000-0000-0000-000000000001\''
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
 
@@ -114,19 +125,45 @@ commit;
 
 begin;
   select set_config('app.current_org_id', :PRESBY, true);
-  -- The presbytery holds ONLY the pastor. It must not see Alder Creek's roll,
-  -- which is invariant 2: access flows up by publication, never by inheritance.
-  select assert_eq((select count(*) from people), 1, 'presbytery: sees only its own member');
+  -- The presbytery holds ONLY its own members. It must not see Alder Creek's
+  -- roll, which is invariant 2: access flows up by publication, never by
+  -- inheritance.
+  --
+  -- Ministry credentials & pastoral appointments (docs/work-log/
+  -- 2026-08-26-presbytery-functionality.md, Increment 2): +1 member (Idris
+  -- Calloway, the presbytery_stated_clerk fixture holder, scripts/
+  -- seed-dev.sql) = 2, mechanically bumped up from 1 the same way every
+  -- earlier increment's own person additions bumped section 3's ALDER count
+  -- above (see its own comment). This bump is committed-fixture-derived and
+  -- holds on any FRESH database seeded from scripts/seed-dev.sql alone.
+  --
+  -- NOT fixed here: this assertion was already reported broken against
+  -- TODAY'S shared/live dev database specifically, independent of this
+  -- commit — an earlier session (the presbytery-portal walk, Increment 0)
+  -- added a THIRD, untracked membership row at this org for
+  -- admin@presby.invalid, live-DB-only and deliberately never carried into
+  -- scripts/seed-dev.sql (see that Phase 4 entry's own note: "left in place
+  -- ... nothing was added to seed-dev.sql"). Against that specific polluted
+  -- database, the true count is 3, not the 2 asserted here — but 2 is the
+  -- value scripts/seed-dev.sql's own committed state actually produces, and
+  -- hardcoding 3 to match one session's live drift would be wrong on the
+  -- next fresh seed. Flagged, not reconciled, per that same walk's own
+  -- explicit instruction not to touch this file for that drift.
+  select assert_eq((select count(*) from people), 2, 'presbytery: sees only its own members');
   select assert_eq((select count(*) from people where id = :ELDER), 0,
                    'presbytery: CANNOT see a congregation''s elder');
-  select assert_eq((select count(*) from memberships), 1, 'presbytery: sees only its own membership');
+  select assert_eq((select count(*) from memberships), 2, 'presbytery: sees only its own memberships');
   -- The presbytery has roll actions of its OWN - a minister's membership sits
-  -- there (G-2.0502). What it must never see is a congregation's.
+  -- there (G-2.0502). What it must never see is a congregation's. +1 (Idris
+  -- Calloway's own opening_balance row, same reasoning as above) — unaffected
+  -- by the live-drift caveat above, since that drift adds no roll_actions row
+  -- (admin@presby.invalid's fixture membership carries current_roll = NULL,
+  -- i.e. never enters the roll at all).
   select assert_eq(
     (select count(*) from roll_actions where organization_id <> :PRESBY), 0,
     'presbytery: CANNOT read a congregation''s roll actions');
-  select assert_eq((select count(*) from roll_actions), 1,
-                   'presbytery: sees its own minister''s roll action');
+  select assert_eq((select count(*) from roll_actions), 2,
+                   'presbytery: sees its own ministers'' roll actions');
 commit;
 
 -- ---------------------------------------------------------------------------
@@ -1698,4 +1735,327 @@ begin;
     (select count(*) from groups
       where id = :ALDER_MANAGED_GROUP and name = 'Property Committee (Renamed)'),
     1, 'groups: an ordinary managed-group name edit still succeeds (trigger is not overbroad)');
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 27. Events model, database-admin schema layer (docs/work-log/
+--     2026-08-26-events-model.md, Phase 4 commit 1 / DECISION-113 /
+--     DECISION-115). New table, no fixture rows to lean on — every insert
+--     below happens inside its own rolled-back transaction, same discipline
+--     as section 19's organization_feature_toggles proof. Three things:
+--
+--       (a) events.manage — the permission-catalog row (drizzle/
+--           0036_presby_events.sql), tier 1, queryable with no GUC set
+--           (permissions carries no organization_id / no RLS). No default
+--           role binding exists (DECISION-115) — deliberately NOT re-proven
+--           against stated_clerk here, since that binding is a
+--           scripts/seed-dev.sql fixture-only convenience owned by the next
+--           commit (full-stack-developer), not this migration.
+--
+--       (b) FORCE RLS tenant isolation — an event inserted at Alder Creek is
+--           invisible at Bramblewood by both a blanket SELECT and a known-id
+--           read, and Bramblewood cannot plant a row into Alder Creek's
+--           organization_id from its own session (the WITH CHECK half),
+--           same F21-shaped guarantee section 4/19 already established.
+--
+--       (c) The presby_app grant shape — full select/insert/update/delete,
+--           same discipline as section 19's organization_feature_toggles
+--           check.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'events.manage'),
+    1, 'permissions: events.manage catalog row exists');
+commit;
+
+begin;
+  select assert_eq((select count(*) from events), 0,
+                   'unset GUC: events invisible');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into events (id, organization_id, title, starts_at, is_public, allows_checkin)
+  values ('e9000000-0000-0000-0000-000000000001', :ALDER,
+          'Session Stated Meeting', now(), false, false);
+  select assert_eq(
+    (select count(*) from events where organization_id = :ALDER),
+    1, 'alder: sees its own newly-inserted event');
+
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from events), 0,
+                   'bramblewood: sees no alder events at all');
+  -- Known-id cross-org read, same discipline as sections 14/19's known-id
+  -- check: naming Alder Creek's exact row id from Bramblewood's own session
+  -- returns zero, not a permission error that would confirm the row exists.
+  select assert_eq(
+    (select count(*) from events where id = 'e9000000-0000-0000-0000-000000000001'),
+    0, 'bramblewood: cross-org read of alder''s event by known id returns zero');
+rollback;
+
+-- The write side of tenant isolation: bramblewood cannot plant an event row
+-- into alder's organization by naming alder's organization_id in the INSERT,
+-- even while its own GUC is set to bramblewood — the WITH CHECK clause on
+-- tenant_isolation rejects it, same F21-shaped guarantee section 4/19 proved.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  do $$
+  begin
+    insert into events (organization_id, title, starts_at)
+    values ('22222222-2222-2222-2222-222222222222', 'Hijacked Event', now());
+    raise exception 'FAIL — bramblewood wrote an event row into alder''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  events tenant_isolation: cross-org write rejected';
+  end $$;
+rollback;
+
+-- FORCE RLS specifically (F1).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'events' and relforcerowsecurity),
+    1, 'events: FORCE row level security is set');
+commit;
+
+-- The presby_app grant shape, proven directly — full select/insert/update/
+-- delete, same discipline as section 19's organization_feature_toggles check.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'events'
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    4, 'events: presby_app has full select/insert/update/delete');
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 28. Ministry credentials & pastoral appointments, database-admin schema
+--     layer (docs/work-log/2026-08-26-presbytery-functionality.md, Increment
+--     2, Phase 4 commit 1 / DECISION-112 (architect) / DECISION-116
+--     (tech-lead)). drizzle/0037_presby_ministry_credentials.sql; fixture
+--     rows in scripts/seed-dev.sql (Idris Calloway, the presbytery_stated_
+--     clerk adopted copy + grant, and the one real appointments row: Rowan
+--     Thistlewood/:PASTOR, recorded by the presbytery, serving Alder Creek).
+--     Five things:
+--
+--       (a) credentials.manage — the permission-catalog row, tier 1,
+--           queryable with no GUC set (permissions carries no
+--           organization_id / no RLS), same shape as sections 19/22/23/24's
+--           own catalog proofs.
+--
+--       (b) presbytery_stated_clerk — the GLOBAL template row (organization_
+--           id IS NULL, organization_type_scope = 'presbytery'), the first
+--           presbytery-scoped template this codebase has shipped. Visible
+--           from BOTH a presbytery context (its natural home) and a
+--           congregation context (the widened app_roles SELECT policy,
+--           drizzle/0032, is type-scope-agnostic by design — section 24
+--           already proved this generically for committee_chair; this just
+--           confirms THIS row) — and bound to credentials.manage. The
+--           ORG-SCOPED adopted copy at northern reach (a distinct row,
+--           distinct id, same key — DECISION-116 ruling 2's own point that a
+--           shared literal key across two organization_id IS NULL rows is
+--           the thing to avoid, not across a template and its own adoption)
+--           resolves the permission for Idris Calloway at the presbytery and
+--           NOTHING at a congregation she holds no grant at — same
+--           "prove the mechanism once" shape as every prior new-role section.
+--
+--       (c) ordinations.status — the new column exists, NOT NULL, defaults
+--           to 'active' for every pre-existing ordinations row (none of
+--           which named a status at insert time), and the credential_status
+--           enum actually rejects a value outside its seven-member set.
+--
+--       (d) appointments — FORCE RLS tenant isolation, proven against a
+--           SECOND, ad hoc presbytery (Phase 1's literal ask: "presbytery
+--           A's appointment invisible to presbytery B"), not merely a
+--           second congregation — the seeded fixture only has ONE
+--           presbytery, so this section mints a second one inside its own
+--           rolled-back transaction (organizations carries no RLS of its
+--           own — schema-design.md section 17 — so this is a legal, side-
+--           effect-free way to get a second real presbytery-type org for
+--           the length of one transaction). Also proves the servingOrgId
+--           cross-reference doesn't leak: querying by Alder Creek's own id
+--           (the servingOrgId named in the fixture appointment) from a
+--           session that is neither the recording presbytery NOR Alder
+--           Creek itself still returns zero — isolation keys off
+--           organization_id alone, never servingOrgId, so a join shape that
+--           forgot the organization_id predicate would not "accidentally"
+--           work either.
+--
+--       (e) appointments_person_fk — the composite FK (F2): an appointment
+--           naming a real person who holds NO membership at the STATED
+--           organization_id is rejected, mirroring officer_terms_org_unit_
+--           fk's own F2 proof (section 18) for the identical composite-key
+--           shape.
+--
+--     NOT covered here, same posture as sections 22/23's own closing notes:
+--     an assertion that credentials.manage actually GATES a
+--     src/lib/credentials.ts mutation end to end — that belongs in vitest
+--     against the query/mutation module once it exists (full-stack-
+--     developer's commit), not in this SQL suite.
+-- ---------------------------------------------------------------------------
+
+-- (a) permission-catalog row.
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'credentials.manage'),
+    1, 'permissions: credentials.manage catalog row exists');
+commit;
+
+-- (b) the global template + its binding, then the org-scoped adopted copy.
+begin;
+  select assert_eq(
+    (select count(*) from app_roles
+      where id = :PRESBYTERY_STATED_CLERK_TEMPLATE_ROLE
+        and organization_id is null
+        and organization_type_scope = 'presbytery'
+        and key = 'presbytery_stated_clerk'),
+    1, 'presbytery_stated_clerk: global template row exists (organization_id IS NULL, scope = presbytery)');
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = :PRESBYTERY_STATED_CLERK_TEMPLATE_ROLE
+        and permission_key = 'credentials.manage'),
+    1, 'presbytery_stated_clerk template: bound to credentials.manage');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from app_roles where id = :PRESBYTERY_STATED_CLERK_TEMPLATE_ROLE),
+    1, 'presbytery: sees the global presbytery_stated_clerk template row');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from app_roles where id = :PRESBYTERY_STATED_CLERK_TEMPLATE_ROLE),
+    1, 'alder (a congregation): ALSO sees the global template row — the widened SELECT policy is type-scope-agnostic, not a leak');
+commit;
+
+-- The org-scoped ADOPTED copy resolves the permission for its holder at the
+-- presbytery, and nothing at a congregation she holds no grant at.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CREDENTIALS_CLERK, :PRESBY, 'credentials.manage')),
+    1, 'presby_has_permission: presbytery_stated_clerk holder (Idris Calloway) holds credentials.manage at the presbytery');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CREDENTIALS_CLERK, :ALDER, 'credentials.manage')),
+    0, 'presby_has_permission: Idris Calloway holds NOTHING at alder creek (no grant there)');
+commit;
+
+-- (c) ordinations.status: column exists, defaults 'active' for every
+--     pre-existing row, and the enum genuinely rejects an out-of-set value.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from ordinations where person_id = :PASTOR and status = 'active'),
+    1, 'ordinations.status: defaults to active for the pre-existing fixture row (no status named at insert time)');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into ordinations (organization_id, person_id, ministry, ordained_on, status)
+    values ('11111111-1111-1111-1111-111111111111',
+            'c0000000-0000-0000-0000-000000000006',
+            'minister_of_word_and_sacrament', '2026-01-01', 'not_a_real_status');
+    raise exception 'FAIL — credential_status enum accepted an out-of-set value';
+  exception when invalid_text_representation then
+    raise notice 'pass  credential_status enum: out-of-set value rejected';
+  end $$;
+rollback;
+
+-- (d) FORCE RLS + tenant isolation, proven against a SECOND real presbytery
+--     minted for the life of this one rolled-back transaction — organizations
+--     carries no RLS of its own (schema-design.md section 17), so this insert
+--     is legal and leaves no trace once rolled back.
+begin;
+  insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status)
+  values ('f6000000-0000-0000-0000-000000000001', null, 'presbytery',
+          'Presbytery of the Southern Fields', 'southern-fields', 'southern_fields', 'managed');
+
+  select set_config('app.current_org_id', 'f6000000-0000-0000-0000-000000000001', true);
+  select assert_eq((select count(*) from appointments), 0,
+                   'presbytery B (southern fields): sees no appointments at all');
+  -- Known-id cross-presbytery read, same discipline as sections 14/19/27's
+  -- known-id checks: naming northern reach's exact appointment id from a
+  -- different presbytery's own session returns zero, not a permission error
+  -- that would confirm the row exists.
+  select assert_eq(
+    (select count(*) from appointments where id = :APPOINTMENT),
+    0, 'presbytery B: known-id cross-presbytery read of northern reach''s appointment returns zero');
+  -- The servingOrgId cross-reference doesn't leak: presbytery B has no
+  -- relationship to Alder Creek either (the servingOrgId named in northern
+  -- reach's appointment) — querying BY that known servingOrgId still returns
+  -- zero, proving isolation keys off organization_id alone, never
+  -- servingOrgId.
+  select assert_eq(
+    (select count(*) from appointments where serving_org_id = :ALDER),
+    0, 'presbytery B: querying by the known servingOrgId (Alder Creek) still returns zero');
+
+  do $$
+  begin
+    insert into appointments (organization_id, person_id, serving_org_id, call_type, starts_on)
+    values ('11111111-1111-1111-1111-111111111111',
+            'c0000000-0000-0000-0000-000000000006',
+            '22222222-2222-2222-2222-222222222222',
+            'installed_pastor', '2026-01-01');
+    raise exception 'FAIL — presbytery B wrote an appointment row into northern reach''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  appointments tenant_isolation: cross-presbytery write rejected';
+  end $$;
+rollback;
+
+-- The non-goal, restated as a proof: Alder Creek itself (the congregation
+-- named as servingOrgId) has NO read of the appointment recorded about it
+-- either — the congregation-side read is deferred to a future publication
+-- mechanism (DECISION-112), not built by this table alone.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from appointments where id = :APPOINTMENT),
+    0, 'alder creek: cannot read the appointment recorded about it (no downward read this increment, by design)');
+commit;
+
+-- FORCE RLS specifically (F1).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'appointments' and relforcerowsecurity),
+    1, 'appointments: FORCE row level security is set');
+commit;
+
+-- The presby_app grant shape, proven directly.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'appointments'
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    4, 'appointments: presby_app has full select/insert/update/delete');
+commit;
+
+-- (e) appointments_person_fk — the composite FK (F2): Tobias Renwick (:CLERK)
+--     holds a membership at Alder Creek, NONE at the presbytery — an
+--     appointment naming him at organization_id = the presbytery must be
+--     rejected, the same F2 shape officer_terms_org_unit_fk already proved
+--     (section 18) for a different composite pair.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into appointments (organization_id, person_id, serving_org_id, call_type, starts_on)
+    values ('11111111-1111-1111-1111-111111111111',
+            'c0000000-0000-0000-0000-000000000002', -- Tobias Renwick — no presbytery membership
+            '22222222-2222-2222-2222-222222222222',
+            'installed_pastor', '2026-01-01');
+    raise exception 'FAIL F2 — an appointment referenced a person with no membership at the stated organization';
+  exception when foreign_key_violation then
+    raise notice 'pass  appointments_person_fk: person with no membership at the stated org rejected (F2)';
+  end $$;
 rollback;

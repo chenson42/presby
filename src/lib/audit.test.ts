@@ -164,6 +164,18 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   GROUP_UPDATED: "tenant.group.updated",
   GROUP_MEMBER_ADDED: "tenant.group_membership.added",
   GROUP_MEMBER_ENDED: "tenant.group_membership.ended",
+  // Children's ministry, Increment A (2026-08-26, childrens-ministry) —
+  // written from src/lib/children.ts
+  TENANT_PERSON_RELATIONSHIP_ADDED: "tenant.person_relationship.added",
+  TENANT_PERSON_RELATIONSHIP_UPDATED: "tenant.person_relationship.updated",
+  TENANT_PERSON_RELATIONSHIP_REMOVED: "tenant.person_relationship.removed",
+  // Ministry credentials & pastoral appointments (2026-08-26,
+  // presbytery-functionality Increment 2, DECISION-112/116) — written from
+  // src/app/(org)/o/[slug]/admin/credentials/actions.ts
+  ORDINATION_RECORDED: "tenant.ordination.recorded",
+  ORDINATION_STATUS_CHANGED: "tenant.ordination.status_changed",
+  APPOINTMENT_RECORDED: "tenant.appointment.recorded",
+  APPOINTMENT_ENDED: "tenant.appointment.ended",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

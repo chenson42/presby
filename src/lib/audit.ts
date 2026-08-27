@@ -196,6 +196,39 @@ export const AUDIT_ACTIONS = {
   // Metadata: { organizationId, groupId, personId, groupRole, startsOn }.
   GROUP_MEMBER_ENDED: "tenant.group_membership.ended",
   // Metadata: { organizationId, groupId, personId, groupName, endsOn }.
+  // Children's ministry, Increment A (docs/work-log/
+  // 2026-08-26-childrens-ministry.md, DECISION-111/114) — written from
+  // src/lib/children.ts. The first application-level read/write surface
+  // `person_relationships` has ever had; every mutation is audited (Phase 2
+  // ruling), no exemption. Reads are never audited, same posture as
+  // TENANT_PERSON_NOTE_ADDED's sibling table.
+  TENANT_PERSON_RELATIONSHIP_ADDED: "tenant.person_relationship.added",
+  // Metadata: { organizationId, childPersonId, relationship }.
+  TENANT_PERSON_RELATIONSHIP_UPDATED: "tenant.person_relationship.updated",
+  // Metadata: { organizationId, childPersonId, relationship }.
+  TENANT_PERSON_RELATIONSHIP_REMOVED: "tenant.person_relationship.removed",
+  // Metadata: { organizationId, childPersonId }.
+  // Ministry credentials & pastoral appointments (docs/work-log/
+  // 2026-08-26-presbytery-functionality.md, Increment 2 — DECISION-112/116)
+  // — written from src/app/(org)/o/[slug]/admin/credentials/actions.ts.
+  // ORDINATION_RECORDED is a Phase 3 addition beyond DECISION-112's own
+  // notes (which named only the status-change/appointment keys): the FIRST
+  // application write path this codebase has ever had to `ordinations` —
+  // a new credential attaching to a person is a polity action with real
+  // weight, same tier as OFFICER_TERM_STARTED, so it gets its own audited
+  // event rather than riding along silently.
+  ORDINATION_RECORDED: "tenant.ordination.recorded",
+  // Metadata: { organizationId, personId, ministry, ordainedOn }.
+  // Fires on EVERY changeOrdinationStatus() call, including the "End
+  // ordination" UI control's status: "removed" submission — see
+  // src/lib/credentials.ts's header for why that shares this one key/
+  // function rather than getting a distinct ORDINATION_ENDED key.
+  ORDINATION_STATUS_CHANGED: "tenant.ordination.status_changed",
+  // Metadata: { organizationId, personId, ordinationId, status }.
+  APPOINTMENT_RECORDED: "tenant.appointment.recorded",
+  // Metadata: { organizationId, personId, servingOrgId, callType, startsOn }.
+  APPOINTMENT_ENDED: "tenant.appointment.ended",
+  // Metadata: { organizationId, appointmentId, personId, servingOrgId, endsOn }.
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

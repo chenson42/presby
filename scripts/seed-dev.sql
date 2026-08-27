@@ -266,7 +266,12 @@ insert into permissions (key, module, description, sensitivity_tier) values
   ('pastoral_notes.manage','pastoral','Manage pastoral care notes for a person',3),
   ('demographics.manage','demographics','Manage SASR demographic data for a person',3),
   ('medical.manage','medical','Manage children''s-safety medical info for a person',3),
-  ('disabilities.manage','disabilities','Manage per-person disability records',3)
+  ('disabilities.manage','disabilities','Manage per-person disability records',3),
+  -- Children's ministry, Increment A (docs/work-log/
+  -- 2026-08-26-childrens-ministry.md) / DECISION-111/114: duplicates
+  -- drizzle/0035_presby_children_ministry_permission.sql's own insert, same
+  -- pattern as every other permission-catalog migration this session.
+  ('children.roster','children','View the children''s roster and manage guardian links for a child',2)
 on conflict (key) do nothing;
 
 insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
@@ -1003,5 +1008,144 @@ insert into role_grants (organization_id, role_id, person_id, starts_on) values
   ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-00000000000b',
    'c0000000-0000-0000-0000-000000000009', -- Marisol Windham
    '2026-08-26');
+
+-- ---------------------------------------------------------------------------
+-- Children's ministry, Increment A (docs/work-log/
+-- 2026-08-26-childrens-ministry.md, Phase 3) / DECISION-111 (architect) /
+-- DECISION-114 (tech-lead): children_ministry_admin, a new constitutional,
+-- protected role carrying `children.roster` ALONE — deliberately separate
+-- from member_care_admin (f...000c) so a Sunday-school coordinator can see
+-- the roster without also getting medical.manage's allergy data (Phase 1's
+-- own requirement).
+--
+-- Fixture-bound to Wren Thackeray (c0000000-...-0008) — an active household
+-- head (household head of "The Thackeray Family", above) holding zero roles
+-- today, confirmed by grep against this file before writing this block.
+-- Avoids a repeat grant onto Tobias Renwick/Marguerite Ashcombe/Priya
+-- Balakrishnan/Rowan Thistlewood/Aldous Fennimore/Marisol Windham, all
+-- already carrying at least one role. Person-arm, direct-granted (mirrors
+-- brand_admin/support_contact/member_care_admin/role_admin): an ordinary
+-- single-accountable-office action with no polity vote behind it, so
+-- nothing for a group grant to represent. starts_on is the date this
+-- pipeline's grant lands, not an office date — no officer_terms row behind
+-- this role, same shape as every other non-constitutional-office role above.
+-- ---------------------------------------------------------------------------
+insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
+  ('f0000000-0000-0000-0000-00000000000d','22222222-2222-2222-2222-222222222222',
+   'children_ministry_admin','Children''s Ministry Administrator','constitutional',true);
+
+insert into app_role_permissions (role_id, permission_key) values
+  -- The ONLY permission this role carries — a single-purpose office, not a
+  -- wildcard, same discipline as brand_admin's/role_admin's own binding
+  -- comments.
+  ('f0000000-0000-0000-0000-00000000000d','children.roster');
+
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-00000000000d',
+   'c0000000-0000-0000-0000-000000000008', -- Wren Thackeray
+   '2026-08-26');
+
+-- The first-ever fixture row in person_relationships (the table has shipped
+-- with zero rows since 0008) — a guardian link exercising the roster's "N
+-- guardian(s) on file" case end to end. Hallie Vandermeer (c0000000-...-0005,
+-- born 2011-03-08, already a fixture child in the Renwick household, under
+-- 18 relative to any date this fixture is read) linked to Tobias Renwick
+-- (c0000000-...-0002, her household's head) as her parent and emergency
+-- contact. Every other org's fixture children roster (none — Bramblewood/
+-- Quillhaven have no under-18 fixture people) exercises the empty state for
+-- free.
+insert into person_relationships (person_id, related_person_id, relationship, is_emergency_contact) values
+  ('c0000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000002',
+   'parent', true);
+
+-- ---------------------------------------------------------------------------
+-- Ministry credentials & pastoral appointments (docs/work-log/
+-- 2026-08-26-presbytery-functionality.md, Increment 2, Phase 4 commit 1
+-- (database-admin)) / DECISION-112 (architect) / DECISION-116 (tech-lead).
+--
+-- CONCURRENCY NOTE: this is an append to the file's single trailing
+-- transaction, added directly ahead of the final `commit;` — the same spot
+-- the children's-ministry Increment A block above landed. A concurrent
+-- events-model pipeline may ALSO be appending here; if a merge conflict
+-- appears at this exact seam, resolve by keeping BOTH blocks (append-only,
+-- neither depends on the other) rather than picking one.
+--
+-- A NEW fixture person, not a reuse of Rowan Thistlewood (the only other
+-- person with a membership at the presbytery) — deliberately, mirroring the
+-- children_ministry_admin block's own preference for a person holding zero
+-- roles today: Rowan already carries installed_pastor, and granting the
+-- Stated Clerk's register-keeping office to the same person the register is
+-- ABOUT reads as a conflict the fixture shouldn't model as normal.
+insert into people (id, first_name, last_name, date_of_birth) values
+  ('c0000000-0000-0000-0000-00000000000a', 'Idris', 'Calloway', '1975-05-19');
+
+insert into person_identifiers (person_id, kind, value_normalized, is_verified, is_shared, source) values
+  ('c0000000-0000-0000-0000-00000000000a', 'email', 'i.calloway@example.invalid', true, false, 'self_service');
+
+insert into memberships (organization_id, person_id, household_id, household_role, engagement_status, current_roll, current_roll_since) values
+  ('11111111-1111-1111-1111-111111111111', 'c0000000-0000-0000-0000-00000000000a',
+   null, null, 'regular', 'active', '2012-03-01');
+
+-- Same presby_roll_cache_drift() discipline as every other membership row
+-- added to this file since it was first caught live (Marisol Windham/Wren
+-- Thackeray's own comments above) — a cache value needs an action behind it.
+insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, age_at_action, approval_status, minute_reference, approved_on) values
+  ('11111111-1111-1111-1111-111111111111', 'c0000000-0000-0000-0000-00000000000a',
+   'opening_balance', '2012-03-01', 'active', 37, 'approved', 'Imported baseline', '2012-03-01');
+
+-- The org-scoped ADOPTED copy of the presbytery_stated_clerk template
+-- (drizzle/0037_presby_ministry_credentials.sql's global, organization_id
+-- IS NULL row) — this is the seed-time equivalent of a presbytery admin
+-- clicking "adopt template" at /admin/roles/new, so the feature is
+-- hand-walkable in CI/fresh-DB dev, not just live-DB state. Distinct id from
+-- the template row itself; same key is fine here since this row IS a real,
+-- org-scoped copy, not a second template.
+insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
+  ('f0000000-0000-0000-0000-00000000000e', '11111111-1111-1111-1111-111111111111',
+   'presbytery_stated_clerk', 'Stated Clerk', 'constitutional', true);
+
+insert into app_role_permissions (role_id, permission_key) values
+  -- The ONLY permission this role carries — single-purpose office, same
+  -- discipline as every other new-role binding comment in this file.
+  ('f0000000-0000-0000-0000-00000000000e', 'credentials.manage');
+
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('11111111-1111-1111-1111-111111111111', 'f0000000-0000-0000-0000-00000000000e',
+   'c0000000-0000-0000-0000-00000000000a', -- Idris Calloway
+   '2026-08-26');
+
+-- One real appointments row, proving the mechanism end to end: Rowan
+-- Thistlewood (c...0006) already serves Alder Creek per the D1 fixture's own
+-- "second membership, no active roll" row above — this appointment is the
+-- presbytery's OWN record of that same call, recorded by the presbytery
+-- (organization_id = northern-reach), naming Alder Creek as the serving
+-- congregation (servingOrgId), matching startsOn to his installed_pastor
+-- role-grant's own starts_on above for internal consistency.
+insert into appointments (id, organization_id, person_id, serving_org_id, call_type, starts_on, minute_reference, recorded_at) values
+  ('e2000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
+   'c0000000-0000-0000-0000-000000000006', -- Rowan Thistlewood
+   '22222222-2222-2222-2222-222222222222', -- Alder Creek
+   'installed_pastor', '2015-08-01', 'Presbytery stated meeting, 2015-08-01, item 3', now());
+
+-- ---------------------------------------------------------------------------
+-- Events model (docs/work-log/2026-08-26-events-model.md), Phase 4 commit 2
+-- (full-stack-developer) / DECISION-115: `events.manage` gets NO default
+-- role binding — DECISION-078's test fails every existing office, the
+-- identical reasoning DECISION-110 used for `groups.manage` (no PC(USA)
+-- office is the constitutional keeper of the congregation's calendar). This
+-- grant to stated_clerk (f0000000-...-0005) is a TEST-REACHABILITY
+-- CONVENIENCE ONLY, matching `groups.manage`'s own fixture comment — not a
+-- recommended production default. Any organization is free to bind
+-- events.manage to whichever role it actually uses for calendar
+-- administration via its own roles.manage holder.
+--
+-- CONCURRENCY NOTE: appended directly ahead of the final `commit;`, same
+-- seam the children's-ministry and presbytery-functionality blocks above
+-- landed at concurrently today (each pipeline's own note applies here too —
+-- if a merge conflict appears at this exact seam, keep ALL blocks;
+-- append-only, none depends on another).
+-- ---------------------------------------------------------------------------
+insert into app_role_permissions (role_id, permission_key) values
+  ('f0000000-0000-0000-0000-000000000005','events.manage');
 
 commit;

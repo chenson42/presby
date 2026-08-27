@@ -49,6 +49,8 @@ const KNOWN_SEEDED_ORG_PORTAL_FLAG_KEYS = new Set([
   "org_portal.features",
   "org_portal.branding",
   "org_portal.groups",
+  "org_portal.events",
+  "org_portal.credentials",
 ]);
 
 describe("PORTAL_TILES — flag-key shape", () => {
@@ -78,11 +80,13 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("mirrors OrgPortalStub's four links plus the members-management, officers, features, branding, and groups tiles (2026-08-26)", () => {
+  it("mirrors OrgPortalStub's four links plus the members-management, officers, features, branding, groups, events, and credentials tiles (2026-08-26)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
+        "credentials",
         "directory",
+        "events",
         "feedback",
         "features",
         "groups",
@@ -94,7 +98,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
     );
   });
 
-  it("classifies roles/features/branding/tickets as administer and directory/members/officers/feedback/groups as operate (operator correction 2026-08-26; groups-admin pipeline, DECISION-110 ruling 6)", () => {
+  it("classifies roles/features/branding/tickets as administer and directory/members/officers/feedback/groups/events/credentials as operate (operator correction 2026-08-26; groups-admin pipeline, DECISION-110 ruling 6; events-model pipeline, DECISION-113 ruling 7; presbytery-functionality Increment 2, Phase 3 Component/Page Plan)", () => {
     const byKey = Object.fromEntries(PORTAL_TILES.map((t) => [t.key, t]));
     expect(byKey.roles.category).toBe("administer");
     expect(byKey.features.category).toBe("administer");
@@ -105,6 +109,8 @@ describe("PORTAL_TILES — flag-key shape", () => {
     expect(byKey.officers.category).toBe("operate");
     expect(byKey.feedback.category).toBe("operate");
     expect(byKey.groups.category).toBe("operate");
+    expect(byKey.events.category).toBe("operate");
+    expect(byKey.credentials.category).toBe("operate");
   });
 
   it("the roles tile is labeled 'Roles', not 'Administration' — it now sits inside the Organization Administration hub", () => {
@@ -196,6 +202,20 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     );
     const tiles = await visiblePortalTiles("operate");
     expect(tiles.map((t) => t.key)).toEqual(["groups"]);
+  });
+
+  it("events tile is independent — org_portal.events on, everything else off (operate)", async () => {
+    isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.events");
+    const tiles = await visiblePortalTiles("operate");
+    expect(tiles.map((t) => t.key)).toEqual(["events"]);
+  });
+
+  it("credentials tile is independent — org_portal.credentials on, everything else off (operate)", async () => {
+    isFlagEnabled.mockImplementation(
+      async (key: string) => key === "org_portal.credentials",
+    );
+    const tiles = await visiblePortalTiles("operate");
+    expect(tiles.map((t) => t.key)).toEqual(["credentials"]);
   });
 
   it("features tile is independent — org_portal.features on, everything else off (administer)", async () => {

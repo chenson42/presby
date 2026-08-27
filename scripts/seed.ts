@@ -309,6 +309,28 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.members_roll_action_edit",
+      // ON (AND org_portal.members_create's flag+toggle pair, already
+      // required to reach /admin/members/<id>/edit at all, both ALSO on):
+      // `RecordRollActionForm` renders on the Edit-person screen, letting a
+      // roll.propose holder record a roll action against an ALREADY-
+      // EXISTING person, not just at creation time
+      // (docs/work-log/2026-08-26-member-roll-on-edit.md). Checked bare, no
+      // DECISION-026 fail-open wrapper — a toggle, not an auth path.
+      // Deliberately a SEPARATE global flag from org_portal.members_create
+      // rather than folded into it (Phase 3, DECISION-107) — `roll_actions`
+      // is append-only, so this gives the platform an independent kill
+      // switch for just the new mutation path without needing a second
+      // per-org toggle (there is none — this rides org_portal.members_
+      // create's existing organization_feature_toggles row). Never
+      // substitutes for roll.propose, checked inside recordRollAction()
+      // (DECISION-003). Seeded OFF, same "ships dark until the page lands"
+      // reasoning as its org_portal.* siblings.
+      description:
+        "Record-a-roll-action section on the Edit-person screen in (org). OFF = only the create-person wizard can originate a roll action; the Edit screen shows no such section, regardless of the org toggle or the viewer's grants.",
+      enabled: false,
+    },
+    {
       key: "ui.branded_signin",
       // ON: /signin renders the origin org's brand when reached via a live
       // public site's /o/<slug> callback. Checked bare, no DECISION-026
@@ -336,6 +358,20 @@ async function seedFlags() {
       // lands" reasoning as org_portal.directory/roles.
       description:
         "Officer-term administration page in (org). OFF = /o/<slug>/admin/officers renders 'isn't available yet' regardless of the viewer's officers.manage grant.",
+      enabled: false,
+    },
+    {
+      key: "org_portal.groups",
+      // ON: /o/<slug>/admin/groups is reachable at all. Checked bare, no
+      // DECISION-026 fail-open wrapper — it's a toggle, not an auth path
+      // (docs/work-log/2026-08-26-groups-admin.md, Phase 3). Never
+      // substitutes for groups.manage: a viewer with the flag on and no
+      // grant still sees the in-page "you don't have permission" state, not
+      // the groups page itself (DECISION-003: a flag never gates a
+      // permission). Seeded OFF, same "ships dark until the page lands"
+      // reasoning as org_portal.directory/roles/officers.
+      description:
+        "Committee/group administration page in (org). OFF = /o/<slug>/admin/groups renders 'isn't turned on yet' regardless of the viewer's groups.manage grant.",
       enabled: false,
     },
     {
@@ -395,6 +431,27 @@ async function seedFlags() {
         "Portal-home greeting band CSS mount fade-in. OFF = the band renders with no entrance animation (still its usual card/border treatment); ON = it fades in once on load, subject to prefers-reduced-motion.",
       enabled: false,
     },
+    {
+      key: "org_portal.sensitive_info",
+      // ON: /o/<slug>/admin/members/<id>/edit/sensitive is reachable at
+      // all — gated ADDITIONALLY by the org-level org_portal.sensitive_info
+      // toggle (organization_feature_toggles), per DECISION-097's
+      // three-axis gate order: this flag -> the org toggle of the same key
+      // -> the pastoral_notes.manage/demographics.manage/medical.manage/
+      // disabilities.manage permission checks inside
+      // src/lib/person-sensitive.ts (docs/work-log/
+      // 2026-08-26-member-sensitive-info.md, Phase 3/DECISION-108). A
+      // DEDICATED flag, NOT reusing org_portal.members_create — that
+      // flag's kill switch covers person/roll creation, a materially
+      // different risk profile than leaking pastoral/medical/demographic
+      // data to the wrong role. Checked bare, no DECISION-026 fail-open
+      // wrapper — a toggle, not an auth path. Never substitutes for any of
+      // the four permission checks (DECISION-003). Seeded OFF, same "ships
+      // dark until the page lands" reasoning as its org_portal.* siblings.
+      description:
+        "Tiered sensitive-info sub-screen (pastoral notes, demographics, medical, disabilities) in (org). OFF = /o/<slug>/admin/members/<id>/edit/sensitive renders 'isn't turned on yet' regardless of the org toggle or the viewer's grants.",
+      enabled: false,
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();
@@ -405,10 +462,13 @@ async function seedFlags() {
 /**
  * Platform-wide `group_types` templates (`organization_id IS NULL`) — the two
  * this codebase's own F16 group-seeding needs: `court` (Session, Board of
- * Deacons) and `roster` (Active Membership). `committee` is deliberately NOT
- * seeded here (docs/work-log/2026-08-24-admin-org-create.md Phase 2/3): no
- * admin surface creates a `committee`-type group yet, so nothing in presby
- * needs that row in a production-reachable seed path today.
+ * Deacons) and `roster` (Active Membership), plus the four manageable types
+ * `/o/<slug>/admin/groups` lets an admin create (`committee`/`small_group`/
+ * `choir`/`team` — docs/work-log/2026-08-26-groups-admin.md, DECISION-110
+ * ruling 1). The latter four were deliberately NOT seeded before that
+ * pipeline (docs/work-log/2026-08-24-admin-org-create.md Phase 2/3): no admin
+ * surface created a `committee`-type group yet, so nothing in presby needed
+ * those rows in a production-reachable seed path at the time.
  *
  * Without this, `createOrganization()` (src/lib/org-provisioning.ts) cannot
  * function against a real database at all — it fails closed with
@@ -431,6 +491,16 @@ async function seedGroupTypes() {
   const defs = [
     { key: "court", name: "Court" },
     { key: "roster", name: "Roster" },
+    // Added for the groups-admin pipeline (docs/work-log/2026-08-26-groups-
+    // admin.md, DECISION-110 ruling 1): the four manageable group types a
+    // fresh install previously had no platform-wide template row for at
+    // all — createGroup() (src/lib/groups.ts) resolves group_type_id against
+    // exactly these four keys, and without this seed a new install has
+    // nothing to reference.
+    { key: "committee", name: "Committee" },
+    { key: "small_group", name: "Small Group" },
+    { key: "choir", name: "Choir" },
+    { key: "team", name: "Team" },
   ];
   for (const g of defs) {
     // Both the read and the write use platformDb, not db — group_types is a

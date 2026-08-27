@@ -197,6 +197,27 @@
       "when": 1787014053186,
       "tag": "0030_presby_branding_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787014054186,
+      "tag": "0031_presby_sensitive_info_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787014055186,
+      "tag": "0032_presby_role_definitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787014056186,
+      "tag": "0033_presby_groups_administration",
+      "breakpoints": true
     }
   ]
 }

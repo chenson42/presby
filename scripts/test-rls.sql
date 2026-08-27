@@ -44,6 +44,21 @@
 -- baseline-roles.md).
 \set MEMBER_ROLE '\'f0000000-0000-0000-0000-000000000004\''
 \set ALDER_ACTIVE_MEMBERSHIP_GROUP '\'b0000000-0000-0000-0000-000000000007\''
+-- Role & permissions administration (section 24). Marisol Windham, the fresh
+-- fixture person role_admin binds to (DECISION-109), the role_admin role
+-- itself, and the global committee_chair template row drizzle/
+-- 0032_presby_role_definitions.sql seeds directly (organization_id IS NULL).
+\set ROLE_ADMIN_PERSON '\'c0000000-0000-0000-0000-000000000009\''
+\set ROLE_ADMIN_ROLE '\'f0000000-0000-0000-0000-00000000000b\''
+\set COMMITTEE_CHAIR_TEMPLATE_ROLE '\'00000000-0000-0000-0000-000000000001\''
+-- Groups administration (sections 25/26). :CLERK (Tobias Renwick) is the
+-- stated_clerk fixture holder groups.manage is bound to (test-reachability
+-- convenience only, DECISION-110 / Phase 3). Marguerite Ashcombe's (:ELDER)
+-- current officer_terms row at Alder Creek (e0000000-...-0002, ruling_elder)
+-- is the derived group_memberships row section 25 attempts to DELETE.
+\set SESSION_DERIVED_TERM '\'e0000000-0000-0000-0000-000000000002\''
+\set ALDER_SESSION_GROUP '\'b0000000-0000-0000-0000-000000000001\''
+\set ALDER_MANAGED_GROUP '\'b0000000-0000-0000-0000-000000000004\''
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
 
@@ -63,7 +78,10 @@ begin;
   select set_config('app.current_org_id', :ALDER, true);
   -- Portal home + directory v2, Increment 4: +2 memberships (Aldous
   -- Fennimore, Wren Thackeray — the two new district households' heads) = 8.
-  select assert_eq((select count(*) from memberships), 8, 'alder: sees own memberships');
+  -- Role & permissions administration (docs/work-log/2026-08-26-role-
+  -- permissions-admin.md): +1 membership (Marisol Windham, the fresh fixture
+  -- person role_admin binds to, DECISION-109) = 9.
+  select assert_eq((select count(*) from memberships), 9, 'alder: sees own memberships');
   select assert_eq((select count(*) from memberships where organization_id <> :ALDER), 0,
                    'alder: sees NO foreign memberships');
   -- P9-role-catalog: 5 base + treasurer + installed_pastor = 7. support_contact
@@ -87,8 +105,9 @@ commit;
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   -- Portal home + directory v2, Increment 4: +2 people (Aldous Fennimore,
-  -- Wren Thackeray) = 8.
-  select assert_eq((select count(*) from people), 8, 'alder: sees people it holds memberships for');
+  -- Wren Thackeray) = 8. Role & permissions administration: +1 person
+  -- (Marisol Windham, role_admin's fresh fixture binding, DECISION-109) = 9.
+  select assert_eq((select count(*) from people), 9, 'alder: sees people it holds memberships for');
   -- The pastor holds memberships at BOTH the presbytery and Alder Creek.
   select assert_eq((select count(*) from people where id = :PASTOR), 1, 'alder: sees its pastor');
 commit;
@@ -1457,3 +1476,226 @@ begin;
     (select count(*) where presby_has_permission(:ELDER, :BRAMBLE, 'branding.manage')),
     0, 'presby_has_permission: brand_admin holder holds NOTHING at bramblewood (no grant there)');
 commit;
+
+-- ---------------------------------------------------------------------------
+-- 24. Role & permissions administration, database-admin schema layer
+--     (docs/work-log/2026-08-26-role-permissions-admin.md, Phase 4 commit 1
+--     / DECISION-106 (Phase 2) / DECISION-109 (Phase 3)). Three things:
+--
+--       (a) roles.manage — the permission-catalog row (drizzle/
+--           0032_presby_role_definitions.sql), proven queryable and bound to
+--           the fresh role_admin fixture (Marisol Windham, deliberately NOT
+--           Tobias Renwick or Marguerite Ashcombe — both already hold two
+--           roles each, DECISION-109), same shape as sections 19/22/23's own
+--           permission-catalog proofs.
+--
+--       (b) the app_roles RLS split — the single largest risk item in this
+--           design (Phase 3 Edge Cases): a tenant must now see the GLOBAL
+--           committee_chair template row (organization_id IS NULL) alongside
+--           its own roles, but must NEVER be able to write one. Proven
+--           directly, not assumed from FORCE RLS alone — the same discipline
+--           section 20's F26 finding demands ("caught by running it, not by
+--           reading a raw SQL predicate").
+--
+--       (c) app_roles.deactivated_at exists and is NULL for every fixture
+--           role today — no role in this fixture has ever been deactivated,
+--           so this is a shape check, not a behavior proof. deactivateRole()
+--           itself (api-developer's Phase 4 commit) gets its own isolation
+--           proof once it exists to write to this column.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'roles.manage'),
+    1, 'permissions: roles.manage catalog row exists');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:ROLE_ADMIN_PERSON, :ALDER, 'roles.manage')),
+    1, 'presby_has_permission: role_admin holder (Marisol Windham) holds roles.manage at alder');
+  -- Confirm this fixture person holds NOTHING ELSE — role_admin is a
+  -- single-purpose office, not a wildcard (same discipline as brand_admin's
+  -- own re-check in section 23).
+  select assert_eq(
+    (select count(*) where presby_has_permission(:ROLE_ADMIN_PERSON, :ALDER, 'people.manage')),
+    0, 'presby_has_permission: role_admin holder holds NOTHING beyond roles.manage');
+commit;
+
+-- Cross-org: the SAME person, at an org where they hold no grant at all,
+-- must not read as having the permission — Marisol Windham has no
+-- role_grants row at bramblewood (seed-dev.sql's role_admin grant is
+-- deliberately Alder-Creek-only, same "prove the mechanism once" posture as
+-- every other new-role fixture grant in this file).
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:ROLE_ADMIN_PERSON, :BRAMBLE, 'roles.manage')),
+    0, 'presby_has_permission: role_admin holder holds NOTHING at bramblewood (no grant there)');
+commit;
+
+-- The app_roles RLS split (b) — proven at BOTH tenant orgs, since the
+-- template row must read as visible from either, not just Alder Creek.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from app_roles where id = :COMMITTEE_CHAIR_TEMPLATE_ROLE),
+    1, 'alder: sees the global committee_chair template row (organization_id IS NULL)');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) from app_roles where id = :COMMITTEE_CHAIR_TEMPLATE_ROLE),
+    1, 'bramblewood: ALSO sees the global committee_chair template row — this is the point of the widened SELECT policy, not a leak');
+commit;
+
+-- The write side stays own-org-only — a tenant can never plant a template
+-- row (organization_id IS NULL) through presby_app, mirroring organizations'
+-- "public tree, no tenant write" shape (DECISION-109's second finding).
+-- CAUGHT BY RUNNING IT, same discipline as section 20's F26 finding — a
+-- literal "organization_id is null" WITH CHECK clause would need this same
+-- live proof to be trusted at all.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
+    values ('00000000-0000-0000-0000-000000000099', null, 'rogue_template', 'Rogue Template', 'custom', false);
+    raise exception 'FAIL — alder wrote a template row (organization_id IS NULL) through presby_app';
+  exception when insufficient_privilege then
+    raise notice 'pass  app_roles write policy: template-row insert rejected';
+  end $$;
+rollback;
+
+-- (c) deactivated_at exists and is NULL for every fixture role today — a
+-- shape check only, since nothing in this commit writes to the column yet.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from app_roles where id = :ROLE_ADMIN_ROLE and deactivated_at is null),
+    1, 'app_roles: deactivated_at column exists and is NULL for the freshly-seeded role_admin row');
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 25. Groups administration, database-admin schema layer (docs/work-log/
+--     2026-08-26-groups-admin.md, Phase 4 commit 1 / DECISION-110 ruling 3).
+--     Two things:
+--
+--       (a) groups.manage — the permission-catalog row (drizzle/
+--           0033_presby_groups_administration.sql), proven queryable and
+--           bound to the existing stated_clerk fixture holder (Tobias
+--           Renwick, :CLERK) — a test-reachability convenience only (Phase 3's
+--           own wording), not a recommended production default, same shape
+--           as sections 19/22/23/24's own permission-catalog proofs.
+--
+--       (b) presby_reject_derived_group_write()'s widened DELETE branch.
+--           Confirmed by direct read (drizzle/0009_presby_rls.sql) before
+--           this migration: the original guard is
+--             if src = 'derived' and coalesce(new.source, old.source) <> 'derived'
+--           which is false for a DELETE — `new` is null, so it reads back
+--           old.source, which IS 'derived', so the condition never fires and
+--           the row deleted unblocked. drizzle/
+--           0033_presby_groups_administration.sql special-cases
+--           tg_op = 'DELETE' first. Proven directly against Marguerite
+--           Ashcombe's derived Session group_memberships row (projected from
+--           officer_terms e...-0002 by officer_terms_sync_derived) — no new
+--           fixture rows needed, same "prove it against real derived data"
+--           discipline section 6 already established for the UPDATE half of
+--           this same trigger.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'groups.manage'),
+    1, 'permissions: groups.manage catalog row exists');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) where presby_has_permission(:CLERK, :ALDER, 'groups.manage')),
+    1, 'presby_has_permission: stated_clerk holder (Tobias Renwick) holds groups.manage at alder — test-reachability binding, not a recommended default');
+commit;
+
+-- Setup check: the derived row this section is about to attempt a DELETE
+-- against actually exists, so a "pass" below is proof of the trigger firing,
+-- not a false pass from an empty WHERE clause matching nothing.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from group_memberships
+      where officer_term_id = :SESSION_DERIVED_TERM and source = 'derived'),
+    1, 'setup: Marguerite Ashcombe''s derived Session group_memberships row exists before the delete attempt');
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    delete from group_memberships where officer_term_id = 'e0000000-0000-0000-0000-000000000002';
+    raise exception 'FAIL invariant 5 — an already-derived group_memberships row was deleted directly';
+  exception when check_violation then
+    raise notice 'pass  invariant 5: DELETE of an already-derived group_memberships row rejected';
+  end $$;
+rollback;
+
+-- Belt-and-braces (section 20's "prove it stuck" discipline): the row must
+-- still be there after the rolled-back attempt, at zero net risk since the
+-- whole attempt above ran inside a transaction that was rolled back either way.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from group_memberships
+      where officer_term_id = :SESSION_DERIVED_TERM and source = 'derived'),
+    1, 'group_memberships: Marguerite Ashcombe''s derived Session row still exists after the rejected delete');
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 26. Groups administration, database-admin schema layer (docs/work-log/
+--     2026-08-26-groups-admin.md, Phase 4 commit 1 / DECISION-110 ruling 3).
+--     No trigger of any kind existed on `groups` before this migration —
+--     nothing stopped a direct UPDATE of a derived group's own name,
+--     description, or meets_when. drizzle/
+--     0033_presby_groups_administration.sql adds groups_reject_derived_edit
+--     (before update on groups), which rejects the change when
+--     old.membership_source = 'derived' and name/description/meets_when
+--     `is distinct from` its old value. Proven against the Session fixture
+--     row (:ALDER_SESSION_GROUP, derived) already seeded in section 6's own
+--     transaction scope — no new fixture rows needed. The final block proves
+--     the trigger is not overbroad: an ordinary MANAGED group's own edit
+--     (Flow 2's whole point) must still succeed.
+-- ---------------------------------------------------------------------------
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    update groups set name = 'Hijacked Session' where id = 'b0000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL invariant 5 — a derived group''s name was edited directly';
+  exception when check_violation then
+    raise notice 'pass  invariant 5: UPDATE of a derived group''s name rejected';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    update groups set description = 'hijacked' where id = 'b0000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL invariant 5 — a derived group''s description was edited directly';
+  exception when check_violation then
+    raise notice 'pass  invariant 5: UPDATE of a derived group''s description rejected';
+  end $$;
+rollback;
+
+-- Not overbroad: an ordinary managed group (Property Committee) must still be
+-- editable — this is Flow 2's whole point, and the trigger only special-cases
+-- membership_source = 'derived'.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  update groups set name = 'Property Committee (Renamed)'
+   where id = :ALDER_MANAGED_GROUP;
+  select assert_eq(
+    (select count(*) from groups
+      where id = :ALDER_MANAGED_GROUP and name = 'Property Committee (Renamed)'),
+    1, 'groups: an ordinary managed-group name edit still succeeds (trigger is not overbroad)');
+rollback;

@@ -32,7 +32,7 @@
  * documents for `organization_sites.status`.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
@@ -372,8 +372,23 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
     // tickets.test.ts's own afterAll avoids by never doing it), groups,
     // app_roles, and role_grants. Deleting the four fixture orgs is
     // therefore sufficient, mirroring tickets.test.ts's own minimal afterAll.
-    for (const orgId of [orgLive, orgProvisioning, orgSuspended, orgUnprovisioned]) {
-      await platform.delete(organizations).where(eq(organizations.id, orgId));
+    //
+    // drizzle/0033's group_memberships_reject_derived trigger now (DECISION-
+    // 110) also rejects the DELETE that cascading `organizations` fires
+    // against this fixture's own active_membership-derived group_memberships
+    // rows — disable it around the cascade, same as roll.test.ts's own
+    // teardown does for roll_actions_freeze.
+    await platform.execute(
+      sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+    );
+    try {
+      for (const orgId of [orgLive, orgProvisioning, orgSuspended, orgUnprovisioned]) {
+        await platform.delete(organizations).where(eq(organizations.id, orgId));
+      }
+    } finally {
+      await platform.execute(
+        sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+      );
     }
     for (const id of [filerPersonId, plainMemberPersonId].filter(Boolean)) {
       await platform.delete(people).where(eq(people.id, id));
@@ -1428,8 +1443,22 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
 
     afterAll(async () => {
       const platform = getPlatformDb();
-      for (const orgId of [orgWithRow, orgNoRow, orgOutsider]) {
-        await platform.delete(organizations).where(eq(organizations.id, orgId));
+      // drizzle/0033's group_memberships_reject_derived trigger now (DECISION-
+      // 110) also rejects the DELETE that cascading `organizations` fires
+      // against this fixture's own active_membership-derived group_memberships
+      // rows — disable it around the cascade, same as roll.test.ts's own
+      // teardown does for roll_actions_freeze.
+      await platform.execute(
+        sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+      );
+      try {
+        for (const orgId of [orgWithRow, orgNoRow, orgOutsider]) {
+          await platform.delete(organizations).where(eq(organizations.id, orgId));
+        }
+      } finally {
+        await platform.execute(
+          sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+        );
       }
       for (const personId of [memberWithRow, memberNoRow, outsiderPerson]) {
         await platform.delete(people).where(eq(people.id, personId));

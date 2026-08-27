@@ -46,8 +46,14 @@ insert into organizations (id, parent_id, organization_type, name, slug, path, p
 -- isolation suite asserts that presby_two_factor_required() reads the policy
 -- at sign-in with no org GUC set (the F26 shape), and it can only prove that
 -- if one church requires 2FA and another does not.
+-- trackDisabilityPerPerson is true only at Alder Creek — "prove the
+-- mechanism once" (member edit: tiered sensitive information, DECISION-108),
+-- so member_care_admin's disabilities.manage grant (Aldous Fennimore, below)
+-- has a real fixture to exercise the disabilities section end-to-end, while
+-- Bramblewood stays a clean "tracking off, section absent regardless of
+-- grant" case for free.
 insert into organization_settings (organization_id, require_two_factor, settings) values
-  ('22222222-2222-2222-2222-222222222222', true,  '{"hasDeacons": true, "sessionServesAsTrustees": false}'),
+  ('22222222-2222-2222-2222-222222222222', true,  '{"hasDeacons": true, "sessionServesAsTrustees": false, "trackDisabilityPerPerson": true}'),
   ('33333333-3333-3333-3333-333333333333', false, '{"hasDeacons": false, "sessionServesAsTrustees": true}');
 
 -- ---------------------------------------------------------------------------
@@ -239,7 +245,6 @@ insert into permissions (key, module, description, sensitivity_tier) values
   ('roll.approve','roll','Approve a roll action',1),
   ('directory.view','directory','Browse the directory',1),
   ('ledger.approve','ledger','Approve a disbursement',2),
-  ('pastoral.notes.view','pastoral','Read pastoral care notes',3),
   -- P9 / DECISION-066: duplicates drizzle/0018_presby_role_administration.sql's
   -- own insert, same "both use on conflict do nothing" pattern directory.view
   -- already established between 0017 and this file.
@@ -251,7 +256,17 @@ insert into permissions (key, module, description, sensitivity_tier) values
   -- duplicates drizzle/0026_presby_org_feature_toggles.sql's and
   -- drizzle/0027_presby_member_management.sql's own inserts, same pattern.
   ('org_features.manage','org_features','Turn optional portal features on or off for this organization',1),
-  ('people.manage','people','Create and edit people, households, and contact/address detail',1)
+  ('people.manage','people','Create and edit people, households, and contact/address detail',1),
+  -- Member edit: tiered sensitive information (docs/work-log/
+  -- 2026-08-26-member-sensitive-info.md, DECISION-108): duplicates
+  -- drizzle/0031_presby_sensitive_info_permissions.sql's own insert, same
+  -- pattern. That same migration retires 'pastoral.notes.view' (removed
+  -- above, superseded by pastoral_notes.manage on the same office,
+  -- installed_pastor) — never re-inserted here.
+  ('pastoral_notes.manage','pastoral','Manage pastoral care notes for a person',3),
+  ('demographics.manage','demographics','Manage SASR demographic data for a person',3),
+  ('medical.manage','medical','Manage children''s-safety medical info for a person',3),
+  ('disabilities.manage','disabilities','Manage per-person disability records',3)
 on conflict (key) do nothing;
 
 insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
@@ -308,7 +323,22 @@ insert into app_roles (id, organization_id, key, name, role_kind, is_protected) 
   -- role-auto-provisioning surface creates it yet (same bootstrap-gap
   -- posture as stated_clerk/officers.manage, tracked in docs/TODO.md).
   ('f0000000-0000-0000-0000-00000000000a','22222222-2222-2222-2222-222222222222',
-   'brand_admin','Brand Administrator','constitutional',true);
+   'brand_admin','Brand Administrator','constitutional',true),
+  -- Member edit: tiered sensitive information (docs/work-log/
+  -- 2026-08-26-member-sensitive-info.md) / DECISION-108: medical.manage and
+  -- disabilities.manage have no constitutional analog — person_medical is
+  -- children's-check-in safety data with no PC(USA) office correlate, and
+  -- person_disabilities is staff-observed, non-consensual, per-person data
+  -- distinct from the aggregate SASR disability line stated_clerk already
+  -- touches via demographics.manage. Bundling exactly these two (not four)
+  -- onto one new role is not a wildcard: both share one coherent purpose
+  -- (accountability for vulnerable-person safety/accommodation records), and
+  -- no role in the catalog holds more than two of the four new keys.
+  -- Constitutional and protected, mirroring brand_admin's shape (f...000a) —
+  -- a baseline role every congregation should have available, not a
+  -- staff-invented committee role.
+  ('f0000000-0000-0000-0000-00000000000c','22222222-2222-2222-2222-222222222222',
+   'member_care_admin','Member Care Administrator','constitutional',true);
 
 insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000001','roll.approve'),
@@ -325,7 +355,15 @@ insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000005','roll.propose'),
   ('f0000000-0000-0000-0000-000000000006','tickets.file'),
   ('f0000000-0000-0000-0000-000000000007','ledger.approve'),
-  ('f0000000-0000-0000-0000-000000000008','pastoral.notes.view'),
+  -- Member edit: tiered sensitive information (docs/work-log/
+  -- 2026-08-26-member-sensitive-info.md) / DECISION-108: supersedes the
+  -- orphaned pastoral.notes.view (retired by
+  -- drizzle/0031_presby_sensitive_info_permissions.sql, and no longer
+  -- inserted above) on the same office. Clergy confidentiality
+  -- (person_notes.visibility = 'clergy_only') IS the pastoral relationship
+  -- this office already names (DECISION-079's own reasoning, applied to the
+  -- same table).
+  ('f0000000-0000-0000-0000-000000000008','pastoral_notes.manage'),
   ('f0000000-0000-0000-0000-000000000009','directory.view_hidden'),
   -- Portal home + directory v2, Increment 4 / DECISION-095: the "Church
   -- Administrator" half of Phase 1's recommended binding — no such role
@@ -373,7 +411,33 @@ insert into app_role_permissions (role_id, permission_key) values
   -- Tenant branding permission, Phase 4 commit 1: brand_admin ->
   -- branding.manage. The ONLY permission this role carries — a
   -- single-purpose office, not a wildcard.
-  ('f0000000-0000-0000-0000-00000000000a','branding.manage');
+  ('f0000000-0000-0000-0000-00000000000a','branding.manage'),
+  -- Member edit: tiered sensitive information, DECISION-108: demographics
+  -- compilation is a direct extension of the SASR duty
+  -- roll.propose/officers.manage already sit on — docs/schema-design.md ties
+  -- SASR demographic/disability compilation directly to "clerks." Tobias
+  -- Renwick's existing stated_clerk grant already carries this for free — no
+  -- new role_grants row needed, same reasoning as this office's other
+  -- bindings above.
+  ('f0000000-0000-0000-0000-000000000005','demographics.manage'),
+  -- member_care_admin's two permissions — the only role in the catalog that
+  -- carries more than one of the four new keys, and the only two with no
+  -- constitutional analog at all (see the app_roles comment above).
+  ('f0000000-0000-0000-0000-00000000000c','medical.manage'),
+  ('f0000000-0000-0000-0000-00000000000c','disabilities.manage'),
+  -- Groups administration (docs/work-log/2026-08-26-groups-admin.md), Phase 4
+  -- commit 1 / DECISION-110 ruling 2: groups.manage mints NO new role and
+  -- gets NO default binding recommendation — DECISION-078's test fails every
+  -- existing office (no PC(USA) office is the constitutional keeper of
+  -- committee rosters), and Phase 3 explicitly rejected both property_chair
+  -- (Tobias Renwick already, over-concentration) and support_contact
+  -- (Marguerite Ashcombe already, same reasoning). This grant to stated_clerk
+  -- is a TEST-REACHABILITY CONVENIENCE ONLY, per Phase 3's own wording — it
+  -- gives scripts/test-rls.sql a real holder to exercise the new triggers'
+  -- regression tests against, not a recommended production default. Any
+  -- organization is free to bind groups.manage to whichever role it actually
+  -- uses for committee administration via its own roles.manage holder.
+  ('f0000000-0000-0000-0000-000000000005','groups.manage');
 
 -- Granted to the DERIVED Session group, not to a person. This is the F3 case:
 -- if the roster were a view rather than materialized rows, the resolver would
@@ -476,11 +540,20 @@ insert into role_grants (organization_id, role_id, person_id, starts_on) values
 -- An administrative commission: the one case where a council reaches DOWN into
 -- a congregation. Its members are a group AT THE PRESBYTERY, which is why the
 -- resolver's third arm needs SECURITY DEFINER to see them (F26/F27).
-insert into group_types (id, organization_id, key, name) values
-  ('a0000000-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111111','committee','Committee');
+--
+-- DECISION-110 ruling 1 (groups-admin pipeline, docs/work-log/2026-08-26-
+-- groups-admin.md): this used to insert its OWN org-scoped 'committee'
+-- group_types row (a0000000-...-0003) duplicating the platform-wide template
+-- (a0000000-...-0002) already seeded above. `git log -S` traced that
+-- duplication to an unrelated commit with no comment justifying it, and D8
+-- (no tenant-extensible custom fields/types) argues against a real per-org
+-- custom-group-types feature. Every groups.group_type_id write now resolves
+-- against the platform template row directly, matching how court/roster
+-- already worked — so this group references a0000000-...-0002, not a
+-- second, org-scoped row.
 insert into groups (id, organization_id, group_type_id, name, membership_source) values
   ('b0000000-0000-0000-0000-000000000005','11111111-1111-1111-1111-111111111111',
-   'a0000000-0000-0000-0000-000000000003','Commission on Alder Creek','managed');
+   'a0000000-0000-0000-0000-000000000002','Commission on Alder Creek','managed');
 insert into group_memberships (organization_id, group_id, person_id, starts_on) values
   ('11111111-1111-1111-1111-111111111111','b0000000-0000-0000-0000-000000000005',
    'c0000000-0000-0000-0000-000000000006','2026-01-01');
@@ -832,6 +905,23 @@ insert into officer_terms (id, organization_id, person_id, office, class_year, o
    'deacon', null, 'a2000000-0000-0000-0000-000000000001', -- North District
    '2025-09-01', null, null, null);
 
+-- Member edit: tiered sensitive information (docs/work-log/
+-- 2026-08-26-member-sensitive-info.md) / DECISION-108: member_care_admin,
+-- direct-granted to Aldous Fennimore — an active household head holding no
+-- other role today, avoiding a fifth capability stacked onto Tobias Renwick,
+-- Marguerite Ashcombe, Priya Balakrishnan, or Rowan Thistlewood, all already
+-- loaded office-holders. Person-arm, direct-granted (mirrors
+-- brand_admin/support_contact): an ordinary single-accountable-office
+-- action, nothing for a group grant to represent. starts_on is the date
+-- this pipeline's grant lands, not an office date — there is no
+-- officer_terms row behind this role, by design (no PC(USA) office
+-- corresponds to it), same shape as brand_admin's/support_contact's own
+-- grants.
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-00000000000c',
+   'c0000000-0000-0000-0000-000000000007', -- Aldous Fennimore
+   '2026-08-26');
+
 -- ---------------------------------------------------------------------------
 -- Portal home + directory v2, Increment 4b (2026-08-24-portal-home-directory,
 -- Phase 4, full-stack-developer) — one `directory_hidden = true` fixture
@@ -847,5 +937,71 @@ insert into officer_terms (id, organization_id, person_id, office, class_year, o
 insert into person_privacy (person_id, organization_id, directory_hidden)
 values ('c0000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222', true)
 on conflict (person_id) do update set directory_hidden = true;
+
+-- ---------------------------------------------------------------------------
+-- Role & permissions administration (docs/work-log/2026-08-26-role-
+-- permissions-admin.md), Phase 4 commit 1 (database-admin) / DECISION-106
+-- (Phase 2) / DECISION-109 (Phase 3): role_admin, the new constitutional,
+-- protected role that carries roles.manage (drizzle/0031_presby_role_
+-- definitions.sql seeds the global permission-catalog row; this file mints
+-- the org-scoped role and its fixture binding — app_roles/role_grants have
+-- no production seeding surface yet, same posture as every other role in
+-- this catalog).
+--
+-- roles.manage does NOT bind to stated_clerk (Tobias Renwick) — DECISION-
+-- 106's third ruling: role/permission-structure definition is not the Clerk
+-- of Session's constitutional office, and stated_clerk already carries seven
+-- accumulated permissions, the exact drift DECISION-101 refused to extend
+-- further for branding.manage. It also does NOT go to Marguerite Ashcombe
+-- (already support_contact + brand_admin) — a third role on either already-
+-- multi-role fixture person would recreate the "one person, every
+-- capability" concentration DECISION-103 flagged and declined to repeat for
+-- brand_admin alone. DECISION-109 calls for a FRESH fixture person instead.
+--
+-- Marisol Windham: an invented, otherwise-unburdened Alder Creek member —
+-- house style per this file's own header (no real name, example.invalid
+-- email). No household (mirrors Desmond Okonkwo's shape, c0000000-...-0004):
+-- role_admin is an ordinary single-accountable-office action with no polity
+-- vote behind it (same reasoning as support_contact/brand_admin), so a
+-- household/family narrative adds nothing this fixture needs. current_roll
+-- is 'active' (a real congregation member, not merely a person record) so
+-- role_grants_person_fk (personId, organizationId) has a memberships row to
+-- reference at Alder Creek.
+-- ---------------------------------------------------------------------------
+insert into people (id, first_name, last_name, date_of_birth) values
+  ('c0000000-0000-0000-0000-000000000009', 'Marisol', 'Windham', '1982-02-14');
+
+insert into person_identifiers (person_id, kind, value_normalized, is_verified, is_shared, source) values
+  ('c0000000-0000-0000-0000-000000000009', 'email', 'm.windham@example.invalid', true, false, 'self_service');
+
+insert into memberships (organization_id, person_id, household_id, household_role, engagement_status, current_roll, current_roll_since) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000009',
+   null, null, 'regular', 'active', '2018-09-01');
+
+-- The Roll Is the System of Record (CLAUDE.md): memberships.current_roll is a
+-- CACHE, never set on its own authority. presby_roll_cache_drift() (caught
+-- LIVE while verifying this commit against the shared dev database, not
+-- reasoned about in advance) compares the cache against a replay of
+-- roll_actions and flags any membership whose current_roll has no action
+-- behind it — same 'opening_balance' pattern as Aldous Fennimore/Wren
+-- Thackeray's own rows above, so Marisol Windham's 'active' cache value
+-- agrees with the replay from the moment she exists.
+insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, age_at_action, approval_status, minute_reference, approved_on) values
+  ('22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000009',
+   'opening_balance', '2018-09-01', 'active', 36, 'approved', 'Imported baseline', '2018-09-01');
+
+insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
+  ('f0000000-0000-0000-0000-00000000000b','22222222-2222-2222-2222-222222222222',
+   'role_admin','Role Administrator','constitutional',true);
+
+insert into app_role_permissions (role_id, permission_key) values
+  -- The ONLY permission this role carries — a single-purpose office, not a
+  -- wildcard, same discipline as brand_admin's own binding comment.
+  ('f0000000-0000-0000-0000-00000000000b','roles.manage');
+
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222','f0000000-0000-0000-0000-00000000000b',
+   'c0000000-0000-0000-0000-000000000009', -- Marisol Windham
+   '2026-08-26');
 
 commit;

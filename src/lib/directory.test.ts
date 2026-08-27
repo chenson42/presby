@@ -19,7 +19,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
@@ -634,11 +634,17 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     // both composite FKs onto `memberships` declared NO ACTION, not cascade
     // (see src/lib/db/domain/privacy.ts and groups.ts). Deleting the org
     // cascades `memberships` away; if a person_privacy row still points at
-    // one of those rows, the cascade is rejected — group_memberships is safe
-    // because it cascades from organizations too (same statement, same
-    // cascade fan-out), but person_privacy has no organization-owned cascade
-    // path at all and must be removed explicitly first. `people` last, since
-    // organizations no longer references it once its memberships are gone.
+    // one of those rows, the cascade is rejected — person_privacy has no
+    // organization-owned cascade path at all and must be removed explicitly
+    // first. `people` last, since organizations no longer references it once
+    // its memberships are gone.
+    //
+    // group_memberships DOES cascade from organizations (same statement, same
+    // cascade fan-out) but drizzle/0033's group_memberships_reject_derived
+    // trigger now (DECISION-110) rejects that cascade DELETE outright for
+    // this fixture's own active_membership/diaconate-derived rows — disable
+    // it around the cascade, same as roll.test.ts's own teardown does for
+    // roll_actions_freeze.
     const platform = getPlatformDb();
     const allPeople = [
       control,
@@ -666,8 +672,17 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     for (const id of allPeople) {
       await platform.delete(personPrivacy).where(eq(personPrivacy.personId, id));
     }
-    await platform.delete(organizations).where(eq(organizations.id, orgA));
-    await platform.delete(organizations).where(eq(organizations.id, orgB));
+    await platform.execute(
+      sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+    );
+    try {
+      await platform.delete(organizations).where(eq(organizations.id, orgA));
+      await platform.delete(organizations).where(eq(organizations.id, orgB));
+    } finally {
+      await platform.execute(
+        sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+      );
+    }
     for (const id of allPeople) {
       await platform.delete(people).where(eq(people.id, id));
     }
@@ -1493,8 +1508,22 @@ describe.skipIf(!hasDb)(
 
     afterAll(async () => {
       const platform = getPlatformDb();
-      await platform.delete(organizations).where(eq(organizations.id, orgA));
-      await platform.delete(organizations).where(eq(organizations.id, orgB));
+      // drizzle/0033's group_memberships_reject_derived trigger now (DECISION-
+      // 110) also rejects the DELETE that cascading `organizations` fires
+      // against this fixture's own active_membership-derived group_memberships
+      // rows — disable it around the cascade, same as roll.test.ts's own
+      // teardown does for roll_actions_freeze.
+      await platform.execute(
+        sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+      );
+      try {
+        await platform.delete(organizations).where(eq(organizations.id, orgA));
+        await platform.delete(organizations).where(eq(organizations.id, orgB));
+      } finally {
+        await platform.execute(
+          sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+        );
+      }
       for (const id of allPeople) {
         await platform.delete(people).where(eq(people.id, id));
       }

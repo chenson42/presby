@@ -18,7 +18,7 @@
  * `getOrgMarkForLayout()`, this pipeline's new read, is pinned.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
@@ -209,10 +209,24 @@ describe.skipIf(!hasDb)(
 
     afterAll(async () => {
       const platform = getPlatformDb();
-      for (const orgId of [orgBranded, orgNoBrandRow, orgBrandRowNoKey, orgOutsider]) {
-        // ON DELETE CASCADE on organization_brands/memberships/groups takes
-        // every fixture row with it.
-        await platform.delete(organizations).where(eq(organizations.id, orgId));
+      // drizzle/0033's group_memberships_reject_derived trigger now (DECISION-
+      // 110) also rejects the DELETE that cascading `organizations` fires
+      // against this fixture's own active_membership-derived group_memberships
+      // rows — disable it around the cascade, same as roll.test.ts's own
+      // teardown does for roll_actions_freeze.
+      await platform.execute(
+        sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+      );
+      try {
+        for (const orgId of [orgBranded, orgNoBrandRow, orgBrandRowNoKey, orgOutsider]) {
+          // ON DELETE CASCADE on organization_brands/memberships/groups takes
+          // every fixture row with it.
+          await platform.delete(organizations).where(eq(organizations.id, orgId));
+        }
+      } finally {
+        await platform.execute(
+          sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+        );
       }
       for (const personId of [
         memberBranded,

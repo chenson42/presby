@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import {
   assertOrgAccess,
@@ -9,6 +10,11 @@ import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
 import { getHouseholds } from "@/lib/directory";
 import { getPersonForEdit } from "@/lib/people";
+import { getSensitiveInfoGrants } from "@/lib/person-sensitive";
+import {
+  getPendingRollActionsForPerson,
+  type PendingRollActionForPerson,
+} from "@/lib/roll";
 import { OrgAccessDenied, OrgAccessEnded } from "../../../../org-states";
 import {
   MembersFlagOff,
@@ -16,8 +22,11 @@ import {
   MembersLoadError,
 } from "../../members-states";
 import { EditPersonForm } from "./edit-person-form";
+import { RecordRollActionForm } from "./record-roll-action-form";
 
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
+const ROLL_ACTION_EDIT_FLAG = "org_portal.members_roll_action_edit";
+const SENSITIVE_INFO_FLAG = "org_portal.sensitive_info";
 
 /**
  * `/o/<slug>/admin/members/<id>/edit` — Increment 2 (docs/work-log/
@@ -27,6 +36,26 @@ const MEMBERS_CREATE_FLAG = "org_portal.members_create";
  * `updatePerson()`, not duplicated here, same discipline as `admin/
  * members/new/page.tsx`. Rides the SAME flag/toggle as Increment 1 — this
  * is additive to the existing `/admin/members` surface, not a new one.
+ *
+ * `RecordRollActionForm` (docs/work-log/2026-08-26-member-roll-on-edit.md
+ * Phase 3) is gated ADDITIONALLY on `ROLL_ACTION_EDIT_FLAG` — the
+ * `MEMBERS_CREATE_FLAG`+toggle pair already required to reach this page at
+ * all, AND the new global flag, both on. No new per-org toggle: this reuses
+ * `org_portal.members_create`'s existing organization-feature-toggle row
+ * rather than asking a church to flip a second checkbox. `roll.propose`
+ * itself is checked inside `recordRollAction()`, not here — a viewer
+ * without it simply gets `forbidden` on submit, same discipline as every
+ * other permission gate on this page.
+ *
+ * The link into `./edit/sensitive` (docs/work-log/
+ * 2026-08-26-member-sensitive-info.md, DECISION-108) renders only when BOTH
+ * `SENSITIVE_INFO_FLAG`'s flag+toggle are on AND `getSensitiveInfoGrants()`
+ * returns at least one `true` — absent otherwise, never disabled/greyed
+ * (Phase 1's explicit requirement). The flag/toggle check here is a cheap
+ * protective addition beyond Phase 3's literal wording (permission alone):
+ * it avoids ever showing a permission holder a link into a sub-route whose
+ * own flag is off, which would just bounce them to that page's flag-off
+ * state — the sub-route re-checks both anyway (defense in depth).
  */
 export default async function EditMemberPage({
   params,
@@ -81,8 +110,20 @@ export default async function EditMemberPage({
     return <MembersFlagOff name={resolved.org.name} />;
   }
 
+  const rollActionEditFlagOn = await isFlagEnabled(ROLL_ACTION_EDIT_FLAG);
+  const sensitiveInfoFlagOn = await isFlagEnabled(SENSITIVE_INFO_FLAG);
+  const sensitiveInfoToggleOn = sensitiveInfoFlagOn
+    ? await isOrgFeatureEnabled(
+        resolved.org.personId,
+        resolved.org.organizationId,
+        SENSITIVE_INFO_FLAG,
+      )
+    : false;
+
   let personResult;
   let households: { householdId: string; name: string }[] = [];
+  let pendingRollActions: PendingRollActionForPerson[] = [];
+  let showSensitiveInfoLink = false;
   try {
     personResult = await getPersonForEdit(
       resolved.org.personId,
@@ -98,6 +139,27 @@ export default async function EditMemberPage({
         householdId: h.householdId,
         name: h.name,
       }));
+    }
+    if (rollActionEditFlagOn) {
+      const pendingResult = await getPendingRollActionsForPerson(
+        resolved.org.personId,
+        resolved.org.organizationId,
+        id,
+      );
+      if (pendingResult.kind === "ok") {
+        pendingRollActions = pendingResult.actions;
+      }
+    }
+    if (sensitiveInfoFlagOn && sensitiveInfoToggleOn) {
+      const grants = await getSensitiveInfoGrants(
+        resolved.org.personId,
+        resolved.org.organizationId,
+      );
+      showSensitiveInfoLink =
+        grants.pastoralNotes ||
+        grants.demographics ||
+        grants.medical ||
+        grants.disabilities;
     }
   } catch (err) {
     if (err instanceof OrgAccessError) {
@@ -128,6 +190,21 @@ export default async function EditMemberPage({
         person={personResult.person}
         households={households}
       />
+      {rollActionEditFlagOn && (
+        <RecordRollActionForm
+          slug={slug}
+          personId={id}
+          pendingActions={pendingRollActions}
+        />
+      )}
+      {showSensitiveInfoLink && (
+        <Link
+          href={`/o/${slug}/admin/members/${id}/edit/sensitive`}
+          className="inline-block text-sm underline underline-offset-2"
+        >
+          Pastoral notes, demographics, medical & disability information
+        </Link>
+      )}
     </section>
   );
 }

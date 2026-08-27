@@ -45,6 +45,8 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   let approveRollAction: typeof import("./roll").approveRollAction;
   let denyRollAction: typeof import("./roll").denyRollAction;
   let listPendingRollActions: typeof import("./roll").listPendingRollActions;
+  let recordRollAction: typeof import("./roll").recordRollAction;
+  let getPendingRollActionsForPerson: typeof import("./roll").getPendingRollActionsForPerson;
   let AUDIT_ACTIONS: typeof import("@/lib/audit").AUDIT_ACTIONS;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
@@ -73,9 +75,23 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   let raceTargetId: string; // pending, used for the already_decided race test
   let ownProposalTargetId: string; // pending, proposed_by = approverUserId
 
+  // recordRollAction / getPendingRollActionsForPerson fixture
+  let proposerPerson: string; // holds roll.propose ONLY (not roll.approve)
+  let proposerUserId2: string; // a users.id for recordRollAction's actingUserId
+  let editSubjectWithBirthdate: string; // membership at orgA, dateOfBirth set
+  let editSubjectNoBirthdate: string; // membership at orgA, dateOfBirth null
+  let editSubjectAlreadyPending: string; // membership at orgA, one pre-existing pending row
+  let personWithNoMembership: string; // exists, but no membership row at orgA
+  let preexistingPendingId: string;
+
   beforeAll(async () => {
-    ({ approveRollAction, denyRollAction, listPendingRollActions } =
-      await import("./roll"));
+    ({
+      approveRollAction,
+      denyRollAction,
+      listPendingRollActions,
+      recordRollAction,
+      getPendingRollActionsForPerson,
+    } = await import("./roll"));
     ({ AUDIT_ACTIONS } = await import("@/lib/audit"));
     ({ getPlatformDb } = await import("@/lib/db"));
     ({ organizations } = await import("@/lib/db/domain/org"));
@@ -147,6 +163,33 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       .insert(appRolePermissions)
       .values({ roleId: approveRole!.id, permissionKey: "roll.approve" });
 
+    // recordRollAction/getPendingRollActionsForPerson fixture — a SEPARATE
+    // role holding ONLY roll.propose, never roll.approve, so "forbidden
+    // without roll.propose" and "roll.propose alone is sufficient" are both
+    // provable against a real grant, not just an absent one.
+    await platform
+      .insert(permissions)
+      .values({
+        key: "roll.propose",
+        module: "roll",
+        description: "Propose a roll action",
+        sensitivityTier: 1,
+      })
+      .onConflictDoNothing();
+
+    const [proposeRole] = await platform
+      .insert(appRoles)
+      .values({
+        organizationId: orgA,
+        key: "roll_proposer",
+        name: "Roll Proposer",
+        roleKind: "custom",
+      })
+      .returning({ id: appRoles.id });
+    await platform
+      .insert(appRolePermissions)
+      .values({ roleId: proposeRole!.id, permissionKey: "roll.propose" });
+
     async function person(first: string, last: string) {
       const [p] = await platform
         .insert(people)
@@ -157,6 +200,16 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     approverPerson = await person("Cassian", `Wrenfield${stamp}`);
     outsiderPerson = await person("Delphine", `Ashgrove${stamp}`);
     rollSubject = await person("Fenwick", `Larimore${stamp}`);
+    proposerPerson = await person("Wren", `Castellane${stamp}`);
+    editSubjectWithBirthdate = await person("Hollis", `Marrow${stamp}`);
+    editSubjectNoBirthdate = await person("Ines", `Thistlewood${stamp}`);
+    editSubjectAlreadyPending = await person("Osric", `Fennimore${stamp}`);
+    personWithNoMembership = await person("Zara", `Outlander${stamp}`);
+
+    await platform
+      .update(people)
+      .set({ dateOfBirth: "2000-06-15" })
+      .where(eq(people.id, editSubjectWithBirthdate));
 
     await platform.insert(memberships).values([
       { organizationId: orgA, personId: approverPerson, engagementStatus: "regular" },
@@ -168,12 +221,23 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         currentRoll: "other_participant",
         currentRollSince: "2020-01-01",
       },
+      { organizationId: orgA, personId: proposerPerson, engagementStatus: "regular" },
+      { organizationId: orgA, personId: editSubjectWithBirthdate, engagementStatus: "regular" },
+      { organizationId: orgA, personId: editSubjectNoBirthdate, engagementStatus: "regular" },
+      { organizationId: orgA, personId: editSubjectAlreadyPending, engagementStatus: "regular" },
+      // personWithNoMembership deliberately has NO membership row at orgA.
     ]);
 
     await platform.insert(roleGrants).values({
       organizationId: orgA,
       roleId: approveRole!.id,
       personId: approverPerson,
+      startsOn: "2020-01-01",
+    });
+    await platform.insert(roleGrants).values({
+      organizationId: orgA,
+      roleId: proposeRole!.id,
+      personId: proposerPerson,
       startsOn: "2020-01-01",
     });
 
@@ -189,6 +253,19 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       .values({ email: `roll-test-proposer-${stamp}@example.invalid`, name: "Fixture Proposer" })
       .returning({ id: users.id });
     const proposerUserId = u2!.id;
+
+    const [u3] = await platform
+      .insert(users)
+      .values({
+        email: `roll-test-recorder-${stamp}@example.invalid`,
+        name: "Fixture Recorder",
+      })
+      .returning({ id: users.id });
+    proposerUserId2 = u3!.id;
+    await platform
+      .update(people)
+      .set({ userId: proposerUserId2 })
+      .where(eq(people.id, proposerPerson));
 
     async function pendingAction(proposedBy: string) {
       const [row] = await platform
@@ -208,6 +285,19 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     denyTargetId = await pendingAction(proposerUserId);
     raceTargetId = await pendingAction(proposerUserId);
     ownProposalTargetId = await pendingAction(approverUserId);
+
+    const [preexisting] = await platform
+      .insert(rollActions)
+      .values({
+        organizationId: orgA,
+        personId: editSubjectAlreadyPending,
+        kind: "restoration",
+        effectiveDate: "2026-02-01",
+        approvalStatus: "pending",
+        proposedBy: proposerUserId2,
+      })
+      .returning({ id: rollActions.id });
+    preexistingPendingId = preexisting!.id;
   });
 
   afterEach(() => {
@@ -231,7 +321,13 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     await platform.delete(people).where(eq(people.id, approverPerson));
     await platform.delete(people).where(eq(people.id, outsiderPerson));
     await platform.delete(people).where(eq(people.id, rollSubject));
+    await platform.delete(people).where(eq(people.id, proposerPerson));
+    await platform.delete(people).where(eq(people.id, editSubjectWithBirthdate));
+    await platform.delete(people).where(eq(people.id, editSubjectNoBirthdate));
+    await platform.delete(people).where(eq(people.id, editSubjectAlreadyPending));
+    await platform.delete(people).where(eq(people.id, personWithNoMembership));
     await platform.delete(users).where(eq(users.id, approverUserId));
+    await platform.delete(users).where(eq(users.id, proposerUserId2));
     // proposerUserId was never tracked in a `let` — sweep by email instead.
     await platform
       .delete(users)
@@ -514,6 +610,182 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       for (const entry of others) {
         expect(entry.proposedByIsViewer).toBe(false);
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // recordRollAction (docs/work-log/2026-08-26-member-roll-on-edit.md)
+  // ---------------------------------------------------------------------
+
+  describe("recordRollAction", () => {
+    it("forbidden without roll.propose", async () => {
+      const result = await recordRollAction(
+        outsiderPerson,
+        orgA,
+        proposerUserId2,
+        {
+          personId: editSubjectWithBirthdate,
+          kind: "restoration",
+          effectiveDate: "2026-03-01",
+        },
+      );
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("not_found when the target person holds no membership at this org", async () => {
+      const result = await recordRollAction(
+        proposerPerson,
+        orgA,
+        proposerUserId2,
+        {
+          personId: personWithNoMembership,
+          kind: "restoration",
+          effectiveDate: "2026-03-01",
+        },
+      );
+      expect(result).toEqual({ kind: "not_found" });
+    });
+
+    it("invalid_kind for a kind outside EDIT_TIME_ROLL_ACTION_KINDS (a terminating kind, F19-excluded)", async () => {
+      const result = await recordRollAction(
+        proposerPerson,
+        orgA,
+        proposerUserId2,
+        {
+          personId: editSubjectWithBirthdate,
+          // @ts-expect-error — deliberately an out-of-allow-list kind, proving
+          // the server-side re-check rejects it even though the TS type
+          // would normally prevent this at the call site (Phase 1's
+          // adversarial pass: never trust the client alone).
+          kind: "death",
+          effectiveDate: "2026-03-01",
+        },
+      );
+      expect(result).toEqual({ kind: "invalid_kind" });
+    });
+
+    it("rejects a malformed effectiveDate by throwing (genuine bad input, not a denial)", async () => {
+      await expect(
+        recordRollAction(proposerPerson, orgA, proposerUserId2, {
+          personId: editSubjectWithBirthdate,
+          kind: "restoration",
+          effectiveDate: "03/01/2026",
+        }),
+      ).rejects.toThrow(/effectiveDate/);
+    });
+
+    it("ok: inserts a pending row with resultingRoll and ageAtAction computed from the person's dateOfBirth", async () => {
+      const result = await recordRollAction(
+        proposerPerson,
+        orgA,
+        proposerUserId2,
+        {
+          personId: editSubjectWithBirthdate,
+          kind: "restoration",
+          effectiveDate: "2026-03-01",
+          minuteReference: "Session 2026-03-01, item 2",
+        },
+      );
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select()
+        .from(rollActions)
+        .where(eq(rollActions.id, result.rollActionId));
+      expect(row?.approvalStatus).toBe("pending");
+      expect(row?.proposedBy).toBe(proposerUserId2);
+      expect(row?.resultingRoll).toBe("active"); // restoration -> active, per ROLL_ACTION_KIND_TO_ROLL
+      // dateOfBirth 2000-06-15, effectiveDate 2026-03-01 → 25 (birthday not yet reached that year)
+      expect(row?.ageAtAction).toBe(25);
+      expect(row?.minuteReference).toBe("Session 2026-03-01, item 2");
+    });
+
+    it("ok: ageAtAction is left null when the person's dateOfBirth is unknown", async () => {
+      const result = await recordRollAction(
+        proposerPerson,
+        orgA,
+        proposerUserId2,
+        {
+          personId: editSubjectNoBirthdate,
+          kind: "reaffirmation",
+          effectiveDate: "2026-03-01",
+        },
+      );
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select()
+        .from(rollActions)
+        .where(eq(rollActions.id, result.rollActionId));
+      expect(row?.ageAtAction).toBeNull();
+      expect(row?.resultingRoll).toBe("active");
+    });
+
+    it("ok: resultingRoll reflects a non-active-roll gain (other_participant_enrolled -> other_participant)", async () => {
+      const result = await recordRollAction(
+        proposerPerson,
+        orgA,
+        proposerUserId2,
+        {
+          personId: editSubjectNoBirthdate,
+          kind: "other_participant_enrolled",
+          effectiveDate: "2026-03-02",
+        },
+      );
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select()
+        .from(rollActions)
+        .where(eq(rollActions.id, result.rollActionId));
+      expect(row?.resultingRoll).toBe("other_participant");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // getPendingRollActionsForPerson
+  // ---------------------------------------------------------------------
+
+  describe("getPendingRollActionsForPerson", () => {
+    it("forbidden without roll.propose", async () => {
+      const result = await getPendingRollActionsForPerson(
+        outsiderPerson,
+        orgA,
+        editSubjectAlreadyPending,
+      );
+      expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("lists only the pending rows for the SPECIFIC person asked about, not the whole org's worklist", async () => {
+      const result = await getPendingRollActionsForPerson(
+        proposerPerson,
+        orgA,
+        editSubjectAlreadyPending,
+      );
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0]).toMatchObject({
+        id: preexistingPendingId,
+        kind: "restoration",
+        effectiveDate: "2026-02-01",
+      });
+    });
+
+    it("returns an empty list for a person with no pending action", async () => {
+      const result = await getPendingRollActionsForPerson(
+        proposerPerson,
+        orgA,
+        outsiderPerson,
+      );
+      expect(result).toEqual({ kind: "ok", actions: [] });
     });
   });
 });

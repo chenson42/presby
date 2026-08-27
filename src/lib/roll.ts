@@ -3,8 +3,14 @@ import { and, eq, sql } from "drizzle-orm";
 import type { db } from "@/lib/db";
 import { withOrgContext } from "@/lib/authz";
 import { rollActions } from "@/lib/db/domain/roll";
-import { people } from "@/lib/db/domain/people";
+import { people, memberships } from "@/lib/db/domain/people";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
+import {
+  EDIT_TIME_ROLL_ACTION_KINDS,
+  ROLL_ACTION_KIND_TO_ROLL,
+  type EditTimeRollActionKind,
+  type RollActionKind,
+} from "@/lib/roll-action-kinds";
 
 /**
  * The roll-action approve/deny worklist — member management Increment 1's
@@ -26,28 +32,53 @@ import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
  * not a substitute for it. `roll.test.ts` proves the trigger itself still
  * rejects a direct `UPDATE` against an already-approved row, independent of
  * this module's own pre-check.
+ *
+ * `recordRollAction()`/`getPendingRollActionsForPerson()` below are a second
+ * pipeline's addition (docs/work-log/2026-08-26-member-roll-on-edit.md): the
+ * edit screen's own entry point for PROPOSING a roll action against an
+ * already-existing person, gated on `roll.propose`, not `roll.approve` —
+ * two different permissions in this one module, matched to the two
+ * different verbs (propose vs. decide) it now performs.
  */
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const ROLL_APPROVE = "roll.approve";
+const ROLL_PROPOSE = "roll.propose";
 
-async function hasRollApprove(
+async function hasPermission(
   tx: OrgTx,
   personId: string,
   organizationId: string,
+  permissionKey: string,
 ): Promise<boolean> {
   const result = await tx.execute(sql`
     select presby_has_permission(
              ${personId}::uuid,
              ${organizationId}::uuid,
-             ${ROLL_APPROVE}
+             ${permissionKey}
            ) as allowed
   `);
   return (
     (result as unknown as { rows?: Array<{ allowed?: boolean }> }).rows?.[0]
       ?.allowed === true
   );
+}
+
+async function hasRollApprove(
+  tx: OrgTx,
+  personId: string,
+  organizationId: string,
+): Promise<boolean> {
+  return hasPermission(tx, personId, organizationId, ROLL_APPROVE);
+}
+
+async function hasRollPropose(
+  tx: OrgTx,
+  personId: string,
+  organizationId: string,
+): Promise<boolean> {
+  return hasPermission(tx, personId, organizationId, ROLL_PROPOSE);
 }
 
 export type RollActionDecisionResult =
@@ -271,5 +302,194 @@ export async function listPendingRollActions(
           viewerUserId !== null && row.proposed_by === viewerUserId,
       })),
     };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// recordRollAction — edit-time entry point (docs/work-log/2026-08-26-member-
+// roll-on-edit.md Phase 3)
+// ---------------------------------------------------------------------------
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * `ageAtAction` from a birthdate and an as-of date — matches `presby_roll_
+ * changes()`'s own `coalesce(age_at_action, 99)` handling of an unknown
+ * birthdate (this function is never called when `dateOfBirth` is null; the
+ * caller leaves `ageAtAction` null in that case instead).
+ */
+function ageAsOf(dateOfBirth: string, asOf: string): number {
+  const [by, bm, bd] = dateOfBirth.split("-").map(Number);
+  const [ay, am, ad] = asOf.split("-").map(Number);
+  let age = ay - by;
+  if (am < bm || (am === bm && ad < bd)) {
+    age -= 1;
+  }
+  return age;
+}
+
+export type RecordRollActionResult =
+  | { kind: "ok"; rollActionId: string }
+  | { kind: "forbidden" }
+  | { kind: "not_found" } // personId has no membership at this org
+  | { kind: "invalid_kind" }; // kind not in EDIT_TIME_ROLL_ACTION_KINDS — server-side re-check
+
+export interface RecordRollActionInput {
+  personId: string;
+  kind: EditTimeRollActionKind;
+  /** 'YYYY-MM-DD'. */
+  effectiveDate: string;
+  minuteReference?: string;
+}
+
+/**
+ * Records a NEW `pending` `roll_actions` row against an ALREADY-EXISTING
+ * person — the edit-screen's second, independent entry point (Phase 2's
+ * placement ruling: this is a roll-action-domain mutation against an
+ * existing person, not a person-identity mutation, so it lives here and not
+ * in `people.ts`/`createPerson()`).
+ *
+ * Gated on `roll.propose` ONLY — deliberately NOT `people.manage`, the
+ * mirror image of `updatePerson()`'s own `people.manage`-only gate
+ * (DECISION-107). A session clerk who proposes roll actions but doesn't
+ * edit contact details must be able to use this function.
+ *
+ * `input.kind` is re-validated against `EDIT_TIME_ROLL_ACTION_KINDS` here,
+ * server-side, before any write — never trusts the client `<select>` alone
+ * (Phase 1's adversarial pass, same discipline `createPerson()` already
+ * follows). This is the ONLY increment-in-scope kind check: the exclusion
+ * of `death`/`certificate_dismissed`/etc. (F19, open — see
+ * `docs/schema-design.md`) is enforced here, not by any database
+ * constraint, because `roll_action_kind` the enum itself still allows every
+ * value — the allow-list is application-layer, by design (Phase 3).
+ *
+ * `resultingRoll` is computed from `ROLL_ACTION_KIND_TO_ROLL` and inserted —
+ * NOT left null, unlike `createPerson()`'s own pre-existing insert (a
+ * separate, already-filed defect, `docs/TODO.md`). `ageAtAction` is computed
+ * from the person's `dateOfBirth` when known, else left null.
+ *
+ * NOT AUDITED — same precedent this file's own header already documents:
+ * roll-action proposal is deliberately unaudited; only approve/deny is.
+ */
+export async function recordRollAction(
+  actingPersonId: string,
+  organizationId: string,
+  actingUserId: string,
+  input: RecordRollActionInput,
+): Promise<RecordRollActionResult> {
+  if (!DATE_RE.test(input.effectiveDate)) {
+    // Genuine bad input, not a denial — thrown, matching createPerson's own
+    // "malformed effectiveDate" contract.
+    throw new Error(
+      `recordRollAction: effectiveDate must be 'YYYY-MM-DD', got ${JSON.stringify(
+        input.effectiveDate,
+      )}`,
+    );
+  }
+  if (!EDIT_TIME_ROLL_ACTION_KINDS.includes(input.kind)) {
+    return { kind: "invalid_kind" };
+  }
+
+  return withOrgContext(actingPersonId, organizationId, async (tx) => {
+    if (!(await hasRollPropose(tx, actingPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    // RLS-scoped by construction, same discipline as updatePerson()'s own
+    // lookup: a zero-row result is already the correct "not visible to me
+    // at this org" answer — this is NOT the F21 cross-org case createPerson
+    // had to work around, because both the actor and the target are read
+    // through this same single-org tx.
+    const [target] = await tx
+      .select({ dateOfBirth: people.dateOfBirth })
+      .from(people)
+      .innerJoin(
+        memberships,
+        and(
+          eq(memberships.personId, people.id),
+          eq(memberships.organizationId, organizationId),
+        ),
+      )
+      .where(eq(people.id, input.personId))
+      .limit(1);
+    if (!target) {
+      return { kind: "not_found" };
+    }
+
+    const resultingRoll = ROLL_ACTION_KIND_TO_ROLL[input.kind];
+    const ageAtAction = target.dateOfBirth
+      ? ageAsOf(target.dateOfBirth, input.effectiveDate)
+      : null;
+
+    const [row] = await tx
+      .insert(rollActions)
+      .values({
+        organizationId,
+        personId: input.personId,
+        kind: input.kind,
+        effectiveDate: input.effectiveDate,
+        resultingRoll,
+        ageAtAction,
+        approvalStatus: "pending",
+        minuteReference: input.minuteReference ?? null,
+        proposedBy: actingUserId,
+      })
+      .returning({ id: rollActions.id });
+
+    return { kind: "ok", rollActionId: row!.id };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// getPendingRollActionsForPerson — the edit screen's own "already pending"
+// warning (Phase 3 Edge Cases: "warn, don't block")
+// ---------------------------------------------------------------------------
+
+export interface PendingRollActionForPerson {
+  id: string;
+  kind: RollActionKind;
+  /** 'YYYY-MM-DD'. */
+  effectiveDate: string;
+}
+
+export type PendingRollActionsForPersonResult =
+  | { kind: "ok"; actions: PendingRollActionForPerson[] }
+  | { kind: "forbidden" };
+
+/**
+ * A small, org-scoped, person-scoped read for `/o/<slug>/admin/members/<id>/
+ * edit`'s own non-blocking notice — deliberately NOT `listPendingRollActions`
+ * (gated on `roll.approve`, the approve worklist's own permission): a clerk
+ * who holds `roll.propose` but not `roll.approve` must still see this
+ * warning on the form they are about to submit, so this is gated on
+ * `roll.propose` instead, matching `recordRollAction()`'s own gate.
+ */
+export async function getPendingRollActionsForPerson(
+  viewerPersonId: string,
+  organizationId: string,
+  personId: string,
+): Promise<PendingRollActionsForPersonResult> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasRollPropose(tx, viewerPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    const rows = await tx
+      .select({
+        id: rollActions.id,
+        kind: rollActions.kind,
+        effectiveDate: rollActions.effectiveDate,
+      })
+      .from(rollActions)
+      .where(
+        and(
+          eq(rollActions.organizationId, organizationId),
+          eq(rollActions.personId, personId),
+          eq(rollActions.approvalStatus, "pending"),
+        ),
+      )
+      .orderBy(rollActions.effectiveDate);
+
+    return { kind: "ok", actions: rows };
   });
 }

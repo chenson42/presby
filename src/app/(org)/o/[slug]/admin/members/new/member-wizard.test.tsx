@@ -35,6 +35,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { MemberWizard } from "./member-wizard";
+import { WIZARD_ROLL_ACTION_KINDS } from "@/lib/roll-action-kinds";
 
 afterEach(() => {
   cleanup();
@@ -268,6 +269,37 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
     expect(
       (screen.getByLabelText(/date of birth/i) as HTMLInputElement).value,
     ).toBe("1950-01-01");
+  });
+});
+
+describe("MemberWizard — roll action kind options — regression for wizard-select-full-kind-map (docs/work-log/2026-08-26-member-roll-on-edit.md)", () => {
+  it("the Roll action <select> renders exactly WIZARD_ROLL_ACTION_KINDS, never death/void/any other kind from the shared 17-kind label map", async () => {
+    mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
+    render(<MemberWizard slug="alder-creek" households={[]} />);
+
+    fillSearch("Nora", "Ashgrove");
+    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+    await waitFor(() => screen.getByText(/name & birth date/i));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    await waitFor(() => screen.getByText(/contact & address/i));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    await waitFor(() => screen.getByText(/^household$/i));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    await waitFor(() => screen.getByText(/step \d+ of \d+: roll action/i));
+
+    const select = screen.getByLabelText(/^roll action$/i) as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((option) => option.value);
+
+    // Exact match, not just "doesn't contain death" — proves the <select>
+    // consumes WIZARD_ROLL_ACTION_KINDS itself, not some other subset that
+    // happens to exclude death too.
+    expect(optionValues).toEqual([...WIZARD_ROLL_ACTION_KINDS]);
+    expect(optionValues).not.toContain("death");
+    expect(optionValues).not.toContain("void");
+    expect(optionValues).not.toContain("certificate_dismissed");
   });
 });
 

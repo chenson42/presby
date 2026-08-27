@@ -4,10 +4,11 @@ import type { UseFormReturn } from "react-hook-form";
 import { ChevronDown } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { WizardField } from "./wizard-field";
+import type { MemberWizardValues } from "./member-wizard-schema";
 import {
   ROLL_ACTION_KIND_LABELS,
-  type MemberWizardValues,
-} from "./member-wizard-schema";
+  WIZARD_ROLL_ACTION_KINDS,
+} from "@/lib/roll-action-kinds";
 
 const SELECT_CLASSES =
   "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
@@ -34,9 +35,12 @@ export function RollActionStep({
             className={SELECT_CLASSES}
             {...register("rollAction.kind")}
           >
-            {Object.entries(ROLL_ACTION_KIND_LABELS).map(([kind, label]) => (
+            {/* Allow-list, not the full label map (Phase 2 Note 3): the
+                wizard offers only its own 2-kind enrollment subset — the
+                same behavior as before this extraction, unchanged. */}
+            {WIZARD_ROLL_ACTION_KINDS.map((kind) => (
               <option key={kind} value={kind}>
-                {label}
+                {ROLL_ACTION_KIND_LABELS[kind]}
               </option>
             ))}
           </select>

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WIZARD_ROLL_ACTION_KINDS } from "@/lib/roll-action-kinds";
 
 /**
  * ONE combined zod schema for the whole wizard (Phase 3's explicit choice
@@ -53,7 +54,11 @@ export const memberWizardSchema = z
       householdId: z.string().optional(),
     }),
     rollAction: z.object({
-      kind: z.enum(["profession_of_faith", "other_participant_enrolled"]),
+      // Same 2 values as before this extraction — WIZARD_ROLL_ACTION_KINDS
+      // is the shared module's own copy of this exact literal list, not a
+      // behavior change (docs/work-log/2026-08-26-member-roll-on-edit.md
+      // Phase 3 step 6).
+      kind: z.enum(WIZARD_ROLL_ACTION_KINDS),
       effectiveDate: z.string().min(1, "Effective date is required"),
       minuteReference: z.string().optional(),
     }),
@@ -135,10 +140,11 @@ export const WIZARD_DEFAULT_VALUES: MemberWizardValues = {
   },
 };
 
-export const ROLL_ACTION_KIND_LABELS: Record<
-  MemberWizardValues["rollAction"]["kind"],
-  string
-> = {
-  profession_of_faith: "Profession of faith",
-  other_participant_enrolled: "Enrolled as a participant",
-};
+// Source of truth extraction only, no behavior change (docs/work-log/
+// 2026-08-26-member-roll-on-edit.md Phase 3 step 6): the full 17-kind label
+// map now lives in the shared, plain `src/lib/roll-action-kinds.ts` (needed
+// by both this wizard and the edit screen's own `RecordRollActionForm`).
+// `rollAction.kind`'s zod enum above stays the same 2 values — re-exported
+// here so every existing importer (`roll-action-step.tsx`, `review-step.tsx`)
+// keeps working unchanged.
+export { ROLL_ACTION_KIND_LABELS } from "@/lib/roll-action-kinds";

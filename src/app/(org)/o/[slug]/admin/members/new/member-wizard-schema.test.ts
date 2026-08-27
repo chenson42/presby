@@ -110,4 +110,16 @@ describe("memberWizardSchema — cross-field rules", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects a rollAction.kind outside WIZARD_ROLL_ACTION_KINDS, e.g. 'death' — regression for wizard-select-full-kind-map (docs/work-log/2026-08-26-member-roll-on-edit.md)", () => {
+    const result = memberWizardSchema.safeParse({
+      ...VALID_NEW_IDENTITY,
+      rollAction: { ...VALID_NEW_IDENTITY.rollAction, kind: "death" },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((i) => i.path.join("."));
+      expect(paths).toContain("rollAction.kind");
+    }
+  });
 });

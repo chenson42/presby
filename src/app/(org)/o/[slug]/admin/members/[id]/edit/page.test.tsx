@@ -48,8 +48,27 @@ vi.mock("@/lib/people", () => ({
   getPersonForEdit: (...args: unknown[]) => getPersonForEdit(...args),
 }));
 
+const getPendingRollActionsForPerson = vi.fn();
+vi.mock("@/lib/roll", () => ({
+  getPendingRollActionsForPerson: (...args: unknown[]) =>
+    getPendingRollActionsForPerson(...args),
+}));
+
+// `page.tsx` also imports `getSensitiveInfoGrants` from `@/lib/person-
+// sensitive` — a SIBLING pipeline's addition (docs/work-log/2026-08-26-
+// member-sensitive-info.md) that landed in this same file concurrently with
+// this one. Mocked here purely so the real (`"server-only"`-carrying)
+// module never loads under jsdom; this file asserts nothing about that
+// pipeline's own feature, which remains its own test responsibility.
+const getSensitiveInfoGrants = vi.fn();
+vi.mock("@/lib/person-sensitive", () => ({
+  getSensitiveInfoGrants: (...args: unknown[]) =>
+    getSensitiveInfoGrants(...args),
+}));
+
 vi.mock("./actions", () => ({
   updatePersonAction: vi.fn(),
+  recordRollActionAction: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -78,9 +97,62 @@ afterEach(() => {
   isOrgFeatureEnabled.mockReset();
   getHouseholds.mockReset();
   getPersonForEdit.mockReset();
+  getPendingRollActionsForPerson.mockReset();
+  getSensitiveInfoGrants.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
+
+/**
+ * `page.tsx` calls `isFlagEnabled` with TWO different keys
+ * (`org_portal.members_create`, then `org_portal.members_roll_action_edit`)
+ * — a blanket `mockResolvedValue` would make both resolve identically,
+ * silently exercising `RecordRollActionForm`'s render path in tests that
+ * never intended to. This keys the mock by argument instead, defaulting
+ * the roll-action-edit flag OFF unless a test asks for it, so every
+ * pre-existing test in this file keeps exercising exactly the same path it
+ * did before that flag existed.
+ */
+function mockFlags({
+  membersCreate,
+  rollActionEdit = false,
+  sensitiveInfo = false,
+}: {
+  membersCreate: boolean;
+  rollActionEdit?: boolean;
+  sensitiveInfo?: boolean;
+}) {
+  isFlagEnabled.mockImplementation(async (key: string) => {
+    if (key === "org_portal.members_create") return membersCreate;
+    if (key === "org_portal.members_roll_action_edit") return rollActionEdit;
+    if (key === "org_portal.sensitive_info") return sensitiveInfo;
+    return false;
+  });
+}
+
+/**
+ * `isOrgFeatureEnabled` is called with THREE different keys across this
+ * page's own two org-toggle checks (`org_portal.members_create`,
+ * `org_portal.sensitive_info`) — keyed by the THIRD argument, same
+ * discrimination `mockFlags` applies to `isFlagEnabled` above, so a test
+ * asserting the sensitive-info link's own toggle doesn't accidentally read
+ * `members_create`'s toggle value instead.
+ */
+function mockToggles({
+  membersCreate,
+  sensitiveInfo = false,
+}: {
+  membersCreate: boolean;
+  sensitiveInfo?: boolean;
+}) {
+  isOrgFeatureEnabled.mockImplementation(
+    async (_personId: string, _organizationId: string, key: string) => {
+      if (key === "org_portal.members_create") return membersCreate;
+      if (key === "org_portal.sensitive_info") return sensitiveInfo;
+      return false;
+    },
+  );
+}
 
 const OK_RESOLVED = {
   kind: "ok" as const,
@@ -115,7 +187,7 @@ describe("EditMemberPage — gate composition (DECISION-097)", () => {
   it("flag off → renders flag-off, never looks up the person", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(false);
+    mockFlags({ membersCreate: false });
 
     const el = await EditMemberPage({ params: makeParams() });
     render(el);
@@ -128,7 +200,7 @@ describe("EditMemberPage — gate composition (DECISION-097)", () => {
   it("flag on but org toggle off → renders the SAME flag-off copy (no axis leak)", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ membersCreate: true });
     isOrgFeatureEnabled.mockResolvedValue(false);
 
     const el = await EditMemberPage({ params: makeParams() });
@@ -141,7 +213,7 @@ describe("EditMemberPage — gate composition (DECISION-097)", () => {
   it("both on and the person is found → renders the edit form prefilled", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ membersCreate: true });
     isOrgFeatureEnabled.mockResolvedValue(true);
     getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
     getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
@@ -160,7 +232,7 @@ describe("EditMemberPage — person lookup", () => {
   it("forbidden → renders the shared MembersForbidden state, not a 404", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ membersCreate: true });
     isOrgFeatureEnabled.mockResolvedValue(true);
     getPersonForEdit.mockResolvedValue({ kind: "forbidden" });
     getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
@@ -175,7 +247,7 @@ describe("EditMemberPage — person lookup", () => {
   it("not_found → calls next/navigation's notFound()", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ membersCreate: true });
     isOrgFeatureEnabled.mockResolvedValue(true);
     getPersonForEdit.mockResolvedValue({ kind: "not_found" });
     getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
@@ -188,7 +260,7 @@ describe("EditMemberPage — person lookup", () => {
   it("re-throws OrgAccessError", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ membersCreate: true });
     isOrgFeatureEnabled.mockResolvedValue(true);
     getPersonForEdit.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
 
@@ -200,7 +272,7 @@ describe("EditMemberPage — person lookup", () => {
   it("renders the load-error state for any other thrown error", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ membersCreate: true });
     isOrgFeatureEnabled.mockResolvedValue(true);
     getPersonForEdit.mockRejectedValue(new Error("connection reset"));
 
@@ -208,5 +280,160 @@ describe("EditMemberPage — person lookup", () => {
     render(el);
 
     expect(screen.getByText(/couldn.t load this right now/i)).toBeTruthy();
+  });
+});
+
+describe("EditMemberPage — RecordRollActionForm gate (docs/work-log/2026-08-26-member-roll-on-edit.md)", () => {
+  it("roll-action-edit flag off → RecordRollActionForm does not render, and its own data is never fetched", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, rollActionEdit: false });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(getPendingRollActionsForPerson).not.toHaveBeenCalled();
+    expect(screen.queryByText(/record a roll action/i)).toBeNull();
+  });
+
+  it("roll-action-edit flag on (AND members_create flag+toggle already on) → RecordRollActionForm renders with no pending notice", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, rollActionEdit: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getPendingRollActionsForPerson.mockResolvedValue({ kind: "ok", actions: [] });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(getPendingRollActionsForPerson).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      "p-1",
+    );
+    expect(screen.getByText(/record a roll action/i)).toBeTruthy();
+    expect(screen.queryByText(/already pending review/i)).toBeNull();
+  });
+
+  it("surfaces an existing pending action as a non-blocking notice, doesn't hide the form", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, rollActionEdit: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getPendingRollActionsForPerson.mockResolvedValue({
+      kind: "ok",
+      actions: [{ id: "ra-1", kind: "restoration", effectiveDate: "2026-06-01" }],
+    });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.getByText(/record a roll action/i)).toBeTruthy();
+    expect(screen.getByText(/already pending review/i)).toBeTruthy();
+  });
+
+  it("getPendingRollActionsForPerson returning forbidden renders the form with no notice, rather than failing the page", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, rollActionEdit: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getPendingRollActionsForPerson.mockResolvedValue({ kind: "forbidden" });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.getByText(/record a roll action/i)).toBeTruthy();
+    expect(screen.queryByText(/already pending review/i)).toBeNull();
+  });
+});
+
+describe("EditMemberPage — sensitive-info link (docs/work-log/2026-08-26-member-sensitive-info.md)", () => {
+  it("sensitive-info flag off → link absent, grants never fetched", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, sensitiveInfo: false });
+    mockToggles({ membersCreate: true });
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(getSensitiveInfoGrants).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText(/pastoral notes, demographics/i),
+    ).toBeNull();
+  });
+
+  it("sensitive-info flag on but org toggle off → link absent, grants never fetched", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, sensitiveInfo: true });
+    mockToggles({ membersCreate: true, sensitiveInfo: false });
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(getSensitiveInfoGrants).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText(/pastoral notes, demographics/i),
+    ).toBeNull();
+  });
+
+  it("both on, viewer holds none of the four permissions → link absent (not disabled)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, sensitiveInfo: true });
+    mockToggles({ membersCreate: true, sensitiveInfo: true });
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getSensitiveInfoGrants.mockResolvedValue({
+      pastoralNotes: false,
+      demographics: false,
+      medical: false,
+      disabilities: false,
+    });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(getSensitiveInfoGrants).toHaveBeenCalledWith("person-1", "org-1");
+    expect(
+      screen.queryByText(/pastoral notes, demographics/i),
+    ).toBeNull();
+  });
+
+  it("both on, viewer holds at least one of the four permissions → link renders, pointing at ./edit/sensitive", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, sensitiveInfo: true });
+    mockToggles({ membersCreate: true, sensitiveInfo: true });
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getSensitiveInfoGrants.mockResolvedValue({
+      pastoralNotes: true,
+      demographics: false,
+      medical: false,
+      disabilities: false,
+    });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    const link = screen.getByText(/pastoral notes, demographics/i);
+    expect((link.closest("a") as HTMLAnchorElement).getAttribute("href")).toBe(
+      "/o/alder-creek/admin/members/p-1/edit/sensitive",
+    );
   });
 });

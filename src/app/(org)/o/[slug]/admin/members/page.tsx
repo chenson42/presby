@@ -24,6 +24,7 @@ import {
 import { MembersList } from "./members-list";
 
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
+const CHILDREN_MINISTRY_FLAG = "org_portal.children_ministry";
 
 /**
  * `/o/<slug>/admin/members` — the list + "Add Person" entry point
@@ -143,11 +144,22 @@ export default async function MembersPage({
     return <MembersForbidden name={resolved.org.name} heading="Members" />;
   }
 
+  // Independent awaited calls, not merged into one Promise.all — same
+  // discipline edit/page.tsx's own two conditional cards follow, so a
+  // future ordering bug in one check can't cross-contaminate the other.
   const canCreate = await hasPermission(
     resolved.org.personId,
     resolved.org.organizationId,
     "people.manage",
   );
+  const childrenMinistryFlagOn = await isFlagEnabled(CHILDREN_MINISTRY_FLAG);
+  const canViewChildrenRoster = childrenMinistryFlagOn
+    ? await hasPermission(
+        resolved.org.personId,
+        resolved.org.organizationId,
+        "children.roster",
+      )
+    : false;
 
   return (
     <section className="space-y-6">
@@ -158,11 +170,20 @@ export default async function MembersPage({
             {resolved.org.name}
           </p>
         </div>
-        {canCreate && (
-          <Button asChild className="min-h-11">
-            <Link href={`/o/${slug}/admin/members/new`}>Add person</Link>
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {canViewChildrenRoster && (
+            <Button asChild variant="outline" className="min-h-11">
+              <Link href={`/o/${slug}/admin/members/children`}>
+                Children&apos;s roster
+              </Link>
+            </Button>
+          )}
+          {canCreate && (
+            <Button asChild className="min-h-11">
+              <Link href={`/o/${slug}/admin/members/new`}>Add person</Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       <MembersList

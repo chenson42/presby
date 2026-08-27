@@ -1,9 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { Lock, Users } from "lucide-react";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import {
   assertOrgAccess,
+  hasPermission,
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
@@ -28,6 +29,7 @@ import { RecordRollActionForm } from "./record-roll-action-form";
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
 const ROLL_ACTION_EDIT_FLAG = "org_portal.members_roll_action_edit";
 const SENSITIVE_INFO_FLAG = "org_portal.sensitive_info";
+const CHILDREN_MINISTRY_FLAG = "org_portal.children_ministry";
 
 /**
  * `/o/<slug>/admin/members/<id>/edit` — Increment 2 (docs/work-log/
@@ -57,6 +59,17 @@ const SENSITIVE_INFO_FLAG = "org_portal.sensitive_info";
  * it avoids ever showing a permission holder a link into a sub-route whose
  * own flag is off, which would just bounce them to that page's flag-off
  * state — the sub-route re-checks both anyway (defense in depth).
+ *
+ * The link into `./edit/guardians` (docs/work-log/
+ * 2026-08-26-childrens-ministry.md, DECISION-111/114) renders only when
+ * BOTH `CHILDREN_MINISTRY_FLAG` is on (checked bare — no org toggle, same
+ * shape as `org_portal.officers`/`org_portal.groups`) AND the viewer holds
+ * `children.roster` directly — absent otherwise, never disabled, same
+ * discipline as the sensitive-info link above. Checked as an INDEPENDENT
+ * awaited call, not folded into the same `Promise.all` as the sensitive-info
+ * checks (Phase 3 Edge Cases note): a shared call-ordering bug between the
+ * two independent conditions must not be able to cross-contaminate either
+ * card's render output.
  */
 export default async function EditMemberPage({
   params,
@@ -125,6 +138,7 @@ export default async function EditMemberPage({
   let households: { householdId: string; name: string }[] = [];
   let pendingRollActions: PendingRollActionForPerson[] = [];
   let showSensitiveInfoLink = false;
+  let showGuardiansLink = false;
   try {
     personResult = await getPersonForEdit(
       resolved.org.personId,
@@ -161,6 +175,14 @@ export default async function EditMemberPage({
         grants.demographics ||
         grants.medical ||
         grants.disabilities;
+    }
+    const childrenMinistryFlagOn = await isFlagEnabled(CHILDREN_MINISTRY_FLAG);
+    if (childrenMinistryFlagOn) {
+      showGuardiansLink = await hasPermission(
+        resolved.org.personId,
+        resolved.org.organizationId,
+        "children.roster",
+      );
     }
   } catch (err) {
     if (err instanceof OrgAccessError) {
@@ -223,6 +245,18 @@ export default async function EditMemberPage({
           >
             <Lock className="size-4 shrink-0" aria-hidden />
             Pastoral notes, demographics, medical & disability information
+          </Link>
+        </div>
+      )}
+
+      {showGuardiansLink && (
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <Link
+            href={`/o/${slug}/admin/members/${id}/edit/guardians`}
+            className="flex items-center gap-2 text-sm underline underline-offset-2"
+          >
+            <Users className="size-4 shrink-0" aria-hidden />
+            Guardians
           </Link>
         </div>
       )}

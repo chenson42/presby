@@ -203,6 +203,95 @@ describe("MembersPage — 'Add person' CTA gated on people.manage", () => {
   });
 });
 
+describe("MembersPage — 'Children's roster' link (docs/work-log/2026-08-26-childrens-ministry.md)", () => {
+  /** `isFlagEnabled` gates TWO keys on this page now
+   * (`org_portal.members_create`, `org_portal.children_ministry`) — keyed
+   * by argument, same discrimination `edit/page.test.tsx`'s `mockFlags`
+   * already applies, so a test targeting one flag doesn't accidentally
+   * exercise the other. */
+  function mockFlagsKeyed({
+    membersCreate,
+    childrenMinistry,
+  }: {
+    membersCreate: boolean;
+    childrenMinistry: boolean;
+  }) {
+    isFlagEnabled.mockImplementation(async (key: string) => {
+      if (key === "org_portal.members_create") return membersCreate;
+      if (key === "org_portal.children_ministry") return childrenMinistry;
+      return false;
+    });
+  }
+
+  /** `hasPermission` is called with TWO different keys on this page now
+   * (`people.manage`, `children.roster`) — keyed by third argument. */
+  function mockPermissions({
+    peopleManage,
+    childrenRoster,
+  }: {
+    peopleManage: boolean;
+    childrenRoster: boolean;
+  }) {
+    hasPermission.mockImplementation(
+      async (_p: string, _o: string, key: string) => {
+        if (key === "people.manage") return peopleManage;
+        if (key === "children.roster") return childrenRoster;
+        return false;
+      },
+    );
+  }
+
+  it("children-ministry flag off → link absent, children.roster never checked", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsKeyed({ membersCreate: true, childrenMinistry: false });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
+    mockPermissions({ peopleManage: true, childrenRoster: true });
+
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
+    render(el);
+
+    expect(hasPermission).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "children.roster",
+    );
+    expect(screen.queryByRole("link", { name: /children.s roster/i })).toBeNull();
+  });
+
+  it("children-ministry flag on but viewer lacks children.roster → link absent", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsKeyed({ membersCreate: true, childrenMinistry: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
+    mockPermissions({ peopleManage: true, childrenRoster: false });
+
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
+    render(el);
+
+    expect(screen.queryByRole("link", { name: /children.s roster/i })).toBeNull();
+  });
+
+  it("children-ministry flag on AND viewer holds children.roster → link renders, pointing at /admin/members/children", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsKeyed({ membersCreate: true, childrenMinistry: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
+    mockPermissions({ peopleManage: false, childrenRoster: true });
+
+    const el = await MembersPage({ params: makeParams(), searchParams: makeSearchParams() });
+    render(el);
+
+    const link = screen.getByRole("link", { name: /children.s roster/i });
+    expect(link.getAttribute("href")).toBe(
+      "/o/alder-creek/admin/members/children",
+    );
+  });
+});
+
 describe("MembersPage — the shared four-way miss response", () => {
   it("redirects to /signin when unauthenticated", async () => {
     cachedAuth.mockResolvedValue(null);

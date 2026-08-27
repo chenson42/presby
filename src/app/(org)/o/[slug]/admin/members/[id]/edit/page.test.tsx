@@ -14,6 +14,7 @@ vi.mock("@/lib/auth/cached-auth", () => ({
 
 const resolveOrgContext = vi.fn();
 const assertOrgAccess = vi.fn();
+const hasPermission = vi.fn();
 vi.mock("@/lib/authz", () => {
   class MockOrgAccessError extends Error {
     constructor() {
@@ -25,6 +26,7 @@ vi.mock("@/lib/authz", () => {
     OrgAccessError: MockOrgAccessError,
     resolveOrgContext: (...args: unknown[]) => resolveOrgContext(...args),
     assertOrgAccess: (...args: unknown[]) => assertOrgAccess(...args),
+    hasPermission: (...args: unknown[]) => hasPermission(...args),
   };
 });
 
@@ -99,6 +101,7 @@ afterEach(() => {
   getPersonForEdit.mockReset();
   getPendingRollActionsForPerson.mockReset();
   getSensitiveInfoGrants.mockReset();
+  hasPermission.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -117,15 +120,18 @@ function mockFlags({
   membersCreate,
   rollActionEdit = false,
   sensitiveInfo = false,
+  childrenMinistry = false,
 }: {
   membersCreate: boolean;
   rollActionEdit?: boolean;
   sensitiveInfo?: boolean;
+  childrenMinistry?: boolean;
 }) {
   isFlagEnabled.mockImplementation(async (key: string) => {
     if (key === "org_portal.members_create") return membersCreate;
     if (key === "org_portal.members_roll_action_edit") return rollActionEdit;
     if (key === "org_portal.sensitive_info") return sensitiveInfo;
+    if (key === "org_portal.children_ministry") return childrenMinistry;
     return false;
   });
 }
@@ -434,6 +440,65 @@ describe("EditMemberPage — sensitive-info link (docs/work-log/2026-08-26-membe
     const link = screen.getByText(/pastoral notes, demographics/i);
     expect((link.closest("a") as HTMLAnchorElement).getAttribute("href")).toBe(
       "/o/alder-creek/admin/members/p-1/edit/sensitive",
+    );
+  });
+});
+
+describe("EditMemberPage — guardians link (docs/work-log/2026-08-26-childrens-ministry.md)", () => {
+  it("children-ministry flag off → link absent, hasPermission never called for children.roster", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, childrenMinistry: false });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(hasPermission).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "children.roster",
+    );
+    expect(screen.queryByText(/^guardians$/i)).toBeNull();
+  });
+
+  it("children-ministry flag on but viewer lacks children.roster → link absent (not disabled)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, childrenMinistry: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    hasPermission.mockResolvedValue(false);
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    expect(hasPermission).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      "children.roster",
+    );
+    expect(screen.queryByText(/^guardians$/i)).toBeNull();
+  });
+
+  it("children-ministry flag on AND viewer holds children.roster → link renders, pointing at ./edit/guardians", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, childrenMinistry: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    hasPermission.mockResolvedValue(true);
+
+    const el = await EditMemberPage({ params: makeParams() });
+    render(el);
+
+    const link = screen.getByText(/^guardians$/i);
+    expect((link.closest("a") as HTMLAnchorElement).getAttribute("href")).toBe(
+      "/o/alder-creek/admin/members/p-1/edit/guardians",
     );
   });
 });

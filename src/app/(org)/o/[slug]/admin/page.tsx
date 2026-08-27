@@ -84,7 +84,7 @@ export default async function AdminHubPage({
     return <AdminHubFlagOff name={resolved.org.name} />;
   }
 
-  const tiles = await visiblePortalTiles("administer");
+  const tiles = await visiblePortalTiles("administer", resolved.org.organizationType);
 
   return (
     <section className="space-y-6">

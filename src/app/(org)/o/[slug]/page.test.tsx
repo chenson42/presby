@@ -55,7 +55,8 @@ vi.mock("@/lib/org-portal/home-data", () => ({
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
-  visiblePortalTiles: (category: string) => visiblePortalTiles(category),
+  visiblePortalTiles: (category: string, organizationType: string) =>
+    visiblePortalTiles(category, organizationType),
 }));
 
 vi.mock("@/components/org-portal/find-person-form", () => ({
@@ -145,7 +146,10 @@ describe("OrgPage — org_portal.home_v2 ON", () => {
     // Guards against an accidental swap to "administer" here, which would
     // silently list permission-gated setup tools on the main page instead of
     // the day-to-day tools (Phase 3 design, page.test.tsx call-site note).
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate");
+    // organizationType (bug fix, docs/work-log/
+    // 2026-08-27-credentials-tile-org-type.md): forwarded from the resolved
+    // org, not hardcoded or omitted.
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation");
     // org_portal.motion (docs/work-log/2026-08-26-portal-visual-modernization.md)
     // must be read alongside org_portal.home_v2, and — mocked false here — must
     // NOT leave the greeting band's mount fade-in classes present. This is the

@@ -4,6 +4,7 @@ import {
   assertOrgAccess,
   OrgAccessError,
   resolveOrgContext,
+  type OrganizationType,
 } from "@/lib/authz";
 import {
   getCredentialsFormOptions,
@@ -16,6 +17,7 @@ import {
   CredentialsFlagOff,
   CredentialsForbidden,
   CredentialsLoadError,
+  CredentialsNotAvailable,
 } from "./credentials-states";
 import { OrdinationList } from "./ordination-list";
 import { AppointmentList } from "./appointment-list";
@@ -43,7 +45,20 @@ import { RecordAppointmentForm } from "./record-appointment-form";
  * `credentials.manage` answers "may THIS person administer credentials
  * here" — two different questions, identical ordering to `admin/officers/
  * page.tsx`.
+ *
+ * THREE CHECKS, IN THIS ORDER, bug fix docs/work-log/
+ * 2026-08-27-credentials-tile-org-type.md: flag, then org type, then
+ * permission (`listOrdinations()`'s own `credentials.manage` read). A
+ * congregation with the flag ON must land on `CredentialsNotAvailable`, not
+ * `CredentialsForbidden` — the latter reads as "ask your administrator",
+ * which is actively wrong here: `credentials.manage` binds only to the
+ * presbytery-scoped `presbytery_stated_clerk` template role (DECISION-112/
+ * 116), so no congregation role could ever be the fix. Allow-list, mirroring
+ * `tiles.ts`'s `credentials` tile entry — never `!== "congregation"`
+ * exclusion, which would wrongly admit synod/GA org types too.
  */
+const CREDENTIALS_ORG_TYPES: readonly OrganizationType[] = ["presbytery"];
+
 export default async function CredentialsPage({
   params,
 }: {
@@ -88,6 +103,10 @@ export default async function CredentialsPage({
   const credentialsEnabled = await isFlagEnabled("org_portal.credentials");
   if (!credentialsEnabled) {
     return <CredentialsFlagOff name={resolved.org.name} />;
+  }
+
+  if (!CREDENTIALS_ORG_TYPES.includes(resolved.org.organizationType)) {
+    return <CredentialsNotAvailable name={resolved.org.name} />;
   }
 
   let ordinationsResult;

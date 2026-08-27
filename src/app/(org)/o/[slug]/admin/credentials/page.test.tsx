@@ -14,6 +14,11 @@
  *
  *   1. `isFlagEnabled("org_portal.credentials")` is checked BEFORE
  *      `listOrdinations()` is ever called.
+ *   1.5. The org-type check (bug fix, docs/work-log/
+ *      2026-08-27-credentials-tile-org-type.md) runs AFTER the flag check
+ *      but BEFORE `listOrdinations()` — a non-presbytery org with the flag
+ *      ON renders `CredentialsNotAvailable` WITHOUT ever calling
+ *      `listOrdinations()`, never `CredentialsForbidden`.
  *   2. `OrgAccessError` thrown by any of the three reads is RE-THROWN, not
  *      swallowed into the load-error state.
  *   3. Any OTHER thrown error renders the load-error state, not a crash.
@@ -117,6 +122,21 @@ const OK_RESOLVED = {
   },
 };
 
+// Bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md: a
+// congregation reaching this route directly (e.g. after the tile-hiding fix,
+// by URL) must land on CredentialsNotAvailable, never CredentialsForbidden.
+const OK_RESOLVED_CONGREGATION = {
+  kind: "ok" as const,
+  org: {
+    organizationId: "org-2",
+    personId: "person-2",
+    name: "Alder Creek Presbyterian Church",
+    organizationType: "congregation" as const,
+    slug: "alder-creek",
+    platformStatus: "managed" as const,
+  },
+};
+
 const EMPTY_OPTIONS = {
   kind: "ok" as const,
   data: { people: [], servingOrgs: [] },
@@ -150,6 +170,59 @@ describe("CredentialsPage — the flag-before-permission ordering contract", () 
     await CredentialsPage({ params: makeParams() });
 
     expect(assertOrgAccess).toHaveBeenCalledWith("person-1", "org-1");
+  });
+});
+
+describe("CredentialsPage — the org-type check — regression for congregation-visible-credentials-tile bug", () => {
+  it("renders CredentialsNotAvailable for a congregation with the flag ON, WITHOUT ever calling listOrdinations()", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_CONGREGATION);
+    isFlagEnabled.mockResolvedValue(true);
+
+    const el = await CredentialsPage({ params: makeParams("alder-creek") });
+    render(el);
+
+    expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.credentials");
+    expect(listOrdinations).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/isn.t available for Alder Creek Presbyterian Church/i),
+    ).toBeTruthy();
+    // Must NOT be the permission-denial copy — a congregation clerk has no
+    // administrator at this org who could turn credentials.manage on.
+    expect(
+      screen.queryByText(/don.t have permission to manage ministry credentials/i),
+    ).toBeNull();
+  });
+
+  it("runs the org-type check AFTER the flag check — flag off still wins with CredentialsFlagOff, even for a congregation", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_CONGREGATION);
+    isFlagEnabled.mockResolvedValue(false);
+
+    const el = await CredentialsPage({ params: makeParams("alder-creek") });
+    render(el);
+
+    expect(
+      screen.getByText(/isn.t turned on for Alder Creek Presbyterian Church/i),
+    ).toBeTruthy();
+    expect(listOrdinations).not.toHaveBeenCalled();
+  });
+
+  it("a presbytery with the flag ON is unaffected — reaches listOrdinations() as before", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listOrdinations.mockResolvedValue({ kind: "ok", data: [] });
+    listAppointments.mockResolvedValue({ kind: "ok", data: [] });
+    getCredentialsFormOptions.mockResolvedValue(EMPTY_OPTIONS);
+
+    const el = await CredentialsPage({ params: makeParams() });
+    render(el);
+
+    expect(listOrdinations).toHaveBeenCalledWith("person-1", "org-1");
+    expect(
+      screen.queryByText(/isn.t available for/i),
+    ).toBeNull();
   });
 });
 

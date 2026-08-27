@@ -6,23 +6,29 @@
  * (docs/work-log/2026-08-26-portal-reorg-and-modernization.md, Phase 3):
  * `visiblePortalTiles()` is now category-parameterized (`PortalNav` always
  * passes `"operate"`), and a new hardcoded "Administration" entry is
- * appended, gated on `org_portal.admin_hub`.
+ * appended, gated on `org_portal.admin_hub`. Further updated by bug fix,
+ * docs/work-log/2026-08-27-credentials-tile-org-type.md: `PortalNav` now
+ * takes a REQUIRED `organizationType` prop, threaded straight through to
+ * `visiblePortalTiles()`'s second argument.
  *
- * `visiblePortalTiles()` is mocked; its own flag-filtering behavior is
- * pinned by `src/lib/org-portal/tiles.test.ts`. What THIS file pins is the
- * entry-construction contract: Home is hardcoded and unconditional, the
- * rest mirror `visiblePortalTiles("operate")`'s output in declaration order,
- * the `exact` flag is set correctly for each, and "Administration" is
- * appended last, gated solely on the `org_portal.admin_hub` flag —
- * regardless of the viewer's own permissions. Active-state styling itself is
- * `PortalNavLinks`' job (portal-nav-links.test.tsx).
+ * `visiblePortalTiles()` is mocked; its own flag-filtering and org-type-
+ * scoping behavior is pinned by `src/lib/org-portal/tiles.test.ts`. What
+ * THIS file pins is the entry-construction contract: Home is hardcoded and
+ * unconditional, the rest mirror `visiblePortalTiles("operate",
+ * organizationType)`'s output in declaration order, the `exact` flag is set
+ * correctly for each, "Administration" is appended last, gated solely on the
+ * `org_portal.admin_hub` flag — regardless of the viewer's own permissions —
+ * and `organizationType` is forwarded to `visiblePortalTiles()` unchanged.
+ * Active-state styling itself is `PortalNavLinks`' job
+ * (portal-nav-links.test.tsx).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
-  visiblePortalTiles: (category: string) => visiblePortalTiles(category),
+  visiblePortalTiles: (category: string, organizationType: string) =>
+    visiblePortalTiles(category, organizationType),
 }));
 
 const isFlagEnabled = vi.fn();
@@ -52,7 +58,7 @@ describe("PortalNav — entry construction", () => {
     visiblePortalTiles.mockResolvedValue([]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
     render(tree);
 
     expect(screen.getByTestId("portal-nav-links-stub")).toBeTruthy();
@@ -65,9 +71,18 @@ describe("PortalNav — entry construction", () => {
     visiblePortalTiles.mockResolvedValue([]);
     isFlagEnabled.mockResolvedValue(false);
 
-    await PortalNav({ slug: "acme" });
+    await PortalNav({ slug: "acme", organizationType: "congregation" });
 
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation");
+  });
+
+  it("forwards organizationType to visiblePortalTiles() unchanged — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", async () => {
+    visiblePortalTiles.mockResolvedValue([]);
+    isFlagEnabled.mockResolvedValue(false);
+
+    await PortalNav({ slug: "northern-reach", organizationType: "presbytery" });
+
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "presbytery");
   });
 
   it("prepends Home, unconditional and exact, ahead of every visible tile", async () => {
@@ -91,7 +106,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
     render(tree);
 
     expect(linksSpy).toHaveBeenCalledWith({
@@ -124,7 +139,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
     render(tree);
 
     const entries = linksSpy.mock.calls[0][0].entries;
@@ -150,7 +165,7 @@ describe("PortalNav — entry construction", () => {
       key === "org_portal.admin_hub",
     );
 
-    const tree = await PortalNav({ slug: "acme" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
     render(tree);
 
     expect(linksSpy).toHaveBeenCalledWith({
@@ -175,7 +190,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
     render(tree);
 
     const entries = linksSpy.mock.calls[0][0].entries;
@@ -188,7 +203,7 @@ describe("PortalNav — entry construction", () => {
     visiblePortalTiles.mockResolvedValue([]);
     isFlagEnabled.mockResolvedValue(false);
 
-    await PortalNav({ slug: "acme" });
+    await PortalNav({ slug: "acme", organizationType: "congregation" });
 
     expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.admin_hub");
   });

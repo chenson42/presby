@@ -21,7 +21,8 @@ import type { PortalTile } from "@/lib/org-portal/tiles";
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
-  visiblePortalTiles: (category: string) => visiblePortalTiles(category),
+  visiblePortalTiles: (category: string, organizationType: string) =>
+    visiblePortalTiles(category, organizationType),
 }));
 
 import { PortalFooter } from "./portal-footer";
@@ -49,6 +50,7 @@ async function renderFooter(
   const el = await PortalFooter({
     slug: "alder-creek",
     organizationName: "Alder Creek Presbyterian Church",
+    organizationType: "congregation",
     profile: null,
     ...props,
   });
@@ -118,7 +120,13 @@ describe("PortalFooter — nav recap", () => {
   it("calls visiblePortalTiles with the 'operate' category, never 'administer'", async () => {
     visiblePortalTiles.mockResolvedValue([]);
     await renderFooter();
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation");
+  });
+
+  it("forwards organizationType to visiblePortalTiles() unchanged — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", async () => {
+    visiblePortalTiles.mockResolvedValue([]);
+    await renderFooter({ organizationType: "presbytery" });
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "presbytery");
   });
 
   it("recaps every visible tile from visiblePortalTiles(), built from the slug", async () => {

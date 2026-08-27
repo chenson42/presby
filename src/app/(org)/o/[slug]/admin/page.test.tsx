@@ -56,7 +56,8 @@ vi.mock("@/lib/flags", () => ({
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
-  visiblePortalTiles: (category: string) => visiblePortalTiles(category),
+  visiblePortalTiles: (category: string, organizationType: string) =>
+    visiblePortalTiles(category, organizationType),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -169,7 +170,10 @@ describe("AdminHubPage — the flag-before-registry ordering contract", () => {
 
     await AdminHubPage({ params: makeParams() });
 
-    expect(visiblePortalTiles).toHaveBeenCalledWith("administer");
+    // organizationType (bug fix, docs/work-log/
+    // 2026-08-27-credentials-tile-org-type.md): forwarded from the resolved
+    // org, not hardcoded or omitted.
+    expect(visiblePortalTiles).toHaveBeenCalledWith("administer", "congregation");
   });
 });
 

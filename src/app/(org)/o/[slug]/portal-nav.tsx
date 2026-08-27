@@ -1,5 +1,6 @@
 import { isFlagEnabled } from "@/lib/flags";
 import { visiblePortalTiles } from "@/lib/org-portal/tiles";
+import type { OrganizationType } from "@/lib/authz";
 import { PortalNavLinks, type PortalNavEntry } from "./portal-nav-links";
 
 /**
@@ -37,10 +38,23 @@ import { PortalNavLinks, type PortalNavEntry } from "./portal-nav-links";
  *
  * Independent of `GlobalNav`'s org-list read — a degraded switcher does not
  * take this row down, and vice versa (Phase 3 Edge Cases).
+ *
+ * `organizationType` (bug fix, docs/work-log/
+ * 2026-08-27-credentials-tile-org-type.md) is a REQUIRED prop, threaded from
+ * `layout.tsx`'s `resolved.kind === "ok"` branch — the same resolve that
+ * already produces `orgBrand`/`orgMark` for this render, so this adds no new
+ * query. `visiblePortalTiles()`'s signature makes the argument impossible to
+ * forget by accident; this component's own prop does the same one layer up.
  */
-export async function PortalNav({ slug }: { slug: string }) {
+export async function PortalNav({
+  slug,
+  organizationType,
+}: {
+  slug: string;
+  organizationType: OrganizationType;
+}) {
   const [tiles, adminHubEnabled] = await Promise.all([
-    visiblePortalTiles("operate"),
+    visiblePortalTiles("operate", organizationType),
     isFlagEnabled("org_portal.admin_hub"),
   ]);
 

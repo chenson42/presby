@@ -1,14 +1,26 @@
 /**
  * Unit tests for the portal-home tile registry.
  *
- * Three properties pinned: every tile's `flagKey` is a real row `scripts/
- * seed.ts` seeds (a hard-coded snapshot below — this module cannot import
- * `scripts/seed.ts` itself, which opens a real DB connection at import
- * time); every tile's `category` is one of the two literal values (guards a
- * future tile shipping with neither filter matching it — a silent third
- * state); and `visiblePortalTiles(category)` filters by category, then by
- * flag, independent of any permission (portal-reorg pipeline, docs/work-log/
+ * Properties pinned: every tile's `flagKey` is a real row `scripts/seed.ts`
+ * seeds (a hard-coded snapshot below — this module cannot import `scripts/
+ * seed.ts` itself, which opens a real DB connection at import time); every
+ * tile's `category` is one of the two literal values (guards a future tile
+ * shipping with neither filter matching it — a silent third state); and
+ * `visiblePortalTiles(category, organizationType)` filters by category, then
+ * by `orgTypeScope` (if the tile declares one), then by flag, independent of
+ * any permission (portal-reorg pipeline, docs/work-log/
  * 2026-08-26-portal-reorg-and-modernization.md, Phase 3).
+ *
+ * `organizationType` bug fix, docs/work-log/
+ * 2026-08-27-credentials-tile-org-type.md: `visiblePortalTiles()`'s
+ * signature changed from `(category)` to `(category, organizationType)`,
+ * REQUIRED (no default) — every existing call in this file below is updated
+ * for the new signature, flagged in that work-log as expected churn. Most
+ * calls below pass `"congregation"` where the org type is otherwise
+ * immaterial to the assertion (no tile under test declares an
+ * `orgTypeScope`); calls that touch the `credentials` tile use
+ * `"presbytery"` so its own scope doesn't exclude it from an
+ * otherwise-unrelated assertion.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -117,24 +129,34 @@ describe("PORTAL_TILES — flag-key shape", () => {
     const roles = PORTAL_TILES.find((t) => t.key === "roles");
     expect(roles?.label).toBe("Roles");
   });
+
+  it("only the credentials tile declares an orgTypeScope, and it is the presbytery allow-list", () => {
+    for (const tile of PORTAL_TILES) {
+      if (tile.key === "credentials") {
+        expect(tile.orgTypeScope).toEqual(["presbytery"]);
+      } else {
+        expect(tile.orgTypeScope).toBeUndefined();
+      }
+    }
+  });
 });
 
-describe("visiblePortalTiles(category) — category, then flag-only filtering", () => {
+describe("visiblePortalTiles(category, organizationType) — category, then org-type scope, then flag", () => {
   it("returns no operate tiles when every flag is off", async () => {
     isFlagEnabled.mockResolvedValue(false);
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles).toEqual([]);
   });
 
   it("returns no administer tiles when every flag is off", async () => {
     isFlagEnabled.mockResolvedValue(false);
-    const tiles = await visiblePortalTiles("administer");
+    const tiles = await visiblePortalTiles("administer", "congregation");
     expect(tiles).toEqual([]);
   });
 
-  it("returns every operate tile when every flag is on, and no administer tile leaks in", async () => {
+  it("returns every operate tile when every flag is on and the org type is presbytery (so credentials' own scope doesn't exclude it), and no administer tile leaks in", async () => {
     isFlagEnabled.mockResolvedValue(true);
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "presbytery");
     const expectedKeys = PORTAL_TILES.filter(
       (t) => t.category === "operate",
     ).map((t) => t.key);
@@ -146,7 +168,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
 
   it("returns every administer tile when every flag is on, and no operate tile leaks in", async () => {
     isFlagEnabled.mockResolvedValue(true);
-    const tiles = await visiblePortalTiles("administer");
+    const tiles = await visiblePortalTiles("administer", "congregation");
     const expectedKeys = PORTAL_TILES.filter(
       (t) => t.category === "administer",
     ).map((t) => t.key);
@@ -160,7 +182,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.directory",
     );
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["directory"]);
   });
 
@@ -168,7 +190,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.tickets",
     );
-    const tiles = await visiblePortalTiles("administer");
+    const tiles = await visiblePortalTiles("administer", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["tickets"]);
   });
 
@@ -176,7 +198,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.feedback",
     );
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["feedback"]);
   });
 
@@ -184,7 +206,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.members_create",
     );
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["members"]);
   });
 
@@ -192,7 +214,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.officers",
     );
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["officers"]);
   });
 
@@ -200,21 +222,21 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.groups",
     );
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["groups"]);
   });
 
   it("events tile is independent — org_portal.events on, everything else off (operate)", async () => {
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.events");
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["events"]);
   });
 
-  it("credentials tile is independent — org_portal.credentials on, everything else off (operate)", async () => {
+  it("credentials tile is independent — org_portal.credentials on, everything else off, at a presbytery (operate)", async () => {
     isFlagEnabled.mockImplementation(
       async (key: string) => key === "org_portal.credentials",
     );
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "presbytery");
     expect(tiles.map((t) => t.key)).toEqual(["credentials"]);
   });
 
@@ -222,7 +244,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.features",
     );
-    const tiles = await visiblePortalTiles("administer");
+    const tiles = await visiblePortalTiles("administer", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["features"]);
   });
 
@@ -230,13 +252,13 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     isFlagEnabled.mockImplementation(async (key: string) =>
       key === "org_portal.branding",
     );
-    const tiles = await visiblePortalTiles("administer");
+    const tiles = await visiblePortalTiles("administer", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["branding"]);
   });
 
   it("preserves PORTAL_TILES declaration order among the visible operate subset", async () => {
     isFlagEnabled.mockResolvedValue(true);
-    const tiles = await visiblePortalTiles("operate");
+    const tiles = await visiblePortalTiles("operate", "presbytery");
     expect(tiles.map((t) => t.key)).toEqual(
       PORTAL_TILES.filter((t) => t.category === "operate").map((t) => t.key),
     );
@@ -244,7 +266,7 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
 
   it("preserves PORTAL_TILES declaration order among the visible administer subset", async () => {
     isFlagEnabled.mockResolvedValue(true);
-    const tiles = await visiblePortalTiles("administer");
+    const tiles = await visiblePortalTiles("administer", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(
       PORTAL_TILES.filter((t) => t.category === "administer").map(
         (t) => t.key,
@@ -257,11 +279,56 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     // flagKeys — asserting the exact call set proves visiblePortalTiles()
     // consults nothing else (no permission resolver, no second gate).
     isFlagEnabled.mockResolvedValue(true);
-    await visiblePortalTiles("administer");
+    await visiblePortalTiles("administer", "congregation");
     const administerFlagKeys = PORTAL_TILES.filter(
       (t) => t.category === "administer",
     ).map((t) => t.flagKey);
     const calledKeys = isFlagEnabled.mock.calls.map((call) => call[0]);
     expect(new Set(calledKeys)).toEqual(new Set(administerFlagKeys));
+  });
+
+  describe("orgTypeScope — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", () => {
+    it("a congregation does NOT get the credentials tile even with its flag on — the regression this fix closes", async () => {
+      isFlagEnabled.mockResolvedValue(true);
+      const tiles = await visiblePortalTiles("operate", "congregation");
+      expect(tiles.map((t) => t.key)).not.toContain("credentials");
+    });
+
+    it("a presbytery DOES get the credentials tile with its flag on", async () => {
+      isFlagEnabled.mockResolvedValue(true);
+      const tiles = await visiblePortalTiles("operate", "presbytery");
+      expect(tiles.map((t) => t.key)).toContain("credentials");
+    });
+
+    it("a tile without an orgTypeScope is unaffected by organization type — directory shows for both a congregation and a synod", async () => {
+      isFlagEnabled.mockImplementation(async (key: string) =>
+        key === "org_portal.directory",
+      );
+      const congregationTiles = await visiblePortalTiles(
+        "operate",
+        "congregation",
+      );
+      const synodTiles = await visiblePortalTiles("operate", "synod");
+      expect(congregationTiles.map((t) => t.key)).toEqual(["directory"]);
+      expect(synodTiles.map((t) => t.key)).toEqual(["directory"]);
+    });
+
+    it("neither synod nor general_assembly get the credentials tile — proves the allow-list, not a `!== \"congregation\"` exclusion", async () => {
+      isFlagEnabled.mockResolvedValue(true);
+      const synodTiles = await visiblePortalTiles("operate", "synod");
+      const gaTiles = await visiblePortalTiles(
+        "operate",
+        "general_assembly",
+      );
+      expect(synodTiles.map((t) => t.key)).not.toContain("credentials");
+      expect(gaTiles.map((t) => t.key)).not.toContain("credentials");
+    });
+
+    it("isFlagEnabled is never called for a tile excluded by orgTypeScope — the org-type filter runs before the flag check", async () => {
+      isFlagEnabled.mockResolvedValue(true);
+      await visiblePortalTiles("operate", "congregation");
+      const calledKeys = isFlagEnabled.mock.calls.map((call) => call[0]);
+      expect(calledKeys).not.toContain("org_portal.credentials");
+    });
   });
 });

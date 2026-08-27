@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cachedAuth } from "@/lib/auth/cached-auth";
-import { resolveOrgContext } from "@/lib/authz";
+import { resolveOrgContext, type OrganizationType } from "@/lib/authz";
 import { getOrgBrandForLayout, getOrgMarkForLayout } from "@/lib/brand/read-org-brand";
 import { isFlagEnabled } from "@/lib/flags";
 import { getOrgProfileForFooter, type OrgProfileForFooter } from "@/lib/sites";
@@ -79,6 +79,14 @@ export default async function OrgSlugLayout({
   let orgBrand: Awaited<ReturnType<typeof getOrgBrandForLayout>> = null;
   let orgMark: { name: string; markSrc: string | null } | null = null;
   let showPortalNav = false;
+  // Bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md: threaded
+  // into BOTH `<PortalNav>` and `<PortalFooter>` — the two independent
+  // `visiblePortalTiles()` callers this layout wires up — from the SAME
+  // `resolved.kind === "ok"` branch `orgBrand`/`orgMark` already use, no new
+  // query. Set unconditionally inside that branch (not gated on either
+  // `chromeV2Enabled` or `chromeV3Enabled`) because chrome_v2 and chrome_v3
+  // are independent rollback units and either could be the only one on.
+  let orgOrganizationType: OrganizationType | null = null;
   let showFooter = false;
   let footerProfile: OrgProfileForFooter | null = null;
   let footerOrgName = "";
@@ -89,6 +97,7 @@ export default async function OrgSlugLayout({
       isFlagEnabled("org_portal.chrome_v3"),
     ]);
     if (resolved.kind === "ok") {
+      orgOrganizationType = resolved.org.organizationType;
       // BOTH ids from the SAME resolution, not `session.user.id` — see
       // read-org-brand.ts's header comment for why that distinction is
       // load-bearing (`users.id` vs. `people.id`) and not a style choice.
@@ -132,7 +141,9 @@ export default async function OrgSlugLayout({
             orgMark={orgMark}
             signOutRedirectTo={`/site/${slug}`}
           />
-          {showPortalNav ? <PortalNav slug={slug} /> : null}
+          {showPortalNav && orgOrganizationType ? (
+            <PortalNav slug={slug} organizationType={orgOrganizationType} />
+          ) : null}
         </>
       ) : (
         // Unreachable in practice — every page under here redirects a signed-out
@@ -155,10 +166,11 @@ export default async function OrgSlugLayout({
       >
         {children}
       </main>
-      {session?.user && showFooter ? (
+      {session?.user && showFooter && orgOrganizationType ? (
         <PortalFooter
           slug={slug}
           organizationName={footerOrgName}
+          organizationType={orgOrganizationType}
           profile={footerProfile}
         />
       ) : null}

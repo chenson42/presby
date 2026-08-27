@@ -175,7 +175,13 @@ describe("OrgSlugLayout — org_portal.chrome_v2 ON, active relationship", () =>
       markSrc: "data:image/png;base64,xyz",
     });
     expect(screen.getByTestId("portal-nav-stub")).toBeTruthy();
-    expect(portalNavSpy).toHaveBeenCalledWith({ slug: "fixture" });
+    // organizationType (bug fix, docs/work-log/
+    // 2026-08-27-credentials-tile-org-type.md): threaded from the SAME
+    // resolved.kind === "ok" branch orgMark already uses.
+    expect(portalNavSpy).toHaveBeenCalledWith({
+      slug: "fixture",
+      organizationType: "congregation",
+    });
     expect(getOrgMarkForLayout).toHaveBeenCalledWith("org-1", "person-1");
   });
 
@@ -262,9 +268,14 @@ describe("OrgSlugLayout — org_portal.chrome_v3 ON, active relationship", () =>
     await renderLayout();
 
     expect(screen.getByTestId("portal-footer-stub")).toBeTruthy();
+    // organizationType (bug fix, docs/work-log/
+    // 2026-08-27-credentials-tile-org-type.md): threaded to PortalFooter too
+    // — the fourth visiblePortalTiles() caller this bug fix's initial pass
+    // missed, caught by tsc.
     expect(portalFooterSpy).toHaveBeenCalledWith({
       slug: "fixture",
       organizationName: "Fixture Congregation",
+      organizationType: "congregation",
       profile: { address: "1 Fixture Way", phone: "555-0100" },
     });
     expect(getOrgProfileForFooter).toHaveBeenCalledWith("org-1", "person-1");

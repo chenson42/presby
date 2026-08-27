@@ -139,7 +139,7 @@ export default async function OrgPage({
     homeData = null;
   }
 
-  const tiles = await visiblePortalTiles("operate");
+  const tiles = await visiblePortalTiles("operate", resolved.org.organizationType);
 
   return (
     <div className="space-y-8">

@@ -2,15 +2,20 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 /**
- * The three non-data-bearing answers `/o/<slug>/admin/credentials` can give
- * (a fourth — an unauthorized org, or a 404 slug — is handled one level up
- * by `org-states.tsx`/`not-found.tsx`, reused as-is). Modeled directly on
+ * The non-data-bearing answers `/o/<slug>/admin/credentials` can give (an
+ * unauthorized org, or a 404 slug, is handled one level up by
+ * `org-states.tsx`/`not-found.tsx`, reused as-is). Modeled directly on
  * `../officers/officers-states.tsx` verbatim, per Phase 3's own instruction
  * to mirror that tree.
  *
- * THREE DISTINCT COPY BLOCKS, DELIBERATELY NOT COLLAPSED (same rationale as
+ * FOUR DISTINCT COPY BLOCKS, DELIBERATELY NOT COLLAPSED (same rationale as
  * `officers-states.tsx`):
  *   - flag off: a product-not-here message, no permission or error framing.
+ *   - not available (this kind of org): a product-fit message, added by bug
+ *     fix docs/work-log/2026-08-27-credentials-tile-org-type.md — also
+ *     product-not-here in tone, but a DIFFERENT fact than flag-off (true
+ *     regardless of the flag, because it's about what kind of organization
+ *     this is, not whether the feature is turned on anywhere).
  *   - forbidden: a permission message, worded so it does NOT read as "your
  *     whole portal access was revoked."
  *   - load error: a broken-right-now message with a retry.
@@ -24,6 +29,29 @@ export function CredentialsFlagOff({ name }: { name: string }) {
       <p className="mt-3 text-sm text-muted-foreground">
         Ministry credentials & pastoral appointments isn&apos;t turned on for{" "}
         {name} yet.
+      </p>
+    </section>
+  );
+}
+
+/**
+ * The organization exists, and the feature is turned on, but this ISN'T A
+ * PRESBYTERY — a congregation, synod, or GA org reached this route directly
+ * (bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md). Modeled
+ * on `CredentialsFlagOff`'s tone deliberately: product-not-here, no implied
+ * remedy, no permission language. "Ask your stated clerk" (`Credentials
+ * Forbidden`'s copy) would be actively wrong here — no congregation role can
+ * ever hold `credentials.manage` (DECISION-112/116), so there is no
+ * administrator at this org who could turn it on for them.
+ */
+export function CredentialsNotAvailable({ name }: { name: string }) {
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold">Credentials</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Ministry credentials & pastoral appointments isn&apos;t available for{" "}
+        {name} — this is a presbytery-level tool, not something a
+        congregation, synod, or General Assembly office uses.
       </p>
     </section>
   );

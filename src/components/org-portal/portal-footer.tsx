@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { visiblePortalTiles } from "@/lib/org-portal/tiles";
+import type { OrganizationType } from "@/lib/authz";
 import type { OrgProfileForFooter } from "@/lib/sites";
 
 /**
@@ -68,17 +69,28 @@ import type { OrgProfileForFooter } from "@/lib/sites";
  * footer recap is a day-to-day-tools surface, matching what `PortalNav` and
  * the main portal page show, not the permission-gated setup tools now on the
  * `/o/<slug>/admin` hub.
+ *
+ * `organizationType` (bug fix, docs/work-log/
+ * 2026-08-27-credentials-tile-org-type.md): a REQUIRED prop, threaded from
+ * `layout.tsx`'s `resolved.kind === "ok"` branch alongside `footerProfile`/
+ * `footerOrgName` — the same resolve, no new query. This is the FOURTH call
+ * site `visiblePortalTiles()`'s signature change touches; missed in this bug
+ * fix's initial pass (the work-log named three) and caught by `tsc`, which
+ * is exactly the failure mode the required (non-defaulted) parameter exists
+ * to surface before shipping.
  */
 export async function PortalFooter({
   slug,
   organizationName,
+  organizationType,
   profile,
 }: {
   slug: string;
   organizationName: string;
+  organizationType: OrganizationType;
   profile: OrgProfileForFooter | null;
 }) {
-  const tiles = await visiblePortalTiles("operate");
+  const tiles = await visiblePortalTiles("operate", organizationType);
   const hasContactInfo = Boolean(profile?.address || profile?.phone);
 
   return (

@@ -408,7 +408,7 @@ export default function DesignSystemPage() {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             Example card content — the shape used for org cards on{" "}
-            <code>/orgs</code>.
+            <code>/home</code>.
           </CardContent>
         </Card>
       </section>

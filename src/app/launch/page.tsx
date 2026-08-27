@@ -22,7 +22,8 @@ export const metadata: Metadata = {
  * door — and redirects. Everything routing-shaped lives in that function so
  * that the rules are readable in one file and testable without a browser.
  *
- * It is separate from `/orgs` on purpose. A chooser that auto-forwards a
+ * It is separate from `/home` (DECISION-124 — this used to be `/orgs`) on
+ * purpose. A chooser that auto-forwards a
  * one-organization user also auto-forwards a zero-organization platform admin
  * into `/admin`, from where the Developer card the operator asked for becomes
  * permanently unreachable. Separating the decision from the surface is what

@@ -4,8 +4,10 @@
  * What is worth pinning here is the boundary the file's shape invites people to
  * get wrong: /o/* is authenticated, active-checked and 2FA-gated at the Edge and
  * NOTHING else — no membership check, no PROTECTION_RULES entry (DECISION-035) —
- * and /orgs sits deliberately outside the 2FA gate even though it starts with
- * "/o".
+ * and /home sits deliberately outside the 2FA gate. (This was /orgs, which
+ * itself sat outside the gate despite starting with "/o" — DECISION-124
+ * retired /orgs to a permanent redirect at /home, and the underlying property
+ * moved with it, not away.)
  */
 vi.mock("@/lib/auth/config", () => ({ edgeAuth: vi.fn() }));
 
@@ -97,13 +99,13 @@ describe("proxy — /o/* (the org portal)", () => {
 });
 
 describe("proxy — the routes around it", () => {
-  it("leaves /orgs outside the 2FA gate — it is not an org path", async () => {
-    // "/orgs".startsWith("/o/") === false, deliberately: the chooser renders no
-    // tenant data and is the one page a user with a lost or pending
-    // organization can still reach.
+  it("leaves /home outside the 2FA gate — it is not an org path", async () => {
+    // /home carries the chooser-equivalent content (DECISION-124) and renders
+    // no tenant data; it is the one page a user with a lost or pending
+    // organization can still reach without clearing 2FA.
     signedIn({ twoFactorRequired: true, twoFactorVerified: false });
 
-    const res = await proxy(request("/orgs"));
+    const res = await proxy(request("/home"));
 
     expect(res.status).toBe(200);
   });

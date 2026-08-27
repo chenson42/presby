@@ -393,8 +393,9 @@ export async function availableOrganizations(
  * Is there a portal behind this relationship?
  *
  * The enterability policy as a pure predicate, exported because THE CHOOSER AND
- * THE ROUTER MUST NOT DISAGREE. `/orgs` has to read the unfiltered list anyway —
- * it names the organizations still being set up — so it would otherwise carry
+ * THE ROUTER MUST NOT DISAGREE. `/home` (DECISION-124 — this used to be
+ * `/orgs`) has to read the unfiltered list anyway — it names the organizations
+ * still being set up — so it would otherwise carry
  * its own inline copy of this condition, and the day the two drift is the day
  * `/launch` forwards a single-org user into `/o/<slug>` that the chooser refuses
  * to show a card for. One definition, used by both.

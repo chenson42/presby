@@ -55,7 +55,7 @@ export interface SwitchableOrganization {
 export interface OrgSwitcherProps {
   /**
    * The organization the user is currently inside, or null on a page that has
-   * no organization context (`/home`, `/orgs`, the account pages).
+   * no organization context (`/home`, the account pages).
    */
   currentName?: string | null;
   /** Slug of the current organization — excluded from the switch list. */
@@ -164,12 +164,13 @@ export function OrgSwitcher({
         <DropdownMenuSeparator />
         {/*
          * The chooser is not replaced by the picker, it is reached from it.
-         * `/orgs` is the only surface that names the organizations still being
-         * set up, and those have no portal to switch into.
+         * `/home` (DECISION-124 — `/orgs` is now a permanent redirect to it)
+         * is the only surface that names the organizations still being set
+         * up, and those have no portal to switch into.
          */}
         <DropdownMenuItem asChild className="min-h-11">
-          <Link href="/orgs" className="cursor-pointer">
-            All organizations
+          <Link href="/home" className="cursor-pointer">
+            Go to your home page
           </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>

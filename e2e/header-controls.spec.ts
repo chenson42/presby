@@ -81,11 +81,14 @@ test.describe("org switcher — a user with two organizations", () => {
   test("offers the full chooser, and it still renders for a multi-org user", async ({
     page,
   }) => {
+    // CONTRACT CHANGE (docs/work-log/2026-08-27-platform-home-and-portal.md,
+    // DECISION-124): the chooser is /home now, not /orgs, and the switcher's
+    // "Go to your home page" item links straight there.
     await page.goto("/home");
     await page.getByTestId(SWITCHER).click();
-    await page.getByRole("menuitem", { name: "All organizations" }).click();
+    await page.getByRole("menuitem", { name: "Go to your home page" }).click();
 
-    await page.waitForURL((u) => u.pathname === "/orgs");
+    await page.waitForURL((u) => u.pathname === "/home");
     await expect(
       page.getByRole("heading", { name: E2E_ORGS.alpha.name }),
     ).toBeVisible();
@@ -121,7 +124,7 @@ test.describe("org switcher — a user with two organizations", () => {
 
     await page.keyboard.press("ArrowDown");
     await expect(
-      page.getByRole("menuitem", { name: "All organizations" }),
+      page.getByRole("menuitem", { name: "Go to your home page" }),
     ).toBeFocused();
   });
 

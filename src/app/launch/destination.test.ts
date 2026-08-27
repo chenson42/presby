@@ -42,7 +42,7 @@ describe("computeDestination — the matrix", () => {
   it("2 orgs, no platform access → the chooser", () => {
     expect(
       computeDestination(input({ enterableOrgs: [ALDER, FERNWOOD] })),
-    ).toEqual({ path: "/orgs", reason: "chooser" });
+    ).toEqual({ path: "/home", reason: "chooser" });
   });
 
   // Row 4 — "if you are only a super admin you would go straight into the
@@ -61,7 +61,7 @@ describe("computeDestination — the matrix", () => {
       computeDestination(
         input({ enterableOrgs: [ALDER], canAccessAdmin: true }),
       ),
-    ).toEqual({ path: "/orgs", reason: "chooser" });
+    ).toEqual({ path: "/home", reason: "chooser" });
   });
 
   // Row 5, the developer half — DECISION-044(1). Routing an is_platform_admin
@@ -69,7 +69,7 @@ describe("computeDestination — the matrix", () => {
   // Developer card unreachable for anyone holding both predicates.
   it("0 orgs and isPlatformAdmin → the chooser, never /admin", () => {
     expect(computeDestination(input({ isPlatformAdmin: true }))).toEqual({
-      path: "/orgs",
+      path: "/home",
       reason: "chooser",
     });
   });
@@ -77,7 +77,7 @@ describe("computeDestination — the matrix", () => {
   it("0 orgs holding BOTH predicates → the chooser, so the Developer card exists", () => {
     expect(
       computeDestination(input({ canAccessAdmin: true, isPlatformAdmin: true })),
-    ).toEqual({ path: "/orgs", reason: "chooser" });
+    ).toEqual({ path: "/home", reason: "chooser" });
   });
 
   it("1 org and isPlatformAdmin → the chooser, not the single-org forward", () => {
@@ -85,7 +85,7 @@ describe("computeDestination — the matrix", () => {
       computeDestination(
         input({ enterableOrgs: [ALDER], isPlatformAdmin: true }),
       ),
-    ).toEqual({ path: "/orgs", reason: "chooser" });
+    ).toEqual({ path: "/home", reason: "chooser" });
   });
 
   // Row 6 — the platform_status row. An `unmanaged` or `invited` relationship
@@ -131,7 +131,7 @@ describe("computeDestination — the requested path", () => {
           requestedPath: "/o/quillhaven",
         }),
       ),
-    ).toEqual({ path: "/orgs", reason: "chooser" });
+    ).toEqual({ path: "/home", reason: "chooser" });
   });
 
   it("falls through to the single-org forward when the slug is not enterable", () => {

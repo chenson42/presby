@@ -1,3 +1,8 @@
+/**
+ * MOVED HERE, UNMODIFIED, FROM `src/lib/org-portal/greeting.test.ts` —
+ * commit 1 of docs/work-log/2026-08-27-platform-home-and-portal.md (Phase
+ * 3, DECISION-125).
+ */
 import { describe, expect, it } from "vitest";
 import { timeOfDayGreeting } from "./greeting";
 

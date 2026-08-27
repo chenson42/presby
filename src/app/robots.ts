@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 /**
  * The platform shell (`(admin)`, `(org)`'s own login-gated pages, `/launch`,
- * `/orgs`, etc.) stays disallowed — the root layout's own `metadata.robots`
+ * `/home`, etc.) stays disallowed — the root layout's own `metadata.robots`
  * (`src/app/layout.tsx`, `{ index: false, follow: false }`) already says as
  * much for the platform's own pages, and this is that same "pre-release"
  * posture expressed at the crawler-directive layer.

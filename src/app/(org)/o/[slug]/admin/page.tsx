@@ -5,8 +5,13 @@ import {
   resolveOrgContext,
 } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
-import { visiblePortalTiles } from "@/lib/org-portal/tiles";
-import { DomainTileSections } from "@/components/org-portal/domain-tile-sections";
+import {
+  DOMAIN_LABELS,
+  DOMAIN_ORDER,
+  visiblePortalTiles,
+} from "@/lib/org-portal/tiles";
+import { DomainTileSections } from "@/components/shared/domain-tile-sections";
+import { TILE_ICONS } from "@/components/org-portal/tile-icons";
 import { OrgAccessDenied, OrgAccessEnded } from "../org-states";
 import { AdminHubFlagOff } from "./admin-hub-states";
 
@@ -109,7 +114,13 @@ export default async function AdminHubPage({
           Nothing is turned on here yet.
         </p>
       ) : (
-        <DomainTileSections slug={slug} tiles={tiles} />
+        <DomainTileSections
+          tiles={tiles}
+          getHref={(tile) => tile.href(slug)}
+          getIcon={(tile) => TILE_ICONS[tile.key]}
+          domainOrder={DOMAIN_ORDER}
+          domainLabels={DOMAIN_LABELS}
+        />
       )}
     </section>
   );

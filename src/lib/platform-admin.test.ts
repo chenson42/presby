@@ -4,10 +4,10 @@
  * `readIsPlatformAdmin` is a four-line select and is exercised against the real
  * database; what is worth pinning here is `sessionCanAccessAdmin`, because
  * THREE places have to agree on it — src/proxy.ts at the Edge, /launch when it
- * routes a zero-organization holder straight to /admin, and /orgs when it
- * renders the Admin card. A disagreement sends a user to a page the Edge
- * bounces to /access-pending, which reads as a broken login rather than as a
- * permissions problem.
+ * routes a zero-organization holder straight to /admin, and /home (DECISION-124
+ * — this used to be /orgs) when it renders the Admin card. A disagreement
+ * sends a user to a page the Edge bounces to /access-pending, which reads as
+ * a broken login rather than as a permissions problem.
  */
 
 vi.mock("server-only", () => ({}));

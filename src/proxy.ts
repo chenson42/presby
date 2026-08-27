@@ -62,9 +62,11 @@ export async function proxy(req: NextRequest) {
   // page can ever ship ahead of it. Safe because /totp walks a user with no
   // enrolment into /account/2fa rather than stranding them.
   //
-  // Note "/orgs".startsWith("/o/") === false — the chooser is deliberately
-  // outside this gate, and it must stay outside: it renders no tenant data and
-  // it is the one page a user with a lost or pending organization can reach.
+  // Note "/home".startsWith("/o/") === false — the chooser-equivalent content
+  // now lives at /home (DECISION-124 — /orgs is a permanent redirect to it)
+  // and is deliberately outside this gate, and it must stay outside: it
+  // renders no tenant data and it is the one page a user with a lost or
+  // pending organization can reach.
   const isTwoFactorGated =
     pathname.startsWith("/admin") || pathname.startsWith("/o/");
   if (
@@ -103,8 +105,10 @@ export async function proxy(req: NextRequest) {
   // access control, add an explicit rule to PROTECTION_RULES above.
   //
   // Auth-only routes (no feature gate): /home, /account, /account/2fa,
-  // /launch, /orgs, /no-organization, /o/* (the last one additionally 2FA-gated
+  // /launch, /no-organization, /o/* (the last one additionally 2FA-gated
   // above, and authorized per-organization in the RSC layer — never here).
+  // /orgs no longer reaches here — it 308s to /home before edgeAuth() ever
+  // runs (next.config.ts redirects(), DECISION-124).
   return NextResponse.next();
 }
 

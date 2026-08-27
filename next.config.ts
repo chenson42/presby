@@ -63,6 +63,14 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   },
+  // /orgs is retired (docs/work-log/2026-08-27-platform-home-and-portal.md,
+  // DECISION-124): its content is absorbed into /home behind
+  // `platform.merged_home`. A permanent (308) config-level redirect, never
+  // entering the React render pipeline — no Suspense boundary to accidentally
+  // open on a segment whose whole job would otherwise be to redirect.
+  async redirects() {
+    return [{ source: "/orgs", destination: "/home", permanent: true }];
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

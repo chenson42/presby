@@ -3,8 +3,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 
 /**
- * One choosable destination on the chooser — an organization, or a platform
- * surface.
+ * MOVED HERE, UNMODIFIED, FROM `src/app/(member)/orgs/destination-card.tsx` —
+ * commit 2 of docs/work-log/2026-08-27-platform-home-and-portal.md (Phase 3,
+ * DECISION-124). `/orgs` is retired to a `next.config.ts` permanent redirect
+ * and its content absorbed into `/home`, which is the new consumer of this
+ * card. No behavioral change: same markup, same styling, same contract.
+ *
+ * One choosable destination on the merged home page — an organization, or a
+ * platform surface.
  *
  * ONE COMPONENT FOR BOTH ON PURPOSE. The organization cards and the Admin /
  * Developer cards are the same gesture ("go here") and must look and behave the

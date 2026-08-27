@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 /**
  * The one honest answer when the organization list cannot be read.
  *
- * Shared by `/launch`, `/orgs` and `/no-organization` — the three pages that
+ * Shared by `/launch`, `/home` (DECISION-124 — this used to be `/orgs`) and
+ * `/no-organization` — the three pages that
  * read it — because the alternative is three different sentences for one
  * condition, and because the failure mode this page exists to prevent is
  * subtle: a router that falls through to a zero-card chooser, or to `/home`,

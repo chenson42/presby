@@ -61,8 +61,9 @@ export interface Destination {
 /**
  * `/o/alder-creek/roll?x=1` → `alder-creek`; anything else → null.
  *
- * Note `/orgs` yields null: `["orgs"][0] !== "o"`. The chooser is deliberately
- * not an org path, in the router as at the Edge.
+ * Note `/orgs` yields null: `["orgs"][0] !== "o"`. The chooser (now `/home`,
+ * DECISION-124 — `/orgs` is a permanent redirect to it) is deliberately not an
+ * org path, in the router as at the Edge.
  */
 function orgSlugFromPath(path: string): string | null {
   const [pathname] = path.split(/[?#]/);
@@ -124,5 +125,13 @@ export function computeDestination(input: DestinationInput): Destination {
 
   // 5. Everything else chooses: ≥2 organizations, or any organizations
   //    alongside platform access, or a platform admin with none.
-  return { path: "/orgs", reason: "chooser" };
+  //
+  // "/home", not "/orgs" (DECISION-124). /orgs no longer exists as a page —
+  // it is a next.config.ts permanent redirect to /home — so a computed
+  // fallback of "/orgs" would be behaviorally identical modulo one extra 308
+  // hop. platform.merged_home is deliberately NOT threaded into this
+  // function: it gates only /home's own render branch (which sections it
+  // shows), never this routing target, keeping this function's zero-import
+  // purity intact.
+  return { path: "/home", reason: "chooser" };
 }

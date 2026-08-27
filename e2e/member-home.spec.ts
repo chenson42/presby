@@ -116,7 +116,15 @@ test.describe("Member home and routing invariants", () => {
   // sweep — regression for the E6 rule (docs/work-log/2026-08-19-brand-foundation.md):
   // a <Link> styled as a button must be <Button asChild><Link/></Button>, never
   // a bare <Button>, or the accessible role and keyboard behavior change silently.
-  test("/home Quick Links render as accessible links, not buttons — regression for a7 primitive sweep", async ({ page }) => {
+  //
+  // CONTRACT CHANGE (docs/work-log/2026-08-27-platform-home-and-portal.md,
+  // DECISION-124): `platform.merged_home` is seeded ON, so the "Admin
+  // dashboard" quick link no longer renders for an admin — the merged
+  // "Platform" section's Admin card covers that destination instead, and
+  // showing both would read as a bug, not a convenience. The card is still a
+  // real `<Link>`-backed anchor (`DestinationCard`), so the a7 regression this
+  // test guards against is still covered, just at the new location.
+  test("/home Quick Links and the Platform section render as accessible links, not buttons — regression for a7 primitive sweep", async ({ page }) => {
     await page.goto("/signin");
     await page.locator('input[name="email"]').fill(ADMIN_EMAIL);
     await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
@@ -132,8 +140,12 @@ test.describe("Member home and routing invariants", () => {
       "Account settings should be a real link",
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Admin dashboard" }),
-      "Admin dashboard should be a real link, visible for an admin user",
+      page.getByRole("heading", { name: "Platform" }),
+      "the merged Platform section should render for an admin user",
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Admin" }),
+      "the Admin destination card should be a real link, visible for an admin user",
     ).toBeVisible();
   });
 

@@ -45,8 +45,9 @@ export async function readIsPlatformAdmin(userId: string): Promise<boolean> {
  * `FEATURES.ADMIN_DASHBOARD` for `/admin` via `PROTECTION_RULES`.
  *
  * Extracted because THREE places now have to agree on it — the Edge, `/launch`
- * (which routes a zero-org holder straight to `/admin`) and `/orgs` (which
- * renders the Admin card). If they disagree, the router sends a user to a page
+ * (which routes a zero-org holder straight to `/admin`) and `/home` (which
+ * renders the Admin card, DECISION-124 — this used to be `/orgs`). If they
+ * disagree, the router sends a user to a page
  * the Edge bounces to `/access-pending`, which reads as a broken login rather
  * than as a permissions problem. The proxy keeps its own inline copy because it
  * runs on the Edge and must not import a module that pulls `@/lib/db`; this

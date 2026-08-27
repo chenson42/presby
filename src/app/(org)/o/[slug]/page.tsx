@@ -11,11 +11,16 @@ import {
 } from "@/lib/feedback-prompt";
 import { isFlagEnabled } from "@/lib/flags";
 import { getPortalHomeData } from "@/lib/org-portal/home-data";
-import { visiblePortalTiles } from "@/lib/org-portal/tiles";
-import { Greeting } from "@/components/org-portal/greeting";
+import {
+  DOMAIN_LABELS,
+  DOMAIN_ORDER,
+  visiblePortalTiles,
+} from "@/lib/org-portal/tiles";
+import { GreetingBand } from "@/components/shared/greeting-band";
 import { FindPersonForm } from "@/components/org-portal/find-person-form";
 import { YoursZone } from "@/components/org-portal/yours-zone";
-import { DomainTileSections } from "@/components/org-portal/domain-tile-sections";
+import { DomainTileSections } from "@/components/shared/domain-tile-sections";
+import { TILE_ICONS } from "@/components/org-portal/tile-icons";
 import { FeedbackPromptCard } from "@/components/shared/feedback-prompt-card";
 import {
   OrgAccessDenied,
@@ -143,7 +148,7 @@ export default async function OrgPage({
 
   // getPortalHomeData() reads a NON-ESSENTIAL summary (the viewer's own
   // display name and household). A DB failure here must not take the whole
-  // home page down — it degrades to `null`, which Greeting and YoursZone
+  // home page down — it degrades to `null`, which GreetingBand and YoursZone
   // both already treat as "nothing to show" rather than an error. Only
   // OrgAccessError (the relationship vanishing mid-request) re-throws, so
   // error.tsx's copy — not a silent "Welcome." — is what a member sees.
@@ -151,7 +156,7 @@ export default async function OrgPage({
   // org_portal.motion (Phase 3, docs/work-log/
   // 2026-08-26-portal-visual-modernization.md) gates ONLY the greeting
   // band's mount fade-in, read alongside the home-data fetch below and
-  // threaded through as Greeting's required `motionEnabled` prop.
+  // threaded through as GreetingBand's required `motionEnabled` prop.
   const motionEnabled = await isFlagEnabled("org_portal.motion");
 
   let homeData: Awaited<ReturnType<typeof getPortalHomeData>> | null = null;
@@ -182,13 +187,19 @@ export default async function OrgPage({
 
   return (
     <div className="space-y-8">
-      <Greeting
+      <GreetingBand
         displayName={homeData?.displayName ?? null}
         motionEnabled={motionEnabled}
       />
       <FindPersonForm slug={resolved.org.slug} />
       <YoursZone slug={resolved.org.slug} household={homeData?.household ?? null} />
-      <DomainTileSections slug={resolved.org.slug} tiles={tiles} />
+      <DomainTileSections
+        tiles={tiles}
+        getHref={(tile) => tile.href(resolved.org.slug)}
+        getIcon={(tile) => TILE_ICONS[tile.key]}
+        domainOrder={DOMAIN_ORDER}
+        domainLabels={DOMAIN_LABELS}
+      />
       {showFeedbackPrompt && <FeedbackPromptCard />}
     </div>
   );

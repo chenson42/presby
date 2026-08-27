@@ -158,9 +158,13 @@ test("6 — one organization forwards straight into it, with no chooser", async 
 test("7 — two organizations get the chooser, with no membership language", async ({
   page,
 }) => {
+  // CONTRACT CHANGE (docs/work-log/2026-08-27-platform-home-and-portal.md,
+  // DECISION-124): the chooser reason now lands on /home, not /orgs — /orgs
+  // is a permanent redirect to /home, and computeDestination's own literal
+  // changed, so the sign-in round trip never visits /orgs at all.
   await signInAndLand(page, "org-multi");
 
-  expect(new URL(page.url()).pathname).toBe("/orgs");
+  expect(new URL(page.url()).pathname).toBe("/home");
 
   const cards = page.getByRole("link", { name: /presbyter/i });
   await expect(
@@ -236,15 +240,20 @@ test.describe("9 — the four-way miss response (DECISION-040)", () => {
 test.describe("10 — the chooser is a convenience, never a gate", () => {
   test.use({ storageState: storageStatePath("org-single") });
 
-  test("/orgs renders for a one-organization user instead of auto-forwarding", async ({
+  test("/orgs redirects to /home, which renders for a one-organization user instead of auto-forwarding", async ({
     page,
   }) => {
-    // If /orgs auto-forwarded, a platform admin with no congregations could
+    // If /home auto-forwarded, a platform admin with no congregations could
     // never reach the Developer card — which is why the decision and the
-    // surface are two separate routes.
-    await page.goto("/orgs");
+    // surface are two separate routes. This is the same property the
+    // docstring names — "the chooser is a convenience, never a gate" — just
+    // at the new path (DECISION-124): /orgs is retired to a permanent
+    // (308) redirect, verified here by landing on /home rather than a 404 or
+    // a stale render.
+    const response = await page.goto("/orgs");
 
-    expect(new URL(page.url()).pathname).toBe("/orgs");
+    expect(new URL(page.url()).pathname).toBe("/home");
+    expect(response?.status()).toBe(200);
     await expect(
       page.getByRole("heading", { name: E2E_ORGS.alpha.name }),
     ).toBeVisible();
@@ -290,15 +299,18 @@ test.describe("12 — the chooser is reachable without typing a URL", () => {
     // back, a user with two congregations has no route to the second one.
     //
     // CONTRACT CHANGE: the bare "Organizations" link is now the org switcher's
-    // trigger, and the chooser is the last item inside it. The property being
-    // asserted — /orgs is reachable from the header on any signed-in page — is
-    // unchanged.
+    // trigger, and the chooser is the last item inside it. CONTRACT CHANGE,
+    // second layer (DECISION-124): the chooser itself is now /home, not
+    // /orgs, and the switcher's "Go to your home page" item links straight
+    // there — it no longer round-trips through the /orgs redirect. The
+    // property being asserted — the chooser is reachable from the header on
+    // any signed-in page — is unchanged.
     await page.goto("/home");
 
     await page.getByTestId("org-switcher-trigger").click();
-    const all = page.getByRole("menuitem", { name: "All organizations" });
+    const all = page.getByRole("menuitem", { name: "Go to your home page" });
     await expect(all).toBeVisible();
     await all.click();
-    await page.waitForURL((u) => u.pathname === "/orgs");
+    await page.waitForURL((u) => u.pathname === "/home");
   });
 });

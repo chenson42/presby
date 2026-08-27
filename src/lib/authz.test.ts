@@ -273,11 +273,12 @@ describe("availableOrganizations", () => {
 });
 
 describe("isEnterableOrganization", () => {
-  // Exported so the chooser and the router cannot drift. /orgs has to read the
-  // UNFILTERED list — it names the organizations still being set up — so
-  // without this it would carry its own inline copy of the condition, and the
-  // day the two disagree is the day /launch forwards a single-organization user
-  // into an /o/<slug> the chooser refuses to show a card for.
+  // Exported so the chooser and the router cannot drift. /home (DECISION-124
+  // — this used to be /orgs) has to read the UNFILTERED list — it names the
+  // organizations still being set up — so without this it would carry its own
+  // inline copy of the condition, and the day the two disagree is the day
+  // /launch forwards a single-organization user into an /o/<slug> the chooser
+  // refuses to show a card for.
   function org(over: Partial<UserOrganization> = {}): UserOrganization {
     return {
       organizationId: "55555555-5555-5555-5555-555555555555",

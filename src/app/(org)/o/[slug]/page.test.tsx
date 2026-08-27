@@ -55,6 +55,8 @@ vi.mock("@/lib/org-portal/home-data", () => ({
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
+  DOMAIN_LABELS: { people: "People & Membership" },
+  DOMAIN_ORDER: ["people"],
   visiblePortalTiles: (category: string, organizationType: string) =>
     visiblePortalTiles(category, organizationType),
 }));
@@ -71,11 +73,15 @@ vi.mock("@/components/org-portal/find-person-form", () => ({
 }));
 
 const domainTileSectionsSpy = vi.fn();
-vi.mock("@/components/org-portal/domain-tile-sections", () => ({
+vi.mock("@/components/shared/domain-tile-sections", () => ({
   DomainTileSections: (props: unknown) => {
     domainTileSectionsSpy(props);
     return null;
   },
+}));
+
+vi.mock("@/components/org-portal/tile-icons", () => ({
+  TILE_ICONS: {},
 }));
 
 vi.mock("@/components/shared/feedback-prompt-card", () => ({
@@ -233,22 +239,29 @@ describe("OrgPage — org_portal.home_v2 ON", () => {
   });
 });
 
-describe("OrgPage — DomainTileSections wiring (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md, DECISION-117)", () => {
-  it("passes the resolved slug and visiblePortalTiles() result straight through to DomainTileSections", async () => {
+describe("OrgPage — DomainTileSections wiring (commit 1, docs/work-log/2026-08-27-platform-home-and-portal.md, genericized shared component)", () => {
+  it("passes the visiblePortalTiles() result, a slug-closure getHref, and the domain order/labels through to DomainTileSections", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.home_v2");
     getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
-    const tiles = [{ key: "directory" }];
+    const tiles = [{ key: "directory", href: (slug: string) => `/o/${slug}/directory` }];
     visiblePortalTiles.mockResolvedValue(tiles);
 
     const el = await OrgPage({ params: makeParams() });
     render(el);
 
-    expect(domainTileSectionsSpy).toHaveBeenCalledWith({
-      slug: "alder-creek",
-      tiles,
-    });
+    expect(domainTileSectionsSpy).toHaveBeenCalledTimes(1);
+    const props = domainTileSectionsSpy.mock.calls[0][0] as {
+      tiles: typeof tiles;
+      getHref: (tile: (typeof tiles)[number]) => string;
+      domainOrder: unknown;
+      domainLabels: unknown;
+    };
+    expect(props.tiles).toBe(tiles);
+    expect(props.getHref(tiles[0])).toBe("/o/alder-creek/directory");
+    expect(props.domainOrder).toEqual(["people"]);
+    expect(props.domainLabels).toEqual({ people: "People & Membership" });
   });
 });
 

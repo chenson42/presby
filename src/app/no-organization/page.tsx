@@ -70,7 +70,7 @@ export default async function NoOrganizationPage() {
             : `You have access to ${enterable.length} organizations.`}
         </p>
         <Button asChild className="mt-6 min-h-11">
-          <Link href="/orgs">Choose where to go</Link>
+          <Link href="/home">Choose where to go</Link>
         </Button>
       </main>
     );

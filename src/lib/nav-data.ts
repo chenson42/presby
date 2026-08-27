@@ -11,7 +11,8 @@ import { readIsPlatformAdmin } from "@/lib/platform-admin";
  * Request-scoped reads for the signed-in header.
  *
  * THE HEADER IS ON EVERY PAGE, so anything it reads is read on every page. Both
- * of these are already read by `/orgs`, and `readIsPlatformAdmin` is
+ * of these are already read by `/home` (DECISION-124 — this used to be
+ * `/orgs`), and `readIsPlatformAdmin` is
  * deliberately NOT a session claim (revocation must take effect immediately),
  * so without memoization the header would double every one of those queries for
  * a value that cannot change mid-render.

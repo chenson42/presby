@@ -146,8 +146,9 @@ describe("OrgSwitcher — how many organizations", () => {
   });
 
   it("always offers the full chooser as the last item", async () => {
-    // The picker is a shortcut to /orgs, not a replacement for it: /orgs is the
-    // only surface that names the organizations still being set up.
+    // The picker is a shortcut to /home, not a replacement for it: /home is
+    // the only surface that names the organizations still being set up
+    // (DECISION-124 — /orgs is retired to a permanent redirect there).
     render(
       <OrgSwitcher
         currentName={WRENFIELD.name}
@@ -158,8 +159,8 @@ describe("OrgSwitcher — how many organizations", () => {
 
     await open();
 
-    const all = screen.getByRole("menuitem", { name: "All organizations" });
-    expect(all.getAttribute("href")).toBe("/orgs");
+    const all = screen.getByRole("menuitem", { name: "Go to your home page" });
+    expect(all.getAttribute("href")).toBe("/home");
   });
 
   it("links each organization at its own portal", async () => {
@@ -183,8 +184,8 @@ describe("OrgSwitcher — how many organizations", () => {
 
 describe("OrgSwitcher — no organization context", () => {
   it("labels itself 'Organizations' and lists everything on a page with no org", async () => {
-    // /home, /orgs, /whats-new: the user is inside no congregation, so naming
-    // one as current would be a lie.
+    // /home, /whats-new: the user is inside no congregation, so naming one as
+    // current would be a lie.
     render(<OrgSwitcher organizations={[WRENFIELD, FELLS]} />);
 
     const trigger = await open();

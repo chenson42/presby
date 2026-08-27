@@ -55,12 +55,12 @@ vi.mock("@/lib/flags", () => ({
 }));
 
 const visiblePortalTiles = vi.fn();
-// DOMAIN_LABELS/DOMAIN_ORDER (DECISION-117, commit 2): this page now renders
-// `DomainTileSections`, which imports the REAL runtime values from this same
-// module — mocked here with the same literals `tiles.ts` declares
-// (independently pinned by `tiles.test.ts`'s own shape assertion), since
-// `visiblePortalTiles` is mocked in this file and mocking a module replaces
-// ALL of its exports, not just the one named.
+// DOMAIN_LABELS/DOMAIN_ORDER (DECISION-117): this page reads the real runtime
+// values from this same module and threads them into the now-generic, shared
+// `DomainTileSections` as props — mocked here with the same literals
+// `tiles.ts` declares (independently pinned by `tiles.test.ts`'s own shape
+// assertion), since `visiblePortalTiles` is mocked in this file and mocking a
+// module replaces ALL of its exports, not just the one named.
 vi.mock("@/lib/org-portal/tiles", () => ({
   DOMAIN_LABELS: {
     people: "People & Membership",
@@ -82,6 +82,10 @@ vi.mock("@/lib/org-portal/tiles", () => ({
   ],
   visiblePortalTiles: (category: string, organizationType: string) =>
     visiblePortalTiles(category, organizationType),
+}));
+
+vi.mock("@/components/org-portal/tile-icons", () => ({
+  TILE_ICONS: {},
 }));
 
 const redirectMock = vi.fn((url: string) => {

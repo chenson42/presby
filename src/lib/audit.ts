@@ -146,6 +146,17 @@ export const AUDIT_ACTIONS = {
   // tenant-side neutralize key exists or should be built — neutralize stays
   // platform-only (DECISION-101).
   TENANT_BRAND_SET: "tenant.brand.set",
+  // Member edit: tiered sensitive information (docs/work-log/
+  // 2026-08-26-member-sensitive-info.md, DECISION-108) — written from
+  // src/lib/person-sensitive.ts. All four tables are tier-3 mutations and
+  // must fire recordAudit() with no exemption (architect's Phase 2 ruling).
+  // Distinct per-table keys, same "tenant.*" axis convention as
+  // TENANT_ROLE_GRANTED/TENANT_BRAND_SET (a tenant-initiated self-service
+  // action, not a platform action against a tenant).
+  TENANT_PERSON_NOTE_ADDED: "tenant.person_note.added",
+  TENANT_PERSON_DEMOGRAPHICS_UPDATED: "tenant.person_demographics.updated",
+  TENANT_PERSON_MEDICAL_UPDATED: "tenant.person_medical.updated",
+  TENANT_PERSON_DISABILITY_SET: "tenant.person_disability.set",
   // Role & permissions administration (docs/work-log/
   // 2026-08-26-role-permissions-admin.md, DECISION-106/109) — written from
   // src/app/(org)/o/[slug]/admin/roles/new/actions.ts and

@@ -41,6 +41,17 @@ export const ORG_FEATURE_CATALOG = [
     description:
       "Lets this congregation's admins create people and approve roll actions.",
   },
+  // Member edit: tiered sensitive information (docs/work-log/
+  // 2026-08-26-member-sensitive-info.md, Phase 3/DECISION-108). A DEDICATED
+  // key, NOT reusing org_portal.members_create — that flag's kill switch
+  // covers person/roll creation, a materially different risk profile than
+  // leaking pastoral/medical/demographic data to the wrong role.
+  {
+    key: "org_portal.sensitive_info",
+    name: "Tiered sensitive information",
+    description:
+      "Lets this congregation enter pastoral notes, demographics, medical/allergy info, and disability records for its members, subject to each viewer's own tier-3 permission grants.",
+  },
 ] as const;
 
 export type OrgFeatureKey = (typeof ORG_FEATURE_CATALOG)[number]["key"];

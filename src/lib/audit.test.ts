@@ -141,6 +141,13 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Tenant-facing brand editor (2026-08-26, tenant-branding-permission) —
   // written from src/app/(org)/o/[slug]/admin/branding/actions.ts
   TENANT_BRAND_SET: "tenant.brand.set",
+  // Member edit: tiered sensitive information (2026-08-26,
+  // member-sensitive-info, DECISION-108) — written from
+  // src/lib/person-sensitive.ts
+  TENANT_PERSON_NOTE_ADDED: "tenant.person_note.added",
+  TENANT_PERSON_DEMOGRAPHICS_UPDATED: "tenant.person_demographics.updated",
+  TENANT_PERSON_MEDICAL_UPDATED: "tenant.person_medical.updated",
+  TENANT_PERSON_DISABILITY_SET: "tenant.person_disability.set",
   // Role & permissions administration (2026-08-26,
   // role-permissions-admin, DECISION-106/109) — written from
   // src/app/(org)/o/[slug]/admin/roles/new/actions.ts and

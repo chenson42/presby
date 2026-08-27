@@ -104,6 +104,12 @@ Unlisted is not brandable — it's a missing classification, and it fails a test
 <div className="rounded-lg border border-border p-4">…</div>
 ```
 
+The generated `<Input>` and `<Textarea>` primitives carry `border-input bg-background`
+natively (a recorded divergence from the shadcn upstream's `bg-transparent` — see each
+file's header and `docs/work-log/2026-08-27-input-background-standard.md`), so never
+re-add `bg-background` in a caller's `className`; the recipe above is for raw elements
+only.
+
 **Never write a Tailwind palette literal** — `bg-blue-600`, `text-amber-700`, `border-green-500`, `dark:text-red-300`, and so on. If you need a color that isn't one of the tokens above, that's a missing token and a design decision, not a class string to reach for. Raise it — status chips (success/warning/info) are the known gap here (tracked in `docs/TODO.md`); everything else routes through the tokens.
 
 ---

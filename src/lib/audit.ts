@@ -146,6 +146,45 @@ export const AUDIT_ACTIONS = {
   // tenant-side neutralize key exists or should be built — neutralize stays
   // platform-only (DECISION-101).
   TENANT_BRAND_SET: "tenant.brand.set",
+  // Role & permissions administration (docs/work-log/
+  // 2026-08-26-role-permissions-admin.md, DECISION-106/109) — written from
+  // src/app/(org)/o/[slug]/admin/roles/new/actions.ts and
+  // src/app/(org)/o/[slug]/admin/roles/[id]/edit/actions.ts. A DISTINCT
+  // `tenant.role_definition.*` prefix from TENANT_ROLE_GRANTED/REVOKED's
+  // `tenant.role.*` — assignment (who holds a role) and definition (what a
+  // role contains) are two different axes (DECISION-106), and collapsing
+  // the audit prefix would collapse the one signal an eventual tenant audit
+  // reader needs to tell them apart.
+  ROLE_DEFINITION_CREATED: "tenant.role_definition.created",
+  // Metadata: { organizationId, roleKey, permissionKeys }.
+  ROLE_DEFINITION_PERMISSIONS_CHANGED: "tenant.role_definition.permissions_changed",
+  // Metadata: { organizationId, addedKeys, removedKeys, holderCount } —
+  // holderCount is Phase 1 Flow 3's explicit ask: editing a role's bindings
+  // retroactively changes what every CURRENT holder can do, with no new
+  // role_grants row of its own, so the audit event carries the affected
+  // count rather than leaving it implicit.
+  ROLE_DEFINITION_DEACTIVATED: "tenant.role_definition.deactivated",
+  // Metadata: { organizationId, endedGrantCount } — deactivation also ends
+  // every live role_grants row pointing at the role in the same
+  // transaction (DECISION-109 finding 3); endedGrantCount records how many.
+  ROLE_DEFINITION_ADOPTED_FROM_TEMPLATE: "tenant.role_definition.adopted_from_template",
+  // Metadata: { organizationId, roleKey, templateRoleId, templateKey }.
+  // Groups administration (docs/work-log/2026-08-26-groups-admin.md, Phase 3/
+  // 4 commit 2) — written from
+  // src/app/(org)/o/[slug]/admin/groups/actions.ts. `role_grants.group_id`
+  // can bind a role to any group, managed or derived — adding/removing a
+  // person from a managed group that happens to carry a role grant is a de
+  // facto access change, so these are audited like
+  // OFFICER_TERM_STARTED/ENDED even though the written row is
+  // groups/group_memberships, not officer_terms.
+  GROUP_CREATED: "tenant.group.created",
+  // Metadata: { organizationId, groupTypeId, name }.
+  GROUP_UPDATED: "tenant.group.updated",
+  // Metadata: { organizationId, groupId, name }.
+  GROUP_MEMBER_ADDED: "tenant.group_membership.added",
+  // Metadata: { organizationId, groupId, personId, groupRole, startsOn }.
+  GROUP_MEMBER_ENDED: "tenant.group_membership.ended",
+  // Metadata: { organizationId, groupId, personId, groupName, endsOn }.
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

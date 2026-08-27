@@ -141,6 +141,22 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Tenant-facing brand editor (2026-08-26, tenant-branding-permission) —
   // written from src/app/(org)/o/[slug]/admin/branding/actions.ts
   TENANT_BRAND_SET: "tenant.brand.set",
+  // Role & permissions administration (2026-08-26,
+  // role-permissions-admin, DECISION-106/109) — written from
+  // src/app/(org)/o/[slug]/admin/roles/new/actions.ts and
+  // src/app/(org)/o/[slug]/admin/roles/[id]/edit/actions.ts
+  ROLE_DEFINITION_CREATED: "tenant.role_definition.created",
+  ROLE_DEFINITION_PERMISSIONS_CHANGED:
+    "tenant.role_definition.permissions_changed",
+  ROLE_DEFINITION_DEACTIVATED: "tenant.role_definition.deactivated",
+  ROLE_DEFINITION_ADOPTED_FROM_TEMPLATE:
+    "tenant.role_definition.adopted_from_template",
+  // Groups administration (2026-08-26, groups-admin) — written from
+  // src/app/(org)/o/[slug]/admin/groups/actions.ts
+  GROUP_CREATED: "tenant.group.created",
+  GROUP_UPDATED: "tenant.group.updated",
+  GROUP_MEMBER_ADDED: "tenant.group_membership.added",
+  GROUP_MEMBER_ENDED: "tenant.group_membership.ended",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

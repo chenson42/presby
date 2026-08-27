@@ -168,7 +168,7 @@ function TimeRowsEditor({
                   onChange={(e) =>
                     updateRow(row.key, { dayOfWeek: Number(e.target.value) })
                   }
-                  className="h-9 appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="h-9 appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-base shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   {DAY_LABELS.map((label, i) => (
                     <option key={label} value={i}>

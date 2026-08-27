@@ -67,4 +67,31 @@ describe("ButtonGroup", () => {
     const svg = screen.getByRole("link", { name: "Members" }).querySelector("svg");
     expect(svg?.getAttribute("aria-hidden")).toBe("true");
   });
+
+  it("suppresses the shadow treatment on an inactive (outline) segment, so a connected row doesn't independently float on hover (docs/work-log/2026-08-27-button-modernization.md Phase 3(d))", () => {
+    render(<ButtonGroup items={ITEMS} aria-label="Directory view" />);
+
+    // "Households" is the inactive item — it renders variant="outline",
+    // which now carries `shadow-xs hover:shadow-sm` from the Button
+    // primitive. Pin that the group's own `shadow-none hover:shadow-none`
+    // override actually wins after twMerge, not just that the source string
+    // contains it — a bare `shadow-xs`/`hover:shadow-sm` surviving would mean
+    // the suppression silently lost the class-order fight.
+    const className = screen.getByRole("link", { name: "Households" }).className;
+    expect(className).toContain("shadow-none");
+    expect(className).toContain("hover:shadow-none");
+    expect(className).not.toContain("shadow-xs");
+    expect(className).not.toContain("hover:shadow-sm");
+  });
+
+  it("suppresses the shadow treatment on the active (default) segment too", () => {
+    render(<ButtonGroup items={ITEMS} aria-label="Directory view" />);
+
+    // "Members" is the active item — it renders variant="default", which now
+    // carries `shadow-xs hover:shadow-sm` from the Button primitive as well.
+    const className = screen.getByRole("link", { name: "Members" }).className;
+    expect(className).toContain("shadow-none");
+    expect(className).toContain("hover:shadow-none");
+    expect(className).not.toContain("hover:shadow-sm");
+  });
 });

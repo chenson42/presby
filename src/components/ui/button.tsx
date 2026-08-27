@@ -41,6 +41,45 @@
 //      plus `rounded-xl` (operator feedback, same day) — a noticeably
 //      rounder corner than the base variant's `rounded-md`, since `cn()`'s
 //      `twMerge` keeps the later same-group utility.
+//   5. Added `shadow-xs hover:shadow-sm` to `default` and `hover:shadow-sm` to
+//      `outline` (which already carried `shadow-xs`) — the DECISION-105 depth
+//      language, scaled down one Tailwind shadow step from `tile`'s
+//      `shadow-sm -> hover:shadow-lg` treatment because a control this much
+//      smaller than a tile would look garish at `tile`'s elevation
+//      (docs/work-log/2026-08-27-button-modernization.md Phase 3(d)). Scoped
+//      to `default`/`outline` only, per operator feedback naming the search
+//      button and the default action row specifically; `destructive`,
+//      `secondary`, `ghost`, `link`, and `tile` are untouched — `tile` already
+//      has its own elevation treatment (#4 above).
+//      `src/components/shared/button-group.tsx` adds an explicit
+//      `shadow-none hover:shadow-none` override on its segment buttons so a
+//      connected row of `outline` segments doesn't independently float on
+//      hover — see that file's own comment.
+//   6. Replaced `disabled:opacity-50` with `disabled:bg-muted
+//      disabled:text-muted-foreground` in the shared `base` cva string
+//      (`disabled:pointer-events-none` kept as-is). `disabled:opacity-50`
+//      over a brand fill reads as a muddy, washed-out version of the brand
+//      color rather than "this control is off" — a standing D5 violation
+//      ("invisible to a 78-year-old").
+//      `muted`/`muted-foreground` is an existing platform-fixed LEGAL_PAIRS
+//      entry (7:1, `derives: D1`) — zero contract changes, disabled is a
+//      state, not an identity, same reasoning D6 already applies to
+//      `destructive`. Because this lands at `base` it reaches every variant
+//      uniformly, not just `default`: `outline`/`ghost`/`tile` previously had
+//      no solid disabled fill (just 50% opacity over whatever was already
+//      there) and now show a flat `bg-muted` box; `link`'s disabled state
+//      similarly gains a filled rectangle behind its text where today it has
+//      none. Intended and uniform, not scope creep (Phase 3(c)).
+//   7. 2026-08-27 (docs/work-log/2026-08-27-control-legibility.md, operator
+//      feedback on three live mockups — "i wonder if the font needs to be
+//      bigger or bolder on the buttons for older people?"): the shared
+//      `base` cva string's `text-sm` (14px) → `text-base` (16px) and
+//      `font-medium` (500) → `font-semibold` (600). Lands at `base`, so it
+//      reaches every variant including `tile`. None of the `size` variants
+//      (`sm`/`lg`/`icon`) declare their own text-size utility — they only
+//      set height/padding/gap — so all three inherit the new 16px/600 from
+//      `base` unchanged; no proportional bump was needed because there was
+//      no existing per-size override to reconcile.
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import * as Slot from "@radix-ui/react-slot"
@@ -48,15 +87,15 @@ import * as Slot from "@radix-ui/react-slot"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-base font-semibold whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs hover:shadow-sm",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         outline:
-          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border bg-background shadow-xs hover:shadow-sm hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost:

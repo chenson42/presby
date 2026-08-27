@@ -100,9 +100,13 @@ Unlisted is not brandable — it's a missing classification, and it fails a test
 - A border that **separates content** (a card edge, a table rule, a divider between sections) uses `border`. It's decorative, not informational, and carries no contrast floor.
 
 ```tsx
-<input className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+<input className="rounded-md border border-input bg-background px-3 py-2 text-base" />
 <div className="rounded-lg border border-border p-4">…</div>
 ```
+
+`text-base` (16px), not `text-sm` — the operator legibility decision
+(docs/work-log/2026-08-27-control-legibility.md): every real form control
+(input, textarea, select) reads at 16px everywhere, not just on mobile.
 
 The generated `<Input>` and `<Textarea>` primitives carry `border-input bg-background`
 natively (a recorded divergence from the shadcn upstream's `bg-transparent` — see each
@@ -353,7 +357,7 @@ export function MyForm({ initialValue }: { initialValue: string }) {
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-base"
         />
       </div>
       <button
@@ -461,7 +465,7 @@ Every select and filter control in the app (`(admin)/admin/feedback/feedback-sta
 ```tsx
 <div className="relative">
   <select
-    className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm"
+    className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base"
     value={value}
     onChange={(e) => setValue(e.target.value)}
   >
@@ -475,6 +479,10 @@ Every select and filter control in the app (`(admin)/admin/feedback/feedback-sta
   />
 </div>
 ```
+
+`text-base`, not `text-sm` — the same 2026-08-27 operator legibility decision
+noted above; a select sitting next to a bordered `<Input>` in a filter row
+reads at the same size as the input now, not one step smaller.
 
 Always give it an associated `<label>`; use `"none"` (or another non-empty string) as the sentinel for "no selection," never `""` — a native `<select>` treats an empty-string option value the same as no `value` attribute at all, which breaks controlled-component behavior.
 

@@ -17,6 +17,13 @@ import { cn } from "@/lib/utils";
  * end corners), and this is link navigation, not toggleable state a real
  * toggle-group primitive exists to manage. No new dependency for a look
  * `Button` already gets most of the way to.
+ *
+ * Each item overrides `shadow-none hover:shadow-none` (docs/work-log/
+ * 2026-08-27-button-modernization.md Phase 3(d)): once `Button`'s `outline`
+ * variant gained `hover:shadow-sm`, every inactive segment in this connected
+ * row would independently float on hover, breaking the "one control, no
+ * gaps" look this component exists to produce. Same mechanism the group
+ * already uses to zero out `border` before re-adding `border-l`.
  */
 export interface ButtonGroupItem {
   key: string;
@@ -52,7 +59,7 @@ export function ButtonGroup({
           variant={item.active ? "default" : "outline"}
           size="sm"
           className={cn(
-            "min-h-11 rounded-none border-0",
+            "min-h-11 rounded-none border-0 shadow-none hover:shadow-none",
             index > 0 && "border-l border-border",
           )}
         >

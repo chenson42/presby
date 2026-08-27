@@ -5,6 +5,12 @@
  * it returns? The action's own zero/one/many/forbidden branching is tested
  * in `find-person-action.test.ts`, unmocked here on purpose — this file
  * only proves the wiring between the two.
+ *
+ * Also pins the home/members search-bar parity fix
+ * (docs/work-log/2026-08-27-control-legibility.md): the query field is the
+ * `<Input>` primitive, not a hand-rolled `<input>` — regression coverage for
+ * the measured delta (missing `shadow-xs`, divergent focus ring) between the
+ * home search row and the members/directory search rows.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -28,6 +34,13 @@ afterEach(() => {
 });
 
 describe("FindPersonForm", () => {
+  it("uses the Input primitive (shadow-xs) for the query field — regression for home/members search-bar parity", () => {
+    render(<FindPersonForm slug="alder-creek" />);
+    const className = screen.getByRole("searchbox").className;
+    expect(className).toContain("shadow-xs");
+    expect(className).toContain("min-h-11");
+  });
+
   it("does not call the action for a blank query", () => {
     render(<FindPersonForm slug="alder-creek" />);
     fireEvent.submit(screen.getByRole("searchbox").closest("form")!);

@@ -23,7 +23,7 @@ import {
 // manual chevron every select on this page now renders — see
 // `directory-grid.tsx`'s status select for the reference implementation.
 const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 const NOTE_TYPES = [
   { value: "general", label: "General" },

@@ -180,7 +180,7 @@ export default async function AdminAuditPage({
               id="action-select"
               name="action"
               defaultValue={validAction ?? ""}
-              className="appearance-none rounded-md border border-input bg-background px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="appearance-none rounded-md border border-input bg-background px-3 py-1.5 pr-8 text-base focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">All actions</option>
               {ACTION_GROUPS.map(({ label, prefix }) => {

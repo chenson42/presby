@@ -109,7 +109,7 @@ export function CreateOrganizationForm() {
             id="organizationType"
             name="organizationType"
             defaultValue="congregation"
-            className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-base shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             {ORG_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -131,7 +131,7 @@ export function CreateOrganizationForm() {
             id="platformStatus"
             name="platformStatus"
             defaultValue="managed"
-            className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-base shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             {PLATFORM_STATUSES.map((s) => (
               <option key={s} value={s} className="capitalize">

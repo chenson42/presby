@@ -52,7 +52,7 @@ export function AssignControl({
         onChange={handleChange}
         disabled={isPending}
         aria-label="Update ticket assignee"
-        className="w-full appearance-none rounded-md border border-input bg-background px-2 py-1.5 pr-8 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+        className="w-full appearance-none rounded-md border border-input bg-background px-2 py-1.5 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
       >
         <option value={UNASSIGNED}>Unassigned</option>
         {operators.map((operator) => (

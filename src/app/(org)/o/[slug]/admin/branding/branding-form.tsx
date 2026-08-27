@@ -238,7 +238,7 @@ export function BrandingForm({
               onChange={(e) =>
                 setTypePairing(e.target.value as TypePairingKey)
               }
-              className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="h-9 w-full appearance-none rounded-md border border-input bg-transparent px-3 pr-8 text-base shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               {TYPE_PAIRINGS.map((p) => (
                 <option key={p.key} value={p.key}>

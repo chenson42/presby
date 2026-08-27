@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { findPersonAction } from "@/app/(org)/o/[slug]/find-person-action";
 
@@ -48,14 +49,14 @@ export function FindPersonForm({ slug }: { slug: string }) {
     >
       <div className="flex-1">
         <Label htmlFor="find-person-query">Find a person</Label>
-        <input
+        <Input
           id="find-person-query"
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Name, email, or phone"
           disabled={isPending}
-          className="mt-1 min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+          className="mt-1 min-h-11"
         />
       </div>
       <Button

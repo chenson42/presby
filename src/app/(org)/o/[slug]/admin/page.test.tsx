@@ -55,7 +55,31 @@ vi.mock("@/lib/flags", () => ({
 }));
 
 const visiblePortalTiles = vi.fn();
+// DOMAIN_LABELS/DOMAIN_ORDER (DECISION-117, commit 2): this page now renders
+// `DomainTileSections`, which imports the REAL runtime values from this same
+// module — mocked here with the same literals `tiles.ts` declares
+// (independently pinned by `tiles.test.ts`'s own shape assertion), since
+// `visiblePortalTiles` is mocked in this file and mocking a module replaces
+// ALL of its exports, not just the one named.
 vi.mock("@/lib/org-portal/tiles", () => ({
+  DOMAIN_LABELS: {
+    people: "People & Membership",
+    worship: "Worship & Events",
+    giving: "Giving & Finance",
+    governance: "Governance & Courts",
+    reports: "Reports & Insights",
+    communications: "Communications",
+    administration: "Administration",
+  },
+  DOMAIN_ORDER: [
+    "people",
+    "worship",
+    "giving",
+    "governance",
+    "reports",
+    "communications",
+    "administration",
+  ],
   visiblePortalTiles: (category: string, organizationType: string) =>
     visiblePortalTiles(category, organizationType),
 }));
@@ -96,6 +120,11 @@ const OK_RESOLVED = {
   },
 };
 
+// `domain` (DECISION-117, commit 2, docs/work-log/
+// 2026-08-27-product-ia-scaffold.md) added to each fixture — required for
+// `DomainTileSections` (which replaced `TileGrid` here in commit 2) to
+// bucket and render them at all; a tile with no matching domain bucket
+// simply never renders.
 const ADMINISTER_TILES = [
   {
     key: "members",
@@ -104,6 +133,7 @@ const ADMINISTER_TILES = [
     href: (slug: string) => `/o/${slug}/admin/members`,
     flagKey: "org_portal.members_create",
     category: "administer" as const,
+    domain: "people" as const,
   },
   {
     key: "roles",
@@ -112,6 +142,7 @@ const ADMINISTER_TILES = [
     href: (slug: string) => `/o/${slug}/admin/roles`,
     flagKey: "org_portal.roles",
     category: "administer" as const,
+    domain: "administration" as const,
   },
   {
     key: "officers",
@@ -120,6 +151,7 @@ const ADMINISTER_TILES = [
     href: (slug: string) => `/o/${slug}/admin/officers`,
     flagKey: "org_portal.officers",
     category: "administer" as const,
+    domain: "governance" as const,
   },
   {
     key: "features",
@@ -129,6 +161,7 @@ const ADMINISTER_TILES = [
     href: (slug: string) => `/o/${slug}/admin/features`,
     flagKey: "org_portal.features",
     category: "administer" as const,
+    domain: "administration" as const,
   },
 ];
 
@@ -233,6 +266,28 @@ describe("AdminHubPage — non-negotiable acceptance criterion: no permission pr
     render(el);
 
     expect(screen.getAllByRole("link")).toHaveLength(1);
+  });
+});
+
+describe("AdminHubPage — domain sections (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md, DECISION-117)", () => {
+  it("renders domain section headings, applied uniformly, grouping the returned administer tiles", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    visiblePortalTiles.mockResolvedValue(ADMINISTER_TILES);
+
+    const el = await AdminHubPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByRole("heading", { name: "People & Membership" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Governance & Courts" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Administration" }),
+    ).toBeTruthy();
   });
 });
 

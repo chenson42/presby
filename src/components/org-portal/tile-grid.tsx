@@ -1,12 +1,18 @@
 import Link from "next/link";
 import {
+  BarChart3,
   BookOpen,
   ChevronRight,
+  FileBarChart,
+  Gavel,
+  HandCoins,
   LayoutGrid,
   Landmark,
-  MessageSquare,
+  Megaphone,
+  Music,
   Palette,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Ticket,
   UserPlus,
@@ -30,6 +36,13 @@ import type { PortalTile } from "@/lib/org-portal/tiles";
  * back to the same `LayoutGrid` glyph — indistinguishable in the grid.
  * `UsersRound` and `Palette` are distinct, semantically-fitting glyphs
  * already available from `lucide-react`; no new dependency.
+ *
+ * The 7 product-IA placeholder tiles (docs/work-log/
+ * 2026-08-27-product-ia-scaffold.md, DECISION-117, commit 2) each get their
+ * own distinct glyph too, same rationale — no new dependency, all already
+ * available from `lucide-react`. `feedback: MessageSquare` is REMOVED, not
+ * just left stale: the `feedback` tile no longer exists in `PORTAL_TILES`
+ * (mid-design operator correction, §6 of the same work-log).
  */
 const TILE_ICONS: Record<string, LucideIcon> = {
   members: UserPlus,
@@ -37,17 +50,32 @@ const TILE_ICONS: Record<string, LucideIcon> = {
   roles: Settings,
   officers: Landmark,
   tickets: Ticket,
-  feedback: MessageSquare,
   features: SlidersHorizontal,
   groups: UsersRound,
   branding: Palette,
+  giving: HandCoins,
+  worship: Music,
+  committees: Gavel,
+  oversight: ShieldCheck,
+  reports: FileBarChart,
+  insights: BarChart3,
+  communications: Megaphone,
 };
 
 /**
- * The gated tool-tile grid. Renders nothing (not an empty section) when
- * every flag behind `tiles` is off, per Phase 3's edge case: "all tile
- * flags off → home renders greeting + search only." 360px: single column,
- * per Phase 3's mobile note; `sm:` widens to two.
+ * The gated tool-tile grid — BARE CARD GRID ONLY, no heading, no `<section>`
+ * wrapper of its own. Commit 2 of docs/work-log/
+ * 2026-08-27-product-ia-scaffold.md (Phase 3 §7) lifted the previous
+ * `<section aria-labelledby>`/`<h2>Tools</h2>` wrapper out of this component
+ * and into the caller: `DomainTileSections` now owns the labeled `<section
+ * id="domain-<key>">` + `<h2>{DOMAIN_LABELS[domain]}</h2>` chrome for every
+ * caller (the home page and the admin hub), because a domain-grouped page
+ * renders SEVERAL of these grids, each under its own domain heading — a
+ * second, hardcoded "Tools" heading per grid would be wrong now. Renders
+ * `null` (not an empty div) when every flag behind `tiles` is off, per
+ * Phase 3's edge case: "all tile flags off → home renders greeting + search
+ * only." 360px: single column, per Phase 3's mobile note; `sm:` widens to
+ * two.
  *
  * ELEVATED CARD, ICON BADGE (docs/work-log/2026-08-26-portal-visual-
  * modernization.md Phase 3 / DECISION-104, revised same day on direct
@@ -77,40 +105,35 @@ export function TileGrid({
   if (tiles.length === 0) return null;
 
   return (
-    <section aria-labelledby="tile-grid-heading" className="space-y-3">
-      <h2 id="tile-grid-heading" className="text-xl font-semibold">
-        Tools
-      </h2>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {tiles.map((tile) => {
-          const Icon = TILE_ICONS[tile.key] ?? LayoutGrid;
-          return (
-            <Button
-              key={tile.key}
-              asChild
-              variant="tile"
-              size="lg"
-              className="group h-auto w-full min-h-11 gap-3 p-5"
-            >
-              <Link href={tile.href(slug)}>
-                <span className="flex items-center justify-center rounded-xl bg-primary/10 p-2 text-primary">
-                  <Icon className="size-5 shrink-0" aria-hidden />
-                </span>
-                <h3 className="text-lg font-semibold text-card-foreground">
-                  {tile.label}
-                </h3>
-                <p className="text-base text-muted-foreground">
-                  {tile.description}
-                </p>
-                <ChevronRight
-                  className="mt-auto size-4 self-end text-muted-foreground transition-transform group-hover:translate-x-0.5"
-                  aria-hidden
-                />
-              </Link>
-            </Button>
-          );
-        })}
-      </div>
-    </section>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {tiles.map((tile) => {
+        const Icon = TILE_ICONS[tile.key] ?? LayoutGrid;
+        return (
+          <Button
+            key={tile.key}
+            asChild
+            variant="tile"
+            size="lg"
+            className="group h-auto w-full min-h-11 gap-3 p-5"
+          >
+            <Link href={tile.href(slug)}>
+              <span className="flex items-center justify-center rounded-xl bg-primary/10 p-2 text-primary">
+                <Icon className="size-5 shrink-0" aria-hidden />
+              </span>
+              <h3 className="text-lg font-semibold text-card-foreground">
+                {tile.label}
+              </h3>
+              <p className="text-base text-muted-foreground">
+                {tile.description}
+              </p>
+              <ChevronRight
+                className="mt-auto size-4 self-end text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                aria-hidden
+              />
+            </Link>
+          </Button>
+        );
+      })}
+    </div>
   );
 }

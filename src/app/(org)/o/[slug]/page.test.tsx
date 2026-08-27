@@ -59,8 +59,27 @@ vi.mock("@/lib/org-portal/tiles", () => ({
     visiblePortalTiles(category, organizationType),
 }));
 
+const getFeedbackPromptState = vi.fn();
+const shouldShowFeedbackPrompt = vi.fn();
+vi.mock("@/lib/feedback-prompt", () => ({
+  getFeedbackPromptState: (...args: unknown[]) => getFeedbackPromptState(...args),
+  shouldShowFeedbackPrompt: (...args: unknown[]) => shouldShowFeedbackPrompt(...args),
+}));
+
 vi.mock("@/components/org-portal/find-person-form", () => ({
   FindPersonForm: () => null,
+}));
+
+const domainTileSectionsSpy = vi.fn();
+vi.mock("@/components/org-portal/domain-tile-sections", () => ({
+  DomainTileSections: (props: unknown) => {
+    domainTileSectionsSpy(props);
+    return null;
+  },
+}));
+
+vi.mock("@/components/shared/feedback-prompt-card", () => ({
+  FeedbackPromptCard: () => <div data-testid="feedback-prompt-card-stub" />,
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -85,6 +104,9 @@ afterEach(() => {
   isFlagEnabled.mockReset();
   getPortalHomeData.mockReset();
   visiblePortalTiles.mockReset().mockResolvedValue([]);
+  getFeedbackPromptState.mockReset().mockResolvedValue(null);
+  shouldShowFeedbackPrompt.mockReset().mockReturnValue(false);
+  domainTileSectionsSpy.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -208,6 +230,83 @@ describe("OrgPage — org_portal.home_v2 ON", () => {
     await expect(OrgPage({ params: makeParams() })).rejects.toThrow(
       "mock: no active membership",
     );
+  });
+});
+
+describe("OrgPage — DomainTileSections wiring (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md, DECISION-117)", () => {
+  it("passes the resolved slug and visiblePortalTiles() result straight through to DomainTileSections", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.home_v2");
+    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    const tiles = [{ key: "directory" }];
+    visiblePortalTiles.mockResolvedValue(tiles);
+
+    const el = await OrgPage({ params: makeParams() });
+    render(el);
+
+    expect(domainTileSectionsSpy).toHaveBeenCalledWith({
+      slug: "alder-creek",
+      tiles,
+    });
+  });
+});
+
+describe("OrgPage — feedback prompt card (mid-design operator correction, §6b)", () => {
+  it("renders the feedback prompt card when org_portal.feedback is ON and shouldShowFeedbackPrompt() returns true", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockImplementation(
+      async (key: string) =>
+        key === "org_portal.home_v2" || key === "org_portal.feedback",
+    );
+    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    visiblePortalTiles.mockResolvedValue([]);
+    getFeedbackPromptState.mockResolvedValue(null);
+    shouldShowFeedbackPrompt.mockReturnValue(true);
+
+    const el = await OrgPage({ params: makeParams() });
+    render(el);
+
+    expect(getFeedbackPromptState).toHaveBeenCalledWith("u1");
+    expect(screen.getByTestId("feedback-prompt-card-stub")).toBeTruthy();
+  });
+
+  it("omits the feedback prompt card when org_portal.feedback is OFF, even if shouldShowFeedbackPrompt() would return true", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.home_v2");
+    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    visiblePortalTiles.mockResolvedValue([]);
+    getFeedbackPromptState.mockResolvedValue(null);
+    shouldShowFeedbackPrompt.mockReturnValue(true);
+
+    const el = await OrgPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.queryByTestId("feedback-prompt-card-stub")).toBeNull();
+  });
+
+  it("omits the feedback prompt card when org_portal.feedback is ON but shouldShowFeedbackPrompt() returns false (snoozed/submitted/opted-out today)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockImplementation(
+      async (key: string) =>
+        key === "org_portal.home_v2" || key === "org_portal.feedback",
+    );
+    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    visiblePortalTiles.mockResolvedValue([]);
+    getFeedbackPromptState.mockResolvedValue({
+      optedOut: false,
+      lastSnoozedDate: "2026-08-27",
+      lastSubmittedDate: null,
+    });
+    shouldShowFeedbackPrompt.mockReturnValue(false);
+
+    const el = await OrgPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.queryByTestId("feedback-prompt-card-stub")).toBeNull();
   });
 });
 

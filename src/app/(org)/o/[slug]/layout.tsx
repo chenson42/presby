@@ -90,14 +90,23 @@ export default async function OrgSlugLayout({
   let showFooter = false;
   let footerProfile: OrgProfileForFooter | null = null;
   let footerOrgName = "";
+  // Feedback relocation (docs/work-log/2026-08-27-product-ia-scaffold.md
+  // §6a, DECISION-117): computed alongside chrome_v2/chrome_v3, only inside
+  // the SAME `resolved.kind === "ok"` branch those already use — every
+  // other outcome (forbidden/ended/not-found/no-session) leaves this
+  // `undefined`, matching orgBrand/orgMark/showPortalNav's own discipline.
+  let feedbackHref: string | undefined;
   if (session?.user) {
-    const [resolved, chromeV2Enabled, chromeV3Enabled] = await Promise.all([
-      resolveOrgContext(session.user.id, slug),
-      isFlagEnabled("org_portal.chrome_v2"),
-      isFlagEnabled("org_portal.chrome_v3"),
-    ]);
+    const [resolved, chromeV2Enabled, chromeV3Enabled, feedbackEnabled] =
+      await Promise.all([
+        resolveOrgContext(session.user.id, slug),
+        isFlagEnabled("org_portal.chrome_v2"),
+        isFlagEnabled("org_portal.chrome_v3"),
+        isFlagEnabled("org_portal.feedback"),
+      ]);
     if (resolved.kind === "ok") {
       orgOrganizationType = resolved.org.organizationType;
+      feedbackHref = feedbackEnabled ? `/o/${slug}/feedback` : undefined;
       // BOTH ids from the SAME resolution, not `session.user.id` — see
       // read-org-brand.ts's header comment for why that distinction is
       // load-bearing (`users.id` vs. `people.id`) and not a style choice.
@@ -140,6 +149,7 @@ export default async function OrgSlugLayout({
             contentWidthClassName="max-w-6xl"
             orgMark={orgMark}
             signOutRedirectTo={`/site/${slug}`}
+            feedbackHref={feedbackHref}
           />
           {showPortalNav && orgOrganizationType ? (
             <PortalNav slug={slug} organizationType={orgOrganizationType} />

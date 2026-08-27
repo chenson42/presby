@@ -5,13 +5,18 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
+import {
+  getFeedbackPromptState,
+  shouldShowFeedbackPrompt,
+} from "@/lib/feedback-prompt";
 import { isFlagEnabled } from "@/lib/flags";
 import { getPortalHomeData } from "@/lib/org-portal/home-data";
 import { visiblePortalTiles } from "@/lib/org-portal/tiles";
 import { Greeting } from "@/components/org-portal/greeting";
 import { FindPersonForm } from "@/components/org-portal/find-person-form";
 import { YoursZone } from "@/components/org-portal/yours-zone";
-import { TileGrid } from "@/components/org-portal/tile-grid";
+import { DomainTileSections } from "@/components/org-portal/domain-tile-sections";
+import { FeedbackPromptCard } from "@/components/shared/feedback-prompt-card";
 import {
   OrgAccessDenied,
   OrgAccessEnded,
@@ -51,6 +56,29 @@ import {
  * path is default; until then both coexist") — this pipeline does not flip
  * the flag on, so nothing here changes what a fork sees until a later
  * increment turns it on.
+ *
+ * DOMAIN-SECTIONED TILE GRID (commit 2, docs/work-log/
+ * 2026-08-27-product-ia-scaffold.md, Phase 3, DECISION-117): the flat
+ * `TileGrid` this page rendered directly is replaced with
+ * `DomainTileSections`, which buckets the same `visiblePortalTiles("operate",
+ * ...)` result into labeled `<section id="domain-<key>">`s that
+ * `portal-nav.tsx`'s domain-anchor entries scroll to. No change to WHICH
+ * tiles are visible — only how they're grouped on the page.
+ *
+ * FEEDBACK-PROMPT CARD, LAST CHILD (mid-design operator correction, §6b of
+ * the same work-log): the platform's existing dismissible daily prompt card
+ * (`src/components/shared/feedback-prompt-card.tsx`, moved here unmodified
+ * from `(member)/home/`) renders at the bottom of this page, mirroring
+ * `/home`'s own bottom placement — gated on `org_portal.feedback` AND the
+ * shared `shouldShowFeedbackPrompt()` suppression rule (opted out / snoozed
+ * today / submitted today), using the SAME two functions `/home` calls
+ * (`src/lib/feedback-prompt.ts`). `getFeedbackPromptState()` is keyed by the
+ * signed-in user's own `session.user.id` (a platform-wide `users.id`), NOT
+ * `resolved.org.personId` — the org-scoped person id is a different id
+ * space `feedbackPromptState` does not recognize. Flag OFF or
+ * daily-suppressed → renders nothing: a passive nudge widget that
+ * disappears is not a "coming soon" stub, it's just absent, matching
+ * `/home`'s own existing behavior.
  */
 export default async function OrgPage({
   params,
@@ -141,6 +169,17 @@ export default async function OrgPage({
 
   const tiles = await visiblePortalTiles("operate", resolved.org.organizationType);
 
+  // Feedback prompt (mid-design operator correction, §6b): flag-gated AND
+  // suppressed by the same shared rule /home applies. Keyed by the
+  // signed-in user's own users.id — NOT resolved.org.personId, a different
+  // id space feedbackPromptState does not recognize.
+  const [feedbackEnabled, promptState] = await Promise.all([
+    isFlagEnabled("org_portal.feedback"),
+    getFeedbackPromptState(session.user.id),
+  ]);
+  const showFeedbackPrompt =
+    feedbackEnabled && shouldShowFeedbackPrompt(promptState);
+
   return (
     <div className="space-y-8">
       <Greeting
@@ -149,7 +188,8 @@ export default async function OrgPage({
       />
       <FindPersonForm slug={resolved.org.slug} />
       <YoursZone slug={resolved.org.slug} household={homeData?.household ?? null} />
-      <TileGrid slug={resolved.org.slug} tiles={tiles} />
+      <DomainTileSections slug={resolved.org.slug} tiles={tiles} />
+      {showFeedbackPrompt && <FeedbackPromptCard />}
     </div>
   );
 }

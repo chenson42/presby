@@ -44,6 +44,7 @@ export async function GlobalNav({
   contentWidthClassName = "max-w-2xl",
   orgMark = null,
   signOutRedirectTo,
+  feedbackHref,
 }: {
   session: Session;
   /** Set inside `(org)`; the switcher renders this organization as current. */
@@ -65,6 +66,14 @@ export async function GlobalNav({
    * read (`getOrgMarkForLayout`) before handing this prop over.
    */
   orgMark?: { name: string; markSrc: string | null } | null;
+  /**
+   * Feedback relocation (docs/work-log/2026-08-27-product-ia-scaffold.md
+   * §6a, DECISION-117). Pure passthrough to `AvatarMenu` — same shape as
+   * `signOutRedirectTo`. Set ONLY by `(org)/o/[slug]/layout.tsx`, only when
+   * `org_portal.feedback` is ON and the slug resolved to an active
+   * relationship. GlobalNav does NOT gate on the flag itself.
+   */
+  feedbackHref?: string;
 }) {
   const userId = session.user.id;
 
@@ -146,6 +155,7 @@ export async function GlobalNav({
             canAccessAdmin={sessionCanAccessAdmin(session.user)}
             isPlatformAdmin={isPlatformAdmin}
             signOutRedirectTo={signOutRedirectTo}
+            feedbackHref={feedbackHref}
           />
         </nav>
       </div>

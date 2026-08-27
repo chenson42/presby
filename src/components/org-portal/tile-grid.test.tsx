@@ -13,6 +13,10 @@ const DIRECTORY_TILE: PortalTile = {
   href: (slug) => `/o/${slug}/directory`,
   flagKey: "org_portal.directory",
   category: "operate",
+  // docs/work-log/2026-08-27-product-ia-scaffold.md, DECISION-117: `domain`
+  // is now a required PortalTile field — mechanical fixture update, not a
+  // TileGrid feature change (that lands in commit 2).
+  domain: "people",
 };
 
 describe("TileGrid — tiles present", () => {
@@ -59,6 +63,7 @@ describe("TileGrid — tiles present", () => {
       href: (slug) => `/o/${slug}/future`,
       flagKey: "org_portal.future",
       category: "operate",
+      domain: "people",
     };
     render(<TileGrid slug="alder-creek" tiles={[futureTile]} />);
     const link = screen.getByRole("link", { name: /future tile/i });
@@ -74,6 +79,7 @@ describe("TileGrid — icon map (regression for M6, groups/branding sharing Layo
     href: (slug) => `/o/${slug}/admin/groups`,
     flagKey: "org_portal.groups",
     category: "operate",
+    domain: "people",
   };
   const BRANDING_TILE: PortalTile = {
     key: "branding",
@@ -82,6 +88,7 @@ describe("TileGrid — icon map (regression for M6, groups/branding sharing Layo
     href: (slug) => `/o/${slug}/admin/branding`,
     flagKey: "org_portal.branding",
     category: "administer",
+    domain: "administration",
   };
 
   it("gives Groups and Branding their own, distinct icon glyphs — not the same LayoutGrid fallback", () => {
@@ -111,5 +118,19 @@ describe("TileGrid — no tiles visible", () => {
     const { container } = render(<TileGrid slug="alder-creek" tiles={[]} />);
     expect(container.textContent).toBe("");
     expect(container.querySelector("section")).toBeNull();
+  });
+});
+
+describe("TileGrid — no internal heading/section wrapper (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md Phase 3 §7)", () => {
+  it("renders the bare card grid with no 'Tools' heading and no wrapping <section> — the caller (DomainTileSections) now owns that chrome", () => {
+    const { container } = render(
+      <TileGrid slug="alder-creek" tiles={[DIRECTORY_TILE]} />,
+    );
+
+    expect(screen.queryByRole("heading", { name: /tools/i })).toBeNull();
+    expect(container.querySelector("section")).toBeNull();
+    expect(container.querySelector("h2")).toBeNull();
+    // The grid itself is still there, unwrapped.
+    expect(container.querySelector(".grid")).toBeTruthy();
   });
 });

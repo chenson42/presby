@@ -508,6 +508,66 @@ async function seedFlags() {
         "Ministry credentials & pastoral appointments page in (org). OFF = /o/<slug>/admin/credentials renders 'isn't turned on yet' regardless of the viewer's credentials.manage grant.",
       enabled: false,
     },
+    // ============================================================
+    // PRODUCT-IA SCAFFOLD PLACEHOLDER FLAGS — SEEDED ON, TEMPORARILY.
+    // docs/work-log/2026-08-27-product-ia-scaffold.md (DECISION-117).
+    // Every flag below gates an inert "coming soon" stub — zero data reads,
+    // zero mutations (see coming-soon.tsx). Seeded ON *only* because presby
+    // has no real congregation on it yet and the operator wants the full
+    // roadmap visible in dev (Phase 1 Operator Answer 4, a deliberate,
+    // documented deviation from this codebase's usual "ships dark until the
+    // page lands" default).
+    //
+    // *** GO-LIVE GATE: BEFORE THE FIRST REAL CONGREGATION OR PRESBYTERY IS
+    // ONBOARDED, FLIP EVERY FLAG IN THIS BLOCK TO `enabled: false`. ***
+    // Tracked in docs/TODO.md ("Go-live: flip placeholder flags off," same
+    // commit). Do NOT remove a flag key when its real feature ships — flip
+    // it deliberately at that point and delete its entry from this block
+    // (the "one durable key across iterations" rule org_portal.home_v2/
+    // directory_v2 already established).
+    // ============================================================
+    {
+      key: "org_portal.giving",
+      description:
+        "Giving & fund-accounting placeholder area in (org). OFF = /o/<slug>/admin/giving renders 'isn't turned on yet'. ON with no feature built = 'coming soon' stub, not a working ledger.",
+      enabled: true, // GO-LIVE: false
+    },
+    {
+      key: "org_portal.worship",
+      description:
+        "Worship & service-planning placeholder area in (org). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
+      enabled: true, // GO-LIVE: false
+    },
+    {
+      key: "org_portal.committees",
+      description:
+        "Presbytery committees & commissions placeholder area in (org). Presbytery-scoped tile (orgTypeScope). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
+      enabled: true, // GO-LIVE: false
+    },
+    {
+      key: "org_portal.oversight",
+      description:
+        "Presbytery congregation-oversight placeholder area in (org). Presbytery-scoped tile (orgTypeScope), BLOCKED on Q1's cross-org RLS ruling before real work can start (docs/TODO.md). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
+      enabled: true, // GO-LIVE: false
+    },
+    {
+      key: "org_portal.reports",
+      description:
+        "Presbytery per-capita/SASR + data-imports placeholder area in (org). Presbytery-scoped tile (orgTypeScope), BLOCKED on a real publication mechanism before real work can start (docs/TODO.md). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
+      enabled: true, // GO-LIVE: false
+    },
+    {
+      key: "org_portal.insights",
+      description:
+        "Insights & analytics dashboards placeholder area in (org). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
+      enabled: true, // GO-LIVE: false
+    },
+    {
+      key: "org_portal.communications",
+      description:
+        "Communications placeholder area in (org). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
+      enabled: true, // GO-LIVE: false
+    },
   ];
   for (const f of defaults) {
     await db.insert(schema.featureFlags).values(f).onConflictDoNothing();

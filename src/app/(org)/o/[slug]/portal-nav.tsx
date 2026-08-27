@@ -1,5 +1,5 @@
 import { isFlagEnabled } from "@/lib/flags";
-import { visiblePortalTiles } from "@/lib/org-portal/tiles";
+import { DOMAIN_LABELS, DOMAIN_ORDER, visiblePortalTiles } from "@/lib/org-portal/tiles";
 import type { OrganizationType } from "@/lib/authz";
 import { PortalNavLinks, type PortalNavEntry } from "./portal-nav-links";
 
@@ -27,6 +27,40 @@ import { PortalNavLinks, type PortalNavEntry } from "./portal-nav-links";
  * points at the new `/o/<slug>/admin` hub, which itself lists every
  * `"administer"`-category tile behind its own flag check. This is the same
  * nav mechanism, not a second one.
+ *
+ * DOMAIN-ANCHOR ENTRIES REPLACE THE OLD ONE-ENTRY-PER-TILE ROW (commit 2 of
+ * docs/work-log/2026-08-27-product-ia-scaffold.md, Phase 3 §4, DECISION-117
+ * — the architect's Phase 2 nav-scaling ruling). Instead of one nav entry
+ * per visible `"operate"` tile (unbounded as the tile universe grows), this
+ * computes ONE entry per `PortalDomain` that has at least one flag-visible
+ * `"operate"` tile for this org's type — a domain-anchor entry pointing at
+ * `/o/<slug>#domain-<key>`, landing on the matching `<section
+ * id="domain-<key>">` `DomainTileSections` renders on the home page. Nav
+ * entry count is now permanently capped at Home + up to 6 domain anchors +
+ * Administration, regardless of how many tiles any one domain accumulates
+ * in the future — the entire point of the architect's ruling, operator
+ * -accepted (shipped high-frequency tools moving from one click to two is a
+ * named, accepted tradeoff, not an oversight).
+ *
+ * THE `"administration"` DOMAIN IS EXCLUDED FROM THIS COMPUTATION, ALWAYS —
+ * see `tiles.ts`'s own `PortalDomain` comment for the full collision
+ * rationale. The nav's existing hardcoded "Administration" entry (below,
+ * unchanged) already owns that label and that destination
+ * (`/o/<slug>/admin`); a second, anchor-based "Administration" entry
+ * pointing at `/o/<slug>#domain-administration` would collide on the
+ * identical label with a different destination. No tile today actually
+ * forces this collision (every `"administration"`-domain tile is
+ * `category: "administer"`, so it never reaches `visiblePortalTiles
+ * ("operate", ...)` in the first place) — the exclusion is a standing rule
+ * for whoever adds the next tile, not an accident of today's data.
+ *
+ * EVERY DOMAIN-ANCHOR ENTRY IS `exact: true` — see `portal-nav-links.tsx`'s
+ * own `matchesEntry` comment for why: `usePathname()` never carries a
+ * `#fragment`, so an anchor entry's stripped target is always
+ * `/o/<slug>` itself, identical to Home's own target. Marking every anchor
+ * `exact` (not `false`) prevents that stripped target from being treated as
+ * a path PREFIX, which would otherwise make the entry read as "active" on
+ * every single subpage in the org.
  *
  * FLAG-ONLY, LIKE ITS DATA SOURCE. This component adds no permission check
  * of its own — the destination page remains the sole authority
@@ -58,12 +92,18 @@ export async function PortalNav({
     isFlagEnabled("org_portal.admin_hub"),
   ]);
 
+  const domainsPresent = DOMAIN_ORDER.filter(
+    (domain) =>
+      domain !== "administration" &&
+      tiles.some((tile) => tile.domain === domain),
+  );
+
   const entries: PortalNavEntry[] = [
     { label: "Home", href: `/o/${slug}`, exact: true },
-    ...tiles.map((tile) => ({
-      label: tile.label,
-      href: tile.href(slug),
-      exact: false,
+    ...domainsPresent.map((domain) => ({
+      label: DOMAIN_LABELS[domain],
+      href: `/o/${slug}#domain-${domain}`,
+      exact: true,
     })),
     ...(adminHubEnabled
       ? [{ label: "Administration", href: `/o/${slug}/admin`, exact: false }]

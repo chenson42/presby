@@ -42,6 +42,9 @@ const DIRECTORY_TILE: PortalTile = {
   href: (slug) => `/o/${slug}/directory`,
   flagKey: "org_portal.directory",
   category: "operate",
+  // docs/work-log/2026-08-27-product-ia-scaffold.md, DECISION-117: `domain`
+  // is now a required PortalTile field — mechanical fixture update.
+  domain: "people",
 };
 
 async function renderFooter(

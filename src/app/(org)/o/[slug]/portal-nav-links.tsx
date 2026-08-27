@@ -9,9 +9,14 @@ import { cn } from "@/lib/utils";
 export interface PortalNavEntry {
   label: string;
   href: string;
-  /** `true` for Home — matches only the exact pathname. Every other entry
-   * matches on `startsWith`, so a child route (e.g. `/directory/<id>`) still
-   * shows its section as active. */
+  /** `true` for Home and every domain-anchor entry (`#domain-<key>`) —
+   * matches only the exact (fragment-stripped) pathname. Anchor entries MUST
+   * be `exact: true`: their stripped target is `/o/<slug>` itself, identical
+   * to Home's, and a non-exact `startsWith` match against that target would
+   * read as "active" on every subpage in the org (docs/work-log/
+   * 2026-08-27-product-ia-scaffold.md Phase 3 §5). Every other entry matches
+   * on `startsWith`, so a child route (e.g. `/directory/<id>`) still shows
+   * its section as active. */
   exact: boolean;
 }
 
@@ -51,10 +56,22 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
     setOpen(false);
   }, [pathname]);
 
-  const matchesEntry = (entry: PortalNavEntry) =>
-    entry.exact
-      ? pathname === entry.href
-      : pathname === entry.href || pathname?.startsWith(`${entry.href}/`);
+  // HASH-STRIPPING (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md
+  // Phase 3 §5, DECISION-117). `usePathname()` NEVER includes a `#fragment`
+  // — Next's router doesn't expose it — so a domain-anchor entry's raw
+  // `href` (e.g. `/o/alpha#domain-people`) can never equal `pathname` as-is.
+  // Comparisons run against the href's PATH PORTION ONLY, with the fragment
+  // stripped; `<Link href={entry.href}>` below stays the raw, un-stripped
+  // href so the fragment survives into the actual navigation (the browser
+  // needs it to scroll) — only the MATCHING logic strips it.
+  const targetOf = (href: string) => href.split("#")[0]!;
+
+  const matchesEntry = (entry: PortalNavEntry) => {
+    const target = targetOf(entry.href);
+    return entry.exact
+      ? pathname === target
+      : pathname === target || pathname?.startsWith(`${target}/`);
+  };
 
   // MOST-SPECIFIC MATCH WINS, not "every entry whose href happens to be a
   // pathname prefix." Found live: several "operate" tiles route through
@@ -66,12 +83,37 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
   // algorithm most routers use for nested-route active state, means a more
   // specific route always shadows a shorter one that merely happens to share
   // its URL prefix — no per-tile special-casing needed here or in tiles.ts.
-  const activeHref = entries.reduce<string | null>((best, entry) => {
-    if (!matchesEntry(entry)) return best;
-    if (best === null || entry.href.length > best.length) return entry.href;
-    return best;
-  }, null);
-  const isEntryActive = (entry: PortalNavEntry) => entry.href === activeHref;
+  //
+  // THE SPECIFICITY TIE-BREAK USES THE STRIPPED TARGET'S LENGTH, NOT THE RAW
+  // HREF'S — an anchor entry's raw length is inflated by its `#fragment` and
+  // must not win a specificity contest it didn't earn on path length alone.
+  // Net effect on `/o/<slug>` itself: every domain-anchor entry strips to the
+  // identical target (`/o/<slug>`) as Home, so Home — listed first — wins
+  // every tie, and no domain anchor ever shows as independently "active."
+  // This is an accepted, named limitation (Phase 3 §5): `usePathname()`
+  // cannot see scroll position, and a client-side scroll-spy is out of scope
+  // (no new dependency).
+  //
+  // TRACKS THE WINNING ENTRY ITSELF, NOT JUST ITS STRIPPED TARGET STRING —
+  // a same-length tie between two DIFFERENT entries (Home and every domain
+  // anchor on `/o/<slug>` all strip to the identical target) must resolve to
+  // exactly ONE winner, the first one encountered (Home, listed first), not
+  // to "every entry whose stripped target happens to equal the winning
+  // string." Comparing by string equality alone would mark ALL of them
+  // active simultaneously on a length tie, which is not "Home wins" at all —
+  // this is the implementation correction that makes the prose guarantee
+  // above actually hold.
+  let activeEntry: PortalNavEntry | null = null;
+  let activeTargetLength = -1;
+  for (const entry of entries) {
+    if (!matchesEntry(entry)) continue;
+    const targetLength = targetOf(entry.href).length;
+    if (activeEntry === null || targetLength > activeTargetLength) {
+      activeEntry = entry;
+      activeTargetLength = targetLength;
+    }
+  }
+  const isEntryActive = (entry: PortalNavEntry) => entry === activeEntry;
 
   // The `border-b-2` accent (docs/work-log/
   // 2026-08-26-portal-visual-modernization.md Phase 3) is applied

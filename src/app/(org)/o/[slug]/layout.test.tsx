@@ -160,6 +160,55 @@ describe("OrgSlugLayout — org_portal.chrome_v2 OFF", () => {
   });
 });
 
+describe("OrgSlugLayout — feedbackHref (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md §6a, DECISION-117)", () => {
+  it("passes feedbackHref to GlobalNav only when org_portal.feedback is ON with an active relationship", async () => {
+    cachedAuth.mockResolvedValue(session());
+    resolveOrgContext.mockResolvedValue(RESOLVED_OK);
+    flagValues.set("org_portal.feedback", true);
+
+    await renderLayout();
+
+    expect(globalNavSpy.mock.calls[0][0].feedbackHref).toBe(
+      "/o/fixture/feedback",
+    );
+  });
+
+  it("passes feedbackHref: undefined when org_portal.feedback is OFF, even with an active relationship", async () => {
+    cachedAuth.mockResolvedValue(session());
+    resolveOrgContext.mockResolvedValue(RESOLVED_OK);
+    flagValues.set("org_portal.feedback", false);
+
+    await renderLayout();
+
+    expect(globalNavSpy.mock.calls[0][0].feedbackHref).toBeUndefined();
+  });
+
+  it.each([
+    ["forbidden", { kind: "forbidden", name: "Denied Org", organizationType: "congregation" }],
+    ["ended", { kind: "ended", name: "Ended Org", endedOn: "2020-01-01" }],
+    ["not-found", { kind: "not-found" }],
+  ])(
+    "passes feedbackHref: undefined for a %s resolution, even with org_portal.feedback ON",
+    async (_label, resolution) => {
+      cachedAuth.mockResolvedValue(session());
+      resolveOrgContext.mockResolvedValue(resolution);
+      flagValues.set("org_portal.feedback", true);
+
+      await renderLayout();
+
+      expect(globalNavSpy.mock.calls[0][0].feedbackHref).toBeUndefined();
+    },
+  );
+
+  it("passes no feedbackHref at all with no session (GlobalNav never even renders)", async () => {
+    cachedAuth.mockResolvedValue(null);
+
+    await renderLayout();
+
+    expect(globalNavSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("OrgSlugLayout — org_portal.chrome_v2 ON, active relationship", () => {
   it("passes the resolved org's name/mark to GlobalNav and renders PortalNav", async () => {
     cachedAuth.mockResolvedValue(session());

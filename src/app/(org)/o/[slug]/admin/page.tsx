@@ -6,7 +6,7 @@ import {
 } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { visiblePortalTiles } from "@/lib/org-portal/tiles";
-import { TileGrid } from "@/components/org-portal/tile-grid";
+import { DomainTileSections } from "@/components/org-portal/domain-tile-sections";
 import { OrgAccessDenied, OrgAccessEnded } from "../org-states";
 import { AdminHubFlagOff } from "./admin-hub-states";
 
@@ -37,6 +37,14 @@ import { AdminHubFlagOff } from "./admin-hub-states";
  * exactly what DECISION-003 rules out. DO NOT "FIX" THIS BY ADDING A
  * PERMISSION CHECK HERE — see `tiles.ts`'s own header for the same rule
  * stated at the registry layer.
+ *
+ * DOMAIN-SECTIONED, NOT A FLAT GRID (commit 2, docs/work-log/
+ * 2026-08-27-product-ia-scaffold.md, Phase 3, DECISION-117): `TileGrid` is
+ * replaced with `DomainTileSections`, applied uniformly — no "big enough"
+ * threshold — grouping the same `visiblePortalTiles("administer", ...)`
+ * result under labeled domain headings (Roles/Features/Branding/Tickets all
+ * bucket to "Administration" today). The `tiles.length === 0` short-circuit
+ * above is unchanged.
  */
 export default async function AdminHubPage({
   params,
@@ -101,7 +109,7 @@ export default async function AdminHubPage({
           Nothing is turned on here yet.
         </p>
       ) : (
-        <TileGrid slug={slug} tiles={tiles} />
+        <DomainTileSections slug={slug} tiles={tiles} />
       )}
     </section>
   );

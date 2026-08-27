@@ -191,3 +191,80 @@ describe("PortalNavLinks — active state", () => {
     ]);
   });
 });
+
+describe("PortalNavLinks — domain-anchor hash-stripping (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md Phase 3 §5, DECISION-117)", () => {
+  const ANCHOR_ENTRIES: PortalNavEntry[] = [
+    { label: "Home", href: "/o/acme", exact: true },
+    { label: "People & Membership", href: "/o/acme#domain-people", exact: true },
+    { label: "Worship & Events", href: "/o/acme#domain-worship", exact: true },
+  ];
+
+  it("regression: an anchor entry does NOT read as active on an unrelated subpage sharing the pre-hash prefix", () => {
+    // Before the fix, `pathname === entry.href` could never match (pathname
+    // never carries a fragment) and — if `exact` were left `false` — the
+    // stripped href would be a prefix of every subpage in the org.
+    usePathname.mockReturnValue("/o/acme/directory/person-123");
+
+    render(<PortalNavLinks entries={ANCHOR_ENTRIES} />);
+
+    expect(
+      screen
+        .getByRole("link", { name: "People & Membership" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: "Worship & Events" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
+  it("Home wins the tie against every domain anchor when pathname === /o/<slug> exactly (all stripped targets are identical)", () => {
+    usePathname.mockReturnValue("/o/acme");
+
+    render(<PortalNavLinks entries={ANCHOR_ENTRIES} />);
+
+    expect(
+      screen.getByRole("link", { name: "Home" }).getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      screen
+        .getByRole("link", { name: "People & Membership" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: "Worship & Events" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
+  it("no anchor entry is ever active anywhere — an accepted, named limitation (no client-side scroll-spy)", () => {
+    usePathname.mockReturnValue("/o/acme/admin/officers");
+
+    render(<PortalNavLinks entries={ANCHOR_ENTRIES} />);
+
+    expect(
+      screen
+        .getByRole("link", { name: "People & Membership" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
+  it("the rendered <Link href> still carries the full, un-stripped fragment — only the matching logic strips it", () => {
+    usePathname.mockReturnValue("/o/acme");
+
+    render(<PortalNavLinks entries={ANCHOR_ENTRIES} />);
+
+    expect(
+      screen
+        .getByRole("link", { name: "People & Membership" })
+        .getAttribute("href"),
+    ).toBe("/o/acme#domain-people");
+    expect(
+      screen
+        .getByRole("link", { name: "Worship & Events" })
+        .getAttribute("href"),
+    ).toBe("/o/acme#domain-worship");
+  });
+});

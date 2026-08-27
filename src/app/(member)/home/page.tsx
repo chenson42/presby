@@ -1,32 +1,19 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import { db } from "@/lib/db";
-import { feedbackPromptState, whatsNewEntries } from "@/lib/db/schema";
+import { whatsNewEntries } from "@/lib/db/schema";
+import {
+  getFeedbackPromptState,
+  shouldShowFeedbackPrompt,
+} from "@/lib/feedback-prompt";
 import { FEATURES } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { FormattedDate } from "@/components/shared/formatted-date";
-import { FeedbackPromptCard } from "./feedback-prompt-card";
+import { FeedbackPromptCard } from "@/components/shared/feedback-prompt-card";
 
 // Number of What's-new entries shown in the home card.
 const WHATS_NEW_HOME_LIMIT = 3;
-
-// Server-side computation: should the daily feedback prompt card be shown?
-// Uses UTC "today" for the comparison (known write-local/read-UTC imprecision — see DECISION-023).
-function shouldShowFeedbackPrompt(
-  state: {
-    optedOut: boolean;
-    lastSnoozedDate: string | null;
-    lastSubmittedDate: string | null;
-  } | null,
-): boolean {
-  if (!state) return true; // New user — no row yet. Show the card.
-  if (state.optedOut) return false;
-  const today = new Date().toISOString().slice(0, 10); // UTC 'YYYY-MM-DD'
-  if (state.lastSnoozedDate === today) return false;
-  if (state.lastSubmittedDate === today) return false;
-  return true;
-}
 
 // cachedAuth() is memoized via React cache() — calling it here after the
 // layout already called it costs nothing (same request, same cached result).
@@ -42,11 +29,8 @@ export default async function HomePage() {
   const isAdmin = featuresList.includes(FEATURES.ADMIN_DASHBOARD);
 
   // Feedback prompt state — query even for no-role users (their signal is valuable).
-  const promptState = await db.query.feedbackPromptState.findFirst({
-    where: eq(feedbackPromptState.userId, user.id),
-    columns: { optedOut: true, lastSnoozedDate: true, lastSubmittedDate: true },
-  });
-  const showFeedbackPrompt = shouldShowFeedbackPrompt(promptState ?? null);
+  const promptState = await getFeedbackPromptState(user.id);
+  const showFeedbackPrompt = shouldShowFeedbackPrompt(promptState);
 
   // What's-new entries — latest WHATS_NEW_HOME_LIMIT only; zero entries → card hidden.
   const recentWhatsNew = await db

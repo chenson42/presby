@@ -24,14 +24,6 @@ import type { OrganizationType } from "@/lib/authz";
  * cannot import `scripts/seed.ts` itself (it runs at script time against
  * `process.env.DATABASE_URL`, not import time).
  *
- * `feedback` carried a BORROWED flagKey (`org_portal.tickets`) through the
- * support-tickets pipeline — harmless while this tile lived only in a card
- * grid, but the portal-chrome pipeline (docs/work-log/
- * 2026-08-25-portal-chrome.md) promotes it to a persistent header link, at
- * which point a shared key becomes consequential (rolling back tickets would
- * silently take feedback with it). It now has its own `org_portal.feedback`
- * flag; `org_portal.tickets` keeps gating `tickets` alone.
- *
  * `category` (docs/work-log/2026-08-26-portal-reorg-and-modernization.md,
  * Phase 3) is a SECOND, ORTHOGONAL routing question added on top of the
  * flag-only design above — "which page renders this tile" (`/o/<slug>` for
@@ -43,9 +35,9 @@ import type { OrganizationType } from "@/lib/authz";
  * `Forbidden` state on click — the hub performs no permission check of any
  * kind, only the flag check (architect's Phase 2 ruling, resolving Phase 1's
  * Gap 2). "operate" tiles are the day-to-day tools meaningful to every
- * member regardless of permission (Directory, Members, Officers, feedback);
- * "administer" tiles are setting up or governing this org rather than running
- * it day to day (Roles, Features, Branding, Tickets) and all gate their own
+ * member regardless of permission (Directory, Members, Officers); "administer"
+ * tiles are setting up or governing this org rather than running it day to
+ * day (Roles, Features, Branding, Tickets) and all gate their own
  * destination on a `*.manage`/`*.file` tenant permission. Operator correction
  * 2026-08-26: Members and Officers moved administer→operate (they're routine
  * congregational work, not org setup) and Tickets moved operate→administer
@@ -59,8 +51,80 @@ import type { OrganizationType } from "@/lib/authz";
  * design: presentational registry metadata, never a permission check. See
  * the `PortalTile` interface's own comment on the field for the array-vs-
  * scalar distinction from `app_roles.organizationTypeScope`.
+ *
+ * `domain` (docs/work-log/2026-08-27-product-ia-scaffold.md, Phase 3,
+ * DECISION-117) is a FOURTH, ORTHOGONAL routing question — "which labeled
+ * section on the home page / admin hub does this tile render under" —
+ * layered on top of `category`/`orgTypeScope`/`flagKey` the same way each of
+ * those was layered on. REQUIRED (no `?`), unlike `orgTypeScope`: a future
+ * tile that omits it fails at `tsc`, not silently at render time with an
+ * unmapped-key fallback — the same discipline the `organizationType`
+ * required-parameter bug fix already validated. Presentation-only, never a
+ * gate (DECISION-003 reaffirmed): a tile's reachability is governed entirely
+ * by `flagKey` + `orgTypeScope` + the destination's own permission check,
+ * same as always. See `PortalDomain`'s own comment for the taxonomy and the
+ * `"administration"` nav-exclusion rule.
+ *
+ * "Give feedback" was removed from this registry entirely (mid-design
+ * operator correction, docs/work-log/2026-08-27-product-ia-scaffold.md
+ * §6/DECISION-117) — it no longer has a tile, a nav entry, or a footer
+ * entry. It re-surfaces as an avatar-menu item and the platform's reused
+ * dismissible daily feedback-prompt card, both still gated by the unchanged
+ * `org_portal.feedback` flag. `/o/<slug>/feedback` itself is untouched.
  */
 export type PortalTileCategory = "operate" | "administer";
+
+/**
+ * The seven-domain taxonomy (DECISION-117) every `PortalTile` is bucketed
+ * into for presentation — which labeled `<section>` it renders under on the
+ * home page (`DomainTileSections`, commit 2) and the admin hub, and which
+ * nav anchor entry it contributes to (`portal-nav.tsx`, commit 2). Closed
+ * union, not a free string — a typo'd domain fails at `tsc`, not silently at
+ * render time.
+ *
+ * `"administration"` is special: it exists ONLY to bucket
+ * Roles/Features/Branding/Tickets on the admin hub's own domain grouping. It
+ * is EXCLUDED from the persistent nav row's domain-anchor computation
+ * (`portal-nav.tsx`, commit 2) — the nav's existing hardcoded
+ * "Administration" entry (unchanged, points at `/o/<slug>/admin`) already
+ * owns that concept, and a second, anchor-based "Administration" entry
+ * pointing at `/o/<slug>#domain-administration` would collide on the
+ * identical label with a different destination. No current tile actually
+ * forces this collision (every `"administration"`-domain tile below is
+ * `category: "administer"`, so it never reaches the nav's operate-only
+ * computation anyway), but the exclusion is a standing rule for commit 2's
+ * `portal-nav.tsx` to implement, not an accident of today's data — a future
+ * operate-category tile must not be assigned `domain: "administration"`
+ * without revisiting this.
+ */
+export type PortalDomain =
+  | "people" // People & Membership
+  | "worship" // Worship & Events
+  | "giving" // Giving & Finance
+  | "governance" // Governance & Courts
+  | "reports" // Reports & Insights
+  | "communications" // Communications
+  | "administration"; // Administration
+
+export const DOMAIN_LABELS: Record<PortalDomain, string> = {
+  people: "People & Membership",
+  worship: "Worship & Events",
+  giving: "Giving & Finance",
+  governance: "Governance & Courts",
+  reports: "Reports & Insights",
+  communications: "Communications",
+  administration: "Administration",
+};
+
+export const DOMAIN_ORDER: readonly PortalDomain[] = [
+  "people",
+  "worship",
+  "giving",
+  "governance",
+  "reports",
+  "communications",
+  "administration",
+];
 
 export interface PortalTile {
   key: string;
@@ -93,6 +157,14 @@ export interface PortalTile {
    * caution).
    */
   orgTypeScope?: readonly OrganizationType[];
+  /**
+   * REQUIRED (bug fix docs/work-log/2026-08-27-product-ia-scaffold.md,
+   * DECISION-117) — see `PortalDomain`'s own comment for the taxonomy and
+   * the `"administration"` nav-exclusion rule. Presentation-only, never a
+   * gate: which labeled section a tile renders under, nothing about whether
+   * it is reachable.
+   */
+  domain: PortalDomain;
 }
 
 export const PORTAL_TILES: readonly PortalTile[] = [
@@ -103,6 +175,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/admin/members`,
     flagKey: "org_portal.members_create",
     category: "operate",
+    domain: "people",
   },
   {
     key: "directory",
@@ -111,6 +184,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/directory`,
     flagKey: "org_portal.directory",
     category: "operate",
+    domain: "people",
   },
   {
     key: "roles",
@@ -119,6 +193,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/admin/roles`,
     flagKey: "org_portal.roles",
     category: "administer",
+    domain: "administration",
   },
   {
     key: "officers",
@@ -127,6 +202,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/admin/officers`,
     flagKey: "org_portal.officers",
     category: "operate",
+    domain: "governance",
   },
   {
     key: "tickets",
@@ -135,14 +211,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/tickets`,
     flagKey: "org_portal.tickets",
     category: "administer",
-  },
-  {
-    key: "feedback",
-    label: "Give feedback",
-    description: "Share feedback about your organization's portal.",
-    href: (slug) => `/o/${slug}/feedback`,
-    flagKey: "org_portal.feedback",
-    category: "operate",
+    domain: "administration",
   },
   {
     key: "groups",
@@ -151,6 +220,13 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/admin/groups`,
     flagKey: "org_portal.groups",
     category: "operate",
+    // docs/work-log/2026-08-27-product-ia-scaffold.md, Phase 3: the
+    // architect's Phase 2 taxonomy table left `groups` unassigned. Tech-lead
+    // call — People & Membership, not Governance & Courts: committees, small
+    // groups, choirs, and teams are day-to-day people-organizing, not
+    // constitutional office (Governance & Courts is reserved for
+    // officer/credential/committee-of-the-court structures).
+    domain: "people",
   },
   {
     key: "features",
@@ -159,6 +235,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/admin/features`,
     flagKey: "org_portal.features",
     category: "administer",
+    domain: "administration",
   },
   {
     key: "branding",
@@ -167,6 +244,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     href: (slug) => `/o/${slug}/admin/branding`,
     flagKey: "org_portal.branding",
     category: "administer",
+    domain: "administration",
   },
   {
     key: "events",
@@ -179,6 +257,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     // work, not org setup/governance.
     flagKey: "org_portal.events",
     category: "operate",
+    domain: "worship",
   },
   {
     key: "credentials",
@@ -192,6 +271,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     // not org setup/governance.
     flagKey: "org_portal.credentials",
     category: "operate",
+    domain: "governance",
     // Bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md:
     // `credentials.manage` binds only to the presbytery-scoped `presbytery_
     // stated_clerk` template role (DECISION-112/116) — no congregation,
@@ -200,6 +280,91 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     // Allow-list, not `!== "congregation"` exclusion — synod/GA would
     // otherwise wrongly qualify.
     orgTypeScope: ["presbytery"],
+  },
+  // ============================================================
+  // PRODUCT-IA SCAFFOLD PLACEHOLDER TILES — docs/work-log/
+  // 2026-08-27-product-ia-scaffold.md (Phase 3, DECISION-117). Every tile
+  // below is an inert "coming soon" stub — no feature exists yet, no data is
+  // read, nothing is mutated. Each `flagKey` is seeded ON (see
+  // scripts/seed.ts's own loud comment block) ONLY because presby has no
+  // real congregation onboarded yet and the operator wants the full roadmap
+  // visible in dev (Phase 1 Operator Answer 4) — flip to OFF before any real
+  // congregation or presbytery is onboarded (docs/TODO.md go-live gate).
+  // ============================================================
+  {
+    key: "giving",
+    label: "Giving & Finance",
+    description: "Fund accounting, giving records, and budgets. Coming soon.",
+    href: (slug) => `/o/${slug}/admin/giving`,
+    flagKey: "org_portal.giving",
+    category: "operate",
+    domain: "giving",
+  },
+  {
+    key: "worship",
+    label: "Worship & Service Planning",
+    description: "Service templates, liturgical roles, and scheduling. Coming soon.",
+    href: (slug) => `/o/${slug}/admin/worship`,
+    flagKey: "org_portal.worship",
+    category: "operate",
+    domain: "worship",
+  },
+  {
+    key: "committees",
+    label: "Committees & Commissions",
+    description:
+      "Presbytery committees, commissions, and administrative-commission tracking. Coming soon.",
+    href: (slug) => `/o/${slug}/admin/committees`,
+    flagKey: "org_portal.committees",
+    category: "operate",
+    domain: "governance",
+    orgTypeScope: ["presbytery"],
+  },
+  {
+    key: "oversight",
+    label: "Congregation Oversight",
+    description:
+      "A presbytery's downward read into its member congregations. Coming soon.",
+    href: (slug) => `/o/${slug}/admin/oversight`,
+    flagKey: "org_portal.oversight",
+    category: "operate",
+    domain: "governance",
+    orgTypeScope: ["presbytery"],
+  },
+  {
+    key: "reports",
+    label: "Per-Capita, SASR & Imports",
+    description:
+      "Per-capita/SASR rollup and data-import housekeeping for a presbytery. Coming soon.",
+    href: (slug) => `/o/${slug}/admin/reports`,
+    flagKey: "org_portal.reports",
+    // docs/work-log/2026-08-27-product-ia-scaffold.md, Phase 3: presbytery
+    // back-office/compliance filing lives on the admin hub, not the home
+    // page — deliberately `administer`, not `operate` (unlike `insights`,
+    // which is universal and day-to-day). Do not conflate the two: this is
+    // the load-bearing category/domain-orthogonality example named in Phase
+    // 3's Edge Cases.
+    category: "administer",
+    domain: "reports",
+    orgTypeScope: ["presbytery"],
+  },
+  {
+    key: "insights",
+    label: "Insights & Analytics",
+    description: "Dashboards, trends, and per-capita/membership insights. Coming soon.",
+    href: (slug) => `/o/${slug}/admin/insights`,
+    flagKey: "org_portal.insights",
+    category: "operate",
+    domain: "reports",
+  },
+  {
+    key: "communications",
+    label: "Communications",
+    description: "Announcements, newsletters, and messaging. Coming soon.",
+    href: (slug) => `/o/${slug}/admin/communications`,
+    flagKey: "org_portal.communications",
+    category: "operate",
+    domain: "communications",
   },
 ] as const;
 

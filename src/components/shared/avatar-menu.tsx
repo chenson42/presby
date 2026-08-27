@@ -45,6 +45,19 @@ export interface AvatarMenuProps {
    * `(org)/o/[slug]/layout.tsx` passes the org's own public site so leaving
    * the portal doesn't strand the visitor on generic platform chrome. */
   signOutRedirectTo?: string;
+  /**
+   * Feedback relocation (commit 2, docs/work-log/
+   * 2026-08-27-product-ia-scaffold.md §6a, DECISION-117). Set ONLY by
+   * `(org)/o/[slug]/layout.tsx`, only when `org_portal.feedback` is ON for
+   * an active relationship. Renders one extra item, "Give feedback",
+   * linking to `/o/<slug>/feedback`. Omitted (every other caller) → no item,
+   * unchanged behavior. This is an "about me at this org" item, grouped with
+   * identity (right after "Account"), not with the platform-admin block —
+   * it says nothing about which organization is on screen structurally, the
+   * same "identity, not context" rule this file's own header comment states
+   * for the rest of the menu.
+   */
+  feedbackHref?: string;
 }
 
 export function AvatarMenu({
@@ -53,6 +66,7 @@ export function AvatarMenu({
   canAccessAdmin,
   isPlatformAdmin,
   signOutRedirectTo,
+  feedbackHref,
 }: AvatarMenuProps) {
   const initials = initialsFrom(name, email);
   const who = accountLabel(name, email);
@@ -102,6 +116,14 @@ export function AvatarMenu({
             Account
           </Link>
         </DropdownMenuItem>
+
+        {feedbackHref && (
+          <DropdownMenuItem asChild className="min-h-11">
+            <Link href={feedbackHref} className="cursor-pointer">
+              Give feedback
+            </Link>
+          </DropdownMenuItem>
+        )}
 
         {showPlatform && (
           <>

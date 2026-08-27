@@ -51,12 +51,14 @@ function renderMenu({
   canAccessAdmin = false,
   isPlatformAdmin = false,
   signOutRedirectTo,
+  feedbackHref,
 }: {
   name?: string | null;
   email?: string | null;
   canAccessAdmin?: boolean;
   isPlatformAdmin?: boolean;
   signOutRedirectTo?: string;
+  feedbackHref?: string;
 } = {}) {
   return render(
     <AvatarMenu
@@ -65,6 +67,7 @@ function renderMenu({
       canAccessAdmin={canAccessAdmin}
       isPlatformAdmin={isPlatformAdmin}
       signOutRedirectTo={signOutRedirectTo}
+      feedbackHref={feedbackHref}
     />,
   );
 }
@@ -179,6 +182,53 @@ describe("AvatarMenu — the entitlement matrix (DECISION-044)", () => {
       .map((item) => item.textContent);
     expect(labels).toEqual([
       "Account",
+      "Platform admin",
+      "Developer",
+      "Sign out",
+    ]);
+  });
+});
+
+describe("AvatarMenu — feedbackHref (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md §6a, DECISION-117)", () => {
+  it("renders 'Give feedback' linking to the given feedbackHref, positioned right after Account", async () => {
+    renderMenu({ feedbackHref: "/o/alder-creek/feedback" });
+
+    await open();
+
+    const labels = screen
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    expect(labels).toEqual(["Account", "Give feedback", "Sign out"]);
+    expect(
+      screen.getByRole("menuitem", { name: "Give feedback" }).getAttribute("href"),
+    ).toBe("/o/alder-creek/feedback");
+  });
+
+  it("omits 'Give feedback' entirely when feedbackHref is not given — every existing platform-shell caller unaffected", async () => {
+    renderMenu();
+
+    await open();
+
+    expect(
+      screen.queryByRole("menuitem", { name: "Give feedback" }),
+    ).toBeNull();
+  });
+
+  it("still renders 'Give feedback' alongside the platform items when both are present", async () => {
+    renderMenu({
+      feedbackHref: "/o/alder-creek/feedback",
+      canAccessAdmin: true,
+      isPlatformAdmin: true,
+    });
+
+    await open();
+
+    const labels = screen
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    expect(labels).toEqual([
+      "Account",
+      "Give feedback",
       "Platform admin",
       "Developer",
       "Sign out",

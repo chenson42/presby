@@ -6,6 +6,13 @@
 //   const flagEnabled = await isFlagEnabled('feedback.v1');
 //   {flagEnabled && shouldShow && <FeedbackPromptCard />}
 // This demonstrates the pattern without shipping an always-on flag.
+//
+// MOVED HERE, UNMODIFIED, FROM `src/app/(member)/home/feedback-prompt-card.tsx`
+// — commit 2 of docs/work-log/2026-08-27-product-ia-scaffold.md (Phase 3
+// §6b, DECISION-117). It is now rendered from TWO route trees — `/home` and
+// the org portal home (`/o/<slug>`) — which is exactly what
+// `src/components/shared/` is for (CLAUDE.md's own Project Layout). No
+// behavioral change: same snooze/opt-out actions, same dialog, same copy.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";

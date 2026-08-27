@@ -369,6 +369,46 @@ describe("GlobalNav — the organization list cannot be read", () => {
   });
 });
 
+describe("GlobalNav — feedbackHref passthrough (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md §6a, DECISION-117)", () => {
+  it("passes feedbackHref straight through to AvatarMenu, rendering the 'Give feedback' item", async () => {
+    cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({
+      session: session(),
+      currentOrgSlug: WRENFIELD.slug,
+      feedbackHref: "/o/e2e-alpha/feedback",
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(screen.getByTestId("avatar-menu-trigger"), {
+        key: "Enter",
+      });
+    });
+
+    expect(
+      screen.getByRole("menuitem", { name: "Give feedback" }).getAttribute("href"),
+    ).toBe("/o/e2e-alpha/feedback");
+  });
+
+  it("omits 'Give feedback' when feedbackHref is not passed", async () => {
+    cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
+    cachedIsPlatformAdmin.mockResolvedValue(false);
+
+    await renderNav({ session: session(), currentOrgSlug: WRENFIELD.slug });
+
+    await act(async () => {
+      fireEvent.keyDown(screen.getByTestId("avatar-menu-trigger"), {
+        key: "Enter",
+      });
+    });
+
+    expect(
+      screen.queryByRole("menuitem", { name: "Give feedback" }),
+    ).toBeNull();
+  });
+});
+
 describe("GlobalNav — is_platform_admin cannot be read", () => {
   it("drops the Developer item and keeps the rest of the header", async () => {
     // Failing closed is right here: the column decides which PAGES are

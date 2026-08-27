@@ -54,6 +54,14 @@ export const appRoles = pgTable(
     name: text("name").notNull(),
     roleKind: text("role_kind").notNull().default("custom"), // constitutional | custom
     isProtected: boolean("is_protected").notNull().default(false),
+    // Soft-deactivation only (docs/work-log/2026-08-26-role-permissions-admin.md,
+    // DECISION-106 ruling 4). role_grants.roleId -> appRoles.id is
+    // onDelete: cascade, so a hard DELETE would destroy historical (ended)
+    // role_grants rows — the append-only trail revokeRole()'s own contract
+    // protects. deactivateRole() sets this AND ends the role's live
+    // role_grants rows in the same transaction (presby_effective_permissions()
+    // has no awareness of this column on its own).
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

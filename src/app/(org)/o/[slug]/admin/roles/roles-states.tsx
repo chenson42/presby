@@ -73,3 +73,96 @@ export function RolesLoadError({ slug }: { slug: string }) {
     </section>
   );
 }
+
+/**
+ * `roles.manage`-gated states — shared by the role *definition* surfaces
+ * (`/admin/roles`'s third section, `/admin/roles/new`,
+ * `/admin/roles/[id]/edit`; docs/work-log/2026-08-26-role-permissions-admin.md,
+ * Phase 3 Component Plan). Deliberately distinct copy from `RolesForbidden`
+ * above — that state denies role *grants* (`role_grants.manage`); this one
+ * denies role *definition* (`roles.manage`), a different, more powerful
+ * capability (DECISION-106) — a reader who holds one but not the other must
+ * not be told the wrong thing is missing.
+ */
+
+/** The viewer has an active relationship with the org but holds no
+ * `roles.manage` grant. Reachable from the roles list's third section (which
+ * simply omits itself) AND directly, if someone deep-links `/new` or
+ * `/[id]/edit` without holding the permission. */
+export function RoleDefinitionForbidden({ name }: { name: string }) {
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold">Roles</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        You don&apos;t have permission to create or edit role definitions at{" "}
+        {name}. If you think this is a mistake, ask your stated clerk or
+        another administrator there.
+      </p>
+    </section>
+  );
+}
+
+/** `getRoleDefinition()` returned `{ kind: "not_found" }` — the role id in
+ * the URL doesn't exist at this organization (never existed, or belongs to
+ * another org; the two collapse the same way, enumeration-safe). */
+export function RoleDefinitionNotFound({ slug }: { slug: string }) {
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold">Role not found</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        That role no longer exists at this organization.
+      </p>
+      <Button asChild className="mt-6 min-h-11">
+        <Link href={`/o/${slug}/admin/roles`}>Back to roles</Link>
+      </Button>
+    </section>
+  );
+}
+
+/** The role exists and the viewer holds `roles.manage`, but
+ * `role.isProtected` is true — a constitutional role (`role_admin` itself,
+ * and any future seeded role). Read-only, no form: `isProtected` is the gate,
+ * not `role_kind` (DECISION-106 ruling 5), and this UI never edits or
+ * deactivates a constitutional role, even if reached by a guessed URL —
+ * `role-catalog-list.tsx` already omits the "Edit" link for these rows; this
+ * is the second, server-side layer of the same rule. */
+export function RoleDefinitionProtected({
+  slug,
+  role,
+}: {
+  slug: string;
+  role: { name: string; key: string; permissionKeys: string[] };
+}) {
+  return (
+    <section className="max-w-2xl space-y-4">
+      <h1 className="text-2xl font-semibold">{role.name}</h1>
+      <p className="text-sm text-muted-foreground">
+        This is a constitutional role (key: {role.key}) and can&apos;t be
+        edited or deactivated here — its permission set is managed by the
+        platform. It carries {role.permissionKeys.length}{" "}
+        {role.permissionKeys.length === 1 ? "permission" : "permissions"}.
+      </p>
+      <Button asChild className="min-h-11">
+        <Link href={`/o/${slug}/admin/roles`}>Back to roles</Link>
+      </Button>
+    </section>
+  );
+}
+
+/** A genuine, non-`OrgAccessError` failure reading a role definition (a DB
+ * blip, most likely) — the retry is a plain `<Link>` back to the roles list,
+ * same posture as `RolesLoadError` above (this stays a Server Component, so
+ * there's no client `reset()` to call). */
+export function RoleDefinitionLoadError({ slug }: { slug: string }) {
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold">Roles</h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        We couldn&apos;t load that right now. Try again in a moment.
+      </p>
+      <Button asChild className="mt-6 min-h-11">
+        <Link href={`/o/${slug}/admin/roles`}>Back to roles</Link>
+      </Button>
+    </section>
+  );
+}

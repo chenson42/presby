@@ -65,6 +65,11 @@ vi.mock("@/lib/role-grants", () => ({
   getGrantFormOptions: (...args: unknown[]) => getGrantFormOptions(...args),
 }));
 
+const listRoleDefinitions = vi.fn();
+vi.mock("@/lib/role-definitions", () => ({
+  listRoleDefinitions: (...args: unknown[]) => listRoleDefinitions(...args),
+}));
+
 vi.mock("./actions", () => ({
   grantRoleAction: vi.fn(),
   revokeRoleAction: vi.fn(),
@@ -97,6 +102,7 @@ afterEach(() => {
   isFlagEnabled.mockReset();
   listGrants.mockReset();
   getGrantFormOptions.mockReset();
+  listRoleDefinitions.mockReset().mockResolvedValue({ kind: "forbidden" });
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -281,6 +287,94 @@ describe("RolesPage — result branches", () => {
     expect(
       screen.getByText(/no roles have been set up for this organization/i),
     ).toBeTruthy();
+  });
+});
+
+describe("RolesPage — the third section, 'Role catalog' (roles.manage)", () => {
+  const OK_GRANTS = { kind: "ok" as const, grants: [] };
+
+  it("omits the section entirely when listRoleDefinitions() returns forbidden — no error, no banner", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGrants.mockResolvedValue(OK_GRANTS);
+    getGrantFormOptions.mockResolvedValue(EMPTY_OPTIONS);
+    listRoleDefinitions.mockResolvedValue({ kind: "forbidden" });
+
+    const el = await RolesPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.queryByText(/role catalog/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: /create role/i })).toBeNull();
+  });
+
+  it("renders the role catalog and a 'Create role' link when listRoleDefinitions() returns ok", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGrants.mockResolvedValue(OK_GRANTS);
+    getGrantFormOptions.mockResolvedValue(EMPTY_OPTIONS);
+    listRoleDefinitions.mockResolvedValue({
+      kind: "ok",
+      roles: [
+        {
+          id: "role-def-1",
+          key: "worship_committee",
+          name: "Worship Committee",
+          roleKind: "custom",
+          isProtected: false,
+          deactivatedAt: null,
+          permissionKeys: ["directory.view"],
+          holderCount: 2,
+        },
+      ],
+    });
+
+    const el = await RolesPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByRole("heading", { name: /role catalog/i }),
+    ).toBeTruthy();
+    const createLink = screen.getByRole("link", { name: /create role/i });
+    expect(createLink.getAttribute("href")).toBe(
+      "/o/alder-creek/admin/roles/new",
+    );
+    expect(screen.getByText("Worship Committee")).toBeTruthy();
+  });
+
+  it("re-throws OrgAccessError from listRoleDefinitions() rather than swallowing it", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGrants.mockResolvedValue(OK_GRANTS);
+    getGrantFormOptions.mockResolvedValue(EMPTY_OPTIONS);
+    listRoleDefinitions.mockRejectedValue(
+      new OrgAccessError("person-1", "org-1"),
+    );
+
+    await expect(RolesPage({ params: makeParams() })).rejects.toThrow(
+      "mock: no active membership",
+    );
+  });
+
+  it("renders an inline notice, not a crash, for any other thrown error from listRoleDefinitions()", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGrants.mockResolvedValue(OK_GRANTS);
+    getGrantFormOptions.mockResolvedValue(EMPTY_OPTIONS);
+    listRoleDefinitions.mockRejectedValue(new Error("connection reset"));
+
+    const el = await RolesPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByText(/couldn.t load the role catalog right now/i),
+    ).toBeTruthy();
+    // The rest of the page still rendered — a broken third section must not
+    // take down an already-successful page.
+    expect(screen.getByRole("heading", { name: /^roles$/i })).toBeTruthy();
   });
 });
 

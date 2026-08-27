@@ -24,6 +24,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import {
   assertOrgAccess,
+  assertPermissionSubset,
   availableOrganizations,
   isEnterableOrganization,
   OrgAccessError,
@@ -31,6 +32,7 @@ import {
   resolveOrgContext,
   userOrganizations,
   withOrgContext,
+  type OrgTx,
   type UserOrganization,
 } from "./authz";
 
@@ -584,5 +586,95 @@ describe("withOrgContext / assertOrgAccess", () => {
 
     await expect(assertOrgAccess(PERSON, ORG)).resolves.toBeUndefined();
     expect(tx.execute).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("assertPermissionSubset", () => {
+  // DECISION-106 ruling 1: the escalation-check DECISION-068 built for
+  // grantRole() lives here, shared with role-definitions.ts. This function
+  // never opens its own transaction — it takes a caller-supplied `tx`, a
+  // plain object exposing `.execute()`, so no `db.transaction` mock is
+  // needed for these tests (unlike the withOrgContext/assertOrgAccess suite
+  // above).
+  const PERSON = "c1000000-0000-0000-0000-000000000003";
+  const ORG = "55555555-5555-5555-5555-555555555555";
+
+  function fakeTx(effectivePermissionKeys: string[]) {
+    const execute = vi.fn(async () => ({
+      rows: effectivePermissionKeys.map((permission_key) => ({
+        permission_key,
+      })),
+    }));
+    return { execute } as unknown as OrgTx;
+  }
+
+  it("trivially passes on an empty proposed set WITHOUT querying the database", async () => {
+    // The empty-delta case (a pure permission removal) can never escalate
+    // anyone — it must short-circuit rather than round-trip through a query
+    // that would happen to also return { ok: true }, for the wrong reason.
+    const tx = fakeTx(["directory.view"]);
+
+    const result = await assertPermissionSubset(tx, PERSON, ORG, []);
+
+    expect(result).toEqual({ ok: true });
+    expect((tx as unknown as { execute: ReturnType<typeof vi.fn> }).execute).not.toHaveBeenCalled();
+  });
+
+  it("passes when every proposed key is a subset of the actor's effective permissions", async () => {
+    const tx = fakeTx(["roles.manage", "directory.view", "officers.manage"]);
+
+    const result = await assertPermissionSubset(tx, PERSON, ORG, [
+      "directory.view",
+    ]);
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("passes when the proposed set exactly equals the actor's effective permissions", async () => {
+    const tx = fakeTx(["roles.manage", "directory.view"]);
+
+    const result = await assertPermissionSubset(tx, PERSON, ORG, [
+      "roles.manage",
+      "directory.view",
+    ]);
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("denies and names every missing key when the proposed set is a superset", async () => {
+    const tx = fakeTx(["roles.manage"]);
+
+    const result = await assertPermissionSubset(tx, PERSON, ORG, [
+      "roles.manage",
+      "directory.view",
+      "ledger.approve",
+    ]);
+
+    expect(result).toEqual({
+      ok: false,
+      missingPermissions: ["directory.view", "ledger.approve"],
+    });
+  });
+
+  it("denies entirely when the actor holds none of the proposed permissions", async () => {
+    const tx = fakeTx([]);
+
+    const result = await assertPermissionSubset(tx, PERSON, ORG, [
+      "roles.manage",
+    ]);
+
+    expect(result).toEqual({ ok: false, missingPermissions: ["roles.manage"] });
+  });
+
+  it("reads presby_effective_permissions() for the ACTOR, scoped to the org, inside the caller's tx", async () => {
+    const tx = fakeTx(["directory.view"]);
+
+    await assertPermissionSubset(tx, PERSON, ORG, ["directory.view"]);
+
+    const executeMock = (tx as unknown as { execute: ReturnType<typeof vi.fn> })
+      .execute;
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const query = JSON.stringify(executeMock.mock.calls[0][0]);
+    expect(query).toContain("presby_effective_permissions");
   });
 });

@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import {
   assertOrgAccess,
@@ -6,11 +7,17 @@ import {
   resolveOrgContext,
 } from "@/lib/authz";
 import { getGrantFormOptions, listGrants } from "@/lib/role-grants";
+import {
+  listRoleDefinitions,
+  type RoleDefinitionsListResult,
+} from "@/lib/role-definitions";
 import { isFlagEnabled } from "@/lib/flags";
+import { Button } from "@/components/ui/button";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import { RolesFlagOff, RolesForbidden, RolesLoadError } from "./roles-states";
 import { RolesList } from "./roles-list";
 import { GrantRoleForm } from "./grant-role-form";
+import { RoleCatalogList } from "./role-catalog-list";
 
 /**
  * `/o/<slug>/admin/roles` — grant, revoke, and view role assignments (P9,
@@ -116,6 +123,30 @@ export default async function RolesPage({
     return <RolesForbidden name={resolved.org.name} />;
   }
 
+  // THE THIRD SECTION — "Role catalog," rendered ONLY when the viewer holds
+  // `roles.manage` (a permission distinct from `role_grants.manage`, which
+  // gates everything above — DECISION-106). `listRoleDefinitions()` runs its
+  // own gate and returns `{ kind: "forbidden" }` for a viewer who doesn't
+  // hold it; that result simply omits the section below rather than
+  // rendering a denial banner — this is an ADDITIONAL capability on a page
+  // whose primary function (grant/revoke) the viewer already has, not a
+  // second copy of the whole-page gate. A genuine load failure (anything
+  // other than `OrgAccessError`, which is re-thrown like every other call on
+  // this page) degrades to a small inline notice rather than losing the
+  // rest of an already-successful page render.
+  let roleDefsResult: RoleDefinitionsListResult | null = null;
+  try {
+    roleDefsResult = await listRoleDefinitions(
+      resolved.org.personId,
+      resolved.org.organizationId,
+    );
+  } catch (err) {
+    if (err instanceof OrgAccessError) {
+      throw err;
+    }
+    roleDefsResult = null;
+  }
+
   return (
     <section className="space-y-10">
       <div>
@@ -134,6 +165,25 @@ export default async function RolesPage({
         <h2 className="text-xl font-semibold">Grant a role</h2>
         <GrantRoleForm slug={slug} options={optionsResult.options} />
       </div>
+
+      {roleDefsResult?.kind === "ok" && (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-xl font-semibold">Role catalog</h2>
+            <Button asChild size="sm" className="min-h-11 sm:min-h-9">
+              <Link href={`/o/${slug}/admin/roles/new`}>Create role</Link>
+            </Button>
+          </div>
+          <RoleCatalogList roles={roleDefsResult.roles} slug={slug} />
+        </div>
+      )}
+
+      {roleDefsResult === null && (
+        <p className="max-w-md text-sm text-muted-foreground">
+          We couldn&apos;t load the role catalog right now. Refresh the page
+          to try again.
+        </p>
+      )}
     </section>
   );
 }

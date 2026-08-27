@@ -55,6 +55,16 @@ export class OrgAccessError extends Error {
   }
 }
 
+/**
+ * The transaction handle every tenant-mutation module's per-export
+ * transaction runs in — `withOrgContext`'s own callback parameter, named so
+ * `assertPermissionSubset` (and any future shared, mid-transaction helper)
+ * can spell it out without redeclaring the same `Parameters<Parameters<...>>`
+ * indirection at every call site (`role-grants.ts`/`role-definitions.ts`
+ * previously each carried their own private copy of this exact type).
+ */
+export type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export interface EffectivePermission {
   permission_key: string;
   sensitivity_tier: number;
@@ -79,7 +89,7 @@ export interface EffectivePermission {
 export async function withOrgContext<T>(
   personId: string,
   organizationId: string,
-  fn: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<T>,
+  fn: (tx: OrgTx) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
     // Membership check runs BEFORE the context is set, so it cannot be
@@ -150,6 +160,75 @@ export async function hasPermission(
 ): Promise<boolean> {
   const perms = await effectivePermissions(personId, organizationId, asOf);
   return perms.some((p) => p.permission_key === permissionKey);
+}
+
+/**
+ * The escalation-check DECISION-068 introduced for `grantRole()` — extracted
+ * (DECISION-106 ruling 1) so every write that changes what a role can do runs
+ * the same posture, not just grants. `docs/work-log/
+ * 2026-08-26-role-permissions-admin.md`'s Phase 1 central finding was
+ * precisely that role-*definition* edits (create a role, edit its permission
+ * set, adopt a template) had NO equivalent check at all — an admin holding
+ * `roles.manage` could edit a role they already hold to add a tier-3
+ * permission with zero escalation review, since no `role_grants` row was ever
+ * inserted for that path.
+ *
+ * Reads the actor's own live `presby_effective_permissions()` set INSIDE
+ * `tx` — the caller's already-open `withOrgContext()` transaction; this
+ * function never opens its own, so it can run mid-transaction from
+ * `role-grants.ts`'s `grantRole()` and `role-definitions.ts`'s
+ * `createRole()`/`setRolePermissions()`/`adoptTemplate()` alike — and diffs
+ * `proposedPermissionKeys` against it. Missing keys are named, never
+ * silently narrowed or silently allowed.
+ *
+ * CALL-SITE CONTRACT, and it differs by caller on purpose:
+ *   - `grantRole()` passes the target role's FULL permission set — its
+ *     existing, unchanged behavior; only the check's location moved here.
+ *   - `setRolePermissions()` passes only the ADDED DELTA, never the full
+ *     resulting set. A pure permission REMOVAL has an empty delta, which is
+ *     why the empty-array case below short-circuits to `{ ok: true }` before
+ *     touching the database at all, rather than falling through to a query
+ *     whose `missingPermissions` would happen to also come back empty for
+ *     the wrong reason: removing a permission can never escalate anyone, and
+ *     a round trip that merely happens to agree with that is not the same
+ *     property as never being reachable as a false denial in the first
+ *     place.
+ */
+export async function assertPermissionSubset(
+  tx: OrgTx,
+  actorPersonId: string,
+  organizationId: string,
+  proposedPermissionKeys: string[],
+): Promise<{ ok: true } | { ok: false; missingPermissions: string[] }> {
+  if (proposedPermissionKeys.length === 0) {
+    return { ok: true };
+  }
+
+  const actorPermsResult = await tx.execute(sql`
+    select permission_key
+      from presby_effective_permissions(
+             ${actorPersonId}::uuid,
+             ${organizationId}::uuid,
+             current_date
+           )
+  `);
+  const actorPermKeys = new Set(
+    (
+      (
+        actorPermsResult as unknown as {
+          rows?: Array<{ permission_key: string }>;
+        }
+      ).rows ?? []
+    ).map((r) => r.permission_key),
+  );
+
+  const missingPermissions = proposedPermissionKeys.filter(
+    (key) => !actorPermKeys.has(key),
+  );
+  if (missingPermissions.length > 0) {
+    return { ok: false, missingPermissions };
+  }
+  return { ok: true };
 }
 
 /**

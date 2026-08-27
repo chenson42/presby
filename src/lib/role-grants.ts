@@ -1,6 +1,6 @@
 import "server-only";
 import { and, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
-import { withOrgContext } from "@/lib/authz";
+import { assertPermissionSubset, withOrgContext } from "@/lib/authz";
 import type { db } from "@/lib/db";
 import {
   appRolePermissions,
@@ -33,7 +33,12 @@ import { memberships, people } from "@/lib/db/domain/people";
  *      this transaction and compared against the target role's
  *      `app_role_permissions`; a grant whose role carries anything the
  *      granter does not already hold is rejected with the missing keys
- *      named, never silently narrowed or silently allowed.
+ *      named, never silently narrowed or silently allowed. As of
+ *      `docs/work-log/2026-08-26-role-permissions-admin.md` (DECISION-106
+ *      ruling 1) the check itself lives in `src/lib/authz.ts`'s
+ *      `assertPermissionSubset()`, shared with `role-definitions.ts` —
+ *      `grantRole()` still calls it with the FULL target permission set,
+ *      the same behavior it always had.
  *   2. Cross-org write — every function takes `organizationId` as an
  *      explicit parameter it never re-derives from anything client-supplied;
  *      `withOrgContext()` re-verifies the caller's OWN membership at that
@@ -469,26 +474,6 @@ export async function grantRole(
       }
     }
 
-    // DECISION-068: two ordinary, already-org-scoped reads inside this same
-    // transaction — no new SQL function, no crossing an org boundary.
-    const granterPermsResult = await tx.execute(sql`
-      select permission_key
-        from presby_effective_permissions(
-               ${granterPersonId}::uuid,
-               ${organizationId}::uuid,
-               current_date
-             )
-    `);
-    const granterPermKeys = new Set(
-      (
-        (
-          granterPermsResult as unknown as {
-            rows?: Array<{ permission_key: string }>;
-          }
-        ).rows ?? []
-      ).map((r) => r.permission_key),
-    );
-
     const targetPermsResult = await tx.execute(sql`
       select permission_key
         from app_role_permissions
@@ -502,11 +487,24 @@ export async function grantRole(
       ).rows ?? []
     ).map((r) => r.permission_key);
 
-    const missingPermissions = targetPermKeys.filter(
-      (key) => !granterPermKeys.has(key),
+    // DECISION-106 ruling 1: the subset check itself was extracted into
+    // src/lib/authz.ts's assertPermissionSubset() so role-definitions.ts's
+    // createRole()/setRolePermissions()/adoptTemplate() run the same posture
+    // — grantRole() still calls it with the target role's FULL permission
+    // set, unchanged behavior, only the check's location moved.
+    // role-grants.test.ts's flagship escalation test is the regression guard
+    // that this extraction changed no observable output of this function.
+    const subsetCheck = await assertPermissionSubset(
+      tx,
+      granterPersonId,
+      organizationId,
+      targetPermKeys,
     );
-    if (missingPermissions.length > 0) {
-      return { kind: "escalation_denied", missingPermissions };
+    if (!subsetCheck.ok) {
+      return {
+        kind: "escalation_denied",
+        missingPermissions: subsetCheck.missingPermissions,
+      };
     }
 
     const startsOn = input.startsOn ?? todayDateString();

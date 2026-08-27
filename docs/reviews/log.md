@@ -43,6 +43,7 @@ weeks-overdue count. The first *real* run of each type replaces its baseline
 line the normal way (newest entry on top) and should read like any other
 finding, not like this one.
 
+2026-08-26 | portal-ux (ad hoc, operator-requested) | live-browser pass at 1280px+390px across every portal surface; 4 high (chevron-less selects on sensitive-info, roll-action select drift, no unsaved-changes guard anywhere, Parishes dead-end cards), 6 medium, 6 low; top-5 shortlist for operator; see 2026-08-26-portal-ux.md
 2026-08-19 | dependencies | baseline (reset) — clock starts here, not a completed review
 2026-08-19 | agent-instruction | baseline (reset) — clock starts here, not a completed review
 2026-08-19 | security | baseline (reset) — clock starts here, not a completed review

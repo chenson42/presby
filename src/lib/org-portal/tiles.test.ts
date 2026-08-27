@@ -48,6 +48,7 @@ const KNOWN_SEEDED_ORG_PORTAL_FLAG_KEYS = new Set([
   "org_portal.members_create",
   "org_portal.features",
   "org_portal.branding",
+  "org_portal.groups",
 ]);
 
 describe("PORTAL_TILES — flag-key shape", () => {
@@ -77,13 +78,14 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("mirrors OrgPortalStub's four links plus the members-management, officers, features, and branding tiles (2026-08-26)", () => {
+  it("mirrors OrgPortalStub's four links plus the members-management, officers, features, branding, and groups tiles (2026-08-26)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
         "directory",
         "feedback",
         "features",
+        "groups",
         "members",
         "officers",
         "roles",
@@ -92,7 +94,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
     );
   });
 
-  it("classifies roles/features/branding/tickets as administer and directory/members/officers/feedback as operate (operator correction 2026-08-26)", () => {
+  it("classifies roles/features/branding/tickets as administer and directory/members/officers/feedback/groups as operate (operator correction 2026-08-26; groups-admin pipeline, DECISION-110 ruling 6)", () => {
     const byKey = Object.fromEntries(PORTAL_TILES.map((t) => [t.key, t]));
     expect(byKey.roles.category).toBe("administer");
     expect(byKey.features.category).toBe("administer");
@@ -102,6 +104,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
     expect(byKey.members.category).toBe("operate");
     expect(byKey.officers.category).toBe("operate");
     expect(byKey.feedback.category).toBe("operate");
+    expect(byKey.groups.category).toBe("operate");
   });
 
   it("the roles tile is labeled 'Roles', not 'Administration' — it now sits inside the Organization Administration hub", () => {
@@ -185,6 +188,14 @@ describe("visiblePortalTiles(category) — category, then flag-only filtering", 
     );
     const tiles = await visiblePortalTiles("operate");
     expect(tiles.map((t) => t.key)).toEqual(["officers"]);
+  });
+
+  it("groups tile is independent — org_portal.groups on, everything else off (operate)", async () => {
+    isFlagEnabled.mockImplementation(async (key: string) =>
+      key === "org_portal.groups",
+    );
+    const tiles = await visiblePortalTiles("operate");
+    expect(tiles.map((t) => t.key)).toEqual(["groups"]);
   });
 
   it("features tile is independent — org_portal.features on, everything else off (administer)", async () => {

@@ -113,6 +113,14 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     category: "operate",
   },
   {
+    key: "groups",
+    label: "Groups",
+    description: "Manage committees, small groups, choirs, and teams.",
+    href: (slug) => `/o/${slug}/admin/groups`,
+    flagKey: "org_portal.groups",
+    category: "operate",
+  },
+  {
     key: "features",
     label: "Features",
     description: "Turn optional portal features on or off for this organization.",

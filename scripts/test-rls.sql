@@ -70,6 +70,19 @@
 \set PRESBYTERY_STATED_CLERK_TEMPLATE_ROLE '\'00000000-0000-0000-0000-000000000002\''
 \set PRESBYTERY_STATED_CLERK_ROLE '\'f0000000-0000-0000-0000-00000000000e\''
 \set APPOINTMENT '\'e2000000-0000-0000-0000-000000000001\''
+-- Presbytery program (section 29). QUILLHAVEN (unmanaged, D9) had no \set
+-- before this section; the fixture rows scripts/seed-dev.sql adds for
+-- congregation_oversight/congregation_statistics/per_capita_rates; the
+-- presbytery's own sign-in-capable clerk user (Idris Calloway's linked
+-- account).
+\set QUILLHAVEN '\'44444444-4444-4444-4444-444444444444\''
+\set OVERSIGHT_ALDER '\'a3000000-0000-0000-0000-000000000001\''
+\set OVERSIGHT_BRAMBLE '\'a3000000-0000-0000-0000-000000000002\''
+\set STAT_QUILLHAVEN '\'a4000000-0000-0000-0000-000000000001\''
+\set STAT_ALDER_PUBLISHED '\'a4000000-0000-0000-0000-000000000002\''
+\set PER_CAPITA_RATE '\'a5000000-0000-0000-0000-000000000001\''
+\set PER_CAPITA_RECORD '\'a6000000-0000-0000-0000-000000000001\''
+\set PRESBYTERY_CLERK_USER '\'e0000000-0000-0000-0000-0000000000f4\''
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
 
@@ -2057,5 +2070,323 @@ begin;
     raise exception 'FAIL F2 — an appointment referenced a person with no membership at the stated organization';
   exception when foreign_key_violation then
     raise notice 'pass  appointments_person_fk: person with no membership at the stated org rejected (F2)';
+  end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 29. Presbytery program: congregation oversight, statistics, per-capita
+--     (docs/work-log/2026-08-27-presbytery-program.md, Phase 3 / DECISION-118
+--     through DECISION-121; database-admin schema commit, work-log
+--     docs/work-log/2026-08-27-presbytery-oversight-statistics.md).
+--
+-- Full-suite-halt check (read, not papered over): this file sets
+-- `\set ON_ERROR_STOP on` (line 13). Every "expected rejection" test below
+-- (and throughout the file) wraps its manual `raise exception 'FAIL — ...'`
+-- in a `do $$ ... exception when <specific errcode> then raise notice 'pass
+-- ...' end $$;` block — a manually raised exception with no explicit errcode
+-- carries the default SQLSTATE P0001, which the narrower `when <errcode>`
+-- handler does NOT match, so if a protection is ever actually broken (the
+-- operation unexpectedly succeeds and the FAIL branch fires), the error is
+-- NOT swallowed — it propagates uncaught and ON_ERROR_STOP halts the whole
+-- script with a hard, visible error, not a silent NOTICE. Confirmed by
+-- direct read rather than assumed; no drift found. This section's own
+-- "positive path" assertions (e) go further and use no exception handler at
+-- all, so a regression there halts immediately too. Every mutating block in
+-- this section runs inside `begin; ... rollback;`, so it is safe to re-run
+-- indefinitely against the same seeded database, same discipline as every
+-- other section since the 2026-08-25 member-management fix (docs/TODO.md).
+-- ---------------------------------------------------------------------------
+
+-- (a) FORCE RLS is set on all four new tables (F1).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('congregation_oversight', 'congregation_statistics',
+                         'per_capita_rates', 'per_capita_records')
+        and relforcerowsecurity),
+    4, 'presbytery program: FORCE row level security is set on all four new tables');
+commit;
+
+-- The presby_app grant shape, proven directly (same style as section 28's
+-- appointments proof) — 4 tables x 4 privileges.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name in ('congregation_oversight', 'congregation_statistics',
+                            'per_capita_rates', 'per_capita_records')
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    16, 'presbytery program: presby_app has full select/insert/update/delete on all four new tables');
+commit;
+
+-- (b) Known-fixture sanity: the presbytery sees its own rows on all four
+--     tables (scripts/seed-dev.sql's fixture).
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq((select count(*) from congregation_oversight where id = :OVERSIGHT_ALDER), 1,
+    'northern reach: sees its own congregation_oversight row for Alder Creek');
+  select assert_eq((select count(*) from congregation_oversight where id = :OVERSIGHT_BRAMBLE), 1,
+    'northern reach: sees its own congregation_oversight row for Bramblewood');
+  select assert_eq((select count(*) from congregation_oversight where about_org_id = :QUILLHAVEN), 0,
+    'northern reach: no oversight row on file for Quillhaven (D9 unmanaged) — "no data on file" empty state');
+  select assert_eq((select count(*) from congregation_statistics where id = :STAT_QUILLHAVEN), 1,
+    'northern reach: sees its own presbytery_entered statistics row for Quillhaven');
+  select assert_eq((select count(*) from congregation_statistics where id = :STAT_ALDER_PUBLISHED), 1,
+    'northern reach: sees its own published_by_congregation statistics row for Alder Creek');
+  select assert_eq((select count(*) from per_capita_rates where id = :PER_CAPITA_RATE), 1,
+    'northern reach: sees its own per-capita rate row');
+  select assert_eq((select count(*) from per_capita_records where id = :PER_CAPITA_RECORD), 1,
+    'northern reach: sees its own per-capita record row');
+commit;
+
+-- (c) Cross-presbytery isolation on all four tables, proven against a SECOND
+--     real presbytery minted for the life of this one rolled-back
+--     transaction — organizations carries no RLS of its own (schema-
+--     design.md section 17), so this insert is legal and leaves no trace
+--     once rolled back. Same discipline as section 28(d)'s appointments
+--     proof, extended to all four tables this section adds.
+begin;
+  insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status)
+  values ('f7000000-0000-0000-0000-000000000001', null, 'presbytery',
+          'Presbytery of the Western Basin', 'western-basin', 'western_basin', 'managed');
+
+  select set_config('app.current_org_id', 'f7000000-0000-0000-0000-000000000001', true);
+
+  select assert_eq((select count(*) from congregation_oversight), 0,
+    'presbytery B (western basin): sees no congregation_oversight rows at all');
+  select assert_eq((select count(*) from congregation_oversight where id = :OVERSIGHT_ALDER), 0,
+    'presbytery B: known-id cross-presbytery read of northern reach''s oversight row returns zero');
+
+  select assert_eq((select count(*) from congregation_statistics), 0,
+    'presbytery B: sees no congregation_statistics rows at all');
+  select assert_eq((select count(*) from congregation_statistics where id = :STAT_ALDER_PUBLISHED), 0,
+    'presbytery B: known-id cross-presbytery read of northern reach''s published statistics row returns zero');
+
+  select assert_eq((select count(*) from per_capita_rates), 0,
+    'presbytery B: sees no per_capita_rates rows at all');
+  select assert_eq((select count(*) from per_capita_records), 0,
+    'presbytery B: sees no per_capita_records rows at all');
+
+  do $$
+  begin
+    insert into congregation_oversight (organization_id, about_org_id, viability_score, updated_by)
+    values ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+            2, 'e0000000-0000-0000-0000-0000000000f4');
+    raise exception 'FAIL — presbytery B wrote a congregation_oversight row into northern reach''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  congregation_oversight tenant_isolation: cross-presbytery write rejected';
+  end $$;
+
+  do $$
+  begin
+    insert into congregation_statistics (organization_id, about_org_id, year, provenance)
+    values ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+            2030, 'presbytery_entered');
+    raise exception 'FAIL — presbytery B wrote a congregation_statistics row into northern reach''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  congregation_statistics tenant_isolation: cross-presbytery write rejected';
+  end $$;
+
+  do $$
+  begin
+    insert into per_capita_rates (organization_id, billing_year, basis_year, rate_per_member, updated_by)
+    values ('11111111-1111-1111-1111-111111111111', 2099, 2097, 1.00,
+            'e0000000-0000-0000-0000-0000000000f4');
+    raise exception 'FAIL — presbytery B wrote a per_capita_rates row into northern reach''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  per_capita_rates tenant_isolation: cross-presbytery write rejected';
+  end $$;
+
+  do $$
+  begin
+    insert into per_capita_records
+      (organization_id, about_org_id, billing_year, basis_year, ending_active_basis, rate_applied, amount_owed)
+    values ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+            2099, 2097, 1, 1.00, 1.00);
+    raise exception 'FAIL — presbytery B wrote a per_capita_records row into northern reach''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  per_capita_records tenant_isolation: cross-presbytery write rejected';
+  end $$;
+rollback;
+
+-- (d) The freeze trigger: rejects UPDATE/DELETE on a published row, allows
+--     UPDATE on a presbytery_entered row — the roll_actions/void precedent,
+--     applied to a column instead of a second table.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    update congregation_statistics set ending_active = 999
+     where id = 'a4000000-0000-0000-0000-000000000002'; -- :STAT_ALDER_PUBLISHED
+    raise exception 'FAIL — updated a published_by_congregation row in place';
+  exception when check_violation then
+    raise notice 'pass  congregation_statistics_freeze: UPDATE on a published row rejected';
+  end $$;
+
+  do $$
+  begin
+    delete from congregation_statistics where id = 'a4000000-0000-0000-0000-000000000002'; -- :STAT_ALDER_PUBLISHED
+    raise exception 'FAIL — deleted a published_by_congregation row';
+  exception when check_violation then
+    raise notice 'pass  congregation_statistics_freeze: DELETE on a published row rejected';
+  end $$;
+
+  -- A presbytery_entered row is ordinary mutable working state — the
+  -- trigger's WHEN clause never fires for it.
+  update congregation_statistics set ending_active = 40 where id = :STAT_QUILLHAVEN;
+  select assert_eq(
+    (select ending_active from congregation_statistics where id = :STAT_QUILLHAVEN),
+    40, 'congregation_statistics_freeze: UPDATE on a presbytery_entered row is allowed (not frozen)');
+rollback;
+
+-- (e) Confused-deputy invariant (F26): presby_publish_sasr_snapshot() takes
+--     NO organization id of any kind — calling it from Alder Creek's own
+--     context (a REAL seeded congregation, not a synthetic pair — Phase 2's
+--     two-real-orgs discipline) lands the new row at its ACTUAL parent
+--     (northern reach) and about itself; there is no parameter through which
+--     it could target anywhere else. The republish is exercised in the same
+--     block: a second call for the same year chains to the first via a
+--     DERIVED supersedes_publication_id, never a caller-supplied one — the
+--     "republish chain" half of the partial-unique-index proof below.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  declare
+    v_new       uuid;
+    v_corrected uuid;
+    v_org_id    uuid;
+    v_about_id  uuid;
+  begin
+    v_new := presby_publish_sasr_snapshot(
+      2026, 'Session stated meeting, 2027-01-10, item 3',
+      p_ending_active => 220, p_ending_baptized => 48,
+      p_avg_weekly_worship_attendance => 170, p_baptisms_children => 5,
+      p_receipts_contributions => 425000.00, p_exp_local_program => 280000.00
+    );
+
+    -- Verified through presby_list_own_congregation_publications(), NOT a
+    -- direct SELECT on congregation_statistics: this session's own
+    -- app.current_org_id is still Alder Creek, and the standard
+    -- tenant_isolation policy correctly filters the just-inserted row
+    -- (organization_id = northern reach) out of any query run under that
+    -- context — the row living outside the caller's own tenant space IS the
+    -- point (F26). The read counterpart is SECURITY DEFINER for exactly
+    -- this reason.
+    select organization_id, about_org_id into v_org_id, v_about_id
+      from presby_list_own_congregation_publications(2026)
+     where id = v_new;
+
+    if v_org_id is distinct from '11111111-1111-1111-1111-111111111111' -- :PRESBY, the ACTUAL parent
+       or v_about_id is distinct from '22222222-2222-2222-2222-222222222222' -- :ALDER, the caller
+    then
+      raise exception 'FAIL — Alder Creek''s publication did not land at its actual parent (found organization_id=%, about_org_id=%)', v_org_id, v_about_id;
+    end if;
+    raise notice 'pass  presby_publish_sasr_snapshot: publication lands at the actual parent (northern reach), about the calling congregation — no parameter exists to redirect it';
+
+    v_corrected := presby_publish_sasr_snapshot(
+      2026, 'Session stated meeting, 2027-02-14, item 2 (correction)',
+      p_ending_active => 221
+    );
+
+    if (select supersedes_publication_id from presby_list_own_congregation_publications(2026) where id = v_corrected)
+       is distinct from v_new then
+      raise exception 'FAIL — a same-year republish did not chain to the row it corrects';
+    end if;
+    raise notice 'pass  presby_publish_sasr_snapshot: a same-year republish chains via a DERIVED supersedes_publication_id (never caller-supplied) — the republish-chain half of the partial unique index proof';
+  end $$;
+rollback;
+
+-- (f) presby_publish_sasr_snapshot() rejects an org with no parent at all —
+--     northern reach itself (a real seeded presbytery, parent_id IS NULL).
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    perform presby_publish_sasr_snapshot(2026, 'n/a');
+    raise exception 'FAIL — an organization with no parent_id was allowed to publish';
+  exception when invalid_parameter_value then
+    raise notice 'pass  presby_publish_sasr_snapshot: an organization with no parent_id is rejected';
+  end $$;
+rollback;
+
+-- (g) presby_publish_sasr_snapshot() rejects a congregation whose parent
+--     exists but is not a presbytery (a synod, here) — minted inline for the
+--     life of this rolled-back transaction, same discipline as (c) above.
+begin;
+  insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status)
+  values
+    ('f8000000-0000-0000-0000-000000000001', null, 'synod',
+     'Synod of the Coastal Plain', 'coastal-plain-synod', 'coastal_plain_synod', 'managed'),
+    ('f8000000-0000-0000-0000-000000000002', 'f8000000-0000-0000-0000-000000000001', 'congregation',
+     'Orphan Chapel (fixture — parent is a synod, not a presbytery)', 'orphan-chapel',
+     'coastal_plain_synod.orphan_chapel', 'managed');
+
+  select set_config('app.current_org_id', 'f8000000-0000-0000-0000-000000000002', true);
+  do $$
+  begin
+    perform presby_publish_sasr_snapshot(2026, 'n/a');
+    raise exception 'FAIL — a congregation whose parent is a synod, not a presbytery, was allowed to publish';
+  exception when invalid_parameter_value then
+    raise notice 'pass  presby_publish_sasr_snapshot: a parent organization_type other than presbytery is rejected';
+  end $$;
+rollback;
+
+-- (h) presby_publish_sasr_snapshot() range-validates every count at the
+--     trust boundary (F26) — a negative count is rejected, never merely
+--     clamped or silently accepted.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    perform presby_publish_sasr_snapshot(2026, 'n/a', p_ending_active => -5);
+    raise exception 'FAIL — a negative count was accepted by presby_publish_sasr_snapshot()';
+  exception when invalid_parameter_value then
+    raise notice 'pass  presby_publish_sasr_snapshot: a negative count is rejected (range validation at the trust boundary)';
+  end $$;
+
+  do $$
+  begin
+    perform presby_publish_sasr_snapshot(3050, 'n/a');
+    raise exception 'FAIL — an out-of-range report year was accepted';
+  exception when invalid_parameter_value then
+    raise notice 'pass  presby_publish_sasr_snapshot: an out-of-range report year is rejected';
+  end $$;
+rollback;
+
+-- (i) presby_list_own_congregation_publications(): Alder Creek reads its own
+--     published row back (the "publication history" requirement); a THIRD
+--     seeded congregation (Bramblewood) never returns Alder Creek's rows,
+--     by count or by known id.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from presby_list_own_congregation_publications() where id = :STAT_ALDER_PUBLISHED),
+    1, 'presby_list_own_congregation_publications: Alder Creek reads its own published row back');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) from presby_list_own_congregation_publications()),
+    0, 'presby_list_own_congregation_publications: Bramblewood (a third congregation) sees none of Alder Creek''s publications');
+  select assert_eq(
+    (select count(*) from presby_list_own_congregation_publications() where id = :STAT_ALDER_PUBLISHED),
+    0, 'presby_list_own_congregation_publications: Bramblewood cannot read Alder Creek''s known publication id either');
+commit;
+
+-- (j) The partial unique index: rejects a duplicate presbytery_entered row
+--     for the same (organization, congregation, year) — the "republish
+--     chain" half of this proof already ran in (e) above via two successful
+--     presby_publish_sasr_snapshot() calls for the same year.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into congregation_statistics (organization_id, about_org_id, year, provenance)
+    values ('11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
+            2025, 'presbytery_entered');
+    raise exception 'FAIL — a second presbytery_entered row for the same (org, congregation, year) was accepted';
+  exception when unique_violation then
+    raise notice 'pass  congregation_statistics_entered_unique_idx: duplicate presbytery_entered row for the same year rejected';
   end $$;
 rollback;

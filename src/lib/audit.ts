@@ -229,6 +229,27 @@ export const AUDIT_ACTIONS = {
   // Metadata: { organizationId, personId, servingOrgId, callType, startsOn }.
   APPOINTMENT_ENDED: "tenant.appointment.ended",
   // Metadata: { organizationId, appointmentId, personId, servingOrgId, endsOn }.
+  // Presbytery oversight & statistics, Increments 3/3b (docs/work-log/
+  // 2026-08-27-presbytery-program.md, DECISION-118 through 121) — written
+  // from src/app/(org)/o/[slug]/admin/oversight/actions.ts and
+  // .../admin/reports/actions.ts. ONE key per table, regardless of insert
+  // vs. update (same discipline TENANT_PERSON_DEMOGRAPHICS_UPDATED already
+  // uses for its own upsert) — the audited fact is "this record changed,"
+  // not which SQL verb changed it.
+  CONGREGATION_OVERSIGHT_SET: "tenant.congregation_oversight.set",
+  // Metadata: { organizationId, aboutOrgId, viabilityScore }.
+  CONGREGATION_STATISTICS_ENTERED: "tenant.congregation_statistics.entered",
+  // Metadata: { organizationId, aboutOrgId, year }.
+  PER_CAPITA_RATE_SET: "tenant.per_capita_rate.set",
+  // Metadata: { organizationId, billingYear, basisYear, ratePerMember }.
+  // Beyond Phase 1's own named audit list (rate-set, record-marked-paid) —
+  // batch-generating records is itself a financial-stakes write (it issues
+  // bills), audited for the same reason Phase 1's Gaps section calls for
+  // auditing oversight/publication writes "even beyond Rule-7's letter."
+  PER_CAPITA_RECORDS_GENERATED: "tenant.per_capita_records.generated",
+  // Metadata: { organizationId, billingYear, created, skipped }.
+  PER_CAPITA_PAYMENT_RECORDED: "tenant.per_capita_payment.recorded",
+  // Metadata: { organizationId, recordId, paidAmount, paidStatus }.
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

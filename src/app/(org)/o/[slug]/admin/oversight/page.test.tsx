@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 /**
  * Orchestration tests for `/o/<slug>/admin/oversight`'s page.tsx —
- * product-IA scaffold, docs/work-log/2026-08-27-product-ia-scaffold.md
- * (Phase 3 §3/§9, DECISION-117). Mirrors `admin/committees/page.test.tsx`'s
- * flag-before-org-type ordering contract. `oversight` is a presbytery-scoped
- * placeholder tile.
+ * Presbytery program Increment 3 (`docs/work-log/
+ * 2026-08-27-presbytery-program.md`, DECISION-118 through 121). Replaces
+ * the product-IA scaffold's `ComingSoon` assertions with the real list.
+ * Same flag-then-org-type ordering contract the stub already established
+ * (`docs/work-log/2026-08-27-product-ia-scaffold.md`) — this file keeps
+ * those tests and adds the read-path/forbidden/load-error contract
+ * `../credentials/page.test.tsx` documents for its own list read.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -16,14 +19,29 @@ vi.mock("@/lib/auth/cached-auth", () => ({
 
 const resolveOrgContext = vi.fn();
 const assertOrgAccess = vi.fn();
-vi.mock("@/lib/authz", () => ({
-  resolveOrgContext: (...args: unknown[]) => resolveOrgContext(...args),
-  assertOrgAccess: (...args: unknown[]) => assertOrgAccess(...args),
-}));
+vi.mock("@/lib/authz", () => {
+  class MockOrgAccessError extends Error {
+    constructor() {
+      super("mock: no active membership");
+      this.name = "OrgAccessError";
+    }
+  }
+  return {
+    OrgAccessError: MockOrgAccessError,
+    resolveOrgContext: (...args: unknown[]) => resolveOrgContext(...args),
+    assertOrgAccess: (...args: unknown[]) => assertOrgAccess(...args),
+  };
+});
 
 const isFlagEnabled = vi.fn();
 vi.mock("@/lib/flags", () => ({
   isFlagEnabled: (...args: unknown[]) => isFlagEnabled(...args),
+}));
+
+const getCongregationOversightList = vi.fn();
+vi.mock("@/lib/presbytery", () => ({
+  getCongregationOversightList: (...args: unknown[]) =>
+    getCongregationOversightList(...args),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -38,6 +56,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import OversightPage from "./page";
+import { OrgAccessError } from "@/lib/authz";
 
 afterEach(() => {
   cleanup();
@@ -45,6 +64,7 @@ afterEach(() => {
   resolveOrgContext.mockReset();
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
+  getCongregationOversightList.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -141,7 +161,7 @@ describe("OversightPage — the flag-before-org-type ordering contract", () => {
     expect(assertOrgAccess).toHaveBeenCalledWith("person-1", "org-1");
   });
 
-  it("flag off renders PlaceholderFlagOff, checked with org_portal.oversight", async () => {
+  it("flag off renders PlaceholderFlagOff, checked with org_portal.oversight, WITHOUT calling getCongregationOversightList()", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
     isFlagEnabled.mockResolvedValue(false);
@@ -150,6 +170,7 @@ describe("OversightPage — the flag-before-org-type ordering contract", () => {
     render(el);
 
     expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.oversight");
+    expect(getCongregationOversightList).not.toHaveBeenCalled();
     expect(
       screen.getByText(
         /isn.t turned on for Presbytery of the Northern Reach yet/i,
@@ -170,7 +191,7 @@ describe("OversightPage — the flag-before-org-type ordering contract", () => {
     ).toBeTruthy();
   });
 
-  it("flag on + wrong org type (congregation) renders PlaceholderNotAvailable, with no permission-shaped copy", async () => {
+  it("flag on + wrong org type (congregation) renders PlaceholderNotAvailable, WITHOUT calling getCongregationOversightList()", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED_CONGREGATION);
     isFlagEnabled.mockResolvedValue(true);
@@ -178,16 +199,61 @@ describe("OversightPage — the flag-before-org-type ordering contract", () => {
     const el = await OversightPage({ params: makeParams("alder-creek") });
     render(el);
 
+    expect(getCongregationOversightList).not.toHaveBeenCalled();
     expect(
       screen.getByText(/isn.t available for Alder Creek Presbyterian Church/i),
     ).toBeTruthy();
     expect(screen.queryByText(/don.t have permission/i)).toBeNull();
   });
+});
 
-  it("flag on + correct org type (presbytery) renders ComingSoon", async () => {
+describe("OversightPage — getCongregationOversightList() error handling", () => {
+  it("re-throws OrgAccessError rather than rendering the load-error state", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
     isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
+
+    await expect(OversightPage({ params: makeParams() })).rejects.toThrow(
+      "mock: no active membership",
+    );
+  });
+
+  it("renders the load-error state for any other thrown error", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockRejectedValue(new Error("connection reset"));
+
+    const el = await OversightPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByText(/couldn.t load oversight records right now/i),
+    ).toBeTruthy();
+  });
+});
+
+describe("OversightPage — result branches", () => {
+  it("renders OversightForbidden when the read returns forbidden", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockResolvedValue({ kind: "forbidden" });
+
+    const el = await OversightPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByText(/don.t have permission to manage congregation oversight/i),
+    ).toBeTruthy();
+  });
+
+  it("renders the empty state when there are no member congregations", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockResolvedValue({ kind: "ok", data: [] });
 
     const el = await OversightPage({ params: makeParams() });
     render(el);
@@ -195,12 +261,59 @@ describe("OversightPage — the flag-before-org-type ordering contract", () => {
     expect(
       screen.getByRole("heading", { name: "Congregation Oversight" }),
     ).toBeTruthy();
-    expect(
-      screen.queryByText(/isn.t available for/i),
-    ).toBeNull();
-    const link = screen.getByRole("link", {
-      name: /want this sooner\? tell us\./i,
+    expect(screen.getByText(/no member congregations on record/i)).toBeTruthy();
+  });
+
+  it("renders the list, distinguishing an assessed congregation from one with no data on file", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockResolvedValue({
+      kind: "ok",
+      data: [
+        {
+          organizationId: "cong-1",
+          name: "Alder Creek Presbyterian Church",
+          platformStatus: "managed",
+          hasData: true,
+          viabilityScore: 3,
+          redevelopmentNotes: null,
+          buildingsNotes: null,
+          insuranceCarrier: "Fieldstone Mutual",
+          insuranceExpiresOn: "2027-03-01",
+          latitude: "41.2033",
+          longitude: "-77.1945",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          organizationId: "cong-2",
+          name: "Quillhaven Presbyterian Church",
+          platformStatus: "unmanaged",
+          hasData: false,
+          viabilityScore: null,
+          redevelopmentNotes: null,
+          buildingsNotes: null,
+          insuranceCarrier: null,
+          insuranceExpiresOn: null,
+          latitude: null,
+          longitude: null,
+          updatedAt: null,
+        },
+      ],
     });
-    expect(link.getAttribute("href")).toBe("/o/northern-reach/feedback");
+
+    const el = await OversightPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.getByText("Alder Creek Presbyterian Church")).toBeTruthy();
+    expect(screen.getByText("Healthy")).toBeTruthy();
+    expect(screen.getByText("Quillhaven Presbyterian Church")).toBeTruthy();
+    expect(screen.getByText("Not yet assessed")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /view \/ edit/i }).getAttribute("href")).toBe(
+      "/o/northern-reach/admin/oversight/cong-1",
+    );
+    expect(screen.getByRole("link", { name: /^assess$/i }).getAttribute("href")).toBe(
+      "/o/northern-reach/admin/oversight/cong-2",
+    );
   });
 });

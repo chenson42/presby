@@ -176,6 +176,11 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   ORDINATION_STATUS_CHANGED: "tenant.ordination.status_changed",
   APPOINTMENT_RECORDED: "tenant.appointment.recorded",
   APPOINTMENT_ENDED: "tenant.appointment.ended",
+  CONGREGATION_OVERSIGHT_SET: "tenant.congregation_oversight.set",
+  CONGREGATION_STATISTICS_ENTERED: "tenant.congregation_statistics.entered",
+  PER_CAPITA_RATE_SET: "tenant.per_capita_rate.set",
+  PER_CAPITA_RECORDS_GENERATED: "tenant.per_capita_records.generated",
+  PER_CAPITA_PAYMENT_RECORDED: "tenant.per_capita_payment.recorded",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

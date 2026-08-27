@@ -1148,4 +1148,139 @@ insert into appointments (id, organization_id, person_id, serving_org_id, call_t
 insert into app_role_permissions (role_id, permission_key) values
   ('f0000000-0000-0000-0000-000000000005','events.manage');
 
+-- ---------------------------------------------------------------------------
+-- Presbytery program: congregation oversight, statistics, per-capita
+-- (docs/work-log/2026-08-27-presbytery-program.md, Phase 3 / DECISION-118
+-- through DECISION-121; database-admin schema commit, work-log
+-- docs/work-log/2026-08-27-presbytery-oversight-statistics.md).
+--
+-- CONCURRENCY NOTE: appended directly ahead of the final `commit;`, the same
+-- seam every recent pipeline's own fixture block has landed at (children's
+-- ministry, events, ministry credentials, immediately above). If a merge
+-- conflict appears at this exact seam, keep ALL blocks — append-only, none
+-- depends on another.
+-- ---------------------------------------------------------------------------
+
+-- A sign-in-capable platform user for Idris Calloway (the presbytery's own
+-- Stated Clerk, c...00a) — same P9 reasoning as clerk.fixture@...: there is
+-- otherwise no way to walk /o/northern-reach/admin/oversight or .../reports
+-- through a real browser session as the person these permissions are bound
+-- to below (statistics.manage/per_capita.manage via the presbytery_stated_
+-- clerk template binding, drizzle/0038_presby_presbytery_program.sql;
+-- congregation_oversight.manage via the fixture grant immediately below).
+-- Same reserved .invalid domain, same shared fixture password
+-- (docs/testing.md), two_factor_required false for the same
+-- no-TOTP-detour reasoning as clerk.fixture/elder.fixture above.
+insert into users (id, email, name, email_verified, password, is_active, two_factor_required)
+values ('e0000000-0000-0000-0000-0000000000f4', 'presbytery.clerk.fixture@example.invalid',
+        'Fixture Presbytery Clerk', now(),
+        '$2b$10$tHdp7RHkvStQGKE5A/BRTenWeJ/HUOeY3iA/MmCGXE2fUCS9wBzT2',
+        true, false)
+on conflict (id) do nothing;
+
+update people
+   set user_id = 'e0000000-0000-0000-0000-0000000000f4'
+ where id = 'c0000000-0000-0000-0000-00000000000a';
+
+-- congregation_oversight.manage gets NO default binding (DECISION-119: no
+-- PC(USA) office is the constitutional keeper of "our opinion of this
+-- congregation," same DECISION-078 test failure as groups.manage/
+-- events.manage) — this grant to the presbytery's adopted presbytery_
+-- stated_clerk copy (f...00e) is a dev-reachability CONVENIENCE ONLY,
+-- matching events.manage's own fixture-grant comment, never a recommended
+-- production default.
+--
+-- statistics.manage/per_capita.manage are bound to the presbytery_stated_
+-- clerk TEMPLATE in drizzle/0038_presby_presbytery_program.sql; this
+-- ADOPTED copy (f...00e) needs its own binding for presby_has_permission()
+-- to resolve them for Idris Calloway — the same two-binding shape
+-- credentials.manage already established (0037's template insert + this
+-- file's own adopted-copy insert, above).
+insert into app_role_permissions (role_id, permission_key) values
+  ('f0000000-0000-0000-0000-00000000000e', 'congregation_oversight.manage'),
+  ('f0000000-0000-0000-0000-00000000000e', 'statistics.manage'),
+  ('f0000000-0000-0000-0000-00000000000e', 'per_capita.manage');
+
+-- statistics.publish binds to the CONGREGATION's stated_clerk (architect
+-- Ruling 2 / DECISION-119) — Tobias Renwick's existing stated_clerk grant
+-- (f0000000-...-0005) already carries this once this lands, same
+-- no-new-role_grants-row reasoning as officers.manage/groups.manage/
+-- events.manage above.
+insert into app_role_permissions (role_id, permission_key) values
+  ('f0000000-0000-0000-0000-000000000005', 'statistics.publish');
+
+-- congregation_oversight: the presbytery's own opinion of two member
+-- congregations. Alder Creek (healthy, managed) and Bramblewood (declining,
+-- managed) — Quillhaven (unmanaged, D9) deliberately gets NO oversight row,
+-- proving the "no data on file" empty state (Phase 3 Edge Cases) is
+-- reachable without any special flag. Coordinates are invented, not
+-- geocoded from any real address (DECISION-120).
+insert into congregation_oversight
+  (id, organization_id, about_org_id, viability_score, redevelopment_notes,
+   buildings_notes, insurance_carrier, insurance_expires_on,
+   latitude, longitude, updated_by)
+values
+  ('a3000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+   3, null,
+   'Roof replaced 2024; sanctuary HVAC original to 1987 construction.',
+   'Fieldstone Mutual (example)', '2027-03-01',
+   41.2033, -77.1945, 'e0000000-0000-0000-0000-0000000000f4'),
+  ('a3000000-0000-0000-0000-000000000002',
+   '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333',
+   2,
+   'Attendance down roughly 30% over five years; Committee on Ministry to discuss redevelopment options at the 2026 fall stated meeting.',
+   'Fellowship-hall roof leak reported spring 2026, awaiting contractor estimate.',
+   'Fieldstone Mutual (example)', '2026-11-15',
+   41.3512, -77.0209, 'e0000000-0000-0000-0000-0000000000f4');
+
+-- congregation_statistics: mixed provenance, the same coalesce read every
+-- consumer (3b's list, 4b's rollup, per-capita's basis-year lookup) needs to
+-- exercise. Quillhaven (unmanaged) gets a presbytery_entered row — the D9
+-- shape. Alder Creek (managed) gets a published_by_congregation row,
+-- standing in for a real publish until Increment 4a's UI can produce one
+-- live end to end (presby_publish_sasr_snapshot() itself is exercised
+-- directly by scripts/test-rls.sql, not replayed here).
+insert into congregation_statistics
+  (id, organization_id, about_org_id, year, provenance, entered_by,
+   ending_active, ending_baptized, avg_weekly_worship_attendance,
+   baptisms_children, receipts_contributions, exp_local_program)
+values
+  ('a4000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
+   2025, 'presbytery_entered', 'e0000000-0000-0000-0000-0000000000f4',
+   38, 12, 30, 1, 84000.00, 61000.00);
+
+insert into congregation_statistics
+  (id, organization_id, about_org_id, year, provenance, published_at, minute_reference,
+   ending_active, ending_baptized, avg_weekly_worship_attendance,
+   baptisms_children, receipts_contributions, exp_local_program)
+values
+  ('a4000000-0000-0000-0000-000000000002',
+   '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+   2025, 'published_by_congregation', '2026-01-12 15:00:00-05',
+   'Session stated meeting, 2026-01-11, item 5',
+   212, 45, 165, 6, 410000.00, 275000.00);
+
+-- per_capita_rates: one billing year, basis year defaulted per Operator
+-- Answer 1's own two-year-arrears practice (2026 billing off 2024 data).
+insert into per_capita_rates (id, organization_id, billing_year, basis_year, rate_per_member, updated_by)
+values
+  ('a5000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111', 2026, 2024, 12.50,
+   'e0000000-0000-0000-0000-0000000000f4');
+
+-- per_capita_records: one generated (and part-paid) bill for Alder Creek,
+-- snapshotting ending_active_basis/rate_applied/amount_owed at generation
+-- time (psvonline-portal's own documented practice) rather than deriving
+-- them live — proves the freeze-on-generation property has a real row to
+-- exercise, not just an empty table.
+insert into per_capita_records
+  (id, organization_id, about_org_id, billing_year, basis_year,
+   ending_active_basis, rate_applied, amount_owed, paid_status)
+values
+  ('a6000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+   2026, 2024, 210, 12.50, 2625.00, 'unpaid');
+
 commit;

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPublishedSite, type PublishedSite } from "@/lib/sites";
+import { publicOrgSummary } from "@/lib/authz";
 import {
   buildPageMetadata,
   renderSiteBundle,
@@ -8,6 +9,20 @@ import {
   type SocialLink,
 } from "presby-site-kit";
 import { ContactForm } from "../contact-form";
+import { PresbyteryFallback } from "../presbytery-fallback";
+
+/**
+ * DECISION-121 — org types that get the minimal sign-in fallback instead of
+ * the untouched `notFound()` collapse, on `getPublishedSite()`'s `not_found`
+ * branch only (never on `renderSiteBundle()` returning null — that means a
+ * site DOES exist but this particular sub-path doesn't, a real 404
+ * regardless of org type). A congregation is never in this list: its
+ * `platformStatus` is the fact DECISION-040's enumeration-safe collapse
+ * protects, and `publicOrgSummary()` deliberately cannot see it — but
+ * organizationType alone leaks nothing a congregation's own miss response
+ * doesn't already leak identically to every other congregation.
+ */
+const FALLBACK_ORG_TYPES = new Set(["presbytery", "synod", "general_assembly"]);
 
 /**
  * Origin only (scheme + host, no trailing slash) — the same
@@ -197,7 +212,19 @@ export default async function PublicSitePage({
   const currentPath = path && path.length > 0 ? `/${path.join("/")}` : "/";
 
   const result = await getPublishedSite(slug);
-  if (result.kind === "not_found") notFound();
+  if (result.kind === "not_found") {
+    // DECISION-121: one extra narrow, public read on the miss path only —
+    // never on the ok path above, and never able to distinguish a
+    // congregation's "never provisioned" from "suspended" from "nonexistent
+    // slug" (publicOrgSummary() cannot see platformStatus at all, so this
+    // adds no new leak surface beyond org type, which the public org tree
+    // already discloses).
+    const summary = await publicOrgSummary(slug);
+    if (summary && FALLBACK_ORG_TYPES.has(summary.organizationType)) {
+      return <PresbyteryFallback name={summary.name} slug={slug} />;
+    }
+    notFound();
+  }
 
   const { site } = result;
 

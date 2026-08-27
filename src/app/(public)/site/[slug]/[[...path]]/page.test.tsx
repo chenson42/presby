@@ -9,10 +9,19 @@
  *      a corrupt bundle (Phase 1 Gap 5's enumeration-safety collapse); this
  *      page never re-derives which one it got, it only branches on `kind`.
  *   2. `renderSiteBundle()` returning `null` (no page in the bundle matches
- *      `currentPath`) also calls `notFound()`.
+ *      `currentPath`) also calls `notFound()` — NEVER the presbytery
+ *      fallback below, even for a presbytery org: a site that exists but
+ *      has no matching sub-path is a real 404, not a "never published"
+ *      case.
  *   3. On the ok path, `renderSiteBundle()` receives exactly what
  *      `getPublishedSite()` returned — `pages`, `brand`, and an `imageUrl`
  *      closure built from `imageKeys` — never a placeholder.
+ *   4. DECISION-121 — on the `not_found` branch ONLY, a presbytery/synod/
+ *      general_assembly org renders `PresbyteryFallback` instead of the
+ *      404; a congregation (or a truly nonexistent slug) keeps the
+ *      untouched `notFound()` collapse. The org-type matrix this pins:
+ *      congregation → 404 unchanged, presbytery → fallback, nonexistent →
+ *      404.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -20,6 +29,11 @@ import { cleanup, render, screen } from "@testing-library/react";
 const getPublishedSite = vi.fn();
 vi.mock("@/lib/sites", () => ({
   getPublishedSite: (...args: unknown[]) => getPublishedSite(...args),
+}));
+
+const publicOrgSummary = vi.fn();
+vi.mock("@/lib/authz", () => ({
+  publicOrgSummary: (...args: unknown[]) => publicOrgSummary(...args),
 }));
 
 const renderSiteBundle = vi.fn();
@@ -64,6 +78,8 @@ import PublicSitePage, { generateMetadata } from "./page";
 afterEach(() => {
   cleanup();
   getPublishedSite.mockReset();
+  publicOrgSummary.mockReset();
+  publicOrgSummary.mockResolvedValue(null);
   renderSiteBundle.mockReset();
   buildPageMetadata.mockReset();
   notFoundMock.mockClear();
@@ -103,8 +119,9 @@ const SITE = {
 };
 
 describe("PublicSitePage — the enumeration-safe not_found collapse", () => {
-  it("calls notFound() when getPublishedSite() returns not_found", async () => {
+  it("calls notFound() when getPublishedSite() returns not_found and the slug resolves to nothing (a truly nonexistent org)", async () => {
     getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    publicOrgSummary.mockResolvedValue(null);
 
     await expect(
       PublicSitePage({ params: makeParams() }),
@@ -113,13 +130,75 @@ describe("PublicSitePage — the enumeration-safe not_found collapse", () => {
     expect(renderSiteBundle).not.toHaveBeenCalled();
   });
 
-  it("calls notFound() when renderSiteBundle() returns null (no matching page)", async () => {
+  it("calls notFound() when getPublishedSite() returns not_found and the slug is a CONGREGATION — the fallback never applies to it", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    publicOrgSummary.mockResolvedValue({
+      name: "Alder Creek Presbyterian Church",
+      organizationType: "congregation",
+    });
+
+    await expect(
+      PublicSitePage({ params: makeParams() }),
+    ).rejects.toThrow("NOT_FOUND");
+  });
+
+  it("calls notFound() when renderSiteBundle() returns null (no matching page) — never the presbytery fallback, even for a presbytery org", async () => {
     getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(null);
 
     await expect(
       PublicSitePage({ params: makeParams() }),
     ).rejects.toThrow("NOT_FOUND");
+
+    expect(publicOrgSummary).not.toHaveBeenCalled();
+  });
+});
+
+describe("PublicSitePage — DECISION-121, the presbytery/synod/GA fallback", () => {
+  it("renders PresbyteryFallback (org name + sign-in link) when the not_found slug resolves to a presbytery", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    publicOrgSummary.mockResolvedValue({
+      name: "Presbytery of the Northern Reach",
+      organizationType: "presbytery",
+    });
+
+    const el = await PublicSitePage({ params: makeParams("northern-reach") });
+    render(el);
+
+    expect(
+      screen.getByRole("heading", { name: "Presbytery of the Northern Reach" }),
+    ).toBeTruthy();
+    const link = screen.getByRole("link", { name: /sign in to the portal/i });
+    expect(link.getAttribute("href")).toBe("/o/northern-reach");
+    expect(notFoundMock).not.toHaveBeenCalled();
+  });
+
+  it("renders the same fallback for a synod", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    publicOrgSummary.mockResolvedValue({
+      name: "Synod of the Wide Plains",
+      organizationType: "synod",
+    });
+
+    const el = await PublicSitePage({ params: makeParams("wide-plains-synod") });
+    render(el);
+
+    expect(
+      screen.getByRole("heading", { name: "Synod of the Wide Plains" }),
+    ).toBeTruthy();
+  });
+
+  it("renders the same fallback for the General Assembly", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    publicOrgSummary.mockResolvedValue({
+      name: "General Assembly",
+      organizationType: "general_assembly",
+    });
+
+    const el = await PublicSitePage({ params: makeParams("ga") });
+    render(el);
+
+    expect(screen.getByRole("heading", { name: "General Assembly" })).toBeTruthy();
   });
 });
 

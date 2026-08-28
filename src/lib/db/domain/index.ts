@@ -22,5 +22,6 @@ export * from "./reporting";
 export * from "./support";
 export * from "./sites";
 export * from "./org-features";
+export * from "./org-feature-categories";
 export * from "./events";
 export * from "./presbytery";

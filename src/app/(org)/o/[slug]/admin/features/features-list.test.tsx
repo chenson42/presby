@@ -40,6 +40,9 @@ const TOGGLE: FeatureToggleEntry = {
   enabled: false,
   updatedAt: null,
   updatedByEmail: null,
+  category: "people",
+  categoryLabel: "People & Membership",
+  categoryEnabled: true,
 };
 
 afterEach(() => {
@@ -90,5 +93,54 @@ describe("FeaturesList — toggling", () => {
       );
     });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+});
+
+describe("FeaturesList — category-off state (Phase 1 Gap 4/5)", () => {
+  const CATEGORY_OFF_TOGGLE: FeatureToggleEntry = {
+    ...TOGGLE,
+    enabled: true,
+    categoryEnabled: false,
+  };
+
+  it("renders the switch disabled and explains why, rather than silently inert", () => {
+    render(<FeaturesList slug="alder-creek" toggles={[CATEGORY_OFF_TOGGLE]} />);
+
+    const toggle = screen.getByRole("switch");
+    expect(toggle.hasAttribute("disabled")).toBe(true);
+    // Both the visible <p> and the sr-only <span> carry the explanation
+    // (visible copy for sighted users, embedded in the switch's accessible
+    // name for screen-reader users) — assert at least one match rather than
+    // a single getByText, which is ambiguous by design here.
+    expect(
+      screen.getAllByText(/turn on people & membership above to enable this/i)
+        .length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not call the action when a category-off switch is clicked", () => {
+    render(<FeaturesList slug="alder-creek" toggles={[CATEGORY_OFF_TOGGLE]} />);
+
+    const toggle = screen.getByRole("switch");
+    fireEvent.click(toggle);
+
+    expect(mockToggleFeatureAction).not.toHaveBeenCalled();
+  });
+
+  it("preserve-not-reset: the nominal enabled state still renders underneath (Gap 5)", () => {
+    render(<FeaturesList slug="alder-creek" toggles={[CATEGORY_OFF_TOGGLE]} />);
+
+    const toggle = screen.getByRole("switch");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("no explanatory copy renders when the category is on", () => {
+    render(<FeaturesList slug="alder-creek" toggles={[TOGGLE]} />);
+
+    expect(
+      screen.queryByText(/enable this/i),
+    ).toBeNull();
+    const toggle = screen.getByRole("switch");
+    expect(toggle.hasAttribute("disabled")).toBe(false);
   });
 });

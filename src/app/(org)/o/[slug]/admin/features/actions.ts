@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { resolveOrgContext } from "@/lib/authz";
-import { toggleOrgFeature } from "@/lib/org-features";
+import { toggleOrgFeature, ORG_FEATURE_CATALOG } from "@/lib/org-features";
+import { toggleOrgFeatureCategory } from "@/lib/org-feature-categories";
+import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import type { ActionResult } from "@/types/actions";
 
 /**
@@ -51,6 +53,74 @@ export async function toggleFeatureAction(
     case "ok":
       break;
   }
+
+  revalidatePath(`/o/${slug}/admin/features`);
+
+  return { ok: true };
+}
+
+/**
+ * Server Action for the new category-picker section. Same plumbing shape as
+ * `toggleFeatureAction` above — `auth()`, `resolveOrgContext()` re-run,
+ * `organizationId` never trusted from the client.
+ *
+ * DOES CALL `recordAudit()` HERE, unlike `toggleFeatureAction` above — the
+ * opposite split from its sibling, and deliberately so (DECISION-130):
+ * `toggleOrgFeatureCategory()` (`src/lib/org-feature-categories.ts`) has no
+ * import of `ORG_FEATURE_CATALOG` (that would create a real import cycle —
+ * see that module's own header), so it cannot itself enumerate which
+ * `feature_key`s a category mutation affects. This action can import both
+ * modules with no cycle, so it computes `affectedFeatureKeys` and calls
+ * `recordAudit()` after the write commits (`result.kind === "ok"`), never
+ * for a write that was rejected or rolled back.
+ */
+export async function toggleFeatureCategoryAction(
+  slug: string,
+  input: { category: string; enabled: boolean },
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user) {
+    return { ok: false, error: "You must be signed in to do that." };
+  }
+
+  const resolved = await resolveOrgContext(session.user.id, slug);
+  if (resolved.kind !== "ok") {
+    return { ok: false, error: "You don't have access to that organization." };
+  }
+
+  const result = await toggleOrgFeatureCategory(
+    resolved.org.personId,
+    resolved.org.organizationId,
+    session.user.id,
+    input.category,
+    input.enabled,
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage features here.",
+      };
+    case "invalid_category":
+      return { ok: false, error: "That category doesn't exist." };
+    case "ok":
+      break;
+  }
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.ORG_FEATURE_CATEGORY_TOGGLED,
+    resourceType: "organization_feature_category",
+    resourceId: input.category,
+    metadata: {
+      organizationId: resolved.org.organizationId,
+      category: input.category,
+      enabled: input.enabled,
+      affectedFeatureKeys: ORG_FEATURE_CATALOG.filter(
+        (entry) => entry.category === input.category,
+      ).map((entry) => entry.key),
+    },
+  });
 
   revalidatePath(`/o/${slug}/admin/features`);
 

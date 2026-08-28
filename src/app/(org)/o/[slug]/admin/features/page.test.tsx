@@ -51,8 +51,26 @@ vi.mock("@/lib/org-features", () => ({
   listFeatureToggles: (...args: unknown[]) => listFeatureToggles(...args),
 }));
 
+const listFeatureCategories = vi.fn();
+vi.mock("@/lib/org-feature-categories", () => ({
+  listFeatureCategories: (...args: unknown[]) => listFeatureCategories(...args),
+}));
+
 vi.mock("./actions", () => ({
   toggleFeatureAction: vi.fn(),
+  toggleFeatureCategoryAction: vi.fn(),
+}));
+
+vi.mock("./feature-categories-list", () => ({
+  FeatureCategoriesList: ({
+    categories,
+  }: {
+    categories: Array<{ category: string }>;
+  }) => (
+    <div data-testid="feature-categories-list">
+      {categories.map((c) => c.category).join(",")}
+    </div>
+  ),
 }));
 
 vi.mock("sonner", () => ({
@@ -81,9 +99,36 @@ afterEach(() => {
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
   listFeatureToggles.mockReset();
+  listFeatureCategories.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
+
+/**
+ * `org_portal.features` and `org_portal.feature_categories` are TWO
+ * independent flags (docs/work-log/2026-08-27-feature-categories.md, Phase
+ * 3 — the category section's own dark-until-shipped rollout lever,
+ * independent of the already-functioning toggle page). Every pre-existing
+ * test in this file that is NOT about the category section itself uses this
+ * helper with `categories: false` (the default), so `listFeatureCategories`
+ * is never called and those tests' original, narrower intent is preserved
+ * unchanged.
+ */
+function mockFlags({
+  features,
+  categories = false,
+}: {
+  features: boolean;
+  categories?: boolean;
+}) {
+  isFlagEnabled.mockImplementation((key: string) => {
+    if (key === "org_portal.features") return Promise.resolve(features);
+    if (key === "org_portal.feature_categories") {
+      return Promise.resolve(categories);
+    }
+    return Promise.resolve(false);
+  });
+}
 
 const OK_RESOLVED = {
   kind: "ok" as const,
@@ -105,7 +150,7 @@ describe("FeaturesPage — the flag-before-permission ordering contract", () => 
   it("checks the flag and renders flag-off WITHOUT ever calling listFeatureToggles()", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(false);
+    mockFlags({ features: false });
 
     const el = await FeaturesPage({ params: makeParams() });
     render(el);
@@ -118,7 +163,7 @@ describe("FeaturesPage — the flag-before-permission ordering contract", () => 
   it("calls assertOrgAccess before checking the flag", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(false);
+    mockFlags({ features: false });
 
     await FeaturesPage({ params: makeParams() });
 
@@ -130,7 +175,7 @@ describe("FeaturesPage — listFeatureToggles() error handling", () => {
   it("re-throws OrgAccessError rather than rendering the load-error state", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ features: true });
     listFeatureToggles.mockRejectedValue(
       new OrgAccessError("person-1", "org-1"),
     );
@@ -143,7 +188,7 @@ describe("FeaturesPage — listFeatureToggles() error handling", () => {
   it("renders the load-error state for any other thrown error", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ features: true });
     listFeatureToggles.mockRejectedValue(new Error("connection reset"));
 
     const el = await FeaturesPage({ params: makeParams() });
@@ -159,7 +204,7 @@ describe("FeaturesPage — result branches", () => {
   it("renders FeaturesForbidden when listFeatureToggles() returns { kind: 'forbidden' }", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ features: true });
     listFeatureToggles.mockResolvedValue({ kind: "forbidden" });
 
     const el = await FeaturesPage({ params: makeParams() });
@@ -173,7 +218,7 @@ describe("FeaturesPage — result branches", () => {
   it("renders the toggle list when listFeatureToggles() returns ok", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ features: true });
     listFeatureToggles.mockResolvedValue({
       kind: "ok",
       toggles: [
@@ -198,7 +243,7 @@ describe("FeaturesPage — result branches", () => {
   it("renders the empty state when listFeatureToggles() returns ok with zero toggles", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
-    isFlagEnabled.mockResolvedValue(true);
+    mockFlags({ features: true });
     listFeatureToggles.mockResolvedValue({ kind: "ok", toggles: [] });
 
     const el = await FeaturesPage({ params: makeParams() });
@@ -233,5 +278,91 @@ describe("FeaturesPage — no circular gate (Phase 3)", () => {
     const source = readFileSync(resolve(__dirname, "page.tsx"), "utf-8");
     expect(source).not.toMatch(/import\s*\{[^}]*isOrgFeatureEnabled/);
     expect(source).not.toMatch(/isOrgFeatureEnabled\(/);
+  });
+});
+
+describe("FeaturesPage — category-picker section (docs/work-log/2026-08-27-feature-categories.md, Phase 3/4)", () => {
+  const ONE_TOGGLE = {
+    kind: "ok" as const,
+    toggles: [
+      {
+        key: "org_portal.members_create",
+        name: "Add & approve members",
+        description: "Lets this congregation's admins create people.",
+        enabled: false,
+        updatedAt: null,
+        updatedByEmail: null,
+        category: "people",
+        categoryLabel: "People & Membership",
+        categoryEnabled: true,
+      },
+    ],
+  };
+
+  it("org_portal.feature_categories off: never calls listFeatureCategories, no category section rendered", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ features: true, categories: false });
+    listFeatureToggles.mockResolvedValue(ONE_TOGGLE);
+
+    const el = await FeaturesPage({ params: makeParams() });
+    render(el);
+
+    expect(listFeatureCategories).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("feature-categories-list")).toBeNull();
+  });
+
+  it("org_portal.feature_categories on: calls listFeatureCategories with personId/organizationId/organizationType BEFORE listFeatureToggles, and renders the section", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ features: true, categories: true });
+    const callOrder: string[] = [];
+    listFeatureCategories.mockImplementation(async () => {
+      callOrder.push("categories");
+      return {
+        kind: "ok",
+        categories: [
+          {
+            category: "people",
+            label: "People & Membership",
+            enabled: true,
+            updatedAt: null,
+            updatedByEmail: null,
+          },
+        ],
+      };
+    });
+    listFeatureToggles.mockImplementation(async () => {
+      callOrder.push("toggles");
+      return ONE_TOGGLE;
+    });
+
+    const el = await FeaturesPage({ params: makeParams() });
+    render(el);
+
+    expect(listFeatureCategories).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      "congregation",
+    );
+    expect(callOrder).toEqual(["categories", "toggles"]);
+    expect(screen.getByTestId("feature-categories-list").textContent).toBe(
+      "people",
+    );
+  });
+
+  it("listFeatureCategories forbidden renders FeaturesForbidden BEFORE listFeatureToggles is ever called", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ features: true, categories: true });
+    listFeatureCategories.mockResolvedValue({ kind: "forbidden" });
+
+    const el = await FeaturesPage({ params: makeParams() });
+    render(el);
+
+    expect(
+      screen.getByText(/don.t have permission to manage features/i),
+    ).toBeTruthy();
+    expect(listFeatureToggles).not.toHaveBeenCalled();
   });
 });

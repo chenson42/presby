@@ -2390,3 +2390,120 @@ begin;
     raise notice 'pass  congregation_statistics_entered_unique_idx: duplicate presbytery_entered row for the same year rejected';
   end $$;
 rollback;
+
+-- ---------------------------------------------------------------------------
+-- 30. Org feature CATEGORIES — the fourth, coarser gating axis (docs/
+--     work-log/2026-08-27-feature-categories.md, Phase 4; DECISION-130),
+--     drizzle/0040_presby_org_feature_categories.sql. Same shape as section
+--     19's organization_feature_toggles proof (a real presby_app grant, own
+--     rolled-back-transaction fixture rows, no reliance on scripts/
+--     seed-dev.sql). Three things this table's own schema layer must prove,
+--     independent of the resolver's DEFAULT-ON application-layer semantics
+--     (categoryEnabledInTx() in src/lib/org-feature-categories.ts — the
+--     "missing row -> true" behavior is a TypeScript default, `?? true`,
+--     over a SQL result set; it is not itself a thing SQL can assert, so
+--     this section proves the schema-layer facts the resolver's guarantee
+--     rests on, not the default-on behavior's own text):
+--
+--       (a) Standard FORCE-RLS tenant isolation, same discipline as section
+--           19's organization_feature_toggles cross-org read/write proof.
+--       (b) The CHECK constraint (DECISION-130's departure from
+--           feature_key's own unconstrained precedent) rejects
+--           'administration' AND an arbitrary garbage value — defense in
+--           depth underneath src/lib/org-feature-categories.ts's own
+--           isCategoryKey() resolver-layer guard (Phase 1 Gap 2).
+--       (c) FORCE RLS specifically (F1) and the presby_app grant shape,
+--           same two checks section 19 runs for its own sibling table.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq((select count(*) from organization_feature_categories), 0,
+                   'unset GUC: organization_feature_categories invisible');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into organization_feature_categories (organization_id, category, enabled, updated_by)
+  values (:ALDER, 'worship', false, (select id from users limit 1))
+  on conflict (organization_id, category) do update
+    set enabled = excluded.enabled, updated_by = excluded.updated_by;
+  select assert_eq((select count(*) from organization_feature_categories), 1,
+                   'alder: sees its own category row');
+  select assert_eq(
+    (select count(*) from organization_feature_categories
+      where organization_id = :ALDER and category = 'worship'
+        and enabled = false),
+    1, 'alder: the category row it just wrote reads back disabled (an explicit off row, not the default-on absence case)');
+
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from organization_feature_categories), 0,
+                   'bramblewood: sees no alder category rows');
+  select assert_eq(
+    (select count(*) from organization_feature_categories
+      where organization_id = :ALDER and category = 'worship'),
+    0, 'bramblewood: cross-org read of alder''s category by known (org, category) returns zero');
+rollback;
+
+-- The write side of tenant isolation, same F21-shaped guarantee section 19's
+-- own equivalent check proves for organization_feature_toggles.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  do $$
+  begin
+    insert into organization_feature_categories (organization_id, category, enabled)
+    values ('22222222-2222-2222-2222-222222222222', 'people', false);
+    raise exception 'FAIL — bramblewood wrote a category row into alder''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_feature_categories tenant_isolation: cross-org write rejected';
+  end $$;
+rollback;
+
+-- (b) The CHECK constraint: 'administration' must never become a selectable
+--     category (Phase 1 Gap 2) — enforced here at the schema layer, not just
+--     by src/lib/org-feature-categories.ts's own isCategoryKey() guard.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  -- Literal org id below, not :ALDER — psql variable substitution does not
+  -- descend into a dollar-quoted PL/pgSQL body, same discipline every other
+  -- exception-proof block in this file already follows.
+  do $$
+  begin
+    insert into organization_feature_categories (organization_id, category, enabled)
+    values ('22222222-2222-2222-2222-222222222222', 'administration', true);
+    raise exception 'FAIL — a row with category = ''administration'' was accepted';
+  exception when check_violation then
+    raise notice 'pass  organization_feature_categories_category_check: administration is rejected';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    insert into organization_feature_categories (organization_id, category, enabled)
+    values ('22222222-2222-2222-2222-222222222222', 'not_a_real_category', true);
+    raise exception 'FAIL — a row with an arbitrary garbage category was accepted';
+  exception when check_violation then
+    raise notice 'pass  organization_feature_categories_category_check: an arbitrary garbage category is rejected';
+  end $$;
+rollback;
+
+-- (c) FORCE RLS specifically (F1), same check section 19 runs for
+--     organization_feature_toggles.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'organization_feature_categories' and relforcerowsecurity),
+    1, 'organization_feature_categories: FORCE row level security is set');
+commit;
+
+-- The presby_app grant shape, proven directly — full select/insert/update/
+-- delete, same discipline as section 19's own check.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_feature_categories'
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    4, 'organization_feature_categories: presby_app has full select/insert/update/delete');
+commit;
+

@@ -6,6 +6,10 @@ import {
   resolveOrgContext,
 } from "@/lib/authz";
 import { listFeatureToggles } from "@/lib/org-features";
+import {
+  listFeatureCategories,
+  type FeatureCategoryEntry,
+} from "@/lib/org-feature-categories";
 import { isFlagEnabled } from "@/lib/flags";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import {
@@ -14,6 +18,7 @@ import {
   FeaturesLoadError,
 } from "./features-states";
 import { FeaturesList } from "./features-list";
+import { FeatureCategoriesList } from "./feature-categories-list";
 
 /**
  * `/o/<slug>/admin/features` — per-org feature enablement (Deliverable A,
@@ -87,12 +92,51 @@ export default async function FeaturesPage({
     return <FeaturesFlagOff name={resolved.org.name} />;
   }
 
-  let togglesResult;
+  // Category-picker section (docs/work-log/2026-08-27-feature-categories.md,
+  // Phase 3; DECISION-130): a SECOND, dedicated flag, checked separately from
+  // org_portal.features above — the category axis's own dark-until-shipped
+  // rollout lever, independent of the already-functioning toggle list. `null`
+  // means "don't render the section at all" (flag off), never "render it
+  // empty" — offeredCategories() is never actually empty for any
+  // organization type, so a `[]` result (flag on) still renders the section.
+  const categoriesFlagEnabled = await isFlagEnabled(
+    "org_portal.feature_categories",
+  );
+
+  let categories: FeatureCategoryEntry[] | null = null;
+  let togglesResult: Awaited<ReturnType<typeof listFeatureToggles>> | {
+    kind: "forbidden";
+  };
   try {
-    togglesResult = await listFeatureToggles(
-      resolved.org.personId,
-      resolved.org.organizationId,
-    );
+    if (categoriesFlagEnabled) {
+      const categoriesResult = await listFeatureCategories(
+        resolved.org.personId,
+        resolved.org.organizationId,
+        resolved.org.organizationType,
+      );
+      // Checked BEFORE listFeatureToggles() is ever called — same
+      // "the new section must not partially render before that check runs"
+      // requirement Phase 1's Flow 1 named for the category picker. A
+      // forbidden category read is folded into `togglesResult` (below,
+      // outside the try) rather than returning JSX from inside try/catch —
+      // constructing JSX inside try/catch means a throw from the JSX
+      // itself would be mis-attributed to `FeaturesLoadError` by the catch
+      // block (lint: react-hooks/error-boundaries, caught in Phase 5 QA).
+      if (categoriesResult.kind === "forbidden") {
+        togglesResult = { kind: "forbidden" };
+      } else {
+        categories = categoriesResult.categories;
+        togglesResult = await listFeatureToggles(
+          resolved.org.personId,
+          resolved.org.organizationId,
+        );
+      }
+    } else {
+      togglesResult = await listFeatureToggles(
+        resolved.org.personId,
+        resolved.org.organizationId,
+      );
+    }
   } catch (err) {
     if (err instanceof OrgAccessError) {
       throw err;
@@ -112,6 +156,8 @@ export default async function FeaturesPage({
           Turn optional portal features on or off for {resolved.org.name}.
         </p>
       </div>
+
+      {categories && <FeatureCategoriesList slug={slug} categories={categories} />}
 
       <FeaturesList slug={slug} toggles={togglesResult.toggles} />
     </section>

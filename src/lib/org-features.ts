@@ -5,6 +5,12 @@ import type { db } from "@/lib/db";
 import { withOrgContext } from "@/lib/authz";
 import { organizationFeatureToggles } from "@/lib/db/domain/org-features";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
+import { isFlagEnabled } from "@/lib/flags";
+import {
+  categoryEnabledInTx,
+  type OrgFeatureCategory,
+} from "@/lib/org-feature-categories";
+import { DOMAIN_LABELS } from "@/lib/org-portal/tiles";
 
 /**
  * Per-org feature enablement — the third gating axis (DECISION-097,
@@ -23,7 +29,25 @@ import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
  * Every real call site already has `personId` in hand (a page or action that
  * has already run `resolveOrgContext()`), so the actual signature threads it
  * through: `isOrgFeatureEnabled(personId, organizationId, key)`.
+ *
+ * FOURTH AXIS, ADDED (docs/work-log/2026-08-27-feature-categories.md, Phase
+ * 3; DECISION-130): a coarser, org-chosen "which ministry areas apply to
+ * this org" checkpoint composed IN FRONT of the per-feature toggle read
+ * below — flag -> CATEGORY -> org toggle -> permission. Composition lives
+ * HERE, inside `isOrgFeatureEnabled()` itself, specifically so every
+ * existing and future call site inherits it for free with no changes at the
+ * call site (Phase 1's adversarial-pass requirement: server-side
+ * enforcement, not just page-render gating). The category check only runs
+ * when `org_portal.feature_categories` is on — see `categoryEnabledInTx()`
+ * (`src/lib/org-feature-categories.ts`) for the axis kill-switch and the
+ * default-on resolution it implements. This is a fourth, coarser version of
+ * the same "does this org have this" question the toggle already answers,
+ * not a permission and not a flag itself (Permissions vs Flags holds
+ * structurally) — documented here per the architect's Phase 2 instruction
+ * not to describe it as "just derivation."
  */
+
+const CATEGORY_AXIS_FLAG = "org_portal.feature_categories";
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -40,6 +64,9 @@ export const ORG_FEATURE_CATALOG = [
     name: "Add & approve members",
     description:
       "Lets this organization's admins create people and approve roll actions.",
+    // Feature-categories axis (docs/work-log/2026-08-27-feature-categories.md,
+    // Phase 3) — People & Membership.
+    category: "people" as const,
   },
   // Member edit: tiered sensitive information (docs/work-log/
   // 2026-08-26-member-sensitive-info.md, Phase 3/DECISION-108). A DEDICATED
@@ -51,6 +78,7 @@ export const ORG_FEATURE_CATALOG = [
     name: "Tiered sensitive information",
     description:
       "Lets this organization enter pastoral notes, demographics, medical/allergy info, and disability records for its members, subject to each viewer's own tier-3 permission grants.",
+    category: "people" as const,
   },
 ] as const;
 
@@ -102,7 +130,30 @@ export const isOrgFeatureEnabled = cache(
     organizationId: string,
     key: string,
   ): Promise<boolean> => {
+    // Fourth axis composition (DECISION-130) — see this file's own header.
+    // The flag read happens ONCE, outside the transaction (isFlagEnabled()
+    // has its own cache()/connection, not `tx`); the category read itself
+    // happens INSIDE the same withOrgContext transaction as the toggle read
+    // below, so composing two axes costs one transaction, not two.
+    const catalogEntry = ORG_FEATURE_CATALOG.find((entry) => entry.key === key);
+    const categoryAxisOn = catalogEntry
+      ? await isFlagEnabled(CATEGORY_AXIS_FLAG)
+      : false;
+
     return withOrgContext(personId, organizationId, async (tx) => {
+      if (catalogEntry && categoryAxisOn) {
+        const categoryEnabled = await categoryEnabledInTx(
+          tx,
+          organizationId,
+          catalogEntry.category,
+        );
+        if (!categoryEnabled) {
+          // A category-off result short-circuits to false without the
+          // second round trip to organization_feature_toggles.
+          return false;
+        }
+      }
+
       const [row] = await tx
         .select({ enabled: organizationFeatureToggles.enabled })
         .from(organizationFeatureToggles)
@@ -126,6 +177,13 @@ export interface FeatureToggleEntry {
   /** ISO-8601, or `null` when the org has never toggled this key. */
   updatedAt: string | null;
   updatedByEmail: string | null;
+  /** Feature-categories axis (DECISION-130). */
+  category: OrgFeatureCategory;
+  categoryLabel: string;
+  /** `true` when `org_portal.feature_categories` is off (axis inert) or
+   * when the category resolves enabled; `false` only when the flag is on
+   * AND an explicit off row exists for this entry's category. */
+  categoryEnabled: boolean;
 }
 
 export type ListFeatureTogglesResult =
@@ -148,6 +206,10 @@ export async function listFeatureToggles(
   viewerPersonId: string,
   organizationId: string,
 ): Promise<ListFeatureTogglesResult> {
+  // Same "read the flag once, outside the transaction" shape as
+  // isOrgFeatureEnabled() above.
+  const categoryAxisOn = await isFlagEnabled(CATEGORY_AXIS_FLAG);
+
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasOrgFeaturesManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
@@ -165,17 +227,37 @@ export async function listFeatureToggles(
     const rows = (result as unknown as { rows?: ToggleRow[] }).rows ?? [];
     const byKey = new Map(rows.map((row) => [row.feature_key, row]));
 
-    const toggles: FeatureToggleEntry[] = ORG_FEATURE_CATALOG.map((entry) => {
-      const row = byKey.get(entry.key);
-      return {
-        key: entry.key,
-        name: entry.name,
-        description: entry.description,
-        enabled: row?.enabled ?? false,
-        updatedAt: row?.updated_at ?? null,
-        updatedByEmail: row?.updated_by_email ?? null,
-      };
-    });
+    // One category read per DISTINCT category (today just "people"), cached
+    // for the duration of this call — never one read per catalog entry.
+    const categoryCache = new Map<OrgFeatureCategory, boolean>();
+    async function categoryEnabledCached(
+      category: OrgFeatureCategory,
+    ): Promise<boolean> {
+      if (!categoryAxisOn) return true;
+      let cached = categoryCache.get(category);
+      if (cached === undefined) {
+        cached = await categoryEnabledInTx(tx, organizationId, category);
+        categoryCache.set(category, cached);
+      }
+      return cached;
+    }
+
+    const toggles: FeatureToggleEntry[] = await Promise.all(
+      ORG_FEATURE_CATALOG.map(async (entry) => {
+        const row = byKey.get(entry.key);
+        return {
+          key: entry.key,
+          name: entry.name,
+          description: entry.description,
+          enabled: row?.enabled ?? false,
+          updatedAt: row?.updated_at ?? null,
+          updatedByEmail: row?.updated_by_email ?? null,
+          category: entry.category,
+          categoryLabel: DOMAIN_LABELS[entry.category],
+          categoryEnabled: await categoryEnabledCached(entry.category),
+        };
+      }),
+    );
 
     return { kind: "ok", toggles };
   });

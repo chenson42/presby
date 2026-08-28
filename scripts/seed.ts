@@ -567,6 +567,30 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.feature_categories",
+      // DUAL PURPOSE (docs/work-log/2026-08-27-feature-categories.md, Phase
+      // 3; DECISION-130) — not merely a page-visibility toggle:
+      //   1. UI GATE: the "Ministry areas" category-picker section on
+      //      /o/<slug>/admin/features renders only when this flag is on;
+      //      off, the page looks exactly as it does today (the existing
+      //      per-feature toggle list, unchanged).
+      //   2. AXIS KILL-SWITCH: isOrgFeatureEnabled()'s composition
+      //      (src/lib/org-features.ts) only consults the fourth, coarser
+      //      category axis (organization_feature_categories,
+      //      src/lib/org-feature-categories.ts) when this flag is on. Off,
+      //      the whole axis is inert — every category resolves enabled, no
+      //      row read even fires — not merely "flag off, page hidden," so
+      //      disabling this is a TRUE rollback of the mechanism, not a
+      //      partial one. Checked bare, no DECISION-026 fail-open wrapper —
+      //      a toggle, not an auth path. Never substitutes for
+      //      org_features.manage (DECISION-003). Seeded OFF, same "ships
+      //      dark until the page lands" reasoning as its org_portal.*
+      //      siblings.
+      description:
+        "Org-chosen ministry-category gating (the fourth, coarser axis above the per-feature toggle) in (org). OFF = /o/<slug>/admin/features renders no category-picker section, and isOrgFeatureEnabled()'s composition never consults the category axis at all (every category resolves enabled).",
+      enabled: false,
+    },
+    {
       key: "platform.merged_home",
       // ON: /home renders the merged post-chooser landing content — "Your
       // organizations" (enterable org cards), "Platform" (Admin card iff

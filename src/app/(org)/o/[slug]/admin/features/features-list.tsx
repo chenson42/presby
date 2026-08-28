@@ -60,6 +60,16 @@ function FeatureToggleCard({
   const [enabled, setEnabled] = useState(toggle.enabled);
   const [pending, setPending] = useState(false);
 
+  // Category-off UI state (docs/work-log/2026-08-27-feature-categories.md,
+  // Phase 1 Gap 4; DECISION-130): a toggle whose category is off renders
+  // disabled + explained, never silently inert. The switch still shows the
+  // toggle's own NOMINAL `enabled` state underneath (never reset — Gap 5,
+  // preserve-not-reset), so turning the category back on restores the
+  // per-feature choice exactly where it was left, with no code needed to
+  // "restore" it — organization_feature_toggles was never touched while the
+  // category was off.
+  const categoryOff = !toggle.categoryEnabled;
+
   async function handleChange(next: boolean) {
     setPending(true);
     const previous = enabled;
@@ -84,13 +94,18 @@ function FeatureToggleCard({
   }
 
   return (
-    <Card>
+    <Card className={categoryOff ? "opacity-70" : undefined}>
       <CardContent className="flex min-h-11 items-center justify-between gap-4">
         <div>
           <h3 className="text-lg font-medium">{toggle.name}</h3>
           <p className="mt-1 text-sm text-muted-foreground">
             {toggle.description}
           </p>
+          {categoryOff && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Turn on {toggle.categoryLabel} above to enable this.
+            </p>
+          )}
           {toggle.updatedAt && (
             <p className="mt-1 text-sm text-muted-foreground">
               Last changed <FormattedDate value={toggle.updatedAt} />
@@ -101,10 +116,13 @@ function FeatureToggleCard({
         <label className="inline-flex min-h-11 min-w-11 items-center justify-center">
           <span className="sr-only">
             {toggle.name}, currently {enabled ? "on" : "off"}
+            {categoryOff
+              ? ` — turn on ${toggle.categoryLabel} above to enable this`
+              : ""}
           </span>
           <Switch
             checked={enabled}
-            disabled={pending}
+            disabled={pending || categoryOff}
             onCheckedChange={handleChange}
           />
         </label>

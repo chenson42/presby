@@ -50,9 +50,12 @@ describe.skipIf(!hasDb)(
     let appRolePermissions: typeof import("@/lib/db/domain/authz").appRolePermissions;
     let roleGrants: typeof import("@/lib/db/domain/authz").roleGrants;
     let organizationFeatureToggles: typeof import("@/lib/db/domain/org-features").organizationFeatureToggles;
+    let organizationFeatureCategories: typeof import("@/lib/db/domain/org-feature-categories").organizationFeatureCategories;
     let users: typeof import("@/lib/db/schema").users;
+    let featureFlags: typeof import("@/lib/db/schema").featureFlags;
 
-    const KEY = "org_portal.members_create";
+    const KEY = "org_portal.members_create"; // category: "people"
+    const CATEGORY_AXIS_FLAG = "org_portal.feature_categories";
 
     let orgA: string;
     let orgB: string;
@@ -74,7 +77,10 @@ describe.skipIf(!hasDb)(
       ({ organizationFeatureToggles } = await import(
         "@/lib/db/domain/org-features"
       ));
-      ({ users } = await import("@/lib/db/schema"));
+      ({ organizationFeatureCategories } = await import(
+        "@/lib/db/domain/org-feature-categories"
+      ));
+      ({ users, featureFlags } = await import("@/lib/db/schema"));
 
       const platform = getPlatformDb();
       const stamp = Date.now();
@@ -217,6 +223,22 @@ describe.skipIf(!hasDb)(
       await platform
         .delete(organizationFeatureToggles)
         .where(eq(organizationFeatureToggles.organizationId, orgB));
+      await platform
+        .delete(organizationFeatureCategories)
+        .where(eq(organizationFeatureCategories.organizationId, orgA));
+      await platform
+        .delete(organizationFeatureCategories)
+        .where(eq(organizationFeatureCategories.organizationId, orgB));
+      // Restore the seeded default (OFF) — this suite's own describe blocks
+      // already reset it after each test, but a fixture-level restore here
+      // is the belt to that suspenders in case a test fails mid-run.
+      await platform
+        .insert(featureFlags)
+        .values({ key: CATEGORY_AXIS_FLAG, enabled: false })
+        .onConflictDoUpdate({
+          target: featureFlags.key,
+          set: { enabled: false },
+        });
       // drizzle/0033's group_memberships_reject_derived trigger now (DECISION-
       // 110) also rejects the DELETE that cascading `organizations` fires
       // against this fixture's own active_membership-derived group_memberships
@@ -333,6 +355,115 @@ describe.skipIf(!hasDb)(
       const entry = result.toggles.find((t) => t.key === KEY);
       expect(entry).toBeDefined();
       expect(typeof entry!.enabled).toBe("boolean");
+    });
+
+    // -------------------------------------------------------------------
+    // Fourth-axis composition (docs/work-log/2026-08-27-feature-categories.md,
+    // Phase 3; DECISION-130) — category composed INTO isOrgFeatureEnabled()
+    // and listFeatureToggles(), not a separate call site.
+    // -------------------------------------------------------------------
+    async function setCategoryAxisFlag(enabled: boolean) {
+      const platform = getPlatformDb();
+      await platform
+        .insert(featureFlags)
+        .values({ key: CATEGORY_AXIS_FLAG, enabled })
+        .onConflictDoUpdate({
+          target: featureFlags.key,
+          set: { enabled },
+        });
+    }
+
+    async function setCategoryRow(
+      organizationId: string,
+      category: string,
+      enabled: boolean,
+    ) {
+      const platform = getPlatformDb();
+      await platform
+        .insert(organizationFeatureCategories)
+        .values({ organizationId, category, enabled })
+        .onConflictDoUpdate({
+          target: [
+            organizationFeatureCategories.organizationId,
+            organizationFeatureCategories.category,
+          ],
+          set: { enabled },
+        });
+    }
+
+    describe("isOrgFeatureEnabled() — fourth-axis composition", () => {
+      afterEach(async () => {
+        // Restore to the seeded default (OFF) so this block never leaks
+        // state into any other suite run against the same shared dev
+        // database, matching scripts/seed.ts's own "seeded OFF" convention.
+        await setCategoryAxisFlag(false);
+      });
+
+      it("axis flag OFF: an explicit category-off row has NO effect — the axis is fully inert", async () => {
+        await setCategoryAxisFlag(false);
+        await setCategoryRow(orgA, "people", false);
+        await toggleOrgFeature(managerPerson, orgA, grantingUserId, KEY, true);
+
+        expect(await isOrgFeatureEnabled(managerPerson, orgA, KEY)).toBe(true);
+      });
+
+      it("axis flag ON + category OFF: false even though the per-feature toggle itself is ON", async () => {
+        await setCategoryAxisFlag(true);
+        await setCategoryRow(orgA, "people", false);
+        await toggleOrgFeature(managerPerson, orgA, grantingUserId, KEY, true);
+
+        expect(await isOrgFeatureEnabled(managerPerson, orgA, KEY)).toBe(false);
+      });
+
+      it("axis flag ON + category row ABSENT (default-on): falls through to the toggle's own state, unchanged behavior", async () => {
+        await setCategoryAxisFlag(true);
+        await getPlatformDb()
+          .delete(organizationFeatureCategories)
+          .where(
+            eq(organizationFeatureCategories.organizationId, orgA),
+          );
+        await toggleOrgFeature(managerPerson, orgA, grantingUserId, KEY, true);
+
+        expect(await isOrgFeatureEnabled(managerPerson, orgA, KEY)).toBe(true);
+      });
+
+      it("axis flag ON + category ON explicitly: still respects the toggle's own OFF state (category narrows, never substitutes)", async () => {
+        await setCategoryAxisFlag(true);
+        await setCategoryRow(orgA, "people", true);
+        await toggleOrgFeature(managerPerson, orgA, grantingUserId, KEY, false);
+
+        expect(await isOrgFeatureEnabled(managerPerson, orgA, KEY)).toBe(false);
+      });
+    });
+
+    describe("listFeatureToggles() — categoryEnabled field", () => {
+      afterEach(async () => {
+        await setCategoryAxisFlag(false);
+      });
+
+      it("axis flag OFF: categoryEnabled is true for every entry regardless of any stored row", async () => {
+        await setCategoryAxisFlag(false);
+        await setCategoryRow(orgA, "people", false);
+
+        const result = await listFeatureToggles(managerPerson, orgA);
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") return;
+        const entry = result.toggles.find((t) => t.key === KEY);
+        expect(entry!.categoryEnabled).toBe(true);
+        expect(entry!.category).toBe("people");
+        expect(entry!.categoryLabel).toBe("People & Membership");
+      });
+
+      it("axis flag ON + category OFF: categoryEnabled is false for the affected entry", async () => {
+        await setCategoryAxisFlag(true);
+        await setCategoryRow(orgA, "people", false);
+
+        const result = await listFeatureToggles(managerPerson, orgA);
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") return;
+        const entry = result.toggles.find((t) => t.key === KEY);
+        expect(entry!.categoryEnabled).toBe(false);
+      });
     });
   },
 );

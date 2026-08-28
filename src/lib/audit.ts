@@ -108,6 +108,18 @@ export const AUDIT_ACTIONS = {
   // permission/access-control-adjacent mutation, audited like
   // TENANT_ROLE_GRANTED. Metadata: { organizationId, featureKey, enabled }.
   ORG_FEATURE_TOGGLED: "tenant.org_feature.toggled",
+  // Org feature CATEGORIES — the fourth, coarser gating axis (docs/work-log/
+  // 2026-08-27-feature-categories.md, Phase 3; DECISION-130) — written from
+  // src/app/(org)/o/[slug]/admin/features/actions.ts's
+  // toggleFeatureCategoryAction(), NOT from src/lib/org-feature-categories.ts
+  // itself (a deliberate divergence from ORG_FEATURE_TOGGLED's own
+  // audit-in-lib split, forced by that module's one-directional dependency on
+  // org-features.ts — see toggleOrgFeatureCategory()'s own header comment).
+  // Metadata: { organizationId, category, enabled, affectedFeatureKeys },
+  // naming every ORG_FEATURE_CATALOG key the category mutation affects
+  // rather than one opaque event (architect's Phase 2 conditional approval of
+  // reusing org_features.manage for this mutation).
+  ORG_FEATURE_CATEGORY_TOGGLED: "tenant.org_feature_category.toggled",
   // Member management, Increment 1 (docs/work-log/
   // 2026-08-25-member-management.md Deliverable B, Phase 2 open-question (b))
   // — written from src/app/(org)/o/[slug]/admin/members/pending/actions.ts.

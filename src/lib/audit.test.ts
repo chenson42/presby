@@ -127,6 +127,7 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Per-org feature toggles (2026-08-25, DECISION-097) — written from
   // src/app/(org)/o/[slug]/admin/features/actions.ts
   ORG_FEATURE_TOGGLED: "tenant.org_feature.toggled",
+  ORG_FEATURE_CATEGORY_TOGGLED: "tenant.org_feature_category.toggled",
   // Member management, Increment 1 (2026-08-25) — written from
   // src/app/(org)/o/[slug]/admin/members/pending/actions.ts
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",

@@ -149,16 +149,41 @@ export interface CreatePersonInput {
     | { mode: "new"; name: string }
     | { mode: "existing"; householdId: string }
     | { mode: "none" };
-  rollAction: {
-    kind: "profession_of_faith" | "other_participant_enrolled";
-    /** 'YYYY-MM-DD'. */
-    effectiveDate: string;
-    minuteReference?: string;
-  };
+  rollAction:
+    | {
+        kind: "profession_of_faith" | "other_participant_enrolled";
+        /** 'YYYY-MM-DD'. */
+        effectiveDate: string;
+        minuteReference?: string;
+      }
+    | {
+        /**
+         * DECISION-128/129 (`docs/work-log/2026-08-27-staff-and-
+         * personnel.md`) — staff hiring's inline "add a new person"
+         * affordance, the ONLY other sanctioned caller of this arm. Skips
+         * step 4 entirely (no `roll_actions` insert) — a staff-only anchor
+         * row must never fabricate a roll fact ("The Roll Is the System of
+         * Record"). Step 3's `memberships` insert sets `engagementStatus:
+         * "staff"`, NOT the other two kinds' `"regular"` — the load-bearing
+         * DECISION-129 fix that keeps this row OUT of `getDirectory()`'s and
+         * `findPersonMatches()`'s `engagement_status = 'regular'`
+         * eligibility branch. `current_roll` stays permanently null, the
+         * same shape an as-yet-undecided visitor already has. Every
+         * `CreatePersonInput` caller that reaches an end user through a form
+         * MUST fix this kind server-side, never trust it from client input —
+         * see `admin/staff/actions.ts`'s `createStaffPersonAction()` and the
+         * runtime guard `admin/members/new/actions.ts`'s
+         * `createPersonAction()` added alongside this type change (the
+         * member wizard must keep requiring a real roll action; widening
+         * this union must not silently let a member-creation caller skip
+         * one).
+         */
+        kind: "none";
+      };
 }
 
 export type CreatePersonResult =
-  | { kind: "ok"; personId: string; rollActionId: string }
+  | { kind: "ok"; personId: string; rollActionId: string | null }
   | { kind: "forbidden" }
   | { kind: "existing_member_elsewhere" }
   | { kind: "invalid_household" };
@@ -199,12 +224,20 @@ function errorMessageChain(err: unknown, depth = 0): string {
 
 /**
  * Creates a person (or attaches an existing, still-unaffiliated one),
- * optionally a household, a `memberships` row, and the initial `pending`
- * `roll_actions` row — ONE `withOrgContext()` transaction, per Phase 1's
- * "no URL-skip / no partial submit" wizard requirement.
+ * optionally a household, a `memberships` row, and — unless `rollAction.kind
+ * === "none"` (DECISION-128) — the initial `pending` `roll_actions` row. ONE
+ * `withOrgContext()` transaction, per Phase 1's "no URL-skip / no partial
+ * submit" wizard requirement.
  *
- * Gated on BOTH `people.manage` AND `roll.propose` — checked together,
- * before any write, same "gate first" discipline as `role-grants.ts`.
+ * GATING SPLIT (DECISION-128 ruling 1, DECISION-129): `people.manage` is
+ * required UNCONDITIONALLY — creating a `people` row is a People-domain
+ * action regardless of which module's UI triggers it. `roll.propose` is
+ * required ONLY when `rollAction.kind !== "none"` — requiring it for a call
+ * that writes no `roll_actions` row makes no sense, and a `staff.manage`-only
+ * caller attaching a position to a brand-new person must not ALSO need
+ * `roll.propose`, a permission with no bearing on what it's actually doing.
+ * Both checks still run before any write, same "gate first" discipline as
+ * `role-grants.ts`.
  *
  * ORDER OF OPERATIONS (Phase 3's design, each step named because a reorder
  * would reopen a finding):
@@ -224,10 +257,14 @@ function errorMessageChain(err: unknown, depth = 0): string {
  *      construction the person here always has zero memberships anywhere
  *      (a brand-new person, or an `existing` person already proven clear
  *      in step 1).
- *   4. Insert `roll_actions` (`approvalStatus: "pending"`). MUST run after
- *      step 3 — `roll_actions_person_fk` composite-FKs into
- *      `(memberships.personId, memberships.organizationId)`, which does
- *      not exist until the membership row lands.
+ *   4. `rollAction.kind !== "none"`: insert `roll_actions` (`approvalStatus:
+ *      "pending"`). MUST run after step 3 — `roll_actions_person_fk`
+ *      composite-FKs into `(memberships.personId, memberships.
+ *      organizationId)`, which does not exist until the membership row
+ *      lands. `rollAction.kind === "none"` (DECISION-128): this step is
+ *      SKIPPED ENTIRELY, `rollActionId` is returned `null`, and step 3's
+ *      `engagementStatus` is `"staff"` instead of `"regular"` — see
+ *      `CreatePersonInput.rollAction`'s own doc comment for why.
  */
 export async function createPerson(
   actingPersonId: string,
@@ -235,7 +272,10 @@ export async function createPerson(
   actingUserId: string,
   input: CreatePersonInput,
 ): Promise<CreatePersonResult> {
-  if (!DATE_RE.test(input.rollAction.effectiveDate)) {
+  if (
+    input.rollAction.kind !== "none" &&
+    !DATE_RE.test(input.rollAction.effectiveDate)
+  ) {
     // Genuine bad input, not a denial — thrown, matching grantRole's own
     // "malformed startsOn" contract.
     throw new Error(
@@ -258,9 +298,16 @@ export async function createPerson(
 
   try {
     return await withOrgContext(actingPersonId, organizationId, async (tx) => {
+      // DECISION-128 ruling 1 / DECISION-129: people.manage is required
+      // UNCONDITIONALLY; roll.propose is required ONLY when a roll_actions
+      // row will actually be written. Short-circuits to `true` (no DB round
+      // trip) when rollAction.kind === "none" rather than skipping the
+      // Promise.all entry, so the two checks stay structurally parallel.
       const [canManagePeople, canProposeRoll] = await Promise.all([
         hasPermission(tx, actingPersonId, organizationId, PEOPLE_MANAGE),
-        hasPermission(tx, actingPersonId, organizationId, ROLL_PROPOSE),
+        input.rollAction.kind === "none"
+          ? Promise.resolve(true)
+          : hasPermission(tx, actingPersonId, organizationId, ROLL_PROPOSE),
       ]);
       if (!canManagePeople || !canProposeRoll) {
         throw new CreatePersonAbort({ kind: "forbidden" });
@@ -376,7 +423,18 @@ export async function createPerson(
           organizationId,
           personId,
           householdId,
-          engagementStatus: "regular",
+          // DECISION-129: `"staff"`, NEVER `"regular"`, when rollAction.kind
+          // === "none" — the load-bearing fix. `getDirectory()`'s and
+          // `findPersonMatches()`'s eligibility predicates both admit any
+          // row with `engagement_status = 'regular'` (their OR-branch,
+          // since `current_roll` stays null for this kind by construction);
+          // a staff-only anchor row that kept the old hardcoded value would
+          // leak straight into the public directory and the admin/members
+          // roster the moment this branch shipped. Confirmed by reading both
+          // predicates directly (`src/lib/directory.ts`, `src/lib/org-portal
+          // /find-person.ts`) — see `staff.test.ts`'s and `people.test.ts`'s
+          // own regression tests proving the literal-string exclusion holds.
+          engagementStatus: input.rollAction.kind === "none" ? "staff" : "regular",
         });
       } catch (err) {
         // Drizzle wraps the underlying pg error as `DrizzleQueryError`,
@@ -391,6 +449,16 @@ export async function createPerson(
           throw new CreatePersonAbort({ kind: "existing_member_elsewhere" });
         }
         throw err;
+      }
+
+      // DECISION-128: rollAction.kind === "none" skips step 4 entirely — no
+      // roll_actions row, ever, for this kind. Checked as a plain `if` (not
+      // folded into the try/catch above) so TypeScript narrows
+      // `input.rollAction` to the two roll-bearing kinds for the insert
+      // below — the discriminant check inside the earlier Promise.all
+      // ternary does NOT persist narrowing past that expression.
+      if (input.rollAction.kind === "none") {
+        return { kind: "ok", personId, rollActionId: null };
       }
 
       const [rollAction] = await tx

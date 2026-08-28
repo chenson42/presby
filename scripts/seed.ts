@@ -591,6 +591,21 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.staff",
+      // ON: /o/<slug>/admin/staff (the paid, non-ordained staff-position
+      // roster/history/add/end surface) is reachable at all — docs/work-log/
+      // 2026-08-27-staff-and-personnel.md, Phase 3 Component/Page Plan;
+      // DECISION-129. Portal-tile visibility only (DECISION-003 — never
+      // substitutes for staff.manage, which the destination route itself
+      // checks). Universal — no org-type restriction; both congregations and
+      // presbyteries employ staff (Phase 1 point 3). Seeded OFF, same "ships
+      // dark until the page lands" reasoning as its org_portal.* siblings
+      // (org_portal.officers/groups/events).
+      description:
+        "Staff and personnel admin page in (org). OFF = /o/<slug>/admin/staff renders 'isn't turned on yet' regardless of the viewer's staff.manage grant.",
+      enabled: false,
+    },
+    {
       key: "platform.merged_home",
       // ON: /home renders the merged post-chooser landing content — "Your
       // organizations" (enterable org cards), "Platform" (Admin card iff

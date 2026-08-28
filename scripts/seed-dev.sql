@@ -1283,4 +1283,87 @@ values
    '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
    2026, 2024, 210, 12.50, 2625.00, 'unpaid');
 
+-- ---------------------------------------------------------------------------
+-- Staff and personnel (docs/work-log/2026-08-27-staff-and-personnel.md,
+-- Phase 4 commit 1, database-admin) / DECISION-129: `personnel_admin`
+-- (drizzle/0039_presby_staff_and_personnel.sql's global, organization_id IS
+-- NULL, organization_type_scope IS NULL template) is universal — unlike
+-- presbytery_stated_clerk's presbytery-only scope — so this file adopts it
+-- into TWO org-scoped copies (one congregation, one presbytery), the
+-- seed-time equivalent of an admin clicking "adopt template" at
+-- /admin/roles/new, same shape 0037/1096's presbytery_stated_clerk adoption
+-- already established. Distinct ids from the template row itself; same key
+-- is fine here since each row IS a real, org-scoped copy, not a second
+-- template.
+--
+-- Fixture-person choice, per DECISION-109's "don't stack a third capability
+-- onto an already-multi-role fixture person" discipline — reusing, not
+-- inventing, two people already seeded above with no role_grants row of
+-- their own today:
+--   Congregation (Alder Creek, 22222222): Desmond Okonkwo (c...0004) — an
+--     existing "other_participant" member with an active membership row and
+--     zero role_grants (portal-home/directory v2's own comment at line ~936
+--     already independently confirms this about him).
+--   Presbytery (Northern Reach, 11111111): Rowan Thistlewood (c...0006) —
+--     his only existing role_grants row (installed_pastor, f...0008) is
+--     scoped to Alder Creek's organization_id, a different org context from
+--     this grant; his presbytery membership row (line ~146, active roll)
+--     satisfies staff_positions_person_fk's/role_grants_person_fk's F2
+--     composite-key requirement at 11111111 with no new person needed.
+-- CONCURRENCY NOTE: appended directly ahead of the final `commit;`, the same
+-- seam every recent pipeline's own fixture block has landed at (children's
+-- ministry, events, ministry credentials, presbytery program, immediately
+-- above). If a merge conflict appears at this exact seam, keep ALL blocks —
+-- append-only, none depends on another.
+-- ---------------------------------------------------------------------------
+insert into app_roles (id, organization_id, key, name, role_kind, is_protected) values
+  ('f0000000-0000-0000-0000-00000000000f', '22222222-2222-2222-2222-222222222222',
+   'personnel_admin', 'Personnel Administrator', 'constitutional', true),
+  ('f0000000-0000-0000-0000-000000000010', '11111111-1111-1111-1111-111111111111',
+   'personnel_admin', 'Personnel Administrator', 'constitutional', true);
+
+insert into app_role_permissions (role_id, permission_key) values
+  -- The ONLY permission this role carries — single-purpose office, same
+  -- discipline as every other new-role binding comment in this file.
+  ('f0000000-0000-0000-0000-00000000000f', 'staff.manage'),
+  ('f0000000-0000-0000-0000-000000000010', 'staff.manage');
+
+insert into role_grants (organization_id, role_id, person_id, starts_on) values
+  ('22222222-2222-2222-2222-222222222222', 'f0000000-0000-0000-0000-00000000000f',
+   'c0000000-0000-0000-0000-000000000004', -- Desmond Okonkwo
+   '2026-08-27'),
+  ('11111111-1111-1111-1111-111111111111', 'f0000000-0000-0000-0000-000000000010',
+   'c0000000-0000-0000-0000-000000000006', -- Rowan Thistlewood
+   '2026-08-27');
+
+-- One staff_positions row per org, proving F22's exclusion has something to
+-- guard and the roster/history read path (api-developer/ux-developer's own
+-- Phase 4 slices) has real data to exercise:
+--   Alder Creek: Hallie Vandermeer (c...0005, the baptized-member child
+--     fixture) is deliberately NOT reused here (a minor should not double as
+--     a paid-staff fixture); instead this uses Marisol Windham (c...0009,
+--     role_admin's own fixture person, already active-member-anchored at
+--     Alder Creek) in a SEPARATE capacity — a person can be both a role_admin
+--     grant-holder AND a paid staff position at once, and proving that is
+--     itself a useful fixture fact (staff_positions carries no FK to
+--     role_grants/app_roles by design, DECISION-129's own "grants nothing by
+--     itself" finding).
+--   Northern Reach: Idris Calloway (c...000a, the presbytery's own Stated
+--     Clerk) holding a second, unrelated, part-time bookkeeper position —
+--     proving a person can hold both an ecclesiastical-register office AND a
+--     paid staff position with no schema coupling between the two (Phase 1's
+--     own "orthogonal to Officers" scenario a).
+insert into staff_positions
+  (id, organization_id, person_id, position, position_key, department,
+   starts_on, minute_reference, recorded_by)
+values
+  ('a7000000-0000-0000-0000-000000000001',
+   '22222222-2222-2222-2222-222222222222', 'c0000000-0000-0000-0000-000000000009',
+   'Church Secretary', 'church secretary', 'Administration',
+   '2022-09-01', null, null),
+  ('a7000000-0000-0000-0000-000000000002',
+   '11111111-1111-1111-1111-111111111111', 'c0000000-0000-0000-0000-00000000000a',
+   'Part-Time Bookkeeper', 'part-time bookkeeper', 'Finance',
+   '2024-01-15', null, 'e0000000-0000-0000-0000-0000000000f4');
+
 commit;

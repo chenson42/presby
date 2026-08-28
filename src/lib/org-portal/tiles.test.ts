@@ -87,6 +87,9 @@ const KNOWN_SEEDED_ORG_PORTAL_FLAG_KEYS = new Set([
   "org_portal.reports",
   "org_portal.insights",
   "org_portal.communications",
+  // docs/work-log/2026-08-27-staff-and-personnel.md, Phase 4 (api-developer
+  // slice): new, seeded off.
+  "org_portal.staff",
 ]);
 
 describe("PORTAL_TILES — flag-key shape", () => {
@@ -122,15 +125,15 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("PORTAL_TILES has exactly 17 entries (10 existing + 7 new placeholders)", () => {
-    expect(PORTAL_TILES.length).toBe(17);
+  it("PORTAL_TILES has exactly 18 entries (10 existing + 7 product-IA placeholders + 1 staff)", () => {
+    expect(PORTAL_TILES.length).toBe(18);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 17-tile universe by key (2026-08-27 product-IA scaffold)", () => {
+  it("mirrors the full 18-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
@@ -148,6 +151,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
         "oversight",
         "reports",
         "roles",
+        "staff",
         "tickets",
         "worship",
       ].sort(),
@@ -190,6 +194,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
     members: { domain: "people", category: "operate" },
     directory: { domain: "people", category: "operate" },
     groups: { domain: "people", category: "operate" },
+    staff: { domain: "people", category: "operate" },
     officers: { domain: "governance", category: "operate" },
     credentials: {
       domain: "governance",
@@ -347,6 +352,14 @@ describe("visiblePortalTiles(category, organizationType) — category, then org-
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.events");
     const tiles = await visiblePortalTiles("operate", "congregation");
     expect(tiles.map((t) => t.key)).toEqual(["events"]);
+  });
+
+  it("staff tile is independent — org_portal.staff on, everything else off (operate), and shows at both a congregation and a presbytery", async () => {
+    isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.staff");
+    const congregationTiles = await visiblePortalTiles("operate", "congregation");
+    expect(congregationTiles.map((t) => t.key)).toEqual(["staff"]);
+    const presbyteryTiles = await visiblePortalTiles("operate", "presbytery");
+    expect(presbyteryTiles.map((t) => t.key)).toEqual(["staff"]);
   });
 
   it("credentials tile is independent — org_portal.credentials on, everything else off, at a presbytery (operate)", async () => {

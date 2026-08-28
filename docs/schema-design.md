@@ -837,6 +837,76 @@ upserts on it.
 `officer_terms`; installed pastors from `officer_terms` where the ministry is teaching elder. Do not
 build them as separate tables.
 
+### Staff and personnel (added 2026-08-27, `docs/work-log/2026-08-27-staff-and-personnel.md`)
+
+A paid, non-ordained employee — bookkeeper, custodian, part-time choir director — is deliberately
+**not** a fourth shape alongside `ordinations`/`officer_terms`/`appointments`. It gets its own table,
+in its own file (`src/lib/db/domain/staff.ts`), orthogonal to this section's ecclesiastical register:
+
+```sql
+create table staff_positions (
+  id               uuid primary key default gen_random_uuid(),
+  organization_id  uuid not null references organizations(id),
+  person_id        uuid not null,          -- composite-FK'd below, never bare people(id) (F2)
+  position         text not null,          -- open list: church staff titles aren't a closed vocabulary
+  department       text,
+  starts_on        date not null,
+  ends_on          date,                   -- null = open-ended
+  end_reason       text,
+  minute_reference text,
+  recorded_by      uuid not null references users(id),
+  recorded_at      timestamptz not null default now(),
+  foreign key (person_id, organization_id) references memberships (person_id, organization_id)
+);
+
+alter table staff_positions add constraint staff_positions_no_overlap
+  exclude using gist (
+    organization_id with =, person_id with =, position with =,
+    daterange(starts_on, coalesce(ends_on, 'infinity'::date), '[)') with &&
+  );
+```
+
+Same F22-shaped exclusion pattern as `officer_terms_no_overlap` above — a same-title double-open is a
+data error, a different concurrent title (custodian + part-time secretary) or a non-consecutive
+re-hire in the same title is not. **Known limitation, accepted rather than silently left**: the
+exclusion's title equality is literal-string, so `'Secretary'` and `'secretary'` for the same
+person/org/overlapping range would not collide — tolerable while no bulk-import surface exists,
+worth normalizing (trim/case-fold) before one does.
+
+**Grants nothing by itself**, the same discipline `officer_terms.office = 'clerk_of_session'` already
+established — a `staff_positions` row is a personnel fact, never an automatic `role_grants` entry.
+No PC(USA) office's constitutional duty is personnel administration (DECISION-078's test run and
+recorded against every existing office, all fail), so `staff.manage` binds to a new, dedicated,
+org-type-neutral `personnel_admin` role instead of an existing one.
+
+**No `aboutOrgId`/`servingOrgId` split**, unlike `appointments` (the presbytery-credentials pastoral
+appointment table, `docs/work-log/2026-08-26-presbytery-functionality.md` — not yet written up in this
+document, a pre-existing gap this note doesn't attempt to close). That split exists because a
+minister's *membership* sits at the presbytery even while they *serve* a congregation — a
+constitutional fact. Employment carries no such polity rule; it is intrinsically local, so
+`organization_id` alone (the employer) is correct for both congregations and presbyteries.
+
+**The DECISION-116 tension, and why it doesn't reopen DECISION-116.** Every "who serves" table in
+this schema requires a CURRENT `memberships` row first, matched only through `presby_match_person()`
+— that discipline holds unchanged here too, forced by the same F2 composite FK. What breaks if
+applied naively is the *destination*: `createPerson()`'s `rollAction` was a required field with only
+two roll-*gain* kinds, so anchoring a staff-only hire (who may never join) would have forced a
+fabricated roll event just to obtain a `memberships` row — a "The Roll Is the System of Record"
+violation, not merely awkward UX. Resolved by extending `createPerson()`'s `rollAction` union with a
+third `{ kind: "none" }` variant: steps 1–3 (person / household / membership) run unchanged, step 4
+(the `roll_actions` insert) is skipped, and `memberships.engagement_status` is set to `'staff'` rather
+than the pastoral-care-flavored `'visitor'` default or the roll-eligible `'regular'`. **This closes a
+real, independently-discovered bug in the same commit**: `createPerson()` had hardcoded
+`engagement_status = 'regular'` unconditionally for every caller, which — once the no-roll-action path
+existed — would have made a staff-only anchor row indistinguishable from an ordinary member and leaked
+it straight into `getDirectory()`/`findPersonMatches()`'s public-facing results. Both readers key
+eligibility on `engagement_status = 'regular'`, so `'staff'` is excluded by construction, not by an
+added filter. See DECISION-128 (the `rollAction` extension) and DECISION-129 (the bug and its fix,
+including the permission-gating split: `people.manage` is required unconditionally to create a new
+person this way, `roll.propose` only when a real roll action is actually written, and `staff.manage`
+alone is never sufficient to create a brand-new `people` row — only to attach a position to someone
+already matched).
+
 ---
 
 ## 9. Section F — Groups

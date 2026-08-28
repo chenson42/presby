@@ -83,6 +83,12 @@
 \set PER_CAPITA_RATE '\'a5000000-0000-0000-0000-000000000001\''
 \set PER_CAPITA_RECORD '\'a6000000-0000-0000-0000-000000000001\''
 \set PRESBYTERY_CLERK_USER '\'e0000000-0000-0000-0000-0000000000f4\''
+-- Staff and personnel (section 31). scripts/seed-dev.sql's two fixture
+-- staff_positions rows: Marisol Windham's (:ROLE_ADMIN_PERSON) Church
+-- Secretary position at Alder Creek, and Idris Calloway's (:CREDENTIALS_CLERK)
+-- second, unrelated Part-Time Bookkeeper position at Northern Reach.
+\set STAFF_SECRETARY  '\'a7000000-0000-0000-0000-000000000001\''
+\set STAFF_BOOKKEEPER '\'a7000000-0000-0000-0000-000000000002\''
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
 
@@ -2507,3 +2513,195 @@ begin;
     4, 'organization_feature_categories: presby_app has full select/insert/update/delete');
 commit;
 
+-- ---------------------------------------------------------------------------
+-- 31. Staff and personnel, database-admin schema layer (docs/work-log/
+--     2026-08-27-staff-and-personnel.md, Phase 4 commit 1 (database-admin) /
+--     Phase 5 QA loop-back fix / DECISION-128 (architect) / DECISION-129
+--     (tech-lead)). drizzle/0039_presby_staff_and_personnel.sql; fixture rows
+--     in scripts/seed-dev.sql (Marisol Windham's Church Secretary position at
+--     Alder Creek, Idris Calloway's second, unrelated Part-Time Bookkeeper
+--     position at Northern Reach). QA's Phase 5 pass confirmed this table had
+--     zero coverage in this file despite two closer precedents
+--     (officer_terms §7, appointments §28) both carrying full sections. Four
+--     things:
+--
+--       (a) FORCE RLS tenant isolation — a congregation sees only its own
+--           staff_positions row, a second congregation that employs no staff
+--           (Bramblewood) sees zero, a cross-org read by known id returns
+--           zero rather than a permission error, and a cross-org write
+--           (naming a foreign organization_id while the session's own GUC
+--           points elsewhere) is rejected by the WITH CHECK half — same
+--           F21-shaped guarantee sections 19/27/28 already prove for their
+--           own tables. Plus the FORCE RLS pg_class check and the
+--           presby_app grant-shape check, same two proofs section 19/27/28
+--           each run for their own sibling table.
+--
+--       (b) staff_positions_person_fk — the composite FK (F2): Tobias
+--           Renwick (:CLERK) holds a membership at Alder Creek, NONE at the
+--           presbytery — a staff position naming him at organization_id =
+--           the presbytery must be rejected, the same F2 shape
+--           appointments_person_fk already proved (section 28(e)) for the
+--           identical composite-key pattern.
+--
+--       (c) staff_positions_no_overlap (F22) actually firing: a same-person/
+--           org/title overlapping insert against Marisol Windham's existing
+--           open-ended Church Secretary row is rejected with
+--           exclusion_violation (same minimal do $$ ... exception when
+--           exclusion_violation ... end $$; rollback; shape section 7's own
+--           officer_terms_no_overlap proof uses), and a genuinely different
+--           title for the same person/org/dates is NOT blocked — the
+--           exclusion only guards a same-title double-open (Phase 1's own
+--           "part-time secretary and part-time custodian" scenario), never
+--           same-person/different-title overlap.
+--
+--       (d) KNOWN, ACCEPTED GAP — not a bug, not silently papered over.
+--           position_key normalization (position.trim().toLowerCase()) is
+--           computed by startStaffPosition() in application code
+--           (src/lib/staff.ts), never DB-enforced. A raw-SQL insert that
+--           bypasses startStaffPosition() and writes a position_key that was
+--           never folded to lowercase does NOT trip the exclusion against an
+--           existing lowercase row for what a human would call "the same
+--           title" — proven here directly, confirming the exact residual
+--           risk the architect's own Phase 2 review named ("a future
+--           raw-SQL import bypassing startStaffPosition() could still write
+--           two differently-cased colliding titles"), which both
+--           api-developer's and ux-developer's Phase 4 slices carried
+--           forward unchanged as accepted: no import surface exists yet for
+--           this table, the same reasoning officer_terms.office's own
+--           equality column has always relied on. If a raw-SQL import
+--           surface is ever built for staff_positions, closing this gap
+--           (e.g. a generated lower(position) column, or a BEFORE INSERT
+--           trigger) should be reconsidered — not required today.
+-- ---------------------------------------------------------------------------
+
+-- (a) FORCE RLS tenant isolation, read side — the two real fixture rows,
+--     each visible only from its own organization.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq((select count(*) from staff_positions), 1,
+                   'alder: sees its own staff_positions row (Marisol Windham, Church Secretary)');
+  select assert_eq((select count(*) from staff_positions where organization_id <> :ALDER), 0,
+                   'alder: sees NO foreign staff_positions rows');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq((select count(*) from staff_positions), 1,
+                   'northern reach (presbytery): sees its own staff_positions row (Idris Calloway, Part-Time Bookkeeper)');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from staff_positions), 0,
+                   'bramblewood: employs no staff, sees zero staff_positions rows');
+  -- Known-id cross-org read, same discipline as sections 14/19/27/28's own
+  -- known-id checks: naming another org's exact row id from bramblewood's
+  -- own session returns zero, not a permission error that would confirm the
+  -- row exists.
+  select assert_eq((select count(*) from staff_positions where id = :STAFF_SECRETARY),
+                   0, 'bramblewood: known-id cross-org read of alder''s staff position returns zero');
+  select assert_eq((select count(*) from staff_positions where id = :STAFF_BOOKKEEPER),
+                   0, 'bramblewood: known-id cross-org read of northern reach''s staff position returns zero');
+commit;
+
+-- The write side of tenant isolation: bramblewood cannot plant a
+-- staff_positions row into alder's organization by naming alder's
+-- organization_id in the INSERT, even while its own GUC is set to
+-- bramblewood — the WITH CHECK clause on tenant_isolation rejects it, same
+-- F21-shaped guarantee sections 4/19/27 already proved.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  do $$
+  begin
+    insert into staff_positions (organization_id, person_id, position, position_key, starts_on)
+    values ('22222222-2222-2222-2222-222222222222', -- alder creek, literal (dollar-quoted body)
+            'c0000000-0000-0000-0000-000000000009', -- Marisol Windham
+            'Hijacked Position', 'hijacked position', '2026-01-01');
+    raise exception 'FAIL — bramblewood wrote a staff_positions row into alder''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  staff_positions tenant_isolation: cross-org write rejected';
+  end $$;
+rollback;
+
+-- FORCE RLS specifically (F1).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'staff_positions' and relforcerowsecurity),
+    1, 'staff_positions: FORCE row level security is set');
+commit;
+
+-- The presby_app grant shape, proven directly — full select/insert/update/
+-- delete, same discipline as sections 19/27/28's own checks.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'staff_positions'
+        and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
+    4, 'staff_positions: presby_app has full select/insert/update/delete');
+commit;
+
+-- (b) staff_positions_person_fk — the composite FK (F2): Tobias Renwick
+--     (:CLERK) holds a membership at Alder Creek, NONE at the presbytery — a
+--     staff position naming him at organization_id = the presbytery must be
+--     rejected, the same F2 shape appointments_person_fk already proved
+--     (section 28(e)) for the identical composite-key pattern.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into staff_positions (organization_id, person_id, position, position_key, starts_on)
+    values ('11111111-1111-1111-1111-111111111111',
+            'c0000000-0000-0000-0000-000000000002', -- Tobias Renwick — no presbytery membership
+            'Facilities Assistant', 'facilities assistant', '2026-01-01');
+    raise exception 'FAIL F2 — a staff position referenced a person with no membership at the stated organization';
+  exception when foreign_key_violation then
+    raise notice 'pass  staff_positions_person_fk: person with no membership at the stated org rejected (F2)';
+  end $$;
+rollback;
+
+-- (c) staff_positions_no_overlap (F22): same-person/org/title overlap fires;
+--     a genuinely different title for the same person/org/dates does not.
+--     Same minimal do $$ ... exception when exclusion_violation ... end $$;
+--     rollback; shape section 7's own officer_terms_no_overlap proof uses.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    insert into staff_positions (organization_id, person_id, position, position_key, starts_on)
+    values ('22222222-2222-2222-2222-222222222222',
+            'c0000000-0000-0000-0000-000000000009', -- Marisol Windham, already Church Secretary since 2022-09-01, open-ended
+            'Church Secretary', 'church secretary', '2026-01-01');
+    raise exception 'FAIL — a same-title overlapping staff position was accepted';
+  exception when exclusion_violation then
+    raise notice 'pass  staff_positions_no_overlap: same-person/org/title overlap rejected';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into staff_positions (organization_id, person_id, position, position_key, starts_on)
+  values ('22222222-2222-2222-2222-222222222222',
+          'c0000000-0000-0000-0000-000000000009', 'Custodian', 'custodian', '2026-01-01');
+  select assert_eq(
+    (select count(*) from staff_positions
+      where organization_id = :ALDER and person_id = :ROLE_ADMIN_PERSON and position_key = 'custodian'),
+    1, 'alder: a different concurrent title for the same person is NOT blocked by the exclusion');
+rollback;
+
+-- (d) KNOWN, ACCEPTED GAP: position_key folding is application-computed, not
+--     DB-enforced (see the section header above). A raw-SQL insert with an
+--     un-folded position_key does not collide with an existing lowercase row
+--     for what a human would call "the same title" — proven, not assumed.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into staff_positions (organization_id, person_id, position, position_key, starts_on)
+  values ('22222222-2222-2222-2222-222222222222',
+          'c0000000-0000-0000-0000-000000000009', 'CHURCH SECRETARY', 'CHURCH SECRETARY', '2026-01-01');
+  select assert_eq(
+    (select count(*) from staff_positions
+      where organization_id = :ALDER and person_id = :ROLE_ADMIN_PERSON
+        and position_key = 'CHURCH SECRETARY'),
+    1, 'KNOWN GAP, accepted: a raw-SQL insert with an un-folded position_key (''CHURCH SECRETARY'') does not trip staff_positions_no_overlap against the existing lowercase ''church secretary'' row for the same person/org/dates — normalization is application-computed, not DB-enforced (no import surface exists yet for this table)');
+rollback;

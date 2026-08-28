@@ -63,6 +63,13 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
   let onlyPeopleManagePerson: string; // orgA — people.manage ONLY, no roll.propose
   let grantingUserId: string; // a users.id for proposedBy/actingUserId
 
+  // DECISION-128/129 (rollAction.kind "none") fixture.
+  let directoryViewerPerson: string; // orgA — holds directory.view ONLY, used to
+  // read getDirectory()/findPersonMatches() in the DECISION-129 regression
+  // tests below — deliberately NOT people.manage/roll.propose, so these
+  // tests exercise the SAME two eligibility predicates a real congregation
+  // member browsing the directory would.
+
   let elsewherePerson: string; // GLOBAL — has a membership at orgB, none at orgA
   let freeAgentPerson: string; // GLOBAL — no membership anywhere
   let freeAgentPerson2: string; // GLOBAL — no membership anywhere (invalid_household case)
@@ -191,6 +198,32 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       .insert(appRolePermissions)
       .values({ roleId: narrowRole!.id, permissionKey: "people.manage" });
 
+    // DECISION-128/129 fixture: directory.view, and a role/grant holding it
+    // ONLY — used by the "rollAction.kind 'none'" regression tests below to
+    // read getDirectory()/findPersonMatches() the same way an ordinary
+    // congregation member would.
+    await platform
+      .insert(permissions)
+      .values({
+        key: "directory.view",
+        module: "directory",
+        description: "Browse the congregation directory",
+        sensitivityTier: 1,
+      })
+      .onConflictDoNothing();
+    const [directoryViewerRole] = await platform
+      .insert(appRoles)
+      .values({
+        organizationId: orgA,
+        key: "directory_viewer_test",
+        name: "Directory Viewer (test)",
+        roleKind: "custom",
+      })
+      .returning({ id: appRoles.id });
+    await platform
+      .insert(appRolePermissions)
+      .values({ roleId: directoryViewerRole!.id, permissionKey: "directory.view" });
+
     async function person(first: string, last: string, dob: string | null = null) {
       const [p] = await platform
         .insert(people)
@@ -202,6 +235,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
 
     managerPerson = await person("Wilhelmina", `Castellan${stamp}`);
     onlyPeopleManagePerson = await person("Barnaby", `Ferrers${stamp}`);
+    directoryViewerPerson = await person("Perpetua", `Underhill${stamp}`);
     elsewherePerson = await person("Guinevere", `Applewhite${stamp}`);
     freeAgentPerson = await person("Ottoline", `Brackenridge${stamp}`);
     freeAgentPerson2 = await person("Percival", `Ashworth${stamp}`);
@@ -213,6 +247,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     await platform.insert(memberships).values([
       { organizationId: orgA, personId: managerPerson, engagementStatus: "regular" },
       { organizationId: orgA, personId: onlyPeopleManagePerson, engagementStatus: "regular" },
+      { organizationId: orgA, personId: directoryViewerPerson, engagementStatus: "regular" },
       { organizationId: orgB, personId: elsewherePerson, engagementStatus: "regular" },
     ]);
 
@@ -227,6 +262,12 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         organizationId: orgA,
         roleId: narrowRole!.id,
         personId: onlyPeopleManagePerson,
+        startsOn: "2020-01-01",
+      },
+      {
+        organizationId: orgA,
+        roleId: directoryViewerRole!.id,
+        personId: directoryViewerPerson,
         startsOn: "2020-01-01",
       },
     ]);
@@ -310,6 +351,11 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     // createPerson's own "new identity" tests insert additional people rows
     // this array never tracked — sweep by the stamped surname instead.
     await platform.delete(people).where(eq(people.lastName, `NewPerson${stamp}`));
+    // rollAction.kind "none" (DECISION-128/129) tests' own "new identity"
+    // people rows — same sweep-by-surname reasoning as NewPerson above.
+    await platform.delete(people).where(eq(people.lastName, `StaffOnly${stamp}`));
+    await platform.delete(people).where(eq(people.lastName, `StaffDirectoryLeak${stamp}`));
+    await platform.delete(people).where(eq(people.lastName, `StaffFindPersonLeak${stamp}`));
     await platform.delete(users).where(eq(users.id, grantingUserId));
   });
 
@@ -510,10 +556,16 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         .where(eq(households.id, membershipRow!.householdId!));
       expect(householdRow?.name).toBe(`The Fresh Household ${stamp}`);
 
+      // Non-null by construction for this rollAction kind — proven by the
+      // `toEqual({ ..., rollActionId: expect.any(String) })` assertion
+      // above. `CreatePersonResult["ok"].rollActionId` is `string | null` on
+      // the type itself because the SAME field also serves the
+      // `rollAction.kind === "none"` staff-hiring caller (DECISION-128/129),
+      // which returns `null`.
       const [rollActionRow] = await platform
         .select()
         .from(rollActions)
-        .where(eq(rollActions.id, result.rollActionId));
+        .where(eq(rollActions.id, result.rollActionId!));
       expect(rollActionRow).toMatchObject({
         organizationId: orgA,
         personId: result.personId,
@@ -664,6 +716,148 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         .from(memberships)
         .where(eq(memberships.personId, freeAgentPerson3));
       expect(membershipRows).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // createPerson — rollAction.kind "none" (DECISION-128/129,
+  // docs/work-log/2026-08-27-staff-and-personnel.md)
+  // ---------------------------------------------------------------------
+
+  describe('createPerson — rollAction.kind "none" (DECISION-128/129)', () => {
+    it("forbidden without people.manage, even for a holder of directory.view (roll.propose is irrelevant to this kind)", async () => {
+      const result = await createPerson(directoryViewerPerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Should", lastName: `NeverExistStaff${stamp}` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+
+      const platform = getPlatformDb();
+      const [orphan] = await platform
+        .select({ id: people.id })
+        .from(people)
+        .where(eq(people.lastName, `NeverExistStaff${stamp}`))
+        .limit(1);
+      expect(orphan).toBeUndefined();
+    });
+
+    /**
+     * THE gating split DECISION-128 ruling 1 exists to prove:
+     * `onlyPeopleManagePerson` holds `people.manage` but explicitly NOT
+     * `roll.propose` (see this file's own fixture comment) — the exact
+     * combination `createPerson()`'s two ROLL-BEARING kinds forbid (see the
+     * "forbidden without people.manage AND roll.propose" test above, same
+     * person). For `rollAction.kind: "none"` it must succeed instead.
+     */
+    it("succeeds for a holder of people.manage ONLY (no roll.propose) — proves the DECISION-128 gating split", async () => {
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: {
+          mode: "new",
+          firstName: "Marisol",
+          lastName: `StaffOnly${stamp}`,
+        },
+        contact: { email: `staffonly-${stamp}@example.invalid` },
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      });
+      expect(result).toEqual({
+        kind: "ok",
+        personId: expect.any(String),
+        rollActionId: null,
+      });
+      if (result.kind !== "ok") return;
+
+      const platform = getPlatformDb();
+
+      // DECISION-129, the load-bearing fix: engagementStatus is "staff", NOT
+      // "regular" — and current_roll stays null, exactly like an
+      // as-yet-undecided visitor.
+      const [membershipRow] = await platform
+        .select({
+          engagementStatus: memberships.engagementStatus,
+          currentRoll: memberships.currentRoll,
+        })
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.personId, result.personId),
+            eq(memberships.organizationId, orgA),
+          ),
+        );
+      expect(membershipRow).toEqual({ engagementStatus: "staff", currentRoll: null });
+
+      // Step 4 is skipped entirely — no roll_actions row of any kind.
+      const rollActionRows = await platform
+        .select()
+        .from(rollActions)
+        .where(eq(rollActions.personId, result.personId));
+      expect(rollActionRows).toHaveLength(0);
+    });
+
+    /**
+     * REGRESSION for DECISION-129 — the actual leak this design catches
+     * before it ships. Reads through the SAME two surfaces the work-log
+     * names: `getDirectory()`'s default (unfiltered) result set and
+     * `findPersonMatches()`. Both admit any row with `engagement_status =
+     * 'regular'`; if `createPerson()`'s `rollAction: { kind: "none" }` arm
+     * ever regresses back to that hardcoded value, this test starts failing.
+     */
+    it("REGRESSION for DECISION-129: a staff-only-anchored person does NOT appear in getDirectory()'s default result set", async () => {
+      const { getDirectory } = await import("./directory");
+
+      const created = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: {
+          mode: "new",
+          firstName: "Idris",
+          lastName: `StaffDirectoryLeak${stamp}`,
+        },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      });
+      expect(created.kind).toBe("ok");
+      if (created.kind !== "ok") return;
+
+      const directoryResult = await getDirectory(directoryViewerPerson, orgA);
+      expect(directoryResult.kind).toBe("ok");
+      if (directoryResult.kind !== "ok") return;
+      const directoryPersonIds = directoryResult.entries.map((entry) => entry.personId);
+      expect(directoryPersonIds).not.toContain(created.personId);
+
+      // Sanity check the harness itself is capable of finding a "regular"
+      // row at all — a person created via the pre-existing rollAction kinds
+      // (Increment 1's own happy-path fixture, created earlier in this file)
+      // DOES appear, proving the assertion above is a real exclusion, not an
+      // artifact of getDirectory() returning nothing for this viewer.
+      expect(directoryPersonIds.length).toBeGreaterThan(0);
+    });
+
+    it("REGRESSION for DECISION-129: findPersonMatches() does NOT surface a staff-only-anchored person", async () => {
+      const { findPersonMatches } = await import("./org-portal/find-person");
+
+      const created = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: {
+          mode: "new",
+          firstName: "Rowan",
+          lastName: `StaffFindPersonLeak${stamp}`,
+        },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      });
+      expect(created.kind).toBe("ok");
+      if (created.kind !== "ok") return;
+
+      const matchResult = await findPersonMatches(
+        directoryViewerPerson,
+        orgA,
+        `StaffFindPersonLeak${stamp}`,
+      );
+      expect(matchResult.kind).toBe("ok");
+      if (matchResult.kind !== "ok") return;
+      expect(matchResult.personIds).not.toContain(created.personId);
     });
   });
 });

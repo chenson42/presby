@@ -229,6 +229,27 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     domain: "people",
   },
   {
+    key: "staff",
+    label: "Staff",
+    description: "Record paid, non-ordained staff positions.",
+    href: (slug) => `/o/${slug}/admin/staff`,
+    // docs/work-log/2026-08-27-staff-and-personnel.md, Phase 3 Component/
+    // Page Plan / DECISION-129: new flag, seeded off (DECISION-115's
+    // no-optional-variant convention).
+    flagKey: "org_portal.staff",
+    // Recording who's on payroll is routine record-keeping, not org setup —
+    // same DECISION-105 test "members"/"groups"/"officers" already passed.
+    category: "operate",
+    // People & Membership, not Governance & Courts — staff are not a
+    // constitutional office structure (Phase 1 point 4: staff_positions is
+    // deliberately orthogonal to the ordination/officer register), same
+    // reasoning "groups" already used.
+    domain: "people",
+    // No orgTypeScope — universal, congregation AND presbytery both employ
+    // staff (Phase 1 point 3, no polity asymmetry the way ordination/
+    // appointments have).
+  },
+  {
     key: "features",
     label: "Features",
     description: "Turn optional portal features on or off for this organization.",

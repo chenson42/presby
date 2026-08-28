@@ -22,6 +22,20 @@ import type { ActionResult } from "@/types/actions";
  * event by design (not in the `AUDIT_ACTIONS` catalog; only feature-toggle
  * and roll-approve/deny are audited, per Phase 2's ruling), and
  * `matchPerson()` is a read.
+ *
+ * `rollAction.kind === "none"` REJECTED HERE, AT RUNTIME (docs/work-log/
+ * 2026-08-27-staff-and-personnel.md, DECISION-128/129 follow-on). `people.ts`
+ * widened `CreatePersonInput.rollAction` to a third arm for staff hiring's
+ * inline person-create, and this action still accepts a plain
+ * `CreatePersonInput` from client input — a Server Action's parameter types
+ * are not a runtime boundary (an arbitrary caller who knows this action's id
+ * can post any JSON shape regardless of what `member-wizard-schema.ts`'s zod
+ * schema allows client-side). The member wizard's whole contract is "every
+ * new member gets a real roll action" — silently letting a `"none"` payload
+ * through here would let anyone reachable at this action skip that
+ * requirement entirely, since `createPerson()` itself now only requires
+ * `people.manage` (not `roll.propose`) for that kind. Checked and rejected
+ * BEFORE calling `createPerson()`, not left to fall through as a type error.
  */
 
 async function resolveActingIdentity(slug: string): Promise<
@@ -72,6 +86,15 @@ export async function createPersonAction(
   const identity = await resolveActingIdentity(slug);
   if (!identity.ok) return { ok: false, error: identity.error };
 
+  // See this file's header comment — a client-supplied "none" must never
+  // reach createPerson() from THIS action.
+  if (input.rollAction.kind === "none") {
+    return {
+      ok: false,
+      error: "A roll action is required to add a new member.",
+    };
+  }
+
   const result = await createPerson(
     identity.personId,
     identity.organizationId,
@@ -98,6 +121,17 @@ export async function createPersonAction(
       };
     case "ok":
       break;
+  }
+
+  // `result.rollActionId` is `string | null` on `createPerson()`'s own
+  // signature (it now also serves the `rollAction.kind === "none"` staff
+  // caller), but THIS action already rejected that kind above — a `null`
+  // here would mean createPerson() and this guard disagree about which kind
+  // was passed, a genuine invariant break, not an expected-and-handled case.
+  if (result.rollActionId === null) {
+    throw new Error(
+      "createPersonAction: createPerson() returned a null rollActionId for a roll-action-bearing call",
+    );
   }
 
   revalidatePath(`/o/${slug}/admin/members`);

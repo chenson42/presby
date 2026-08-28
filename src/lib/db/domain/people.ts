@@ -227,6 +227,17 @@ export const memberships = pgTable(
     householdRole: text("household_role"), // head | spouse | child | other
 
     // Pastoral axis. Never reported; distinct from the constitutional roll.
+    // Plain text, not an enum — three recognized values in application code
+    // as of docs/work-log/2026-08-27-staff-and-personnel.md (DECISION-129):
+    // "visitor" (default — pastoral-track, carries firstVisitDate/howHeard),
+    // "regular" (admits a row into getDirectory()'s/findPersonMatches()'s
+    // default eligibility, alongside a roll-member current_roll value), and
+    // "staff" (a known, anchored contact who is NOT a roll candidate —
+    // written by createPerson()'s `rollAction: { kind: "none" }` arm;
+    // distinct from "visitor"'s pastoral-care connotations, and DELIBERATELY
+    // excluded from getDirectory()'s/findPersonMatches()'s 'regular'-only OR
+    // branch so a staff-only anchor row never leaks into the public
+    // directory or the admin/members roster).
     engagementStatus: text("engagement_status").notNull().default("visitor"),
     firstVisitDate: date("first_visit_date"),
     howHeard: text("how_heard"),

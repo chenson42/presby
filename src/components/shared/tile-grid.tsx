@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronRight, LayoutGrid, type LucideIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -17,6 +18,13 @@ export interface TileLike<TDomain extends string = string> {
   label: string;
   description: string;
   domain: TDomain;
+  /**
+   * Presentational only, same as `domain` — see `PortalTile.comingSoon`'s own
+   * doc comment for the full rationale. Generalized here (rather than kept
+   * org-portal-only) so a future platform-axis roadmap tile gets the same
+   * treatment for free.
+   */
+  comingSoon?: boolean;
 }
 
 /**
@@ -49,6 +57,27 @@ export interface TileLike<TDomain extends string = string> {
  * Component-Rule-5 violation (a hand-rolled `<Link className="rounded-lg…">`
  * card) — the admin axis now goes through the identical primitive the
  * org-portal axis already used.
+ *
+ * ICON BADGE CONTRAST (2026-08-27): the live badge is a SOLID `bg-primary`
+ * fill, not the translucent `bg-primary/10` tint this component originally
+ * shipped with. A live walkthrough against a real congregation's brand seed
+ * found the tint nearly disappeared against that org's own near-white
+ * branded page background (D7 permits a tinted background, and a 10%-opacity
+ * badge on top of a same-hue-family page reads as barely-there) — the badge
+ * is the single most-repeated visual element on this page (one per tile) and
+ * was carrying LESS visual weight than the avatar circle in the corner,
+ * which already uses a solid fill. This is a contrast fix, not a reversal of
+ * DECISION-105's "brand color pushed down to a small badge, not full-bleed"
+ * ruling — the badge is still small and confined to the icon, never the
+ * whole card.
+ *
+ * COMING-SOON TREATMENT: a tile with `comingSoon: true` gets a muted
+ * `bg-muted` badge (never the brand color — an unbuilt feature shouldn't
+ * borrow the same visual energy as a real one) and a "Coming soon" `Badge`
+ * pill next to its heading, replacing the old un-structured convention of
+ * appending the words "Coming soon." to the tile's own `description` string
+ * (see `PortalTile.comingSoon`'s doc comment) — so an aspirational-roadmap
+ * tile reads as one at a glance, not just on close reading of its body copy.
  */
 export function TileGrid<
   TDomain extends string,
@@ -78,12 +107,23 @@ export function TileGrid<
             className="group h-auto w-full min-h-11 gap-3 p-5"
           >
             <Link href={getHref(tile)}>
-              <span className="flex items-center justify-center rounded-xl bg-primary/10 p-2 text-primary">
+              <span
+                className={
+                  tile.comingSoon
+                    ? "flex items-center justify-center rounded-xl bg-muted p-2 text-muted-foreground"
+                    : "flex items-center justify-center rounded-xl bg-primary p-2 text-primary-foreground"
+                }
+              >
                 <Icon className="size-5 shrink-0" aria-hidden />
               </span>
-              <h3 className="text-lg font-semibold text-card-foreground">
-                {tile.label}
-              </h3>
+              <span className="flex w-full items-center gap-2">
+                <h3 className="text-lg font-semibold text-card-foreground">
+                  {tile.label}
+                </h3>
+                {tile.comingSoon && (
+                  <Badge variant="secondary">Coming soon</Badge>
+                )}
+              </span>
               <p className="text-base text-muted-foreground">
                 {tile.description}
               </p>

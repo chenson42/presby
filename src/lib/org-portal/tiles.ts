@@ -165,6 +165,25 @@ export interface PortalTile {
    * it is reachable.
    */
   domain: PortalDomain;
+  /**
+   * A FIFTH, ORTHOGONAL routing question, same rule as `category`/
+   * `orgTypeScope`/`domain`: presentational only, never a gate — the
+   * destination route itself still renders its own honest state regardless
+   * of this field. `undefined`/`false` means "a real, working tool";
+   * `true` means the tile's own `TileGrid` rendering should read as
+   * aspirational-roadmap rather than equal-weight-with-the-live-tools next
+   * to it (muted icon badge, a "Coming soon" pill instead of trailing
+   * description text, no hover-lift). Added 2026-08-27 after a live
+   * comparison against a real congregation's portal showed every stub tile
+   * rendering with identical visual weight to Members/Directory/Events —
+   * diluting the page and reading as "unfinished" rather than "a roadmap."
+   * Do NOT infer this from the description string containing "Coming
+   * soon." — that was the ad hoc, un-structured precedent this field
+   * replaces; every tile that sets this MUST also drop "Coming soon." from
+   * its own `description` (the pill now carries that meaning) so the two
+   * never disagree.
+   */
+  comingSoon?: boolean;
 }
 
 export const PORTAL_TILES: readonly PortalTile[] = [
@@ -304,48 +323,57 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   },
   // ============================================================
   // PRODUCT-IA SCAFFOLD PLACEHOLDER TILES — docs/work-log/
-  // 2026-08-27-product-ia-scaffold.md (Phase 3, DECISION-117). Every tile
-  // below is an inert "coming soon" stub — no feature exists yet, no data is
-  // read, nothing is mutated. Each `flagKey` is seeded ON (see
-  // scripts/seed.ts's own loud comment block) ONLY because presby has no
-  // real congregation onboarded yet and the operator wants the full roadmap
-  // visible in dev (Phase 1 Operator Answer 4) — flip to OFF before any real
-  // congregation or presbytery is onboarded (docs/TODO.md go-live gate).
+  // 2026-08-27-product-ia-scaffold.md (Phase 3, DECISION-117). Each
+  // `flagKey` is seeded ON (see scripts/seed.ts's own loud comment block)
+  // ONLY because presby has no real congregation onboarded yet and the
+  // operator wants the full roadmap visible in dev (Phase 1 Operator Answer
+  // 4) — flip to OFF before any real congregation or presbytery is
+  // onboarded (docs/TODO.md go-live gate).
+  //
+  // GRADUATED (2026-08-27): `oversight` and `reports` are no longer stubs —
+  // real schema and full admin pages shipped the same day
+  // (docs/work-log/2026-08-27-presbytery-oversight-statistics.md) — so
+  // `comingSoon` is NOT set on either, and their descriptions no longer say
+  // "Coming soon." They follow the ordinary seeded-off convention instead of
+  // this block's dev-visibility carve-out; left here because they're still
+  // presbytery-scoped Product-IA-Scaffold tiles, not because they're inert.
   // ============================================================
   {
     key: "giving",
     label: "Giving & Finance",
-    description: "Fund accounting, giving records, and budgets. Coming soon.",
+    description: "Fund accounting, giving records, and budgets.",
     href: (slug) => `/o/${slug}/admin/giving`,
     flagKey: "org_portal.giving",
     category: "operate",
     domain: "giving",
+    comingSoon: true,
   },
   {
     key: "worship",
     label: "Worship & Service Planning",
-    description: "Service templates, liturgical roles, and scheduling. Coming soon.",
+    description: "Service templates, liturgical roles, and scheduling.",
     href: (slug) => `/o/${slug}/admin/worship`,
     flagKey: "org_portal.worship",
     category: "operate",
     domain: "worship",
+    comingSoon: true,
   },
   {
     key: "committees",
     label: "Committees & Commissions",
     description:
-      "Presbytery committees, commissions, and administrative-commission tracking. Coming soon.",
+      "Presbytery committees, commissions, and administrative-commission tracking.",
     href: (slug) => `/o/${slug}/admin/committees`,
     flagKey: "org_portal.committees",
     category: "operate",
     domain: "governance",
     orgTypeScope: ["presbytery"],
+    comingSoon: true,
   },
   {
     key: "oversight",
     label: "Congregation Oversight",
-    description:
-      "A presbytery's downward read into its member congregations. Coming soon.",
+    description: "A presbytery's downward read into its member congregations.",
     href: (slug) => `/o/${slug}/admin/oversight`,
     flagKey: "org_portal.oversight",
     category: "operate",
@@ -356,7 +384,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     key: "reports",
     label: "Per-Capita, SASR & Imports",
     description:
-      "Per-capita/SASR rollup and data-import housekeeping for a presbytery. Coming soon.",
+      "Per-capita/SASR rollup and data-import housekeeping for a presbytery.",
     href: (slug) => `/o/${slug}/admin/reports`,
     flagKey: "org_portal.reports",
     // docs/work-log/2026-08-27-product-ia-scaffold.md, Phase 3: presbytery
@@ -372,20 +400,22 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   {
     key: "insights",
     label: "Insights & Analytics",
-    description: "Dashboards, trends, and per-capita/membership insights. Coming soon.",
+    description: "Dashboards, trends, and per-capita/membership insights.",
     href: (slug) => `/o/${slug}/admin/insights`,
     flagKey: "org_portal.insights",
     category: "operate",
     domain: "reports",
+    comingSoon: true,
   },
   {
     key: "communications",
     label: "Communications",
-    description: "Announcements, newsletters, and messaging. Coming soon.",
+    description: "Announcements, newsletters, and messaging.",
     href: (slug) => `/o/${slug}/admin/communications`,
     flagKey: "org_portal.communications",
     category: "operate",
     domain: "communications",
+    comingSoon: true,
   },
 ] as const;
 

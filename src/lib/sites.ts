@@ -16,6 +16,7 @@ import { generateBrandTokens, type BrandTokenSet } from "@/lib/brand/generate";
 import type { ResolvedTypePairing } from "@/lib/brand/fonts";
 import { TYPE_PAIRINGS, type TypePairingKey } from "@/lib/brand/contract";
 import { hasTicketsFile } from "@/lib/tickets";
+import type { OfficerOffice } from "@/lib/officers";
 
 /**
  * Public organization websites — the tenant/platform query-and-mutation
@@ -96,6 +97,21 @@ import { hasTicketsFile } from "@/lib/tickets";
  * wrapped, `withOrgContext()`-based, collapses `OrgAccessError` (and any
  * no-row case) to `null` so `<PortalFooter>` degrades to its contact-info-
  * omitted empty state rather than crashing the page.
+ *
+ * COMMIT 5 ADDITION (docs/work-log/2026-08-27-public-staff-directory.md
+ * Phase 3 "API Contract"): `getPublicStaffRoster` — a SIXTH caller shape,
+ * but the CHEAPEST member of caller shape 1 (the anonymous public read):
+ * no personId, no organizationId supplied by the caller, `db` with no org
+ * GUC, reading through a narrow new `SECURITY DEFINER` function
+ * (`presby_public_staff_roster(text)`, drizzle/0041) that unions
+ * `staff_positions`/`officer_terms` rows an admin has opted into public
+ * listing. Gated on its own flag, `sites.public_staff_directory`, checked
+ * bare — same "not an auth path, fail-closed-to-empty is correct" posture
+ * `sites.public_render` already documents. Deliberately NO `not_found`/`ok`
+ * split like `getPublishedSite` — Phase 1's "no per-person route" ruling
+ * means this function has no per-person miss case to protect, so "flag
+ * off," "site not live," and "nobody opted in" all collapse to the SAME
+ * `[]`, not a tagged result.
  */
 
 // ---------------------------------------------------------------------------
@@ -1272,4 +1288,92 @@ export async function markSiteContactMessageRead(
     if (updated.length === 0) return { kind: "not_found" };
     return { kind: "ok" };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Public staff & leadership directory — anonymous read, no membership,
+// server-only, never getPlatformDb() (docs/work-log/
+// 2026-08-27-public-staff-directory.md Phase 3 "API Contract")
+// ---------------------------------------------------------------------------
+
+export interface PublicStaffRosterEntry {
+  displayName: string;
+  roleLabel: string;
+  department: string | null;
+  /** `blob_assets.id`-shaped key (`people.photo_key`), or `null`. The
+   * caller builds the URL — this function returns no route-path string,
+   * matching `imageUrl`'s own closure-based resolution in `page.tsx`. */
+  photoKey: string | null;
+}
+
+interface PublicStaffRosterRow {
+  kind: "staff" | "officer";
+  role_raw: string;
+  department: string | null;
+  display_name: string;
+  photo_key: string | null;
+}
+
+/**
+ * The anonymous public staff-directory read. `if (!isFlagEnabled(...))
+ * return []` FIRST, then one call to `presby_public_staff_roster(text)`
+ * (`SECURITY DEFINER`, drizzle/0041) — no membership, no org GUC, reading
+ * through the plain `db` connection exactly like `getPublishedSite`.
+ *
+ * Officer `role_raw` values map through `OFFICE_LABELS` (imported from
+ * `@/lib/officers`) to their display label; staff `role_raw` is already a
+ * display string (`staff_positions.position`) and passes through
+ * unchanged. Label mapping stays in TypeScript, not duplicated as a `CASE`
+ * inside the SQL function, so `OFFICE_LABELS` has exactly one source of
+ * truth (Phase 3's own reasoning: a future seventh office would otherwise
+ * need editing both a TS map and a SQL function to stay in sync). An
+ * unrecognized `role_raw` (a future office this map hasn't caught up with
+ * yet) falls back to the raw value rather than throwing — this is a public,
+ * best-effort render, not a place to 500 the whole directory over one
+ * stale label.
+ *
+ * `OFFICE_LABELS` IS DYNAMICALLY IMPORTED, deliberately not a static
+ * top-level import — same reasoning `getPublishedSite()`'s own
+ * `resolveTypePairing()` comment documents at length: `@/lib/officers`
+ * imports `@/lib/audit`, which transitively imports `@/auth` (next-auth), a
+ * module this file's own Vitest suite (and every OTHER caller of this file
+ * that never touches the officer-labeling branch) cannot resolve under
+ * plain Node. Deferred to exactly the one call site that needs it.
+ */
+export async function getPublicStaffRoster(
+  slug: string,
+): Promise<PublicStaffRosterEntry[]> {
+  // The ENTIRE BODY is one try { … } catch { return [] }, matching
+  // getPublishedSiteBrand()'s own convention: a transient DB error must
+  // degrade to "no listing shown" (indistinguishable from the flag being off
+  // or nobody having opted in), never propagate up through
+  // renderSiteBundle()'s per-block render and collapse the WHOLE public site
+  // page for that org. Phase 1 (docs/work-log/2026-08-27-public-staff-
+  // directory.md) named this exact decision as one that had to be made
+  // explicitly and it shipped unmade — closed same-day as a Phase 6 bug-fix
+  // addendum once found.
+  try {
+    if (!(await isFlagEnabled("sites.public_staff_directory"))) return [];
+
+    const result = await db.execute(
+      sql`select * from presby_public_staff_roster(${slug})`,
+    );
+    const rows =
+      (result as unknown as { rows?: PublicStaffRosterRow[] }).rows ?? [];
+    if (rows.length === 0) return [];
+
+    const { OFFICE_LABELS } = await import("@/lib/officers");
+
+    return rows.map((row) => ({
+      displayName: row.display_name,
+      roleLabel:
+        row.kind === "officer"
+          ? (OFFICE_LABELS[row.role_raw as OfficerOffice] ?? row.role_raw)
+          : row.role_raw,
+      department: row.department,
+      photoKey: row.photo_key,
+    }));
+  } catch {
+    return [];
+  }
 }

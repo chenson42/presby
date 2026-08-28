@@ -182,6 +182,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   PER_CAPITA_RATE_SET: "tenant.per_capita_rate.set",
   PER_CAPITA_RECORDS_GENERATED: "tenant.per_capita_records.generated",
   PER_CAPITA_PAYMENT_RECORDED: "tenant.per_capita_payment.recorded",
+  STAFF_POSITION_LISTED_PUBLICLY: "staff_position.listed_publicly",
+  STAFF_POSITION_UNLISTED_PUBLICLY: "staff_position.unlisted_publicly",
+  OFFICER_TERM_LISTED_PUBLICLY: "officer_term.listed_publicly",
+  OFFICER_TERM_UNLISTED_PUBLICLY: "officer_term.unlisted_publicly",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

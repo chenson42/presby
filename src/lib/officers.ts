@@ -6,6 +6,7 @@ import { isExclusionViolation } from "@/lib/db/errors";
 import { officerTerms } from "@/lib/db/domain/officers";
 import { orgUnits } from "@/lib/db/domain/org";
 import { memberships, people } from "@/lib/db/domain/people";
+import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 
 /**
  * Officer-term administration — P?? gap 1 (`docs/work-log/
@@ -65,6 +66,15 @@ import { memberships, people } from "@/lib/db/domain/people";
  *      non-null org_unit on a non-deacon office; it does not itself require
  *      one on a deacon office) — the "iff" is an application-level rule,
  *      enforced here and again client-side (commit 3).
+ *
+ * `setOfficerTermPublicListed()` (docs/work-log/
+ * 2026-08-27-public-staff-directory.md, Phase 3) IS AN EXCEPTION to this
+ * module's usual "audit lives in `admin/officers/actions.ts`" split
+ * (`startOfficerTerm`/`endOfficerTerm`'s own `AUDIT_ACTIONS.OFFICER_TERM_
+ * STARTED`/`ENDED` calls are in that actions.ts file, not here) —
+ * `recordAudit()` is called from INSIDE this function per that work-log's
+ * explicit Phase 3 instruction. See the function's own doc comment for the
+ * `check:audit` tripwire-coverage finding this produced.
  */
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -136,6 +146,9 @@ export interface OfficerRosterEntry {
   endsOn: string | null;
   orgUnitId: string | null;
   orgUnitName: string | null;
+  /** Public staff-directory opt-in (docs/work-log/
+   * 2026-08-27-public-staff-directory.md) — additive field, same query. */
+  publicListed: boolean;
 }
 
 export interface OfficerHistoryEntry {
@@ -176,6 +189,7 @@ interface RosterRow {
   ends_on: string | null;
   org_unit_id: string | null;
   org_unit_name: string | null;
+  public_listed: boolean;
 }
 
 /**
@@ -222,7 +236,8 @@ export async function listOfficerRoster(
         roster.starts_on::text  as starts_on,
         roster.ends_on::text    as ends_on,
         ot.org_unit_id          as org_unit_id,
-        ou.name                 as org_unit_name
+        ou.name                 as org_unit_name,
+        ot.public_listed        as public_listed
         from roster
         join people p on p.id = roster.person_id
         join officer_terms ot on ot.id = roster.term_id
@@ -241,6 +256,7 @@ export async function listOfficerRoster(
       endsOn: row.ends_on,
       orgUnitId: row.org_unit_id,
       orgUnitName: row.org_unit_name,
+      publicListed: row.public_listed,
     }));
 
     return { kind: "ok", data };
@@ -617,4 +633,112 @@ export async function endOfficerTerm(
 
     return { kind: "ok", data: { termId: input.termId } };
   });
+}
+
+// ---------------------------------------------------------------------------
+// setOfficerTermPublicListed
+// ---------------------------------------------------------------------------
+
+export interface SetOfficerTermPublicListedInput {
+  termId: string;
+  publicListed: boolean;
+}
+
+/**
+ * Public staff-directory opt-in/opt-out (docs/work-log/
+ * 2026-08-27-public-staff-directory.md, Phase 3 API Contract). Toggles
+ * `officer_terms.public_listed` — the bit `presby_public_staff_roster()`
+ * (drizzle/0041) reads anonymously for `(public)/site/<slug>`'s staff
+ * directory.
+ *
+ * ORDER OF OPERATIONS, mirroring `startOfficerTerm()`/`endOfficerTerm()`
+ * exactly:
+ *   1. `hasOfficersManage` gate — `forbidden` if the caller doesn't hold
+ *      `officers.manage` at all.
+ *   2. Row lookup scoped to `(id, organizationId)` — `invalid_target` if
+ *      missing or belongs to another org (F2 shape, matching
+ *      `endOfficerTerm`'s own lookup).
+ *   3. Update `publicListed`, `publicListedBy = actingUserId`,
+ *      `publicListedAt = now()` on EVERY call, in BOTH directions — turning
+ *      the bit off is itself an attributable, timestamped act (Phase 3 Edge
+ *      Cases: this departs from `recordedBy`'s "set once at creation"
+ *      precedent on purpose).
+ *   4. `recordAudit()` — `OFFICER_TERM_LISTED_PUBLICLY`/
+ *      `OFFICER_TERM_UNLISTED_PUBLICLY` depending on direction. Called from
+ *      INSIDE this function, not from `admin/officers/actions.ts` — a
+ *      DELIBERATE divergence from `startOfficerTerm`/`endOfficerTerm`'s own
+ *      "actions.ts owns the audit call" convention in THIS SAME FILE (see
+ *      this file's header), per the work-log's explicit Phase 3 instruction.
+ *
+ * `check:audit` TRIPWIRE-COVERAGE FINDING (confirmed at Phase 4, step 2):
+ * `scripts/check-audit-coverage.mjs` only walks `src/app/**\/actions.ts`
+ * looking for a literal `db.insert|update|delete` in THAT file. This
+ * function's `tx.update(officerTerms, ...)` lives here, in `src/lib/
+ * officers.ts` — a file the script never visits at all (it isn't under
+ * `src/app`, and isn't named `actions.ts`). `admin/officers/actions.ts`'s
+ * own wrapper (`setOfficerTermPublicListedAction`) calls no `db.*` method
+ * directly either, so even that file's mutation regex never fires. Net: the
+ * tripwire is BLIND to this call site, on both counts, not just one — the
+ * SAME finding `staff.ts`'s identical sibling function documents; recorded
+ * once each per file rather than only once, since either file could be read
+ * in isolation. Do not read `check:audit` passing as coverage evidence for
+ * this mutation — only `officers.test.ts`'s own assertions (`recordAudit`
+ * is called on both directions) prove it fires.
+ */
+export async function setOfficerTermPublicListed(
+  viewerPersonId: string,
+  organizationId: string,
+  actingUserId: string,
+  input: SetOfficerTermPublicListedInput,
+): Promise<OfficersResult<{ termId: string; publicListed: boolean }>> {
+  const result = await withOrgContext(
+    viewerPersonId,
+    organizationId,
+    async (tx): Promise<OfficersResult<{ termId: string; publicListed: boolean }>> => {
+      if (!(await hasOfficersManage(tx, viewerPersonId, organizationId))) {
+        return { kind: "forbidden" };
+      }
+
+      const [term] = await tx
+        .select({ id: officerTerms.id })
+        .from(officerTerms)
+        .where(
+          and(
+            eq(officerTerms.id, input.termId),
+            eq(officerTerms.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      if (!term) {
+        return { kind: "invalid_target" };
+      }
+
+      await tx
+        .update(officerTerms)
+        .set({
+          publicListed: input.publicListed,
+          publicListedBy: actingUserId,
+          publicListedAt: new Date(),
+        })
+        .where(eq(officerTerms.id, input.termId));
+
+      return {
+        kind: "ok",
+        data: { termId: input.termId, publicListed: input.publicListed },
+      };
+    },
+  );
+
+  if (result.kind === "ok") {
+    await recordAudit({
+      action: result.data.publicListed
+        ? AUDIT_ACTIONS.OFFICER_TERM_LISTED_PUBLICLY
+        : AUDIT_ACTIONS.OFFICER_TERM_UNLISTED_PUBLICLY,
+      resourceType: "officer_term",
+      resourceId: result.data.termId,
+      metadata: { organizationId, publicListed: result.data.publicListed },
+    });
+  }
+
+  return result;
 }

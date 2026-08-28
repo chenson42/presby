@@ -34,6 +34,22 @@ import { eq, sql } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
+// `recordAudit()` is mocked at the module boundary — same posture and same
+// reason `children.test.ts`/`person-sensitive.test.ts` document: `@/lib/audit`
+// transitively imports `@/auth` (next-auth), which this test environment
+// cannot resolve. Only exercised by the `setOfficerTermPublicListed` describe
+// block below; every other describe block in this file never touches an
+// audited code path (OFFICER_TERM_STARTED/ENDED are audited from `admin/
+// officers/actions.ts`, a different file, not from `officers.ts` itself).
+const mockRecordAudit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/lib/audit", () => ({
+  AUDIT_ACTIONS: {
+    OFFICER_TERM_LISTED_PUBLICLY: "officer_term.listed_publicly",
+    OFFICER_TERM_UNLISTED_PUBLICLY: "officer_term.unlisted_publicly",
+  },
+  recordAudit: (...args: unknown[]) => mockRecordAudit(...args),
+}));
+
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
 );
@@ -44,6 +60,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
   let getOfficerFormOptions: typeof import("./officers").getOfficerFormOptions;
   let startOfficerTerm: typeof import("./officers").startOfficerTerm;
   let endOfficerTerm: typeof import("./officers").endOfficerTerm;
+  let setOfficerTermPublicListed: typeof import("./officers").setOfficerTermPublicListed;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let orgUnits: typeof import("@/lib/db/domain/org").orgUnits;
@@ -87,6 +104,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       getOfficerFormOptions,
       startOfficerTerm,
       endOfficerTerm,
+      setOfficerTermPublicListed,
     } = await import("./officers"));
     ({ getPlatformDb } = await import("@/lib/db"));
     ({ organizations, orgUnits } = await import("@/lib/db/domain/org"));
@@ -360,6 +378,17 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
         endReason: "resigned",
       });
       expect(result).toEqual({ kind: "forbidden" });
+    });
+
+    it("setOfficerTermPublicListed: forbidden for a person holding no officers.manage, AND NO AUDIT FIRES", async () => {
+      const result = await setOfficerTermPublicListed(
+        narrowPerson,
+        orgA,
+        grantingUserId,
+        { termId: randomUUID(), publicListed: true },
+      );
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
     });
   });
 
@@ -744,6 +773,120 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       await expect(
         listOfficerRoster(randomUUID(), orgA),
       ).rejects.toMatchObject({ name: "OrgAccessError" });
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // setOfficerTermPublicListed — public staff directory opt-in/opt-out
+  // (docs/work-log/2026-08-27-public-staff-directory.md, Phase 3)
+  // ---------------------------------------------------------------------
+
+  describe("setOfficerTermPublicListed", () => {
+    afterAll(() => {
+      mockRecordAudit.mockClear();
+    });
+
+    it("invalid_target for a termId that doesn't exist", async () => {
+      const result = await setOfficerTermPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { termId: randomUUID(), publicListed: true },
+      );
+      expect(result).toEqual({ kind: "invalid_target" });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("invalid_target for a term belonging to a DIFFERENT org", async () => {
+      const platform = getPlatformDb();
+      const [crossOrgTerm] = await platform
+        .insert(officerTerms)
+        .values({
+          organizationId: orgB,
+          personId: outsidePerson,
+          office: "trustee",
+          startsOn: "2020-01-01",
+          recordedBy: grantingUserId,
+        })
+        .returning({ id: officerTerms.id });
+
+      const result = await setOfficerTermPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { termId: crossOrgTerm!.id, publicListed: true },
+      );
+      expect(result).toEqual({ kind: "invalid_target" });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("ON: sets publicListed/publicListedBy/publicListedAt and records OFFICER_TERM_LISTED_PUBLICLY", async () => {
+      const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        office: "trustee",
+        startsOn: "2020-01-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      mockRecordAudit.mockClear();
+      const result = await setOfficerTermPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { termId: started.data.termId, publicListed: true },
+      );
+      expect(result).toEqual({
+        kind: "ok",
+        data: { termId: started.data.termId, publicListed: true },
+      });
+      expect(mockRecordAudit).toHaveBeenCalledWith({
+        action: "officer_term.listed_publicly",
+        resourceType: "officer_term",
+        resourceId: started.data.termId,
+        metadata: { organizationId: orgA, publicListed: true },
+      });
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select({
+          publicListed: officerTerms.publicListed,
+          publicListedBy: officerTerms.publicListedBy,
+          publicListedAt: officerTerms.publicListedAt,
+        })
+        .from(officerTerms)
+        .where(eq(officerTerms.id, started.data.termId));
+      expect(row?.publicListed).toBe(true);
+      expect(row?.publicListedBy).toBe(grantingUserId);
+      expect(row?.publicListedAt).not.toBeNull();
+
+      // OFF direction: every call writes publicListedBy/At — including
+      // turning it back off — never leaves a stale "last listed" trail
+      // (Phase 3 Edge Cases: departs from recordedBy's "set once" precedent
+      // on purpose).
+      mockRecordAudit.mockClear();
+      const off = await setOfficerTermPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { termId: started.data.termId, publicListed: false },
+      );
+      expect(off).toEqual({
+        kind: "ok",
+        data: { termId: started.data.termId, publicListed: false },
+      });
+      expect(mockRecordAudit).toHaveBeenCalledWith({
+        action: "officer_term.unlisted_publicly",
+        resourceType: "officer_term",
+        resourceId: started.data.termId,
+        metadata: { organizationId: orgA, publicListed: false },
+      });
+
+      const [offRow] = await platform
+        .select({ publicListed: officerTerms.publicListed })
+        .from(officerTerms)
+        .where(eq(officerTerms.id, started.data.termId));
+      expect(offRow?.publicListed).toBe(false);
     });
   });
 });

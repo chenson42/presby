@@ -46,9 +46,12 @@ vi.mock("@/lib/audit", () => ({
 
 const mockStartOfficerTerm = vi.hoisted(() => vi.fn());
 const mockEndOfficerTerm = vi.hoisted(() => vi.fn());
+const mockSetOfficerTermPublicListed = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/officers", () => ({
   startOfficerTerm: (...args: unknown[]) => mockStartOfficerTerm(...args),
   endOfficerTerm: (...args: unknown[]) => mockEndOfficerTerm(...args),
+  setOfficerTermPublicListed: (...args: unknown[]) =>
+    mockSetOfficerTermPublicListed(...args),
 }));
 
 const mockRevalidatePath = vi.hoisted(() => vi.fn());
@@ -57,7 +60,11 @@ vi.mock("next/cache", () => ({
 }));
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { endOfficerTermAction, startOfficerTermAction } from "./actions";
+import {
+  endOfficerTermAction,
+  setOfficerTermPublicListedAction,
+  startOfficerTermAction,
+} from "./actions";
 
 const SESSION = {
   user: { id: "user-platform-id-1", email: "clerk@example.invalid" },
@@ -354,6 +361,113 @@ describe("endOfficerTermAction — OfficersResult → ActionResult mapping", () 
     expect(mockRevalidatePath).toHaveBeenCalledWith(
       "/o/alder-creek/admin/officers",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setOfficerTermPublicListedAction — OfficersResult → ActionResult mapping
+// (docs/work-log/2026-08-27-public-staff-directory.md, Phase 3). Mocked at
+// the same `@/lib/officers` boundary — recordAudit for THIS mutation is
+// called from INSIDE setOfficerTermPublicListed() (see that function's own
+// doc comment for why), so unlike startOfficerTermAction/endOfficerTermAction
+// above, this action calls no recordAudit() itself: every assertion below
+// confirms mockRecordAudit is NEVER called from this action, not just on
+// denial.
+// ---------------------------------------------------------------------------
+
+describe("setOfficerTermPublicListedAction — OfficersResult → ActionResult mapping", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue(SESSION);
+    mockResolveOrgContext.mockResolvedValue(RESOLVED_OK);
+  });
+
+  function publicListedInput() {
+    return { termId: "term-1", publicListed: true };
+  }
+
+  it("not signed in returns an error without calling setOfficerTermPublicListed", async () => {
+    mockAuth.mockResolvedValueOnce(null);
+
+    const result = await setOfficerTermPublicListedAction(
+      "alder-creek",
+      publicListedInput(),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "You must be signed in to do that.",
+    });
+    expect(mockSetOfficerTermPublicListed).not.toHaveBeenCalled();
+  });
+
+  it("passes resolved personId/organizationId and session.user.id as actingUserId", async () => {
+    mockSetOfficerTermPublicListed.mockResolvedValueOnce({
+      kind: "ok",
+      data: { termId: "term-1", publicListed: true },
+    });
+
+    const input = publicListedInput();
+    await setOfficerTermPublicListedAction("alder-creek", input);
+
+    expect(mockSetOfficerTermPublicListed).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      "user-platform-id-1",
+      input,
+    );
+  });
+
+  it("forbidden → ok:false, no audit, no revalidate", async () => {
+    mockSetOfficerTermPublicListed.mockResolvedValueOnce({ kind: "forbidden" });
+    const result = await setOfficerTermPublicListedAction(
+      "alder-creek",
+      publicListedInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "You don't have permission to manage officer terms here.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("invalid_target → 'no longer exists'", async () => {
+    mockSetOfficerTermPublicListed.mockResolvedValueOnce({
+      kind: "invalid_target",
+    });
+    const result = await setOfficerTermPublicListedAction(
+      "alder-creek",
+      publicListedInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "That officer term no longer exists.",
+    });
+  });
+
+  it("ok → returns ok:true with termId/publicListed, revalidates, and calls recordAudit ZERO times from this action", async () => {
+    mockSetOfficerTermPublicListed.mockResolvedValueOnce({
+      kind: "ok",
+      data: { termId: "term-1", publicListed: true },
+    });
+
+    const result = await setOfficerTermPublicListedAction(
+      "alder-creek",
+      publicListedInput(),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      data: { termId: "term-1", publicListed: true },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(
+      "/o/alder-creek/admin/officers",
+    );
+    // Not "no audit fired at all" — setOfficerTermPublicListed() itself
+    // fires it, per its own doc comment. This asserts the DIVERGENCE from
+    // startOfficerTermAction/endOfficerTermAction's own recordAudit() call
+    // sites above: THIS action calls no recordAudit() of its own.
+    expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });
 

@@ -262,6 +262,22 @@ export const AUDIT_ACTIONS = {
   // Metadata: { organizationId, billingYear, created, skipped }.
   PER_CAPITA_PAYMENT_RECORDED: "tenant.per_capita_payment.recorded",
   // Metadata: { organizationId, recordId, paidAmount, paidStatus }.
+  // Public staff & leadership directory (docs/work-log/
+  // 2026-08-27-public-staff-directory.md, Phase 2 ruling 6b) — written from
+  // src/lib/staff.ts's setStaffPositionPublicListed() and src/lib/
+  // officers.ts's setOfficerTermPublicListed(), NOT from either module's
+  // actions.ts (a deliberate divergence from OFFICER_TERM_STARTED/ENDED's
+  // own actions.ts-does-audit split in officers.ts specifically — see that
+  // function's own header comment). Not an access-change fact (DECISION-129's
+  // own test doesn't transfer), but a DISCLOSURE fact Rule 7 covers by
+  // spirit: the bit exposes a person's name/role/photo to the entire
+  // unauthenticated internet. On/off-pair shape, matching ORG_BRAND_SET/
+  // NEUTRALIZED — the direction is the fact worth searching audit history
+  // for. Metadata: { organizationId, publicListed }.
+  STAFF_POSITION_LISTED_PUBLICLY: "staff_position.listed_publicly",
+  STAFF_POSITION_UNLISTED_PUBLICLY: "staff_position.unlisted_publicly",
+  OFFICER_TERM_LISTED_PUBLICLY: "officer_term.listed_publicly",
+  OFFICER_TERM_UNLISTED_PUBLICLY: "officer_term.unlisted_publicly",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

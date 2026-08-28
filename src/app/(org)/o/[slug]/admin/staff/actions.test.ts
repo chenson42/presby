@@ -65,6 +65,8 @@ describe.skipIf(!hasDb)(
   "admin/staff/actions.ts createStaffPersonAction (Postgres-backed, real dev database)",
   () => {
     let createStaffPersonAction: typeof import("./actions").createStaffPersonAction;
+    let startStaffPositionAction: typeof import("./actions").startStaffPositionAction;
+    let setStaffPositionPublicListedAction: typeof import("./actions").setStaffPositionPublicListedAction;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
@@ -89,7 +91,11 @@ describe.skipIf(!hasDb)(
     const trackedPeopleIds: string[] = [];
 
     beforeAll(async () => {
-      ({ createStaffPersonAction } = await import("./actions"));
+      ({
+        createStaffPersonAction,
+        startStaffPositionAction,
+        setStaffPositionPublicListedAction,
+      } = await import("./actions"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
@@ -349,6 +355,93 @@ describe.skipIf(!hasDb)(
         .from(rollActions)
         .where(eq(rollActions.personId, personId));
       expect(rollActionRows).toHaveLength(0);
+    });
+
+    // -----------------------------------------------------------------
+    // setStaffPositionPublicListedAction (docs/work-log/
+    // 2026-08-27-public-staff-directory.md, Phase 3) — real Postgres,
+    // exercising the actual staff.manage gate and the real
+    // setStaffPositionPublicListed() mutation, not a mock standing in for
+    // either. Confirms the action-layer wiring (identity resolution,
+    // result-kind mapping); staff.test.ts's own describe block owns the
+    // exhaustive coverage of the mutation itself (recordAudit args, both
+    // directions, cross-org invalid_target).
+    // -----------------------------------------------------------------
+
+    describe("setStaffPositionPublicListedAction", () => {
+      it("forbidden for a session holding people.manage ONLY (no staff.manage)", async () => {
+        sessionFor(peopleManageOnlyPerson);
+
+        const result = await setStaffPositionPublicListedAction(SLUG, {
+          positionId: "00000000-0000-0000-0000-000000000000",
+          publicListed: true,
+        });
+
+        expect(result).toEqual({
+          ok: false,
+          error: "You don't have permission to manage staff here.",
+        });
+      });
+
+      it("happy path: toggles publicListed on, then off, for a real position", async () => {
+        sessionFor(bothPermissionsPerson);
+        const started = await startStaffPositionAction(SLUG, {
+          personId: bothPermissionsPerson,
+          position: `Public Listing Action Test ${stamp}`,
+          startsOn: "2020-01-01",
+        });
+        expect(started.ok).toBe(true);
+        if (!started.ok || !started.data) return;
+        const positionId = started.data.positionId;
+
+        sessionFor(bothPermissionsPerson);
+        const onResult = await setStaffPositionPublicListedAction(SLUG, {
+          positionId,
+          publicListed: true,
+        });
+        expect(onResult).toEqual({
+          ok: true,
+          data: { positionId, publicListed: true },
+        });
+
+        const platform = getPlatformDb();
+        const { staffPositions } = await import("@/lib/db/domain/staff");
+        const [onRow] = await platform
+          .select({ publicListed: staffPositions.publicListed })
+          .from(staffPositions)
+          .where(eq(staffPositions.id, positionId));
+        expect(onRow?.publicListed).toBe(true);
+
+        sessionFor(bothPermissionsPerson);
+        const offResult = await setStaffPositionPublicListedAction(SLUG, {
+          positionId,
+          publicListed: false,
+        });
+        expect(offResult).toEqual({
+          ok: true,
+          data: { positionId, publicListed: false },
+        });
+
+        const [offRow] = await platform
+          .select({ publicListed: staffPositions.publicListed })
+          .from(staffPositions)
+          .where(eq(staffPositions.id, positionId));
+        expect(offRow?.publicListed).toBe(false);
+      });
+
+      it("invalid_target for a positionId that doesn't exist", async () => {
+        sessionFor(bothPermissionsPerson);
+
+        const result = await setStaffPositionPublicListedAction(SLUG, {
+          positionId: "00000000-0000-0000-0000-000000000000",
+          publicListed: true,
+        });
+
+        expect(result).toEqual({
+          ok: false,
+          error: "That staff position no longer exists.",
+        });
+      });
     });
   },
 );

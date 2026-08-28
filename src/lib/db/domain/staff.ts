@@ -4,6 +4,7 @@ import {
   uuid,
   date,
   timestamp,
+  boolean,
   index,
   unique,
   foreignKey,
@@ -66,6 +67,15 @@ export const staffPositions = pgTable(
     recordedAt: timestamp("recorded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Public staff & leadership directory (docs/work-log/
+    // 2026-08-27-public-staff-directory.md, Phase 4 step 1). Opt-in only —
+    // an admin holding staff.manage must affirmatively flip this to true.
+    // publicListedBy/publicListedAt are set on every call in both
+    // directions (turning it off is itself an attributable act), not just
+    // at creation, unlike recordedBy/recordedAt above.
+    publicListed: boolean("public_listed").notNull().default(false),
+    publicListedBy: uuid("public_listed_by").references(() => users.id),
+    publicListedAt: timestamp("public_listed_at", { withTimezone: true }),
   },
   (t) => [
     index("staff_positions_org_person_idx").on(t.organizationId, t.personId),

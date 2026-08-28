@@ -279,6 +279,23 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "sites.public_staff_directory",
+      // ON: the anonymous public staff/leadership directory read
+      // (`getPublicStaffRoster()`) is live — docs/work-log/
+      // 2026-08-27-public-staff-directory.md, Phase 3. Checked bare, no
+      // DECISION-026 fail-open wrapper — not an auth path, and fail-closed-
+      // to-empty-roster during a DB blip or an operator rollback is correct
+      // (same "sites.*" posture as sites.public_render). Gates the read/
+      // render path only, not the admin-side `staff.manage`/
+      // `officers.manage`-gated "list publicly" toggle — an org with rows
+      // opted in before this flag ships gets an empty roster, not a leak,
+      // until the flag flips (DECISION-003 composition). Seeded OFF, same
+      // "ships dark until the page lands" reasoning as sites.public_render.
+      description:
+        "Public staff/leadership directory read for (public)/site/<slug>. OFF = getPublicStaffRoster() returns [] regardless of how many staff_positions/officer_terms rows are public_listed.",
+      enabled: false,
+    },
+    {
       key: "org_portal.features",
       // ON: /o/<slug>/admin/features (the per-org feature-toggle admin
       // surface, DECISION-097) is reachable at all. Checked bare, no

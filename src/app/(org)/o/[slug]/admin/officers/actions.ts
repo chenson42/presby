@@ -6,9 +6,11 @@ import { resolveOrgContext } from "@/lib/authz";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import {
   endOfficerTerm,
+  setOfficerTermPublicListed,
   startOfficerTerm,
   type EndOfficerTermInput,
   type OfficerOffice,
+  type SetOfficerTermPublicListedInput,
   type StartOfficerTermInput,
 } from "@/lib/officers";
 import type { ActionResult } from "@/types/actions";
@@ -64,6 +66,15 @@ import type { ActionResult } from "@/types/actions";
  *     disambiguate on, so one message covers both).
  *   - `forbidden`        → "You don't have permission to manage officer
  *     terms here."
+ *
+ * `setOfficerTermPublicListedAction` (docs/work-log/
+ * 2026-08-27-public-staff-directory.md) IS A DELIBERATE DIVERGENCE from this
+ * file's own "actions.ts calls recordAudit()" convention above —
+ * `recordAudit()` for that mutation is called from INSIDE `src/lib/
+ * officers.ts`'s `setOfficerTermPublicListed()` instead, per that
+ * work-log's explicit Phase 3 instruction. This action calls no
+ * `recordAudit()` itself. See that function's own doc comment for the
+ * `check:audit` tripwire-coverage finding this produced.
  */
 
 async function resolveActingIdentity(slug: string): Promise<
@@ -216,4 +227,58 @@ export async function endOfficerTermAction(
   revalidatePath(`/o/${slug}/admin/officers`);
 
   return { ok: true, data: { termId: result.data.termId } };
+}
+
+// ---------------------------------------------------------------------------
+// setOfficerTermPublicListedAction
+// ---------------------------------------------------------------------------
+
+/**
+ * Public staff-directory opt-in/opt-out (docs/work-log/
+ * 2026-08-27-public-staff-directory.md, Phase 3). All SQL correctness (the
+ * `officers.manage` gate, the `(id, organizationId)` row scoping, the
+ * `recordAudit()` call) lives in and is proven by
+ * `src/lib/officers.ts`/`officers.test.ts` — this action's only job is the
+ * auth-in-the-action-body plumbing and the error->copy mapping, same shape
+ * as `startOfficerTermAction`/`endOfficerTermAction`.
+ */
+export async function setOfficerTermPublicListedAction(
+  slug: string,
+  input: SetOfficerTermPublicListedInput,
+): Promise<ActionResult<{ termId: string; publicListed: boolean }>> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await setOfficerTermPublicListed(
+    identity.personId,
+    identity.organizationId,
+    identity.userId,
+    input,
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage officer terms here.",
+      };
+    case "invalid_target":
+      return { ok: false, error: "That officer term no longer exists." };
+    case "invalid_input":
+      return { ok: false, error: result.message };
+    case "overlap":
+      // Unreachable from setOfficerTermPublicListed in practice — no insert
+      // happens on this path, so no exclusion constraint can fire. Handled
+      // for exhaustiveness, matching endOfficerTermAction's own precedent.
+      return { ok: false, error: "Couldn't save that — try again." };
+    case "ok":
+      break;
+  }
+
+  revalidatePath(`/o/${slug}/admin/officers`);
+
+  return {
+    ok: true,
+    data: { termId: result.data.termId, publicListed: result.data.publicListed },
+  };
 }

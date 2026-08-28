@@ -23,6 +23,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 vi.mock("./actions", () => ({
   startOfficerTermAction: vi.fn(),
   endOfficerTermAction: vi.fn(),
+  setOfficerTermPublicListedAction: vi.fn(),
 }));
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -46,6 +47,7 @@ const ELDER_ENTRY: OfficerRosterEntry = {
   endsOn: null,
   orgUnitId: null,
   orgUnitName: null,
+  publicListed: false,
 };
 
 const DEACON_ENTRY: OfficerRosterEntry = {
@@ -58,6 +60,20 @@ const DEACON_ENTRY: OfficerRosterEntry = {
   endsOn: null,
   orgUnitId: "org-unit-1",
   orgUnitName: "North District",
+  publicListed: false,
+};
+
+const PUBLIC_ENTRY: OfficerRosterEntry = {
+  termId: "term-3",
+  personId: "person-3",
+  displayName: "Corwin Aldridge",
+  office: "clerk_of_session",
+  classYear: null,
+  startsOn: "2022-01-08",
+  endsOn: null,
+  orgUnitId: null,
+  orgUnitName: null,
+  publicListed: true,
 };
 
 describe("OfficerRoster — empty state", () => {
@@ -101,5 +117,21 @@ describe("OfficerRoster — the District column is conditional", () => {
     );
     expect(screen.getByRole("columnheader", { name: /district/i })).toBeTruthy();
     expect(screen.getByText("North District")).toBeTruthy();
+  });
+});
+
+describe("OfficerRoster — public listing control (docs/work-log/2026-08-27-public-staff-directory.md)", () => {
+  it("renders a 'List publicly' switch per row and no Public badge when not opted in", () => {
+    render(<OfficerRoster entries={[ELDER_ENTRY]} slug="alder-creek" />);
+    expect(screen.getByRole("switch")).toBeTruthy();
+    expect(screen.queryByText("Public")).toBeNull();
+  });
+
+  it("shows a Public badge and a checked switch for a row already opted in", () => {
+    render(<OfficerRoster entries={[PUBLIC_ENTRY]} slug="alder-creek" />);
+    expect(screen.getByText("Public")).toBeTruthy();
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
 });

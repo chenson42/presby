@@ -11,6 +11,7 @@ import { FormattedDate } from "@/components/shared/formatted-date";
 import type { OfficerRosterEntry } from "@/lib/officers";
 import { OFFICE_LABELS } from "./office-labels";
 import { EndTermDialog } from "./end-term-dialog";
+import { PublicListingToggle } from "./public-listing-toggle";
 
 /**
  * "Who currently holds office" — a `Table`, not cards, per Phase 2/3's
@@ -35,7 +36,14 @@ import { EndTermDialog } from "./end-term-dialog";
  * Actions) reaches the End-term button without scrolling on a phone. Both
  * values are still readable at `sm:` and above; nothing is lost, only
  * deferred past the breakpoint, per Phase 2/3's own "class year / district
- * need to drop below a breakpoint" suggestion.
+ * need to drop below a breakpoint" suggestion. `Public listing` (docs/
+ * work-log/2026-08-27-public-staff-directory.md) joins this below-`sm:` set
+ * for the identical reason — VERIFIED IN A REAL BROWSER AT 390PX, adding it
+ * as an always-visible column pushed "End term" out of the frame with no
+ * scroll affordance, the exact failure this comment already documents for
+ * Class year/District. Opting a term into the public directory is an
+ * occasional, desk-adjacent action (Phase 1's own cadence), not a
+ * look-up-on-the-go one.
  *
  * Office and Person also wrap (rather than `TableCell`'s own default
  * `whitespace-nowrap`) below a max width on small screens ONLY — "Clerk of
@@ -79,6 +87,7 @@ export function OfficerRoster({
           {hasDistrict && (
             <TableHead className="hidden sm:table-cell">District</TableHead>
           )}
+          <TableHead className="hidden sm:table-cell">Public listing</TableHead>
           <TableHead className="sr-only">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -114,6 +123,15 @@ export function OfficerRoster({
                 {entry.orgUnitName ?? "—"}
               </TableCell>
             )}
+            <TableCell className="hidden sm:table-cell">
+              <PublicListingToggle
+                slug={slug}
+                termId={entry.termId}
+                officeLabel={OFFICE_LABELS[entry.office]}
+                personName={entry.displayName}
+                publicListed={entry.publicListed}
+              />
+            </TableCell>
             <TableCell>
               <EndTermDialog
                 slug={slug}

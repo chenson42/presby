@@ -36,6 +36,21 @@ import { eq, sql } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
+// `getPublicStaffRoster()` dynamically imports `@/lib/officers` for
+// `OFFICE_LABELS` (see that function's own doc comment for why dynamic, not
+// static). `@/lib/officers` itself imports `@/lib/audit`, which transitively
+// imports `@/auth` (next-auth) — a module this test environment cannot
+// resolve (`next/server` vs. `next/server.js`, the exact class of failure
+// `children.test.ts`/`person-sensitive.test.ts` already document). Mocked
+// here for the same reason, at the same boundary.
+vi.mock("@/lib/audit", () => ({
+  AUDIT_ACTIONS: {
+    OFFICER_TERM_LISTED_PUBLICLY: "officer_term.listed_publicly",
+    OFFICER_TERM_UNLISTED_PUBLICLY: "officer_term.unlisted_publicly",
+  },
+  recordAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
 // `next/font/google`'s real export is populated only by Next's SWC compiler
 // plugin at build time — `fonts.test.ts`'s own header comment documents this
 // at length. `getPublishedSite`'s existing fixture works around it by simply
@@ -85,12 +100,14 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   let listOrganizationServiceTimes: typeof import("./sites").listOrganizationServiceTimes;
   let replaceOrganizationServiceTimes: typeof import("./sites").replaceOrganizationServiceTimes;
   let getOrgProfileForFooter: typeof import("./sites").getOrgProfileForFooter;
+  let getPublicStaffRoster: typeof import("./sites").getPublicStaffRoster;
 
   let db: typeof import("@/lib/db").db;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
   let groups: typeof import("@/lib/db/domain/groups").groups;
+  let groupMemberships: typeof import("@/lib/db/domain/groups").groupMemberships;
   let people: typeof import("@/lib/db/domain/people").people;
   let memberships: typeof import("@/lib/db/domain/people").memberships;
   let permissions: typeof import("@/lib/db/domain/authz").permissions;
@@ -102,6 +119,8 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   let organizationSites: typeof import("@/lib/db/domain/sites").organizationSites;
   let siteContactMessages: typeof import("@/lib/db/domain/sites").siteContactMessages;
   let organizationBrands: typeof import("@/lib/db/domain/org").organizationBrands;
+  let staffPositions: typeof import("@/lib/db/domain/staff").staffPositions;
+  let officerTerms: typeof import("@/lib/db/domain/officers").officerTerms;
   let getBlobStore: typeof import("@/lib/storage/blob-store").getBlobStore;
   let generateBrandTokens: typeof import("@/lib/brand/generate").generateBrandTokens;
 
@@ -143,10 +162,15 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       listOrganizationServiceTimes,
       replaceOrganizationServiceTimes,
       getOrgProfileForFooter,
+      getPublicStaffRoster,
     } = await import("./sites"));
     ({ db, getPlatformDb } = await import("@/lib/db"));
     ({ organizations, organizationBrands } = await import("@/lib/db/domain/org"));
-    ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
+    ({ staffPositions } = await import("@/lib/db/domain/staff"));
+    ({ officerTerms } = await import("@/lib/db/domain/officers"));
+    ({ groupTypes, groups, groupMemberships } = await import(
+      "@/lib/db/domain/groups"
+    ));
     ({ people, memberships } = await import("@/lib/db/domain/people"));
     ({ permissions, appRoles, appRolePermissions, roleGrants } = await import(
       "@/lib/db/domain/authz"
@@ -1481,6 +1505,259 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       // RLS (not an app-layer filter) is what refuses the row.
       const result = await getOrgProfileForFooter(orgWithRow, outsiderPerson);
       expect(result).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // getPublicStaffRoster — public staff & leadership directory
+  // (docs/work-log/2026-08-27-public-staff-directory.md, Phase 3)
+  // ---------------------------------------------------------------------
+
+  describe("getPublicStaffRoster", () => {
+    let originalPublicStaffDirectoryEnabled: boolean;
+    const rosterStamp = Date.now();
+
+    let staffPersonId: string;
+    let officerPersonId: string;
+    let notListedPersonId: string;
+    let endedPersonId: string;
+
+    let publicStaffPositionId: string;
+
+    beforeAll(async () => {
+      const existing = await db.query.featureFlags.findFirst({
+        where: eq(featureFlags.key, "sites.public_staff_directory"),
+      });
+      originalPublicStaffDirectoryEnabled = existing?.enabled ?? false;
+      await db
+        .insert(featureFlags)
+        .values({ key: "sites.public_staff_directory", enabled: true })
+        .onConflictDoUpdate({
+          target: featureFlags.key,
+          set: { enabled: true },
+        });
+
+      const platform = getPlatformDb();
+
+      async function personAt(label: string): Promise<string> {
+        const [p] = await platform
+          .insert(people)
+          .values({ firstName: "Zz", lastName: `${label} ${rosterStamp}` })
+          .returning({ id: people.id });
+        await platform.insert(memberships).values({
+          organizationId: orgLive,
+          personId: p!.id,
+          engagementStatus: "regular",
+          currentRoll: "active",
+        });
+        return p!.id;
+      }
+
+      staffPersonId = await personAt("PublicStaff");
+      officerPersonId = await personAt("PublicOfficer");
+      notListedPersonId = await personAt("NotListed");
+      endedPersonId = await personAt("EndedPosition");
+
+      const [staffRow] = await platform
+        .insert(staffPositions)
+        .values({
+          organizationId: orgLive,
+          personId: staffPersonId,
+          position: `Church Secretary ${rosterStamp}`,
+          positionKey: `church secretary ${rosterStamp}`.toLowerCase(),
+          department: "Administration",
+          startsOn: "2020-01-01",
+          publicListed: true,
+          publicListedBy: grantingUserId,
+          publicListedAt: new Date(),
+          recordedBy: grantingUserId,
+        })
+        .returning({ id: staffPositions.id });
+      publicStaffPositionId = staffRow!.id;
+
+      await platform.insert(officerTerms).values({
+        organizationId: orgLive,
+        personId: officerPersonId,
+        office: "trustee",
+        startsOn: "2020-01-01",
+        publicListed: true,
+        publicListedBy: grantingUserId,
+        publicListedAt: new Date(),
+        recordedBy: grantingUserId,
+      });
+
+      // Not opted in — public_listed defaults false.
+      await platform.insert(staffPositions).values({
+        organizationId: orgLive,
+        personId: notListedPersonId,
+        position: `Bookkeeper ${rosterStamp}`,
+        positionKey: `bookkeeper ${rosterStamp}`.toLowerCase(),
+        startsOn: "2020-01-01",
+        recordedBy: grantingUserId,
+      });
+
+      // Opted in, but the term has ENDED — presby_public_staff_roster()'s own
+      // `ends_on is null` filter must exclude it (Phase 3 Edge Cases: silent
+      // drop-off on term-end, no acknowledgment step).
+      await platform.insert(officerTerms).values({
+        organizationId: orgLive,
+        personId: endedPersonId,
+        office: "treasurer",
+        startsOn: "2018-01-01",
+        endsOn: "2019-12-31",
+        endReason: "Term completed",
+        publicListed: true,
+        publicListedBy: grantingUserId,
+        publicListedAt: new Date(),
+        recordedBy: grantingUserId,
+      });
+    });
+
+    afterAll(async () => {
+      const platform = getPlatformDb();
+      await platform
+        .delete(staffPositions)
+        .where(eq(staffPositions.organizationId, orgLive));
+      await platform
+        .delete(officerTerms)
+        .where(eq(officerTerms.organizationId, orgLive));
+      // orgLive's derived "Active Membership" group persists across this
+      // whole file (other describe blocks share it), so deleting these four
+      // fixture people ALONE — not the whole organization — leaves their own
+      // group_memberships rows as the actual blocker: that FK carries no
+      // ON DELETE CASCADE, and group_memberships_reject_derived (drizzle/
+      // 0033) refuses a direct DELETE against a derived row's own table
+      // unless disabled first, same disable/re-enable dance every other
+      // describe block's teardown in this file already documents (those
+      // teardowns get the DELETE for free via a cascading `organizations`
+      // delete; this one deletes the group_memberships rows directly since
+      // orgLive itself isn't being torn down here).
+      const rosterFixturePeople = [
+        staffPersonId,
+        officerPersonId,
+        notListedPersonId,
+        endedPersonId,
+      ];
+      await platform.execute(
+        sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+      );
+      try {
+        for (const personId of rosterFixturePeople) {
+          await platform
+            .delete(groupMemberships)
+            .where(eq(groupMemberships.personId, personId));
+        }
+      } finally {
+        await platform.execute(
+          sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+        );
+      }
+      for (const personId of rosterFixturePeople) {
+        await platform.delete(people).where(eq(people.id, personId));
+      }
+      await db
+        .update(featureFlags)
+        .set({ enabled: originalPublicStaffDirectoryEnabled })
+        .where(eq(featureFlags.key, "sites.public_staff_directory"));
+    });
+
+    it("flag off: returns [] regardless of how many rows are public_listed", async () => {
+      await db
+        .update(featureFlags)
+        .set({ enabled: false })
+        .where(eq(featureFlags.key, "sites.public_staff_directory"));
+      try {
+        const result = await getPublicStaffRoster(orgLiveSlug);
+        expect(result).toEqual([]);
+      } finally {
+        await db
+          .update(featureFlags)
+          .set({ enabled: true })
+          .where(eq(featureFlags.key, "sites.public_staff_directory"));
+      }
+    });
+
+    it("flag on: returns only public_listed, open rows — a flat, alphabetized union of staff and officers", async () => {
+      const result = await getPublicStaffRoster(orgLiveSlug);
+
+      const names = result.map((e) => e.displayName);
+      expect(names).toContain(`Zz PublicStaff ${rosterStamp}`);
+      expect(names).toContain(`Zz PublicOfficer ${rosterStamp}`);
+      expect(names).not.toContain(`Zz NotListed ${rosterStamp}`);
+      expect(names).not.toContain(`Zz EndedPosition ${rosterStamp}`);
+
+      // Alphabetized by display_name (SQL function's own `order by 4`).
+      const sorted = [...names].sort((a, b) => a.localeCompare(b));
+      expect(names).toEqual(sorted);
+
+      const staffEntry = result.find(
+        (e) => e.displayName === `Zz PublicStaff ${rosterStamp}`,
+      );
+      expect(staffEntry).toMatchObject({
+        roleLabel: `Church Secretary ${rosterStamp}`,
+        department: "Administration",
+        photoKey: null,
+      });
+
+      const officerEntry = result.find(
+        (e) => e.displayName === `Zz PublicOfficer ${rosterStamp}`,
+      );
+      expect(officerEntry).toMatchObject({
+        // "trustee" -> OFFICE_LABELS.trustee, mapped in TypeScript, not SQL.
+        roleLabel: "Trustee",
+        department: null,
+        photoKey: null,
+      });
+    });
+
+    it("revoking public_listed removes the row from the roster on the next read", async () => {
+      const platform = getPlatformDb();
+      await platform
+        .update(staffPositions)
+        .set({ publicListed: false, publicListedBy: grantingUserId, publicListedAt: new Date() })
+        .where(eq(staffPositions.id, publicStaffPositionId));
+      try {
+        const result = await getPublicStaffRoster(orgLiveSlug);
+        expect(result.map((e) => e.displayName)).not.toContain(
+          `Zz PublicStaff ${rosterStamp}`,
+        );
+      } finally {
+        await platform
+          .update(staffPositions)
+          .set({ publicListed: true, publicListedBy: grantingUserId, publicListedAt: new Date() })
+          .where(eq(staffPositions.id, publicStaffPositionId));
+      }
+    });
+
+    it("a suspended org's public_listed rows never surface — organization_sites.status = 'live' gate", async () => {
+      // orgSuspended carries a live-then-suspended content bundle but no
+      // staff_positions/officer_terms rows of its own — this exercises the
+      // SQL function's own defense-in-depth site-liveness gate from a second
+      // angle (organizations.status/organization_sites.status), same
+      // discipline presby_published_site() already documents.
+      const result = await getPublicStaffRoster(orgSuspendedSlug);
+      expect(result).toEqual([]);
+    });
+
+    it("a nonexistent slug returns [] — no error, no distinguishable miss", async () => {
+      const result = await getPublicStaffRoster(NONEXISTENT_SLUG);
+      expect(result).toEqual([]);
+    });
+
+    it("a transient DB error degrades to [] rather than throwing — Phase 6 bug-fix regression", async () => {
+      // Phase 1's own review named this decision as one that had to be made
+      // explicitly (degrade vs. take down the whole public page) and it
+      // shipped unmade — closed same-day. Without the fix, this rejection
+      // propagates uncaught out of getPublicStaffRoster().
+      const spy = vi
+        .spyOn(db, "execute")
+        .mockRejectedValueOnce(new Error("simulated transient DB error"));
+      try {
+        const result = await getPublicStaffRoster(orgLiveSlug);
+        expect(result).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

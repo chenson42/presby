@@ -1,6 +1,6 @@
 {
   "name": "presby",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "private": true,
   "description": "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods: rolls, officers, directory, and council operations. Pre-release.",
   "repository": {
@@ -59,7 +59,7 @@
     "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "otplib": "^13.4.0",
-    "presby-site-kit": "github:chenson42/presby-site-kit#v3.4.0",
+    "presby-site-kit": "github:chenson42/presby-site-kit#v3.6.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

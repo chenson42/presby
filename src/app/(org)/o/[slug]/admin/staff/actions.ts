@@ -5,8 +5,10 @@ import { auth } from "@/auth";
 import { hasPermission, resolveOrgContext } from "@/lib/authz";
 import {
   endStaffPosition,
+  setStaffPositionPublicListed,
   startStaffPosition,
   type EndStaffPositionInput,
+  type SetStaffPositionPublicListedInput,
   type StartStaffPositionInput,
 } from "@/lib/staff";
 import { createPerson, type CreatePersonInput } from "@/lib/people";
@@ -59,14 +61,25 @@ import type { ActionResult } from "@/types/actions";
  * found this action previously relied ONLY on `createPerson()`'s internal
  * `people.manage` check, silently forgetting `staff.manage` — fixed here.
  *
- * NO `recordAudit()` CALLS IN THIS FILE (DECISION-129, fourth ruling) —
- * staff hiring/termination are personnel-administration mutations with no
- * access-change nexus (`staff_positions` has no FK/trigger into `role_
- * grants`/`group_memberships`, unlike `officer_terms`). Each mutation below
- * carries a `// audit-exempt:` comment naming this reasoning for the next
- * reader — the mechanical `check:audit` tripwire does not fire on this file
- * either way (the actual `tx.insert`/`tx.update` calls live in `src/lib/
- * staff.ts`, not here), so the comment is for humans, not the tripwire.
+ * NO `recordAudit()` CALLS IN THIS FILE FOR HIRING/TERMINATION (DECISION-129,
+ * fourth ruling) — staff hiring/termination are personnel-administration
+ * mutations with no access-change nexus (`staff_positions` has no FK/trigger
+ * into `role_grants`/`group_memberships`, unlike `officer_terms`). Each
+ * mutation below carries a `// audit-exempt:` comment naming this reasoning
+ * for the next reader — the mechanical `check:audit` tripwire does not fire
+ * on this file either way (the actual `tx.insert`/`tx.update` calls live in
+ * `src/lib/staff.ts`, not here), so the comment is for humans, not the
+ * tripwire.
+ *
+ * `setStaffPositionPublicListedAction` (docs/work-log/
+ * 2026-08-27-public-staff-directory.md) IS AN EXCEPTION to the "no
+ * `recordAudit()` in this file" sentence above but NOT to this file's own
+ * posture — `recordAudit()` for that mutation is called from INSIDE
+ * `src/lib/staff.ts`'s `setStaffPositionPublicListed()`, per that
+ * work-log's explicit Phase 3 instruction; this action still calls no
+ * `recordAudit()` itself. See that function's own doc comment for the
+ * `check:audit` tripwire-coverage finding this produced (the tripwire is
+ * blind to this call site on BOTH files, not just this one).
  */
 
 async function resolveActingIdentity(slug: string): Promise<
@@ -275,4 +288,59 @@ export async function createStaffPersonAction(
   revalidatePath(`/o/${slug}/admin/staff`);
 
   return { ok: true, data: { personId: result.personId } };
+}
+
+// ---------------------------------------------------------------------------
+// setStaffPositionPublicListedAction
+// ---------------------------------------------------------------------------
+
+/**
+ * Public staff-directory opt-in/opt-out (docs/work-log/
+ * 2026-08-27-public-staff-directory.md, Phase 3). All SQL correctness (the
+ * `staff.manage` gate, the `(id, organizationId)` row scoping, the
+ * `recordAudit()` call) lives in and is proven by
+ * `src/lib/staff.ts`/`staff.test.ts` — this action's only job is the
+ * auth-in-the-action-body plumbing and the error->copy mapping, same shape
+ * as every other action in this file.
+ */
+export async function setStaffPositionPublicListedAction(
+  slug: string,
+  input: SetStaffPositionPublicListedInput,
+): Promise<ActionResult<{ positionId: string; publicListed: boolean }>> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await setStaffPositionPublicListed(
+    identity.personId,
+    identity.organizationId,
+    identity.userId,
+    input,
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage staff here.",
+      };
+    case "invalid_target":
+      return { ok: false, error: "That staff position no longer exists." };
+    case "invalid_input":
+      return { ok: false, error: result.message };
+    case "overlap":
+      // Unreachable from setStaffPositionPublicListed in practice — no
+      // insert happens on this path, so no exclusion constraint can fire.
+      // Handled for exhaustiveness, matching endStaffPositionAction's own
+      // precedent.
+      return { ok: false, error: "Couldn't save that — try again." };
+    case "ok":
+      break;
+  }
+
+  revalidatePath(`/o/${slug}/admin/staff`);
+
+  return {
+    ok: true,
+    data: { positionId: result.data.positionId, publicListed: result.data.publicListed },
+  };
 }

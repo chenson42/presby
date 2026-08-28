@@ -10,6 +10,7 @@ import {
 } from "presby-site-kit";
 import { ContactForm } from "../contact-form";
 import { PresbyteryFallback } from "../presbytery-fallback";
+import { PublicStaffDirectory } from "../staff-directory";
 
 /**
  * DECISION-121 — org types that get the minimal sign-in fallback instead of
@@ -243,6 +244,15 @@ export default async function PublicSitePage({
   // `contactForm` block: this page passes the interactive element once,
   // and whichever content page authors a `{"type": "contactForm"}` block
   // renders it exactly there. Content with no such block gets no form.
+  //
+  // `liveSlots.staffDirectory` (docs/work-log/2026-08-27-public-staff-
+  // directory.md) is site-kit v3.5.0's generic named-slot mechanism —
+  // unlike `contactForm`'s own bespoke prop, ANY content page can pick up
+  // ANY named live element by placing a `{"type": "liveSlot", "props":
+  // {"slot": "staffDirectory"}}` marker block; this page still only
+  // supplies the one slot this feature needs today. A page with no such
+  // marker renders nothing extra — same "content author controls
+  // placement, absence is not an error" discipline as `contactForm`.
   const rendered = renderSiteBundle({
     organizationName: site.organizationName,
     origin: siteOrigin(),
@@ -258,6 +268,7 @@ export default async function PublicSitePage({
     portalLabel: PORTAL_LABEL,
     portalNavOrder: PORTAL_NAV_ORDER,
     contactForm: <ContactForm slug={slug} />,
+    liveSlots: { staffDirectory: <PublicStaffDirectory slug={slug} /> },
   });
 
   // renderSiteBundle() returning null means no page in the bundle matches

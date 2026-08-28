@@ -5,6 +5,7 @@ import type { db } from "@/lib/db";
 import { isExclusionViolation } from "@/lib/db/errors";
 import { staffPositions } from "@/lib/db/domain/staff";
 import { memberships, people } from "@/lib/db/domain/people";
+import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 
 /**
  * Staff and personnel administration (`docs/work-log/
@@ -57,7 +58,7 @@ import { memberships, people } from "@/lib/db/domain/people";
  * "attach to someone already visible here" case — never a bare `select *
  * from people`.
  *
- * NO `recordAudit()` CALLS ANYWHERE IN THIS MODULE (DECISION-129, fourth
+ * NO `recordAudit()` CALLS FOR HIRING/TERMINATION (DECISION-129, fourth
  * ruling) — staff hiring/termination mutations carry no access-change nexus
  * at all: `staff_positions` has no trigger and no FK into `role_grants`/
  * `group_memberships`, unlike `officer_terms`'s own
@@ -70,6 +71,16 @@ import { memberships, people } from "@/lib/db/domain/people";
  * tripwire would not fire either way, since the actual writes live here
  * behind `tx.insert`/`tx.update`, matching `officers.ts`'s own indirection —
  * the comment is for humans, not the tripwire).
+ *
+ * `setStaffPositionPublicListed()` IS THE ONE EXCEPTION (docs/work-log/
+ * 2026-08-27-public-staff-directory.md, Phase 3 API Contract / Phase 2
+ * ruling 6b) — flipping `public_listed` is a DISCLOSURE fact, not an access
+ * fact, so DECISION-129's own "access-change nexus" test doesn't transfer,
+ * but Rule 7 separately names it security-sensitive: the bit exposes PII to
+ * the entire unauthenticated internet. `recordAudit()` is called from
+ * INSIDE this function (not from `admin/staff/actions.ts`), per that
+ * work-log's explicit instruction — see the function's own doc comment for
+ * the `check:audit` tripwire-coverage finding this produced.
  */
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -127,6 +138,9 @@ export interface StaffPositionEntry {
   /** 'YYYY-MM-DD', or null (open-ended). */
   endsOn: string | null;
   minuteReference: string | null;
+  /** Public staff-directory opt-in (docs/work-log/
+   * 2026-08-27-public-staff-directory.md) — additive field, same query. */
+  publicListed: boolean;
 }
 
 export interface StaffHistoryEntry {
@@ -194,6 +208,7 @@ export async function listStaffRoster(
         startsOn: staffPositions.startsOn,
         endsOn: staffPositions.endsOn,
         minuteReference: staffPositions.minuteReference,
+        publicListed: staffPositions.publicListed,
       })
       .from(staffPositions)
       .innerJoin(people, eq(people.id, staffPositions.personId))
@@ -209,6 +224,7 @@ export async function listStaffRoster(
       startsOn: row.startsOn,
       endsOn: row.endsOn,
       minuteReference: row.minuteReference,
+      publicListed: row.publicListed,
     }));
 
     return { kind: "ok", data };
@@ -505,4 +521,110 @@ export async function endStaffPosition(
 
     return { kind: "ok", data: { positionId: input.positionId } };
   });
+}
+
+// ---------------------------------------------------------------------------
+// setStaffPositionPublicListed
+// ---------------------------------------------------------------------------
+
+export interface SetStaffPositionPublicListedInput {
+  positionId: string;
+  publicListed: boolean;
+}
+
+/**
+ * Public staff-directory opt-in/opt-out (docs/work-log/
+ * 2026-08-27-public-staff-directory.md, Phase 3 API Contract). Toggles
+ * `staff_positions.public_listed` — the bit `presby_public_staff_roster()`
+ * (drizzle/0041) reads anonymously for `(public)/site/<slug>`'s staff
+ * directory.
+ *
+ * ORDER OF OPERATIONS, mirroring `startStaffPosition()`/`endStaffPosition()`
+ * exactly:
+ *   1. `hasStaffManage` gate — `forbidden` if the caller doesn't hold
+ *      `staff.manage` at all.
+ *   2. Row lookup scoped to `(id, organizationId)` — `invalid_target` if
+ *      missing or belongs to another org (F2 shape, matching
+ *      `endStaffPosition`'s own lookup).
+ *   3. Update `publicListed`, `publicListedBy = actingUserId`,
+ *      `publicListedAt = now()` on EVERY call, in BOTH directions — turning
+ *      the bit off is itself an attributable, timestamped act (Phase 3 Edge
+ *      Cases: this departs from `recordedBy`'s "set once at creation"
+ *      precedent on purpose).
+ *   4. `recordAudit()` — `STAFF_POSITION_LISTED_PUBLICLY`/
+ *      `STAFF_POSITION_UNLISTED_PUBLICLY` depending on direction. Called
+ *      from INSIDE this function, not from `admin/staff/actions.ts` — the
+ *      work-log's explicit instruction, NOT this module's usual
+ *      "actions.ts owns the audit call" convention (there is none here;
+ *      this is the first audited mutation this file has ever had).
+ *
+ * `check:audit` TRIPWIRE-COVERAGE FINDING (confirmed at Phase 4, step 2):
+ * `scripts/check-audit-coverage.mjs` only walks `src/app/**\/actions.ts`
+ * looking for a literal `db.insert|update|delete` in THAT file. This
+ * function's `tx.update(staffPositions, ...)` lives here, in `src/lib/
+ * staff.ts` — a file the script never visits at all (it isn't under
+ * `src/app`, and isn't named `actions.ts`). `admin/staff/actions.ts`'s own
+ * wrapper (`setStaffPositionPublicListedAction`) calls no `db.*` method
+ * directly either, so even that file's mutation regex never fires. Net: the
+ * tripwire is BLIND to this call site, on both counts, not just one. Do not
+ * read `check:audit` passing as coverage evidence for this mutation — only
+ * `staff.test.ts`'s own assertions (`recordAudit` is called on both
+ * directions) prove it fires.
+ */
+export async function setStaffPositionPublicListed(
+  viewerPersonId: string,
+  organizationId: string,
+  actingUserId: string,
+  input: SetStaffPositionPublicListedInput,
+): Promise<StaffResult<{ positionId: string; publicListed: boolean }>> {
+  const result = await withOrgContext(
+    viewerPersonId,
+    organizationId,
+    async (tx): Promise<StaffResult<{ positionId: string; publicListed: boolean }>> => {
+      if (!(await hasStaffManage(tx, viewerPersonId, organizationId))) {
+        return { kind: "forbidden" };
+      }
+
+      const [position] = await tx
+        .select({ id: staffPositions.id })
+        .from(staffPositions)
+        .where(
+          and(
+            eq(staffPositions.id, input.positionId),
+            eq(staffPositions.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      if (!position) {
+        return { kind: "invalid_target" };
+      }
+
+      await tx
+        .update(staffPositions)
+        .set({
+          publicListed: input.publicListed,
+          publicListedBy: actingUserId,
+          publicListedAt: new Date(),
+        })
+        .where(eq(staffPositions.id, input.positionId));
+
+      return {
+        kind: "ok",
+        data: { positionId: input.positionId, publicListed: input.publicListed },
+      };
+    },
+  );
+
+  if (result.kind === "ok") {
+    await recordAudit({
+      action: result.data.publicListed
+        ? AUDIT_ACTIONS.STAFF_POSITION_LISTED_PUBLICLY
+        : AUDIT_ACTIONS.STAFF_POSITION_UNLISTED_PUBLICLY,
+      resourceType: "staff_position",
+      resourceId: result.data.positionId,
+      metadata: { organizationId, publicListed: result.data.publicListed },
+    });
+  }
+
+  return result;
 }

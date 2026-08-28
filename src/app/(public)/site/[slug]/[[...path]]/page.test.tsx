@@ -410,6 +410,18 @@ describe("PublicSitePage — the ok path", () => {
     const call = renderSiteBundle.mock.calls[0][0] as { contactForm?: unknown };
     expect(call.contactForm).toBeTruthy();
   });
+
+  it("passes a liveSlots.staffDirectory element into renderSiteBundle() for a {\"type\":\"liveSlot\"} block to place (docs/work-log/2026-08-27-public-staff-directory.md)", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams() });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots?: Record<string, unknown>;
+    };
+    expect(call.liveSlots?.staffDirectory).toBeTruthy();
+  });
 });
 
 describe("generateMetadata", () => {

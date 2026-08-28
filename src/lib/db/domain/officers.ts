@@ -6,6 +6,7 @@ import {
   date,
   integer,
   timestamp,
+  boolean,
   index,
   unique,
   foreignKey,
@@ -135,6 +136,15 @@ export const officerTerms = pgTable(
     // null. Composite FK mirrors memberships.orgUnitId's existing pattern
     // (F2) — see the CHECK below binding this to office = 'deacon'.
     orgUnitId: uuid("org_unit_id"),
+    // Public staff & leadership directory (docs/work-log/
+    // 2026-08-27-public-staff-directory.md, Phase 4 step 1). Opt-in only —
+    // an admin holding officers.manage must affirmatively flip this to
+    // true. publicListedBy/publicListedAt are set on every call in both
+    // directions (turning it off is itself an attributable act), unlike
+    // recordedBy/recordedAt above which are set once at creation.
+    publicListed: boolean("public_listed").notNull().default(false),
+    publicListedBy: uuid("public_listed_by").references(() => users.id),
+    publicListedAt: timestamp("public_listed_at", { withTimezone: true }),
   },
   (t) => [
     index("officer_terms_org_office_idx").on(

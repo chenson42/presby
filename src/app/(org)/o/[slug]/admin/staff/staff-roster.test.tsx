@@ -27,6 +27,7 @@ vi.mock("./actions", () => ({
   startStaffPositionAction: vi.fn(),
   endStaffPositionAction: vi.fn(),
   createStaffPersonAction: vi.fn(),
+  setStaffPositionPublicListedAction: vi.fn(),
 }));
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -49,6 +50,7 @@ const OPEN_ENTRY: StaffPositionEntry = {
   startsOn: "2024-06-01",
   endsOn: null,
   minuteReference: null,
+  publicListed: false,
 };
 
 const ENDED_ENTRY: StaffPositionEntry = {
@@ -60,6 +62,19 @@ const ENDED_ENTRY: StaffPositionEntry = {
   startsOn: "2022-01-01",
   endsOn: "2025-12-31",
   minuteReference: null,
+  publicListed: false,
+};
+
+const PUBLIC_ENTRY: StaffPositionEntry = {
+  positionId: "position-3",
+  personId: "person-3",
+  displayName: "Wren Halloway",
+  position: "Office Administrator",
+  department: null,
+  startsOn: "2023-03-01",
+  endsOn: null,
+  minuteReference: null,
+  publicListed: true,
 };
 
 describe("StaffRoster — empty state", () => {
@@ -109,5 +124,21 @@ describe("StaffRoster — the Department column is conditional", () => {
       screen.getByRole("columnheader", { name: /department/i }),
     ).toBeTruthy();
     expect(screen.getByText("Finance")).toBeTruthy();
+  });
+});
+
+describe("StaffRoster — public listing control (docs/work-log/2026-08-27-public-staff-directory.md)", () => {
+  it("renders a 'List publicly' switch per row and no Public badge when not opted in", () => {
+    render(<StaffRoster entries={[OPEN_ENTRY]} slug="alder-creek" />);
+    expect(screen.getByRole("switch")).toBeTruthy();
+    expect(screen.queryByText("Public")).toBeNull();
+  });
+
+  it("shows a Public badge and a checked switch for a row already opted in", () => {
+    render(<StaffRoster entries={[PUBLIC_ENTRY]} slug="alder-creek" />);
+    expect(screen.getByText("Public")).toBeTruthy();
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
 });

@@ -10,6 +10,7 @@ import {
 import { FormattedDate } from "@/components/shared/formatted-date";
 import type { StaffPositionEntry } from "@/lib/staff";
 import { EndPositionDialog } from "./end-position-dialog";
+import { PublicListingToggle } from "./public-listing-toggle";
 
 /**
  * "Who currently holds a staff position" — a `Table`, not cards, same
@@ -22,10 +23,20 @@ import { EndPositionDialog } from "./end-position-dialog";
  * congregations won't populate it for every position, and a column of solid
  * em dashes is worse than no column.
  *
- * `Department` and (once verified live) other secondary columns drop below
- * `sm:` on a phone viewport, mirroring `officer-roster.tsx`'s own verified
- * 360px finding — Position/Person/Since/Ends/Actions is the always-visible
- * set that must reach the "End position" action without horizontal scroll.
+ * `Department` and other secondary columns drop below `sm:` on a phone
+ * viewport, mirroring `officer-roster.tsx`'s own verified 360px finding —
+ * Position/Person/Since/Ends/Actions is the always-visible set that must
+ * reach the "End position" action without horizontal scroll. `Public
+ * listing` (docs/work-log/2026-08-27-public-staff-directory.md) is the
+ * newest member of the below-`sm:` set — VERIFIED IN A REAL BROWSER AT
+ * 390PX: adding it as an always-visible column pushed "End position" out of
+ * the frame with no visible affordance that it existed, the exact failure
+ * mode this file's own comment already named for the columns above. Opting
+ * someone into the public directory is an occasional, desk-adjacent action
+ * (Phase 1's own cadence: "per hire"), not a look-up-on-the-go one, so
+ * trading its mobile visibility for keeping "End position" reachable
+ * without scrolling is the right tradeoff, not a compromise forced by
+ * running out of room.
  *
  * A Server Component (read-only data) — embeds `<EndPositionDialog>` (a
  * client component) per row without itself needing `'use client'`.
@@ -61,6 +72,7 @@ export function StaffRoster({
           )}
           <TableHead>Since</TableHead>
           <TableHead>Ends</TableHead>
+          <TableHead className="hidden sm:table-cell">Public listing</TableHead>
           <TableHead className="sr-only">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -92,6 +104,15 @@ export function StaffRoster({
               ) : (
                 "—"
               )}
+            </TableCell>
+            <TableCell className="hidden sm:table-cell">
+              <PublicListingToggle
+                slug={slug}
+                positionId={entry.positionId}
+                position={entry.position}
+                personName={entry.displayName}
+                publicListed={entry.publicListed}
+              />
             </TableCell>
             <TableCell>
               {entry.endsOn === null ? (

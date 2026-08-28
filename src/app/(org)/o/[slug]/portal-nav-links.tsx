@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X } from "lucide-react";
+import { Home, Menu, X, type LucideIcon } from "lucide-react";
+import { NAV_DOMAIN_ICONS } from "@/components/org-portal/tile-icons";
+import type { PortalDomain } from "@/lib/org-portal/tiles";
 import { cn } from "@/lib/utils";
 
 export interface PortalNavEntry {
@@ -18,7 +20,37 @@ export interface PortalNavEntry {
    * on `startsWith`, so a child route (e.g. `/directory/<id>`) still shows
    * its section as active. */
   exact: boolean;
+  /**
+   * docs/work-log/2026-08-28-directory-visual-refresh.md, Phase 4, item 3. A
+   * KEY into `ICON_BY_KEY` below (`"home"` or a `PortalDomain`), NOT the icon
+   * component itself.
+   *
+   * WHY A STRING, NOT A `LucideIcon` COMPONENT REFERENCE — this file is
+   * `"use client"`; `portal-nav.tsx`, which builds these entries, is a
+   * Server Component. Passing an actual icon component object as a prop
+   * across that boundary is a real, confirmed-live bug, not a style
+   * preference: a `lucide-react` icon is `React.forwardRef(...)`, an object
+   * with methods, and Next's RSC payload serializer rejects it outright —
+   * "Only plain objects can be passed to Client Components from Server
+   * Components" — which took the whole page down with a 500 (caught in
+   * Phase 4's own live-browser verification pass, not by `tsc` or
+   * `next build`, both of which stay green through this exact defect). A
+   * plain string key IS serializable, and this file resolves it to the real
+   * component locally, entirely on the client side of the boundary — the
+   * same `NAV_DOMAIN_ICONS` map `portal-nav.tsx` would otherwise have
+   * imported, just resolved one file over from where the icon components
+   * themselves get rendered.
+   */
+  icon?: "home" | PortalDomain;
 }
+
+/** `"home"` plus every `NAV_DOMAIN_ICONS` entry — see `PortalNavEntry.icon`'s
+ * own doc comment for why resolution happens here, client-side, rather than
+ * in `portal-nav.tsx`. */
+const ICON_BY_KEY: Record<"home" | PortalDomain, LucideIcon> = {
+  home: Home,
+  ...NAV_DOMAIN_ICONS,
+};
 
 /**
  * The active-state client leaf for `PortalNav` — the one piece of this row
@@ -115,19 +147,26 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
   }
   const isEntryActive = (entry: PortalNavEntry) => entry === activeEntry;
 
-  // The `border-b-2` accent (docs/work-log/
-  // 2026-08-26-portal-visual-modernization.md Phase 3) is applied
-  // UNCONDITIONALLY — `border-primary` when active, `border-transparent`
-  // when not — never omitted for either state. An active-only border would
-  // shift every link's vertical position by 2px when its active state
-  // toggles, at both the desktop wrapped-row and mobile stacked-menu
-  // presentations.
+  // FILLED, ROUNDED PILL (docs/work-log/2026-08-28-directory-visual-refresh.md,
+  // Phase 4, item 3) replaces the PRIOR `border-b-2` underline accent
+  // (docs/work-log/2026-08-26-portal-visual-modernization.md Phase 3): the
+  // active entry now gets a `bg-primary text-primary-foreground` fill rather
+  // than a bottom border. `bg-primary`/`text-primary-foreground` is the SAME
+  // brandable pair `Button`'s own `default` variant uses — `--primary-
+  // foreground` is derived (`src/lib/brand/generate.ts`) to clear D2's
+  // 4.5:1 text-contrast floor against `--primary` for ANY per-org brand
+  // seed, so this reads correctly on both the platform default palette and a
+  // custom-branded organization (verified live against `/o/fpcw`, Phase 4
+  // notes). Unlike the border accent, the pill's own background/padding is
+  // IDENTICAL between states (only the fill colour and font-weight change),
+  // so the "apply unconditionally to avoid a layout shift" concern the prior
+  // comment named no longer applies — there is no border to add or remove.
   const linkClassName = (isActive: boolean) =>
     cn(
-      "flex min-h-11 items-center rounded-md border-b-2 px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:min-h-0 sm:px-1 sm:py-1",
+      "flex min-h-11 items-center gap-1.5 rounded-full px-3 py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:min-h-9 sm:px-3 sm:py-1.5",
       isActive
-        ? "border-primary font-semibold text-foreground"
-        : "border-transparent text-muted-foreground hover:text-foreground",
+        ? "bg-primary font-semibold text-primary-foreground"
+        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
     );
 
   return (
@@ -162,16 +201,20 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
           open ? "flex" : "hidden",
         )}
       >
-        {entries.map((entry) => (
-          <Link
-            key={entry.href}
-            href={entry.href}
-            aria-current={isEntryActive(entry) ? "page" : undefined}
-            className={linkClassName(isEntryActive(entry))}
-          >
-            {entry.label}
-          </Link>
-        ))}
+        {entries.map((entry) => {
+          const Icon = entry.icon ? ICON_BY_KEY[entry.icon] : undefined;
+          return (
+            <Link
+              key={entry.href}
+              href={entry.href}
+              aria-current={isEntryActive(entry) ? "page" : undefined}
+              className={linkClassName(isEntryActive(entry))}
+            >
+              {Icon ? <Icon className="size-4 shrink-0" aria-hidden /> : null}
+              {entry.label}
+            </Link>
+          );
+        })}
       </div>
     </nav>
   );

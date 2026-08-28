@@ -93,7 +93,7 @@ describe("PortalNavLinks — active state", () => {
     ).toBeNull();
   });
 
-  it("applies an unconditional border-b-2 accent, border-primary only when active", () => {
+  it("renders the active entry as a filled, rounded pill (bg-primary/text-primary-foreground), the inactive entry flat (docs/work-log/2026-08-28-directory-visual-refresh.md, Phase 4, item 3)", () => {
     usePathname.mockReturnValue("/o/acme");
 
     render(<PortalNavLinks entries={ENTRIES} />);
@@ -101,10 +101,30 @@ describe("PortalNavLinks — active state", () => {
     const homeLink = screen.getByRole("link", { name: "Home" });
     const directoryLink = screen.getByRole("link", { name: "Directory" });
 
-    expect(homeLink.className).toContain("border-b-2");
-    expect(homeLink.className).toContain("border-primary");
-    expect(directoryLink.className).toContain("border-b-2");
-    expect(directoryLink.className).toContain("border-transparent");
+    expect(homeLink.className).toContain("rounded-full");
+    expect(homeLink.className).toContain("bg-primary");
+    expect(homeLink.className).toContain("text-primary-foreground");
+    expect(directoryLink.className).toContain("rounded-full");
+    expect(directoryLink.className).not.toContain("bg-primary");
+  });
+
+  it("renders an entry's icon (aria-hidden) before its label when one is supplied, and no icon element at all when omitted", () => {
+    usePathname.mockReturnValue("/o/acme");
+
+    const entriesWithIcon: PortalNavEntry[] = [
+      { label: "Home", href: "/o/acme", exact: true, icon: "home" },
+      { label: "Directory", href: "/o/acme/directory", exact: false },
+    ];
+
+    render(<PortalNavLinks entries={entriesWithIcon} />);
+
+    const homeLink = screen.getByRole("link", { name: "Home" });
+    const icon = homeLink.querySelector("svg");
+    expect(icon).toBeTruthy();
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+
+    const directoryLink = screen.getByRole("link", { name: "Directory" });
+    expect(directoryLink.querySelector("svg")).toBeNull();
   });
 
   it("resolves overlapping prefixes to the single most-specific entry — regression for 'Groups' also lighting up 'Administration'", () => {

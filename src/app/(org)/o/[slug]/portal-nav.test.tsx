@@ -98,7 +98,7 @@ describe("PortalNav — entry construction", () => {
 
     expect(screen.getByTestId("portal-nav-links-stub")).toBeTruthy();
     expect(linksSpy).toHaveBeenCalledWith({
-      entries: [{ label: "Home", href: "/o/acme", exact: true }],
+      entries: [{ label: "Home", href: "/o/acme", exact: true, icon: "home" }],
     });
   });
 
@@ -133,10 +133,25 @@ describe("PortalNav — entry construction", () => {
 
     expect(linksSpy).toHaveBeenCalledWith({
       entries: [
-        { label: "Home", href: "/o/acme", exact: true },
-        { label: "People & Membership", href: "/o/acme#domain-people", exact: true },
-        { label: "Worship & Events", href: "/o/acme#domain-worship", exact: true },
-        { label: "Governance & Courts", href: "/o/acme#domain-governance", exact: true },
+        { label: "Home", href: "/o/acme", exact: true, icon: "home" },
+        {
+          label: "People & Membership",
+          href: "/o/acme#domain-people",
+          exact: true,
+          icon: "people",
+        },
+        {
+          label: "Worship & Events",
+          href: "/o/acme#domain-worship",
+          exact: true,
+          icon: "worship",
+        },
+        {
+          label: "Governance & Courts",
+          href: "/o/acme#domain-governance",
+          exact: true,
+          icon: "governance",
+        },
       ],
     });
   });
@@ -191,7 +206,7 @@ describe("PortalNav — entry construction", () => {
     render(tree);
 
     expect(linksSpy).toHaveBeenCalledWith({
-      entries: [{ label: "Home", href: "/o/acme", exact: true }],
+      entries: [{ label: "Home", href: "/o/acme", exact: true, icon: "home" }],
     });
   });
 
@@ -208,11 +223,54 @@ describe("PortalNav — entry construction", () => {
 
     expect(linksSpy).toHaveBeenCalledWith({
       entries: [
-        { label: "Home", href: "/o/acme", exact: true },
-        { label: "People & Membership", href: "/o/acme#domain-people", exact: true },
-        { label: "Administration", href: "/o/acme/admin", exact: false },
+        { label: "Home", href: "/o/acme", exact: true, icon: "home" },
+        {
+          label: "People & Membership",
+          href: "/o/acme#domain-people",
+          exact: true,
+          icon: "people",
+        },
+        {
+          label: "Administration",
+          href: "/o/acme/admin",
+          exact: false,
+          icon: "administration",
+        },
       ],
     });
+  });
+
+  it("attaches an icon KEY per entry — 'home' for Home, the domain string itself for every domain anchor, 'administration' for the hub entry (docs/work-log/2026-08-28-directory-visual-refresh.md, Phase 4, item 3)", async () => {
+    // Deliberately a STRING key, not an icon component reference — see
+    // `PortalNavEntry.icon`'s own doc comment in `portal-nav-links.tsx` for
+    // why passing the component itself across this Server->Client boundary
+    // is a confirmed-live 500, not a style preference. `PortalNavLinks`
+    // (its own test file) is what pins that the key actually RESOLVES to
+    // the same icon `NAV_DOMAIN_ICONS`/`TILE_ICONS` use.
+    visiblePortalTiles.mockResolvedValue(
+      (["people", "worship", "giving", "governance", "reports", "communications"] as const).map(
+        (domain) => tile({ key: domain, domain }),
+      ),
+    );
+    isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.admin_hub");
+
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    render(tree);
+
+    const entries = linksSpy.mock.calls[0][0].entries as Array<{
+      label: string;
+      icon?: string;
+    }>;
+    const byLabel = Object.fromEntries(entries.map((e) => [e.label, e.icon]));
+
+    expect(byLabel["Home"]).toBe("home");
+    expect(byLabel["People & Membership"]).toBe("people");
+    expect(byLabel["Worship & Events"]).toBe("worship");
+    expect(byLabel["Giving & Finance"]).toBe("giving");
+    expect(byLabel["Governance & Courts"]).toBe("governance");
+    expect(byLabel["Reports & Insights"]).toBe("reports");
+    expect(byLabel["Communications"]).toBe("communications");
+    expect(byLabel["Administration"]).toBe("administration");
   });
 
   it("omits 'Administration' when org_portal.admin_hub is off, regardless of visible tiles", async () => {

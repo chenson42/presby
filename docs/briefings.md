@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=122 commit=be9b6ef -->
+<!-- covers: decision=131 commit=42252fc -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -22,7 +22,157 @@ entries — that is the one piece of discipline this file needs, and it is check
 
 ---
 
+## 2026-08-28
+
+- [ ] **`decision` · A public "who serves here" page is now possible on a
+  congregation's or presbytery's public website, pulling directly from the
+  same staff and officer records the admin tools already keep — no more
+  manually retyping names onto a webpage and forgetting to update it.** An
+  admin has to affirmatively mark each specific staff position or officer
+  term "public" one at a time — nothing is shown by default, and a
+  confirmation message explains plainly that turning this on makes that
+  person's name, role, and eventual photo visible to anyone on the internet,
+  including search engines, and that turning it back off stops future
+  display but can't un-ring a bell already rung elsewhere on the internet.
+  Only name, role, and department are ever shown — never a phone number or
+  email address, enforced in two separate, independent places so a single
+  mistake can't leak contact information. **A real gap was found and fixed
+  the same day it was found**: the code powering this page had no
+  fallback for a brief database hiccup, which would have taken down the
+  *entire* public website for that congregation instead of just quietly
+  hiding the one directory section — closed before it ever went live. Photo
+  display is designed in but not yet built (tracked separately). Ships
+  fully turned off until you're ready to turn it on for a real
+  congregation.
+
+- [ ] **`decision` · Following up on your own live comparison against
+  `../fpcw-directory`, three specific visual gaps in the Directory and the
+  main navigation were closed the same day.** Every person's photo circle
+  now gets its own consistent color instead of one identical gray circle
+  for everyone; the Members/Households/Parishes tabs now sit in a rounded
+  tray with the active one raised, instead of looking like plain buttons;
+  and the main navigation now shows a small icon next to each section with
+  the current section highlighted as a filled pill, instead of a plain
+  underline. **A real bug was caught only by looking at it in an actual
+  browser, not by any automated check**: an early version of the navigation
+  change crashed every single page with a working navigation bar entirely,
+  a mistake invisible to the code's own type-checking and build process —
+  found and fixed before you ever saw it. Separately, four capabilities your
+  reference app has that this one doesn't yet (printing/exporting the
+  directory, saving a contact card, photo management, and map links to an
+  address) were written down as a backlog item — with a flag that printing
+  or exporting the whole directory needs to be limited to specific trusted
+  people once built, not available to everyone who can merely view the
+  directory, since exporting is a much bigger privacy exposure than
+  viewing one card at a time.
+
 ## 2026-08-27
+
+- [ ] **`defect` · The tool tiles on the portal home page (Members, Directory,
+  Staff, and the rest) had started to blend into the "coming soon" stubs
+  sitting right beside them — a screenshot you sent in flagged this
+  directly.** Two real, confirmed causes, not a vague "make it feel
+  cleaner": the colored icon badge on every real tool was a faint,
+  10%-strength tint that nearly disappeared against a congregation's own
+  branded page background — weaker, in fact, than the plain corner avatar
+  icon, which is backwards for the single most-repeated element on the page.
+  And every not-yet-built tool (giving, worship planning, committees, and a
+  few others) rendered as a full, equal-looking card, with "coming soon."
+  buried in a sentence of description text — visually indistinguishable from
+  a real, working feature. Fixed both: real tools now get a solid, fully
+  colored badge; not-yet-built ones get a muted gray badge and a small
+  "Coming soon" tag next to the name instead. **A separate, real bug was
+  caught while making this fix, unrelated to the visual issue**: two tiles
+  (Oversight and Reports) were still labeled "coming soon" even though both
+  had already shipped as real, working pages earlier the same day — stale
+  leftover copy, now corrected. This was one visible pass at your "doesn't
+  feel as clean as the original directory app" feedback; it addressed two
+  concrete contributors but not a full redesign, in case the feeling
+  persists once you look again.
+
+- [ ] **`decision` · Congregations and presbyteries can now record actual
+  paid or volunteer staff — office managers, custodians, bookkeepers,
+  musicians — completely separate from the constitutional roll of members
+  and from ordained officers.** This was a deliberately different shape from
+  everything built so far: hiring or letting go of a staff member never
+  touches someone's membership status or roll history, even when the same
+  person is both a member and an employee. A new "Personnel Administrator"
+  permission was created for this, since no existing office (clerk,
+  treasurer, pastor, trustee) was actually the right constitutional fit —
+  each was checked individually and none qualified. **A real, meaningful bug
+  was caught and fixed before this ever reached you**: the shared
+  person-creation code this feature reuses was about to mark a staff-only
+  hire (someone with no membership at all) with the same internal status
+  used for regular members — which would have made them wrongly show up in
+  the public member directory and the membership roster. Caught in review,
+  fixed before shipping. A second real gap, also caught before shipping: the
+  save button for adding a new staff member wasn't actually checking that
+  the person doing the saving held the new Personnel permission at all —
+  meaning anyone who could reach the page could have added staff regardless
+  of their role. Fixed, with a test that specifically tries the bad action
+  and confirms it's now refused.
+
+- [ ] **`decision` · Congregations and presbyteries can now turn entire
+  categories of the portal on or off at once (for example, hiding every
+  giving/finance-related tool as a group) instead of only being able to
+  flip one individual feature at a time.** This sits as a second, coarser
+  layer on top of the existing individual toggles — an admin can turn a
+  whole category off, or turn it back on and then fine-tune individual tools
+  within it. Everything defaults to fully on, so nothing changes for a
+  congregation that never touches this new control. **A real bug was caught
+  by an independent review before this shipped**: a chunk of screen-drawing
+  code had been accidentally written inside the same block of code
+  responsible for error-handling, which could have produced a broken page in
+  an edge case; restructured and fixed before release. This entire feature
+  and the staff/personnel one above were designed and built side by side —
+  both teams briefly, and independently, reached for the same internal
+  migration step number, caught and corrected before either was affected.
+
+- [ ] **`decision` · The operator-supplied brand kit (navy, blue, and gold,
+  with a real logo) is now the platform's actual default look, replacing the
+  placeholder color scheme that had been standing in since the earliest
+  foundation work.** This only replaces the platform's own shell and the
+  public marketing home page — a congregation that has already set its own
+  colors is completely unaffected, exactly as designed. Two small,
+  deliberate departures from the kit as delivered: the "danger/delete"
+  red was nudged very slightly (a change no eye would notice) because the
+  kit's exact shade sat just barely inside a safety margin one of this
+  project's own automated color-safety checks enforces, for one specific,
+  unusual congregation-brand-color combination out of hundreds tested; and a
+  dark-mode version of the palette was designed from scratch, since the kit
+  itself only specified one (light) scheme. Also fixed while doing this:
+  every leftover plain-text "presby" placeholder around the app (page
+  titles, the admin section's own back button, browser tab icon) now shows
+  the real name and logo instead.
+
+- [ ] **`decision` · The project now has a real public name: PresbyPortal**
+  (`presbyportal.org`)**, ending the "placeholder" period the foundation
+  work had been tracking since the very beginning.** Public-facing pages —
+  the marketing home page, the README, external docs — use the real name
+  starting immediately. Internal, behind-the-scenes technical names (the
+  database's internal role name, function-naming prefixes, old migration
+  filenames) are **deliberately left as "presby" for now, on purpose, not
+  as an oversight** — those are load-bearing internal names a live database
+  actively depends on, and safely renaming them is its own carefully
+  sequenced future project, not a quick find-and-replace. Tracked as its own
+  future backlog item.
+
+- [ ] **`decision` · Signing in now takes you to one combined "home" page
+  instead of a separate organization-picker screen, and the platform admin
+  hub now only shows each admin the tools their own permissions actually
+  unlock (instead of a fixed list with some tiles denying access when
+  clicked).** The old organization-picker address still works — it quietly
+  forwards to the new combined page — so nothing that used to link there
+  breaks. The marketing home page (the one a signed-out visitor sees) was
+  also redesigned in the same batch of work. **A real, pre-existing bug was
+  found and fixed as part of this**: the support-ticket/feedback-handling
+  role could not actually reach the admin section at all, despite being
+  intended to handle tickets and feedback there — a gap in how that role was
+  originally set up, invisible until this work went looking for it. This
+  whole change ships behind its own on/off switch, specifically so the new
+  merged home page's content (not the sign-in redirect itself) can be
+  switched off quickly if a problem turns up after release, without needing
+  a new deployment.
 
 - [ ] **`decision` · The next phase of work for presbyteries — not just a
   login screen, but real functionality — is fully designed, though nothing

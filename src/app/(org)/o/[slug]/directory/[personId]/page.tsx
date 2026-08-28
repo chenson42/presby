@@ -210,6 +210,7 @@ export default async function PersonDetailPage({
         <PersonAvatar
           photoSrc={photoSrc}
           displayName={displayName}
+          seed={entry.personId}
           className="size-20"
         />
         <div>

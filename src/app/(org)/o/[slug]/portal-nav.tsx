@@ -98,15 +98,29 @@ export async function PortalNav({
       tiles.some((tile) => tile.domain === domain),
   );
 
+  // ICON KEYS, NOT ICON COMPONENTS — see `PortalNavEntry.icon`'s own doc
+  // comment in `portal-nav-links.tsx` for why: this is a Server Component
+  // handing props to that file's `"use client"` leaf, and an actual
+  // `LucideIcon` object crossing that boundary is a confirmed live 500, not
+  // a hypothetical. `domain` is already the exact string key `ICON_BY_KEY`
+  // resolves there, so no lookup is even needed on this side.
   const entries: PortalNavEntry[] = [
-    { label: "Home", href: `/o/${slug}`, exact: true },
+    { label: "Home", href: `/o/${slug}`, exact: true, icon: "home" },
     ...domainsPresent.map((domain) => ({
       label: DOMAIN_LABELS[domain],
       href: `/o/${slug}#domain-${domain}`,
       exact: true,
+      icon: domain,
     })),
     ...(adminHubEnabled
-      ? [{ label: "Administration", href: `/o/${slug}/admin`, exact: false }]
+      ? [
+          {
+            label: "Administration",
+            href: `/o/${slug}/admin`,
+            exact: false,
+            icon: "administration" as const,
+          },
+        ]
       : []),
   ];
 

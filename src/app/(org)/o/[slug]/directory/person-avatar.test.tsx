@@ -29,7 +29,11 @@ vi.mock("@/lib/storage/blob-store", () => ({
   getBlobStore: () => ({ resolve, resolveMeta: vi.fn(), store: vi.fn() }),
 }));
 
-import { PersonAvatar, resolvePhotoSrc } from "./person-avatar";
+import {
+  PersonAvatar,
+  resolvePhotoSrc,
+  __avatarPaletteClassNameForTest as avatarPaletteClassName,
+} from "./person-avatar";
 
 afterEach(() => {
   cleanup();
@@ -67,18 +71,34 @@ describe("resolvePhotoSrc", () => {
 
 describe("<PersonAvatar>", () => {
   it("renders the initials fallback for a two-word name", () => {
-    render(<PersonAvatar photoSrc={null} displayName="Marguerite Ashcombe" />);
+    render(
+      <PersonAvatar
+        photoSrc={null}
+        displayName="Marguerite Ashcombe"
+        seed="person-1"
+      />,
+    );
     expect(screen.getByText("MA")).toBeTruthy();
   });
 
   it("attempts no <img> at all when photoSrc is null", () => {
-    render(<PersonAvatar photoSrc={null} displayName="Marguerite Ashcombe" />);
+    render(
+      <PersonAvatar
+        photoSrc={null}
+        displayName="Marguerite Ashcombe"
+        seed="person-1"
+      />,
+    );
     expect(document.querySelector("img")).toBeNull();
   });
 
   it("marks the fallback aria-hidden when a photoSrc is present, visible when it is not", () => {
     const { rerender } = render(
-      <PersonAvatar photoSrc={null} displayName="Marguerite Ashcombe" />,
+      <PersonAvatar
+        photoSrc={null}
+        displayName="Marguerite Ashcombe"
+        seed="person-1"
+      />,
     );
     expect(screen.getByText("MA").getAttribute("aria-hidden")).toBe("false");
 
@@ -86,6 +106,7 @@ describe("<PersonAvatar>", () => {
       <PersonAvatar
         photoSrc="data:image/png;base64,AAA="
         displayName="Marguerite Ashcombe"
+        seed="person-1"
       />,
     );
     // The fallback node itself may or may not still be in the tree
@@ -95,5 +116,67 @@ describe("<PersonAvatar>", () => {
     if (fallback) {
       expect(fallback.getAttribute("aria-hidden")).toBe("true");
     }
+  });
+
+  it("applies a background/text colour class from the palette to the fallback", () => {
+    render(
+      <PersonAvatar photoSrc={null} displayName="Ada Lovelace" seed="person-1" />,
+    );
+    const fallback = screen.getByText("AL");
+    expect(fallback.className).toMatch(/bg-\w+-\d{3}/);
+    expect(fallback.className).toMatch(/text-\w+-\d{3}/);
+  });
+});
+
+describe("avatar colour determinism (docs/work-log/2026-08-28-directory-visual-refresh.md, Phase 4, item 1)", () => {
+  it("the same seed always produces the same palette class", () => {
+    const first = avatarPaletteClassName("11111111-1111-1111-1111-111111111111");
+    const second = avatarPaletteClassName("11111111-1111-1111-1111-111111111111");
+    expect(first).toBe(second);
+  });
+
+  it("is stable across many calls, not just two", () => {
+    const seed = "22222222-2222-2222-2222-222222222222";
+    const results = new Set(
+      Array.from({ length: 20 }, () => avatarPaletteClassName(seed)),
+    );
+    expect(results.size).toBe(1);
+  });
+
+  it("different seeds plausibly land on different buckets (not every seed collapses to one class)", () => {
+    const seeds = [
+      "person-a",
+      "person-b",
+      "person-c",
+      "person-d",
+      "person-e",
+      "person-f",
+      "person-g",
+      "person-h",
+    ];
+    const classes = new Set(seeds.map((s) => avatarPaletteClassName(s)));
+    // With 8 seeds over a 6-bucket palette, a correct hash should spread
+    // across more than one bucket. A constant function (the bug this test
+    // exists to catch) would collapse this to size 1.
+    expect(classes.size).toBeGreaterThan(1);
+  });
+
+  it("hashes by the id, not the name — two different ids produce independently-determined colours even if a caller passed the same name twice", () => {
+    // Not a claim that two different ids can never share a bucket (6
+    // buckets, so collisions are expected) — a claim that the function reads
+    // ITS ARGUMENT, not some other identity signal. Guards a regression where
+    // a future edit accidentally re-derives the seed from `displayName`
+    // instead of using the id it was handed.
+    const byId1 = avatarPaletteClassName("00000000-0000-0000-0000-000000000001");
+    const byId2 = avatarPaletteClassName("00000000-0000-0000-0000-000000000002");
+    // These two ids are chosen (verified below) to land in different
+    // buckets, proving the function is sensitive to the seed's full value,
+    // not just e.g. its length (both ids are the same length).
+    expect(byId1).not.toBe(byId2);
+  });
+
+  it("returns one of the exact palette entries — never an arbitrary/out-of-range string", () => {
+    const result = avatarPaletteClassName("any-seed-at-all");
+    expect(result).toMatch(/^bg-(slate|teal|indigo|violet|fuchsia|cyan)-\d{3}/);
   });
 });

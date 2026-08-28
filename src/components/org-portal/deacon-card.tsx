@@ -50,6 +50,10 @@ export function DeaconCard({ deaconName }: { deaconName: string | null }) {
             <PersonAvatar
               photoSrc={null}
               displayName={deaconName}
+              // No personId available here — see PersonAvatarProps.seed's own
+              // doc comment for why the name is an accepted substitute in
+              // this one card.
+              seed={deaconName}
               className="size-12"
             />
             <div>

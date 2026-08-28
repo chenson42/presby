@@ -70,6 +70,7 @@ export function PersonCard({
         <PersonAvatar
           photoSrc={photoSrc}
           displayName={displayName}
+          seed={entry.personId}
           className="size-12"
         />
         <div className="min-w-0 flex-1 space-y-1">

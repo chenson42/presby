@@ -335,10 +335,20 @@ describe("button-modernization (docs/work-log/2026-08-27-button-modernization.md
    * available proof that the light-scheme-only stopping-condition change in
    * `searchBrandLightness` did not leak into dark. `dark-scheme-golden.json`
    * was captured from the PRE-change generator (git HEAD at the start of
-   * this commit) for every entry in `ALL_SEEDS`, before the stopping
+   * that commit) for every entry in `ALL_SEEDS`, before the stopping
    * condition was tightened. A regression that accidentally applied
    * white-forcing (or anything else) to dark would change at least one
    * seed's `tokens.dark` and fail this loop.
+   *
+   * REGENERATED 2026-08-27 (docs/work-log/2026-08-27-presbyportal-brand-kit.md):
+   * the PresbyPortal rebrand intentionally changed `PLATFORM_TOKENS.dark`'s
+   * `border`/`danger`/`input-border`/`muted-surface`/`on-danger`/
+   * `on-muted-surface` — every dark-scheme entry `copyPlatform()`'s straight
+   * through untouched (Step 9). This fixture's fields for exactly those six
+   * keys changed to match; every other field (surface/brand/on-brand/etc.,
+   * which the generator derives from the SEED, not the platform) is
+   * unchanged, which is itself confirmation the derivation logic wasn't
+   * touched — only its platform-fixed inputs were.
    */
   it("every seed's tokens.dark is byte-identical to the pre-change golden fixture", () => {
     for (const seed of ALL_SEEDS) {

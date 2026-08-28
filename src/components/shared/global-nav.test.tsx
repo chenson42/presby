@@ -202,15 +202,26 @@ describe("GlobalNav — the healthy path", () => {
 });
 
 describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-portal-chrome.md)", () => {
-  it("renders the platform 'presby' wordmark, linking to /, when orgMark is absent — byte-identical to today", async () => {
+  it("renders the platform PresbyPortal wordmark, linking to /, when orgMark is absent", async () => {
     cachedAvailableOrganizations.mockResolvedValue([WRENFIELD]);
     cachedIsPlatformAdmin.mockResolvedValue(false);
 
     await renderNav({ session: session(), currentOrgSlug: WRENFIELD.slug });
 
-    const wordmark = screen.getByRole("link", { name: "presby" });
+    const wordmark = screen.getByRole("link", { name: "PresbyPortal" });
     expect(wordmark.getAttribute("href")).toBe("/");
-    expect(screen.queryByRole("img")).toBeNull();
+    // Both the light and dark-swap images are decorative (alt="", the link
+    // itself carries the accessible name via aria-label) — see
+    // PlatformWordmark's doc comment for why. Assert the light-mode image
+    // by src rather than by accessible name.
+    const images = wordmark.querySelectorAll("img");
+    expect(images.length).toBe(2);
+    expect(images[0].getAttribute("src")).toBe(
+      "/brand/presbyportal-logo-horizontal.svg",
+    );
+    expect(images[1].getAttribute("src")).toBe(
+      "/brand/presbyportal-logo-horizontal-reverse.svg",
+    );
   });
 
   it("swaps to OrgMark, linking to /site/<slug> (the public site, not the portal home), when orgMark and currentOrgSlug are both present", async () => {
@@ -225,7 +236,7 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
       orgMark: { name: "Fixture Congregation", markSrc: "data:image/png;base64,xyz" },
     });
 
-    expect(screen.queryByRole("link", { name: "presby" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "PresbyPortal" })).toBeNull();
     const image = screen.getByRole("img", { name: "Fixture Congregation logo" });
     expect(image.getAttribute("src")).toBe("data:image/png;base64,xyz");
     const wordmarkLink = screen.getByRole("link", {
@@ -280,7 +291,7 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
       orgMark: { name: "Fixture Congregation", markSrc: null },
     });
 
-    const wordmark = screen.getByRole("link", { name: "presby" });
+    const wordmark = screen.getByRole("link", { name: "PresbyPortal" });
     expect(wordmark.getAttribute("href")).toBe("/");
   });
 

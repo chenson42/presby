@@ -1,12 +1,27 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
+/**
+ * The platform's own typeface (PresbyPortal Brand Guidelines v1.0,
+ * docs/work-log/2026-08-27-presbyportal-brand-kit.md, DECISION-127). The kit
+ * specifies "Inter Display" for headings/24px+ and "Inter" below — Google
+ * Fonts has no separate "Inter Display" family, so this applies plain Inter
+ * everywhere at platform level, matching the kit's own fallback chain
+ * (`"Inter Display", "Inter", system-ui`). Applied on <body> so it's the
+ * default everywhere; `(org)` pages still override it per-organization via
+ * `fontPairing.bodyClassName` on <main> (src/lib/brand/fonts.ts) — a
+ * property set directly on a descendant always wins over an inherited one,
+ * regardless of the two classes' equal specificity.
+ */
+const inter = Inter({ subsets: ["latin"], display: "swap" });
+
 export const metadata: Metadata = {
   title: {
-    default: "presby",
-    template: "%s · presby",
+    default: "PresbyPortal",
+    template: "%s · PresbyPortal",
   },
   description:
     "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods.",
@@ -17,8 +32,8 @@ export const metadata: Metadata = {
   // returned by querySelector.
   openGraph: {
     type: "website",
-    siteName: "presby",
-    title: "presby",
+    siteName: "PresbyPortal",
+    title: "PresbyPortal",
     description:
       "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods.",
   },
@@ -33,7 +48,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen antialiased">
+      <body className={`${inter.className} min-h-screen antialiased`}>
         {/*
          * pattern: server-action → client toast
          * Server actions return { ok, error? }. Client components read the result

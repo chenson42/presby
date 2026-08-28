@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { AvatarMenu } from "@/components/shared/avatar-menu";
 import { OrgSwitcher } from "@/components/shared/org-switcher";
 import { OrgWordmark } from "@/components/brand/org-mark";
+import { PlatformWordmark } from "@/components/brand/platform-mark";
 
 /**
  * The signed-in header: brand, organization switcher, avatar menu.
@@ -59,8 +60,9 @@ export async function GlobalNav({
    * Phase 3). Set ONLY by `(org)/o/[slug]/layout.tsx`, and only when
    * `org_portal.chrome_v2` is ON and the slug resolved to an active
    * relationship — every other caller (and `(org)` itself when the flag is
-   * OFF) passes nothing, and the "presby" wordmark renders exactly as it
-   * does today. GlobalNav does NOT gate on the flag itself and reads no
+   * OFF) passes nothing, and the platform wordmark (PlatformWordmark,
+   * docs/work-log/2026-08-27-presbyportal-brand-kit.md) renders instead.
+   * GlobalNav does NOT gate on the flag itself and reads no
    * brand data of its own — it stays brand-blind for `(member)`/`(admin)`;
    * the caller already did both the flag check and the membership-verified
    * read (`getOrgMarkForLayout`) before handing this prop over.
@@ -136,8 +138,12 @@ export async function GlobalNav({
               <OrgWordmark name={orgMark.name} markSrc={orgMark.markSrc} plate={false} />
             </Link>
           ) : (
-            <Link href="/" className={WORDMARK_LINK_CLASS}>
-              presby
+            <Link
+              href="/"
+              aria-label="PresbyPortal"
+              className={cn(WORDMARK_LINK_CLASS, "px-0 py-0")}
+            >
+              <PlatformWordmark heightPx={20} />
             </Link>
           )}
           <OrgSwitcher

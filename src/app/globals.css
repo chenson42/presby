@@ -35,99 +35,102 @@
  * in `TOKEN_POLICY`, and every value matches `PLATFORM_TOKENS`. Change a colour
  * here without changing it there and the test fails and names the token.
  *
- * Four values were corrected in P0.5 slice 0 (work-log
- * 2026-08-19-brand-foundation) because the palette failed the floors the
- * contract declares — S16 puts body text at AAA (7:1), non-text and control
- * borders at 3:1. Each correction carries its measured ratio inline. This was
- * a deliberate visible change, not a refactor.
+ * PresbyPortal Brand Guidelines v1.0 palette (navy/blue/gold, DECISION-127,
+ * docs/work-log/2026-08-27-presbyportal-brand-kit.md), replacing the
+ * placeholder palette slice 0 merely brought up to the contrast floors. See
+ * `contract.ts`'s PLATFORM_TOKENS comment for the full measured-ratio table —
+ * every pair here was re-verified against S16's floors, not carried over from
+ * the kit's own README claims.
  */
 
 :root {
   --radius: 0.5rem;
 
   --background: hsl(0 0% 100%);
-  --foreground: hsl(222 47% 11%);
+  --foreground: hsl(215 66% 15%);
 
   --card: hsl(0 0% 100%);
-  --card-foreground: hsl(222 47% 11%);
+  --card-foreground: hsl(215 66% 15%);
 
   --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(222 47% 11%);
+  --popover-foreground: hsl(215 66% 15%);
 
-  /* Brand. One accent colour; forks rebrand here. */
-  --primary: hsl(221 83% 53%);
+  /* Brand. PresbyPortal blue (#1A5AA8) — 6.84:1 with white text (D2),
+     6.84:1 against the white surface (D3). */
+  --primary: hsl(213 73% 38%);
   --primary-foreground: hsl(0 0% 100%);
 
-  --secondary: hsl(210 40% 96%);
-  --secondary-foreground: hsl(222 47% 11%);
+  --secondary: hsl(216 24% 96%);
+  --secondary-foreground: hsl(215 66% 15%);
 
-  --muted: hsl(210 40% 96%);
-  /* Corrected 47% → 33%: was 4.70:1 on the page against a 7:1 floor, across
-     244 `text-muted-foreground` sites. Now 7.92 on background, 7.23 on muted. */
-  --muted-foreground: hsl(215 16% 33%);
+  --muted: hsl(216 24% 96%);
+  /* 7.91:1 on background, 7.18:1 on muted — clears the 7:1 floor (D1). */
+  --muted-foreground: hsl(216 16% 33%);
 
   /* Subtle hover/active surface — not the brand colour. */
-  --accent: hsl(210 40% 96%);
-  --accent-foreground: hsl(222 47% 11%);
+  --accent: hsl(216 24% 96%);
+  --accent-foreground: hsl(215 66% 15%);
 
-  --destructive: hsl(0 72% 51%);
+  /* PresbyPortal's `danger` semantic, adapted from the brand kit's #B4232A
+     (nudged to #B22B1E, OKLCH hue 29.8 vs the kit's 24.6 — the kit's exact
+     value sat close enough to red-violet seeds that one grid point in
+     generate.test.ts's 288-seed property check missed D6's 45° hue-distance
+     floor by 0.1°; this value restores the same margin the pre-rebrand pure
+     red held) — 6.45:1 with white text (D2). Dark enough (L 41%) that white
+     text works in BOTH schemes with the identical fill — no
+     move-the-text-not-the-hue split needed here. */
+  --destructive: hsl(5 71% 41%);
   --destructive-foreground: hsl(0 0% 100%);
 
-  /* `border` separates CONTENT; `input` identifies a CONTROL. They carried the
-     identical value until P0.5 — which put every control border at 1.24:1
-     against a 3:1 floor (D3). Splitting them is what lets the control border
-     reach 3:1 without repainting every card edge in mid-grey. */
-  --border: hsl(214 32% 91%);
-  --input: hsl(214 32% 59%); /* 3.20:1 on background */
+  /* `border` separates CONTENT; `input` identifies a CONTROL. */
+  --border: hsl(215 20% 83%);
+  --input: hsl(217 16% 56%); /* 3.45:1 on background (D3) */
   /* Equal to `--primary` on purpose. The ring's contrast is only ever measured
-     against the SURFACE (5.17:1), because every focus ring is drawn with a 2px
-     offset in the surface colour and so is never adjacent to the control it
-     rings. That is D4 made structural instead of dependent on a lucky value —
-     see FOCUS_RING_OFFSET_PX in src/lib/brand/contract.ts. Flush against the
-     primary button this ring is 1.00:1, i.e. invisible; the offset, not the
-     value, is what fixes it. */
-  --ring: hsl(221 83% 53%);
+     against the SURFACE, because every focus ring is drawn with a 2px offset
+     in the surface colour and so is never adjacent to the control it rings.
+     That is D4 made structural instead of dependent on a lucky value — see
+     FOCUS_RING_OFFSET_PX in src/lib/brand/contract.ts. */
+  --ring: hsl(213 73% 38%);
 }
 
 .dark {
-  --background: hsl(222 47% 11%);
-  --foreground: hsl(210 40% 98%);
+  --background: hsl(215 71% 8%);
+  --foreground: hsl(216 24% 96%);
 
-  --card: hsl(217 33% 17%);
-  --card-foreground: hsl(210 40% 98%);
+  --card: hsl(215 67% 12%);
+  --card-foreground: hsl(216 24% 96%);
 
-  --popover: hsl(217 33% 17%);
-  --popover-foreground: hsl(210 40% 98%);
+  --popover: hsl(215 67% 12%);
+  --popover-foreground: hsl(216 24% 96%);
 
-  --primary: hsl(217 91% 60%);
-  --primary-foreground: hsl(222 47% 11%);
+  /* Lighter step of the brand blue (blue-300) — 7.54:1 against this dark
+     background AND against its own foreground (D2/D3), so it also clears
+     the ring floor without a separate value. */
+  --primary: hsl(214 70% 68%);
+  --primary-foreground: hsl(215 71% 8%);
 
-  --secondary: hsl(217 33% 17%);
-  --secondary-foreground: hsl(210 40% 98%);
+  --secondary: hsl(215 67% 12%);
+  --secondary-foreground: hsl(216 24% 96%);
 
-  --muted: hsl(217 33% 17%);
-  /* Corrected 65% → 73%: was 5.78:1 on card against a 7:1 floor.
-     Now 8.89 on background, 7.37 on card and on muted. */
-  --muted-foreground: hsl(215 20% 73%);
+  --muted: hsl(215 67% 12%);
+  /* 8.85:1 on background, 8.13:1 on card/muted — clears the 7:1 floor (D1). */
+  --muted-foreground: hsl(216 18% 71%);
 
-  --accent: hsl(217 33% 17%);
-  --accent-foreground: hsl(210 40% 98%);
+  --accent: hsl(215 67% 12%);
+  --accent-foreground: hsl(216 24% 96%);
 
-  /* The token pair was 3.61:1 with the old near-white foreground — failing
-     plain AA, not merely the AAA body floor. Corrected by moving the TEXT,
-     not the hue (operator ruling, work-log 2026-08-19-brand-foundation
-     note 7): the fill stays at 60% so rendered text-destructive keeps
-     4.73:1 on the page, and the foreground becomes the page ink, giving
-     4.73:1 on the pair. The rejected alternative (fill → 48% + white) fixed
-     a pair nothing renders while dropping rendered text-destructive to 3.67. */
-  --destructive: hsl(0 84% 60%);
-  --destructive-foreground: hsl(222 47% 11%);
+  /* Same fill as the light block, same reasoning: `danger` (#B22B1E, L 41%)
+     is dark enough that white text clears D2 in both schemes — no
+     move-the-text-not-the-hue split needed the way the prior palette's
+     lighter red required. */
+  --destructive: hsl(5 71% 41%);
+  --destructive-foreground: hsl(0 0% 100%);
 
   /* See the light block: `border` separates content, `input` identifies a
      control. */
-  --border: hsl(217 33% 22%);
-  --input: hsl(217 33% 50%); /* 3.88:1 on background, 3.22:1 on card */
-  --ring: hsl(217 91% 60%); /* 4.91:1 on surface; offset, per the light block */
+  --border: hsl(213 59% 22%);
+  --input: hsl(217 16% 44%); /* 3.47:1 on background (D3) */
+  --ring: hsl(214 70% 68%); /* = --primary; 7.54:1 on surface, offset per the light block */
 }
 
 @theme inline {

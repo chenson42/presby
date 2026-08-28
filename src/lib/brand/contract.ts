@@ -643,10 +643,39 @@ export type TypePairingKey = (typeof TYPE_PAIRINGS)[number]["key"];
  * does not declare, and the transcription test skips exactly the entries
  * TOKEN_POLICY marks `additive`.
  *
- * G1: the default is deliberately NOT presby's marketing identity in the long
- * run — an ecclesiastically neutral register is a separate visual decision and
- * is out of scope here. What slice 0 does is make the CURRENT default meet the
- * floors this file declares.
+ * G1 UPDATE (docs/work-log/2026-08-27-presbyportal-brand-kit.md): the default
+ * WAS deliberately not presby's marketing identity while none existed. One now
+ * does — the PresbyPortal Brand Guidelines v1.0 (navy `#0D2240` / blue
+ * `#1A5AA8` / gold `#F2B134`, DECISION-127) — so this is that "separate visual
+ * decision," applied. Every value below is the brand kit's palette transcribed
+ * to HSL, each pair re-verified against the floors this file declares rather
+ * than trusted from the kit's own README claims:
+ *
+ *   navy-700 on white (foreground/background, D1 7:1) ......... 15.91
+ *   white on blue-600 (on-brand/brand, D2 4.5:1) ................ 6.84
+ *   blue-600 on white (brand/surface, D3 3:1) .................... 6.84
+ *   gray-600 on white/gray-50 (muted-fg pair, D1 7:1) ...... 7.91 / 7.18
+ *   navy-700 on gray-50 (accent-fg/accent, D1 7:1) .............. 14.44
+ *   white on `danger` #B22B1E (on-danger/danger, D2 4.5:1) ....... 6.45
+ *   gray-400 on white (input-border/surface, D3 3:1) ............. 3.45
+ *   gray-50 on navy-900 (dark fg/bg, D1 7:1) ..................... 17.04
+ *   gray-300 on navy-900/navy-800 (dark muted-fg, D1 7:1) .. 8.85 / 8.13
+ *   navy-900 on blue-300 (dark on-brand/brand, D2 4.5:1) .......... 7.54
+ *   gray-500 on navy-900 (dark input-border/bg, D3 3:1) ........... 3.47
+ *
+ * `--destructive` adopts the kit's own `danger` semantic, in BOTH schemes
+ * with the SAME fill — dark enough (L 41%) that white text clears D2 in
+ * both, unlike the prior palette's dark-mode "move the text, not the hue"
+ * workaround this replaces. NUDGED from the kit's literal `#B4232A` to
+ * `#B22B1E`: the kit's exact value has OKLCH hue 24.6°, which the ramp
+ * generator's own exhaustive 288-seed property test
+ * (`generate.test.ts` — D6's per-org hue-distance check runs in OKLCH, not
+ * sRGB HSL) caught sitting close enough to one red-violet seed's brand hue
+ * to miss `MIN_BRAND_DANGER_HUE_DISTANCE_DEG` (45°) by 0.1° after that
+ * seed's own nudge. `#B22B1E`'s OKLCH hue (29.8°) sits back near the prior
+ * palette's pure-red hue (27.2°) that test suite was already proven safe
+ * against — same visual "brick red" family, same contrast floor, no
+ * change to the generator itself.
  * ---------------------------------------------------------------------- */
 
 export type Scheme = "light" | "dark";
@@ -654,48 +683,48 @@ export type Scheme = "light" | "dark";
 export const PLATFORM_TOKENS = {
   light: {
     "--background": "hsl(0 0% 100%)",
-    "--foreground": "hsl(222 47% 11%)",
+    "--foreground": "hsl(215 66% 15%)",
     "--card": "hsl(0 0% 100%)",
-    "--card-foreground": "hsl(222 47% 11%)",
+    "--card-foreground": "hsl(215 66% 15%)",
     "--popover": "hsl(0 0% 100%)",
-    "--popover-foreground": "hsl(222 47% 11%)",
-    "--primary": "hsl(221 83% 53%)",
+    "--popover-foreground": "hsl(215 66% 15%)",
+    "--primary": "hsl(213 73% 38%)",
     "--primary-foreground": "hsl(0 0% 100%)",
-    "--brand-raw": "hsl(221 83% 53%)",
+    "--brand-raw": "hsl(213 73% 38%)",
     "--brand-raw-foreground": "hsl(0 0% 100%)",
-    "--secondary": "hsl(210 40% 96%)",
-    "--secondary-foreground": "hsl(222 47% 11%)",
-    "--muted": "hsl(210 40% 96%)",
-    "--muted-foreground": "hsl(215 16% 33%)",
-    "--accent": "hsl(210 40% 96%)",
-    "--accent-foreground": "hsl(222 47% 11%)",
-    "--destructive": "hsl(0 72% 51%)",
+    "--secondary": "hsl(216 24% 96%)",
+    "--secondary-foreground": "hsl(215 66% 15%)",
+    "--muted": "hsl(216 24% 96%)",
+    "--muted-foreground": "hsl(216 16% 33%)",
+    "--accent": "hsl(216 24% 96%)",
+    "--accent-foreground": "hsl(215 66% 15%)",
+    "--destructive": "hsl(5 71% 41%)",
     "--destructive-foreground": "hsl(0 0% 100%)",
-    "--border": "hsl(214 32% 91%)",
-    "--input": "hsl(214 32% 59%)",
-    "--ring": "hsl(221 83% 53%)",
+    "--border": "hsl(215 20% 83%)",
+    "--input": "hsl(217 16% 56%)",
+    "--ring": "hsl(213 73% 38%)",
   },
   dark: {
-    "--background": "hsl(222 47% 11%)",
-    "--foreground": "hsl(210 40% 98%)",
-    "--card": "hsl(217 33% 17%)",
-    "--card-foreground": "hsl(210 40% 98%)",
-    "--popover": "hsl(217 33% 17%)",
-    "--popover-foreground": "hsl(210 40% 98%)",
-    "--primary": "hsl(217 91% 60%)",
-    "--primary-foreground": "hsl(222 47% 11%)",
-    "--brand-raw": "hsl(217 91% 60%)",
-    "--brand-raw-foreground": "hsl(222 47% 11%)",
-    "--secondary": "hsl(217 33% 17%)",
-    "--secondary-foreground": "hsl(210 40% 98%)",
-    "--muted": "hsl(217 33% 17%)",
-    "--muted-foreground": "hsl(215 20% 73%)",
-    "--accent": "hsl(217 33% 17%)",
-    "--accent-foreground": "hsl(210 40% 98%)",
-    "--destructive": "hsl(0 84% 60%)",
-    "--destructive-foreground": "hsl(222 47% 11%)",
-    "--border": "hsl(217 33% 22%)",
-    "--input": "hsl(217 33% 50%)",
-    "--ring": "hsl(217 91% 60%)",
+    "--background": "hsl(215 71% 8%)",
+    "--foreground": "hsl(216 24% 96%)",
+    "--card": "hsl(215 67% 12%)",
+    "--card-foreground": "hsl(216 24% 96%)",
+    "--popover": "hsl(215 67% 12%)",
+    "--popover-foreground": "hsl(216 24% 96%)",
+    "--primary": "hsl(214 70% 68%)",
+    "--primary-foreground": "hsl(215 71% 8%)",
+    "--brand-raw": "hsl(214 70% 68%)",
+    "--brand-raw-foreground": "hsl(215 71% 8%)",
+    "--secondary": "hsl(215 67% 12%)",
+    "--secondary-foreground": "hsl(216 24% 96%)",
+    "--muted": "hsl(215 67% 12%)",
+    "--muted-foreground": "hsl(216 18% 71%)",
+    "--accent": "hsl(215 67% 12%)",
+    "--accent-foreground": "hsl(216 24% 96%)",
+    "--destructive": "hsl(5 71% 41%)",
+    "--destructive-foreground": "hsl(0 0% 100%)",
+    "--border": "hsl(213 59% 22%)",
+    "--input": "hsl(217 16% 44%)",
+    "--ring": "hsl(214 70% 68%)",
   },
 } as const satisfies Record<Scheme, Record<PlatformTokenName, string>>;

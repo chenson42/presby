@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { Button } from "@/components/ui/button";
+import { PlatformMark, PlatformWordmark } from "@/components/brand/platform-mark";
 
 /**
  * The four courts of Presbyterian polity, rendered as a minimal inline SVG —
@@ -78,9 +79,10 @@ export default async function Home() {
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-4">
           <Link
             href="/"
-            className="rounded-sm text-base font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            aria-label="PresbyPortal"
+            className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            PresbyPortal
+            <PlatformWordmark heightPx={28} />
           </Link>
           <div className="flex items-center gap-3">
             {signedIn ? (
@@ -121,9 +123,25 @@ export default async function Home() {
        * `@media (prefers-reduced-motion: reduce)` rule (which forces
        * animation-duration to ~0) neutralizes it automatically — no inline
        * style duration to fight that override.
+       *
+       * The oversized, low-opacity arch mark bleeding off the right edge
+       * (docs/work-log/2026-08-27-presbyportal-brand-kit.md) is purely
+       * decorative texture, not a second logo instance — `decorative` on
+       * `PlatformMark` marks it `aria-hidden`/`alt=""` so it's invisible to
+       * assistive tech, and `z-0`/`relative z-10` on the content wrapper
+       * below keeps it strictly behind the headline regardless of DOM
+       * order (an absolutely-positioned element paints above static
+       * content unless the static content is itself given a stacking
+       * context). `overflow-hidden` on the section is what lets it bleed
+       * off the edge without widening the page.
        */}
-      <section className="bg-primary text-primary-foreground">
-        <div className="mx-auto max-w-3xl px-6 py-20 text-center sm:py-28">
+      <section className="relative overflow-hidden bg-primary text-primary-foreground">
+        <PlatformMark
+          variant="reverse"
+          decorative
+          className="pointer-events-none absolute -right-24 top-1/2 z-0 h-[140%] w-auto -translate-y-1/2 opacity-[0.07] sm:-right-12 sm:h-[170%]"
+        />
+        <div className="relative z-10 mx-auto max-w-3xl px-6 py-20 text-center sm:py-28">
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* `hero` type-scale role — documented exception, docs/ui-standards.md
                 Type Scale table. Used ONLY here; every other heading on this

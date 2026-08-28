@@ -283,7 +283,7 @@ describe("OrgSlugLayout — no session", () => {
     expect(screen.queryByTestId("portal-footer-stub")).toBeNull();
     expect(resolveOrgContext).not.toHaveBeenCalled();
     expect(getOrgProfileForFooter).not.toHaveBeenCalled();
-    expect(screen.getByText("presby")).toBeTruthy();
+    expect(screen.getByText("PresbyPortal")).toBeTruthy();
   });
 });
 

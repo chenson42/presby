@@ -74,6 +74,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 import PublicSitePage, { generateMetadata } from "./page";
+import { PublicStaffDirectory } from "../staff-directory";
+import { PublicCommitteeDirectory } from "../committee-directory";
 
 afterEach(() => {
   cleanup();
@@ -411,16 +413,80 @@ describe("PublicSitePage — the ok path", () => {
     expect(call.contactForm).toBeTruthy();
   });
 
-  it("passes a liveSlots.staffDirectory element into renderSiteBundle() for a {\"type\":\"liveSlot\"} block to place (docs/work-log/2026-08-27-public-staff-directory.md)", async () => {
+  it("passes a liveSlots.staffDirectory RESOLVER FUNCTION into renderSiteBundle() for a {\"type\":\"liveSlot\"} block to place — presby-site-kit v4.0.0 made liveSlots values functions, not elements (docs/work-log/2026-08-28-public-directory-primitives.md)", async () => {
     getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams() });
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
+    };
+    expect(typeof call.liveSlots?.staffDirectory).toBe("function");
+
+    // A truthy-function check alone would still pass even if the resolver
+    // ignored its own `filter` argument or closed over the wrong slug — this
+    // asserts on the RESOLVED OUTPUT of actually CALLING the closure: it
+    // must be a real <PublicStaffDirectory> element built from exactly the
+    // `filter` object this call passed in and this page's own `slug`, not
+    // merely "some truthy value."
+    const suppliedFilter = { kind: "officer", hasPriority: true };
+    const resolved = call.liveSlots?.staffDirectory?.(suppliedFilter) as {
+      type: unknown;
+      props: { slug: string; filter: unknown };
+    };
+    expect(resolved.type).toBe(PublicStaffDirectory);
+    expect(resolved.props).toEqual({ slug: "alder-creek", filter: suppliedFilter });
+  });
+
+  it("passes a liveSlots.committeeDirectory resolver function into renderSiteBundle() alongside staffDirectory, resolving to a real <PublicCommitteeDirectory> element built from that call's own filter (docs/work-log/2026-08-28-public-directory-primitives.md)", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
+    };
+    expect(typeof call.liveSlots?.committeeDirectory).toBe("function");
+
+    const suppliedFilter = { committee: "Missions Committee" };
+    const resolved = call.liveSlots?.committeeDirectory?.(suppliedFilter) as {
+      type: unknown;
+      props: { slug: string; filter: unknown };
+    };
+    expect(resolved.type).toBe(PublicCommitteeDirectory);
+    expect(resolved.props).toEqual({ slug: "alder-creek", filter: suppliedFilter });
+  });
+
+  it("a marker with no filter still resolves staffDirectory to {} — reproducing the shipped feature's exact unfiltered behavior with no content-repo migration required", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
+    };
+    const resolved = call.liveSlots?.staffDirectory?.({}) as {
+      props: { filter: unknown };
+    };
+    expect(resolved.props.filter).toEqual({});
+  });
+
+  it("exposes exactly staffDirectory and committeeDirectory — no other named slot", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       liveSlots?: Record<string, unknown>;
     };
-    expect(call.liveSlots?.staffDirectory).toBeTruthy();
+    expect(Object.keys(call.liveSlots ?? {}).sort()).toEqual([
+      "committeeDirectory",
+      "staffDirectory",
+    ]);
   });
 });
 

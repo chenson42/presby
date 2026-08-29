@@ -141,6 +141,10 @@ export interface StaffPositionEntry {
   /** Public staff-directory opt-in (docs/work-log/
    * 2026-08-27-public-staff-directory.md) — additive field, same query. */
   publicListed: boolean;
+  /** Admin-set public-directory curation order (docs/work-log/
+   * 2026-08-28-public-directory-primitives.md) — additive field, same
+   * query. `null` = no curation set, alphabetical-by-name ordering. */
+  publicDisplayOrder: number | null;
 }
 
 export interface StaffHistoryEntry {
@@ -209,6 +213,7 @@ export async function listStaffRoster(
         endsOn: staffPositions.endsOn,
         minuteReference: staffPositions.minuteReference,
         publicListed: staffPositions.publicListed,
+        publicDisplayOrder: staffPositions.publicDisplayOrder,
       })
       .from(staffPositions)
       .innerJoin(people, eq(people.id, staffPositions.personId))
@@ -225,6 +230,7 @@ export async function listStaffRoster(
       endsOn: row.endsOn,
       minuteReference: row.minuteReference,
       publicListed: row.publicListed,
+      publicDisplayOrder: row.publicDisplayOrder,
     }));
 
     return { kind: "ok", data };
@@ -627,4 +633,106 @@ export async function setStaffPositionPublicListed(
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// setStaffPositionPublicDisplayOrder
+// ---------------------------------------------------------------------------
+
+export interface SetStaffPositionPublicDisplayOrderInput {
+  positionId: string;
+  publicDisplayOrder: number | null;
+}
+
+/**
+ * The int4 bound `coalesce(public_display_order, MAX_INT), display_name`
+ * (`presby_public_staff_roster()`, `presby_public_committee_roster()`)
+ * depends on this never being a legitimate curated value.
+ */
+const MAX_PUBLIC_DISPLAY_ORDER = 2147483647;
+
+/**
+ * Admin-set public-directory curation input (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3 API Contract). A
+ * SEPARATE mutation from `setStaffPositionPublicListed()` above, deliberately
+ * NOT an optional field folded into that toggle's input — that work-log's own
+ * reasoning: a JS object can't cleanly distinguish an omitted
+ * `publicDisplayOrder` key ("leave unchanged") from a present one ("clear
+ * it") across a Server Action `FormData` boundary, and getting it wrong would
+ * silently clear an admin's prior curation the next time they merely toggle
+ * listing on/off for an unrelated reason. This dedicated mutation's
+ * `publicDisplayOrder` is a required (non-optional) `number | null`, so
+ * there is no third state to misinterpret.
+ *
+ * ORDER OF OPERATIONS, mirroring `setStaffPositionPublicListed()`'s shape
+ * MINUS the audit call:
+ *   1. `hasStaffManage` gate — `forbidden` if the caller doesn't hold
+ *      `staff.manage` at all.
+ *   2. Row lookup scoped to `(id, organizationId)` — `invalid_target` if
+ *      missing or belongs to another org.
+ *   3. Validate `publicDisplayOrder` is `null` or a non-negative integer ≤
+ *      2147483647 — `invalid_input` otherwise.
+ *   4. Update `publicDisplayOrder` only.
+ *
+ * NO `recordAudit()` CALL, unlike `setStaffPositionPublicListed()` — setting
+ * a display-order integer among people who are ALREADY public-listed changes
+ * nothing about who is visible or reachable to the internet; it is purely a
+ * presentation-order fact, the same "content configuration, not an
+ * identity/access/security-control change" shape DECISION-113 already uses
+ * to exempt `events.manage` mutations from Rule 7. Named explicitly so a
+ * future reader doesn't "fix" the apparent asymmetry with this function's
+ * `publicListed` sibling immediately above.
+ */
+export async function setStaffPositionPublicDisplayOrder(
+  viewerPersonId: string,
+  organizationId: string,
+  input: SetStaffPositionPublicDisplayOrderInput,
+): Promise<
+  StaffResult<{ positionId: string; publicDisplayOrder: number | null }>
+> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasStaffManage(tx, viewerPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    const [position] = await tx
+      .select({ id: staffPositions.id })
+      .from(staffPositions)
+      .where(
+        and(
+          eq(staffPositions.id, input.positionId),
+          eq(staffPositions.organizationId, organizationId),
+        ),
+      )
+      .limit(1);
+    if (!position) {
+      return { kind: "invalid_target" };
+    }
+
+    if (
+      input.publicDisplayOrder !== null &&
+      (!Number.isInteger(input.publicDisplayOrder) ||
+        input.publicDisplayOrder < 0 ||
+        input.publicDisplayOrder > MAX_PUBLIC_DISPLAY_ORDER)
+    ) {
+      return {
+        kind: "invalid_input",
+        message:
+          "Display order must be a whole number from 0 to 2147483647, or left blank.",
+      };
+    }
+
+    await tx
+      .update(staffPositions)
+      .set({ publicDisplayOrder: input.publicDisplayOrder })
+      .where(eq(staffPositions.id, input.positionId));
+
+    return {
+      kind: "ok",
+      data: {
+        positionId: input.positionId,
+        publicDisplayOrder: input.publicDisplayOrder,
+      },
+    };
+  });
 }

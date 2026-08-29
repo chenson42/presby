@@ -12,6 +12,7 @@ import type { OfficerRosterEntry } from "@/lib/officers";
 import { OFFICE_LABELS } from "./office-labels";
 import { EndTermDialog } from "./end-term-dialog";
 import { PublicListingToggle } from "./public-listing-toggle";
+import { DisplayOrderInput } from "./display-order-input";
 
 /**
  * "Who currently holds office" — a `Table`, not cards, per Phase 2/3's
@@ -44,6 +45,13 @@ import { PublicListingToggle } from "./public-listing-toggle";
  * Class year/District. Opting a term into the public directory is an
  * occasional, desk-adjacent action (Phase 1's own cadence), not a
  * look-up-on-the-go one.
+ *
+ * `Display order` (docs/work-log/2026-08-28-public-directory-primitives.md)
+ * joins the SAME below-`sm:` set for the identical reason — RE-VERIFIED IN A
+ * REAL BROWSER AT 390PX/360PX with this second new column added: at both
+ * widths, Office/Person/Since/Ends/"End term" still reach the visible
+ * viewport with no horizontal scroll, because both new columns are hidden
+ * below `sm:`, exactly as `Public listing` already was.
  *
  * Office and Person also wrap (rather than `TableCell`'s own default
  * `whitespace-nowrap`) below a max width on small screens ONLY — "Clerk of
@@ -88,6 +96,7 @@ export function OfficerRoster({
             <TableHead className="hidden sm:table-cell">District</TableHead>
           )}
           <TableHead className="hidden sm:table-cell">Public listing</TableHead>
+          <TableHead className="hidden sm:table-cell">Display order</TableHead>
           <TableHead className="sr-only">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -130,6 +139,14 @@ export function OfficerRoster({
                 officeLabel={OFFICE_LABELS[entry.office]}
                 personName={entry.displayName}
                 publicListed={entry.publicListed}
+              />
+            </TableCell>
+            <TableCell className="hidden sm:table-cell">
+              <DisplayOrderInput
+                slug={slug}
+                termId={entry.termId}
+                personName={entry.displayName}
+                publicDisplayOrder={entry.publicDisplayOrder}
               />
             </TableCell>
             <TableCell>

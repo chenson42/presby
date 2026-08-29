@@ -32,6 +32,22 @@ import { and, eq, sql } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
+// `recordAudit()` is mocked at the module boundary — same posture and same
+// reason `staff.test.ts`/`officers.test.ts` document: `@/lib/audit`
+// transitively imports `@/auth` (next-auth), which this test environment
+// cannot resolve. `setGroupMembershipPublicListed()` (docs/work-log/
+// 2026-08-28-public-directory-primitives.md) is the FIRST audited call this
+// module has ever had — every other describe block in this file never
+// touches an audited code path.
+const mockRecordAudit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/lib/audit", () => ({
+  AUDIT_ACTIONS: {
+    GROUP_MEMBERSHIP_LISTED_PUBLICLY: "group_membership.listed_publicly",
+    GROUP_MEMBERSHIP_UNLISTED_PUBLICLY: "group_membership.unlisted_publicly",
+  },
+  recordAudit: (...args: unknown[]) => mockRecordAudit(...args),
+}));
+
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
 );
@@ -45,6 +61,8 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
   let updateGroup: typeof import("./groups").updateGroup;
   let addGroupMember: typeof import("./groups").addGroupMember;
   let endGroupMembership: typeof import("./groups").endGroupMembership;
+  let setGroupMembershipPublicListed: typeof import("./groups").setGroupMembershipPublicListed;
+  let setGroupMembershipPublicDisplayOrder: typeof import("./groups").setGroupMembershipPublicDisplayOrder;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
@@ -92,6 +110,8 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       updateGroup,
       addGroupMember,
       endGroupMembership,
+      setGroupMembershipPublicListed,
+      setGroupMembershipPublicDisplayOrder,
     } = await import("./groups"));
     ({ getPlatformDb } = await import("@/lib/db"));
     ({ organizations } = await import("@/lib/db/domain/org"));
@@ -383,6 +403,26 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       });
       expect(result).toEqual({ kind: "forbidden" });
     });
+
+    it("setGroupMembershipPublicListed: forbidden for a person holding no groups.manage, and NO AUDIT FIRES", async () => {
+      mockRecordAudit.mockClear();
+      const result = await setGroupMembershipPublicListed(
+        narrowPerson,
+        orgA,
+        grantingUserId,
+        { groupMembershipId: randomUUID(), publicListed: true },
+      );
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("setGroupMembershipPublicDisplayOrder: forbidden for a person holding no groups.manage", async () => {
+      const result = await setGroupMembershipPublicDisplayOrder(narrowPerson, orgA, {
+        groupMembershipId: randomUUID(),
+        publicDisplayOrder: 1,
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+    });
   });
 
   // ---------------------------------------------------------------------
@@ -591,6 +631,89 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
         }
       }
     });
+
+    it("setGroupMembershipPublicListed: cannot list a derived (source='derived') group_memberships row publicly — invalid_target, NO AUDIT FIRES, and NOTHING is written (docs/work-log/2026-08-28-public-directory-primitives.md, Phase 1 Flow 2's load-bearing guard)", async () => {
+      const platform = getPlatformDb();
+      const [derivedRow] = await platform
+        .insert(groupMemberships)
+        .values({
+          organizationId: orgA,
+          groupId: sessionGroupA,
+          personId: targetPerson,
+          groupRole: "member",
+          source: "derived",
+          startsOn: "2020-01-01",
+        })
+        .returning({ id: groupMemberships.id });
+
+      try {
+        mockRecordAudit.mockClear();
+        const result = await setGroupMembershipPublicListed(
+          clerkPerson,
+          orgA,
+          grantingUserId,
+          { groupMembershipId: derivedRow!.id, publicListed: true },
+        );
+        expect(result).toEqual({ kind: "invalid_target" });
+        expect(mockRecordAudit).not.toHaveBeenCalled();
+
+        const [row] = await platform
+          .select({ publicListed: groupMemberships.publicListed })
+          .from(groupMemberships)
+          .where(eq(groupMemberships.id, derivedRow!.id))
+          .limit(1);
+        expect(row?.publicListed).toBe(false);
+      } finally {
+        await platform.execute(
+          sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+        );
+        try {
+          await platform
+            .delete(groupMemberships)
+            .where(eq(groupMemberships.id, derivedRow!.id));
+        } finally {
+          await platform.execute(
+            sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+          );
+        }
+      }
+    });
+
+    it("setGroupMembershipPublicDisplayOrder: cannot set a curation order on a derived group_memberships row — invalid_target", async () => {
+      const platform = getPlatformDb();
+      const [derivedRow] = await platform
+        .insert(groupMemberships)
+        .values({
+          organizationId: orgA,
+          groupId: sessionGroupA,
+          personId: targetPerson,
+          groupRole: "member",
+          source: "derived",
+          startsOn: "2020-01-01",
+        })
+        .returning({ id: groupMemberships.id });
+
+      try {
+        const result = await setGroupMembershipPublicDisplayOrder(clerkPerson, orgA, {
+          groupMembershipId: derivedRow!.id,
+          publicDisplayOrder: 1,
+        });
+        expect(result).toEqual({ kind: "invalid_target" });
+      } finally {
+        await platform.execute(
+          sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+        );
+        try {
+          await platform
+            .delete(groupMemberships)
+            .where(eq(groupMemberships.id, derivedRow!.id));
+        } finally {
+          await platform.execute(
+            sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+          );
+        }
+      }
+    });
   });
 
   // ---------------------------------------------------------------------
@@ -777,6 +900,256 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       expect(row).toBeDefined();
       expect(row?.endsOn).toBe("2026-08-01");
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // setGroupMembershipPublicListed / setGroupMembershipPublicDisplayOrder —
+  // public committee-directory primitives (docs/work-log/
+  // 2026-08-28-public-directory-primitives.md, Phase 3)
+  // ---------------------------------------------------------------------
+
+  describe("setGroupMembershipPublicListed", () => {
+    afterAll(() => {
+      mockRecordAudit.mockClear();
+    });
+
+    it("invalid_target for a groupMembershipId that doesn't exist", async () => {
+      const result = await setGroupMembershipPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { groupMembershipId: randomUUID(), publicListed: true },
+      );
+      expect(result).toEqual({ kind: "invalid_target" });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("invalid_target for a membership belonging to a DIFFERENT org", async () => {
+      const platform = getPlatformDb();
+      const [orgBGroup] = await platform
+        .insert(groups)
+        .values({
+          organizationId: orgB,
+          groupTypeId: committeeTypeId,
+          name: "Cross-Org Committee (fixture)",
+          membershipSource: "managed",
+          derivedFrom: null,
+          isProtected: false,
+        })
+        .returning({ id: groups.id });
+      const [crossOrgMembership] = await platform
+        .insert(groupMemberships)
+        .values({
+          organizationId: orgB,
+          groupId: orgBGroup!.id,
+          personId: outsidePerson,
+          groupRole: "member",
+          source: "managed",
+          startsOn: "2020-01-01",
+        })
+        .returning({ id: groupMemberships.id });
+
+      const result = await setGroupMembershipPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { groupMembershipId: crossOrgMembership!.id, publicListed: true },
+      );
+      expect(result).toEqual({ kind: "invalid_target" });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    // Explicit timeout: ~8 sequential real-Postgres round trips (add, ON
+    // toggle, read, OFF toggle, read, end) — this repo's own shared-dev-DB
+    // contention has been observed to push this past the default 5000ms.
+    it(
+      "ON: sets publicListed/publicListedBy/publicListedAt and records GROUP_MEMBERSHIP_LISTED_PUBLICLY, then OFF the same way",
+      async () => {
+      const added = await addGroupMember(clerkPerson, orgA, {
+        groupId: managedGroupA,
+        personId: targetPerson,
+        groupRole: "member",
+        startsOn: "2026-09-01",
+      });
+      expect(added.kind).toBe("ok");
+      if (added.kind !== "ok") return;
+
+      mockRecordAudit.mockClear();
+      const result = await setGroupMembershipPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { groupMembershipId: added.data.groupMembershipId, publicListed: true },
+      );
+      expect(result).toEqual({
+        kind: "ok",
+        data: {
+          groupMembershipId: added.data.groupMembershipId,
+          publicListed: true,
+        },
+      });
+      expect(mockRecordAudit).toHaveBeenCalledWith({
+        action: "group_membership.listed_publicly",
+        resourceType: "group_membership",
+        resourceId: added.data.groupMembershipId,
+        metadata: { organizationId: orgA, publicListed: true },
+      });
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select({
+          publicListed: groupMemberships.publicListed,
+          publicListedBy: groupMemberships.publicListedBy,
+          publicListedAt: groupMemberships.publicListedAt,
+        })
+        .from(groupMemberships)
+        .where(eq(groupMemberships.id, added.data.groupMembershipId));
+      expect(row?.publicListed).toBe(true);
+      expect(row?.publicListedBy).toBe(grantingUserId);
+      expect(row?.publicListedAt).not.toBeNull();
+
+      // OFF direction: every call writes publicListedBy/At — including
+      // turning it back off — never leaves a stale "last listed" trail
+      // (matching setStaffPositionPublicListed's own departure from
+      // recordedBy's "set once" precedent).
+      mockRecordAudit.mockClear();
+      const off = await setGroupMembershipPublicListed(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { groupMembershipId: added.data.groupMembershipId, publicListed: false },
+      );
+      expect(off).toEqual({
+        kind: "ok",
+        data: {
+          groupMembershipId: added.data.groupMembershipId,
+          publicListed: false,
+        },
+      });
+      expect(mockRecordAudit).toHaveBeenCalledWith({
+        action: "group_membership.unlisted_publicly",
+        resourceType: "group_membership",
+        resourceId: added.data.groupMembershipId,
+        metadata: { organizationId: orgA, publicListed: false },
+      });
+
+      const [offRow] = await platform
+        .select({ publicListed: groupMemberships.publicListed })
+        .from(groupMemberships)
+        .where(eq(groupMemberships.id, added.data.groupMembershipId));
+      expect(offRow?.publicListed).toBe(false);
+
+      // Clean up so later tests see a stable fixture (targetPerson holds no
+      // open managedGroupA row afterward) — matching the addGroupMember
+      // overlap regression's own "clean up" precedent.
+      await endGroupMembership(clerkPerson, orgA, {
+        groupMembershipId: added.data.groupMembershipId,
+        endsOn: "2026-09-02",
+      });
+      },
+      15000,
+    );
+  });
+
+  describe("setGroupMembershipPublicDisplayOrder", () => {
+    it("invalid_target for a groupMembershipId that doesn't exist", async () => {
+      const result = await setGroupMembershipPublicDisplayOrder(clerkPerson, orgA, {
+        groupMembershipId: randomUUID(),
+        publicDisplayOrder: 1,
+      });
+      expect(result).toEqual({ kind: "invalid_target" });
+    });
+
+    // Explicit timeout: this test makes ~10 sequential real-Postgres round
+    // trips (add, three invalid-input attempts, set, read, clear, read, end)
+    // — comfortably under the default 5000ms in isolation, but the combined
+    // margin has been observed to exceed it under this repo's own documented
+    // shared-dev-DB contention, not a regression this test introduces.
+    it(
+      "validates bounds, sets a valid integer, clears it back to null, and never calls recordAudit",
+      async () => {
+      // targetPerson's prior managedGroupA stint (setGroupMembershipPublic
+      // Listed's own ON/OFF test) was ended 2026-09-02 above — a fresh,
+      // non-overlapping stint here reuses the same, already-available
+      // fixture person rather than reaching for a dedicated one.
+      const added = await addGroupMember(clerkPerson, orgA, {
+        groupId: managedGroupA,
+        personId: targetPerson,
+        groupRole: "member",
+        startsOn: "2026-09-03",
+      });
+      expect(added.kind).toBe("ok");
+      if (added.kind !== "ok") return;
+
+      mockRecordAudit.mockClear();
+
+      const negative = await setGroupMembershipPublicDisplayOrder(clerkPerson, orgA, {
+        groupMembershipId: added.data.groupMembershipId,
+        publicDisplayOrder: -1,
+      });
+      expect(negative.kind).toBe("invalid_input");
+
+      const nonInteger = await setGroupMembershipPublicDisplayOrder(clerkPerson, orgA, {
+        groupMembershipId: added.data.groupMembershipId,
+        publicDisplayOrder: 1.5,
+      });
+      expect(nonInteger.kind).toBe("invalid_input");
+
+      const overflow = await setGroupMembershipPublicDisplayOrder(clerkPerson, orgA, {
+        groupMembershipId: added.data.groupMembershipId,
+        publicDisplayOrder: 2147483648,
+      });
+      expect(overflow.kind).toBe("invalid_input");
+
+      const set = await setGroupMembershipPublicDisplayOrder(clerkPerson, orgA, {
+        groupMembershipId: added.data.groupMembershipId,
+        publicDisplayOrder: 5,
+      });
+      expect(set).toEqual({
+        kind: "ok",
+        data: {
+          groupMembershipId: added.data.groupMembershipId,
+          publicDisplayOrder: 5,
+        },
+      });
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select({ publicDisplayOrder: groupMemberships.publicDisplayOrder })
+        .from(groupMemberships)
+        .where(eq(groupMemberships.id, added.data.groupMembershipId));
+      expect(row?.publicDisplayOrder).toBe(5);
+
+      const cleared = await setGroupMembershipPublicDisplayOrder(clerkPerson, orgA, {
+        groupMembershipId: added.data.groupMembershipId,
+        publicDisplayOrder: null,
+      });
+      expect(cleared).toEqual({
+        kind: "ok",
+        data: {
+          groupMembershipId: added.data.groupMembershipId,
+          publicDisplayOrder: null,
+        },
+      });
+
+      // None of the calls above — valid or invalid — ever call recordAudit:
+      // presentation-order only, not a disclosure fact (unlike this
+      // describe's setGroupMembershipPublicListed sibling above).
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+
+      const [clearedRow] = await platform
+        .select({ publicDisplayOrder: groupMemberships.publicDisplayOrder })
+        .from(groupMemberships)
+        .where(eq(groupMemberships.id, added.data.groupMembershipId));
+      expect(clearedRow?.publicDisplayOrder).toBeNull();
+
+      await endGroupMembership(clerkPerson, orgA, {
+        groupMembershipId: added.data.groupMembershipId,
+        endsOn: "2026-09-04",
+      });
+      },
+      20000,
+    );
   });
 
   // ---------------------------------------------------------------------

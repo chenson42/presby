@@ -59,6 +59,7 @@ describe.skipIf(!hasDb)("staff.ts (Postgres-backed, real dev database)", () => {
   let startStaffPosition: typeof import("./staff").startStaffPosition;
   let endStaffPosition: typeof import("./staff").endStaffPosition;
   let setStaffPositionPublicListed: typeof import("./staff").setStaffPositionPublicListed;
+  let setStaffPositionPublicDisplayOrder: typeof import("./staff").setStaffPositionPublicDisplayOrder;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
@@ -98,6 +99,7 @@ describe.skipIf(!hasDb)("staff.ts (Postgres-backed, real dev database)", () => {
       startStaffPosition,
       endStaffPosition,
       setStaffPositionPublicListed,
+      setStaffPositionPublicDisplayOrder,
     } = await import("./staff"));
     ({ getPlatformDb } = await import("@/lib/db"));
     ({ organizations } = await import("@/lib/db/domain/org"));
@@ -787,6 +789,163 @@ describe.skipIf(!hasDb)("staff.ts (Postgres-backed, real dev database)", () => {
         .from(staffPositions)
         .where(eq(staffPositions.id, started.data.positionId));
       expect(offRow?.publicListed).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // setStaffPositionPublicDisplayOrder — public-directory curation order
+  // (docs/work-log/2026-08-28-public-directory-primitives.md, Phase 3)
+  // ---------------------------------------------------------------------
+
+  describe("setStaffPositionPublicDisplayOrder", () => {
+    afterAll(() => {
+      mockRecordAudit.mockClear();
+    });
+
+    it("invalid_target for a positionId that doesn't exist", async () => {
+      const result = await setStaffPositionPublicDisplayOrder(
+        staffAdminPerson,
+        orgA,
+        { positionId: "00000000-0000-0000-0000-000000000000", publicDisplayOrder: 1 },
+      );
+      expect(result).toEqual({ kind: "invalid_target" });
+    });
+
+    it("invalid_target for a position belonging to a DIFFERENT org", async () => {
+      const platform = getPlatformDb();
+      const [crossOrgPosition] = await platform
+        .insert(staffPositions)
+        .values({
+          organizationId: orgB,
+          personId: outsidePerson,
+          position: `Cross-Org Display Order ${stamp}`,
+          positionKey: `cross-org display order ${stamp}`.toLowerCase(),
+          startsOn: "2020-01-01",
+          recordedBy: grantingUserId,
+        })
+        .returning({ id: staffPositions.id });
+
+      const result = await setStaffPositionPublicDisplayOrder(
+        staffAdminPerson,
+        orgA,
+        { positionId: crossOrgPosition!.id, publicDisplayOrder: 1 },
+      );
+      expect(result).toEqual({ kind: "invalid_target" });
+    });
+
+    it("forbidden for a person holding no staff.manage, and NOTHING is written", async () => {
+      const started = await startStaffPosition(staffAdminPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        position: `Display Order Forbidden Test ${stamp}`,
+        startsOn: "2020-01-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      const result = await setStaffPositionPublicDisplayOrder(narrowPerson, orgA, {
+        positionId: started.data.positionId,
+        publicDisplayOrder: 1,
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select({ publicDisplayOrder: staffPositions.publicDisplayOrder })
+        .from(staffPositions)
+        .where(eq(staffPositions.id, started.data.positionId));
+      expect(row?.publicDisplayOrder).toBeNull();
+    });
+
+    it("invalid_input for a negative value", async () => {
+      const started = await startStaffPosition(staffAdminPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        position: `Display Order Negative Test ${stamp}`,
+        startsOn: "2020-01-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      const result = await setStaffPositionPublicDisplayOrder(staffAdminPerson, orgA, {
+        positionId: started.data.positionId,
+        publicDisplayOrder: -1,
+      });
+      expect(result.kind).toBe("invalid_input");
+    });
+
+    it("invalid_input for a non-integer value", async () => {
+      const started = await startStaffPosition(staffAdminPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        position: `Display Order Fraction Test ${stamp}`,
+        startsOn: "2020-01-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      const result = await setStaffPositionPublicDisplayOrder(staffAdminPerson, orgA, {
+        positionId: started.data.positionId,
+        publicDisplayOrder: 1.5,
+      });
+      expect(result.kind).toBe("invalid_input");
+    });
+
+    it("invalid_input for a value beyond the int4 bound", async () => {
+      const started = await startStaffPosition(staffAdminPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        position: `Display Order Overflow Test ${stamp}`,
+        startsOn: "2020-01-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      const result = await setStaffPositionPublicDisplayOrder(staffAdminPerson, orgA, {
+        positionId: started.data.positionId,
+        publicDisplayOrder: 2147483648,
+      });
+      expect(result.kind).toBe("invalid_input");
+    });
+
+    it("sets a valid integer, clears it back to null with an explicit null, and never calls recordAudit", async () => {
+      const started = await startStaffPosition(staffAdminPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        position: `Display Order Happy Path ${stamp}`,
+        startsOn: "2020-01-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      mockRecordAudit.mockClear();
+      const set = await setStaffPositionPublicDisplayOrder(staffAdminPerson, orgA, {
+        positionId: started.data.positionId,
+        publicDisplayOrder: 3,
+      });
+      expect(set).toEqual({
+        kind: "ok",
+        data: { positionId: started.data.positionId, publicDisplayOrder: 3 },
+      });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select({ publicDisplayOrder: staffPositions.publicDisplayOrder })
+        .from(staffPositions)
+        .where(eq(staffPositions.id, started.data.positionId));
+      expect(row?.publicDisplayOrder).toBe(3);
+
+      const cleared = await setStaffPositionPublicDisplayOrder(staffAdminPerson, orgA, {
+        positionId: started.data.positionId,
+        publicDisplayOrder: null,
+      });
+      expect(cleared).toEqual({
+        kind: "ok",
+        data: { positionId: started.data.positionId, publicDisplayOrder: null },
+      });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+
+      const [clearedRow] = await platform
+        .select({ publicDisplayOrder: staffPositions.publicDisplayOrder })
+        .from(staffPositions)
+        .where(eq(staffPositions.id, started.data.positionId));
+      expect(clearedRow?.publicDisplayOrder).toBeNull();
     });
   });
 });

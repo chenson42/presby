@@ -47,11 +47,14 @@ vi.mock("@/lib/audit", () => ({
 const mockStartOfficerTerm = vi.hoisted(() => vi.fn());
 const mockEndOfficerTerm = vi.hoisted(() => vi.fn());
 const mockSetOfficerTermPublicListed = vi.hoisted(() => vi.fn());
+const mockSetOfficerTermPublicDisplayOrder = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/officers", () => ({
   startOfficerTerm: (...args: unknown[]) => mockStartOfficerTerm(...args),
   endOfficerTerm: (...args: unknown[]) => mockEndOfficerTerm(...args),
   setOfficerTermPublicListed: (...args: unknown[]) =>
     mockSetOfficerTermPublicListed(...args),
+  setOfficerTermPublicDisplayOrder: (...args: unknown[]) =>
+    mockSetOfficerTermPublicDisplayOrder(...args),
 }));
 
 const mockRevalidatePath = vi.hoisted(() => vi.fn());
@@ -62,6 +65,7 @@ vi.mock("next/cache", () => ({
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   endOfficerTermAction,
+  setOfficerTermPublicDisplayOrderAction,
   setOfficerTermPublicListedAction,
   startOfficerTermAction,
 } from "./actions";
@@ -467,6 +471,121 @@ describe("setOfficerTermPublicListedAction — OfficersResult → ActionResult m
     // fires it, per its own doc comment. This asserts the DIVERGENCE from
     // startOfficerTermAction/endOfficerTermAction's own recordAudit() call
     // sites above: THIS action calls no recordAudit() of its own.
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setOfficerTermPublicDisplayOrderAction — OfficersResult → ActionResult
+// mapping (docs/work-log/2026-08-28-public-directory-primitives.md, Phase 3)
+// ---------------------------------------------------------------------------
+
+describe("setOfficerTermPublicDisplayOrderAction — OfficersResult → ActionResult mapping", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue(SESSION);
+    mockResolveOrgContext.mockResolvedValue(RESOLVED_OK);
+  });
+
+  function displayOrderInput() {
+    return { termId: "term-1", publicDisplayOrder: 3 };
+  }
+
+  it("not signed in returns an error without calling setOfficerTermPublicDisplayOrder", async () => {
+    mockAuth.mockResolvedValueOnce(null);
+
+    const result = await setOfficerTermPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "You must be signed in to do that.",
+    });
+    expect(mockSetOfficerTermPublicDisplayOrder).not.toHaveBeenCalled();
+  });
+
+  it("passes resolved personId/organizationId (no actingUserId — this mutation takes none)", async () => {
+    mockSetOfficerTermPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "ok",
+      data: { termId: "term-1", publicDisplayOrder: 3 },
+    });
+
+    const input = displayOrderInput();
+    await setOfficerTermPublicDisplayOrderAction("alder-creek", input);
+
+    expect(mockSetOfficerTermPublicDisplayOrder).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      input,
+    );
+  });
+
+  it("forbidden → ok:false, no audit, no revalidate", async () => {
+    mockSetOfficerTermPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "forbidden",
+    });
+    const result = await setOfficerTermPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "You don't have permission to manage officer terms here.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("invalid_target → 'no longer exists'", async () => {
+    mockSetOfficerTermPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "invalid_target",
+    });
+    const result = await setOfficerTermPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "That officer term no longer exists.",
+    });
+  });
+
+  it("invalid_input → surfaces officers.ts's own message verbatim", async () => {
+    mockSetOfficerTermPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "invalid_input",
+      message: "Display order must be a whole number from 0 to 2147483647, or left blank.",
+    });
+    const result = await setOfficerTermPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "Display order must be a whole number from 0 to 2147483647, or left blank.",
+    });
+  });
+
+  it("ok → returns ok:true with termId/publicDisplayOrder, revalidates, and calls recordAudit ZERO times", async () => {
+    mockSetOfficerTermPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "ok",
+      data: { termId: "term-1", publicDisplayOrder: 3 },
+    });
+
+    const result = await setOfficerTermPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      data: { termId: "term-1", publicDisplayOrder: 3 },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(
+      "/o/alder-creek/admin/officers",
+    );
+    // Presentation-order only, not a disclosure fact — never audited at all,
+    // unlike this file's setOfficerTermPublicListedAction sibling.
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });

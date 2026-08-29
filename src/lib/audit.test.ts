@@ -186,6 +186,8 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   STAFF_POSITION_UNLISTED_PUBLICLY: "staff_position.unlisted_publicly",
   OFFICER_TERM_LISTED_PUBLICLY: "officer_term.listed_publicly",
   OFFICER_TERM_UNLISTED_PUBLICLY: "officer_term.unlisted_publicly",
+  GROUP_MEMBERSHIP_LISTED_PUBLICLY: "group_membership.listed_publicly",
+  GROUP_MEMBERSHIP_UNLISTED_PUBLICLY: "group_membership.unlisted_publicly",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

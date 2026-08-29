@@ -149,6 +149,10 @@ export interface OfficerRosterEntry {
   /** Public staff-directory opt-in (docs/work-log/
    * 2026-08-27-public-staff-directory.md) — additive field, same query. */
   publicListed: boolean;
+  /** Admin-set public-directory curation order (docs/work-log/
+   * 2026-08-28-public-directory-primitives.md) — additive field, same
+   * query. `null` = no curation set, alphabetical-by-name ordering. */
+  publicDisplayOrder: number | null;
 }
 
 export interface OfficerHistoryEntry {
@@ -190,6 +194,7 @@ interface RosterRow {
   org_unit_id: string | null;
   org_unit_name: string | null;
   public_listed: boolean;
+  public_display_order: number | null;
 }
 
 /**
@@ -237,7 +242,8 @@ export async function listOfficerRoster(
         roster.ends_on::text    as ends_on,
         ot.org_unit_id          as org_unit_id,
         ou.name                 as org_unit_name,
-        ot.public_listed        as public_listed
+        ot.public_listed        as public_listed,
+        ot.public_display_order as public_display_order
         from roster
         join people p on p.id = roster.person_id
         join officer_terms ot on ot.id = roster.term_id
@@ -257,6 +263,7 @@ export async function listOfficerRoster(
       orgUnitId: row.org_unit_id,
       orgUnitName: row.org_unit_name,
       publicListed: row.public_listed,
+      publicDisplayOrder: row.public_display_order,
     }));
 
     return { kind: "ok", data };
@@ -741,4 +748,100 @@ export async function setOfficerTermPublicListed(
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// setOfficerTermPublicDisplayOrder
+// ---------------------------------------------------------------------------
+
+export interface SetOfficerTermPublicDisplayOrderInput {
+  termId: string;
+  publicDisplayOrder: number | null;
+}
+
+/**
+ * The int4 bound `coalesce(public_display_order, MAX_INT), display_name`
+ * (`presby_public_staff_roster()`, `presby_public_committee_roster()`)
+ * depends on this never being a legitimate curated value.
+ */
+const MAX_PUBLIC_DISPLAY_ORDER = 2147483647;
+
+/**
+ * Admin-set public-directory curation input (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3 API Contract). A
+ * SEPARATE mutation from `setOfficerTermPublicListed()` above — same
+ * "omitted vs. cleared" ambiguity `setStaffPositionPublicDisplayOrder()`'s
+ * own doc comment names, avoided the identical way: a required (non-
+ * optional) `number | null` input, no third state to misinterpret.
+ *
+ * ORDER OF OPERATIONS, mirroring `setOfficerTermPublicListed()`'s shape
+ * MINUS the audit call:
+ *   1. `hasOfficersManage` gate — `forbidden` if the caller doesn't hold
+ *      `officers.manage` at all.
+ *   2. Row lookup scoped to `(id, organizationId)` — `invalid_target` if
+ *      missing or belongs to another org.
+ *   3. Validate `publicDisplayOrder` is `null` or a non-negative integer ≤
+ *      2147483647 — `invalid_input` otherwise.
+ *   4. Update `publicDisplayOrder` only.
+ *
+ * NO `recordAudit()` CALL, unlike `setOfficerTermPublicListed()` — setting a
+ * display-order integer among people who are ALREADY public-listed changes
+ * nothing about who is visible or reachable; it is purely a presentation-
+ * order fact, the same DECISION-113 "content configuration" shape this
+ * function's `staff.ts` sibling documents at length. Named explicitly so a
+ * future reader doesn't "fix" the apparent asymmetry with this function's
+ * `publicListed` sibling immediately above.
+ */
+export async function setOfficerTermPublicDisplayOrder(
+  viewerPersonId: string,
+  organizationId: string,
+  input: SetOfficerTermPublicDisplayOrderInput,
+): Promise<
+  OfficersResult<{ termId: string; publicDisplayOrder: number | null }>
+> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasOfficersManage(tx, viewerPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    const [term] = await tx
+      .select({ id: officerTerms.id })
+      .from(officerTerms)
+      .where(
+        and(
+          eq(officerTerms.id, input.termId),
+          eq(officerTerms.organizationId, organizationId),
+        ),
+      )
+      .limit(1);
+    if (!term) {
+      return { kind: "invalid_target" };
+    }
+
+    if (
+      input.publicDisplayOrder !== null &&
+      (!Number.isInteger(input.publicDisplayOrder) ||
+        input.publicDisplayOrder < 0 ||
+        input.publicDisplayOrder > MAX_PUBLIC_DISPLAY_ORDER)
+    ) {
+      return {
+        kind: "invalid_input",
+        message:
+          "Display order must be a whole number from 0 to 2147483647, or left blank.",
+      };
+    }
+
+    await tx
+      .update(officerTerms)
+      .set({ publicDisplayOrder: input.publicDisplayOrder })
+      .where(eq(officerTerms.id, input.termId));
+
+    return {
+      kind: "ok",
+      data: {
+        termId: input.termId,
+        publicDisplayOrder: input.publicDisplayOrder,
+      },
+    };
+  });
 }

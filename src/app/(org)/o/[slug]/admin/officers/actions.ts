@@ -6,10 +6,12 @@ import { resolveOrgContext } from "@/lib/authz";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import {
   endOfficerTerm,
+  setOfficerTermPublicDisplayOrder,
   setOfficerTermPublicListed,
   startOfficerTerm,
   type EndOfficerTermInput,
   type OfficerOffice,
+  type SetOfficerTermPublicDisplayOrderInput,
   type SetOfficerTermPublicListedInput,
   type StartOfficerTermInput,
 } from "@/lib/officers";
@@ -280,5 +282,60 @@ export async function setOfficerTermPublicListedAction(
   return {
     ok: true,
     data: { termId: result.data.termId, publicListed: result.data.publicListed },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// setOfficerTermPublicDisplayOrderAction
+// ---------------------------------------------------------------------------
+
+/**
+ * Public-directory display-order curation (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3). A SEPARATE action
+ * from `setOfficerTermPublicListedAction` above — see `src/lib/officers.ts`'s
+ * own doc comment on `setOfficerTermPublicDisplayOrder()` for why. This
+ * action calls no `recordAudit()` (matching the underlying mutation's own
+ * no-audit ruling — presentation-order only, not a disclosure fact).
+ */
+export async function setOfficerTermPublicDisplayOrderAction(
+  slug: string,
+  input: SetOfficerTermPublicDisplayOrderInput,
+): Promise<ActionResult<{ termId: string; publicDisplayOrder: number | null }>> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await setOfficerTermPublicDisplayOrder(
+    identity.personId,
+    identity.organizationId,
+    input,
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage officer terms here.",
+      };
+    case "invalid_target":
+      return { ok: false, error: "That officer term no longer exists." };
+    case "invalid_input":
+      return { ok: false, error: result.message };
+    case "overlap":
+      // Unreachable from setOfficerTermPublicDisplayOrder in practice — no
+      // insert happens on this path, so no exclusion constraint can fire.
+      // Handled for exhaustiveness, matching this file's other actions.
+      return { ok: false, error: "Couldn't save that — try again." };
+    case "ok":
+      break;
+  }
+
+  revalidatePath(`/o/${slug}/admin/officers`);
+
+  return {
+    ok: true,
+    data: {
+      termId: result.data.termId,
+      publicDisplayOrder: result.data.publicDisplayOrder,
+    },
   };
 }

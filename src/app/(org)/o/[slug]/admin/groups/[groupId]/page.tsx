@@ -26,6 +26,8 @@ import {
 import { GROUP_ROLE_LABELS } from "../group-type-labels";
 import { AddGroupMemberForm } from "../add-group-member-form";
 import { EndGroupMembershipDialog } from "../end-group-membership-dialog";
+import { PublicListingToggle } from "../public-listing-toggle";
+import { DisplayOrderInput } from "../display-order-input";
 
 const GROUPS_FLAG = "org_portal.groups";
 
@@ -53,6 +55,17 @@ const GROUPS_FLAG = "org_portal.groups";
  * currently active and can I end their membership right now" without
  * scrolling on a phone; Role/Since are still readable at `sm:` and above,
  * only deferred past the breakpoint.
+ *
+ * `Public listing`/`Display order` (docs/work-log/2026-08-28-public-
+ * directory-primitives.md, Phase 3/4) join the SAME below-`sm:` set, for the
+ * identical reason `staff-roster.tsx`/`officer-roster.tsx` already
+ * established for their own twin columns — VERIFIED IN A REAL BROWSER AT
+ * 390PX/360PX: Person/Ends/"End membership" still reach the visible
+ * viewport with no horizontal scroll with both new columns added, because
+ * both are hidden below `sm:` exactly like `Role`/`Since` above. Opting a
+ * committee member into the public directory (and curating their display
+ * order) is the same occasional, desk-adjacent cadence as ending a
+ * membership — not a look-up-on-the-go action.
  */
 export default async function GroupDetailPage({
   params,
@@ -172,6 +185,8 @@ export default async function GroupDetailPage({
                 <TableHead className="hidden sm:table-cell">Role</TableHead>
                 <TableHead className="hidden sm:table-cell">Since</TableHead>
                 <TableHead>Ends</TableHead>
+                <TableHead className="hidden sm:table-cell">Public listing</TableHead>
+                <TableHead className="hidden sm:table-cell">Display order</TableHead>
                 <TableHead className="sr-only">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -193,6 +208,25 @@ export default async function GroupDetailPage({
                     ) : (
                       "—"
                     )}
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">
+                    <PublicListingToggle
+                      slug={slug}
+                      groupId={groupId}
+                      groupMembershipId={entry.groupMembershipId}
+                      groupName={group.name}
+                      personName={entry.displayName}
+                      publicListed={entry.publicListed}
+                    />
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">
+                    <DisplayOrderInput
+                      slug={slug}
+                      groupId={groupId}
+                      groupMembershipId={entry.groupMembershipId}
+                      personName={entry.displayName}
+                      publicDisplayOrder={entry.publicDisplayOrder}
+                    />
                   </TableCell>
                   <TableCell>
                     {entry.endsOn === null && (

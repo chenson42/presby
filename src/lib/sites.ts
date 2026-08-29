@@ -112,6 +112,21 @@ import type { OfficerOffice } from "@/lib/officers";
  * means this function has no per-person miss case to protect, so "flag
  * off," "site not live," and "nobody opted in" all collapse to the SAME
  * `[]`, not a tagged result.
+ *
+ * COMMIT 6 ADDITION (docs/work-log/2026-08-28-public-directory-primitives.md
+ * Phase 3): `getPublicStaffRoster` widens in place with an optional second
+ * `filter` parameter (`kind`/`hasPriority` passed as SQL parameters to the
+ * widened `presby_public_staff_roster()`; `department`/`office` matched in
+ * TypeScript AFTER the SQL read, forced by DECISION-131's "office labels
+ * live in exactly one place, `OFFICE_LABELS`" ruling — see
+ * `normalizeFilterText()`'s own doc comment). Existing zero-arg call sites
+ * are unaffected. A SIBLING function, `getPublicCommitteeRoster`, is added
+ * alongside it — a SEPARATE `SECURITY DEFINER` read over `group_memberships`
+ * (a structurally different table), gated by its own new flag,
+ * `sites.public_committee_directory`, not a widening of the staff/officer
+ * union. Both functions' ENTIRE BODY is one `try { … } catch { return []; }`
+ * from day one, per the shipped precedent's own same-day Phase 6 bug-fix
+ * finding on `getPublicStaffRoster` — not rediscovered a second time here.
  */
 
 // ---------------------------------------------------------------------------
@@ -124,6 +139,19 @@ function isTypePairingKey(value: string): value is TypePairingKey {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Trim + lowercase normalization for a `liveSlot` marker's author-typed
+ * `department`/`office` filter value (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3 Design Decision 1) — the
+ * SAME normalization `staff_positions.position_key` already applies at write
+ * time (`src/lib/staff.ts`'s `startStaffPosition()`), applied here at the
+ * filter-match side instead, one call site for both fields rather than
+ * splitting free-text matching across two layers by field.
+ */
+function normalizeFilterText(value: string): string {
+  return value.trim().toLowerCase();
+}
 
 /**
  * Sets the org GUC on the RLS-enforced connection for the duration of one
@@ -1306,6 +1334,36 @@ export interface PublicStaffRosterEntry {
   photoKey: string | null;
 }
 
+/**
+ * Optional author-baked narrowing for a `staffDirectory` `liveSlot` marker
+ * (docs/work-log/2026-08-28-public-directory-primitives.md, Phase 3 Design
+ * Decision 1). Every field is optional and defensively narrowed — a
+ * `liveSlot`'s `props.filter` is untrusted JSON from a lower-trust,
+ * hand-authored content repo, never assumed present or well-typed. Per Phase
+ * 1 Ruling 1's redline, this shape is NEVER accepted from a visitor-facing
+ * HTTP request — it is resolved server-side, once, from parameters an
+ * author baked into a page at content-authoring time.
+ */
+export interface PublicStaffRosterFilter {
+  /** Restrict to just `staff_positions` rows ("staff") or just
+   * `officer_terms` rows ("officer"). Omit for the full flat union — today's
+   * default, unchanged behavior. */
+  kind?: "staff" | "officer";
+  /** `staff_positions.department`, case-insensitive/trim matched. A row
+   * with no department (or an officer row, which has none) never matches a
+   * non-empty value. */
+  department?: string;
+  /** `officer_terms.office`'s raw enum value OR its `OFFICE_LABELS` display
+   * string, case-insensitive/trim matched against EITHER. A staff row never
+   * matches. */
+  office?: string;
+  /** Only rows an admin has given an explicit `publicDisplayOrder` — the
+   * "hand-picked leadership" case. No separate `sort` key exists — ordering
+   * is always `coalesce(publicDisplayOrder, MAX), displayName`, so this
+   * filter alone yields a curated, ordered subset. */
+  hasPriority?: boolean;
+}
+
 interface PublicStaffRosterRow {
   kind: "staff" | "officer";
   role_raw: string;
@@ -1316,9 +1374,22 @@ interface PublicStaffRosterRow {
 
 /**
  * The anonymous public staff-directory read. `if (!isFlagEnabled(...))
- * return []` FIRST, then one call to `presby_public_staff_roster(text)`
- * (`SECURITY DEFINER`, drizzle/0041) — no membership, no org GUC, reading
- * through the plain `db` connection exactly like `getPublishedSite`.
+ * return []` FIRST, then one call to the widened `presby_public_staff_roster
+ * (text, text default null, boolean default null)` (`SECURITY DEFINER`,
+ * drizzle/0042) — no membership, no org GUC, reading through the plain `db`
+ * connection exactly like `getPublishedSite`.
+ *
+ * `filter?.kind`/`filter?.hasPriority` are passed as SQL PARAMETERS to the
+ * widened function — both are exact predicates against real, cheap columns,
+ * and `hasPriority` must interact with the SQL `ORDER BY` to be useful at
+ * all. `filter?.department`/`filter?.office` are matched HERE, in
+ * TypeScript, on the rows the SQL layer already returned — NOT a stylistic
+ * split, forced by DECISION-131's own ruling: office LABELS live in exactly
+ * one place, `OFFICE_LABELS` (TypeScript), and the SQL function must not grow
+ * a second copy of that map as a `CASE`. Filtering after ordering does not
+ * disturb the order — filtering removes rows, it doesn't reorder the
+ * survivors. See `normalizeFilterText()`'s own doc comment for the shared
+ * trim/lowercase normalization applied on both sides.
  *
  * Officer `role_raw` values map through `OFFICE_LABELS` (imported from
  * `@/lib/officers`) to their display label; staff `role_raw` is already a
@@ -1342,6 +1413,7 @@ interface PublicStaffRosterRow {
  */
 export async function getPublicStaffRoster(
   slug: string,
+  filter?: PublicStaffRosterFilter,
 ): Promise<PublicStaffRosterEntry[]> {
   // The ENTIRE BODY is one try { … } catch { return [] }, matching
   // getPublishedSiteBrand()'s own convention: a transient DB error must
@@ -1351,12 +1423,15 @@ export async function getPublicStaffRoster(
   // page for that org. Phase 1 (docs/work-log/2026-08-27-public-staff-
   // directory.md) named this exact decision as one that had to be made
   // explicitly and it shipped unmade — closed same-day as a Phase 6 bug-fix
-  // addendum once found.
+  // addendum once found. Confirmed still intact after the Phase 3
+  // 2026-08-28 filter widening.
   try {
     if (!(await isFlagEnabled("sites.public_staff_directory"))) return [];
 
     const result = await db.execute(
-      sql`select * from presby_public_staff_roster(${slug})`,
+      sql`select * from presby_public_staff_roster(
+        ${slug}, ${filter?.kind ?? null}, ${filter?.hasPriority ?? null}
+      )`,
     );
     const rows =
       (result as unknown as { rows?: PublicStaffRosterRow[] }).rows ?? [];
@@ -1364,13 +1439,130 @@ export async function getPublicStaffRoster(
 
     const { OFFICE_LABELS } = await import("@/lib/officers");
 
-    return rows.map((row) => ({
+    // department/office matching — TypeScript layer, after the SQL read.
+    // See this function's own doc comment for why this split is forced
+    // (DECISION-131), not stylistic.
+    const departmentNeedle =
+      filter?.department !== undefined
+        ? normalizeFilterText(filter.department)
+        : null;
+    const officeNeedle =
+      filter?.office !== undefined ? normalizeFilterText(filter.office) : null;
+
+    const filteredRows = rows.filter((row) => {
+      if (departmentNeedle !== null) {
+        if (row.department === null) return false;
+        if (normalizeFilterText(row.department) !== departmentNeedle) {
+          return false;
+        }
+      }
+      if (officeNeedle !== null) {
+        // A staff row's role_raw/department is never the same string as an
+        // office needle by construction — this branch excludes it anyway,
+        // explicitly, rather than relying on that coincidence.
+        if (row.kind !== "officer") return false;
+        const label = OFFICE_LABELS[row.role_raw as OfficerOffice];
+        const matchesRaw = normalizeFilterText(row.role_raw) === officeNeedle;
+        const matchesLabel =
+          label !== undefined && normalizeFilterText(label) === officeNeedle;
+        if (!matchesRaw && !matchesLabel) return false;
+      }
+      return true;
+    });
+
+    return filteredRows.map((row) => ({
       displayName: row.display_name,
       roleLabel:
         row.kind === "officer"
           ? (OFFICE_LABELS[row.role_raw as OfficerOffice] ?? row.role_raw)
           : row.role_raw,
       department: row.department,
+      photoKey: row.photo_key,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public committee directory — anonymous read, no membership, server-only,
+// never getPlatformDb() (docs/work-log/
+// 2026-08-28-public-directory-primitives.md, Phase 3 "API Contract"). A
+// SIBLING to getPublicStaffRoster above, not a widening of it — committees
+// are a structurally different read over group_memberships/groups, gated by
+// their own flag.
+// ---------------------------------------------------------------------------
+
+export interface PublicCommitteeRosterFilter {
+  /** `groups.name`, case-insensitive/trim matched. Omit to get every
+   * currently-public committee in one flat list, each row tagged with its
+   * own `groupName`. */
+  committee?: string;
+  hasPriority?: boolean;
+}
+
+/** `groupName` (text), never `groupId` — no id is ever exposed in this
+ * anonymous projection (docs/work-log/2026-08-28-public-directory-
+ * primitives.md, Phase 3 Design Decision 2). Two managed committees sharing
+ * an identical name is an accepted, named edge case (they merge under one
+ * heading on an all-committees page) — a data-quality question, not a
+ * security one. */
+export interface PublicCommitteeRosterEntry {
+  groupName: string;
+  groupRole: "chair" | "leader" | "member";
+  displayName: string;
+  photoKey: string | null;
+}
+
+interface PublicCommitteeRosterRow {
+  group_name: string;
+  group_role: "chair" | "leader" | "member";
+  display_name: string;
+  photo_key: string | null;
+}
+
+/**
+ * The anonymous public committee-directory read, backing the
+ * `committeeDirectory` `liveSlot`. `if (!isFlagEnabled(
+ * "sites.public_committee_directory")) return []` FIRST — a SEPARATE flag
+ * from `sites.public_staff_directory` (Phase 3's own ruling: a different
+ * rollout concern, an org may want the staff/officer roster live before or
+ * independent of committee rosters) — then one call to
+ * `presby_public_committee_roster(text, text default null, boolean default
+ * null)` (`SECURITY DEFINER`, drizzle/0042).
+ *
+ * `filter?.committee`/`filter?.hasPriority` BOTH stay in SQL, unlike
+ * `getPublicStaffRoster`'s `office` split — `group_role`'s three values
+ * (`chair`/`leader`/`member`) are a fixed, closed enum with no separate
+ * label-mapping table anywhere (`GROUP_ROLES` in `@/lib/groups` is already
+ * the raw wire value), so there is no DECISION-131-shaped reason to push
+ * `committee`-name matching into TypeScript. No further TypeScript-layer
+ * filtering is needed at all here.
+ *
+ * ENTIRE BODY is one `try { … } catch { return []; }`, from day one — the
+ * shipped precedent's own same-day Phase 6 bug-fix on `getPublicStaffRoster`
+ * (per Phase 1/2's explicit flag on this pipeline) must not be rediscovered
+ * a second time.
+ */
+export async function getPublicCommitteeRoster(
+  slug: string,
+  filter?: PublicCommitteeRosterFilter,
+): Promise<PublicCommitteeRosterEntry[]> {
+  try {
+    if (!(await isFlagEnabled("sites.public_committee_directory"))) return [];
+
+    const result = await db.execute(
+      sql`select * from presby_public_committee_roster(
+        ${slug}, ${filter?.committee ?? null}, ${filter?.hasPriority ?? null}
+      )`,
+    );
+    const rows =
+      (result as unknown as { rows?: PublicCommitteeRosterRow[] }).rows ?? [];
+
+    return rows.map((row) => ({
+      groupName: row.group_name,
+      groupRole: row.group_role,
+      displayName: row.display_name,
       photoKey: row.photo_key,
     }));
   } catch {

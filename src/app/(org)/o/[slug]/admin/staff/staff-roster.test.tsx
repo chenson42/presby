@@ -51,6 +51,7 @@ const OPEN_ENTRY: StaffPositionEntry = {
   endsOn: null,
   minuteReference: null,
   publicListed: false,
+  publicDisplayOrder: null,
 };
 
 const ENDED_ENTRY: StaffPositionEntry = {
@@ -63,6 +64,7 @@ const ENDED_ENTRY: StaffPositionEntry = {
   endsOn: "2025-12-31",
   minuteReference: null,
   publicListed: false,
+  publicDisplayOrder: null,
 };
 
 const PUBLIC_ENTRY: StaffPositionEntry = {
@@ -75,6 +77,7 @@ const PUBLIC_ENTRY: StaffPositionEntry = {
   endsOn: null,
   minuteReference: null,
   publicListed: true,
+  publicDisplayOrder: null,
 };
 
 describe("StaffRoster — empty state", () => {

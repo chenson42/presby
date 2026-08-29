@@ -67,6 +67,7 @@ describe.skipIf(!hasDb)(
     let createStaffPersonAction: typeof import("./actions").createStaffPersonAction;
     let startStaffPositionAction: typeof import("./actions").startStaffPositionAction;
     let setStaffPositionPublicListedAction: typeof import("./actions").setStaffPositionPublicListedAction;
+    let setStaffPositionPublicDisplayOrderAction: typeof import("./actions").setStaffPositionPublicDisplayOrderAction;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
@@ -95,6 +96,7 @@ describe.skipIf(!hasDb)(
         createStaffPersonAction,
         startStaffPositionAction,
         setStaffPositionPublicListedAction,
+        setStaffPositionPublicDisplayOrderAction,
       } = await import("./actions"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
@@ -440,6 +442,97 @@ describe.skipIf(!hasDb)(
         expect(result).toEqual({
           ok: false,
           error: "That staff position no longer exists.",
+        });
+      });
+    });
+
+    // -----------------------------------------------------------------
+    // setStaffPositionPublicDisplayOrderAction (docs/work-log/
+    // 2026-08-28-public-directory-primitives.md, Phase 3) — real Postgres,
+    // exercising the actual staff.manage gate and the real
+    // setStaffPositionPublicDisplayOrder() mutation. staff.test.ts's own
+    // describe block owns exhaustive coverage of the mutation itself; this
+    // pins the action-layer wiring only.
+    // -----------------------------------------------------------------
+
+    describe("setStaffPositionPublicDisplayOrderAction", () => {
+      it("forbidden for a session holding people.manage ONLY (no staff.manage)", async () => {
+        sessionFor(peopleManageOnlyPerson);
+
+        const result = await setStaffPositionPublicDisplayOrderAction(SLUG, {
+          positionId: "00000000-0000-0000-0000-000000000000",
+          publicDisplayOrder: 1,
+        });
+
+        expect(result).toEqual({
+          ok: false,
+          error: "You don't have permission to manage staff here.",
+        });
+      });
+
+      it("invalid_target for a positionId that doesn't exist", async () => {
+        sessionFor(bothPermissionsPerson);
+
+        const result = await setStaffPositionPublicDisplayOrderAction(SLUG, {
+          positionId: "00000000-0000-0000-0000-000000000000",
+          publicDisplayOrder: 1,
+        });
+
+        expect(result).toEqual({
+          ok: false,
+          error: "That staff position no longer exists.",
+        });
+      });
+
+      it("invalid_input for an out-of-bounds value, surfaced verbatim", async () => {
+        sessionFor(bothPermissionsPerson);
+        const started = await startStaffPositionAction(SLUG, {
+          personId: bothPermissionsPerson,
+          position: `Display Order Action Test ${stamp}`,
+          startsOn: "2020-01-01",
+        });
+        expect(started.ok).toBe(true);
+        if (!started.ok || !started.data) return;
+
+        sessionFor(bothPermissionsPerson);
+        const result = await setStaffPositionPublicDisplayOrderAction(SLUG, {
+          positionId: started.data.positionId,
+          publicDisplayOrder: -1,
+        });
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        expect(result.error).toMatch(/whole number/);
+      });
+
+      it("happy path: sets a value, then clears it back to null, for a real position", async () => {
+        sessionFor(bothPermissionsPerson);
+        const started = await startStaffPositionAction(SLUG, {
+          personId: bothPermissionsPerson,
+          position: `Display Order Action Happy Path ${stamp}`,
+          startsOn: "2020-01-02",
+        });
+        expect(started.ok).toBe(true);
+        if (!started.ok || !started.data) return;
+        const positionId = started.data.positionId;
+
+        sessionFor(bothPermissionsPerson);
+        const setResult = await setStaffPositionPublicDisplayOrderAction(SLUG, {
+          positionId,
+          publicDisplayOrder: 4,
+        });
+        expect(setResult).toEqual({
+          ok: true,
+          data: { positionId, publicDisplayOrder: 4 },
+        });
+
+        sessionFor(bothPermissionsPerson);
+        const clearResult = await setStaffPositionPublicDisplayOrderAction(SLUG, {
+          positionId,
+          publicDisplayOrder: null,
+        });
+        expect(clearResult).toEqual({
+          ok: true,
+          data: { positionId, publicDisplayOrder: null },
         });
       });
     });

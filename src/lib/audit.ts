@@ -278,6 +278,20 @@ export const AUDIT_ACTIONS = {
   STAFF_POSITION_UNLISTED_PUBLICLY: "staff_position.unlisted_publicly",
   OFFICER_TERM_LISTED_PUBLICLY: "officer_term.listed_publicly",
   OFFICER_TERM_UNLISTED_PUBLICLY: "officer_term.unlisted_publicly",
+  // Public directory primitives — committees (docs/work-log/
+  // 2026-08-28-public-directory-primitives.md, Phase 1 Ruling 4 / Phase 3) —
+  // written from src/lib/groups.ts's setGroupMembershipPublicListed(), NOT
+  // from admin/groups/actions.ts (a deliberate divergence from that file's
+  // own "actions.ts calls recordAudit()" convention for its other four
+  // mutations — see setGroupMembershipPublicListed()'s own header comment).
+  // Same reasoning as STAFF_POSITION_LISTED_PUBLICLY/OFFICER_TERM_LISTED_
+  // PUBLICLY above: not an access-change fact (DECISION-129's test doesn't
+  // transfer), but a DISCLOSURE fact Rule 7 covers by spirit — the bit
+  // exposes a committee member's name/role/photo to the entire
+  // unauthenticated internet. On/off-pair shape, same as its two siblings.
+  // Metadata: { organizationId, publicListed }.
+  GROUP_MEMBERSHIP_LISTED_PUBLICLY: "group_membership.listed_publicly",
+  GROUP_MEMBERSHIP_UNLISTED_PUBLICLY: "group_membership.unlisted_publicly",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

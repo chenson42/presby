@@ -4,6 +4,7 @@ import {
   uuid,
   date,
   boolean,
+  integer,
   timestamp,
   index,
   unique,
@@ -13,6 +14,7 @@ import {
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
 import { memberships } from "./people";
+import { users } from "../schema";
 
 /**
  * Groups. See docs/schema-design.md section F.
@@ -117,6 +119,26 @@ export const groupMemberships = pgTable(
     membershipId: uuid("membership_id"),
     startsOn: date("starts_on").notNull().defaultNow(),
     endsOn: date("ends_on"),
+    // Public directory primitives (docs/work-log/
+    // 2026-08-28-public-directory-primitives.md, Phase 4 step 1). Per-
+    // membership opt-in, matching the staff/officer precedent's own
+    // reasoning exactly (Phase 1 Ruling 3): a groups-level bit would make
+    // every current AND future committee member implicitly public with no
+    // individual act of consent. setGroupMembershipPublicListed() must
+    // refuse to touch a row belonging to a `derived` group (source column
+    // above) — a Session/Diaconate roster row must never become
+    // independently publicly-listable through this mutation; that is
+    // covered by officer_terms.publicListed instead. publicListedBy/
+    // publicListedAt are set on every call in both directions, matching
+    // staffPositions/officerTerms's own departure from recordedBy's
+    // set-once-at-creation precedent (DECISION-131) — turning listing off
+    // is itself an attributable, timestamped act.
+    publicListed: boolean("public_listed").notNull().default(false),
+    publicListedBy: uuid("public_listed_by").references(() => users.id),
+    publicListedAt: timestamp("public_listed_at", { withTimezone: true }),
+    // Admin-set, nullable curation input — identical shape and rationale to
+    // staffPositions.publicDisplayOrder/officerTerms.publicDisplayOrder.
+    publicDisplayOrder: integer("public_display_order"),
   },
   (t) => [
     index("group_memberships_org_group_idx").on(

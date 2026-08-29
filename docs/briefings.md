@@ -24,6 +24,8 @@ entries — that is the one piece of discipline this file needs, and it is check
 
 ## 2026-08-28
 
+- [ ] **`decision` · The public "who serves here" page from earlier today can now show a curated leadership page and separate committee pages, not just one flat list of everyone.** A website builder can now ask for exactly the people they want — by department, by office, or a hand-picked leadership group shown in whatever order you set — instead of only ever getting an alphabetical list of the whole staff. Committee membership can now be listed publicly too, the same one-person-at-a-time, off-by-default way staff and officer listings already work, with its own separate on/off switch so you can turn on committee listings independently of the staff directory. **Tried on fpcw's real site and found a real gap, not a code problem**: the mechanism works end-to-end (verified live with test data), but fpcw doesn't actually have its real staff or committee roster entered into the admin tools yet, so there's nothing real to show on the live site until that data entry happens — the existing hand-written committees page was deliberately left alone rather than replaced with an empty section. **A genuine architectural correction happened mid-build**: the first design for "let one webpage section show a different filtered list each time it's used" turned out to have a real flaw (two different filtered sections on the same page could get confused with each other) — caught and redesigned before anything shipped, not discovered after the fact.
+
 - [ ] **`decision` · A public "who serves here" page is now possible on a
   congregation's or presbytery's public website, pulling directly from the
   same staff and officer records the admin tools already keep — no more

@@ -61,6 +61,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
   let startOfficerTerm: typeof import("./officers").startOfficerTerm;
   let endOfficerTerm: typeof import("./officers").endOfficerTerm;
   let setOfficerTermPublicListed: typeof import("./officers").setOfficerTermPublicListed;
+  let setOfficerTermPublicDisplayOrder: typeof import("./officers").setOfficerTermPublicDisplayOrder;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let orgUnits: typeof import("@/lib/db/domain/org").orgUnits;
@@ -105,6 +106,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       startOfficerTerm,
       endOfficerTerm,
       setOfficerTermPublicListed,
+      setOfficerTermPublicDisplayOrder,
     } = await import("./officers"));
     ({ getPlatformDb } = await import("@/lib/db"));
     ({ organizations, orgUnits } = await import("@/lib/db/domain/org"));
@@ -888,5 +890,169 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
         .where(eq(officerTerms.id, started.data.termId));
       expect(offRow?.publicListed).toBe(false);
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // setOfficerTermPublicDisplayOrder — public-directory curation order
+  // (docs/work-log/2026-08-28-public-directory-primitives.md, Phase 3)
+  // ---------------------------------------------------------------------
+
+  describe("setOfficerTermPublicDisplayOrder", () => {
+    afterAll(() => {
+      mockRecordAudit.mockClear();
+    });
+
+    it("invalid_target for a termId that doesn't exist", async () => {
+      const result = await setOfficerTermPublicDisplayOrder(clerkPerson, orgA, {
+        termId: randomUUID(),
+        publicDisplayOrder: 1,
+      });
+      expect(result).toEqual({ kind: "invalid_target" });
+    });
+
+    it("invalid_target for a term belonging to a DIFFERENT org", async () => {
+      // A distinct office/date pair from every other cross-org fixture this
+      // file inserts directly (setOfficerTermPublicListed's own cross-org
+      // test above already occupies trustee/2020-01-01 for orgB/
+      // outsidePerson and is never ended) — colliding with that row would
+      // trip officer_terms_no_overlap, an unrelated false failure.
+      const platform = getPlatformDb();
+      const [crossOrgTerm] = await platform
+        .insert(officerTerms)
+        .values({
+          organizationId: orgB,
+          personId: outsidePerson,
+          office: "moderator",
+          startsOn: "2019-01-01",
+          recordedBy: grantingUserId,
+        })
+        .returning({ id: officerTerms.id });
+
+      const result = await setOfficerTermPublicDisplayOrder(clerkPerson, orgA, {
+        termId: crossOrgTerm!.id,
+        publicDisplayOrder: 1,
+      });
+      expect(result).toEqual({ kind: "invalid_target" });
+    });
+
+    // Every test below uses targetPerson/clerk_of_session at a dedicated,
+    // sequentially-increasing 2030+ date range unused anywhere else in this
+    // file, ending each term immediately after use (mirroring
+    // groups.test.ts's identical fix for the same officer_terms_no_overlap/
+    // group_memberships-overlap hazard) — targetPerson already holds several
+    // OTHER open/ended terms across this file's other describe blocks, so
+    // reusing office/date pairs those use would collide.
+
+    it("forbidden for a person holding no officers.manage, and NOTHING is written", async () => {
+      const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        office: "clerk_of_session",
+        startsOn: "2030-01-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      const result = await setOfficerTermPublicDisplayOrder(narrowPerson, orgA, {
+        termId: started.data.termId,
+        publicDisplayOrder: 1,
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select({ publicDisplayOrder: officerTerms.publicDisplayOrder })
+        .from(officerTerms)
+        .where(eq(officerTerms.id, started.data.termId));
+      expect(row?.publicDisplayOrder).toBeNull();
+
+      await endOfficerTerm(clerkPerson, orgA, {
+        termId: started.data.termId,
+        endsOn: "2030-01-02",
+        endReason: "resigned",
+      });
+    });
+
+    // Explicit timeout: this test makes ~10 sequential real-Postgres round
+    // trips (start, three invalid-input attempts, set, read, clear, read,
+    // end) — comfortably under the default 5000ms in isolation, but the
+    // combined margin has been observed to exceed it under this repo's own
+    // documented shared-dev-DB contention (docs/TODO.md's ongoing
+    // concurrent-pipeline latency-variance entries), not a regression this
+    // test introduces.
+    it(
+      "validates bounds, sets a valid integer, clears it back to null, and never calls recordAudit",
+      async () => {
+      const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        office: "clerk_of_session",
+        startsOn: "2030-02-01",
+      });
+      expect(started.kind).toBe("ok");
+      if (started.kind !== "ok") return;
+
+      mockRecordAudit.mockClear();
+
+      const negative = await setOfficerTermPublicDisplayOrder(clerkPerson, orgA, {
+        termId: started.data.termId,
+        publicDisplayOrder: -1,
+      });
+      expect(negative.kind).toBe("invalid_input");
+
+      const nonInteger = await setOfficerTermPublicDisplayOrder(clerkPerson, orgA, {
+        termId: started.data.termId,
+        publicDisplayOrder: 1.5,
+      });
+      expect(nonInteger.kind).toBe("invalid_input");
+
+      const overflow = await setOfficerTermPublicDisplayOrder(clerkPerson, orgA, {
+        termId: started.data.termId,
+        publicDisplayOrder: 2147483648,
+      });
+      expect(overflow.kind).toBe("invalid_input");
+
+      const set = await setOfficerTermPublicDisplayOrder(clerkPerson, orgA, {
+        termId: started.data.termId,
+        publicDisplayOrder: 2,
+      });
+      expect(set).toEqual({
+        kind: "ok",
+        data: { termId: started.data.termId, publicDisplayOrder: 2 },
+      });
+
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .select({ publicDisplayOrder: officerTerms.publicDisplayOrder })
+        .from(officerTerms)
+        .where(eq(officerTerms.id, started.data.termId));
+      expect(row?.publicDisplayOrder).toBe(2);
+
+      const cleared = await setOfficerTermPublicDisplayOrder(clerkPerson, orgA, {
+        termId: started.data.termId,
+        publicDisplayOrder: null,
+      });
+      expect(cleared).toEqual({
+        kind: "ok",
+        data: { termId: started.data.termId, publicDisplayOrder: null },
+      });
+
+      // None of the calls above — valid or invalid — ever call recordAudit:
+      // presentation-order only, not a disclosure fact (unlike this
+      // describe's setOfficerTermPublicListed sibling above).
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+
+      const [clearedRow] = await platform
+        .select({ publicDisplayOrder: officerTerms.publicDisplayOrder })
+        .from(officerTerms)
+        .where(eq(officerTerms.id, started.data.termId));
+      expect(clearedRow?.publicDisplayOrder).toBeNull();
+
+      await endOfficerTerm(clerkPerson, orgA, {
+        termId: started.data.termId,
+        endsOn: "2030-02-02",
+        endReason: "resigned",
+      });
+      },
+      20000,
+    );
   });
 });

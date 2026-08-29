@@ -5,9 +5,11 @@ import { auth } from "@/auth";
 import { hasPermission, resolveOrgContext } from "@/lib/authz";
 import {
   endStaffPosition,
+  setStaffPositionPublicDisplayOrder,
   setStaffPositionPublicListed,
   startStaffPosition,
   type EndStaffPositionInput,
+  type SetStaffPositionPublicDisplayOrderInput,
   type SetStaffPositionPublicListedInput,
   type StartStaffPositionInput,
 } from "@/lib/staff";
@@ -342,5 +344,62 @@ export async function setStaffPositionPublicListedAction(
   return {
     ok: true,
     data: { positionId: result.data.positionId, publicListed: result.data.publicListed },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// setStaffPositionPublicDisplayOrderAction
+// ---------------------------------------------------------------------------
+
+/**
+ * Public-directory display-order curation (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3). A SEPARATE action
+ * from `setStaffPositionPublicListedAction` above — see `src/lib/staff.ts`'s
+ * own doc comment on `setStaffPositionPublicDisplayOrder()` for why. This
+ * action calls no `recordAudit()` (matching the underlying mutation's own
+ * no-audit ruling — presentation-order only, not a disclosure fact).
+ */
+export async function setStaffPositionPublicDisplayOrderAction(
+  slug: string,
+  input: SetStaffPositionPublicDisplayOrderInput,
+): Promise<
+  ActionResult<{ positionId: string; publicDisplayOrder: number | null }>
+> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await setStaffPositionPublicDisplayOrder(
+    identity.personId,
+    identity.organizationId,
+    input,
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage staff here.",
+      };
+    case "invalid_target":
+      return { ok: false, error: "That staff position no longer exists." };
+    case "invalid_input":
+      return { ok: false, error: result.message };
+    case "overlap":
+      // Unreachable from setStaffPositionPublicDisplayOrder in practice — no
+      // insert happens on this path, so no exclusion constraint can fire.
+      // Handled for exhaustiveness, matching this file's other actions.
+      return { ok: false, error: "Couldn't save that — try again." };
+    case "ok":
+      break;
+  }
+
+  revalidatePath(`/o/${slug}/admin/staff`);
+
+  return {
+    ok: true,
+    data: {
+      positionId: result.data.positionId,
+      publicDisplayOrder: result.data.publicDisplayOrder,
+    },
   };
 }

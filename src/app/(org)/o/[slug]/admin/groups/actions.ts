@@ -8,10 +8,14 @@ import {
   addGroupMember,
   createGroup,
   endGroupMembership,
+  setGroupMembershipPublicDisplayOrder,
+  setGroupMembershipPublicListed,
   updateGroup,
   type AddGroupMemberInput,
   type CreateGroupInput,
   type EndGroupMembershipInput,
+  type SetGroupMembershipPublicDisplayOrderInput,
+  type SetGroupMembershipPublicListedInput,
   type UpdateGroupInput,
 } from "@/lib/groups";
 import type { ActionResult } from "@/types/actions";
@@ -36,10 +40,26 @@ import type { ActionResult } from "@/types/actions";
  * USES `auth()` DIRECTLY, NOT `cachedAuth()` — server actions are each a
  * separate invocation, so `cache()` is a no-op; same convention every other
  * `actions.ts` in this tree follows.
+ *
+ * `setGroupMembershipPublicListedAction`/
+ * `setGroupMembershipPublicDisplayOrderAction` (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md) are DELIBERATE DIVERGENCES from
+ * this file's own "actions.ts calls recordAudit()" convention above — for
+ * the FIRST of those two, `recordAudit()` is called from INSIDE
+ * `src/lib/groups.ts`'s `setGroupMembershipPublicListed()` instead, per that
+ * work-log's explicit Phase 3 instruction (matching
+ * `setStaffPositionPublicListedAction`/`setOfficerTermPublicListedAction`'s
+ * own identical divergence in their own files); the second is never audited
+ * at all. Neither action calls `recordAudit()` itself. `resolveActingIdentity`
+ * below now also resolves `userId` (a `users.id`, from `session.user.id`) —
+ * needed as `setGroupMembershipPublicListed`'s `actingUserId` parameter,
+ * matching `admin/staff/actions.ts`'s/`admin/officers/actions.ts`'s own
+ * identical shape; every pre-existing caller in this file ignores the new
+ * field.
  */
 
 async function resolveActingIdentity(slug: string): Promise<
-  | { ok: true; personId: string; organizationId: string }
+  | { ok: true; userId: string; personId: string; organizationId: string }
   | { ok: false; error: string }
 > {
   const session = await auth();
@@ -57,6 +77,7 @@ async function resolveActingIdentity(slug: string): Promise<
 
   return {
     ok: true,
+    userId: session.user.id,
     personId: resolved.org.personId,
     organizationId: resolved.org.organizationId,
   };
@@ -304,5 +325,142 @@ export async function endGroupMembershipAction(
   return {
     ok: true,
     data: { groupMembershipId: result.data.groupMembershipId },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// setGroupMembershipPublicListedAction
+// ---------------------------------------------------------------------------
+
+/**
+ * Public committee-directory opt-in/opt-out (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3). All SQL correctness
+ * (the `groups.manage` gate, the re-load-scoped-to-`managed`-before-mutate
+ * derived-group guard, the `recordAudit()` call) lives in and is proven by
+ * `src/lib/groups.ts`/`groups.test.ts` — this action's only job is the
+ * auth-in-the-action-body plumbing and the error->copy mapping. `groupId` is
+ * caller-supplied (the group detail page, which already fetched `getGroup()`
+ * to render the row being toggled) purely for `revalidatePath` — mirroring
+ * `endGroupMembershipAction`'s identical shape.
+ *
+ * DELIBERATE DIVERGENCE from this file's own "actions.ts calls
+ * recordAudit()" convention (see this file's header) — this action calls no
+ * `recordAudit()` itself.
+ */
+export async function setGroupMembershipPublicListedAction(
+  slug: string,
+  input: SetGroupMembershipPublicListedInput & { groupId: string },
+): Promise<
+  ActionResult<{ groupMembershipId: string; publicListed: boolean }>
+> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await setGroupMembershipPublicListed(
+    identity.personId,
+    identity.organizationId,
+    identity.userId,
+    {
+      groupMembershipId: input.groupMembershipId,
+      publicListed: input.publicListed,
+    },
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage groups here.",
+      };
+    case "invalid_target":
+      // Covers both "no longer exists" AND "this is a derived group's
+      // membership" — the load-bearing guard Phase 1 Flow 2 names.
+      return {
+        ok: false,
+        error: "That group membership no longer exists.",
+      };
+    case "invalid_input":
+      return { ok: false, error: result.message };
+    case "overlap":
+      // Unreachable from setGroupMembershipPublicListed in practice — no
+      // insert happens on this path.
+      return { ok: false, error: "Couldn't save that — try again." };
+    case "ok":
+      break;
+  }
+
+  revalidatePath(`/o/${slug}/admin/groups/${input.groupId}`);
+
+  return {
+    ok: true,
+    data: {
+      groupMembershipId: result.data.groupMembershipId,
+      publicListed: result.data.publicListed,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// setGroupMembershipPublicDisplayOrderAction
+// ---------------------------------------------------------------------------
+
+/**
+ * Public-directory display-order curation (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3). A SEPARATE action
+ * from `setGroupMembershipPublicListedAction` above — see
+ * `src/lib/groups.ts`'s own doc comment on
+ * `setGroupMembershipPublicDisplayOrder()` for why. This action calls no
+ * `recordAudit()` (matching the underlying mutation's own no-audit ruling —
+ * presentation-order only, not a disclosure fact).
+ */
+export async function setGroupMembershipPublicDisplayOrderAction(
+  slug: string,
+  input: SetGroupMembershipPublicDisplayOrderInput & { groupId: string },
+): Promise<
+  ActionResult<{
+    groupMembershipId: string;
+    publicDisplayOrder: number | null;
+  }>
+> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await setGroupMembershipPublicDisplayOrder(
+    identity.personId,
+    identity.organizationId,
+    {
+      groupMembershipId: input.groupMembershipId,
+      publicDisplayOrder: input.publicDisplayOrder,
+    },
+  );
+
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        error: "You don't have permission to manage groups here.",
+      };
+    case "invalid_target":
+      return {
+        ok: false,
+        error: "That group membership no longer exists.",
+      };
+    case "invalid_input":
+      return { ok: false, error: result.message };
+    case "overlap":
+      // Unreachable from setGroupMembershipPublicDisplayOrder in practice.
+      return { ok: false, error: "Couldn't save that — try again." };
+    case "ok":
+      break;
+  }
+
+  revalidatePath(`/o/${slug}/admin/groups/${input.groupId}`);
+
+  return {
+    ok: true,
+    data: {
+      groupMembershipId: result.data.groupMembershipId,
+      publicDisplayOrder: result.data.publicDisplayOrder,
+    },
   };
 }

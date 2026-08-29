@@ -43,11 +43,17 @@ const mockCreateGroup = vi.hoisted(() => vi.fn());
 const mockUpdateGroup = vi.hoisted(() => vi.fn());
 const mockAddGroupMember = vi.hoisted(() => vi.fn());
 const mockEndGroupMembership = vi.hoisted(() => vi.fn());
+const mockSetGroupMembershipPublicListed = vi.hoisted(() => vi.fn());
+const mockSetGroupMembershipPublicDisplayOrder = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/groups", () => ({
   createGroup: (...args: unknown[]) => mockCreateGroup(...args),
   updateGroup: (...args: unknown[]) => mockUpdateGroup(...args),
   addGroupMember: (...args: unknown[]) => mockAddGroupMember(...args),
   endGroupMembership: (...args: unknown[]) => mockEndGroupMembership(...args),
+  setGroupMembershipPublicListed: (...args: unknown[]) =>
+    mockSetGroupMembershipPublicListed(...args),
+  setGroupMembershipPublicDisplayOrder: (...args: unknown[]) =>
+    mockSetGroupMembershipPublicDisplayOrder(...args),
 }));
 
 const mockRevalidatePath = vi.hoisted(() => vi.fn());
@@ -60,6 +66,8 @@ import {
   addGroupMemberAction,
   createGroupAction,
   endGroupMembershipAction,
+  setGroupMembershipPublicDisplayOrderAction,
+  setGroupMembershipPublicListedAction,
   updateGroupAction,
 } from "./actions";
 
@@ -386,6 +394,185 @@ describe("endGroupMembershipAction — GroupsResult → ActionResult mapping", (
     expect(mockRevalidatePath).toHaveBeenCalledWith(
       `/o/alder-creek/admin/groups/${input.groupId}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setGroupMembershipPublicListedAction — GroupsResult → ActionResult mapping
+// (docs/work-log/2026-08-28-public-directory-primitives.md, Phase 3)
+// ---------------------------------------------------------------------------
+
+describe("setGroupMembershipPublicListedAction — GroupsResult → ActionResult mapping", () => {
+  beforeEachAuth();
+
+  function publicListedInput() {
+    return { groupMembershipId: "gm-1", publicListed: true, groupId: "g-1" };
+  }
+
+  it("passes resolved personId/organizationId AND session.user.id as actingUserId", async () => {
+    mockSetGroupMembershipPublicListed.mockResolvedValueOnce({
+      kind: "ok",
+      data: { groupMembershipId: "gm-1", publicListed: true },
+    });
+
+    await setGroupMembershipPublicListedAction("alder-creek", publicListedInput());
+
+    expect(mockSetGroupMembershipPublicListed).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      "user-platform-id-1",
+      { groupMembershipId: "gm-1", publicListed: true },
+    );
+  });
+
+  it("forbidden → ok:false, no audit, no revalidate", async () => {
+    mockSetGroupMembershipPublicListed.mockResolvedValueOnce({ kind: "forbidden" });
+    const result = await setGroupMembershipPublicListedAction(
+      "alder-creek",
+      publicListedInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "You don't have permission to manage groups here.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("invalid_target → 'no longer exists' — covers both missing and derived-group rows", async () => {
+    mockSetGroupMembershipPublicListed.mockResolvedValueOnce({
+      kind: "invalid_target",
+    });
+    const result = await setGroupMembershipPublicListedAction(
+      "alder-creek",
+      publicListedInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "That group membership no longer exists.",
+    });
+  });
+
+  it("ok → returns ok:true, revalidates the detail path, and calls recordAudit ZERO times from this action", async () => {
+    mockSetGroupMembershipPublicListed.mockResolvedValueOnce({
+      kind: "ok",
+      data: { groupMembershipId: "gm-1", publicListed: true },
+    });
+
+    const input = publicListedInput();
+    const result = await setGroupMembershipPublicListedAction("alder-creek", input);
+
+    expect(result).toEqual({
+      ok: true,
+      data: { groupMembershipId: "gm-1", publicListed: true },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(
+      `/o/alder-creek/admin/groups/${input.groupId}`,
+    );
+    // Not "no audit fired at all" — setGroupMembershipPublicListed() itself
+    // fires it, per its own doc comment. This asserts the DIVERGENCE from
+    // createGroupAction/updateGroupAction/addGroupMemberAction/
+    // endGroupMembershipAction's own recordAudit() call sites above: THIS
+    // action calls no recordAudit() of its own.
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setGroupMembershipPublicDisplayOrderAction — GroupsResult → ActionResult
+// mapping (docs/work-log/2026-08-28-public-directory-primitives.md, Phase 3)
+// ---------------------------------------------------------------------------
+
+describe("setGroupMembershipPublicDisplayOrderAction — GroupsResult → ActionResult mapping", () => {
+  beforeEachAuth();
+
+  function displayOrderInput() {
+    return { groupMembershipId: "gm-1", publicDisplayOrder: 2, groupId: "g-1" };
+  }
+
+  it("passes resolved personId/organizationId (no actingUserId — this mutation takes none)", async () => {
+    mockSetGroupMembershipPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "ok",
+      data: { groupMembershipId: "gm-1", publicDisplayOrder: 2 },
+    });
+
+    await setGroupMembershipPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+
+    expect(mockSetGroupMembershipPublicDisplayOrder).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      { groupMembershipId: "gm-1", publicDisplayOrder: 2 },
+    );
+  });
+
+  it("forbidden → ok:false, no audit, no revalidate", async () => {
+    mockSetGroupMembershipPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "forbidden",
+    });
+    const result = await setGroupMembershipPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "You don't have permission to manage groups here.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("invalid_target → 'no longer exists'", async () => {
+    mockSetGroupMembershipPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "invalid_target",
+    });
+    const result = await setGroupMembershipPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "That group membership no longer exists.",
+    });
+  });
+
+  it("invalid_input → surfaces groups.ts's own message verbatim", async () => {
+    mockSetGroupMembershipPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "invalid_input",
+      message: "Display order must be a whole number from 0 to 2147483647, or left blank.",
+    });
+    const result = await setGroupMembershipPublicDisplayOrderAction(
+      "alder-creek",
+      displayOrderInput(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "Display order must be a whole number from 0 to 2147483647, or left blank.",
+    });
+  });
+
+  it("ok → returns ok:true, revalidates the detail path, and never calls recordAudit", async () => {
+    mockSetGroupMembershipPublicDisplayOrder.mockResolvedValueOnce({
+      kind: "ok",
+      data: { groupMembershipId: "gm-1", publicDisplayOrder: 2 },
+    });
+
+    const input = displayOrderInput();
+    const result = await setGroupMembershipPublicDisplayOrderAction(
+      "alder-creek",
+      input,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      data: { groupMembershipId: "gm-1", publicDisplayOrder: 2 },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(
+      `/o/alder-creek/admin/groups/${input.groupId}`,
+    );
+    expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });
 

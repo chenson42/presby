@@ -101,6 +101,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
   let replaceOrganizationServiceTimes: typeof import("./sites").replaceOrganizationServiceTimes;
   let getOrgProfileForFooter: typeof import("./sites").getOrgProfileForFooter;
   let getPublicStaffRoster: typeof import("./sites").getPublicStaffRoster;
+  let getPublicCommitteeRoster: typeof import("./sites").getPublicCommitteeRoster;
 
   let db: typeof import("@/lib/db").db;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
@@ -163,6 +164,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       replaceOrganizationServiceTimes,
       getOrgProfileForFooter,
       getPublicStaffRoster,
+      getPublicCommitteeRoster,
     } = await import("./sites"));
     ({ db, getPlatformDb } = await import("@/lib/db"));
     ({ organizations, organizationBrands } = await import("@/lib/db/domain/org"));
@@ -1521,6 +1523,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
     let officerPersonId: string;
     let notListedPersonId: string;
     let endedPersonId: string;
+    let priorityOfficerPersonId: string;
 
     let publicStaffPositionId: string;
 
@@ -1557,6 +1560,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       officerPersonId = await personAt("PublicOfficer");
       notListedPersonId = await personAt("NotListed");
       endedPersonId = await personAt("EndedPosition");
+      priorityOfficerPersonId = await personAt("PriorityOfficer");
 
       const [staffRow] = await platform
         .insert(staffPositions)
@@ -1611,6 +1615,21 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         publicListedAt: new Date(),
         recordedBy: grantingUserId,
       });
+
+      // A curated row (public_display_order set) — the "hand-picked
+      // leadership" case (docs/work-log/2026-08-28-public-directory-
+      // primitives.md, Phase 3 Design Decision 1's `hasPriority` filter).
+      await platform.insert(officerTerms).values({
+        organizationId: orgLive,
+        personId: priorityOfficerPersonId,
+        office: "moderator",
+        startsOn: "2020-01-01",
+        publicListed: true,
+        publicListedBy: grantingUserId,
+        publicListedAt: new Date(),
+        publicDisplayOrder: 1,
+        recordedBy: grantingUserId,
+      });
     });
 
     afterAll(async () => {
@@ -1637,6 +1656,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         officerPersonId,
         notListedPersonId,
         endedPersonId,
+        priorityOfficerPersonId,
       ];
       await platform.execute(
         sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
@@ -1754,6 +1774,407 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         .mockRejectedValueOnce(new Error("simulated transient DB error"));
       try {
         const result = await getPublicStaffRoster(orgLiveSlug);
+        expect(result).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    // -------------------------------------------------------------------
+    // Filter widening (docs/work-log/2026-08-28-public-directory-
+    // primitives.md, Phase 3 Design Decision 1) — kind/hasPriority as SQL
+    // parameters, department/office matched in TypeScript AFTER the SQL
+    // read.
+    // -------------------------------------------------------------------
+
+    it("filter.kind narrows to just staff or just officer rows", async () => {
+      const staffOnly = await getPublicStaffRoster(orgLiveSlug, { kind: "staff" });
+      expect(staffOnly.map((e) => e.displayName)).toEqual([
+        `Zz PublicStaff ${rosterStamp}`,
+      ]);
+
+      const officerOnly = await getPublicStaffRoster(orgLiveSlug, {
+        kind: "officer",
+      });
+      const officerNames = officerOnly.map((e) => e.displayName);
+      expect(officerNames).toContain(`Zz PublicOfficer ${rosterStamp}`);
+      expect(officerNames).toContain(`Zz PriorityOfficer ${rosterStamp}`);
+      expect(officerNames).not.toContain(`Zz PublicStaff ${rosterStamp}`);
+    });
+
+    it("filter.hasPriority narrows to only rows with an explicit publicDisplayOrder, ordered first", async () => {
+      const result = await getPublicStaffRoster(orgLiveSlug, { hasPriority: true });
+      expect(result.map((e) => e.displayName)).toEqual([
+        `Zz PriorityOfficer ${rosterStamp}`,
+      ]);
+    });
+
+    it("filter.department is case-insensitive/trim matched in TypeScript, and never matches an officer row", async () => {
+      const exact = await getPublicStaffRoster(orgLiveSlug, {
+        department: "Administration",
+      });
+      expect(exact.map((e) => e.displayName)).toEqual([
+        `Zz PublicStaff ${rosterStamp}`,
+      ]);
+
+      const messyCase = await getPublicStaffRoster(orgLiveSlug, {
+        department: "  ADMINISTRATION  ",
+      });
+      expect(messyCase.map((e) => e.displayName)).toEqual([
+        `Zz PublicStaff ${rosterStamp}`,
+      ]);
+
+      const noMatch = await getPublicStaffRoster(orgLiveSlug, {
+        department: "Nonexistent Department",
+      });
+      expect(noMatch).toEqual([]);
+    });
+
+    it("filter.office matches EITHER the raw enum value OR its OFFICE_LABELS display string, case-insensitive/trim, and never matches a staff row", async () => {
+      const byRaw = await getPublicStaffRoster(orgLiveSlug, { office: "trustee" });
+      expect(byRaw.map((e) => e.displayName)).toEqual([
+        `Zz PublicOfficer ${rosterStamp}`,
+      ]);
+
+      const byLabel = await getPublicStaffRoster(orgLiveSlug, {
+        office: "  Trustee  ",
+      });
+      expect(byLabel.map((e) => e.displayName)).toEqual([
+        `Zz PublicOfficer ${rosterStamp}`,
+      ]);
+
+      // A staff row's department never matches an office needle, even one
+      // that happens to equal the staff row's own department string.
+      const noStaffMatch = await getPublicStaffRoster(orgLiveSlug, {
+        office: "Administration",
+      });
+      expect(noStaffMatch).toEqual([]);
+    });
+
+    it("zero-arg call site (no filter) is unaffected by the widening — unchanged behavior", async () => {
+      const result = await getPublicStaffRoster(orgLiveSlug);
+      const names = result.map((e) => e.displayName);
+      expect(names).toContain(`Zz PublicStaff ${rosterStamp}`);
+      expect(names).toContain(`Zz PublicOfficer ${rosterStamp}`);
+      expect(names).toContain(`Zz PriorityOfficer ${rosterStamp}`);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // getPublicCommitteeRoster — public committee directory (docs/work-log/
+  // 2026-08-28-public-directory-primitives.md, Phase 3)
+  // ---------------------------------------------------------------------
+
+  describe("getPublicCommitteeRoster", () => {
+    let originalPublicCommitteeDirectoryEnabled: boolean;
+    const committeeStamp = Date.now();
+
+    let committeeTypeId: string;
+    let missionsGroupId: string;
+    let propertyGroupId: string;
+    let sessionGroupId: string;
+
+    let chairPersonId: string;
+    let memberPersonId: string;
+    let notListedPersonId: string;
+    let propertyMemberPersonId: string;
+    let derivedPersonId: string;
+
+    beforeAll(async () => {
+      const existing = await db.query.featureFlags.findFirst({
+        where: eq(featureFlags.key, "sites.public_committee_directory"),
+      });
+      originalPublicCommitteeDirectoryEnabled = existing?.enabled ?? false;
+      await db
+        .insert(featureFlags)
+        .values({ key: "sites.public_committee_directory", enabled: true })
+        .onConflictDoUpdate({
+          target: featureFlags.key,
+          set: { enabled: true },
+        });
+
+      const platform = getPlatformDb();
+
+      const [ct] = await platform
+        .insert(groupTypes)
+        .values({ organizationId: null, key: "committee", name: "Committee" })
+        .onConflictDoNothing()
+        .returning({ id: groupTypes.id });
+      committeeTypeId = ct?.id ?? "";
+      if (!committeeTypeId) {
+        const [existingType] = await platform
+          .select({ id: groupTypes.id })
+          .from(groupTypes)
+          .where(eq(groupTypes.key, "committee"))
+          .limit(1);
+        committeeTypeId = existingType!.id;
+      }
+
+      async function personAt(label: string): Promise<string> {
+        const [p] = await platform
+          .insert(people)
+          .values({ firstName: "Zz", lastName: `${label} ${committeeStamp}` })
+          .returning({ id: people.id });
+        await platform.insert(memberships).values({
+          organizationId: orgLive,
+          personId: p!.id,
+          engagementStatus: "regular",
+          currentRoll: "active",
+        });
+        return p!.id;
+      }
+
+      chairPersonId = await personAt("CommitteeChair");
+      memberPersonId = await personAt("CommitteeMember");
+      notListedPersonId = await personAt("CommitteeNotListed");
+      propertyMemberPersonId = await personAt("PropertyMember");
+      derivedPersonId = await personAt("SessionMember");
+
+      const [missionsGroup] = await platform
+        .insert(groups)
+        .values({
+          organizationId: orgLive,
+          groupTypeId: committeeTypeId,
+          name: `Missions Committee ${committeeStamp}`,
+          membershipSource: "managed",
+          derivedFrom: null,
+          isProtected: false,
+        })
+        .returning({ id: groups.id });
+      missionsGroupId = missionsGroup!.id;
+
+      const [propertyGroup] = await platform
+        .insert(groups)
+        .values({
+          organizationId: orgLive,
+          groupTypeId: committeeTypeId,
+          name: `Property Committee ${committeeStamp}`,
+          membershipSource: "managed",
+          derivedFrom: null,
+          isProtected: false,
+        })
+        .returning({ id: groups.id });
+      propertyGroupId = propertyGroup!.id;
+
+      // orgLive's own "Active Membership" derived group (this file's
+      // top-level beforeAll) already occupies derivedFrom: "active_
+      // membership" — groups_org_derived_key is unique on (organizationId,
+      // derivedFrom), so this fixture's own derived group uses "session"
+      // instead, matching groups.test.ts's own derived-group-guard fixture
+      // shape.
+      const [sessionGroup] = await platform
+        .insert(groups)
+        .values({
+          organizationId: orgLive,
+          groupTypeId: committeeTypeId,
+          name: `Session ${committeeStamp}`,
+          membershipSource: "derived",
+          derivedFrom: "session",
+          isProtected: true,
+        })
+        .returning({ id: groups.id });
+      sessionGroupId = sessionGroup!.id;
+
+      await platform.insert(groupMemberships).values([
+        {
+          organizationId: orgLive,
+          groupId: missionsGroupId,
+          personId: chairPersonId,
+          groupRole: "chair",
+          source: "managed",
+          startsOn: "2020-01-01",
+          publicListed: true,
+          publicListedBy: grantingUserId,
+          publicListedAt: new Date(),
+          publicDisplayOrder: 1,
+        },
+        {
+          organizationId: orgLive,
+          groupId: missionsGroupId,
+          personId: memberPersonId,
+          groupRole: "member",
+          source: "managed",
+          startsOn: "2020-01-01",
+          publicListed: true,
+          publicListedBy: grantingUserId,
+          publicListedAt: new Date(),
+        },
+        {
+          organizationId: orgLive,
+          groupId: missionsGroupId,
+          personId: notListedPersonId,
+          groupRole: "member",
+          source: "managed",
+          startsOn: "2020-01-01",
+          // publicListed defaults false — not opted in.
+        },
+        {
+          organizationId: orgLive,
+          groupId: propertyGroupId,
+          personId: propertyMemberPersonId,
+          groupRole: "leader",
+          source: "managed",
+          startsOn: "2020-01-01",
+          publicListed: true,
+          publicListedBy: grantingUserId,
+          publicListedAt: new Date(),
+        },
+        // Inserted directly against the DERIVED group, bypassing groups.ts's
+        // own setGroupMembershipPublicListed() entirely — proves the SQL
+        // function's own `g.membership_source = 'managed'` defense-in-depth
+        // clause, not merely that the application layer refuses to write
+        // one (docs/work-log/2026-08-28-public-directory-primitives.md,
+        // Phase 3 Design Decision 2).
+        {
+          organizationId: orgLive,
+          groupId: sessionGroupId,
+          personId: derivedPersonId,
+          groupRole: "member",
+          source: "derived",
+          startsOn: "2020-01-01",
+          publicListed: true,
+          publicListedBy: grantingUserId,
+          publicListedAt: new Date(),
+        },
+      ]);
+    });
+
+    afterAll(async () => {
+      const platform = getPlatformDb();
+      const committeeFixturePeople = [
+        chairPersonId,
+        memberPersonId,
+        notListedPersonId,
+        propertyMemberPersonId,
+        derivedPersonId,
+      ];
+      // Same disable/re-enable dance getPublicStaffRoster's own teardown
+      // above documents — deleting these group_memberships rows directly
+      // (including the derived one, which the trigger otherwise refuses to
+      // let go) since orgLive itself isn't being torn down here.
+      await platform.execute(
+        sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+      );
+      try {
+        for (const personId of committeeFixturePeople) {
+          await platform
+            .delete(groupMemberships)
+            .where(eq(groupMemberships.personId, personId));
+        }
+        await platform.delete(groups).where(eq(groups.id, missionsGroupId));
+        await platform.delete(groups).where(eq(groups.id, propertyGroupId));
+        await platform.delete(groups).where(eq(groups.id, sessionGroupId));
+      } finally {
+        await platform.execute(
+          sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+        );
+      }
+      for (const personId of committeeFixturePeople) {
+        await platform.delete(people).where(eq(people.id, personId));
+      }
+      await db
+        .update(featureFlags)
+        .set({ enabled: originalPublicCommitteeDirectoryEnabled })
+        .where(eq(featureFlags.key, "sites.public_committee_directory"));
+    });
+
+    it("flag off: returns [] regardless of how many rows are public_listed", async () => {
+      await db
+        .update(featureFlags)
+        .set({ enabled: false })
+        .where(eq(featureFlags.key, "sites.public_committee_directory"));
+      try {
+        const result = await getPublicCommitteeRoster(orgLiveSlug);
+        expect(result).toEqual([]);
+      } finally {
+        await db
+          .update(featureFlags)
+          .set({ enabled: true })
+          .where(eq(featureFlags.key, "sites.public_committee_directory"));
+      }
+    });
+
+    it("flag on, no filter: returns every currently-public committee's rows in one flat list, each tagged with its own groupName — excludes not-opted-in and derived rows", async () => {
+      const result = await getPublicCommitteeRoster(orgLiveSlug);
+      const names = result.map((e) => e.displayName);
+
+      expect(names).toContain(`Zz CommitteeChair ${committeeStamp}`);
+      expect(names).toContain(`Zz CommitteeMember ${committeeStamp}`);
+      expect(names).toContain(`Zz PropertyMember ${committeeStamp}`);
+      expect(names).not.toContain(`Zz CommitteeNotListed ${committeeStamp}`);
+      // The derived Session row is NEVER returned, even though it was
+      // inserted with public_listed: true directly — g.membership_source =
+      // 'managed' excludes it regardless.
+      expect(names).not.toContain(`Zz SessionMember ${committeeStamp}`);
+
+      const chairEntry = result.find(
+        (e) => e.displayName === `Zz CommitteeChair ${committeeStamp}`,
+      );
+      expect(chairEntry).toMatchObject({
+        groupName: `Missions Committee ${committeeStamp}`,
+        groupRole: "chair",
+        photoKey: null,
+      });
+
+      const propertyEntry = result.find(
+        (e) => e.displayName === `Zz PropertyMember ${committeeStamp}`,
+      );
+      expect(propertyEntry).toMatchObject({
+        groupName: `Property Committee ${committeeStamp}`,
+        groupRole: "leader",
+      });
+
+      // Ordered by group_name, then coalesce(public_display_order, MAX),
+      // display_name — Missions' own chair (display_order 1) sorts before
+      // its member (no display_order) within that same group.
+      const missionsNames = result
+        .filter((e) => e.groupName === `Missions Committee ${committeeStamp}`)
+        .map((e) => e.displayName);
+      expect(missionsNames).toEqual([
+        `Zz CommitteeChair ${committeeStamp}`,
+        `Zz CommitteeMember ${committeeStamp}`,
+      ]);
+    });
+
+    it("filter.committee narrows to one committee's own currently-public members, case-insensitive/trim matched", async () => {
+      const result = await getPublicCommitteeRoster(orgLiveSlug, {
+        committee: `  ${`missions committee ${committeeStamp}`.toUpperCase()}  `,
+      });
+      const names = result.map((e) => e.displayName);
+      expect(names).toEqual(
+        expect.arrayContaining([
+          `Zz CommitteeChair ${committeeStamp}`,
+          `Zz CommitteeMember ${committeeStamp}`,
+        ]),
+      );
+      expect(names).not.toContain(`Zz PropertyMember ${committeeStamp}`);
+    });
+
+    it("filter.hasPriority narrows to only rows with an explicit publicDisplayOrder", async () => {
+      const result = await getPublicCommitteeRoster(orgLiveSlug, {
+        hasPriority: true,
+      });
+      expect(result.map((e) => e.displayName)).toEqual([
+        `Zz CommitteeChair ${committeeStamp}`,
+      ]);
+    });
+
+    it("a suspended org's public_listed rows never surface — organization_sites.status = 'live' gate", async () => {
+      const result = await getPublicCommitteeRoster(orgSuspendedSlug);
+      expect(result).toEqual([]);
+    });
+
+    it("a nonexistent slug returns [] — no error, no distinguishable miss", async () => {
+      const result = await getPublicCommitteeRoster(NONEXISTENT_SLUG);
+      expect(result).toEqual([]);
+    });
+
+    it("a transient DB error degrades to [] rather than throwing — same fail-closed wrapper as getPublicStaffRoster, applied from day one", async () => {
+      const spy = vi
+        .spyOn(db, "execute")
+        .mockRejectedValueOnce(new Error("simulated transient DB error"));
+      try {
+        const result = await getPublicCommitteeRoster(orgLiveSlug);
         expect(result).toEqual([]);
       } finally {
         spy.mockRestore();

@@ -296,6 +296,28 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "sites.public_committee_directory",
+      // ON: the anonymous public committee-directory read
+      // (`getPublicCommitteeRoster()`) is live — docs/work-log/
+      // 2026-08-28-public-directory-primitives.md, Phase 3. Checked bare, no
+      // DECISION-026 fail-open wrapper — not an auth path, and fail-closed-
+      // to-empty-roster during a DB blip or an operator rollback is correct
+      // (same "sites.*" posture as sites.public_staff_directory). A
+      // DELIBERATELY SEPARATE flag from sites.public_staff_directory, not
+      // folded into it — committees are a structurally different read (a
+      // new SECURITY DEFINER function over group_memberships/groups) and a
+      // different rollout concern: an org may want the staff/officer roster
+      // live before or independent of committee rosters going public. Gates
+      // the read/render path only, not the admin-side `groups.manage`-gated
+      // "list publicly" toggle — an org with rows opted in before this flag
+      // ships gets an empty roster, not a leak, until the flag flips
+      // (DECISION-003 composition). Seeded OFF, same "ships dark until the
+      // page lands" reasoning as sites.public_staff_directory.
+      description:
+        "Public committee-directory read for (public)/site/<slug>. OFF = getPublicCommitteeRoster() returns [] regardless of how many group_memberships rows are public_listed.",
+      enabled: false,
+    },
+    {
       key: "org_portal.features",
       // ON: /o/<slug>/admin/features (the per-org feature-toggle admin
       // surface, DECISION-097) is reachable at all. Checked bare, no

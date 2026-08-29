@@ -11,6 +11,7 @@ import { FormattedDate } from "@/components/shared/formatted-date";
 import type { StaffPositionEntry } from "@/lib/staff";
 import { EndPositionDialog } from "./end-position-dialog";
 import { PublicListingToggle } from "./public-listing-toggle";
+import { DisplayOrderInput } from "./display-order-input";
 
 /**
  * "Who currently holds a staff position" — a `Table`, not cards, same
@@ -37,6 +38,15 @@ import { PublicListingToggle } from "./public-listing-toggle";
  * trading its mobile visibility for keeping "End position" reachable
  * without scrolling is the right tradeoff, not a compromise forced by
  * running out of room.
+ *
+ * `Display order` (docs/work-log/2026-08-28-public-directory-primitives.md)
+ * joins the SAME below-`sm:` set for the identical reason — RE-VERIFIED IN A
+ * REAL BROWSER AT 390PX/360PX with this second new column added: at both
+ * widths, Position/Person/Since/Ends/"End position" still reach the visible
+ * viewport with no horizontal scroll, because both new columns are hidden
+ * below `sm:`, exactly as `Public listing` already was. Curating a person's
+ * display order is the same occasional, desk-adjacent cadence as opting
+ * them in — not a look-up-on-the-go action.
  *
  * A Server Component (read-only data) — embeds `<EndPositionDialog>` (a
  * client component) per row without itself needing `'use client'`.
@@ -73,6 +83,7 @@ export function StaffRoster({
           <TableHead>Since</TableHead>
           <TableHead>Ends</TableHead>
           <TableHead className="hidden sm:table-cell">Public listing</TableHead>
+          <TableHead className="hidden sm:table-cell">Display order</TableHead>
           <TableHead className="sr-only">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -112,6 +123,14 @@ export function StaffRoster({
                 position={entry.position}
                 personName={entry.displayName}
                 publicListed={entry.publicListed}
+              />
+            </TableCell>
+            <TableCell className="hidden sm:table-cell">
+              <DisplayOrderInput
+                slug={slug}
+                positionId={entry.positionId}
+                personName={entry.displayName}
+                publicDisplayOrder={entry.publicDisplayOrder}
               />
             </TableCell>
             <TableCell>

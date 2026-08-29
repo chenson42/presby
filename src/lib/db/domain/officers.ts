@@ -145,6 +145,12 @@ export const officerTerms = pgTable(
     publicListed: boolean("public_listed").notNull().default(false),
     publicListedBy: uuid("public_listed_by").references(() => users.id),
     publicListedAt: timestamp("public_listed_at", { withTimezone: true }),
+    // Public directory primitives (docs/work-log/
+    // 2026-08-28-public-directory-primitives.md, Phase 4 step 1). Admin-set,
+    // nullable curation input for a hand-picked, ordered subset — see the
+    // identical comment on staffPositions.publicDisplayOrder for the full
+    // rationale (shared ordering discipline across both tables).
+    publicDisplayOrder: integer("public_display_order"),
   },
   (t) => [
     index("officer_terms_org_office_idx").on(

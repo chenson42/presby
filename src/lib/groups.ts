@@ -4,6 +4,7 @@ import { withOrgContext } from "@/lib/authz";
 import { getPlatformDb, type db } from "@/lib/db";
 import { groupMemberships, groups, groupTypes } from "@/lib/db/domain/groups";
 import { memberships, people } from "@/lib/db/domain/people";
+import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 
 /**
  * Groups administration — docs/work-log/2026-08-26-groups-admin.md, Phase 3
@@ -70,6 +71,21 @@ import { memberships, people } from "@/lib/db/domain/people";
  * platform-bypassing connection here — the same shape `presby_has_permission`
  * (a `SECURITY DEFINER` function, a different mechanism for the same
  * "correctly needs to see past RLS" problem) exists to solve.
+ *
+ * `setGroupMembershipPublicListed()` (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3) IS THE FIRST AUDITED
+ * CALL THIS MODULE HAS EVER HAD — every other export above is deliberately
+ * unaudited (DECISION-110/Phase 2's own posture). `recordAudit()` is called
+ * from INSIDE this function, not from `admin/groups/actions.ts` — a
+ * deliberate divergence from THAT file's own "actions.ts calls
+ * recordAudit()" convention for its other four mutations
+ * (`createGroup`/`updateGroup`/`addGroupMember`/`endGroupMembership`),
+ * matching `src/lib/staff.ts`'s/`src/lib/officers.ts`'s own identical
+ * divergence for their `setXPublicListed()` siblings. See that function's
+ * own doc comment for the `check:audit` tripwire-coverage finding this
+ * produces. `setGroupMembershipPublicDisplayOrder()` is NOT audited at all
+ * (presentation-order only, not a disclosure fact) — see its own doc
+ * comment.
  */
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -144,6 +160,13 @@ export interface GroupRosterEntry {
   startsOn: string;
   /** 'YYYY-MM-DD', or null (current). */
   endsOn: string | null;
+  /** Public committee-directory opt-in (docs/work-log/
+   * 2026-08-28-public-directory-primitives.md) — additive field, same
+   * query. */
+  publicListed: boolean;
+  /** Admin-set public-directory curation order — additive field, same
+   * query. `null` = no curation set, alphabetical-by-name ordering. */
+  publicDisplayOrder: number | null;
 }
 
 export interface GroupDetail {
@@ -358,6 +381,8 @@ interface RosterRow {
   group_role: string;
   starts_on: string;
   ends_on: string | null;
+  public_listed: boolean;
+  public_display_order: number | null;
 }
 
 /**
@@ -406,7 +431,9 @@ export async function getGroup(
              p.preferred_name,
              gm.group_role,
              gm.starts_on::text as starts_on,
-             gm.ends_on::text as ends_on
+             gm.ends_on::text as ends_on,
+             gm.public_listed as public_listed,
+             gm.public_display_order as public_display_order
         from group_memberships gm
         join people p on p.id = gm.person_id
        where gm.group_id = ${groupId}
@@ -435,6 +462,8 @@ export async function getGroup(
           groupRole: row.group_role as GroupRole,
           startsOn: row.starts_on,
           endsOn: row.ends_on,
+          publicListed: row.public_listed,
+          publicDisplayOrder: row.public_display_order,
         })),
       },
     };
@@ -847,5 +876,217 @@ export async function endGroupMembership(
       .where(eq(groupMemberships.id, input.groupMembershipId));
 
     return { kind: "ok", data: { groupMembershipId: input.groupMembershipId } };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// setGroupMembershipPublicListed
+// ---------------------------------------------------------------------------
+
+export interface SetGroupMembershipPublicListedInput {
+  groupMembershipId: string;
+  publicListed: boolean;
+}
+
+/**
+ * Public committee-directory opt-in/opt-out (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3 API Contract). Toggles
+ * `group_memberships.public_listed` — the bit `presby_public_committee_
+ * roster()` (drizzle/0042) reads anonymously for `(public)/site/<slug>`'s
+ * committee directory.
+ *
+ * ORDER OF OPERATIONS, mirroring `endGroupMembership()`'s own re-load-
+ * scoped-before-mutate, reject-derived discipline exactly:
+ *   1. `hasGroupsManage` gate — `forbidden` if the caller doesn't hold
+ *      `groups.manage` at all.
+ *   2. Row lookup scoped to `(id, organizationId, source = 'managed')` —
+ *      `invalid_target` if missing OR the row belongs to a DERIVED group.
+ *      This is the load-bearing guard Phase 1 Flow 2 named: a Session/
+ *      Diaconate `group_memberships` row must never become independently
+ *      publicly-listable through this mutation — that would open a second,
+ *      less-audited publication path for the same person's officer status,
+ *      which `officer_terms.publicListed` already covers.
+ *   3. Update `publicListed`, `publicListedBy = actingUserId`,
+ *      `publicListedAt = now()` on EVERY call, in BOTH directions — matching
+ *      `setStaffPositionPublicListed()`'s own departure from `recordedBy`'s
+ *      "set once at creation" precedent: turning the bit off is itself an
+ *      attributable, timestamped act.
+ *   4. `recordAudit()` — `GROUP_MEMBERSHIP_LISTED_PUBLICLY`/
+ *      `GROUP_MEMBERSHIP_UNLISTED_PUBLICLY` depending on direction. Called
+ *      from INSIDE this function, not from `admin/groups/actions.ts` — see
+ *      this file's own header for why this is the FIRST audited call this
+ *      module has ever had.
+ *
+ * `check:audit` TRIPWIRE-COVERAGE FINDING, identical shape to `staff.ts`'s/
+ * `officers.ts`'s own sibling functions: `scripts/check-audit-coverage.mjs`
+ * only walks `src/app/**\/actions.ts` looking for a literal
+ * `db.insert|update|delete` in THAT file. This function's
+ * `tx.update(groupMemberships, ...)` lives here, in `src/lib/groups.ts` — a
+ * file the script never visits at all. `admin/groups/actions.ts`'s own
+ * wrapper (`setGroupMembershipPublicListedAction`) calls no `db.*` method
+ * directly either. Net: the tripwire is BLIND to this call site, on both
+ * counts. Do not read `check:audit` passing as coverage evidence for this
+ * mutation — only `groups.test.ts`'s own `mockRecordAudit` assertions (both
+ * directions) prove it fires.
+ */
+export async function setGroupMembershipPublicListed(
+  viewerPersonId: string,
+  organizationId: string,
+  actingUserId: string,
+  input: SetGroupMembershipPublicListedInput,
+): Promise<
+  GroupsResult<{ groupMembershipId: string; publicListed: boolean }>
+> {
+  const result = await withOrgContext(
+    viewerPersonId,
+    organizationId,
+    async (
+      tx,
+    ): Promise<
+      GroupsResult<{ groupMembershipId: string; publicListed: boolean }>
+    > => {
+      if (!(await hasGroupsManage(tx, viewerPersonId, organizationId))) {
+        return { kind: "forbidden" };
+      }
+
+      const [row] = await tx
+        .select({ id: groupMemberships.id })
+        .from(groupMemberships)
+        .where(
+          and(
+            eq(groupMemberships.id, input.groupMembershipId),
+            eq(groupMemberships.organizationId, organizationId),
+            eq(groupMemberships.source, "managed"),
+          ),
+        )
+        .limit(1);
+      if (!row) {
+        return { kind: "invalid_target" };
+      }
+
+      await tx
+        .update(groupMemberships)
+        .set({
+          publicListed: input.publicListed,
+          publicListedBy: actingUserId,
+          publicListedAt: new Date(),
+        })
+        .where(eq(groupMemberships.id, input.groupMembershipId));
+
+      return {
+        kind: "ok",
+        data: {
+          groupMembershipId: input.groupMembershipId,
+          publicListed: input.publicListed,
+        },
+      };
+    },
+  );
+
+  if (result.kind === "ok") {
+    await recordAudit({
+      action: result.data.publicListed
+        ? AUDIT_ACTIONS.GROUP_MEMBERSHIP_LISTED_PUBLICLY
+        : AUDIT_ACTIONS.GROUP_MEMBERSHIP_UNLISTED_PUBLICLY,
+      resourceType: "group_membership",
+      resourceId: result.data.groupMembershipId,
+      metadata: { organizationId, publicListed: result.data.publicListed },
+    });
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// setGroupMembershipPublicDisplayOrder
+// ---------------------------------------------------------------------------
+
+export interface SetGroupMembershipPublicDisplayOrderInput {
+  groupMembershipId: string;
+  publicDisplayOrder: number | null;
+}
+
+/**
+ * The int4 bound `coalesce(public_display_order, MAX_INT), display_name`
+ * (`presby_public_committee_roster()`) depends on this never being a
+ * legitimate curated value.
+ */
+const MAX_PUBLIC_DISPLAY_ORDER = 2147483647;
+
+/**
+ * Admin-set public-directory curation input (docs/work-log/
+ * 2026-08-28-public-directory-primitives.md, Phase 3 API Contract). A
+ * SEPARATE mutation from `setGroupMembershipPublicListed()` above — same
+ * "omitted vs. cleared" ambiguity `setStaffPositionPublicDisplayOrder()`'s
+ * own doc comment names, avoided the identical way: a required (non-
+ * optional) `number | null` input, no third state to misinterpret.
+ *
+ * ORDER OF OPERATIONS, mirroring `setGroupMembershipPublicListed()`'s shape
+ * MINUS the audit call — including the SAME re-load-scoped-to-
+ * `source = 'managed'` derived-group guard as step 2:
+ *   1. `hasGroupsManage` gate — `forbidden` otherwise.
+ *   2. Row lookup scoped to `(id, organizationId, source = 'managed')` —
+ *      `invalid_target` if missing OR the row belongs to a derived group.
+ *   3. Validate `publicDisplayOrder` is `null` or a non-negative integer ≤
+ *      2147483647 — `invalid_input` otherwise.
+ *   4. Update `publicDisplayOrder` only.
+ *
+ * NO `recordAudit()` CALL, unlike `setGroupMembershipPublicListed()` —
+ * presentation-order only, not a disclosure fact. Same DECISION-113
+ * reasoning `setStaffPositionPublicDisplayOrder()`'s doc comment gives at
+ * length.
+ */
+export async function setGroupMembershipPublicDisplayOrder(
+  viewerPersonId: string,
+  organizationId: string,
+  input: SetGroupMembershipPublicDisplayOrderInput,
+): Promise<
+  GroupsResult<{ groupMembershipId: string; publicDisplayOrder: number | null }>
+> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasGroupsManage(tx, viewerPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    const [row] = await tx
+      .select({ id: groupMemberships.id })
+      .from(groupMemberships)
+      .where(
+        and(
+          eq(groupMemberships.id, input.groupMembershipId),
+          eq(groupMemberships.organizationId, organizationId),
+          eq(groupMemberships.source, "managed"),
+        ),
+      )
+      .limit(1);
+    if (!row) {
+      return { kind: "invalid_target" };
+    }
+
+    if (
+      input.publicDisplayOrder !== null &&
+      (!Number.isInteger(input.publicDisplayOrder) ||
+        input.publicDisplayOrder < 0 ||
+        input.publicDisplayOrder > MAX_PUBLIC_DISPLAY_ORDER)
+    ) {
+      return {
+        kind: "invalid_input",
+        message:
+          "Display order must be a whole number from 0 to 2147483647, or left blank.",
+      };
+    }
+
+    await tx
+      .update(groupMemberships)
+      .set({ publicDisplayOrder: input.publicDisplayOrder })
+      .where(eq(groupMemberships.id, input.groupMembershipId));
+
+    return {
+      kind: "ok",
+      data: {
+        groupMembershipId: input.groupMembershipId,
+        publicDisplayOrder: input.publicDisplayOrder,
+      },
+    };
   });
 }

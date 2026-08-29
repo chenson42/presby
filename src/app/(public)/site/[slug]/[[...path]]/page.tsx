@@ -11,6 +11,7 @@ import {
 import { ContactForm } from "../contact-form";
 import { PresbyteryFallback } from "../presbytery-fallback";
 import { PublicStaffDirectory } from "../staff-directory";
+import { PublicCommitteeDirectory } from "../committee-directory";
 
 /**
  * DECISION-121 — org types that get the minimal sign-in fallback instead of
@@ -245,14 +246,26 @@ export default async function PublicSitePage({
   // and whichever content page authors a `{"type": "contactForm"}` block
   // renders it exactly there. Content with no such block gets no form.
   //
-  // `liveSlots.staffDirectory` (docs/work-log/2026-08-27-public-staff-
-  // directory.md) is site-kit v3.5.0's generic named-slot mechanism —
-  // unlike `contactForm`'s own bespoke prop, ANY content page can pick up
-  // ANY named live element by placing a `{"type": "liveSlot", "props":
-  // {"slot": "staffDirectory"}}` marker block; this page still only
-  // supplies the one slot this feature needs today. A page with no such
-  // marker renders nothing extra — same "content author controls
-  // placement, absence is not an error" discipline as `contactForm`.
+  // `liveSlots` (docs/work-log/2026-08-27-public-staff-directory.md) is
+  // site-kit's generic named-slot mechanism — unlike `contactForm`'s own
+  // bespoke prop, ANY content page can pick up ANY named live element by
+  // placing a `{"type": "liveSlot", "props": {"slot": "<name>"}}` marker
+  // block. A page with no such marker renders nothing extra — same
+  // "content author controls placement, absence is not an error"
+  // discipline as `contactForm`.
+  //
+  // presby-site-kit v4.0.0 (docs/work-log/2026-08-28-public-directory-
+  // primitives.md, DECISION-132) made `liveSlots` VALUES RESOLVER FUNCTIONS
+  // — `(filter) => ReactElement | null` — instead of pre-rendered elements,
+  // so the SAME slot name can render a different filtered subset per marker
+  // instance (a hand-curated "leadership" block and a per-committee page
+  // both use `staffDirectory`/`committeeDirectory`, each with its own
+  // `filter`). Each closure below MAY ONLY CLOSE OVER `slug` (or another
+  // URL-path-derived value already in scope on this page) — NEVER `request`,
+  // `headers()`, or `cookies()` (Phase 2's enumeration-safety redline). A
+  // marker with no `filter` key resolves to `{}`, reproducing today's exact
+  // unfiltered behavior for any content already using `staffDirectory` with
+  // no filter.
   const rendered = renderSiteBundle({
     organizationName: site.organizationName,
     origin: siteOrigin(),
@@ -268,7 +281,14 @@ export default async function PublicSitePage({
     portalLabel: PORTAL_LABEL,
     portalNavOrder: PORTAL_NAV_ORDER,
     contactForm: <ContactForm slug={slug} />,
-    liveSlots: { staffDirectory: <PublicStaffDirectory slug={slug} /> },
+    liveSlots: {
+      staffDirectory: (filter) => (
+        <PublicStaffDirectory slug={slug} filter={filter} />
+      ),
+      committeeDirectory: (filter) => (
+        <PublicCommitteeDirectory slug={slug} filter={filter} />
+      ),
+    },
   });
 
   // renderSiteBundle() returning null means no page in the bundle matches

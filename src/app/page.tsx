@@ -274,14 +274,15 @@ export default async function Home() {
           <p className="text-sm text-muted-foreground">
             Read the full{" "}
             <a
-              href="https://github.com/chenson42/presby/blob/main/docs/architecture.md"
+              href="https://chenson42.github.io/presby/"
               target="_blank"
               rel="noreferrer"
               className={EXTERNAL_LINK_CLASSNAME}
             >
               architecture overview
-            </a>{" "}
-            in the project&rsquo;s repository.
+            </a>
+            , including how a human and a fleet of specialized AI agents
+            actually build this codebase, phase by phase.
           </p>
         </section>
 

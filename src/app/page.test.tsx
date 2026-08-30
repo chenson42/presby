@@ -218,7 +218,7 @@ describe("/ — copy content", () => {
       name: "architecture overview",
     });
     expect(archLink.getAttribute("href")).toBe(
-      "https://github.com/chenson42/presby/blob/main/docs/architecture.md",
+      "https://chenson42.github.io/presby/",
     );
   });
 

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PresbyPortal Architecture</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="How PresbyPortal is built, why it's shaped this way, and how a human working with a fleet of specialized AI agents actually built it.">
+<style>
+  /* ============================================================
+     Ledger/registry palette: paper (cool slate-blue, not cream),
+     ink, registry (primary accent — rule/numeral/heading colour),
+     garnet (sparing, a wax-seal mark), brass (hairline rules,
+     section numerals). Iowan Old Style/Palatino throughout — a
+     registrar's serif at two weights, not a second family.
+     ============================================================ */
+  :root {
+    --paper: #eef0f3;
+    --paper-raised: #ffffff;
+    --ink: #171a2c;
+    --ink-soft: #4a4f66;
+    --ink-faint: #7d8199;
+    --registry: #2e3a66;
+    --registry-soft: #4a5787;
+    --garnet: #7c2d3a;
+    --brass: #9c8449;
+    --rule: #cdd1de;
+    --code-bg: #e2e5ec;
+    --good: #2f6b4f;
+    --card-shadow: 0 1px 2px rgba(23, 26, 44, 0.06), 0 4px 14px rgba(23, 26, 44, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12141f; --paper-raised: #191c2b; --ink: #e8e7de;
+      --ink-soft: #b7b8c9; --ink-faint: #82869c; --registry: #90a2df;
+      --registry-soft: #7686bd; --garnet: #d68b96; --brass: #c7a968;
+      --rule: #333857; --code-bg: #202339; --good: #7fc7a3;
+      --card-shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12141f; --paper-raised: #191c2b; --ink: #e8e7de;
+    --ink-soft: #b7b8c9; --ink-faint: #82869c; --registry: #90a2df;
+    --registry-soft: #7686bd; --garnet: #d68b96; --brass: #c7a968;
+    --rule: #333857; --code-bg: #202339; --good: #7fc7a3;
+    --card-shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.3);
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 780px; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
+  .titleblock { border-bottom: 1px solid var(--rule); padding-bottom: 2rem; margin-bottom: 3rem; }
+  .eyebrow {
+    font-variant: small-caps; letter-spacing: .12em; font-size: .8rem;
+    color: var(--brass); margin: 0 0 .9rem;
+  }
+  h1.doctitle { font-size: 2.6rem; line-height: 1.1; margin: 0 0 .9rem; text-wrap: balance; font-weight: 600; }
+  .dek { font-size: 1.08rem; color: var(--ink-soft); max-width: 62ch; margin: 0 0 .6rem; text-wrap: balance; }
+  .meta { font-size: .85rem; color: var(--ink-faint); font-style: italic; }
+  .meta a { color: var(--ink-faint); }
+  nav.toc {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 6px;
+    box-shadow: var(--card-shadow); padding: 1.2rem 1.5rem; margin-bottom: 3rem;
+  }
+  nav.toc p { font-variant: small-caps; letter-spacing: .1em; font-size: .76rem; color: var(--brass); margin: 0 0 .7rem; }
+  nav.toc ol { columns: 2; column-gap: 2rem; margin: 0; padding-left: 1.2rem; font-size: .92rem; }
+  nav.toc li { margin-bottom: .35rem; break-inside: avoid; }
+  nav.toc a { text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  section.entry { position: relative; padding-left: 2.6rem; margin-bottom: 3rem; border-left: 1px solid var(--rule); scroll-margin-top: 1.5rem; }
+  section.entry::before {
+    content: attr(data-num); position: absolute; left: -.02rem; top: .15rem; transform: translateX(-50%);
+    background: var(--paper); color: var(--brass);
+    font-family: ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    font-size: .82rem; padding: 0 .4rem; font-weight: 600; letter-spacing: .02em;
+  }
+  h2 { font-size: 1.5rem; margin: 0 0 1.1rem; color: var(--registry); text-wrap: balance; font-weight: 600; }
+  h3 { font-size: 1.12rem; margin: 1.6rem 0 .7rem; font-weight: 600; }
+  p { margin: 0 0 1.05rem; max-width: 66ch; }
+  section.entry > p:last-child, section.entry > ol:last-child, section.entry > ul:last-child, section.entry > .card:last-child { margin-bottom: 0; }
+  strong { color: var(--ink); font-weight: 700; }
+  a { color: var(--registry); text-decoration-color: var(--rule); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--registry); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--registry); outline-offset: 2px; }
+  ol, ul { margin: 0 0 1.05rem; padding-left: 1.4rem; max-width: 64ch; }
+  li { margin-bottom: .55rem; }
+  li:last-child { margin-bottom: 0; }
+  li::marker { color: var(--brass); font-family: ui-monospace,monospace; font-size: .9em; }
+  code {
+    font-family: ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    font-size: .86em; background: var(--code-bg); color: var(--registry-soft);
+    padding: .12em .38em; border-radius: 3px;
+  }
+  .card {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 6px;
+    box-shadow: var(--card-shadow); padding: 1.4rem 1.5rem; margin: 1.2rem 0 1.4rem; overflow-x: auto;
+  }
+  .card-label { font-variant: small-caps; letter-spacing: .1em; font-size: .76rem; color: var(--brass); margin: 0 0 .9rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  th, td { text-align: left; padding: .6rem .9rem .6rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-variant: small-caps; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; font-size: .82rem; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child, th:first-child { padding-left: 0; }
+  pre.mermaid { margin: 0; background: transparent; display: flex; justify-content: center; }
+  .mark { border-left: 2px solid var(--garnet); padding-left: 1.1rem; margin: 1.3rem 0; color: var(--ink-soft); font-style: italic; max-width: 62ch; }
+  .index-link { font-family: ui-monospace,monospace; font-size: .85rem; }
+  .whoblock { margin: 0 0 1.3rem; }
+  .whoblock:last-child { margin-bottom: 0; }
+  .who { display: block; font-variant: small-caps; letter-spacing: .04em; color: var(--registry); font-weight: 700; font-size: 1rem; margin-bottom: .3rem; }
+  .agent-grid { display: grid; grid-template-columns: 1fr; gap: .9rem; margin: 1.2rem 0 1.4rem; }
+  .agent {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 1rem 1.2rem; box-shadow: var(--card-shadow);
+  }
+  .agent-name { font-weight: 700; color: var(--registry); }
+  .agent-tools { font-size: .8rem; color: var(--ink-faint); font-family: ui-monospace, monospace; }
+  .agent-readonly { color: var(--garnet); font-weight: 700; }
+  .pipeline-steps { list-style: none; padding: 0; margin: 0 0 1.4rem; counter-reset: phase; }
+  .pipeline-steps li {
+    counter-increment: phase; position: relative; padding: .7rem 0 .7rem 3rem;
+    border-bottom: 1px solid var(--rule); margin: 0;
+  }
+  .pipeline-steps li:last-child { border-bottom: none; }
+  .pipeline-steps li::before {
+    content: counter(phase); position: absolute; left: 0; top: .65rem;
+    width: 1.9rem; height: 1.9rem; border-radius: 50%; background: var(--registry); color: var(--paper-raised);
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .95rem;
+    font-family: ui-monospace, monospace;
+  }
+  .pipeline-steps li::marker { content: none; }
+  .pipeline-steps strong { display: block; margin-bottom: .15rem; }
+  footer.closing { margin-top: 3.5rem; padding-top: 1.6rem; border-top: 1px solid var(--rule); color: var(--ink-soft); font-size: .95rem; max-width: 64ch; }
+  .backlink { display: inline-block; margin-bottom: 2rem; font-size: .9rem; }
+  @media (max-width: 600px) {
+    .page { padding: 2.6rem 1.1rem 4rem; }
+    h1.doctitle { font-size: 2rem; }
+    section.entry { padding-left: 2rem; }
+    .card { padding: 1.1rem; }
+    nav.toc ol { columns: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="titleblock">
+    <p class="eyebrow">Architecture Overview</p>
+    <h1 class="doctitle">PresbyPortal</h1>
+    <p class="dek">A multitenant platform for Presbyterian congregations, presbyteries, and synods — what it does, why it's built this way, and how a human working with a fleet of specialized AI agents actually built it.</p>
+    <p class="meta">First read for engineers joining the project · <a href="https://github.com/chenson42/presby">github.com/chenson42/presby</a> · named <strong>PresbyPortal</strong> (<code>presbyportal.org</code>) — the code, deliberately, still runs on the <code>presby</code> prefix</p>
+  </div>
+
+  <nav class="toc">
+    <p>Contents</p>
+    <ol>
+      <li><a href="#s01">What this is, and why</a></li>
+      <li><a href="#s02">What works today</a></li>
+      <li><a href="#s03">The domain model, five ideas</a></li>
+      <li><a href="#s04">Tenant isolation</a></li>
+      <li><a href="#s05">Authorization</a></li>
+      <li><a href="#s06">Extensibility</a></li>
+      <li><a href="#s07">The support-ticket loop</a></li>
+      <li><a href="#s08">Public websites</a></li>
+      <li><a href="#s09">Personalization</a></li>
+      <li><a href="#s10">Stack</a></li>
+      <li><a href="#s11">How AI actually builds this</a></li>
+      <li><a href="#s12">Where to go deeper</a></li>
+    </ol>
+  </nav>
+
+  <section class="entry" data-num="01" id="s01">
+    <h2>What this is, and why it exists</h2>
+    <p><strong>PresbyPortal is a multitenant platform for Presbyterian congregations, presbyteries, and synods</strong> — the three levels of a PC(USA) governing structure. One church management system serves membership rolls, officer records, a member directory, groups, and events; one set of tools serves council operations; every tenant gets a public website; and a support-ticket loop, worked partly by an AI pairing with a human operator, is how the platform grows and gets fixed.</p>
+    <p>The reason to build this rather than buy something existing: PC(USA) polity has real structure that generic church-management software gets wrong — who's a member of what, who can approve what, which records are permanent — and getting it wrong either produces bad data or requires a human to work around the software forever. We had the chance to design the schema <em>from</em> the polity instead of bolting polity onto a generic contacts database, and did.</p>
+    <p>Four sibling projects — independent prior builds, not part of this codebase — fed real requirements in before a line of schema was written: a 69-table church portal, a 24-table fund-accounting system, a presbytery-operations tool, and a public-facing "learn" site with an AI assistant. Where this document says "we decided X," it usually means three of those four hit the same wall and we designed around it.</p>
+  </section>
+
+  <section class="entry" data-num="02" id="s02">
+    <h2>What actually works today, by who's using it</h2>
+    <p>A functional summary, not an implementation one — for the full, current inventory of what's built vs. designed-but-not-built, see <code>docs/product/functionality-map.md</code> in the repository.</p>
+    <div class="whoblock">
+      <span class="who">A congregation's staff and clergy</span>
+      <p>search and browse the membership directory (per-field privacy — a member can hide their own phone, address, or photo); record roll actions against the permanent membership ledger; record and end session/diaconate officer terms; create and manage committees and groups (the court rosters themselves are <em>derived</em>, not editable — idea 3 below); enter tiered pastoral, medical, demographic, and disability information behind separate, narrower permissions than ordinary member data; track children in the congregation and their guardians; schedule one-time or recurring events; file and track support tickets; set their own congregation's brand; and publish a public website built from content they control, including curated leadership and committee pages drawn live from the same staff/officer records.</p>
+    </div>
+    <div class="whoblock">
+      <span class="who">A presbytery's stated clerk</span>
+      <p>gets everything a congregation gets, plus presbytery-scoped tools: recording ministers' ordinations and standing, recording and ending pastoral appointments, and recording the presbytery's own judgment about a member congregation's viability and property, plus entering or receiving that congregation's annual statistics for per-capita billing. Every statistics figure is labeled by where it came from — entered by the presbytery, or published by the congregation itself.</p>
+    </div>
+    <div class="whoblock">
+      <span class="who">A platform operator</span>
+      <p>manages the tenant roster, feature flags, per-congregation two-factor policy, the audit log, and the ticket/feedback queues, through an admin portal that shows each operator only the tools they actually hold — never the full list with most of it denied on click.</p>
+    </div>
+    <div class="whoblock">
+      <span class="who">Anyone signed in</span>
+      <p>lands on one page after authenticating that shows their own organizations and, if they hold platform-level access, the platform tools they hold — not a chooser screen followed by a second, separately-designed page.</p>
+    </div>
+    <div class="mark">Not yet built, named plainly rather than glossed over: fund accounting and giving, worship and service planning, event check-in, a public event calendar, presbytery committee and commission tracking, and a presbytery-wide rollup dashboard. Each has a real, working "coming soon" placeholder in the product today, not a dead link.</div>
+  </section>
+
+  <section class="entry" data-num="03" id="s03">
+    <h2>The domain model, in five ideas</h2>
+    <p>Everything else in the schema is downstream of these five decisions. Full rationale and the review-findings log that tested them live in <code>docs/schema-design.md</code>.</p>
+    <ol>
+      <li><strong>A person is global; membership is per-organization.</strong> <code>people</code> holds the human. <code>memberships</code> links a person to an organization and carries their roll status <em>there</em>. This isn't convenience — polity requires it: a minister is a member of their <em>presbytery</em>, not the congregation they serve, while a ruling elder is a member of the <em>congregation</em>. One person routinely holds different standing at different organizations at once.</li>
+      <li><strong>The roll is a ledger, not a status field.</strong> <code>roll_actions</code> is append-only — what the session actually did, in order. The directory, the annual statistical report, and per-capita billing are all <em>views</em> of that ledger. An approved action is frozen; a mistake is corrected by recording a <code>void</code>, never by editing history.</li>
+      <li><strong>A court is not a group someone edits.</strong> The Session and Diaconate rosters are <em>materialized from</em> officer terms by a database trigger and reject direct writes. If staff could add a name to the Session roll by hand, every vote that roster took would be legally questionable.</li>
+      <li><strong>Authority flows up by publication, never down by inheritance.</strong> A presbytery sees what a congregation is required to publish to it and nothing else by default. A congregation's own clerk publishes an annual statistical snapshot, and the write that creates the presbytery's copy of it is a single, narrow database function that derives its own target — the calling congregation's actual parent presbytery — rather than trusting anything the caller supplies: the platform's first write that ever crosses a tenant boundary, built to be the only kind that's allowed to.</li>
+      <li><strong>Isolation is a property of the database</strong>, not a habit of the application code — the subject of the next section.</li>
+    </ol>
+  </section>
+
+  <section class="entry" data-num="04" id="s04">
+    <h2>Tenant isolation — understand this before writing a query</h2>
+    <p>Every tenant table has Postgres row-level security <strong>forced</strong>, not just enabled. That distinction matters more than it sounds: <code>FORCE ROW LEVEL SECURITY</code> is required because Postgres otherwise exempts a table's own owner from RLS — with a shared application role, "enabled but not forced" is silently inert, and every naive test still passes. This was found by running the isolation suite, not by reading the schema.</p>
+    <div class="card">
+      <p class="card-label">Two connections, one boundary</p>
+      <table>
+        <tr><th>Connection</th><th>Role</th><th>Used by</th></tr>
+        <tr><td><code>db</code></td><td><code>presby_app</code>, <code>NOBYPASSRLS</code></td><td>every <code>/o/&lt;slug&gt;/...</code> tenant page — every query filters to the caller's own organization, enforced by Postgres itself</td></tr>
+        <tr><td><code>getPlatformDb()</code></td><td>bypasses RLS entirely</td><td>platform-admin pages only, that legitimately need to see across every tenant</td></tr>
+      </table>
+    </div>
+    <p><code>users.is_platform_admin</code> decides which <em>pages</em> are reachable — it never decides whether a query is filtered. A tenant request never reaches the database without first calling <code>withOrgContext()</code>, which verifies real membership, <em>then</em> sets a transaction-scoped session variable every RLS policy checks.</p>
+    <div class="mark">This function was once written to set the variable first and verify second. It rejected every legitimate member for weeks before anything exercised it — the check meant to stop cross-tenant access instead stopped <em>all</em> access, silently. It's covered by an integration test now that would fail loudly if that ordering ever regressed.</div>
+    <p>The other structural rule worth knowing: <strong>every foreign key between two tenant tables is composite</strong> — <code>(id, organization_id)</code>, not just <code>id</code>. A plain reference would let a row in one organization point at a person in a different one; RLS filters what you can <em>read</em>, but a composite key is what stops you from <em>writing</em> that mistake in the first place.</p>
+  </section>
+
+  <section class="entry" data-num="05" id="s05">
+    <h2>Authorization — separate from isolation, deliberately narrow</h2>
+    <p>Isolation answers "can this query see this organization's data at all." Authorization answers "may <em>this person</em> do <em>this specific thing</em> here" — resolved by one function, <code>presby_effective_permissions()</code>, with four independent ways to hold a permission: <strong>directly</strong> (a role granted to one named person), <strong>through a group</strong> (a role granted to a derived group, e.g. the Session), <strong>through an administrative commission</strong> (a presbytery body temporarily exercising a congregation's own authority), or <strong>through a delegation</strong> (a session explicitly, temporarily handing a power to someone else).</p>
+    <p>Two rules discipline this system. <strong>No role ever carries a wildcard</strong> — a "Church Administrator" role does not get pastoral-note access by default; every permission is granted at the tier it belongs to (1: directory, 2: financial, 3: pastoral/medical — pastoral sits <em>above</em> financial). And <strong>permissions and flags are never the same mechanism</strong>: a permission answers "may this user do this," a flag answers "is this capability on at all" — a flag never grants access, a permission never stages a rollout.</p>
+  </section>
+
+  <section class="entry" data-num="06" id="s06">
+    <h2>Extensibility: tags, and everything else is a conversation</h2>
+    <p>Most church-management software lets an administrator add arbitrary custom fields. We rejected that: a field nobody designed has no validation, no place in a report, and no defined sensitivity tier — and it's a decision made in isolation by one congregation's admin that then has to be supported forever.</p>
+    <p><strong>Tags are the only tenant-extensible attribute in the schema.</strong> Everything else a congregation might need becomes a support ticket, and — this is the important part — <strong>if the need is real, it becomes a feature every congregation gets</strong>, not a one-off field for whoever asked.</p>
+  </section>
+
+  <section class="entry" data-num="07" id="s07">
+    <h2>The support-ticket loop</h2>
+    <p>A congregation designates someone — a real office-holder, not "any staff member with a login" — who can file a ticket on the congregation's behalf. Ordinary members have a lighter path too: anyone can leave feedback, and the designated role-holder can promote it into a formal ticket if it's worth acting on. Every ticket carries a category and a priority from a fixed, small vocabulary — because a well-structured ticket is one an AI-assisted first pass can actually act on.</p>
+    <p>Tickets are worked on the platform side by a human operator, most often paired with an AI coding assistant doing the actual investigation and change. That's deliberate: the platform does <strong>not</strong> run an autonomous AI agent with standing write access to tenant data. Every change a ticket produces is an ordinary, reviewed engineering change with a human accountable for it.</p>
+  </section>
+
+  <section class="entry" data-num="08" id="s08">
+    <h2>Public websites — building and staying current</h2>
+    <p>The constraint that shaped this design: <strong>PresbyPortal's own source repository must never contain a real congregation's data</strong> — not a name, address, photo, or phone number, ever, because that's a permanent, effectively unscrubbable commitment once it's in git history. So a congregation's public website — which necessarily <em>is</em> real content — can't live in this repository.</p>
+    <p>The shape we landed on: a congregation's site content lives in its own, separate Git repository — page content and images only, no application code. A small shared package (<code>presby-site-kit</code>) holds the rendering code: a fixed, deliberately limited set of page components, plus the checks that validate a change before it can go live. The main platform is the only thing that ever runs — when content changes, an automated check validates and converts it into a structured form and hands it to the platform, the only place that ever turns content into a page.</p>
+    <div class="mark">It would have been possible to let each congregation's repository build and deploy its own independent copy of the site. We didn't, because that means a congregation's repository ships <em>code</em> that would run inside the platform, and content isn't a security boundary you want to depend on hundreds of loosely-supervised repositories to respect. Under this design, a congregation's content can never become more than content.</div>
+    <p>The newest layer on top of this: a congregation can now compose a <strong>curated leadership page</strong> or <strong>per-committee pages</strong> by requesting a filtered slice of its own live staff/officer/committee records — by department, office, or a hand-picked and ordered subset — rather than a single fixed "everyone" list. Getting this right took a real design correction: the first version of the mechanism let a website page ask for a filtered view, but couldn't cleanly support two <em>different</em> filtered views of the same kind of content on one page. An architectural review caught the gap and reworked it before anything shipped — the small case study in §11 below.</p>
+  </section>
+
+  <section class="entry" data-num="09" id="s09">
+    <h2>Personalization</h2>
+    <p>Each congregation can set its own brand — a colour, a logo, a type pairing — from a closed set the platform validates for accessibility before it's ever shown to anyone. That identity is intentionally the <em>only</em> per-tenant styling mechanism in the platform, which is what keeps hundreds of tenants' worth of visual variation from turning into hundreds of one-off maintenance burdens.</p>
+  </section>
+
+  <section class="entry" data-num="10" id="s10">
+    <h2>Stack, in one paragraph</h2>
+    <p>Next.js 16 (App Router) and React 19, TypeScript throughout in strict mode. Drizzle ORM against Neon Postgres, deliberately over a WebSocket connection pool rather than Neon's simpler HTTP driver — the isolation model in §4 depends on a transaction-scoped session variable, and the HTTP driver has no notion of a transaction, so the isolation model dictated the driver. NextAuth for authentication, Tailwind and Radix for UI primitives, deployed to Vercel.</p>
+  </section>
+
+  <section class="entry" data-num="11" id="s11">
+    <h2>How AI actually builds this</h2>
+    <p>This is not a project where an AI model was asked to "build a church management system" and produced one. Nearly every commit in this repository was written by a human operator working with Claude, through a formal, six-phase process that exists specifically because a schema with real invariants — the isolation model in §4 being the sharpest example — punishes anything looser. The process is documented in full in the repository's own <code>CLAUDE.md</code>; this section is the plain-language version of why it's shaped the way it is.</p>
+
+    <h3>The six gates</h3>
+    <p>Every non-trivial change passes through the same sequence before it's considered finished. A change can loop backward to an earlier gate — a design flaw found in Phase 4 sends the work back to Phase 3, not forward with a patch — but it never skips one.</p>
+    <ol class="pipeline-steps">
+      <li><strong>Functional refinement.</strong> Before any design work starts, a review pass turns a request into concrete user flows and names the gaps the request itself didn't address — permission edge cases, what happens on failure, what's explicitly out of scope.</li>
+      <li><strong>Architectural review.</strong> Where does this live, does it need a new dependency, does it touch an existing invariant. A structural change gets a structural review before a line of implementation code exists.</li>
+      <li><strong>Technical design.</strong> A concrete design document — the exact function signatures, the exact schema, the implementation order, which specialist builds which piece.</li>
+      <li><strong>Implementation.</strong> The design gets built, by a specialist matched to the kind of work — schema, server logic, or UI.</li>
+      <li><strong>Independent verification.</strong> A separate pass runs the real test suite, re-checks the safety-critical claims directly against the code and the database rather than trusting the implementer's own report, and issues a pass/fail verdict.</li>
+      <li><strong>Shipped-vs-intent.</strong> A final comparison between what was actually built and what Phase 1 said the feature needed to do. Only this verdict — never anything earlier — closes the work.</li>
+    </ol>
+
+    <h3>Specialists, not one generalist</h3>
+    <p>Each phase is worked by an agent defined for that phase, not by one model doing everything end to end. The roster, as it exists in this repository today:</p>
+    <div class="agent-grid">
+      <div class="agent"><span class="agent-name">analyst</span> — turns a request into concrete flows and gaps (Phase 1), then does the final shipped-vs-intent check (Phase 6). <span class="agent-tools">tools: <span class="agent-readonly">Read, Bash only</span></span></div>
+      <div class="agent"><span class="agent-name">architect</span> — rules on placement, dependencies, and invariant compliance (Phase 2). <span class="agent-tools">tools: <span class="agent-readonly">Read, Bash, web search only</span></span></div>
+      <div class="agent"><span class="agent-name">tech-lead</span> — writes the concrete design doc and names the implementer (Phase 3). <span class="agent-tools">tools: Read, Write, Edit, Bash</span></div>
+      <div class="agent"><span class="agent-name">database-admin</span> — schema, migrations, indexes (Phase 4, schema slice). <span class="agent-tools">tools: Read, Write, Edit, Bash</span></div>
+      <div class="agent"><span class="agent-name">api-developer</span> — route handlers, server actions, business logic (Phase 4, server slice). <span class="agent-tools">tools: Read, Write, Edit, Bash</span></div>
+      <div class="agent"><span class="agent-name">ux-developer</span> — React components, pages, forms (Phase 4, client slice). <span class="agent-tools">tools: Read, Write, Edit, Bash</span></div>
+      <div class="agent"><span class="agent-name">qa</span> — runs the real suites, re-verifies safety claims independently, issues pass/fail (Phase 5). <span class="agent-tools">tools: <span class="agent-readonly">Read, Bash only</span></span></div>
+    </div>
+
+    <h3>The one design detail that makes this a real check, not a formality</h3>
+    <p><strong>The agents that render a verdict cannot write code.</strong> <code>analyst</code>, <code>architect</code>, and <code>qa</code> are given exactly two tools — <code>Read</code> and <code>Bash</code> — and nothing that can modify a file. This is not an oversight or a cost-saving measure; it is the entire point. An agent that can both judge a piece of work <em>and</em> edit it can make a failing test pass instead of reporting that it failed, and the paper trail would still read clean. Structurally removing the ability to write is what turns "independent verification" from a phrase into a property that actually holds: <code>qa</code> can find a real defect and has no way to quietly fix it to make its own report look better. When a judgment agent's verdict needs to be recorded, it hands its findings back as text, and a human — or the orchestrating session — transcribes it into the permanent record. The friction is deliberate.</p>
+
+    <h3>A real example: a design correction, not a rewrite</h3>
+    <p>When the platform's public staff-directory feature was extended to support curated leadership pages and per-committee pages, Phase 1's own analysis recommended a specific mechanism for letting one type of website block render a different filtered subset of people each time it was used. Phase 2's architectural review read the actual code the recommendation would touch, found that it didn't handle two different filtered instances of the same block appearing on one page — the exact case the feature existed to support — and replaced it with a different, smaller design before a line of it was implemented. The correction is recorded permanently in the project's own decision log, attributed to the phase that caught it, not smoothed over.</p>
+    <p>That is the shape of essentially every defect this project's own documentation admits to: found by an adversarial, independent step actually running or actually reading the thing in question, not by a single pass getting it right the first time. The process exists because that keeps happening, not because it looks rigorous on paper.</p>
+
+    <h3>What a human is accountable for</h3>
+    <p>None of this removes a human from the loop. Every phase's output lands in a plain-text work-log, committed to the repository, readable by anyone. Nothing is pushed to the shared codebase without an explicit human review of the diff. The platform itself — per §7 — runs no autonomous agent with standing write access to a real congregation's data; every change a support ticket produces is an ordinary, reviewed engineering change with a named person accountable for it. The process described above is how that accountable human and an AI collaborator get a change from "someone asked for this" to "this is genuinely done" without either one taking the other's word for it along the way.</p>
+  </section>
+
+  <section class="entry" data-num="12" id="s12">
+    <h2>Where things stand, and where to go deeper</h2>
+    <p>This document won't age well as a status report, so it doesn't try to be one.</p>
+    <div class="card">
+      <p class="card-label">Index</p>
+      <table>
+        <tr><th>Question</th><th>Where to look</th></tr>
+        <tr><td>What's actually built vs. designed-but-not-built</td><td class="index-link">docs/product/functionality-map.md</td></tr>
+        <tr><td>Full schema rationale, every table, the findings log</td><td class="index-link">docs/schema-design.md</td></tr>
+        <tr><td>Every architectural decision, numbered, with reasoning</td><td class="index-link">docs/decisions.md</td></tr>
+        <tr><td>The six-phase process in full, and each agent's own definition</td><td class="index-link">CLAUDE.md, .claude/agents/</td></tr>
+        <tr><td>How a specific feature was built, phase by phase</td><td class="index-link">docs/work-log/ — newest first</td></tr>
+      </table>
+    </div>
+    <footer class="closing">If you're reading this before your first real session in the codebase: start with <code>docs/STATE.md</code> in the repository, then come back to whichever section above matches what you're about to touch. The repository itself is at <a href="https://github.com/chenson42/presby">github.com/chenson42/presby</a>.</footer>
+  </section>
+
+</div>
+</body>
+</html>

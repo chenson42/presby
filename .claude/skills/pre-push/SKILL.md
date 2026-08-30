@@ -96,6 +96,18 @@ Vitest runs every `*.test.ts` under `src/`. If a test fails, fix it before pushi
 
 **Do not proceed if any test fails.**
 
+## Step 3e: Secrets & PII Tripwire
+
+```bash
+npm run check:secrets
+```
+
+`scripts/check-secrets-pii.mjs` scans every `git ls-files`-tracked file (this repo is public — that file set is the actual exposure surface) for private-key blocks, cloud-provider API-key shapes, JWTs, and connection strings with embedded credentials (HARD findings, no exemption exists — fix or redact, always), plus env-var-shaped secret assignments, email addresses outside the project's safe-domain allowlist, and phone/SSN-shaped numbers outside the `555` fake-number convention (SOFT findings — annotate a genuine false positive with `// leak-ok: <reason>` on the same or line above; a Markdown file uses `<!-- leak-ok: <reason> -->`). Never annotate to suppress a real finding.
+
+This only sees the CURRENT tracked tree, not git history — a value already committed in a past commit stays in this repo's public history regardless of what this script finds today. If a real secret or a real person's/congregation's PII is found already committed, that's a decision for the user (redact going forward vs. a history rewrite), not something to resolve unilaterally.
+
+**Do not proceed if a HARD finding exists.** A SOFT finding needs review, not an automatic block — but don't wave one through without actually looking at it.
+
 ## Step 4: Production Build
 
 ```bash
@@ -185,6 +197,7 @@ Report results:
 - Production build: PASS / FAIL
 - Schema and migrations: in sync / pending (with details)
 - Release notes + version: updated / missing
+- Secrets & PII tripwire: PASS / FAIL (HARD findings) / WARN (SOFT findings reviewed and accepted)
 - Dependency CVE audit: PASS / WARN / FAIL (advisory IDs if any)
 - Housekeeping warnings: list them
 - **Ready to push? yes / no**

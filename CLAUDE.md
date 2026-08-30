@@ -340,7 +340,13 @@ npm run check:sql-date # Tripwire: bans unannotated sql<Date> (the Neon driver r
 npm run check:deps-drift  # Tripwire: the radix-ui umbrella must not reappear (DECISION-048)
 npm run check:brand-scope # Tripwire: the brand emitter and *-brand utilities stay in the two
                           # brandable route groups (DECISION-047)
-npm run check        # All four tripwires in sequence
+npm run check:secrets # Tripwire: scans every git-tracked file (the repo is public — that's the
+                       # real exposure surface) for private keys, cloud API-key shapes, JWTs,
+                       # and connection strings with embedded credentials (hard fail, no
+                       # exemption), plus env-var-shaped secrets, off-allowlist email addresses,
+                       # and phone/SSN-shaped numbers outside the 555 fake-number convention
+                       # (soft findings — annotate a real false positive with `// leak-ok: <reason>`)
+npm run check        # All five tripwires in sequence
 npm run ui:add -- <component…>  # The ONLY supported way to generate a shadcn primitive.
                        # Wraps `shadcn add`, rewrites the radix-ui umbrella import to the
                        # individual package, restores the lockfile. Raw `npx shadcn add`

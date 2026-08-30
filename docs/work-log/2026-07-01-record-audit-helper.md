@@ -554,6 +554,7 @@ Run `npm run check:audit` — must pass (nothing migrated yet, all files still h
 **`src/lib/audit.test.ts`** (Vitest; mock `auth`, `headers`, `db.insert`):
 
 - Actor `undefined` (omitted) → `auth()` called; `actorUserId`/`actorEmail` from session
+<!-- leak-ok: toy placeholder value, not a real address -->
 - Actor explicit `{ userId: "u1", email: "a@b.com" }` → `auth()` NOT called; values used
 - Actor `null` → `auth()` NOT called; `actorUserId`/`actorEmail` both null
 - `headers()` returns valid headers → `ip` and `userAgent` populated from them

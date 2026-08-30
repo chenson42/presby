@@ -914,7 +914,7 @@ For Phase 5 (qa):
 
 - Read Phase 1 (complete / READY WITH NOTES) and Phase 2 (complete / Approved with suggestions / DECISION-019) of this work-log.
 - Read `playwright.config.ts` — confirmed no `globalSetup`, `baseURL` from `E2E_BASE_URL ?? "http://localhost:3000"`.
-- Read `.env.local` — confirmed `SEED_ADMIN_EMAIL=admin@claudecode.info`, `SEED_ADMIN_PASSWORD=Gr307GDrMiOlxAiu`, `RATE_LIMIT_DISABLED=true`.
+- Read `.env.local` — confirmed `SEED_ADMIN_EMAIL=admin@claudecode.info`, `SEED_ADMIN_PASSWORD=<redacted>`, `RATE_LIMIT_DISABLED=true`.
 - Read `docs/decisions.md` — confirmed DECISION-019 is the highest number.
 - Read `docs/TODO.md` — confirmed In Flight entry for this feature.
 - **Ran mandatory live probe** on port 3100 (separate from any active port 3000 pipeline):

@@ -144,10 +144,12 @@ constraint) — the same bug already existed, undetected, in
 database: First Presbyterian Church of Westerville, slug `fpcw`, id
 `4315666c-d344-4a73-99a1-dfb7944cc29e`, type `congregation`, platform
 status `managed`. All three F16 groups seeded (Session, Board of Deacons,
-Active Membership). Real profile data entered:
-`organization_profiles.address` = "41 W. College Avenue, Westerville, Ohio
-43081", `.phone` = "614-882-3155"; one real `organization_service_times`
-row (Sunday, 10:15 AM). Site linked: `organization_sites.repo` =
+Active Membership). Real profile data entered — address and phone
+populated from the congregation's own public listing (redacted here per
+CLAUDE.md's No Real Data invariant, now that this repo is public; the dev
+database itself is not public and is unaffected by this redaction) — plus
+one real `organization_service_times` row (Sunday, 10:15 AM). Site linked:
+`organization_sites.repo` =
 `chenson42/site-fpcw`, `status` = `provisioning` (never ingested yet —
 correct, no CI has run against it).
 

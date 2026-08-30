@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=133 commit=186ab99 -->
+<!-- covers: decision=134 commit=81519c9 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -21,6 +21,10 @@ if decisions or feat/fix commits have landed since. Move it when you write new
 entries — that is the one piece of discipline this file needs, and it is checked.*
 
 ---
+
+## 2026-08-30
+
+- [ ] **`defect` · Now that this project's code is public, an automatic check was added that scans every file in the repository for anything that looks like a password, an API key, or a real person's or church's private contact information — and it's required to pass before any future change can be pushed.** Running it once against everything already in the repository turned up two real things worth knowing about, both now fixed: a random-looking password that had been typed into an old planning document while describing what a local test setting contained (nobody used it for anything real, but leaving a real generated password sitting in a public repository forever is bad practice regardless), and a real, actual street address and phone number for First Presbyterian Church of Westerville that had been entered into a project planning document while testing a feature — this is the same information already public on the church's own website, but it still goes against this project's own rule that no real address ever appears in this specific repository (a separate, private repository is where a real church's actual public-website content is supposed to live). Both have been blanked out going forward. **One thing you decided directly, worth remembering:** the history of every past change to this project still technically contains both of those values, because "erasing" something from a shared project's history is its own disruptive, hard-to-undo operation — you were asked, and chose to leave the history alone rather than rewrite it.
 
 ## 2026-08-28
 

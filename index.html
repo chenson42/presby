@@ -5,51 +5,90 @@
 <title>PresbyPortal Architecture</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="How PresbyPortal is built, why it's shaped this way, and how a human working with a fleet of specialized AI agents actually built it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700&display=swap" rel="stylesheet">
 <style>
   /* ============================================================
-     Ledger/registry palette: paper (cool slate-blue, not cream),
-     ink, registry (primary accent — rule/numeral/heading colour),
-     garnet (sparing, a wax-seal mark), brass (hairline rules,
-     section numerals). Iowan Old Style/Palatino throughout — a
-     registrar's serif at two weights, not a second family.
+     PresbyPortal Brand Guidelines v1.0 (DECISION-127): navy
+     #0D2240 / blue #1A5AA8 / gold #F2B134, Inter throughout. The
+     numbered-section/side-rule structure is a layout choice, not
+     a competing visual identity — every color and type role below
+     maps onto the platform's own token names (registry == primary,
+     paper == background, garnet's role reassigned to the brand's
+     gold, used exactly as sparingly as the logo mark itself does).
      ============================================================ */
   :root {
-    --paper: #eef0f3;
-    --paper-raised: #ffffff;
-    --ink: #171a2c;
-    --ink-soft: #4a4f66;
-    --ink-faint: #7d8199;
-    --registry: #2e3a66;
-    --registry-soft: #4a5787;
-    --garnet: #7c2d3a;
-    --brass: #9c8449;
-    --rule: #cdd1de;
-    --code-bg: #e2e5ec;
+    --paper: #ffffff;
+    --paper-raised: #f7f8fa;
+    --ink: #142438;
+    --ink-soft: #3d4f66;
+    --ink-faint: #6b7a8f;
+    --registry: #1a5aa8;
+    --registry-soft: #124079;
+    --garnet: #a9791f;
+    --brass: #a9791f;
+    --rule: #d7dde5;
+    --code-bg: #eef1f5;
     --good: #2f6b4f;
-    --card-shadow: 0 1px 2px rgba(23, 26, 44, 0.06), 0 4px 14px rgba(23, 26, 44, 0.05);
+    --navy: #0d2240;
+    --gold: #f2b134;
+    --card-shadow: 0 1px 2px rgba(13, 34, 64, 0.06), 0 4px 14px rgba(13, 34, 64, 0.06);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --paper: #12141f; --paper-raised: #191c2b; --ink: #e8e7de;
-      --ink-soft: #b7b8c9; --ink-faint: #82869c; --registry: #90a2df;
-      --registry-soft: #7686bd; --garnet: #d68b96; --brass: #c7a968;
-      --rule: #333857; --code-bg: #202339; --good: #7fc7a3;
+      --paper: #0d2240; --paper-raised: #14304f; --ink: #eef1f5;
+      --ink-soft: #c3ccd9; --ink-faint: #93a2b6; --registry: #7fb0ea;
+      --registry-soft: #a6c9ef; --garnet: #f2b134; --brass: #f2b134;
+      --rule: #2a4467; --code-bg: #18375c; --good: #7fc7a3;
+      --navy: #0d2240; --gold: #f2b134;
       --card-shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.3);
     }
   }
   :root[data-theme="dark"] {
-    --paper: #12141f; --paper-raised: #191c2b; --ink: #e8e7de;
-    --ink-soft: #b7b8c9; --ink-faint: #82869c; --registry: #90a2df;
-    --registry-soft: #7686bd; --garnet: #d68b96; --brass: #c7a968;
-    --rule: #333857; --code-bg: #202339; --good: #7fc7a3;
+    --paper: #0d2240; --paper-raised: #14304f; --ink: #eef1f5;
+    --ink-soft: #c3ccd9; --ink-faint: #93a2b6; --registry: #7fb0ea;
+    --registry-soft: #a6c9ef; --garnet: #f2b134; --brass: #f2b134;
+    --rule: #2a4467; --code-bg: #18375c; --good: #7fc7a3;
+    --navy: #0d2240; --gold: #f2b134;
     --card-shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.3);
   }
   * { box-sizing: border-box; }
   html { background: var(--paper); }
   body {
     margin: 0; background: var(--paper); color: var(--ink);
-    font-family: "Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, .doctitle { font-family: "Inter Tight", "Inter", sans-serif; }
+  .brand-mark { display: inline-flex; align-items: center; gap: .6rem; margin-bottom: 1.4rem; }
+  .brand-mark svg { height: 2.1rem; width: auto; flex-shrink: 0; }
+  /* Light/dark mark swap, matching the platform's own PlatformMark component
+     convention exactly rather than trying to recolor one SVG's fill via CSS. */
+  .brand-mark .mark-light { display: block; }
+  .brand-mark .mark-dark { display: none; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .brand-mark .mark-light { display: none; }
+    :root:not([data-theme="light"]) .brand-mark .mark-dark { display: block; }
+  }
+  :root[data-theme="dark"] .brand-mark .mark-light { display: none; }
+  :root[data-theme="dark"] .brand-mark .mark-dark { display: block; }
+  .brand-wordmark { font-family: "Inter Tight", "Inter", sans-serif; font-weight: 700; font-size: 1.05rem; letter-spacing: .01em; color: var(--navy); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .brand-wordmark { color: var(--ink); }
+  }
+  :root[data-theme="dark"] .brand-wordmark { color: var(--ink); }
+  .gh-corner { position: fixed; top: 0; right: 0; z-index: 50; width: 12.1rem; height: 12.1rem; overflow: hidden; pointer-events: none; }
+  .gh-corner a {
+    pointer-events: auto; position: absolute; top: 2.4rem; right: -3.2rem; width: 12rem;
+    transform: rotate(45deg); background: var(--registry); color: #fff; text-align: center;
+    font-family: "Inter Tight","Inter",sans-serif; font-weight: 700; font-size: .8rem;
+    letter-spacing: .03em; padding: .45rem 0; text-decoration: none; box-shadow: 0 2px 8px rgba(13,34,64,.25);
+  }
+  .gh-corner a:hover { background: var(--registry-soft); }
+  @media (max-width: 600px) {
+    .gh-corner { width: 8.5rem; height: 8.5rem; }
+    .gh-corner a { top: 1.5rem; right: -2.6rem; width: 9rem; font-size: .68rem; padding: .35rem 0; }
   }
   .page { max-width: 780px; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
   .titleblock { border-bottom: 1px solid var(--rule); padding-bottom: 2rem; margin-bottom: 3rem; }
@@ -145,9 +184,17 @@
 </style>
 </head>
 <body>
+<div class="gh-corner" aria-hidden="false">
+  <a href="https://github.com/chenson42/presby" target="_blank" rel="noreferrer" aria-label="View source on GitHub">View on GitHub</a>
+</div>
 <div class="page">
 
   <div class="titleblock">
+    <div class="brand-mark" aria-hidden="true">
+      <svg class="mark-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 217.0 301.0"><g><path d="M0 108.5A108.5 108.5 0 0 1 217 108.5A108.5 89.3 0 0 1 150 191L150 105.5A46.5 46.5 0 0 0 57 105.5L57 249L0 301Z" fill="#0D2240"/><path d="M75 251H142L87.19 301H20.19Z" fill="#F2B134"/></g></svg>
+      <svg class="mark-dark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 217.0 301.0"><g><path d="M0 108.5A108.5 108.5 0 0 1 217 108.5A108.5 89.3 0 0 1 150 191L150 105.5A46.5 46.5 0 0 0 57 105.5L57 249L0 301Z" fill="#FFFFFF"/><path d="M75 251H142L87.19 301H20.19Z" fill="#F2B134"/></g></svg>
+      <span class="brand-wordmark">PresbyPortal</span>
+    </div>
     <p class="eyebrow">Architecture Overview</p>
     <h1 class="doctitle">PresbyPortal</h1>
     <p class="dek">A multitenant platform for Presbyterian congregations, presbyteries, and synods — what it does, why it's built this way, and how a human working with a fleet of specialized AI agents actually built it.</p>

@@ -615,6 +615,27 @@ A single gray sentence in the middle of the page is not an empty state.
 
 ## Accessibility
 
+> **Why this section is stricter than WCAG AA.** The audience skews elderly. A
+> congregation's directory is read by people in their seventies and eighties, on
+> phones, often at arm's length. Every floor below is set for that reader, and the
+> AAA contrast requirement is the clearest example — it is a deliberate choice, not
+> an aspiration.
+>
+> **On harvesting UI conventions from `fpcw-directory`** (reviewed 2026-09-24): its
+> `docs/ui-standards.md` is 775 lines of *layout consistency* — action-bar order,
+> back-navigation, view switchers, search-bar row order, card typography — and
+> contains **no accessibility guidance at all**; its source has zero occurrences of
+> `focus-visible`, `aria-live` or `prefers-reduced-motion`. So there is nothing to
+> import from it on this axis; presby is already ahead. What *is* worth taking is the
+> consistency discipline itself, which serves an older reader more than any single
+> type bump: when every module puts the same control in the same place, the page
+> stops needing to be re-learned.
+>
+> **One thing not to copy:** fpcw's card-typography tier uses `text-xs` (12px) for
+> secondary detail. That is below this project's 14px member-facing floor
+> (`MIN_MEMBER_FACING_PX`, `src/lib/brand/contract.ts`). Adopting its card
+> hierarchy verbatim would regress accessibility.
+
 - **Keyboard navigation.** All interactive elements must be reachable with Tab. Verify by tabbing through the page — every button, link, and input must receive a visible focus ring.
 - **Focus rings, always with a 2px offset.** `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background` on every focusable element. The offset is not polish — the platform's own `--ring` is byte-identical to `--primary`, so a ring drawn flush against the default `<Button>` measures **1.00:1, invisible, in both color schemes** (measured in `src/lib/brand/contract.ts`; the D4 test there asserts the offset is what fixes it, not the color). Drawing the ring with surface-colored space between it and the control it rings means its contrast is only ever measured against the surface, which the token contract can guarantee at every brand seed — measuring it against the control it rings cannot be guaranteed the same way. Never suppress a focus ring with bare `focus:outline-none` unless you replace it with an offset ring of your own.
 - **Semantic HTML.** `<main>`, `<nav>`, `<section>`, `<h1>`–`<h6>` in proper hierarchy. Screen readers depend on landmark roles; don't bury all structure in `<div>`.
@@ -624,6 +645,10 @@ A single gray sentence in the middle of the page is not an empty state.
 - **Color alone is not a signal.** Never rely solely on color to convey status (e.g., "red = error"). Always pair color with text, an icon, or an ARIA attribute.
 - **Reduced motion.** Respect `prefers-reduced-motion: reduce`. `globals.css` carries a base rule collapsing animation and transition durations to near-zero under that media query — don't add a component-level animation (a custom `@keyframes`, a JS-driven transition) that bypasses it. If you're using the stock `animate-in`/`fade-in`/`slide-in-from-*` utilities on a generated primitive, the base rule already covers you; a hand-rolled animation is where this gets missed.
 - **200% zoom.** A page's primary content must survive 200% browser zoom without horizontal scroll. Test with the browser's own zoom control, not by shrinking the viewport — a fixed-width element or an unwrapped flex row can pass a narrow-viewport check and still fail zoom, because zoom scales content inside a viewport that itself stays put.
+- **Hover is never the only affordance.** A control must be recognisable as a control before the pointer touches it — from its border, its fill, its shape, or its label. `hover:shadow-md cursor-pointer` on an otherwise-flat card tells a touch user nothing, tells a keyboard user nothing, and tells an older user scanning the page nothing. Hover *confirms* an affordance (see [Four-State Component Design](#four-state-component-design)); it never establishes one. If a card is clickable, it carries a visible interactive element — a linked title, a chevron, a button — not just a cursor change.
+- **Never use a placeholder as a label.** Every input gets a real `<label>`. Placeholder text vanishes the moment someone starts typing, so anyone who loses their place has no way back to what the field wanted; it also sits at a lower contrast than body text by design. Use the placeholder for an *example* of the format (`MM/DD/YYYY`), never for the field's name.
+- **Plain language, at the reading level of the congregation.** This product's users are church volunteers and members, many of them elderly, none of them obliged to know our vocabulary. Write labels and messages in the words the church already uses — "Add a member", not "Create person record"; "Transferred to another church", not "Roll action: certificate issued". Where the polity has a term of art the clerk genuinely uses (*session*, *per capita*, *profession of faith*), use it — that is the congregation's language, not ours. Where the term is ours (*tenant*, *organization*, *record*, *entity*, *sync*), it does not belong on a member-facing surface. Errors say what happened and what to do next, in a sentence a person can act on without calling the office.
+- **Session length is an accessibility concern.** Someone completing a long form — a roll action, an annual statistical return, a sensitive-info sub-form — may take much longer than a staff user testing it. A session that expires mid-task and discards the work is a failure of this standard, not a security feature. Any flow expected to take more than a few minutes must either keep the session alive while the user is active or preserve entered data across re-authentication. The [Unsaved Changes Guard](#forms--unsaved-changes-guard) protects against navigation, not expiry.
 - **Print.** Church offices print rolls, directories, and reports on monochrome laser printers. Any content page a user might reasonably print — a roll view, a report, a directory listing — must stay legible with color removed: pair a status color with an icon or a label (not just a colored chip), and keep borders and dividers that rely on `border`/`border-input` rather than a colored background alone. Check the browser's print preview, not just the screen, before shipping a page whose primary use is "print this and hand it to the clerk of session."
 
 ---
@@ -661,3 +686,7 @@ QA runs this in Phase 5 for any change that touches UI. A single unchecked box b
 - [ ] No extra `container`/padding wrapper inside a layout that already provides padding (`p-8` in admin layout)
 - [ ] `loading.tsx` + `error.tsx` present in any new route segment that does async data fetching
 - [ ] Page tested at ≥2 viewport widths (desktop 1440px, mobile 375px)
+- [ ] Every clickable surface is recognisable as clickable without hovering it
+- [ ] Every input has a real `<label>`; no placeholder standing in for one
+- [ ] Labels, buttons and errors use the congregation's words, not the schema's ("Add a member", not "Create person record")
+- [ ] Any flow that could take more than a few minutes survives a session expiry without discarding entered data

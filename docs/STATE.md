@@ -9,7 +9,59 @@ Updated 2026-09-24.
 
 ## Session handoff — 2026-09-24 (read this FIRST — supersedes the 2026-08-31 entry below)
 
-### Update, end of the 2026-09-24 session — the DDL pipeline SHIPPED (uncommitted at time of writing)
+### ⚠️ RESUME HERE — session stopped mid round-two hardening (2026-09-24, laptop shutdown)
+
+**Pushed to `origin/main` (all verified, in order):** `1a5201e` fix(provisioning) ·
+`36a2bb8` feat(schema) the D10/D19/D20/D21 unit (`drizzle/0043`–`0047`) ·
+`422d894` fix(schema) hardening round one (F47–F53) · `11ab488` build(node) Node 22
+pin · `17bfc7c` docs(agents) the agent-instruction punch-list, incl. **Workflow
+Rule 16 on running pipelines in parallel** · `05d7371` docs(reviews).
+**Production has NOT been migrated** (deploys do not migrate; `npm run db:migrate`
+against production is a deliberate, separate step — do it only after round two).
+
+**Uncommitted in the working tree, deliberately:** hardening **round two**
+(F54–F58, DECISION-141 — "creation guarded as strongly as mutation": sanctioned-write
+GUCs on INSERT for the lifecycle aggregate, the return→publication→projection chain,
+the withdrawal pair, and identifiers). The design ruling is complete and in
+`docs/schema-design-2.md` §2g / the work-log's Phase 3 "Amendment after external
+review, round 2"; the **implementation had not started** when the session
+stopped — **nothing was built, no DDL was executed, and the `development` Neon
+branch is unchanged at the round-one (F47–F53) state, green: `test-rls.sql` 384 /
+exit 0, DB-backed trio+2 119/119.** The work-log's Phase 4 "Loop-back after
+external review, round 2" block ("STOPPED MID-WAY") banks the full call-site
+inventory the sweep needs and three findings the next implementer must read first:
+`scripts/seed-dev.sql` writes the publication chain (`:1374/:1386/:1399`) and must
+arm the GUC inside its transaction; Ruling 3 is under-specified for
+`publications`' rejection literal; `publication.test.ts:980` would false-pass under
+the new guard and must be split. `docs/release-notes/v0.24.md` already carries the 0.24.2 entry and
+`package.json` is at 0.24.2 for that commit.
+
+**To resume round two:** read the work-log note → re-apply the corrected
+`drizzle/0043`→`0047` whole, in order, on `development` (`psql
+"$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f …`; they are idempotent) → hand
+`database-admin` the remaining items → QA re-verify (probe each guard on the owner
+connection, state the refusing layer) → one `fix(schema):` commit (`Caught-By:
+human-review`, `Discovered-In: post-merge`, `Work-Log:
+2026-09-24-lifecycle-affiliation-returns`) → `/pre-push` → push. Then regenerate the
+operator's review export (`~/Downloads/presby-table-definitions-2026-09-24.md`; the
+generator script lived in the session scratchpad — trivially rewritable: verbatim
+DDL per migration, function bodies collapsed to signature + file:line).
+
+**Then, in order:** the five remaining overdue reviews (`security` first — it now has
+F38/F40/F44/F46–F58 and the `presby_platform` blanket grant in `drizzle/0009:44`
+waiting for it; then `code`, `documentation`, `test-coverage`, `retrospective`);
+then the parallel waves described under Workflow Rule 16 — wave 1: Track B visual
+parity, Track C directory quick wins, D22 and D23 (design phases); wave 2: increment
+6 submission grants (own work-log + security pass; Phase 2 Ruling 11 pre-placed the
+route group), increment 7 name history + D13 import staging, Track A groups schema
+(gated on 0c), Track R reimbursement — each in its own worktree + Neon branch,
+integrated one PR at a time.
+
+**Operator actions outstanding:** set the Vercel project's Node version to 22.x
+before 2026-10-01 (`docs/TODO.md`, Deployment section); decide the real-PII row in
+`organization_profiles` on the shared `development` branch (TODO).
+
+### The DDL pipeline SHIPPED (earlier in the same session)
 
 The "NEXT TASK" below is **done**: `docs/work-log/2026-09-24-lifecycle-affiliation-returns.md`
 closed SHIP WITH NOTES after a full six-phase run (three Phase 3 loop-backs, one

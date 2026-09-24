@@ -17,8 +17,8 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-09-24 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-09-24 |
-| 3 — Technical design | tech-lead | Complete, amended after batch A, amended again after batches B and C, amended a third time after Phase 5 Finding 1, amended a fourth time after an external post-merge review, ratified a fifth time after the resulting hardening pass | Design complete, increments 1–5 specified; five Phase 4 deviations ruled on after batch A (4 accepted, 1 fixed before batch B — see "Amendment after batch A"); thirteen further items ruled on after batches B and C, none requiring a Phase 4 loop-back — see "Amendment after batches B and C"; QA's Finding 1 (`organization_successions` was policy-mediated, not function-mediated, contra Phase 2 Ruling 1) confirmed and routed to database-admin — see "Amendment after Phase 5" below; an external reviewer's five findings against the exported table shapes (F47–F52) ruled on and routed to database-admin as a migration correction in place — see "Amendment after external implementation review" below; two loop-back candidates and nine deviations from that pass ratified — one CHECK (`organization_affiliations_recorded_has_from`) refused against fixture/test evidence, one CHECK shape (`statistical_returns_provenance_shape`'s attestation exclusion) confirmed Ruling-A4-consistent, no further Phase 4 change required — see "Ratification after the hardening pass" below | 2026-09-24 |
-| 4 — Implementation | database-admin | Complete, re-opened twice (Phase 5 Finding 1; external implementation review) | Six passes green. All three batches green. Increments 1–2 + fixture sweep + `createOrganization()` (batch A); Ruling A5's correction to `drizzle/0044` + increment 3 (`drizzle/0045`, the about-org enforcing trigger) (batch B); increments 4–5 (`drizzle/0046`, `drizzle/0047`), the `congregation_statistics` retrofit and backfill, the rewritten publish function, `presby_list_published_returns_to_me()` and the `sasr_reports` drop (batch C). Then the Finding 1 loop-back, then the external-review hardening pass (F47–F53 / DECISION-140) as a correction in place to `drizzle/0043`–`0047`: six of the seven items built, `organization_affiliations_recorded_has_from` refused as contradicting F41's asserted fixture. test-rls 384/exit 0, DB-backed vitest 119 passed, 33 failing-first proofs. Five loop-back candidates for tech-lead, none blocking | 2026-09-24 |
+| 3 — Technical design | tech-lead | Complete, amended after batch A, amended again after batches B and C, amended a third time after Phase 5 Finding 1, amended a fourth time after an external post-merge review, ratified a fifth time after the resulting hardening pass, amended a sixth time after a second-round external post-merge review | Design complete, increments 1–5 specified; five Phase 4 deviations ruled on after batch A (4 accepted, 1 fixed before batch B — see "Amendment after batch A"); thirteen further items ruled on after batches B and C, none requiring a Phase 4 loop-back — see "Amendment after batches B and C"; QA's Finding 1 (`organization_successions` was policy-mediated, not function-mediated, contra Phase 2 Ruling 1) confirmed and routed to database-admin — see "Amendment after Phase 5" below; an external reviewer's five findings against the exported table shapes (F47–F52) ruled on and routed to database-admin as a migration correction in place — see "Amendment after external implementation review" below; two loop-back candidates and nine deviations from that pass ratified — one CHECK (`organization_affiliations_recorded_has_from`) refused against fixture/test evidence, one CHECK shape (`statistical_returns_provenance_shape`'s attestation exclusion) confirmed Ruling-A4-consistent, no further Phase 4 change required — see "Ratification after the hardening pass" below; a second-round external review's five items (two blockers, two informational, one confirmation) ruled on as F54–F58, generalizing F44/F49's "creation guarded as strongly as mutation" rule to `organization_lifecycle_events`/`organization_successions`, the return→publication→projection chain, the withdrawal pair, and `organization_identifiers` — see "Amendment after external review, round 2" below | 2026-09-24 |
+| 4 — Implementation | database-admin | Complete, re-opened twice (Phase 5 Finding 1; external implementation review); **re-opened a third time for the round-2 creation-guard hardening (F54–F58) and STOPPED MID-WAY 2026-09-24 (laptop shutdown) — nothing built, no DDL applied, baselines captured; see "Loop-back after external review, round 2"** | Six passes green. All three batches green. Increments 1–2 + fixture sweep + `createOrganization()` (batch A); Ruling A5's correction to `drizzle/0044` + increment 3 (`drizzle/0045`, the about-org enforcing trigger) (batch B); increments 4–5 (`drizzle/0046`, `drizzle/0047`), the `congregation_statistics` retrofit and backfill, the rewritten publish function, `presby_list_published_returns_to_me()` and the `sasr_reports` drop (batch C). Then the Finding 1 loop-back, then the external-review hardening pass (F47–F53 / DECISION-140) as a correction in place to `drizzle/0043`–`0047`: six of the seven items built, `organization_affiliations_recorded_has_from` refused as contradicting F41's asserted fixture. test-rls 384/exit 0, DB-backed vitest 119 passed, 33 failing-first proofs. Five loop-back candidates for tech-lead, none blocking | 2026-09-24 |
 | 5 — Verification | qa | Complete, re-verified twice (Finding 1 loop-back; hardening pass F47–F53) | PASS — hardening re-verification: every reviewer hole probed on both connections and refused by the specified mechanism; test-rls 384/exit 0; DB-backed trio+2 119/119; two failing-first proofs reproduced; refused CHECK and attestation deviation pinned | 2026-09-24 |
 | 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES — follow-ups tracked in docs/TODO.md; CLAUDE.md, architecture.md, functionality map updated in the ship commit | 2026-09-24 |
 
@@ -3498,6 +3498,151 @@ needs the new file.
 
 ---
 
+## Loop-back after external review, round 2 (2026-09-24, database-admin)
+
+### STOPPED MID-WAY (2026-09-24, laptop shutdown)
+
+**Nothing was built.** The session was halted by the operator during the
+read/plan/baseline stage, before the first file edit. This block exists so the
+next session does not have to re-derive the ground truth.
+
+**State of the working tree:** no migration, test, seed or Drizzle-module file
+was edited by this pass. The only file this pass touched at all is this
+work-log (this block). `git status` for `drizzle/`, `scripts/`, `src/` is
+unchanged from the start of the session.
+
+**State of the `development` Neon branch:** the corrected `0043`–`0047` are
+**not applied at all**, because they were never written. The branch carries the
+F47–F53 (`DECISION-140`) versions of all five files exactly as they stand on
+`origin/main` — no DDL of any kind was executed this session. No apply, no
+partial apply, nothing to unwind.
+
+**Per the spec's five items:**
+
+| # | Item | State |
+|---|---|---|
+| 1 | Lifecycle aggregate (F54, `0044`): `presby.lifecycle_write_active`, `BEFORE INSERT` guards on `organization_lifecycle_events` + `organization_successions`, deferred event-side cardinality trigger sharing `presby_lifecycle_event_cardinality_check()` | **Not started** |
+| 2 | Return → publication → projection (F55, `0046`/`0047`): `presby.publication_write_active`, `presby_deny_publication_write()`, `presby_guard_publication_write()`, three triggers, arming inside `presby_publish_sasr_snapshot()` and the `0047` backfill | **Not started** |
+| 3 | Withdrawal pair (F56, `0047`): `presby.withdrawal_write_active` conjunct in `presby_freeze_publication()` and `presby_reject_published_statistics_write()` | **Not started** |
+| 4 | Identifiers INSERT (F58, `0043`): widen `organization_identifiers_guard` to `BEFORE INSERT OR UPDATE OR DELETE`, correct its comment block | **Not started** |
+| 5 | Drizzle-module mirror comments; `_journal.json` unchanged | **Not started** |
+
+**Test-fixture sweep — zero files swept.** No call site anywhere arms
+`presby.lifecycle_write_active`, `presby.publication_write_active` or
+`presby.withdrawal_write_active` yet. The inventory below was completed and is
+the sweep's work list.
+
+**Baselines captured before the stop (both green, on `development`):**
+
+- `psql "$APP_DATABASE_URL" -f scripts/test-rls.sql` → **384 passes, exit 0**
+  (so the post-change target of "> 384" is measured against 384, confirmed).
+- `dotenv -e .env.local -- vitest run --no-file-parallelism` over
+  `src/lib/db/domain/lifecycle.test.ts`, `publication.test.ts`,
+  `org-identifiers.test.ts`, `src/lib/presbytery.test.ts`,
+  `src/lib/org-provisioning.test.ts` → **5 files, 119 tests, all passing.**
+
+### Inventory the next session should not have to redo
+
+**Lifecycle direct-INSERT call sites (must arm `presby.lifecycle_write_active`):**
+
+- `scripts/test-rls.sql` — 5 sites: `:3096` (successions, expects
+  `insufficient_privilege` from the *grant*, so it must stay unarmed and needs
+  no change), `:3157`, `:3174`, `:3186` (the section 32(k) authority/CHECK
+  probes — `:3186` expects `check_violation` from
+  `organization_lifecycle_events_external_body_shape`, which a `BEFORE INSERT`
+  guard would pre-empt, so this one **must** be armed), `:3202` (the
+  dissolution path, must be armed).
+- `src/lib/db/domain/lifecycle.test.ts` — 10 `organizationLifecycleEvents`
+  inserts (lines 258, 283, 380, 414, 461, 500, 537, 570, 635) plus 9
+  `organizationSuccessions` inserts (lines 399, 429, 445, 476, 481, 517, 549,
+  582, 647, 658), across the `presby_freeze_lifecycle_event`,
+  `organization_successions write path` and
+  `organization_successions_edge_unique` describes. Cleanest shape: arm once at
+  the top of each `inRollback()` body that writes either table.
+
+**Publication-chain direct-INSERT call sites (must arm
+`presby.publication_write_active`):**
+
+- `src/lib/db/domain/publication.test.ts` — `statistical_returns`: lines 727,
+  749, 765, 781, 797, 813, 827, 837 (field-spec block), 860, 878, 891
+  (imported/about-org block), 913, 929, 945 (provenance-shape block);
+  `publications`: lines 1001, 1058, 1082, 1094, 1107, 1158, 1189;
+  `congregation_statistics` with `provenance = 'published_by_congregation'`:
+  line 1199. One `armPublicationWrite(tx)` helper called at the top of each
+  `inOwnerRollback()` body is the least invasive shape.
+- **`scripts/seed-dev.sql` — a spec defect worth flagging.** Phase 3's facts
+  block says the seed "inserts no row into either table", which is true of the
+  two *lifecycle* tables but **false of the publication chain**: the seed
+  writes `statistical_returns` (`:1374`), `publications` (`:1386`) and a
+  `published_by_congregation` `congregation_statistics` row (`:1399`) as
+  explicit fixed-id inserts. All three land inside the file's single
+  `begin;`(`:25`)/`commit;`(`:1516`) transaction, so one
+  `select set_config('presby.publication_write_active', 'true', true);` before
+  `:1374` covers them; without it a fresh `seed-dev.sql` fails outright.
+- `scripts/test-rls.sql` `:4154`/`:4165` insert into `statistical_returns` /
+  `publications` as `presby_app` expecting `insufficient_privilege` from the
+  revoked grant — the grant fires before the trigger, so these stay unarmed and
+  unchanged.
+- Every `congregation_statistics` insert in `scripts/test-rls.sql` (`:2197`,
+  `:2398`, `:3630`, `:3673`, `:3685`, `:3738`, `:3748`, `:3758`) uses
+  `presbytery_entered` or `imported`, and `setCongregationStatistics()`
+  (`src/lib/presbytery.ts:663`, `targetWhere` pinned to those two provenances)
+  writes nothing else — so the `WHEN (new.provenance =
+  'published_by_congregation')` clause leaves the whole live tenant path
+  untouched, and these are the regression proof, already in the suite.
+
+**Withdrawal-transition call sites (must arm `presby.withdrawal_write_active`):**
+
+- `src/lib/db/domain/publication.test.ts` lines 487 (the permitted triple), 595
+  (Option A read-back) and 672 (the projection's `withdrawn_at`). Line 980's
+  probe expects a rejection and must stay unarmed — but note its assertion
+  regex (`/a withdrawal must set withdrawn_at|publications_withdrawal_shape|withdrawn_by/`)
+  will then be matching the *new* unarmed-writer rejection rather than the
+  shape CHECK, which is a false pass the next session must split into two
+  probes.
+
+**Identifier call sites (must arm `presby.identifier_trigger_active`):**
+
+- `src/lib/db/domain/org-identifiers.test.ts` — `seedAlderIdentifier()`
+  (`:127`, used by three tests) and the raw INSERT at `:183`. The test at
+  `:177` ("is armed on UPDATE and DELETE only — INSERT is deliberately left to
+  the grant and the partial unique index") is the F58 assertion that **inverts**
+  and must be rewritten as the failing-first INSERT-rejection proof.
+- `scripts/test-rls.sql` `:3342`–`:3347` asserts the guard trigger's `tgtype`
+  bits as `ROW|BEFORE|DELETE|UPDATE` (`&1,&2,&8,&16`); widening to INSERT means
+  adding `(t.tgtype & 4) = 4` and correcting the assertion text.
+- `drizzle/0043`'s own `pcusa_pin` backfill (section 2) is column-existence
+  guarded and runs before section 4 creates the trigger, so it needs no arming
+  on a fresh apply and is skipped entirely on re-apply — confirmed by reading
+  the guard, not assumed.
+
+**Two implementation notes established by reading, worth keeping:**
+
+1. **Trigger firing order is alphabetical by name.** On
+   `organization_lifecycle_events`, `…_authority` sorts before `…_guard`, so
+   `presby_assert_council_authority()` still rejects a bad actor/subject pair
+   first; on `organization_successions`, `…_event_scope` sorts before
+   `…_guard`. Both orders are compatible with the rulings, but the reviewer's
+   "third predecessor after a valid merge" repro therefore needs a
+   *legitimately-scoped* event so that `event_scope` passes and the GUC guard
+   is provably what rejects.
+2. **`presby_freeze_publication()` has no single reusable "immutable" literal.**
+   Ruling 3 says the unarmed withdrawal falls through to "the function's
+   existing exception vocabulary", but that function raises three distinct
+   messages and the applicable one (`a publication is immutable; the only
+   permitted UPDATE is a single withdrawal …`) is interpolated with `old.id`,
+   so reusing it before `return new` means either duplicating the literal
+   inside the one function body or introducing a helper. The
+   `congregation_statistics` half has no such problem — its permitted-transition
+   `IF` simply gains the conjunct and falls through to the single existing
+   `raise`.
+
+**Next agent: database-admin** (this same Phase 4 loop-back, resumed from
+zero). The spec is unchanged: Phase 3 "Amendment after external review, round
+2" above, `docs/schema-design-2.md` §2g, DECISION-141.
+
+---
+
 # Phase 5 — Verification (qa)
 
 *Recorded verbatim by the orchestrator, 2026-09-24. Orchestrator disposition of Finding 1 follows at the end.*
@@ -3962,3 +4107,80 @@ Items 1–3 actioned directly in the ship commit: `CLAUDE.md` (organizations-are
 ### Orchestrator closure of the hardening loop-back (2026-09-24)
 
 The external implementation review (F47–F53) was handled as a Phase 3 → 4 → 5 loop-back on the already-shipped, unreleased migrations: ruled (Phase 3 "Amendment after external implementation review" and "Ratification after the hardening pass"), built in place (Phase 4 "Loop-back after external implementation review"), and independently re-verified (Phase 5 addendum above, PASS). Shipped-vs-intent recheck for this loop-back, done by the orchestrator against the Phase 5 evidence rather than a fresh analyst pass because no user-visible surface changed: the two ratified deviations are stated accurately in the v0.24.1 release-notes entry (an affiliation may predate our records; the automated publish path names no attester yet), every other reviewer item is closed by the mechanism the ruling specified, and the residuals (identifiers INSERT ungated beyond the grant; the rollup's future withdrawn-row filter; the null-context branch test) are in `docs/TODO.md`. Committed as `fix(schema)` with `Caught-By: human-review`, `Discovered-In: post-merge`. The pipeline's verdict remains SHIP WITH NOTES.
+
+---
+
+# Phase 3 — Technical Design (tech-lead), continued
+
+## Amendment after external review, round 2 (2026-09-24, tech-lead) — sixth Phase 3 loop-back
+
+**Context.** `drizzle/0043`–`0047` are on `main` (`422d894`, being pushed) but still applied only to the `development` Neon branch — production has never run these five files, and the fourth/fifth loop-backs' `fix(schema)` correction (F47–F53, DECISION-140) is the same kind of migration-correction-in-place this loop-back is: same files, same numbers. The same external reviewer read the regenerated export after that correction and returned round two: two remaining database-contract blockers, two items deliberately left on the loop-back list (not blocking), and a withdrawal-decision confirmation. The reviewer's own closing sentence states a rule this pipeline already applied once, at F44/F49, generalized to a case that finding never reached: **"if an immutable record represents an authorized act, creation must be guarded as strongly as mutation."** F44 taught this pipeline that a grant edit binds nobody on the `getPlatformDb()` connection; F49 applied a GUC-gated guard trigger to `organization_affiliations`' *mutation* surface. What round two finds is that three tables' *creation* surface — `organization_lifecycle_events`/`organization_successions` as a pair, and the `statistical_returns` → `publications` → `congregation_statistics` chain — never got the equivalent treatment, because at the time each was hardened, "grant to SELECT/INSERT + a shape CHECK" looked sufficient for INSERT the way it never looked sufficient for UPDATE/DELETE. It wasn't a different judgment; it was an incomplete application of a rule already adopted. Findings are logged as **F54–F58** in `docs/schema-design-2.md` §2g. `docs/decisions.md` gets one new entry, **DECISION-141**.
+
+**A verified fact worth stating before the rulings, because it changes the risk shape of items 1 and 2 to "correct the plumbing," not "brace for a live regression": nothing in this codebase writes to `organization_lifecycle_events`, `organization_successions`, `statistical_returns`, or `publications` from application code today** (confirmed by search: no non-test, non-`dev-docs.ts` reference to the first two tables anywhere in `src/`; the third and fourth are written only from inside `presby_publish_sasr_snapshot()` and `drizzle/0047`'s own backfill). `createOrganization()` writes only the initial `organization_affiliations` row, not a lifecycle event — confirmed, no code path in `src/lib/org-provisioning.ts` touches either table. `scripts/seed-dev.sql` inserts no row into either table. The only live writers of these four tables' rows are: the two SQL migrations' own backfills (statistical_returns/publications only), the `.test.ts` fixtures exercising the tables directly on the owner connection, and `presby_publish_sasr_snapshot()`. Every guard added below is therefore *zero-regression against any real caller* — the cost is entirely in updating direct-INSERT test fixtures to arm the new GUCs, which is real and is called out explicitly in the punch list, not a live application risk.
+
+Also verified, per the facts block: `presby_publish_sasr_snapshot()` sets **no GUC at all today** — it is a `SECURITY DEFINER` function whose only current protection is that it runs as owner, with no transaction-local marker distinguishing its writes from any other owner-connection write. `presby.affiliation_trigger_active` is unrelated and untouched by it.
+
+### Ruling 1 — `organization_lifecycle_events` + `organization_successions` are one immutable aggregate; INSERT is guarded, and cardinality is checked from both directions (F54)
+
+Confirmed on both points, and the reviewer's own example targets `organization_successions` specifically (a later, unguarded `INSERT` of a third predecessor into an *already-valid* merge, which changes the act's meaning without violating cardinality) while the *second* hole — a `merged`/`divided` event committed with **zero** succession rows because the cardinality trigger only lives on `organization_successions` — is a `organization_lifecycle_events`-side gap the same finding covers.
+
+**Mechanism, one aggregate, one sanctioned entry:**
+
+1. **New GUC, `presby.lifecycle_write_active`**, transaction-local (`is_local => true`, same discipline as every other GUC in this pipeline). Armed exactly one place today: the future `presby_record_lifecycle_event()` (named in `docs/TODO.md` already) arms it at entry, before it inserts the event row and its succession rows in the same transaction. Nothing arms it yet, which means **both tables' INSERT is effectively closed until that function ships** — the reviewer's own fallback suggestion ("seriously consider making successions read-only outside migrations"), achieved as a side effect of gating the whole aggregate rather than as a separate rule, and with the plumbing already correct for the day the function lands (no second migration needed).
+2. **New function `presby_guard_lifecycle_write()`**, `BEFORE INSERT`, reused across both tables (not two copies): checks `coalesce(current_setting('presby.lifecycle_write_active', true), '') = 'true'`; on failure, calls `presby_deny_lifecycle_change()` — the **existing** literal, reused rather than minted fresh. This is the affiliation/organizations reuse pattern (DECISION-139/140), not the identifier no-reuse pattern: the claim is identical ("this write is part of a sanctioned lifecycle act") across both tables, in the same transaction, for the same future writer — reuse is the minimum-complexity answer.
+3. `create trigger organization_lifecycle_events_guard before insert on organization_lifecycle_events for each row execute function presby_guard_lifecycle_write();` and the equivalent `organization_successions_guard`, alongside the existing `organization_successions_event_scope` (unchanged — see the disposition on its permissive branch below) and the existing `organization_lifecycle_events_authority` (unchanged — the type-relationship check remains a second, independent layer, not replaced by the GUC).
+4. **`createOrganization()` needs no change** — verified above, it never writes either table. **The backfills need no change** — verified above, neither `0044` nor any other migration inserts a fixture row into either table.
+5. **Deferred `CONSTRAINT TRIGGER` on `organization_lifecycle_events` INSERT, closing the "zero-succession merge" hole directly.** Rather than duplicate `presby_check_succession_cardinality()`'s counting/raising logic in a second copy (drift risk — the two would have to be kept in step by hand forever), extract the shared logic into `presby_lifecycle_event_cardinality_check(p_event_id uuid) returns void`, `language plpgsql` (no `SECURITY DEFINER` needed — it is called from two `SECURITY INVOKER`-caller-adjacent triggers that already run in the writer's own transaction against a table the writer just touched, not across a foreign tenant's RLS), containing the existing count/raise body verbatim, parameterized on `p_event_id` instead of reading `new`/`old`. `presby_check_succession_cardinality()` becomes a thin wrapper (`v_event_id := coalesce(new.event_id, old.event_id); if v_event_id is not null then perform presby_lifecycle_event_cardinality_check(v_event_id); end if; return null;` — the "event gone" no-op move *into* the shared function, so both callers get it for free). New `presby_check_lifecycle_event_cardinality()`, `AFTER INSERT ... DEFERRABLE INITIALLY DEFERRED` on `organization_lifecycle_events`, body `perform presby_lifecycle_event_cardinality_check(new.id); return null;`. Both triggers validate the same aggregate from opposite ends; in the ordinary case where both fire in one transaction they agree, and either one alone is sufficient to close a zero-child merge/division.
+6. **The null-context permissive branch in `presby_check_succession_event()` is kept, not removed.** It is not moot: once the GUC guard is the actual gate, that branch stops being "the thing that lets an untethered owner-path insert through" and becomes what it always should have been — an actor-context integrity check for the writer that *does* get past the GUC (the future `presby_record_lifecycle_event()`, or a migration backfill that arms the GUC without an `app.current_org_id` context, which is a real shape: nothing sets org context outside a request). Removing it would require the branch to reject a null-actor insert outright, which breaks the only migration-time write shape this design has ever anticipated for these tables. No change to this function.
+
+**A residual named, not fixed, because it is outside this finding's scope**: `presby_assert_council_authority()`'s type check (presbytery-over-congregation, synod-over-presbytery, etc.) validates organization-*type* compatibility between `new.organization_id` and `new.subject_org_id`, not that the two are actually affiliated via `presby_org_affiliated()` — so, RLS aside, any presbytery-typed org could satisfy the authority check for any congregation-typed org, correct type pairing regardless of real jurisdiction. `presby_set_organization_identifier()` already gets this right (`presby_org_affiliated()` is the actual standing check, not a type comparison). Folded into the existing `docs/TODO.md` line for `presby_record_lifecycle_event()`, which is the function that should close it, mirroring the identifier function's own shape — not solved in this hardening pass, which is schema-guard-only.
+
+**Tests owed** (`test-rls.sql`, new subsection; `src/lib/db/domain/lifecycle.test.ts`): a grant-shape assertion is not the mechanism here (grants are unchanged) — instead, a failing-first proof that a raw owner-connection `INSERT` into each of the two tables, with the GUC unarmed, is rejected via the uniform lifecycle literal; a proof that arming `presby.lifecycle_write_active` (simulating the future sanctioned writer) permits a well-formed insert to both tables in one transaction, so the day `presby_record_lifecycle_event()` ships its plumbing is already proven correct; the reviewer's exact repro — commit a valid `merged` (A+B→C), then attempt a later, separate `INSERT` of a third predecessor row referencing the same event — proven rejected by the GUC guard (not by cardinality, which would still pass); a `merged`/`divided` event committed with the GUC armed but zero succession rows, proven rejected at commit by the new deferred constraint trigger on `organization_lifecycle_events`; a proof that `presby_check_succession_cardinality()`'s refactor is behavior-preserving (the existing cardinality assertions in `test-rls.sql` §32(j)-adjacent and `lifecycle.test.ts` must still pass unmodified in their pass/fail outcome, only their fixture setup changes to arm the new GUC first). **Every existing direct-INSERT call site into either table across `test-rls.sql` and `lifecycle.test.ts` (confirmed: 5 in the former, 15+ in the latter) must arm `presby.lifecycle_write_active` before its insert, or it will now fail for the wrong reason** (guard rejection, not whatever the test exists to prove) — this is the single largest line-count item in the Phase 4 punch list below, not new design surface.
+
+### Ruling 2 — the return → publication → projection chain gets one sanctioned-write GUC, and `presby_publish_sasr_snapshot()` sets it today (F55)
+
+Confirmed: `statistical_returns` and `publications` have `INSERT` revoked from both application roles (F50/F51), but revoking a grant does not bind `neondb_owner` (F44) and neither table has a `BEFORE INSERT` guard reading a sanctioned-write marker — the CHECK constraints prove *shape*, never *provenance*. A raw owner-connection `INSERT` satisfying `statistical_returns_provenance_shape` and the composite FKs is indistinguishable, at the database, from `presby_publish_sasr_snapshot()`'s own write.
+
+**One GUC for the whole atomic operation**, not three: `presby.publication_write_active`. Per this pipeline's own reuse rule — same claim ("this row is part of one sanctioned publish operation"), and (for the submitted path) the same function, the same transaction — splitting it per table would be the identifier-table's no-reuse case misapplied to a case that is actually the affiliation-table's reuse case. **Imported returns share the same GUC, not a second `presby.import_write_active`.** D13's import function is future work and its exact shape is unknown, but whatever it turns out to be, the claim the guard exists to prove is identical regardless of `provenance` — "a sanctioned function wrote this, not a raw connection" — and a guard that OR's two GUCs together to mean the same thing is complexity with no additional protection. When the import function ships, it arms `presby.publication_write_active` too.
+
+1. **New function `presby_guard_publication_write()`**, `BEFORE INSERT`, unconditional on `statistical_returns` and `publications`, `WHEN (NEW.provenance = 'published_by_congregation')`-scoped on `congregation_statistics` — **this is exactly how the guard distinguishes the live `presbytery_entered`/`imported` tenant-DML path from the sanctioned path it must not touch**: those two provenances are written by `setCongregationStatisticsAction` today, through ordinary tenant `INSERT` under RLS, and the `WHEN` clause means the new trigger is never even invoked for those rows — zero grant change, zero behavior change, on `congregation_statistics`. Checks `coalesce(current_setting('presby.publication_write_active', true), '') = 'true'`; on failure, raises via **new** helper `presby_deny_publication_write()` — one literal shared across all three call sites, following the same "one aggregate, one claim" reuse reasoning as Ruling 1, since the reviewer's own framing is that this is genuinely one atomic operation across three tables, not three unrelated ones.
+2. `create trigger statistical_returns_guard before insert on statistical_returns ...`; `create trigger publications_guard before insert on publications ...` (alongside the existing `publications_freeze` and `presby_check_publication_supersession()` triggers, unaffected); `create trigger congregation_statistics_publication_guard before insert on congregation_statistics for each row when (new.provenance = 'published_by_congregation') execute function presby_guard_publication_write();`.
+3. **`presby_publish_sasr_snapshot()` arms the GUC once**, immediately after its existing validation block (org context, report year, form version) and before its first `insert into statistical_returns` — one `perform set_config('presby.publication_write_active', 'true', true);` line, covering all three of its own inserts in the same transaction.
+4. **`drizzle/0047`'s backfill `DO $$` block arms the same GUC**, once, before its `PASS 1` loop's two inserts (`statistical_returns`, `publications` — its `congregation_statistics` write is an `UPDATE` of `publication_id` on a pre-existing row, never an `INSERT`, so it is never in the new trigger's `WHEN`-scoped path and needs no arming for that table). Same-migration correction-in-place, same convention as every other in-place fix this file has already taken.
+
+**Tests owed**: a failing-first proof that a raw owner-connection `INSERT` into `statistical_returns` and into `publications`, satisfying every existing CHECK/FK, is rejected with the GUC unarmed; a `WHEN`-scope proof that a raw `presbytery_entered`/`imported` `congregation_statistics` `INSERT` **still succeeds unmodified** (this is the regression proof that the live action keeps working, and the one the reviewer's own suggested fix would have broken if applied table-wide without the `WHEN` clause); a proof that a raw owner-connection `INSERT` into `congregation_statistics` with `provenance = 'published_by_congregation'` **is** rejected with the GUC unarmed (this is the reviewer's exact "false artifact" repro: same org for `organization_id`/`about_org_id`, `provenance = 'submitted'`, `reconciled = true`, plausible attestation — now stopped one step earlier, at the projection insert, in addition to at `statistical_returns`/`publications` themselves); a regression proof that `presby_publish_sasr_snapshot()` still succeeds end-to-end with the new guards live (it arms its own GUC, so this proves the arming call is correctly placed, not just present); a migration-apply smoke that the corrected backfill `DO` block still completes under the new guards (production carries zero rows in either table today, so this is a shape proof).
+
+### Ruling 3 — the withdrawal pair is rejected on both tables until `presby_withdraw_publication()` exists (F56)
+
+Confirmed, and ruled the reviewer's stated preference exactly: **until the pairing function exists, neither table's one permitted transition is reachable, on any connection.** `presby_freeze_publication()` and `presby_reject_published_statistics_write()` each already correctly permit exactly one transition and reject everything else about it (double withdrawal, partial-column withdrawal) — the gap is that each permits its own half *independently*, so a raw owner connection can withdraw one side of the pair and leave the other historical projection un-withdrawn, silently disagreeing with the publication it projects.
+
+1. **New GUC, `presby.withdrawal_write_active`** — a **new**, not reused, GUC: the future `presby_withdraw_publication()` is a distinct function running in a distinct transaction, at a distinct point in time from `presby_publish_sasr_snapshot()`, so this is the identifier-table's no-reuse case (unrelated transaction, no claim to piggyback on), not the affiliation-table's reuse case.
+2. `presby_reject_published_statistics_write()`'s one permitted `IF` branch gains one additional required conjunct: `and coalesce(current_setting('presby.withdrawal_write_active', true), '') = 'true'`. Falling through hits the function's existing `raise exception` unchanged — the message ("published rows are immutable... the only permitted UPDATE is a single withdrawal") is slightly imprecise about *why* today (no sanctioned writer exists yet, not "withdrawal is categorically forbidden"), but reusing it is consistent with this pipeline's existing practice of a stable per-table literal and is not worth a second message for a state that is itself temporary.
+3. `presby_freeze_publication()`'s final permitted-transition check (currently: reject if `new.withdrawn_at is null`, else `return new`) gains the same conjunct, checked immediately before that `return new`: fail closed with the function's existing exception vocabulary if `presby.withdrawal_write_active` is not `'true'`.
+4. **Nothing arms this GUC today** — by design. When `presby_withdraw_publication()` ships (publish-UI pipeline, already in `docs/TODO.md`), it arms `presby.withdrawal_write_active` once and performs both tables' `UPDATE` in the same transaction, which is exactly the "both freeze triggers permit exactly that pair of transitions" design F52 already committed to — this ruling only removes the ability to perform *half* of that pair before the function exists.
+
+**Tests owed**: a failing-first proof that a raw owner-connection `UPDATE` performing the one previously-permitted `congregation_statistics` transition (`withdrawn_at` null → set, nothing else) now fails with the GUC unarmed; the equivalent proof for `publications`' withdrawal triple; a proof that arming `presby.withdrawal_write_active` manually (simulating the future function) permits each transition individually, so the guard is proven not to have also broken the shape the future function depends on; no "legitimate path still works" regression proof is owed beyond that, since no legitimate caller of either transition exists yet.
+
+### Ruling 4 — attestation identity and `recorded_by`: documentation precision, no new mechanism (F57)
+
+Ruled as asked: a documentation correction to D21/F50's text, not a schema change. Today the database can prove a `submitted` `statistical_returns` row was attested **at a time** (`attested_at`) but not **by whom** — `attested_by_name`/`attested_role` are excluded from the provenance-shape CHECK (F50, ratified) precisely because `presby_publish_sasr_snapshot()` has no acting-user identity to draw one from, and accepting a caller-supplied name would be the exact confused-deputy identity claim this pipeline's functions already refuse elsewhere. D21's "frozen attested submission" language is corrected to say so explicitly: attestation is *timestamped*, not yet *attributed*, and stays that way until `app.current_user_id` exists. Separately, `organization_lifecycle_events.recorded_by` is `NOT NULL` today while the only value any caller can supply is a caller-provided UUID — there is no trusted-context source for it yet, the same gap by a different name. **Both fold into the single existing `docs/TODO.md` line for the `app.current_user_id` GUC** (the line already carries the `statistical_returns` half, per the fifth loop-back's ratification of F50); this ruling adds the explicit instruction that the *future* `presby_record_lifecycle_event()` must take `recorded_by` from that trusted GUC once it exists, never as a parameter — the same rule already stated for `presby_transfer_affiliation()`'s `closed_by`/`recorded_by` and now stated once more so the third occurrence of the identical gap doesn't get treated as a fresh discovery.
+
+### Ruling 5 — `organization_identifiers` INSERT closes now, for consistency, not because it was independently urgent (F58)
+
+The reviewer explicitly calls this non-blocking; ruled to close it anyway, per the orchestrator's read of the reviewer's own closing rule applied uniformly, and because the cost here is essentially zero: `presby_set_organization_identifier()` already arms `presby.identifier_trigger_active` **at entry**, before either its `INSERT` or its `UPDATE` branch (`drizzle/0043:213`) — extending the existing guard trigger's operation list from `BEFORE UPDATE OR DELETE` to `BEFORE INSERT OR UPDATE OR DELETE` requires no change to `presby_guard_organization_identifiers()`'s body (its `tg_op = 'DELETE'` branch already falls through correctly for `INSERT`, returning `new`) and no change to the sole sanctioned writer. Verified zero live callers outside it: `createOrganization()` never touches `organization_identifiers`, `scripts/seed-dev.sql` inserts no row into it, and `drizzle/0043`'s own `pcusa_pin` backfill (`DO $$` block, section 2) runs and completes **before** the guard trigger is even created later in the same file (section 4) — migration ordering, not a GUC, protects that one-time move. The trigger's own comment block, which currently argues at length for narrower scope ("Engineering a bootstrap-vs-tenant distinction into an INSERT guard is more machinery than today's problem needs"), is corrected in place to record that the distinction turned out to need no machinery at all once the sanctioned writer already armed the GUC unconditionally.
+
+**Tests owed**: a failing-first proof that a raw owner-connection `INSERT` (with a non-colliding `value_normalized`, so only the guard — not the existing unique index — is what would otherwise let it through) is rejected with the GUC unarmed; a regression proof that `presby_set_organization_identifier()`'s own `INSERT` branch (a brand-new `(organization_id, kind, value_normalized)` triple, not the `UPDATE` branch) still succeeds.
+
+### Ruling 6 — nothing else found
+
+Beyond the residual named under Ruling 1 (the authority check's type-only standing, folded into the existing `presby_record_lifecycle_event()` TODO line) and the two items the reviewer itself left as informational rather than blocking (both ruled on above, in Rulings 4 and 5), no further gap surfaced in this pass. The reviewer's closing rule — creation guarded as strongly as mutation — is now applied to every table in this pipeline that represents an authorized act: `organizations` (F38/DECISION-136), `organization_affiliations` (F49), `organization_lifecycle_events`/`organization_successions` (F54, this loop-back), `statistical_returns`/`publications`/`congregation_statistics`'s published branch (F55, this loop-back), the withdrawal pair (F56, this loop-back), and `organization_identifiers` (F58, this loop-back). `sasr_form_versions` is deliberately not on this list: its `INSERT` is seed/reference-data provisioning, not the recording of a minuted act, and F53 already closed its only authorized-act-shaped surface (redefining a spec once relied upon).
+
+### Commit framing
+
+One `fix(schema):` commit, migration-correction-in-place shape (same files, same numbers — `drizzle/0043`–`0047`), matching the convention F46 and F47–F53 both already established for this pipeline. Trailers: `Caught-By: human-review`, `Discovered-In: post-merge`, `Work-Log: 2026-09-24-lifecycle-affiliation-returns`. `docs/TODO.md`'s reconciliation (open items 54/55/108/109 reworded to match this ruling; item 108 — the identifiers INSERT residual — retitled from "accepted residual" to "ruled closed, awaiting Phase 4"; a new In Flight line tracks this loop-back) lands in this ruling's commit; item 108's actual flip to Done, and this loop-back's In Flight line closing, are database-admin's to make in the Phase 4 commit that builds it, per Workflow Rule 10's "same commit as the work." Release notes: `docs/release-notes/v0.24.2.md` (Fix) — draft below.
+
+**Implementer: database-admin.** Schema-only (two new GUCs plus one reused, five new/widened trigger functions across four tables, one refactor extracting shared cardinality logic, two `set_config` calls added inside existing `SECURITY DEFINER` functions, one migration-comment correction) — no route handler, server action, or UI surface is touched by any of the six rulings above. The bulk of the implementation cost is **test-fixture updates**, not new schema surface: every existing direct-INSERT test call site into `organization_lifecycle_events`/`organization_successions` (both `test-rls.sql` and `lifecycle.test.ts`) must arm `presby.lifecycle_write_active` before its insert, or it fails for the wrong reason once the new guard ships.
+
+## Per-Phase Status (sixth loop-back)
+
+Phase 3 row: **amended a sixth time**, ruling F54–F58 (round-two external post-merge review) and routing to database-admin as a migration correction in place to `drizzle/0043`–`0047`. Design complete; no architectural or functional re-opening — every ruling above is schema-guard mechanism, consistent with the placement and invariants Phase 2 already approved.

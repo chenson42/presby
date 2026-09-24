@@ -818,6 +818,119 @@ future publish-UI pipeline, which has an actual consumer to design against).
 
 ---
 
+
+## 2g. Sixth Phase 3 loop-back — second-round external post-merge review (F54–F58)
+
+*(2026-09-24, tech-lead, sixth Phase 3 amendment,
+`docs/work-log/2026-09-24-lifecycle-affiliation-returns.md` — "Amendment
+after external review, round 2." Same migration-correction-in-place
+convention F46 and F47–F53 established: `drizzle/0043`–`0047` are on `main`
+but applied only to `development`.)*
+
+The same external reviewer read the regenerated export after F47–F53 shipped
+and returned two remaining database-contract blockers, two informational
+items, and a withdrawal-decision confirmation. The reviewer's closing
+sentence generalizes a rule this pipeline already applied once (F44/F49's
+guard-trigger treatment of `organization_affiliations`' *mutation* surface)
+to a case it hadn't yet reached: **"if an immutable record represents an
+authorized act, creation must be guarded as strongly as mutation."** F54/F55
+close that gap on the two remaining unguarded creation surfaces; F56 applies
+the same GUC-gating pattern to a mutation the prior round left half-closed;
+F57 is a documentation-only correction; F58 closes a previously-accepted
+residual for consistency.
+
+### F54 — `organization_lifecycle_events` and `organization_successions` are one immutable aggregate; INSERT was policy-mediated by omission on both
+
+A `merged`/`divided` lifecycle event could be recorded and committed with
+zero succession rows (the only cardinality check lived on
+`organization_successions`' own insert/delete, never on the event); and,
+independently, a later raw-owner `INSERT` of an additional succession edge
+into an *already-valid* merge changed the act's meaning without violating
+cardinality, since nothing gated `organization_successions`' `INSERT` beyond
+the existing event-scope trigger's permissive null-actor branch. Fix: a new
+transaction-local GUC, `presby.lifecycle_write_active`, gates `INSERT` on
+both tables via one reused guard function and the **existing**
+`presby_deny_lifecycle_change()` literal (same aggregate, same claim — the
+Ruling 1/DECISION-139 reuse case, not the identifier table's no-reuse case);
+armed only by the future `presby_record_lifecycle_event()`, so both tables'
+`INSERT` are effectively closed until it ships. The zero-succession hole is
+closed independently by extracting `presby_check_succession_cardinality()`'s
+counting logic into a shared `presby_lifecycle_event_cardinality_check()`,
+called from both a new `AFTER INSERT DEFERRABLE INITIALLY DEFERRED` trigger
+on `organization_lifecycle_events` and the existing trigger on
+`organization_successions`, so a zero-child merge/division is rejected at
+commit regardless of which table's succession rows are missing.
+`presby_check_succession_event()`'s null-actor permissive branch is kept, not
+removed — once the GUC is the real gate, that branch is no longer "the thing
+that lets an untethered insert through," only a legitimate actor-context
+check for the sanctioned writer's own migration-time shape.
+
+### F55 — the return→publication→projection chain had no sanctioned-write GUC; a raw owner `INSERT` could manufacture an artifact `presby_publish_sasr_snapshot()` never touched
+
+`statistical_returns` and `publications` hold no `INSERT` grant for either
+application role (F50/F51), but a grant does not bind `neondb_owner` (F44),
+and neither table's `CHECK`/FK layer proves *provenance*, only *shape*: a raw
+owner `INSERT` satisfying every constraint is indistinguishable from
+`presby_publish_sasr_snapshot()`'s own write. Fix: one GUC for the whole
+atomic operation, `presby.publication_write_active` — not split per table,
+and not split by provenance (`imported` shares it too, once D13's import
+function ships) — armed once inside `presby_publish_sasr_snapshot()` before
+its first insert, and once inside `drizzle/0047`'s backfill `DO` block before
+its two inserts. A new guard function, `presby_guard_publication_write()`,
+gates `INSERT` unconditionally on `statistical_returns`/`publications` and,
+on `congregation_statistics`, only `WHEN (NEW.provenance =
+'published_by_congregation')` — the `WHEN` clause is exactly how the guard
+leaves the live `presbytery_entered`/`imported` tenant-DML path
+(`setCongregationStatisticsAction`) untouched, since those two provenances
+never reach the new trigger at all.
+
+### F56 — the withdrawal pair's one permitted transition was independently reachable on each table; nothing coordinated the pair
+
+`presby_freeze_publication()` and `presby_reject_published_statistics_write()`
+each correctly permit exactly one transition and reject every other change —
+but a raw owner connection could still perform *either half alone*, leaving
+the publication withdrawn and its projection not, or vice versa. Fix: a new,
+**not reused**, GUC (`presby.withdrawal_write_active` — a distinct future
+function in a distinct transaction, the identifier table's no-reuse case)
+added as a required conjunct to each function's one permitted-transition
+branch. Nothing arms it today; the future `presby_withdraw_publication()`
+arms it once and performs both tables' `UPDATE` together, which is the pair
+F52 already committed both triggers to permitting.
+
+### F57 — attestation identity and `recorded_by`: documentation precision, no new mechanism
+
+D21's "frozen attested submission" is corrected to say plainly that the
+database proves a submission was attested **at a time**
+(`statistical_returns.attested_at`), not **by whom** —
+`attested_by_name`/`attested_role` stay excluded from the provenance-shape
+CHECK (F50) because `presby_publish_sasr_snapshot()` has no acting-user
+identity to draw one from. `organization_lifecycle_events.recorded_by` is
+`NOT NULL` today with a caller-provided UUID as its only source, the same gap
+under a different name. Both fold into the existing `docs/TODO.md` line for
+the `app.current_user_id` GUC; the future `presby_record_lifecycle_event()`
+must take `recorded_by` from that GUC once it exists, never as a parameter.
+
+### F58 — `organization_identifiers` INSERT, an accepted residual from F47, closed for consistency
+
+Not independently urgent (the reviewer names it non-blocking) but closed at
+near-zero cost: `presby_set_organization_identifier()` already arms
+`presby.identifier_trigger_active` at entry, before either its `INSERT` or
+`UPDATE` branch, so widening `organization_identifiers_guard` from `BEFORE
+UPDATE OR DELETE` to `BEFORE INSERT OR UPDATE OR DELETE` requires no change
+to the guard function or the sanctioned writer. `createOrganization()` and
+`scripts/seed-dev.sql` never touch this table; `drizzle/0043`'s own
+`pcusa_pin` backfill runs, and completes, before the guard trigger exists
+later in the same file, so migration ordering — not a GUC — protects it.
+
+**Residual named, not fixed:** `presby_assert_council_authority()`'s standing
+check validates organization-*type* compatibility (presbytery-over-
+congregation, etc.), not actual `presby_org_affiliated()` standing, for
+lifecycle events — unlike `presby_set_organization_identifier()`, which
+checks the real relationship. Folded into the existing `docs/TODO.md` line
+for `presby_record_lifecycle_event()`, the function that should close it.
+
+---
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

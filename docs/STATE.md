@@ -3,7 +3,112 @@
 **Read this first in a new session.** Then `docs/schema-design.md` for rationale
 and the findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-08-24.
+Updated 2026-08-31.
+
+---
+
+## Session handoff — 2026-08-31 (read this before anything else below)
+
+**Checkpointed mid-launch, ahead of a restart.** First real production
+push — a lot of infrastructure state changed that lives in Neon/Vercel, not
+in this repo, so it would otherwise be invisible to a fresh session.
+
+### The real production database — correcting `docs/deployment.md`
+
+`docs/deployment.md` (still untracked, not yet committed/corrected) was
+written by an earlier session believing it had no access to "the dev
+database's" Neon account, so it provisioned a brand-new, separate project
+(`presby-production`, id `withered-bird-71608444`) as production. **That
+belief was wrong and that project is not what's live.** The actual
+production database is the **`presby` Neon project's `production` branch**
+(id `polished-snow-90038485`, branch `br-wild-band-ax96gv09`) — the same
+project this session's Neon MCP integration has always had access to.
+`docs/deployment.md` needs a correction pass (or replacement) before it's
+committed; don't trust its "Already done" section about a separate DB.
+
+### Neon: dev/prod split done, production cleaned
+
+- Created a `development` branch (`br-super-dawn-axfi55p6`) off
+  `production`, in the `presby` project. **`.env.local` now points at
+  `development`, not `production`** — local work no longer touches the live
+  database directly.
+- `production` had been used directly as the shared dev/test target for
+  weeks, accumulating cruft. Cleaned it down to exactly two orgs:
+  - `fpcw` (First Presbyterian Church of Westerville) — the real sponsor
+    congregation.
+  - `presbytery-of-scioto-valley` (Presbytery of Scioto Valley) — newly
+    created; `fpcw` is now parented under it (real ecclesiastical
+    geography — FPCW/Westerville OH is genuinely in Scioto Valley
+    presbytery's bounds).
+  - Removed: 48 leaked `vitest` test-fixture orgs (spanning 15+ spec
+    files — see the new `docs/TODO.md` bug below) and 10 stale
+    `seed-dev.sql`/e2e fixture orgs (`e2e-*`, `northern-reach`,
+    `quillhaven`, `fernwood`, `marrowbone`, `alder-creek`, `bramblewood`).
+  - The cascade deletes required temporarily disabling four immutability
+    triggers one at a time, each with explicit sign-off:
+    `group_memberships_reject_derived`, `roll_actions_freeze`,
+    `groups_reject_derived_edit`, `congregation_statistics_freeze` — all
+    confirmed re-enabled after. One leaked row was itself invariant-broken
+    (`group_memberships.source = 'derived'` with `officer_term_id = null`,
+    impossible through the normal materialization path).
+  - Also had to explicitly delete `ticket_messages` rows before the org
+    cascade — `ticket_messages_ticket_fk` is `NO ACTION`, not `CASCADE`,
+    so it doesn't clean up on its own.
+- New `docs/TODO.md` entry names the root cause: the DB-backed test suite
+  writes directly into the shared branch and doesn't reliably tear down.
+  Needs real per-test isolation or bulletproof teardown, not more
+  hand-cleaning.
+
+### Vercel production — was silently broken, now fixed and verified
+
+The `presby` Vercel project (`community-collective/presby`) is linked and
+`presbyportal.org`/`www.presbyportal.org` are live-aliased. Two real
+production bugs found and fixed:
+
+1. **Wrong DB credentials.** `DATABASE_URL` et al. were failing
+   `password authentication failed for user 'presby_app'` in production
+   runtime logs — almost every DB-backed route was 500ing, including the
+   public `fpcw` site (confirmed via `vercel logs --level error`). Reset
+   `DATABASE_URL`/`APP_DATABASE_URL`/`PLATFORM_DATABASE_URL` to the correct
+   `production`-branch connection strings and added the previously-missing
+   `MIGRATE_DATABASE_URL`. Redeployed and confirmed `/`, `/signin`, and
+   `/site/fpcw` all return 200 with real content.
+2. **`AUTH_URL`/`NEXT_PUBLIC_APP_URL` pointed at the apex domain**
+   (`presbyportal.org`) while the site's canonical host is `www` — the apex
+   308-redirects everything, including `/api/auth/*`, to `www`. That would
+   have bounced the OAuth dance between hosts. Fixed both to
+   `https://www.presbyportal.org`, redeployed, confirmed
+   `/api/auth/providers` now reflects the `www` callback URL.
+
+### Blocked on the user, next up
+
+1. **Google OAuth** — `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are not set in
+   production, and there is no credentials-login fallback by design
+   (`docs/deployment.md`'s own note). **Nobody can sign into production
+   right now, including the operator.** Waiting on a Google Cloud Console
+   OAuth client (redirect URI `https://www.presbyportal.org/api/auth/callback/google`)
+   before this can be wired up and smoke-tested.
+2. **Resend** — `RESEND_API_KEY` not set; email queue will back up
+   (password reset/verification) once real users exist. Not launch-blocking
+   for a browse-only demo.
+3. **Real first content ingest for `site-fpcw`** — `organization_sites`'s
+   `last_ingested_commit_sha` for `fpcw` is a scratch/test placeholder
+   string, not a real git SHA. Production is also missing
+   `SITES_INGEST_OIDC_AUDIENCE`/`GITHUB_SITES_ORG`, which the ingest
+   endpoint needs to verify a GitHub Actions OIDC token from `site-fpcw`'s
+   own repo — a real first ingest would fail auth today the same way the DB
+   connection did.
+4. **Church data import** — no import feature exists yet
+   (`docs/TODO.md`'s "Presbytery Increment 5 — imports and reports" is an
+   unscoped backlog item). Needs its own Phase 1 before any real roll data
+   moves, or a carefully-invariant-respecting one-off script if that's
+   preferred instead.
+
+### Also this session
+
+- A local demo of `/site/fpcw` was run off the `development` branch via
+  `npm run dev -- -p 3001` (LAN-reachable at `192.168.1.55:3001`). Server
+  has since been stopped; nothing left running.
 
 ---
 

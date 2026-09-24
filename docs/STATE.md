@@ -81,6 +81,21 @@ eventually, not today).
    can sign in to production at all right now — including the operator. That is
    accepted, not an outage.
 
+### ⚠️ Blocking the push: two critical Next.js CVEs
+
+`/pre-push` ran clean on everything else — typecheck, 3,206 tests, build, all five
+tripwires — but `npm audit` found **two CRITICAL advisories in `next` itself**.
+Installed 16.3.0; both fixed in **16.3.3**, a patch bump inside the same minor.
+
+`GHSA-2xp9-vwfh-vxw4` is the one that matters: unauthenticated RCE in the **Image
+Optimization API when AVIF is used.** `next/image` is used in five files and
+`next.config.ts` configures `images.remotePatterns`, so the optimizer route is live.
+`www.presbyportal.org` serves `/site/fpcw` publicly today. This is not theoretical.
+
+**The pre-push gate was deliberately NOT stamped.** Bump `next` to >=16.3.3, re-run
+`/pre-push`, then push. Also high and worth taking in the same pass: `sharp`
+<0.35.4, `js-yaml`, `browserslist`.
+
 ### Reviews still overdue
 
 All seven, unchanged: test-coverage and retrospective (14d slot), plus code,

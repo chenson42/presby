@@ -11,10 +11,11 @@ import {
   unique,
   uniqueIndex,
   check,
-  type AnyPgColumn,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
+import { publications } from "./publication";
 import { users } from "../schema";
 
 /**
@@ -131,8 +132,9 @@ export const congregationOversight = pgTable(
  *
  * Freeze-only-on-published-rows is a PARTIAL unique index (mutable
  * provenances upsert cleanly; a published row is never unique-constrained on
- * (about_org_id, year) because a correction is a brand-new frozen row
- * chained by supersedesPublicationId, never an UPDATE) plus a trigger
+ * (about_org_id, year) because a correction is a brand-new frozen row whose
+ * publication chains to the one it corrects via `publications.supersedesId`,
+ * never an UPDATE) plus a trigger
  * predicated on the same column — the roll_actions/void precedent, applied
  * to a column instead of a second table.
  */
@@ -148,14 +150,33 @@ export const congregationStatistics = pgTable(
     year: integer("year").notNull(),
     // presbytery_entered | published_by_congregation | imported
     provenance: text("provenance").notNull(),
-    // Self-FK, AnyPgColumn idiom (events.parentEventId / organizations.
-    // parentId precedent) — only meaningful for provenance =
-    // 'published_by_congregation'; a republish chains to the row it
-    // corrects rather than updating it in place.
-    supersedesPublicationId: uuid("supersedes_publication_id").references(
-      (): AnyPgColumn => congregationStatistics.id,
-    ),
-    // Set only for published rows.
+    /**
+     * The `publications` row this projection projects (F36, drizzle/0047).
+     * NOT NULL exactly when `provenance = 'published_by_congregation'`
+     * (CHECK in 0047).
+     *
+     * The composite FK is `(publication_id, ABOUT_ORG_ID) -> publications
+     * (id, organization_id)`, not `(publication_id, organization_id)` as
+     * Phase 3's Data Model wrote it: THIS table's `organizationId` is the
+     * recipient presbytery while `publications.organizationId` is the source
+     * congregation, so `aboutOrgId` is the column that matches. It preserves
+     * the F2 property that matters — a projection cannot claim a publication
+     * recorded by a different congregation.
+     *
+     * Replaced `supersedesPublicationId`, the self-chain between projection
+     * rows, which moved to `publications.supersedesId` — a chain between
+     * EVENT rows (Ruling 5 / DECISION-137).
+     */
+    publicationId: uuid("publication_id"),
+    /**
+     * Set only for published rows, and it STAYS HERE rather than moving to
+     * `publications` (F39): `src/lib/presbytery.ts:522` orders on it and
+     * `:533-539` coalesces provenance with it, and the presbytery cannot read
+     * `publications` at all. A projection is allowed to carry the event's
+     * facts; unlike F29's `currentRoll` this copy cannot drift, because one
+     * DEFINER function writes both rows in one transaction with the same
+     * instant and neither row is ever updated again.
+     */
     publishedAt: timestamp("published_at", { withTimezone: true }),
     // Phase 3's API Contract names `p_minute_reference` as
     // `presby_publish_sasr_snapshot()`'s second parameter (the session
@@ -260,8 +281,9 @@ export const congregationStatistics = pgTable(
   (t) => [
     unique("congregation_statistics_id_org_key").on(t.id, t.organizationId),
     // Partial: deliberately excludes 'published_by_congregation' — a
-    // republish is a new frozen row chained by supersedesPublicationId,
-    // never an UPDATE, so it must never collide with this constraint.
+    // republish is a new frozen row whose publication chains to the one it
+    // corrects (publications.supersedesId, drizzle/0047), never an UPDATE,
+    // so it must never collide with this constraint.
     uniqueIndex("congregation_statistics_entered_unique_idx")
       .on(t.organizationId, t.aboutOrgId, t.year, t.provenance)
       .where(sql`${t.provenance} in ('presbytery_entered', 'imported')`),
@@ -272,6 +294,18 @@ export const congregationStatistics = pgTable(
       t.organizationId,
       t.aboutOrgId,
       t.year,
+    ),
+    index("congregation_statistics_publication_idx").on(t.publicationId),
+    // (publicationId, ABOUT_ORG_ID), not (publicationId, organizationId) —
+    // see the publicationId column comment. drizzle/0047.
+    foreignKey({
+      name: "congregation_statistics_publication_fk",
+      columns: [t.publicationId, t.aboutOrgId],
+      foreignColumns: [publications.id, publications.organizationId],
+    }),
+    check(
+      "congregation_statistics_publication_shape",
+      sql`(${t.provenance} = 'published_by_congregation') = (${t.publicationId} is not null)`,
     ),
     check(
       "congregation_statistics_provenance_allowed",

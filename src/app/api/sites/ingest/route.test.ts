@@ -61,6 +61,7 @@ vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, and } from "drizzle-orm";
 import { generateKeyPairSync, sign as cryptoSign, type KeyObject } from "node:crypto";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
@@ -252,6 +253,8 @@ describe.skipIf(!hasDb)(
         const [row] = await platform
           .insert(organizations)
           .values({
+            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+            deletableUntil: fixtureDeletableUntil(),
             organizationType: "congregation",
             name: `Fixture Congregation ${label} for sites/ingest route.test.ts`,
             slug,

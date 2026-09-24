@@ -33,6 +33,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
@@ -204,6 +205,8 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       const [row] = await platform
         .insert(organizations)
         .values({
+          // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+          deletableUntil: fixtureDeletableUntil(),
           organizationType: "congregation",
           name: `Fixture Congregation ${label} for sites.test.ts`,
           slug,
@@ -1388,6 +1391,8 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         const [row] = await platform
           .insert(organizations)
           .values({
+            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+            deletableUntil: fixtureDeletableUntil(),
             organizationType: "congregation",
             name: `Fixture ${label} for getOrgProfileForFooter`,
             slug: `sites-test-footer-${label.toLowerCase()}-${footerStamp}`,

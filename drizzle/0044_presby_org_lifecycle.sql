@@ -1,0 +1,1145 @@
+-- Organization lifecycle, succession topology, and council affiliation
+-- (D10 / D19 / D26) — increment 2 of the lifecycle/affiliation/returns
+-- pipeline (docs/work-log/2026-09-24-lifecycle-affiliation-returns.md,
+-- Phase 3 Data Model "Increment 2"; DECISION-135 through DECISION-139;
+-- docs/schema-design-2.md sec 2b/sec 2c F38-F41, sec 3).
+--
+-- This is the pipeline's riskiest migration and it lands as ONE file, in the
+-- order Phase 3 specifies, ending with a backfill-completeness assertion that
+-- must hold before the migration commits.
+--
+-- What it does:
+--
+--   1. `organizations` gains lifecycle_status / lifecycle_as_of /
+--      deletable_until.
+--   2. `organization_lifecycle_events` — the minuted acts of G-3.0301(a)
+--      (organizing, receiving, merging, dismissing, dissolving a
+--      congregation), G-3.0403(c) (a synod on a presbytery) and G-3.0502(d)
+--      (the GA on a synod). Append-only; the status column it replaces was
+--      editable and remembered nothing.
+--   3. `organization_successions` — pure topology (who became whom), with a
+--      DEFERRED constraint trigger for per-event cardinality.
+--   4. `organization_affiliations` — the THIRD axis: which council a body
+--      belongs to, WITH HISTORY. `organizations.parent_id` and
+--      `organizations.path` become a derived cache of the currently-open
+--      affiliation row and are no longer writable by anyone directly.
+--   5. The write path: `presby_transfer_affiliation()`, the
+--      `presby_publish_sasr_snapshot()` shape (DECISION-135). No
+--      acting-council parameter; the actor is `presby_current_org()`.
+--   6. The read path: `presby_org_affiliated()` and
+--      `presby_affiliation_parent_as_of()`, both shipped HERE rather than in
+--      increment 3 (DECISION-139) because the write path's own standing
+--      check depends on the second of them.
+--   7. The grant model this design rests on, MADE TRUE rather than assumed
+--      (F38, below).
+--   8. The affiliation backfill for every org that carries a parent_id
+--      today, `effective_from` NULL = unbounded-below (F41).
+--   9. CORRECTION, 2026-09-24 (Ruling A5 of the Phase 3 amendment after
+--      batch A; DECISION-135's dated correction note): `presby_platform` is
+--      narrowed to `select, insert` on `organization_lifecycle_events` and
+--      `organization_affiliations` (it had full DML, which Ruling 3 never
+--      asked for), and `presby_freeze_lifecycle_event()` refuses UPDATE and
+--      DELETE on the lifecycle-events table on EVERY connection, owner
+--      included — append-only-by-grant binds the two application roles, not
+--      the owner, and the owner path is the one that matters. Applied as a
+--      change to THIS file, not a new migration number: it completes
+--      increment 2 correctly and the file re-applies idempotently.
+--  10. CORRECTION, 2026-09-24 (Phase 5 Finding 1, QA; loop-back disposition
+--      recorded in the work-log's Phase 5 section): `organization_successions`
+--      is brought under Phase 2 Ruling 1's rule — "cross-council access to the
+--      three-axis tables is function-mediated, never policy-mediated."
+--      `presby_app` loses INSERT and DELETE (it never held UPDATE) and keeps
+--      SELECT, `presby_platform` is narrowed to select+insert (batch B's
+--      finding 5), and two triggers land: an event-scope BEFORE INSERT check
+--      and a BEFORE UPDATE OR DELETE freeze. Applied as a change to THIS file,
+--      not a new migration number, for the same reason item 9 was.
+--
+-- ---------------------------------------------------------------------------
+-- WHY EVERY TRIGGER HERE THAT WRITES organizations IS `SECURITY DEFINER`
+-- ---------------------------------------------------------------------------
+-- F38, verified against the live development branch before this file was
+-- written: `presby_app` held INSERT, UPDATE, DELETE and SELECT on
+-- `organizations`, which has neither RLS nor a single trigger.
+-- drizzle/0009_presby_rls.sql:93's `grant select on organizations to
+-- presby_app` is ADDITIVE — it never revoked anything, and a blanket
+-- platform-table grant swept `organizations` in with `users`/`sessions`.
+-- `people` (0009:376) was the only table ever explicitly clawed back.
+--
+-- This migration revokes INSERT/UPDATE/DELETE on `organizations` from
+-- `presby_app` (bottom of this file). AFTER that revoke, every trigger
+-- function here that writes `parent_id`, `path`, `lifecycle_status` or
+-- `lifecycle_as_of` needs `SECURITY DEFINER` **for grant reasons alone** —
+-- independently of F26's cross-org-read reasoning. DECISION-121's warning
+-- applies in reverse here: the risk is not cargo-culting DEFINER on, it is a
+-- later reader stripping DEFINER off `presby_apply_lifecycle_event()`
+-- because "that one isn't cross-org." It is not cross-org. It still cannot
+-- run without DEFINER.
+--
+-- ---------------------------------------------------------------------------
+-- WHY `organization_affiliations` DML IS REVOKED FROM presby_app (F40)
+-- ---------------------------------------------------------------------------
+-- A UNIQUE or EXCLUDE constraint is enforced against ALL rows, not the
+-- RLS-visible subset. With ordinary tenant DML, Presbytery B could probe
+-- `insert (subject => <any org id>, parent => itself, ...)` and learn from
+-- the constraint-violation error whether that organization has an open
+-- affiliation ANYWHERE — a row B cannot see. That is DECISION-047's
+-- enumeration-oracle class arriving through a constraint instead of a page.
+-- The DEFINER function is therefore the ONLY writer, it checks standing
+-- first, and every rejection raises ONE literal string
+-- (`presby_deny_affiliation_change()`) so no cause is distinguishable from
+-- any other — DECISION-040's byte-identical discipline applied to a function.
+--
+-- Hand-written per CLAUDE.md: Drizzle Kit emits no RLS, no trigger, no
+-- SECURITY DEFINER function, no EXCLUDE constraint and no revoke. Every
+-- statement is idempotent.
+--
+-- Migration-numbering note: `ls drizzle/` was run immediately before 0043
+-- and this file was written in the same pass; 0042 was the highest claimed
+-- number on disk, 0043 and 0044 are claimed together and both journal
+-- entries are added in the same edit.
+
+create extension if not exists btree_gist;  -- idempotent; already installed
+                                            -- (drizzle/0009:471, 0039:120)
+
+-- ---------------------------------------------------------------------------
+-- 1. organizations: lifecycle cache + the fixture-deletion window
+-- ---------------------------------------------------------------------------
+alter table organizations add column if not exists lifecycle_status text not null default 'active';
+alter table organizations add column if not exists lifecycle_as_of date;
+alter table organizations add column if not exists deletable_until timestamptz;
+
+alter table organizations drop constraint if exists organizations_lifecycle_status_allowed;
+alter table organizations add constraint organizations_lifecycle_status_allowed
+  check (lifecycle_status in ('active', 'merged', 'divided', 'dismissed', 'dissolved'));
+
+comment on column organizations.lifecycle_status is
+  'CACHE of the most recent organization_lifecycle_events row for this org, maintained by presby_apply_lifecycle_event(). The events table is the system of record; this column cannot answer a historical question. Replaces the editable `status` column conceptually — `status` itself still exists because five shipped public-site SECURITY DEFINER functions still read it (see drizzle/0043''s header).';
+comment on column organizations.deletable_until is
+  'Test-fixture deletion window, and NOTHING else. presby_guard_organizations_delete() permits a DELETE only while this is non-null and in the future, so a stale marker does not grant permanent deletability. Deliberately NOT folded into platform_status (D9''s tenant-participation axis) — mixing a test-lifecycle concern into that column would change the meaning of every platform_status query in presby_user_organizations() and the org chooser.';
+
+-- ---------------------------------------------------------------------------
+-- 2. organization_lifecycle_events
+-- ---------------------------------------------------------------------------
+create table if not exists organization_lifecycle_events (
+  id uuid primary key default gen_random_uuid(),
+  -- The ACTING council (the presbytery that dissolved, the synod that
+  -- divided). Tenant scope for RLS.
+  organization_id uuid not null references organizations(id),
+  -- The body acted upon. PLAIN FK, the about-org structural exception
+  -- (docs/schema-design.md sec 17) — never composite.
+  subject_org_id uuid not null references organizations(id),
+  event text not null,
+  effective_on date not null,
+  minute_reference text not null,
+  -- GA concurrence on a synod act (G-3.0502(e)) is recorded as DATA, never
+  -- as a second actor — the actor rule stays one-level-above (Ruling 8).
+  concurrence_reference text,
+  -- Required for received/dismissed (the counterparty outside this system),
+  -- null otherwise.
+  external_body text,
+  recorded_by uuid not null references users(id),
+  recorded_at timestamptz not null default now(),
+  notes text,
+  constraint organization_lifecycle_events_id_org_key unique (id, organization_id),
+  constraint organization_lifecycle_events_event_allowed
+    check (event in ('organized', 'received', 'merged', 'divided', 'dismissed', 'dissolved')),
+  constraint organization_lifecycle_events_not_self
+    check (organization_id <> subject_org_id),
+  constraint organization_lifecycle_events_external_body_shape
+    check ((event in ('received', 'dismissed')) = (external_body is not null))
+);
+
+create index if not exists organization_lifecycle_events_org_idx
+  on organization_lifecycle_events (organization_id);
+create index if not exists organization_lifecycle_events_subject_idx
+  on organization_lifecycle_events (subject_org_id, effective_on);
+
+alter table organization_lifecycle_events enable row level security;
+alter table organization_lifecycle_events force row level security;
+
+drop policy if exists tenant_isolation on organization_lifecycle_events;
+create policy tenant_isolation on organization_lifecycle_events
+  using (organization_id = presby_current_org())
+  with check (organization_id = presby_current_org());
+
+-- APPEND-ONLY, resolving Phase 3's explicitly-open call ("whether it needs
+-- its own freeze trigger or relies on convention is a Phase 4
+-- implementation call"). A minuted act is corrected by recording another
+-- act, the roll_actions/void precedent.
+--
+-- CORRECTED 2026-09-24 (tech-lead Phase 3 amendment after batch A, Ruling
+-- A5; DECISION-135's dated correction note). The first build of this file
+-- resolved append-only BY GRANT ALONE — no UPDATE/DELETE to presby_app —
+-- and reasoned that a freeze trigger would be belt-and-braces over an
+-- absent grant. That reasoning is sound for presby_app and INSUFFICIENT for
+-- the database as a whole, for two reasons this same migration already
+-- establishes elsewhere:
+--
+--   1. presby_platform (the getPlatformDb() connection) was granted full
+--      select, insert, update, delete here. Phase 3's Ruling 3 only ever
+--      required INSERT (createOrganization()'s affiliation row, on the
+--      OTHER table). A SECURITY DEFINER function runs with its OWNER's
+--      privileges regardless of what its caller holds, so
+--      presby_transfer_affiliation() never needed that widening — it bought
+--      nothing and reopened, on the connection with the most reach, exactly
+--      the "a raw mutation bypasses the function's authority check, the
+--      uniform-message discipline and the provenance rule" hole
+--      DECISION-135's function-mediation rule exists to close.
+--   2. A grant is not a guarantee against the OWNER. neondb_owner is
+--      BYPASSRLS and holds every privilege by ownership; presby_guard_
+--      organizations_delete() in section 14 of this same file already names
+--      why that is the path that matters ("BYPASSRLS exempts a role from
+--      RLS POLICIES, never from TRIGGERS" — the 2026-08-31 58-org cascade
+--      went through getPlatformDb(), not a tenant connection).
+--
+-- So: the grant is narrowed to select, insert on BOTH roles, AND
+-- presby_freeze_lifecycle_event() (section 12 below) refuses UPDATE and
+-- DELETE on every connection, owner included — the roll_actions_freeze
+-- standard (drizzle/0009:358-373), not a substitute for the grant.
+revoke update, delete on organization_lifecycle_events from presby_app;
+revoke update, delete on organization_lifecycle_events from presby_platform;
+grant select, insert on organization_lifecycle_events to presby_app;
+grant select, insert on organization_lifecycle_events to presby_platform;
+
+comment on table organization_lifecycle_events is
+  'Minuted lifecycle acts on an organization: G-3.0301(a) for a presbytery acting on a congregation or NWC, G-3.0403(c) for a synod on a presbytery, G-3.0502(d) for the GA on a synod. APPEND-ONLY on every connection: no UPDATE/DELETE grant to presby_app or presby_platform, and presby_freeze_lifecycle_event() refuses both on the owner path too (the roll_actions_freeze standard). Correct a recorded act by recording another act. organizations.lifecycle_status is a cache of this table, never the record.';
+
+-- ---------------------------------------------------------------------------
+-- 3. organization_successions
+-- ---------------------------------------------------------------------------
+-- Pure topology, deliberately carrying NO organization_id. A single
+-- merged_into_org_id column on `organizations` cannot express 1->N or N->1,
+-- which is D10's whole reason for a table.
+--
+-- WHAT THE ABSENT organization_id DOES AND DOES NOT BUY, CORRECTED 2026-09-24
+-- (Phase 5 Finding 1). The first build of this file said "visibility follows
+-- the parent event's tenant policy through a join." That is true of a READ
+-- that actually performs the join and false of everything else, and QA
+-- demonstrated the difference in a rolled-back transaction: as one council,
+-- insert a lifecycle event; switch `app.current_org_id` to an unrelated
+-- congregation; `select ... from organization_lifecycle_events where id = <that
+-- event>` returns 0 rows — and the very next `insert into
+-- organization_successions (event_id => <that same invisible event>, ...)`
+-- SUCCEEDED. A WRITE joins nothing. The FK checks existence, not visibility
+-- (it is enforced against ALL rows, the same property F40 names for the
+-- EXCLUDE constraint on organization_affiliations), and the deferred
+-- cardinality trigger in section 13 constrains SHAPE, not OWNERSHIP. So a
+-- council could write — and, with the DELETE grant, remove — succession rows
+-- against a minuted act it cannot read. The confidentiality half is small
+-- (topology is public; the org tree already publishes who became whom, and
+-- SELECT stays open for exactly that reason). The INTEGRITY half is not: the
+-- rows attached to another council's minuted act are that act's content.
+--
+-- THE FIX, and why append-only-by-grant was not enough on its own. Section 2
+-- resolved the lifecycle-events table with a grant plus a freeze trigger.
+-- Here the grant alone would still have left INSERT open to every tenant (the
+-- table needs SOME writer), and an INSERT is precisely the verb QA exploited.
+-- So this table gets the Ruling 1 treatment instead:
+--
+--   * `presby_app`: SELECT only. No tenant connection writes this table by
+--     any verb. The future `presby_record_lifecycle_event()` SECURITY DEFINER
+--     function — the lifecycle-UI pipeline's, one family with the deferred
+--     `presby_organize_congregation()` named in Phase 2 Ruling 3 — becomes
+--     the ONLY tenant-side writer, and it will record the event and its
+--     succession rows in one body, having checked standing first, exactly as
+--     presby_transfer_affiliation() does for affiliations. Do not re-grant
+--     INSERT here to give that pipeline a shortcut; the shortcut is the bug.
+--   * `presby_platform`: select + insert (batch B's finding 5 — it held
+--     UPDATE, which nothing ever asked for; no caller exists at all today,
+--     and INSERT is kept only so a future createOrganization()-class
+--     provisioning path is not blocked on a migration).
+--   * presby_check_succession_event() (section 13) rejects an INSERT naming
+--     an event the current org does not own, with the SAME uniform literal
+--     presby_deny_lifecycle_change() raises for every other lifecycle
+--     rejection, so "no such event" and "not your event" are byte-identical
+--     (DECISION-139 / DECISION-040's discipline). It is the belt to the
+--     grant's braces, and it is what protects the DEFINER writer from itself:
+--     a function running as owner has no grant stopping it.
+--   * presby_freeze_succession() (section 13) refuses UPDATE and DELETE on
+--     EVERY connection, owner included — the section-2/roll_actions standard.
+--     A succession row is the content of a minuted act and is corrected the
+--     same way the act is: by recording another act.
+create table if not exists organization_successions (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references organization_lifecycle_events(id) on delete cascade,
+  predecessor_org_id uuid not null references organizations(id),
+  successor_org_id uuid not null references organizations(id),
+  constraint organization_successions_not_self
+    check (predecessor_org_id <> successor_org_id)
+);
+
+create index if not exists organization_successions_event_idx
+  on organization_successions (event_id);
+
+revoke insert, update, delete on organization_successions from presby_app;
+grant select on organization_successions to presby_app;
+revoke update, delete on organization_successions from presby_platform;
+grant select, insert on organization_successions to presby_platform;
+
+comment on table organization_successions is
+  'Pure topology: who became whom (D10). No organization_id and no policy of its own — SELECT is open to both roles because topology is public, the same call `organizations` itself makes. WRITES ARE NOT policy-mediated and never were: an INSERT joins nothing, so the absent organization_id bought no write protection (Phase 5 Finding 1). presby_app holds SELECT ONLY; the future presby_record_lifecycle_event() SECURITY DEFINER function is the sole tenant-side writer. presby_check_succession_event() rejects an INSERT naming an event the current org does not own, with the uniform lifecycle literal, and presby_freeze_succession() refuses UPDATE and DELETE on every connection including the owner.';
+
+-- ---------------------------------------------------------------------------
+-- 4. organization_affiliations — the third axis
+-- ---------------------------------------------------------------------------
+create table if not exists organization_affiliations (
+  id uuid primary key default gen_random_uuid(),
+  -- The RECORDING council. This is PROVENANCE and never changes: a closed
+  -- row keeps the organization_id of whoever recorded it, because re-owning
+  -- it to the closing synod would rewrite who acted in 1994.
+  organization_id uuid not null references organizations(id),
+  -- ON DELETE CASCADE is attached below, as a named constraint swap.
+  subject_org_id uuid not null references organizations(id),
+  parent_org_id uuid not null references organizations(id),
+  relationship_type text not null,
+  -- NULLABLE, and null means UNBOUNDED BELOW ("predates our records") — F41.
+  -- A backfill with a bounded lower edge would make
+  -- presby_org_affiliated(as_of => 1987) false for the entire 41-year PSV
+  -- archive and block the import the about-org trigger exists to protect.
+  effective_from date,
+  effective_to date,          -- null = current/open
+  authority text not null default 'recorded',
+  reason text,
+  minute_reference text,
+  concurrence_reference text,
+  recorded_by uuid references users(id),
+  recorded_at timestamptz not null default now(),
+  -- The close is an attributable act by (often) a DIFFERENT council than the
+  -- one that owns the row. Without these four columns it is an
+  -- unattributable mutation of a provenanced record.
+  closed_by_org_id uuid references organizations(id),
+  closed_by uuid references users(id),
+  closed_on date,
+  closed_minute_reference text,
+  constraint organization_affiliations_id_org_key unique (id, organization_id),
+  constraint organization_affiliations_relationship_type_allowed
+    check (relationship_type in ('member_congregation', 'member_presbytery',
+                                 'member_synod', 'member_nwc')),
+  constraint organization_affiliations_authority_allowed
+    check (authority in ('recorded', 'backfill')),
+  -- A minute-less row can only ever be an inferred one, so an inferred
+  -- relationship can never be mistaken for a minuted act.
+  constraint organization_affiliations_backfill_minute_shape
+    check (authority = 'backfill' or minute_reference is not null),
+  constraint organization_affiliations_no_overlap
+    exclude using gist (
+      subject_org_id with =,
+      relationship_type with =,
+      daterange(effective_from, effective_to, '[)') with &&
+    )
+);
+
+-- subject_org_id CASCADES, alone among the four organization FKs on this
+-- table. An organization's own affiliation history is meaningless once the
+-- row it describes is gone, and the only DELETE that can reach
+-- `organizations` at all is a `deletable_until`-stamped test fixture (see
+-- presby_guard_organizations_delete below) — without the cascade, every
+-- hierarchical fixture teardown in the DB-backed suite would fail on this
+-- FK instead of cleaning up. organization_id (the recording council) and
+-- parent_org_id stay RESTRICT deliberately: a council that still owns or
+-- parents live records should refuse to disappear loudly.
+-- Written as an explicit drop/add rather than inline so a database that
+-- already has the table from an earlier run of this migration converges.
+alter table organization_affiliations
+  drop constraint if exists organization_affiliations_subject_org_id_fkey;
+alter table organization_affiliations
+  add constraint organization_affiliations_subject_org_id_fkey
+  foreign key (subject_org_id) references organizations(id) on delete cascade;
+
+create index if not exists organization_affiliations_org_idx
+  on organization_affiliations (organization_id);
+create index if not exists organization_affiliations_subject_idx
+  on organization_affiliations (subject_org_id, effective_to);
+create index if not exists organization_affiliations_parent_idx
+  on organization_affiliations (parent_org_id);
+
+alter table organization_affiliations enable row level security;
+alter table organization_affiliations force row level security;
+
+drop policy if exists tenant_isolation on organization_affiliations;
+create policy tenant_isolation on organization_affiliations
+  using (organization_id = presby_current_org())
+  with check (organization_id = presby_current_org());
+
+comment on table organization_affiliations is
+  'Which council a body belongs to, with history (D19/D26). organizations.parent_id and organizations.path are a DERIVED CACHE of the currently-open row here and are maintained only by presby_apply_affiliation_to_org_tree(). presby_app holds SELECT only: the DEFINER function presby_transfer_affiliation() is the sole write path (F40 — an EXCLUDE constraint on a FORCE-RLS table is a cross-tenant existence oracle).';
+
+-- The (subject, parent, type, range) projection, with no reason/minute/notes
+-- on it. Shipped now so a future cross-council read has a bounded surface
+-- that is not the base table.
+--
+-- DELIBERATELY NOT `security_invoker`. A plain view runs with its OWNER's
+-- privileges, so this one sees past organization_affiliations' tenant policy
+-- — which is the point, and is the same call `organizations` itself already
+-- makes: who belongs to which council is public information (PC(USA)
+-- publishes presbytery rosters). What is NOT public is the acting council's
+-- own record of WHY, so `reason`, `minute_reference`, `concurrence_reference`
+-- and the `closed_*` attribution are absent from the projection and must stay
+-- absent. Widening this column list is a policy change, not a convenience.
+create or replace view organization_affiliations_public as
+  select subject_org_id, parent_org_id, relationship_type, effective_from, effective_to
+    from organization_affiliations;
+grant select on organization_affiliations_public to presby_app, presby_platform;
+
+-- ---------------------------------------------------------------------------
+-- 5. BACKFILL — one affiliation row per org that carries a parent_id today
+-- ---------------------------------------------------------------------------
+-- Run BEFORE the authority trigger is created, deliberately: the backfill
+-- states what the database already believes, and historical data must not be
+-- refused by a rule written today. `effective_from` is null (unbounded
+-- below, F41); `authority = 'backfill'` and a null minute_reference say, in
+-- the schema itself, that nobody claims a minute for it.
+insert into organization_affiliations
+  (organization_id, subject_org_id, parent_org_id, relationship_type,
+   effective_from, effective_to, authority, minute_reference, recorded_at)
+select o.parent_id, o.id, o.parent_id,
+       case o.organization_type
+         when 'congregation' then 'member_congregation'
+         when 'new_worshiping_community' then 'member_nwc'
+         when 'presbytery' then 'member_presbytery'
+         when 'synod' then 'member_synod'
+       end,
+       null, null, 'backfill', null, now()
+  from organizations o
+ where o.parent_id is not null
+   and not exists (
+     select 1 from organization_affiliations a
+      where a.subject_org_id = o.id and a.effective_to is null
+   );
+
+-- ---------------------------------------------------------------------------
+-- 6. The uniform rejection helpers (F40 / DECISION-139)
+-- ---------------------------------------------------------------------------
+-- One literal string per table, in exactly one place in the codebase, so it
+-- cannot drift between call sites and so a probing caller cannot tell "you
+-- are not authorized" from "that organization has no open affiliation" from
+-- "that id does not exist."
+create or replace function presby_deny_affiliation_change()
+returns void language plpgsql as $$
+begin
+  raise exception 'organization_affiliations: this change is not permitted'
+    using errcode = 'insufficient_privilege';
+end $$;
+
+create or replace function presby_deny_lifecycle_change()
+returns void language plpgsql as $$
+begin
+  raise exception 'organization_lifecycle_events: this change is not permitted'
+    using errcode = 'insufficient_privilege';
+end $$;
+
+revoke all on function presby_deny_affiliation_change() from public;
+revoke all on function presby_deny_lifecycle_change() from public;
+grant execute on function presby_deny_affiliation_change() to presby_app;
+grant execute on function presby_deny_lifecycle_change() to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- 7. presby_assert_council_authority()
+-- ---------------------------------------------------------------------------
+-- One level above, and no further (Ruling 8):
+--   presbytery       -> congregation | new_worshiping_community  G-3.0301(a)
+--   synod            -> presbytery                               G-3.0403(c)
+--   general_assembly -> synod                                    G-3.0502(d)
+-- Both types live on `organizations`, so this cannot be a CHECK.
+--
+-- DEVIATION FROM PHASE 3, and it is load-bearing. Phase 3's API Contract has
+-- this function raise the LIFECYCLE literal always, and has
+-- presby_transfer_affiliation() call it as
+-- `presby_assert_council_authority(v_actor, subject)`. Both are wrong:
+--   (a) raising the lifecycle literal from inside the affiliation write path
+--       would distinguish one rejection cause from the others, which is
+--       precisely what F40's uniform message exists to prevent. Hence the
+--       p_context parameter.
+--   (b) checking ACTOR-against-subject inside the affiliation path makes
+--       D19's headline scenario unbuildable: in a redistricting the actor is
+--       the synod and the subject is a congregation — two levels apart — so
+--       the one-level rule would reject the very transfer Ruling 1 exists to
+--       enable. On an affiliation row the rule that belongs here is
+--       PARENT-fits-CHILD (`parent_org_id` vs `subject_org_id`); the actor's
+--       standing is a separate, and different, check inside
+--       presby_transfer_affiliation(). On a lifecycle event the acting
+--       council IS the one-level-above body, so there the call passes
+--       organization_id. Recorded in the work-log's Implementer Notes.
+create or replace function presby_assert_council_authority(
+  p_actor_org_id uuid,
+  p_subject_org_id uuid,
+  p_context text default 'organization_affiliations'
+) returns void
+language plpgsql security definer as $$
+declare
+  v_actor_type   organization_type;
+  v_subject_type organization_type;
+begin
+  select organization_type into v_actor_type from organizations where id = p_actor_org_id;
+  select organization_type into v_subject_type from organizations where id = p_subject_org_id;
+
+  if p_actor_org_id is null
+     or p_subject_org_id is null
+     or p_actor_org_id = p_subject_org_id
+     or v_actor_type is null
+     or v_subject_type is null
+     or not (
+       (v_actor_type = 'presbytery'
+          and v_subject_type in ('congregation', 'new_worshiping_community'))
+       or (v_actor_type = 'synod' and v_subject_type = 'presbytery')
+       or (v_actor_type = 'general_assembly' and v_subject_type = 'synod')
+     )
+  then
+    if p_context = 'organization_lifecycle_events' then
+      perform presby_deny_lifecycle_change();
+    else
+      perform presby_deny_affiliation_change();
+    end if;
+  end if;
+end $$;
+
+revoke all on function presby_assert_council_authority(uuid, uuid, text) from public;
+grant execute on function presby_assert_council_authority(uuid, uuid, text) to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- 8. The read path: presby_affiliation_parent_as_of() / presby_org_affiliated()
+-- ---------------------------------------------------------------------------
+-- Both ship HERE, in increment 2, not increment 3 (DECISION-139):
+-- presby_transfer_affiliation()'s own standing check calls the first, so it
+-- cannot ship later than the function that calls it. Both are bounded to the
+-- public-projection columns — no reason/minute_reference/notes can leak
+-- through either.
+create or replace function presby_affiliation_parent_as_of(
+  p_subject_org_id uuid,
+  p_as_of date
+) returns uuid
+language sql stable security definer as $$
+  select a.parent_org_id
+    from organization_affiliations a
+   where a.subject_org_id = p_subject_org_id
+     and daterange(a.effective_from, a.effective_to, '[)') @> p_as_of
+   limit 1;
+$$;
+
+-- "Is the subject affiliated with this council as of that date" means the
+-- council is somewhere in the subject's ANCESTRY on that date — not that the
+-- council recorded the row. A synod-level about-org check is three levels
+-- down, so this walks the chain. Depth-capped so a cycle introduced by a bad
+-- write can never hang a request.
+create or replace function presby_org_affiliated(
+  p_subject_org_id uuid,
+  p_council_org_id uuid,
+  p_as_of date
+) returns boolean
+language sql stable security definer as $$
+  with recursive ancestry as (
+    select a.parent_org_id as org_id, 1 as depth
+      from organization_affiliations a
+     where a.subject_org_id = p_subject_org_id
+       and daterange(a.effective_from, a.effective_to, '[)') @> p_as_of
+    union all
+    select a.parent_org_id, an.depth + 1
+      from ancestry an
+      join organization_affiliations a
+        on a.subject_org_id = an.org_id
+       and daterange(a.effective_from, a.effective_to, '[)') @> p_as_of
+     where an.depth < 8
+  )
+  select exists (select 1 from ancestry where org_id = p_council_org_id);
+$$;
+
+revoke all on function presby_affiliation_parent_as_of(uuid, date) from public;
+revoke all on function presby_org_affiliated(uuid, uuid, date) from public;
+grant execute on function presby_affiliation_parent_as_of(uuid, date) to presby_app;
+grant execute on function presby_org_affiliated(uuid, uuid, date) to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- 9. presby_apply_affiliation_to_org_tree() — the ONE derivation path
+-- ---------------------------------------------------------------------------
+-- parent_id and path are derived HERE and nowhere else (Ruling 2.3). The
+-- subtree rebuild is the single most likely thing in this pipeline to be
+-- subtly wrong, so it must not exist in two copies: both the affiliation
+-- trigger and the lifecycle trigger call this.
+--
+-- The GUC is set with is_local => true. A session-scoped GUC here would
+-- leave the organizations guards DISARMED for the next unrelated request on
+-- a pooled neon-serverless connection — the same hazard src/lib/db/index.ts
+-- documents for app.current_org_id.
+create or replace function presby_apply_affiliation_to_org_tree(
+  p_subject_org_id uuid,
+  p_as_of date default current_date
+) returns void
+language plpgsql security definer as $$
+declare
+  v_old_path    text;
+  v_label       text;
+  v_new_parent  uuid;
+  v_parent_path text;
+  v_new_path    text;
+begin
+  perform set_config('presby.affiliation_trigger_active', 'true', true);
+
+  select o.path, replace(o.slug, '-', '_')
+    into v_old_path, v_label
+    from organizations o
+   where o.id = p_subject_org_id;
+
+  -- Subject gone (deleted earlier in this same transaction): nothing to
+  -- derive, and raising here would turn a legal teardown into a failure.
+  if v_label is null then
+    return;
+  end if;
+
+  select a.parent_org_id
+    into v_new_parent
+    from organization_affiliations a
+   where a.subject_org_id = p_subject_org_id
+     and a.effective_to is null
+   order by a.effective_from desc nulls last
+   limit 1;
+
+  if v_new_parent is null then
+    -- Top-level org, or a subject whose affiliation was just closed with no
+    -- successor yet (a dissolution with no receiving council). Same
+    -- root-label rule deriveOrgPath() uses in src/lib/org-provisioning.ts —
+    -- that function stays roots-only and is NOT extended; the parent-prefix
+    -- rule lives here, permanently.
+    v_new_path := v_label;
+  else
+    select o.path into v_parent_path from organizations o where o.id = v_new_parent;
+    if v_parent_path is null then
+      perform presby_deny_affiliation_change();
+    end if;
+    -- A parent that sits INSIDE the subject's own subtree would build a
+    -- cycle, and a cycle in `path` hangs every ancestry read afterwards.
+    if v_old_path is not null
+       and left(v_parent_path, length(v_old_path) + 1) = v_old_path || '.' then
+      perform presby_deny_affiliation_change();
+    end if;
+    v_new_path := v_parent_path || '.' || v_label;
+  end if;
+
+  update organizations
+     set parent_id = v_new_parent,
+         path = v_new_path
+   where id = p_subject_org_id;
+
+  -- Rebuild the whole subtree in ONE statement, never a per-row loop.
+  -- left()/length() rather than LIKE: path labels are full of underscores
+  -- and `_` is a LIKE wildcard, so `path like 'northern_reach.%'` would also
+  -- match `northernXreach.…`.
+  if v_old_path is not null and v_old_path is distinct from v_new_path then
+    update organizations
+       set path = v_new_path || substring(path from length(v_old_path) + 1)
+     where left(path, length(v_old_path) + 1) = v_old_path || '.';
+  end if;
+end $$;
+
+revoke all on function presby_apply_affiliation_to_org_tree(uuid, date) from public;
+grant execute on function presby_apply_affiliation_to_org_tree(uuid, date) to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- 10. presby_transfer_affiliation() — the ONLY write path (DECISION-135)
+-- ---------------------------------------------------------------------------
+-- Accepts NO acting-council id, the strengthened confused-deputy form
+-- drizzle/0038:376-380 established: the actor is presby_current_org(),
+-- already membership-verified by withOrgContext() before this function is
+-- reachable. Standing is read from the AFFILIATION HISTORY, never from
+-- organizations.parent_id/path — those are the derived cache this same
+-- transaction is about to rewrite, so reading them as the authority is
+-- circular.
+--
+-- PARAMETER ORDER DEVIATES FROM PHASE 3 BY NECESSITY: Phase 3's signature
+-- places `p_reason text default null` BEFORE `p_minute_reference text` with
+-- no default, which Postgres rejects outright ("input parameters after one
+-- with a default value must also have defaults"). p_minute_reference moves
+-- ahead of p_reason; it is required anyway, since the row it writes carries
+-- authority = 'recorded' and the backfill-shape CHECK then demands a minute.
+create or replace function presby_transfer_affiliation(
+  p_subject_org_id uuid,
+  p_new_parent_org_id uuid,
+  p_relationship_type text,
+  p_effective_on date,
+  p_minute_reference text,
+  p_reason text default null,
+  p_concurrence_reference text default null
+) returns uuid
+language plpgsql security definer as $$
+declare
+  v_actor          uuid := presby_current_org();
+  v_current_row_id uuid;
+  v_current_parent uuid;
+  v_current_from   date;
+  v_new_id         uuid;
+begin
+  if v_actor is null then
+    perform presby_deny_affiliation_change();
+  end if;
+
+  select a.id, a.parent_org_id, a.effective_from
+    into v_current_row_id, v_current_parent, v_current_from
+    from organization_affiliations a
+   where a.subject_org_id = p_subject_org_id
+     and a.effective_to is null
+   order by a.effective_from desc nulls last
+   limit 1;
+
+  -- No open affiliation, or no such organization at all — one message for
+  -- both, so the caller learns nothing about which.
+  if v_current_row_id is null then
+    perform presby_deny_affiliation_change();
+  end if;
+
+  -- A close cannot predate the row's own opening.
+  if v_current_from is not null and v_current_from > p_effective_on then
+    perform presby_deny_affiliation_change();
+  end if;
+
+  if p_new_parent_org_id = v_current_parent then
+    -- A CORRECTION, not a jurisdictional transfer (fixing relationship_type,
+    -- or reopening a backfilled row with a real minute). The current parent
+    -- is the only council with standing.
+    if v_actor is distinct from v_current_parent then
+      perform presby_deny_affiliation_change();
+    end if;
+  else
+    -- A TRUE TRANSFER. The actor must be the COMMON SUPERIOR of both
+    -- parents as of the effective date — which is the polity, not a
+    -- modeling convenience: G-3.0403(c) gives the synod the act between two
+    -- presbyteries, G-3.0502(d) gives the GA the equivalent between synods,
+    -- and p_concurrence_reference records GA concurrence on a synod act
+    -- (G-3.0502(e)) as data, never as a second actor.
+    if presby_affiliation_parent_as_of(v_current_parent, p_effective_on) is distinct from v_actor
+       or presby_affiliation_parent_as_of(p_new_parent_org_id, p_effective_on) is distinct from v_actor
+    then
+      perform presby_deny_affiliation_change();
+    end if;
+  end if;
+
+  -- Parent-type-fits-child-type (see the deviation note on
+  -- presby_assert_council_authority above: the rule on an affiliation row is
+  -- about the PARENT, not the actor).
+  perform presby_assert_council_authority(
+    p_new_parent_org_id, p_subject_org_id, 'organization_affiliations');
+
+  -- Close. organization_id is untouched: ownership is provenance.
+  update organization_affiliations
+     set effective_to = p_effective_on,
+         closed_by_org_id = v_actor,
+         -- No acting-USER context exists in this platform (there is no
+         -- app.current_user_id GUC — only app.current_org_id), so closed_by
+         -- and recorded_by below are null for a function-mediated transfer.
+         -- Accepting a user id as a parameter would be a caller-supplied
+         -- identity claim, which is exactly what this function's shape
+         -- refuses. Named in the work-log's Implementer Notes as a gap for
+         -- the lifecycle-UI pipeline, not papered over.
+         closed_by = null,
+         closed_on = current_date,
+         closed_minute_reference = p_minute_reference
+   where id = v_current_row_id;
+
+  insert into organization_affiliations
+    (organization_id, subject_org_id, parent_org_id, relationship_type,
+     effective_from, effective_to, authority, reason, minute_reference,
+     concurrence_reference, recorded_by, recorded_at)
+  values
+    (v_actor, p_subject_org_id, p_new_parent_org_id, p_relationship_type,
+     p_effective_on, null, 'recorded', p_reason, p_minute_reference,
+     p_concurrence_reference, null, now())
+  returning id into v_new_id;
+
+  perform presby_apply_affiliation_to_org_tree(p_subject_org_id, p_effective_on);
+
+  return v_new_id;
+end $$;
+
+revoke all on function presby_transfer_affiliation(uuid, uuid, text, date, text, text, text) from public;
+grant execute on function presby_transfer_affiliation(uuid, uuid, text, date, text, text, text) to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- 11. Triggers on organization_affiliations
+-- ---------------------------------------------------------------------------
+create or replace function presby_check_affiliation_authority()
+returns trigger language plpgsql security definer as $$
+begin
+  perform presby_assert_council_authority(
+    new.parent_org_id, new.subject_org_id, 'organization_affiliations');
+  return new;
+end $$;
+
+drop trigger if exists organization_affiliations_authority on organization_affiliations;
+create trigger organization_affiliations_authority
+  before insert on organization_affiliations
+  for each row execute function presby_check_affiliation_authority();
+
+create or replace function presby_apply_affiliation_row()
+returns trigger language plpgsql security definer as $$
+begin
+  perform presby_apply_affiliation_to_org_tree(
+    new.subject_org_id, coalesce(new.effective_from, current_date));
+  return null;
+end $$;
+
+drop trigger if exists organization_affiliations_apply on organization_affiliations;
+create trigger organization_affiliations_apply
+  after insert or update on organization_affiliations
+  for each row execute function presby_apply_affiliation_row();
+
+-- ---------------------------------------------------------------------------
+-- 12. Triggers on organization_lifecycle_events
+-- ---------------------------------------------------------------------------
+create or replace function presby_check_lifecycle_authority()
+returns trigger language plpgsql security definer as $$
+begin
+  perform presby_assert_council_authority(
+    new.organization_id, new.subject_org_id, 'organization_lifecycle_events');
+  return new;
+end $$;
+
+drop trigger if exists organization_lifecycle_events_authority on organization_lifecycle_events;
+create trigger organization_lifecycle_events_authority
+  before insert on organization_lifecycle_events
+  for each row execute function presby_check_lifecycle_authority();
+
+-- SECURITY DEFINER for GRANT reasons (F38), not only for F26: after the
+-- revoke at the bottom of this file, presby_app cannot UPDATE organizations
+-- at all, same-org or not.
+create or replace function presby_apply_lifecycle_event()
+returns trigger language plpgsql security definer as $$
+declare
+  v_status text;
+begin
+  -- organized/received mean the body is now ACTIVE in this system;
+  -- everything else maps to itself.
+  v_status := case new.event
+                when 'organized' then 'active'
+                when 'received'  then 'active'
+                else new.event
+              end;
+
+  update organizations
+     set lifecycle_status = v_status,
+         lifecycle_as_of = new.effective_on
+   where id = new.subject_org_id;
+
+  if new.event in ('dissolved', 'merged', 'divided', 'dismissed') then
+    -- Close the subject's open affiliation. The effective_from guard keeps a
+    -- back-dated event from building an inverted daterange, which the
+    -- EXCLUDE constraint would reject with a raw Postgres error.
+    update organization_affiliations
+       set effective_to = new.effective_on,
+           closed_by_org_id = new.organization_id,
+           closed_by = new.recorded_by,
+           closed_on = current_date,
+           closed_minute_reference = new.minute_reference
+     where subject_org_id = new.subject_org_id
+       and effective_to is null
+       and (effective_from is null or effective_from <= new.effective_on);
+
+    perform presby_apply_affiliation_to_org_tree(new.subject_org_id, new.effective_on);
+  end if;
+  -- `received` closes nothing: there was no affiliation inside this system
+  -- to close. Opening one is presby_transfer_affiliation()'s or
+  -- createOrganization()'s job, out of this trigger's scope.
+
+  return null;
+end $$;
+
+drop trigger if exists organization_lifecycle_events_apply on organization_lifecycle_events;
+create trigger organization_lifecycle_events_apply
+  after insert on organization_lifecycle_events
+  for each row execute function presby_apply_lifecycle_event();
+
+-- THE FREEZE (Ruling A5 / DECISION-135's 2026-09-24 correction). A minuted
+-- act is immutable; it is corrected by recording another act, never by an
+-- UPDATE and never by a DELETE. Mirrors presby_freeze_approved_roll_action()
+-- (drizzle/0009:358-373) down to the errcode.
+--
+-- WHY A TRIGGER AND NOT JUST THE ABSENT GRANT (section 2's own note, in
+-- full): a grant binds presby_app and presby_platform; it does not bind
+-- neondb_owner, which holds every privilege by ownership and is the role
+-- getPlatformDb()/MIGRATE_DATABASE_URL actually connect as. BYPASSRLS
+-- exempts a role from RLS policies, never from triggers, so this fires on
+-- the owner path — the path that matters, and the one the 2026-08-31 58-org
+-- cascade took. Deliberately defeatable by `alter table ... disable
+-- trigger`, as an owner-only, conspicuous act, exactly like
+-- presby_guard_organizations_delete().
+--
+-- NOT mirrored onto organization_affiliations, deliberately (Ruling A5.3):
+-- presby_transfer_affiliation() performs that table's one legitimate UPDATE
+-- (closing a row) inside its own transaction, and a freeze trigger there
+-- would have to distinguish the DEFINER function's own write from a raw
+-- mutation. The narrowed grant in section 15 prevents the raw mutation
+-- without that complexity.
+create or replace function presby_freeze_lifecycle_event()
+returns trigger language plpgsql as $$
+begin
+  raise exception
+    'organization_lifecycle_events %: a minuted act is immutable; record a correcting act instead',
+    old.id
+    using errcode = 'check_violation';
+end $$;
+
+drop trigger if exists organization_lifecycle_events_freeze on organization_lifecycle_events;
+create trigger organization_lifecycle_events_freeze
+  before update or delete on organization_lifecycle_events
+  for each row execute function presby_freeze_lifecycle_event();
+
+-- ---------------------------------------------------------------------------
+-- 13. organization_successions: event scope, cardinality, and the freeze
+-- ---------------------------------------------------------------------------
+-- (13a) EVENT SCOPE — the trigger half of Phase 5 Finding 1's fix.
+--
+-- SECURITY DEFINER is load-bearing and is NOT cargo cult (DECISION-121's
+-- warning, answered explicitly): this function's own SELECT reads
+-- organization_lifecycle_events, which is FORCE ROW LEVEL SECURITY. Run as
+-- INVOKER from a tenant connection it would read zero rows for exactly the
+-- case it guards — F26's failure mode verbatim — and would then reject every
+-- legitimate insert while being unable to tell a foreign event from a
+-- nonexistent one. It must see across that table's RLS to compare against it.
+--
+-- The `presby_current_org() is not null` guard is the owner/migration path:
+-- with no org context there is no tenant to check against, and the freeze
+-- plus the absent grant are what bound that path. This is the same shape
+-- every DEFINER function here uses, EXCEPT that it does not refuse a null
+-- context outright — a BEFORE INSERT trigger fires on the migration's own
+-- backfills and on platform provisioning, neither of which has a GUC set.
+-- Existence is still checked unconditionally.
+--
+-- Both rejections go through presby_deny_lifecycle_change(), so a probe
+-- cannot distinguish "no such event" from "that event is not yours"
+-- (DECISION-139; DECISION-040's byte-identical discipline). Note the ORDER a
+-- tenant meets these layers in: the missing INSERT grant fires FIRST, as
+-- `permission denied for table organization_successions`, and this trigger is
+-- never reached from `presby_app` at all. The trigger's guarantee is for the
+-- writer that DOES get here — the future DEFINER function, which runs as the
+-- owner and therefore has no grant stopping it. scripts/test-rls.sql says
+-- which layer each of its assertions proves.
+create or replace function presby_check_succession_event()
+returns trigger language plpgsql security definer as $$
+declare
+  v_event_org uuid;
+  v_actor     uuid := presby_current_org();
+begin
+  select e.organization_id
+    into v_event_org
+    from organization_lifecycle_events e
+   where e.id = new.event_id;
+
+  if v_event_org is null then
+    perform presby_deny_lifecycle_change();
+  end if;
+
+  if v_actor is not null and v_event_org is distinct from v_actor then
+    perform presby_deny_lifecycle_change();
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists organization_successions_event_scope on organization_successions;
+create trigger organization_successions_event_scope
+  before insert on organization_successions
+  for each row execute function presby_check_succession_event();
+
+-- (13b) CARDINALITY — DEFERRED, and that is not optional.
+-- A `merged` event needs >= 2 predecessor rows, which cannot be true at the
+-- instant the first row is inserted. An IMMEDIATE trigger would make the
+-- legal case unwritable.
+create or replace function presby_check_succession_cardinality()
+returns trigger language plpgsql as $$
+declare
+  v_event_id uuid := coalesce(new.event_id, old.event_id);
+  v_event    text;
+  v_pred     integer;
+  v_succ     integer;
+begin
+  select e.event into v_event
+    from organization_lifecycle_events e where e.id = v_event_id;
+  -- Parent event removed in the same transaction (ON DELETE CASCADE): there
+  -- is no cardinality left to check.
+  if v_event is null then
+    return null;
+  end if;
+
+  select count(distinct predecessor_org_id), count(distinct successor_org_id)
+    into v_pred, v_succ
+    from organization_successions where event_id = v_event_id;
+
+  if v_event = 'merged' and not (v_pred >= 2 and v_succ = 1) then
+    raise exception
+      'organization_successions: a merged event needs at least 2 predecessors and exactly 1 successor (found % / %)',
+      v_pred, v_succ using errcode = 'check_violation';
+  elsif v_event = 'divided' and not (v_pred = 1 and v_succ >= 2) then
+    raise exception
+      'organization_successions: a divided event needs exactly 1 predecessor and at least 2 successors (found % / %)',
+      v_pred, v_succ using errcode = 'check_violation';
+  elsif v_event in ('dissolved', 'dismissed', 'organized', 'received')
+        and (v_pred > 0 or v_succ > 0) then
+    raise exception
+      'organization_successions: a % event carries no succession rows (found % / %)',
+      v_event, v_pred, v_succ using errcode = 'check_violation';
+  end if;
+
+  return null;
+end $$;
+
+drop trigger if exists organization_successions_cardinality on organization_successions;
+create constraint trigger organization_successions_cardinality
+  after insert or delete on organization_successions
+  deferrable initially deferred
+  for each row execute function presby_check_succession_cardinality();
+
+-- (13c) THE FREEZE. Same instrument and same reasoning as
+-- presby_freeze_lifecycle_event() in section 12: a grant binds presby_app and
+-- presby_platform, never neondb_owner, and the owner path is the one the
+-- 2026-08-31 58-org cascade took. A succession row is the CONTENT of a
+-- minuted act; it is corrected the way the act is, by recording another act.
+--
+-- CHECKED AGAINST 13b's LEGITIMATE FLOWS BEFORE ADDING IT, because a freeze
+-- that breaks a legal path is worse than no freeze:
+--
+--   * The cardinality trigger's DELETE arm (`coalesce(new.event_id,
+--     old.event_id)`) is now defence in depth rather than a live path. It
+--     stays: it is what still holds if an owner disables THIS trigger, which
+--     is the deliberate, conspicuous escape hatch presby_guard_organizations_
+--     delete() also leaves.
+--   * `event_id ... on delete cascade` is likewise unreachable, and already
+--     was — section 12's freeze makes a lifecycle event undeletable, so the
+--     cascade can never fire. The clause stays as a statement of intent.
+--   * Building a multi-row `merged` incrementally does NOT need DELETE. The
+--     cardinality constraint is DEFERRED, so an in-progress shape is legal
+--     until commit and a mistake is unwound by ROLLBACK, not by removing
+--     rows. scripts/test-rls.sql 32(j) and the owner-connection proofs in
+--     src/lib/db/domain/lifecycle.test.ts both work exactly that way.
+--   * The `organizations` FKs here are RESTRICT, so a fixture-org teardown
+--     that touched a succession row would already fail on the FK — this
+--     trigger changes nothing about it.
+--
+-- So no legal flow needs DELETE, and DELETE is not kept for the owner either.
+create or replace function presby_freeze_succession()
+returns trigger language plpgsql as $$
+begin
+  raise exception
+    'organization_successions %: a succession row is the content of a minuted act and is immutable; record a correcting act instead',
+    old.id
+    using errcode = 'check_violation';
+end $$;
+
+drop trigger if exists organization_successions_freeze on organization_successions;
+create trigger organization_successions_freeze
+  before update or delete on organization_successions
+  for each row execute function presby_freeze_succession();
+
+-- ---------------------------------------------------------------------------
+-- 14. The organizations guards
+-- ---------------------------------------------------------------------------
+-- All three SECURITY DEFINER (F38). All three fire on BOTH connections:
+-- BYPASSRLS exempts a role from RLS POLICIES, never from TRIGGERS, and the
+-- owner path (getPlatformDb()) is the one that matters — the 2026-08-31
+-- 58-org cascade went through it.
+create or replace function presby_guard_organizations_insert()
+returns trigger language plpgsql security definer as $$
+begin
+  if coalesce(current_setting('presby.affiliation_trigger_active', true), '') <> 'true' then
+    raise exception
+      'organizations: parent_id is derived from organization_affiliations and may not be set directly; insert the organization as a root and record its affiliation'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists organizations_guard_insert on organizations;
+create trigger organizations_guard_insert
+  before insert on organizations
+  for each row when (new.parent_id is not null)
+  execute function presby_guard_organizations_insert();
+
+create or replace function presby_guard_organizations_reparent()
+returns trigger language plpgsql security definer as $$
+begin
+  if coalesce(current_setting('presby.affiliation_trigger_active', true), '') <> 'true' then
+    raise exception
+      'organizations: parent_id and path are derived from organization_affiliations and may not be updated directly; record an affiliation change instead'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists organizations_guard_reparent on organizations;
+create trigger organizations_guard_reparent
+  before update of parent_id, path on organizations
+  for each row execute function presby_guard_organizations_reparent();
+
+-- Invariant: an organization is permanent, the `people` rule's twin. A
+-- congregation that closes is a lifecycle event, never a deleted row. The
+-- one difference from the person rule is load-bearing: a person merge is
+-- FOLLOWED (merged_into_id is a chain); a congregation merge is NOT —
+-- following organization_successions would attribute a predecessor's 1987
+-- return to the successor, the mis-attribution D19 exists to prevent.
+create or replace function presby_guard_organizations_delete()
+returns trigger language plpgsql security definer as $$
+begin
+  if old.deletable_until is null or old.deletable_until <= now() then
+    raise exception
+      'organizations: an organization is permanent; record a lifecycle event instead of deleting it'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return old;
+end $$;
+
+drop trigger if exists organizations_guard_delete on organizations;
+create trigger organizations_guard_delete
+  before delete on organizations
+  for each row execute function presby_guard_organizations_delete();
+
+-- ---------------------------------------------------------------------------
+-- 15. The revokes — F38 and F40, made TRUE rather than assumed
+-- ---------------------------------------------------------------------------
+revoke insert, update, delete on organization_affiliations from presby_app;
+grant select on organization_affiliations to presby_app;
+-- createOrganization() writes the initial affiliation row for a
+-- newly-provisioned hierarchical org (Ruling 3). presby_platform already
+-- bypasses RLS by design and is "platform admin pages only, rare and obvious
+-- in review", so this narrow grant does not reopen F40's oracle: the oracle
+-- needs a role that can probe WITHOUT being able to read.
+--
+-- CORRECTED 2026-09-24 (Ruling A5.1 / DECISION-135's dated correction note):
+-- SELECT + INSERT only. The first build granted UPDATE and DELETE here too,
+-- which Ruling 3 never asked for — createOrganization() only ever INSERTs.
+-- presby_transfer_affiliation() is SECURITY DEFINER and runs with its
+-- OWNER's privileges, so closing a row (this table's one legitimate UPDATE)
+-- does not depend on the caller's grant at all; the widening only reopened a
+-- raw-mutation path around the function's authority check, its uniform
+-- rejection message and its provenance rule, on the connection with the most
+-- reach. No freeze trigger here — see section 12's note on why the grant
+-- alone is the right instrument for THIS table and is not for the lifecycle
+-- events table.
+revoke update, delete on organization_affiliations from presby_platform;
+grant select, insert on organization_affiliations to presby_platform;
+
+revoke insert, update, delete on organizations from presby_app;
+grant select on organizations to presby_app;
+
+-- ---------------------------------------------------------------------------
+-- 16. BACKFILL COMPLETENESS ASSERTION (Phase 2 Notes item 3)
+-- ---------------------------------------------------------------------------
+-- Increment 3's about-org trigger will answer "is X my member congregation"
+-- from presby_org_affiliated(), while src/lib/presbytery.ts:143,169 and
+-- src/lib/credentials.ts:522,710 still answer it from
+-- organizations.parent_id. Those two answers are the same BY CONSTRUCTION
+-- only as long as parent_id is a pure cache of the current affiliation. If
+-- the backfill missed one row, a presbytery's own UI would offer a
+-- congregation the database then refuses — a user-facing error on a shipped
+-- page, not a failing test. So this runs inside the migration, before it
+-- commits, not as a follow-up check.
+do $$
+declare
+  v_orgs_with_parent  integer;
+  v_open_affiliations integer;
+begin
+  select count(*) into v_orgs_with_parent from organizations where parent_id is not null;
+  select count(*) into v_open_affiliations from organization_affiliations where effective_to is null;
+  if v_orgs_with_parent <> v_open_affiliations then
+    raise exception
+      'affiliation backfill incomplete: % orgs have parent_id set but % open affiliation rows exist',
+      v_orgs_with_parent, v_open_affiliations;
+  end if;
+  raise notice 'affiliation backfill complete: % parented orgs, % open affiliation rows',
+    v_orgs_with_parent, v_open_affiliations;
+end $$;

@@ -27,20 +27,107 @@ begin;
 -- ---------------------------------------------------------------------------
 -- Organizations
 -- ---------------------------------------------------------------------------
-insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status) values
-  ('11111111-1111-1111-1111-111111111111', null,
+-- NO `parent_id` AND NO NESTED `path` IS WRITTEN HERE (drizzle/0044). Both
+-- columns are a derived cache of the currently-open `organization_
+-- affiliations` row, rebuilt only by presby_apply_affiliation_to_org_tree();
+-- `organizations_guard_insert` rejects a direct parent_id on both
+-- connections, including this owner one (BYPASSRLS exempts a role from RLS
+-- POLICIES, never from TRIGGERS). Every org below therefore goes in as a
+-- root with a root-shaped path, and the affiliation block that follows
+-- establishes the hierarchy through the real write path — which is also what
+-- makes this fixture exercise the mechanism instead of faking its output.
+insert into organizations (id, organization_type, name, slug, path, platform_status) values
+  ('11111111-1111-1111-1111-111111111111',
    'presbytery', 'Presbytery of the Northern Reach', 'northern-reach',
    'northern_reach', 'managed'),
-  ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111',
+  ('22222222-2222-2222-2222-222222222222',
    'congregation', 'Alder Creek Presbyterian Church', 'alder-creek',
-   'northern_reach.alder_creek', 'managed'),
-  ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111',
+   'alder_creek', 'managed'),
+  ('33333333-3333-3333-3333-333333333333',
    'congregation', 'Bramblewood Presbyterian Church', 'bramblewood',
-   'northern_reach.bramblewood', 'managed'),
+   'bramblewood', 'managed'),
   -- D9: in the hierarchy, not a tenant. The presbytery stewards its records.
-  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111',
+  ('44444444-4444-4444-4444-444444444444',
    'congregation', 'Quillhaven Presbyterian Church', 'quillhaven',
-   'northern_reach.quillhaven', 'unmanaged');
+   'quillhaven', 'unmanaged'),
+  -- Three councils that exist ONLY so scripts/test-rls.sql has real
+  -- cross-council fixtures to set app.current_org_id to. They used to be
+  -- minted inline by the suite inside a rolled-back transaction, which stops
+  -- working twice over after drizzle/0044: the suite runs as presby_app,
+  -- which now holds SELECT only on `organizations`, and the synod/child pair
+  -- also carried a direct parent_id. They move here, to the owner-run setup
+  -- the suite already depends on. No memberships, no rows of their own, so
+  -- every count assertion elsewhere in the suite is blind to them.
+  ('f6000000-0000-0000-0000-000000000001',
+   'presbytery', 'Presbytery of the Southern Fields', 'southern-fields',
+   'southern_fields', 'managed'),
+  ('f7000000-0000-0000-0000-000000000001',
+   'presbytery', 'Presbytery of the Western Basin', 'western-basin',
+   'western_basin', 'managed'),
+  ('f8000000-0000-0000-0000-000000000001',
+   'synod', 'Synod of the Coastal Plain', 'coastal-plain-synod',
+   'coastal_plain_synod', 'managed'),
+  -- A presbytery UNDER that synod. Replaces the old "Orphan Chapel" fixture
+  -- (a congregation whose parent was a synod), which drizzle/0044 makes
+  -- unwritable on purpose: presby_assert_council_authority() permits a synod
+  -- to receive presbyteries only (G-3.0403(c)). This pair exercises the same
+  -- presby_publish_sasr_snapshot() rejection branch — "the recipient is not
+  -- a presbytery" — with a shape the polity actually allows.
+  ('f8000000-0000-0000-0000-000000000002',
+   'presbytery', 'Presbytery of the Tidewater', 'tidewater',
+   'tidewater', 'managed');
+
+-- ---------------------------------------------------------------------------
+-- Council affiliations (D19/D26, drizzle/0044) — the hierarchy itself
+-- ---------------------------------------------------------------------------
+-- Written through the real table, and each INSERT's AFTER trigger derives
+-- the subject's parent_id and path. Order matters for Quillhaven: the CLOSED
+-- historical row goes in first so the OPEN row is the one the derivation
+-- lands on.
+insert into organization_affiliations
+  (organization_id, subject_org_id, parent_org_id, relationship_type,
+   effective_from, effective_to, authority, minute_reference, reason)
+values
+  ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+   '11111111-1111-1111-1111-111111111111', 'member_congregation',
+   '1962-05-01', null, 'recorded',
+   'Northern Reach stated meeting, 1962-05-01, item 4', 'Organized'),
+  ('11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333',
+   '11111111-1111-1111-1111-111111111111', 'member_congregation',
+   '1948-09-12', null, 'recorded',
+   'Northern Reach stated meeting, 1948-09-12, item 2', 'Organized'),
+  -- Quillhaven, the REDISTRICTING fixture: in the Southern Fields until the
+  -- 1995 boundary change, in the Northern Reach since. This is what makes
+  -- presby_org_affiliated(quillhaven, southern-fields, '1990-01-01') answer
+  -- true while the same question asked of today answers false — the whole
+  -- point of giving affiliation a history (F30/F31: an archive whose returns
+  -- were received by a council that no longer holds the congregation).
+  ('f6000000-0000-0000-0000-000000000001', '44444444-4444-4444-4444-444444444444',
+   'f6000000-0000-0000-0000-000000000001', 'member_congregation',
+   null, '1995-01-01', 'recorded',
+   'Southern Fields stated meeting, 1901-04-02, item 1',
+   'Predates our records; closed by the 1995 boundary change'),
+  ('11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
+   '11111111-1111-1111-1111-111111111111', 'member_congregation',
+   '1995-01-01', null, 'recorded',
+   'Synod of the Northern Watershed, 1994-10-21, minute 7',
+   'Boundary change of 1995'),
+  ('f8000000-0000-0000-0000-000000000001', 'f8000000-0000-0000-0000-000000000002',
+   'f8000000-0000-0000-0000-000000000001', 'member_presbytery',
+   '1973-01-01', null, 'recorded',
+   'Coastal Plain synod meeting, 1973-01-01, item 1', 'Organized');
+
+-- Close the Quillhaven historical row's attribution: the Southern Fields
+-- recorded it, the Synod closed it at the boundary change. Written directly
+-- rather than through presby_transfer_affiliation() because that function
+-- derives its actor from presby_current_org(), and a seed script has no
+-- session. (The function itself is proven in scripts/test-rls.sql.)
+update organization_affiliations
+   set closed_by_org_id = 'f6000000-0000-0000-0000-000000000001',
+       closed_on = '1995-01-01',
+       closed_minute_reference = 'Synod of the Northern Watershed, 1994-10-21, minute 7'
+ where subject_org_id = '44444444-4444-4444-4444-444444444444'
+   and effective_to = '1995-01-01';
 
 -- require_two_factor differs between the two congregations on purpose: the
 -- isolation suite asserts that presby_two_factor_required() reads the policy
@@ -569,11 +656,13 @@ values ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-22222222
         'b0000000-0000-0000-0000-000000000005','2026-01-01','2026-12-31',
         'Presbytery 2026-01-15, item 9');
 
-insert into sasr_reports (organization_id, report_year, official_beginning_balance, computed_beginning_balance, ending_active, status) values
-  ('22222222-2222-2222-2222-222222222222', 2025, 118, 116, 115, 'submitted'),
-  -- D9: unmanaged org has no roll, so computed_beginning_balance is NULL.
-  -- The projection must render "not derived", never 0.
-  ('44444444-4444-4444-4444-444444444444', 2025, 41, null, 39, 'submitted');
+-- `sasr_reports` was DROPPED by drizzle/0047 (Phase 2 Ruling 6 /
+-- DECISION-137): zero rows on production and development, zero application
+-- consumers, and a shape already stale under D25 (`submitted` is no longer a
+-- status — it is the existence of a statistical_returns row). The two fixture
+-- rows that used to sit here are gone with it. The working-draft surface it
+-- nominally served is a tracked design question for the publish-UI pipeline,
+-- not something this seed should fake.
 
 -- ---------------------------------------------------------------------------
 -- A platform user linked to a fixture person.
@@ -654,15 +743,30 @@ update people
 --
 -- Neither gets an organization_settings row, so the 2FA-policy assertions in
 -- section 11 are untouched (absent row = not required).
-insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status) values
-  ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111',
+-- Roots plus an affiliation, not a direct parent_id — see the note on the
+-- first organizations block above (drizzle/0044).
+insert into organizations (id, organization_type, name, slug, path, platform_status) values
+  ('55555555-5555-5555-5555-555555555555',
    'congregation', 'Fernwood Presbyterian Church', 'fernwood',
-   'northern_reach.fernwood', 'managed'),
+   'fernwood', 'managed'),
   -- Onboarding: stewarded by the presbytery pending handover. A membership here
   -- yields no card and no portal — only different copy on /no-organization.
-  ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111',
+  ('66666666-6666-6666-6666-666666666666',
    'congregation', 'Marrowbone Presbyterian Church', 'marrowbone',
-   'northern_reach.marrowbone', 'invited');
+   'marrowbone', 'invited');
+
+insert into organization_affiliations
+  (organization_id, subject_org_id, parent_org_id, relationship_type,
+   effective_from, effective_to, authority, minute_reference)
+values
+  ('11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555',
+   '11111111-1111-1111-1111-111111111111', 'member_congregation',
+   '1988-03-06', null, 'recorded',
+   'Northern Reach stated meeting, 1988-03-06, item 3'),
+  ('11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666',
+   '11111111-1111-1111-1111-111111111111', 'member_congregation',
+   '2024-06-11', null, 'recorded',
+   'Northern Reach stated meeting, 2024-06-11, item 5');
 
 -- P1 / DECISION-063: these two orgs are created here, well after the F16
 -- block near the top of this file, so their active_membership derived groups
@@ -1251,14 +1355,54 @@ values
    2025, 'presbytery_entered', 'e0000000-0000-0000-0000-0000000000f4',
    38, 12, 30, 1, 84000.00, 61000.00);
 
+-- Alder Creek's published row is now a PROJECTION OF A PUBLICATION
+-- (drizzle/0047, F36), so all three rows are seeded, in dependency order:
+-- the artifact, the event, then the projection that carries publication_id.
+-- Written as explicit fixed-id inserts rather than by calling
+-- presby_publish_sasr_snapshot() from a fabricated org context, because
+-- scripts/test-rls.sql pins a4000000-...-0002 by literal id in five places
+-- and the function would mint a new one each seed. The function itself is
+-- exercised for real in test-rls.sql section 29(e) and in
+-- src/lib/db/domain/publication.test.ts.
+--
+-- The payload keys are the 2024 field_spec's own keys — drizzle/0046's
+-- presby_enforce_sasr_field_spec() rejects anything else, which is the point
+-- of the spec and is worth a fixture proving it from the seed side too.
+insert into statistical_returns
+  (id, organization_id, about_org_id, report_year, form_version_key, provenance,
+   payload, reconciled, attested_by_name, attested_role, attested_at)
+values
+  ('a8000000-0000-0000-0000-000000000001',
+   '22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222',
+   2025, '2024', 'submitted',
+   '{"ending_active": 212, "ending_baptized": 45, "avg_weekly_worship_attendance": 165,
+     "baptisms_children": 6, "receipts_contributions": 410000.00,
+     "exp_local_program": 275000.00}'::jsonb,
+   true, 'Tobias Renwick', 'Clerk of Session', '2026-01-12 15:00:00-05');
+
+insert into publications
+  (id, organization_id, recipient_org_id, record_class, artifact_id,
+   published_at, supersedes_id, minute_reference)
+values
+  ('a9000000-0000-0000-0000-000000000001',
+   '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111',
+   'statistical_return', 'a8000000-0000-0000-0000-000000000001',
+   '2026-01-12 15:00:00-05', null,
+   'Session stated meeting, 2026-01-11, item 5');
+
+-- published_at and minute_reference are COPIES of the publication's, and
+-- test-rls.sql section 34 asserts the equality (F39). Keep them in step if
+-- either row is ever edited here.
 insert into congregation_statistics
-  (id, organization_id, about_org_id, year, provenance, published_at, minute_reference,
+  (id, organization_id, about_org_id, year, provenance, publication_id,
+   published_at, minute_reference,
    ending_active, ending_baptized, avg_weekly_worship_attendance,
    baptisms_children, receipts_contributions, exp_local_program)
 values
   ('a4000000-0000-0000-0000-000000000002',
    '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
-   2025, 'published_by_congregation', '2026-01-12 15:00:00-05',
+   2025, 'published_by_congregation', 'a9000000-0000-0000-0000-000000000001',
+   '2026-01-12 15:00:00-05',
    'Session stated meeting, 2026-01-11, item 5',
    212, 45, 165, 6, 410000.00, 275000.00);
 

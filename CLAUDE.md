@@ -403,6 +403,19 @@ admin administers the presbytery's own org and gets nothing inside a member
 congregation. The only downward paths are an administrative commission and a
 session-granted delegation, both time-boxed and minuted.
 
+The testable form: **no platform role acquires ecclesiastical authority merely
+by its position on the platform.** Council affiliation is a third axis with
+history (`organization_affiliations`, D19); `organizations.parent_id` and
+`path` are a derived cache of it, never written directly. Every cross-council
+read or write on the three-axis tables is function-mediated
+(`presby_transfer_affiliation()`, `presby_org_affiliated()`,
+`presby_publish_sasr_snapshot()`, `presby_list_published_returns_to_me()`),
+never policy-mediated, and each derives its actor from `presby_current_org()`
+and its standing from the affiliation history — no platform predicate appears
+in any authority check. Publication is an immutable event (`publications`)
+referencing an immutable artifact; a recipient reads the published artifact,
+not the source's live state.
+
 ### The Roll Is the System of Record
 
 `roll_actions` is append-only; an approved action is frozen by trigger and
@@ -467,6 +480,15 @@ in org B point at a person in org A — RLS filters reads, and that is a bad
 
 PC(USA) records are permanent. `delete` is revoked on `people`; use
 `merged_into_id`.
+
+**Organizations are permanent too** (D10, `drizzle/0044`). `delete` is revoked
+on `organizations` and a `BEFORE DELETE` guard covers the owner path too (the
+owner connection is `neondb_owner`, which no grant binds — only triggers do); a
+congregation that closes is recorded as a lifecycle event, never removed. Test
+fixtures are the one exemption, via `deletable_until`. The one difference from
+the person rule: a person merge is followed (`merged_into_id` is a chain), a
+congregation merge is **not** — `organization_successions` records the
+topology, and a predecessor's history stays attributed to the predecessor.
 
 ### Extensibility Goes Through Support
 

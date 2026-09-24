@@ -34,6 +34,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
@@ -53,6 +54,7 @@ describe.skipIf(!hasDb)(
     let getCredentialsFormOptions: typeof import("./credentials").getCredentialsFormOptions;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
+    let organizationAffiliations: typeof import("@/lib/db/domain/lifecycle").organizationAffiliations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
     let groups: typeof import("@/lib/db/domain/groups").groups;
     let people: typeof import("@/lib/db/domain/people").people;
@@ -96,6 +98,9 @@ describe.skipIf(!hasDb)(
       } = await import("./credentials"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
+      ({ organizationAffiliations } = await import(
+        "@/lib/db/domain/lifecycle"
+      ));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
       ({ people, memberships } = await import("@/lib/db/domain/people"));
       ({ permissions, appRoles, appRolePermissions, roleGrants } = await import(
@@ -113,6 +118,8 @@ describe.skipIf(!hasDb)(
         const [row] = await platform
           .insert(organizations)
           .values({
+            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+            deletableUntil: fixtureDeletableUntil(),
             organizationType: "presbytery",
             name: `Fixture Presbytery ${label} for credentials.test.ts`,
             slug: `credentials-test-presbytery-${label.toLowerCase()}-${stamp}`,
@@ -123,6 +130,16 @@ describe.skipIf(!hasDb)(
         return row!.id;
       }
 
+      /**
+       * A congregation (or NWC) UNDER a presbytery.
+       *
+       * `parentId` is no longer set on the INSERT and cannot be
+       * (drizzle/0044's `organizations_guard_insert` rejects it on both
+       * connections). The org goes in as a root and its
+       * `organization_affiliations` row — the new system of record for
+       * "whose presbytery is this?" — derives `parent_id` and `path` through
+       * `presby_apply_affiliation_to_org_tree()`, the one derivation path.
+       */
       async function makeCongregation(
         label: string,
         parentId: string,
@@ -131,14 +148,27 @@ describe.skipIf(!hasDb)(
         const [row] = await platform
           .insert(organizations)
           .values({
+            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+            deletableUntil: fixtureDeletableUntil(),
             organizationType,
-            parentId,
             name: `Fixture Congregation ${label} for credentials.test.ts`,
             slug: `credentials-test-cong-${label.toLowerCase()}-${stamp}`,
             path: `credentials_test_cong_${label.toLowerCase()}_${stamp}`,
             platformStatus: "unmanaged",
           })
           .returning({ id: organizations.id });
+        await platform.insert(organizationAffiliations).values({
+          organizationId: parentId,
+          subjectOrgId: row!.id,
+          parentOrgId: parentId,
+          relationshipType:
+            organizationType === "new_worshiping_community"
+              ? "member_nwc"
+              : "member_congregation",
+          effectiveFrom: "2000-01-01",
+          authority: "recorded",
+          minuteReference: `Fixture affiliation for credentials.test.ts (${label})`,
+        });
         return row!.id;
       }
 

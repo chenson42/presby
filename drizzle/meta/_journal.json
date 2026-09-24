@@ -281,6 +281,41 @@
       "when": 1787014065186,
       "tag": "0042_presby_public_directory_primitives",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1787014066186,
+      "tag": "0043_presby_org_identifiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1787014067186,
+      "tag": "0044_presby_org_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1787014068186,
+      "tag": "0045_presby_about_org_affiliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1787014069186,
+      "tag": "0046_presby_statistical_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787014070186,
+      "tag": "0047_presby_publications",
+      "breakpoints": true
     }
   ]
 }

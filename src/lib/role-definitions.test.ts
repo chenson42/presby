@@ -31,6 +31,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
@@ -112,6 +113,8 @@ describe.skipIf(!hasDb)(
         const [row] = await platform
           .insert(organizations)
           .values({
+            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+            deletableUntil: fixtureDeletableUntil(),
             organizationType: "congregation",
             name: `Fixture Congregation ${label} for role-definitions.test.ts`,
             slug: `role-definitions-test-${label.toLowerCase()}-${stamp}`,
@@ -609,6 +612,8 @@ describe.skipIf(!hasDb)(
         const [orgRow] = await platform
           .insert(organizations)
           .values({
+            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+            deletableUntil: fixtureDeletableUntil(),
             organizationType: "presbytery",
             name: `Fixture Presbytery for role-definitions.test.ts scope filtering`,
             slug: `role-definitions-test-presbytery-${stamp}`,

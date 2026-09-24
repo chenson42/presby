@@ -18,6 +18,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 // vi.mock() calls are hoisted above the imports by Vitest's transform.
 // blob-store.ts (and @/lib/authz, transitively pulled in by nothing here but
@@ -55,6 +56,8 @@ describe.skipIf(!hasDb)(
       const [org] = await platform
         .insert(organizations)
         .values({
+          // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+          deletableUntil: fixtureDeletableUntil(),
           organizationType: "congregation",
           name: "Fixture Congregation for blob-store.test.ts",
           slug: `blob-store-test-a-${stamp}`,
@@ -67,6 +70,8 @@ describe.skipIf(!hasDb)(
       const [other] = await platform
         .insert(organizations)
         .values({
+          // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+          deletableUntil: fixtureDeletableUntil(),
           organizationType: "congregation",
           name: "Fixture Congregation B for blob-store.test.ts",
           slug: `blob-store-test-b-${stamp}`,

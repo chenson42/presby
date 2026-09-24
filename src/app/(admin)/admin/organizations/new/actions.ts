@@ -8,6 +8,7 @@ import { isReservedSlug } from "@/lib/reserved-slugs";
 import {
   createOrganization,
   type CreateOrganizationInput,
+  type RelationshipType,
 } from "@/lib/org-provisioning";
 import type { OrganizationType, PlatformStatus } from "@/lib/authz";
 
@@ -55,6 +56,19 @@ const PLATFORM_STATUSES: readonly PlatformStatus[] = [
 function isPlatformStatus(value: string): value is PlatformStatus {
   return (PLATFORM_STATUSES as readonly string[]).includes(value);
 }
+
+const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
+  "member_congregation",
+  "member_nwc",
+  "member_presbytery",
+  "member_synod",
+];
+function isRelationshipType(value: string): value is RelationshipType {
+  return (RELATIONSHIP_TYPES as readonly string[]).includes(value);
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MAX_NAME_LEN = 200;
 
@@ -114,11 +128,36 @@ export async function createOrganizationAction(
     return { ok: false, error: RESERVED_SLUG_ERROR };
   }
 
+  // Optional hierarchical provisioning (DECISION-136). NO form control ships
+  // in this pipeline — the create form still offers root orgs only — but the
+  // fields are parsed here so the lifecycle-UI pipeline adds a <select>, not
+  // a whole second write path. Absent fields leave behavior byte-identical
+  // to before.
+  const parentRaw = String(formData.get("parentOrganizationId") ?? "").trim();
+  const relationshipRaw = String(formData.get("relationshipType") ?? "").trim();
+  const minuteRaw = String(formData.get("minuteReference") ?? "").trim();
+  if (parentRaw.length > 0) {
+    if (!UUID_RE.test(parentRaw)) {
+      return { ok: false, error: "Choose a valid parent organization." };
+    }
+    if (!isRelationshipType(relationshipRaw)) {
+      return { ok: false, error: "Choose a valid relationship to the parent." };
+    }
+  }
+
   const input: CreateOrganizationInput = {
     name,
     slug,
     organizationType: organizationTypeRaw,
     platformStatus: platformStatusRaw,
+    ...(parentRaw.length > 0 && isRelationshipType(relationshipRaw)
+      ? {
+          parentOrganizationId: parentRaw,
+          relationshipType: relationshipRaw,
+          minuteReference: minuteRaw.length > 0 ? minuteRaw : undefined,
+          recordedByUserId: session.user.id,
+        }
+      : {}),
   };
 
   let result;
@@ -145,6 +184,15 @@ export async function createOrganizationAction(
         error:
           "We can't create organizations right now — platform setup is incomplete. Contact an engineer.",
       };
+    case "invalid_parent":
+      // One message for "no such organization" and for "that pairing is not
+      // permitted by polity", deliberately: the copy must not become an
+      // existence oracle for organization ids.
+      return {
+        ok: false,
+        error:
+          "That parent organization can't receive this one — a presbytery receives congregations and new worshiping communities, a synod receives presbyteries, and the General Assembly receives synods.",
+      };
     case "invalid_input":
       // Defense-in-depth only; the validation above should catch everything
       // this branch could return.
@@ -162,6 +210,11 @@ export async function createOrganizationAction(
       slug,
       organizationType: organizationTypeRaw,
       platformStatus: platformStatusRaw,
+      // Extends the EXISTING action's payload rather than minting a second
+      // audit key: "an organization was created under this council" is the
+      // same security-sensitive mutation, with one more fact about it.
+      parentOrganizationId: input.parentOrganizationId ?? null,
+      relationshipType: input.relationshipType ?? null,
     },
   });
 

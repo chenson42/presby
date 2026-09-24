@@ -36,6 +36,18 @@ function platformSql(): Sql {
 }
 
 async function deleteOrgBySlug(sql: Sql, slug: string): Promise<void> {
+  // drizzle/0044: an organization is permanent. presby_guard_organizations_
+  // delete() refuses a DELETE unless `deletable_until` is set and in the
+  // future, and it fires on THIS connection too — BYPASSRLS exempts a role
+  // from RLS policies, never from triggers. The org under test comes out of
+  // the real /admin/organizations/new flow, so nothing stamped it at insert
+  // (createOrganization() rightly never does); the teardown window is opened
+  // here, deliberately and narrowly, immediately before the delete.
+  await sql`
+    update organizations
+       set deletable_until = now() + interval '1 hour'
+     where slug = ${slug}
+  `;
   await sql`delete from organizations where slug = ${slug}`;
 }
 

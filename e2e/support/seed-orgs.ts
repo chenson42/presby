@@ -241,25 +241,56 @@ export async function seedE2EOrgs(platformDbUrl: string): Promise<void> {
   assertFixtureShape();
   const sql = neon(platformDbUrl);
 
+  // `parent_id` and `path` are NOT written here, on either the INSERT or the
+  // upsert's SET list (drizzle/0044). Both columns are derived from
+  // `organization_affiliations` by `presby_apply_affiliation_to_org_tree()`,
+  // and `organizations_guard_insert`/`organizations_guard_reparent` reject a
+  // direct write on BOTH connections — including this one, since BYPASSRLS
+  // exempts a role from policies but never from triggers. Note that the
+  // upsert's old `path = EXCLUDED.path` would have tripped the reparent
+  // guard on every re-seed even when the value was unchanged: `UPDATE OF
+  // path` fires on the column being in the SET list, not on it changing.
+  //
+  // The INSERT seeds the root-shaped label; the affiliation loop below
+  // derives the real `e2e_presbytery.<label>` path for the three children.
   for (const org of Object.values(E2E_ORGS)) {
     await sql`
-      INSERT INTO organizations (id, parent_id, organization_type, name, slug, path, platform_status)
+      INSERT INTO organizations (id, organization_type, name, slug, path, platform_status)
       VALUES (
         ${org.id}::uuid,
-        ${org.parentId}::uuid,
         ${org.type},
         ${org.name},
         ${org.slug},
-        ${org.path},
+        ${org.slug.replace(/-/g, "_")},
         ${org.platformStatus}
       )
       ON CONFLICT (id) DO UPDATE SET
-        parent_id         = EXCLUDED.parent_id,
         organization_type = EXCLUDED.organization_type,
         name              = EXCLUDED.name,
         slug              = EXCLUDED.slug,
-        path              = EXCLUDED.path,
         platform_status   = EXCLUDED.platform_status
+    `;
+  }
+
+  // One open affiliation per child fixture, written only when the child has
+  // none: `organization_affiliations_no_overlap` (a GIST EXCLUDE) would
+  // reject a second unbounded/overlapping row on a re-seed, and this seeder
+  // must stay re-runnable. The INSERT's own AFTER trigger sets the child's
+  // parent_id and path, so `E2E_ORGS[...].path` is the value the database
+  // ends up with, not the value written.
+  for (const org of Object.values(E2E_ORGS)) {
+    if (!org.parentId) continue;
+    await sql`
+      INSERT INTO organization_affiliations
+        (organization_id, subject_org_id, parent_org_id, relationship_type,
+         effective_from, authority, minute_reference)
+      SELECT ${org.parentId}::uuid, ${org.id}::uuid, ${org.parentId}::uuid,
+             'member_congregation', DATE '2020-01-01', 'recorded',
+             'e2e fixture affiliation (e2e/support/seed-orgs.ts)'
+       WHERE NOT EXISTS (
+         SELECT 1 FROM organization_affiliations
+          WHERE subject_org_id = ${org.id}::uuid AND effective_to IS NULL
+       )
     `;
   }
 

@@ -1,0 +1,172 @@
+import {
+  pgTable,
+  check,
+  foreignKey,
+  index,
+  text,
+  timestamp,
+  unique,
+  uuid,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { organizations } from "./org";
+import { statisticalReturns } from "./returns";
+import { users } from "../schema";
+
+/**
+ * The publication EVENT (D20). DDL, RLS, the freeze trigger and the two
+ * SECURITY DEFINER read/write functions live in
+ * `drizzle/0047_presby_publications.sql`; design rationale in
+ * `docs/schema-design-2.md` sec 5 and
+ * `docs/work-log/2026-09-24-lifecycle-affiliation-returns.md`.
+ *
+ * ITS OWN MODULE, DELIBERATELY (Phase 2 Ruling 9 / DECISION-138). D20 defines
+ * publication as generic over `recordClass`, and this table is the schema
+ * expression of the platform's second invariant — "access flows up by
+ * publication, never down by inheritance." Parking it in a statistics module
+ * would guarantee that the day a second record class lands, either the table
+ * moves file (churn in `/developer` and every import) or the module name
+ * lies. `assets.ts` (91 lines) and `events.ts` (104) are the precedent for a
+ * small module that earns its name.
+ *
+ * MUCH OF THE REAL ENFORCEMENT IS NOT EXPRESSIBLE IN DRIZZLE and lives only
+ * in `0047`:
+ *
+ *   - `publications_freeze` (BEFORE UPDATE OR DELETE) refuses DELETE
+ *     outright and permits EXACTLY ONE UPDATE transition: a row whose three
+ *     withdrawal columns are all null may have them set together
+ *     (`withdrawnAt` required), with nothing else on the row moving in that
+ *     same statement. A withdrawal is not reversible, re-datable or
+ *     re-minutable — correcting one means publishing again. It fires on EVERY
+ *     connection, including the owner: `presby_app` and `presby_platform`
+ *     hold `select, insert` only, but a grant does not bind `neondb_owner`,
+ *     which `PLATFORM_DATABASE_URL` actually connects as (Ruling A5's batch-B
+ *     finding). `BYPASSRLS` exempts a role from RLS policies, never from
+ *     triggers.
+ *   - WITHDRAWAL CARRIES PROVENANCE, because it is itself a minuted act:
+ *     `withdrawnAt`, `withdrawnBy` and `withdrawnMinuteReference` are
+ *     DECISION-135's affiliation-close shape (`closedByOrgId` / `closedBy` /
+ *     `closedOn` / `closedMinuteReference`) applied to a publication, for the
+ *     same reason — a close with no attribution is an unattributable mutation
+ *     of an otherwise provenanced record.
+ *   - There is NO tenant-side withdrawal path in this pipeline: with UPDATE
+ *     revoked from `presby_app`, withdrawal is an owner-only act. The
+ *     intended writer is a future `presby_withdraw_publication()` SECURITY
+ *     DEFINER function in the publish-UI pipeline, in the same
+ *     confused-deputy shape as `presby_transfer_affiliation()` — no
+ *     caller-supplied council id, the actor is `presby_current_org()`. It is
+ *     NOT built here.
+ *   - The RECIPIENT cannot read this table under the tenant policy —
+ *     `organizationId` is the SOURCE council. That is the point: the
+ *     recipient reads through `presby_list_published_returns_to_me()`
+ *     (SECURITY DEFINER), so the publication EVENT grants the read rather
+ *     than the tenant policy (Ruling 5 / DECISION-135). Not a third named
+ *     cross-org RLS policy — `docs/schema-design.md` sec 17's
+ *     two-named-policies rule is untouched.
+ *   - `presby_publish_sasr_snapshot()` is the only writer today, and it
+ *     DERIVES both `recipientOrgId` (from
+ *     `presby_affiliation_parent_as_of()`, never `organizations.parent_id`)
+ *     and `supersedesId` (the caller's most recent non-withdrawn publication
+ *     for the year). Neither is a parameter, so neither can be spoofed.
+ *
+ * `organizationId` and `recipientOrgId` are PLAIN FKs to `organizations`
+ * (F2's structural exception, `docs/schema-design.md` sec 17). `artifactId`
+ * is NOT: it is composite to `statistical_returns (id, organization_id)`,
+ * because `artifactId` alone would let a publication claim an artifact
+ * recorded under a different organization.
+ */
+export const publications = pgTable(
+  "publications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** The SOURCE council — the body that published. Tenant scope. */
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /**
+     * The council the artifact was published TO: the presbytery of current
+     * membership at `publishedAt` (D19 / G-3.0108(a)), resolved ONCE from
+     * `presby_affiliation_parent_as_of()` and never re-derived — a later
+     * redistricting cannot change who received an already-filed return.
+     */
+    recipientOrgId: uuid("recipient_org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** `'statistical_return'` today; generic by design (D20). */
+    recordClass: text("record_class").notNull().default("statistical_return"),
+    artifactId: uuid("artifact_id").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** The publication this one corrects. Derived, never caller-supplied. */
+    supersedesId: uuid("supersedes_id").references(
+      (): AnyPgColumn => publications.id,
+    ),
+    /**
+     * Null everywhere today: there is no acting-USER context in this platform
+     * (only `app.current_org_id` exists as a GUC — Ruling A4), and accepting
+     * a user id as a function parameter would be the caller-supplied identity
+     * claim the publish function's whole shape refuses. It fills in when the
+     * `app.current_user_id` GUC lands.
+     */
+    authorizedBy: uuid("authorized_by").references(() => users.id),
+    /**
+     * The PUBLISHING council's own minute authorizing publication (a
+     * congregation's session minute for an SASR). NOT the same fact as
+     * `congregationStatistics.minuteReference`, which is the presbytery's
+     * data-entry minute on a `presbytery_entered` row — collapsing them is
+     * the one-column-two-facts error this design refuses everywhere else
+     * (F39).
+     */
+    minuteReference: text("minute_reference"),
+    /**
+     * Withdrawal is a column, not a delete (D20), and it is a MINUTED ACT:
+     * these three move together, exactly once, on a row that is not already
+     * withdrawn. A withdrawn publication disappears from
+     * `presby_list_published_returns_to_me()`; its `congregation_statistics`
+     * projection row is DELIBERATELY UNTOUCHED — acting on the projection is
+     * out of scope for this pipeline and belongs to whichever pipeline ships
+     * a withdrawal UI (Phase 3 Edge Cases).
+     */
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    /**
+     * Null on every row today: `presby_app` holds no UPDATE grant, so
+     * withdrawal is an owner-only act until `presby_withdraw_publication()`
+     * ships — and there is still no acting-USER context in this platform
+     * (Ruling A4: only `app.current_org_id` exists as a GUC).
+     */
+    withdrawnBy: uuid("withdrawn_by").references(() => users.id),
+    /**
+     * The WITHDRAWING council's own minute. Distinct from `minuteReference`,
+     * which authorized the publication — one column, one fact.
+     */
+    withdrawnMinuteReference: text("withdrawn_minute_reference"),
+  },
+  (t) => [
+    unique("publications_id_org_key").on(t.id, t.organizationId),
+    foreignKey({
+      name: "publications_artifact_fk",
+      columns: [t.artifactId, t.organizationId],
+      foreignColumns: [statisticalReturns.id, statisticalReturns.organizationId],
+    }),
+    index("publications_recipient_idx").on(t.recipientOrgId),
+    index("publications_org_artifact_idx").on(t.organizationId, t.artifactId),
+    index("publications_supersedes_idx").on(t.supersedesId),
+    check(
+      "publications_record_class_allowed",
+      sql`${t.recordClass} in ('statistical_return')`,
+    ),
+    check(
+      "publications_not_self_superseding",
+      sql`${t.supersedesId} is null or ${t.supersedesId} <> ${t.id}`,
+    ),
+    // Attribution without the act it attributes is meaningless. The trigger
+    // enforces the TRANSITION; this enforces the resulting SHAPE, including
+    // for the owner's own writes.
+    check(
+      "publications_withdrawal_shape",
+      sql`${t.withdrawnAt} is not null or (${t.withdrawnBy} is null and ${t.withdrawnMinuteReference} is null)`,
+    ),
+  ],
+);

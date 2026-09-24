@@ -91,7 +91,11 @@ export type TableDoc = {
 const MODULES: Record<string, string> = {
   organizations: "A. Organizations",
   organization_settings: "A. Organizations",
+  organization_identifiers: "A. Organizations",
   org_units: "A. Organizations",
+  organization_lifecycle_events: "K. Lifecycle and affiliation",
+  organization_successions: "K. Lifecycle and affiliation",
+  organization_affiliations: "K. Lifecycle and affiliation",
   households: "B. People",
   people: "B. People",
   addresses: "B. People",
@@ -125,7 +129,9 @@ const MODULES: Record<string, string> = {
   consents: "H. Privacy",
   person_demographics: "H. Privacy",
   person_disabilities: "H. Privacy",
-  sasr_reports: "J. Reporting",
+  sasr_form_versions: "J. Reporting",
+  statistical_returns: "J. Reporting",
+  publications: "J. Reporting",
 };
 
 /**
@@ -137,6 +143,18 @@ const MODULES: Record<string, string> = {
 const BESPOKE_POLICIES: Record<string, string> = {
   organizations:
     "Not tenant-isolated. The org tree is public information; PC(USA) publishes congregation and presbytery lists. Sensitive data lives in organization_settings.",
+  organization_identifiers:
+    "Not tenant-isolated, by the same reasoning as organizations: external identifiers (OGA church PIN, psvonline id, legacy import keys) are identity data about a public org-tree entry. pcusa_pin lived on the tenant-isolated organization_settings until drizzle/0043, where a presbytery running an import could not read a member congregation's own PIN.",
+  organization_affiliations:
+    "Standard tenant policy, but presby_app holds SELECT only: presby_transfer_affiliation() is the only write path. A UNIQUE/EXCLUDE constraint is enforced against ALL rows and not the RLS-visible subset, so ordinary tenant DML here would let one presbytery probe whether an organization it cannot see has an open affiliation (F40). Every rejection raises one byte-identical string.",
+  sasr_form_versions:
+    "Not tenant-isolated and carries no organization_id: a SASR form revision is platform-wide reference data in the class of `permissions` and `feature_flags`, not any council's property. Written only by migration; SELECT to both roles. Its field_spec is what presby_enforce_sasr_field_spec() validates every statistical_returns payload against, which is the only thing making `payload jsonb` an allow-list rather than the custom fields D8 refuses.",
+  statistical_returns:
+    "Standard tenant policy, but APPEND-ONLY on every connection: presby_app and presby_platform hold select+insert, and statistical_returns_freeze refuses UPDATE/DELETE on the owner path too, which no grant can bind. The owner of a submitted return is the CONGREGATION, so the recipient presbytery cannot read it under the policy at all — it reads through presby_list_published_returns_to_me(), because the publication EVENT grants the read rather than the tenant policy.",
+  publications:
+    "Standard tenant policy on the SOURCE council, which means the recipient cannot read its own inbox through the policy — that is deliberate, and presby_list_published_returns_to_me() (SECURITY DEFINER, filtering on recipient_org_id) is the read. Immutable except withdrawn_at: publications_freeze refuses DELETE outright and refuses any UPDATE that moves another column, on every connection. presby_app has no UPDATE grant, so there is no tenant-side withdrawal path yet.",
+  organization_successions:
+    "No organization_id and no policy of its own: pure topology, and SELECT is open to both roles because who became whom is public. That absent organization_id protects reads through a join and protects NO write — a write joins nothing — so the write side is closed by grant and trigger instead: presby_app holds SELECT only, presby_platform select+insert, a BEFORE INSERT trigger refuses an event id the current org does not own (with the same uniform lifecycle literal, so 'no such event' and 'not your event' are indistinguishable), and a BEFORE UPDATE OR DELETE freeze refuses both on the owner path too. Per-event cardinality (merged needs >= 2 predecessors) is a DEFERRED constraint trigger, because the second predecessor cannot exist when the first row is inserted.",
   people:
     "GLOBAL, no organization_id (D1). Holds the person's own data. Ministers of Word and Sacrament are members of the presbytery while ruling elders are members of the congregation, so one human's roll and service routinely sit at different orgs. Visible when the current org holds a membership for them.",
   transfer_certificates:
@@ -359,6 +377,30 @@ export const INVARIANTS: {
     title: "Nothing about a person is ever hard-deleted",
     detail:
       "PC(USA) records are permanent. delete is revoked on people; use merged_into_id.",
+    enforcement: "database",
+  },
+  {
+    title: "An organization is never hard-deleted either",
+    detail:
+      "The people rule's twin. insert/update/delete are revoked on organizations from presby_app and a BEFORE DELETE guard covers the owner path too (BYPASSRLS exempts a role from policies, never from triggers); only a deletable_until-stamped test fixture may be removed. A congregation that closes is an organization_lifecycle_events row, never a deleted row. One difference from the person rule, and it is load-bearing: a person merge is FOLLOWED (merged_into_id is a chain), a congregation merge is NOT — following organization_successions would attribute a predecessor's 1987 return to its successor.",
+    enforcement: "database",
+  },
+  {
+    title: "parent_id and path are derived from council affiliation",
+    detail:
+      "organizations.parent_id and organizations.path are a CACHE of the currently-open organization_affiliations row, rebuilt only by presby_apply_affiliation_to_org_tree(). A direct INSERT ... parent_id or UPDATE of either column is rejected on both connections. The affiliation table itself is write-closed to presby_app: presby_transfer_affiliation() is the only write path, because an EXCLUDE constraint on a FORCE-RLS table is enforced against ALL rows and would otherwise be a cross-tenant existence oracle (F40).",
+    enforcement: "trigger",
+  },
+  {
+    title: "A record ABOUT another organization must be affiliated with it",
+    detail:
+      "congregation_oversight, congregation_statistics, per_capita_records and appointments each carry a row about another organization. drizzle/0045 makes the relationship a database property rather than an application-layer parent_id check: presby_org_affiliated(about_org, recording_council, as_of) must be true, and as_of is the ROW'S OWN YEAR for statistics and per-capita bills, current_date for the rest. That is what lets a 1990 return resolve to the council that received it in 1990 rather than to whoever holds the congregation today — and it means a council may legitimately be refused a historical row for one of its present-day member congregations. A recorded lifecycle event is likewise immutable on every connection (presby_freeze_lifecycle_event(), the roll_actions precedent): correct a minuted act by recording another act.",
+    enforcement: "trigger",
+  },
+  {
+    title: "Publication is an event, not a data-entry screen",
+    detail:
+      "Access flows up by publication. A congregation's statistical return is an immutable statistical_returns row; publishing it is an immutable publications row naming the recipient council, the date and the session minute; and the presbytery's congregation_statistics row is a PROJECTION of that event, not an independent record. presby_publish_sasr_snapshot() writes all three in one transaction and accepts no organization id of any kind — the recipient is derived from the affiliation history (presby_affiliation_parent_as_of), never from organizations.parent_id, and the supersession chain is derived, never passed. The recipient reads the artifact through presby_list_published_returns_to_me(), filtered on the recorded publication rather than on live affiliation, so a dissolved congregation's returns stay readable by the council that received them (G-3.0107). Withdrawal is a column, never a delete; every one of the three rows is frozen by trigger on every connection, so the projection's copy of published_at and minute_reference cannot drift from the event's (F39).",
     enforcement: "database",
   },
   {

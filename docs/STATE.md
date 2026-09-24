@@ -9,6 +9,28 @@ Updated 2026-09-24.
 
 ## Session handoff — 2026-09-24 (read this FIRST — supersedes the 2026-08-31 entry below)
 
+### Update, end of the 2026-09-24 session — the DDL pipeline SHIPPED (uncommitted at time of writing)
+
+The "NEXT TASK" below is **done**: `docs/work-log/2026-09-24-lifecycle-affiliation-returns.md`
+closed SHIP WITH NOTES after a full six-phase run (three Phase 3 loop-backs, one
+Phase 5 loop-back — every one caught a real defect; read the work-log's Phase 2
+rulings and the QA sections before touching any of these tables). Shipped:
+`drizzle/0043`–`0047`, domain modules `lifecycle.ts` / `returns.ts` /
+`publication.ts` (`reporting.ts` deleted), `createOrganization()` with a parent,
+`test-rls.sql` 277 → 363 assertions, v0.24.0. Applied and proven on the
+`development` Neon branch; **not yet applied to `production`** — that happens
+with the deploy (`npm run db:migrate` there; on `development` the runner's ledger
+is incomplete, so migrations were applied with `psql "$MIGRATE_DATABASE_URL"`).
+
+**Next pipelines, in order of leverage:** (1) the seven overdue periodic reviews —
+`security` first, since it now has F38/F40/F46 and the `presby_platform` blanket
+grant (`drizzle/0009:44`) waiting for it; (2) increment 6, submission grants, its
+own work-log and security pass (Phase 2 Ruling 11 pre-placed the route group);
+(3) increment 7, name history + D13 import staging; (4) the lifecycle-UI pipeline
+(`presby_record_lifecycle_event()` / `presby_organize_congregation()`, the admin
+form's missing parent control); (5) the publish UI (Increment 4a). D22 and D23
+remain independent. The `docs/TODO.md` FPCW-program block has every follow-up.
+
 **Checkpointed ahead of a session refresh.** No code was written this session
 beyond a one-paragraph copy fix. What happened was **planning and schema design**,
 and the artifacts are all committed — but the next step was deliberately *not*
@@ -31,7 +53,7 @@ sequentially would produce four shapes that do not fit:
 > permanent organization identity (D10) → historical affiliation (D19) → global
 > person + tenant membership (D1) → append-only roll → live statistical projection
 > → frozen submitted artifact (D21) → immutable publication event (D20) → recipient
-> sees only what was published
+> reads the published artifact, not the source's live state
 
 Broad schema discovery is **complete**. This is DDL, constraints, indexes and RLS
 policy — not more shape-finding. D22 (person-merge provenance) and D23 (care

@@ -25,6 +25,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, and, sql } from "drizzle-orm";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
@@ -108,6 +109,8 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     const [org] = await platform
       .insert(organizations)
       .values({
+        // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+        deletableUntil: fixtureDeletableUntil(),
         organizationType: "congregation",
         name: "Fixture Congregation for roll.test.ts",
         slug: `roll-test-a-${stamp}`,
@@ -317,7 +320,28 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     } finally {
       await platform.execute(sql`alter table roll_actions enable trigger roll_actions_freeze`);
     }
-    await platform.delete(organizations).where(eq(organizations.id, orgA));
+    // PRE-EXISTING TEARDOWN GAP, fixed here because running this file on its
+    // own surfaces it every time: deleting the org cascades into
+    // `group_memberships`, and this fixture HAS derived rows there (the
+    // active_membership group above plus drizzle/0017's
+    // memberships_sync_derived_group trigger), which
+    // presby_reject_derived_group_write() refuses. The file only ever
+    // appeared green because sibling test files run in parallel and one of
+    // them happens to have this same global trigger disabled at the moment
+    // the cascade runs — the "unreliable teardown / no per-test isolation"
+    // item in docs/TODO.md, seen from the inside. Nothing to do with
+    // drizzle/0044's delete guard, which this fixture satisfies through
+    // `deletableUntil` at insert.
+    await platform.execute(
+      sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+    );
+    try {
+      await platform.delete(organizations).where(eq(organizations.id, orgA));
+    } finally {
+      await platform.execute(
+        sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+      );
+    }
     await platform.delete(people).where(eq(people.id, approverPerson));
     await platform.delete(people).where(eq(people.id, outsiderPerson));
     await platform.delete(people).where(eq(people.id, rollSubject));

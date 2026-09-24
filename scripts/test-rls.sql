@@ -89,6 +89,19 @@
 -- second, unrelated Part-Time Bookkeeper position at Northern Reach.
 \set STAFF_SECRETARY  '\'a7000000-0000-0000-0000-000000000001\''
 \set STAFF_BOOKKEEPER '\'a7000000-0000-0000-0000-000000000002\''
+-- Organization lifecycle + council affiliation (section 32, drizzle/0044).
+-- Four councils that exist only as cross-council fixtures. They were minted
+-- inline by sections 28/29 until drizzle/0044 revoked INSERT on
+-- `organizations` from presby_app (F38); they now live in
+-- scripts/seed-dev.sql, the owner-run setup this suite already depends on.
+--   SOUTHERN_FIELDS  the presbytery that held Quillhaven until 1995 — the
+--                    closed historical affiliation, i.e. the 1990 case
+--   WESTERN_BASIN    a presbytery with no rows of its own (isolation probe)
+--   COASTAL_SYNOD    a synod, and TIDEWATER the presbytery under it
+\set SOUTHERN_FIELDS '\'f6000000-0000-0000-0000-000000000001\''
+\set WESTERN_BASIN   '\'f7000000-0000-0000-0000-000000000001\''
+\set COASTAL_SYNOD   '\'f8000000-0000-0000-0000-000000000001\''
+\set TIDEWATER       '\'f8000000-0000-0000-0000-000000000002\''
 -- assert_eq() is installed by the owner (see scripts/install-test-helpers.sql);
 -- presby_app only calls it.
 
@@ -1989,16 +2002,17 @@ begin;
   end $$;
 rollback;
 
--- (d) FORCE RLS + tenant isolation, proven against a SECOND real presbytery
---     minted for the life of this one rolled-back transaction — organizations
---     carries no RLS of its own (schema-design.md section 17), so this insert
---     is legal and leaves no trace once rolled back.
+-- (d) FORCE RLS + tenant isolation, proven against a SECOND real presbytery.
+--     That presbytery used to be minted inline here, inside this rolled-back
+--     transaction, on the reasoning that "organizations carries no RLS of its
+--     own (schema-design.md section 17), so this insert is legal." It was
+--     legal only because of the drift F38 names: drizzle/0044 revokes INSERT
+--     on organizations from presby_app, and this suite runs as presby_app
+--     (line 1). The Southern Fields is now a permanent fixture in
+--     scripts/seed-dev.sql — the owner-run setup this suite already depends
+--     on — and this section only sets the context to it.
 begin;
-  insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status)
-  values ('f6000000-0000-0000-0000-000000000001', null, 'presbytery',
-          'Presbytery of the Southern Fields', 'southern-fields', 'southern_fields', 'managed');
-
-  select set_config('app.current_org_id', 'f6000000-0000-0000-0000-000000000001', true);
+  select set_config('app.current_org_id', :SOUTHERN_FIELDS, true);
   select assert_eq((select count(*) from appointments), 0,
                    'presbytery B (southern fields): sees no appointments at all');
   -- Known-id cross-presbytery read, same discipline as sections 14/19/27's
@@ -2146,17 +2160,12 @@ begin;
 commit;
 
 -- (c) Cross-presbytery isolation on all four tables, proven against a SECOND
---     real presbytery minted for the life of this one rolled-back
---     transaction — organizations carries no RLS of its own (schema-
---     design.md section 17), so this insert is legal and leaves no trace
---     once rolled back. Same discipline as section 28(d)'s appointments
---     proof, extended to all four tables this section adds.
+--     real presbytery. Same move as section 28(d): the Western Basin used to
+--     be minted inline here and is now a permanent scripts/seed-dev.sql
+--     fixture, because drizzle/0044 revokes INSERT on organizations from
+--     presby_app and this suite runs as presby_app (F38).
 begin;
-  insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status)
-  values ('f7000000-0000-0000-0000-000000000001', null, 'presbytery',
-          'Presbytery of the Western Basin', 'western-basin', 'western_basin', 'managed');
-
-  select set_config('app.current_org_id', 'f7000000-0000-0000-0000-000000000001', true);
+  select set_config('app.current_org_id', :WESTERN_BASIN, true);
 
   select assert_eq((select count(*) from congregation_oversight), 0,
     'presbytery B (western basin): sees no congregation_oversight rows at all');
@@ -2248,22 +2257,28 @@ rollback;
 -- (e) Confused-deputy invariant (F26): presby_publish_sasr_snapshot() takes
 --     NO organization id of any kind — calling it from Alder Creek's own
 --     context (a REAL seeded congregation, not a synthetic pair — Phase 2's
---     two-real-orgs discipline) lands the new row at its ACTUAL parent
---     (northern reach) and about itself; there is no parameter through which
---     it could target anywhere else. The republish is exercised in the same
---     block: a second call for the same year chains to the first via a
---     DERIVED supersedes_publication_id, never a caller-supplied one — the
---     "republish chain" half of the partial-unique-index proof below.
+--     two-real-orgs discipline) lands the new row at its ACTUAL current
+--     council (northern reach) and about itself; there is no parameter
+--     through which it could target anywhere else.
+--
+--     REWRITTEN BY drizzle/0047. Two things this block used to assert have
+--     moved and are now asserted in SECTION 34, where the publication
+--     mechanism they belong to lives: the function now returns the
+--     statistical_returns id rather than the congregation_statistics id, and
+--     the republish chain is publications.supersedes_id (between EVENT rows)
+--     rather than congregation_statistics.supersedes_publication_id (between
+--     projection rows, a column 0047 drops). What stays here is the property
+--     THIS section exists for — the confused-deputy shape — checked against
+--     the projection exactly as before.
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   do $$
   declare
-    v_new       uuid;
-    v_corrected uuid;
+    v_return_id uuid;
     v_org_id    uuid;
     v_about_id  uuid;
   begin
-    v_new := presby_publish_sasr_snapshot(
+    v_return_id := presby_publish_sasr_snapshot(
       2026, 'Session stated meeting, 2027-01-10, item 3',
       p_ending_active => 220, p_ending_baptized => 48,
       p_avg_weekly_worship_attendance => 170, p_baptisms_children => 5,
@@ -2277,63 +2292,55 @@ begin;
     -- (organization_id = northern reach) out of any query run under that
     -- context — the row living outside the caller's own tenant space IS the
     -- point (F26). The read counterpart is SECURITY DEFINER for exactly
-    -- this reason.
-    select organization_id, about_org_id into v_org_id, v_about_id
-      from presby_list_own_congregation_publications(2026)
-     where id = v_new;
+    -- this reason. The join key is the PUBLICATION now, since the function's
+    -- return value is the artifact's id.
+    select s.organization_id, s.about_org_id into v_org_id, v_about_id
+      from presby_list_own_congregation_publications(2026) s
+      join publications p on p.id = s.publication_id
+     where p.artifact_id = v_return_id;
 
-    if v_org_id is distinct from '11111111-1111-1111-1111-111111111111' -- :PRESBY, the ACTUAL parent
+    if v_org_id is distinct from '11111111-1111-1111-1111-111111111111' -- :PRESBY, the ACTUAL current council
        or v_about_id is distinct from '22222222-2222-2222-2222-222222222222' -- :ALDER, the caller
     then
-      raise exception 'FAIL — Alder Creek''s publication did not land at its actual parent (found organization_id=%, about_org_id=%)', v_org_id, v_about_id;
+      raise exception 'FAIL — Alder Creek''s publication did not land at its actual current council (found organization_id=%, about_org_id=%)', v_org_id, v_about_id;
     end if;
-    raise notice 'pass  presby_publish_sasr_snapshot: publication lands at the actual parent (northern reach), about the calling congregation — no parameter exists to redirect it';
-
-    v_corrected := presby_publish_sasr_snapshot(
-      2026, 'Session stated meeting, 2027-02-14, item 2 (correction)',
-      p_ending_active => 221
-    );
-
-    if (select supersedes_publication_id from presby_list_own_congregation_publications(2026) where id = v_corrected)
-       is distinct from v_new then
-      raise exception 'FAIL — a same-year republish did not chain to the row it corrects';
-    end if;
-    raise notice 'pass  presby_publish_sasr_snapshot: a same-year republish chains via a DERIVED supersedes_publication_id (never caller-supplied) — the republish-chain half of the partial unique index proof';
+    raise notice 'pass  presby_publish_sasr_snapshot: publication lands at the actual current council (northern reach), about the calling congregation — no parameter exists to redirect it';
   end $$;
 rollback;
 
--- (f) presby_publish_sasr_snapshot() rejects an org with no parent at all —
---     northern reach itself (a real seeded presbytery, parent_id IS NULL).
+-- (f) presby_publish_sasr_snapshot() rejects an org with no CURRENT
+--     AFFILIATION at all — northern reach itself (a real seeded presbytery
+--     and a root council). Since drizzle/0047 the recipient is resolved by
+--     presby_affiliation_parent_as_of(), never by organizations.parent_id;
+--     the rejection text moved with it, the errcode did not.
 begin;
   select set_config('app.current_org_id', :PRESBY, true);
   do $$
   begin
     perform presby_publish_sasr_snapshot(2026, 'n/a');
-    raise exception 'FAIL — an organization with no parent_id was allowed to publish';
+    raise exception 'FAIL — an organization with no current affiliation was allowed to publish';
   exception when invalid_parameter_value then
-    raise notice 'pass  presby_publish_sasr_snapshot: an organization with no parent_id is rejected';
+    raise notice 'pass  presby_publish_sasr_snapshot: an organization with no current affiliation is rejected';
   end $$;
 rollback;
 
--- (g) presby_publish_sasr_snapshot() rejects a congregation whose parent
---     exists but is not a presbytery (a synod, here) — minted inline for the
---     life of this rolled-back transaction, same discipline as (c) above.
+-- (g) presby_publish_sasr_snapshot() rejects a body whose parent exists but
+--     is not a presbytery. The fixture CHANGED SHAPE at drizzle/0044: it was
+--     an "Orphan Chapel", a congregation minted inline under a synod, and
+--     that row is now unwritable on purpose — presby_assert_council_
+--     authority() permits a synod to receive presbyteries only (G-3.0403(c)),
+--     and presby_app can no longer insert into organizations at all (F38).
+--     The Tidewater presbytery under the Coastal Plain synod
+--     (scripts/seed-dev.sql) exercises the identical rejection branch with a
+--     shape the polity allows.
 begin;
-  insert into organizations (id, parent_id, organization_type, name, slug, path, platform_status)
-  values
-    ('f8000000-0000-0000-0000-000000000001', null, 'synod',
-     'Synod of the Coastal Plain', 'coastal-plain-synod', 'coastal_plain_synod', 'managed'),
-    ('f8000000-0000-0000-0000-000000000002', 'f8000000-0000-0000-0000-000000000001', 'congregation',
-     'Orphan Chapel (fixture — parent is a synod, not a presbytery)', 'orphan-chapel',
-     'coastal_plain_synod.orphan_chapel', 'managed');
-
-  select set_config('app.current_org_id', 'f8000000-0000-0000-0000-000000000002', true);
+  select set_config('app.current_org_id', :TIDEWATER, true);
   do $$
   begin
     perform presby_publish_sasr_snapshot(2026, 'n/a');
-    raise exception 'FAIL — a congregation whose parent is a synod, not a presbytery, was allowed to publish';
+    raise exception 'FAIL — a body whose current council is a synod, not a presbytery, was allowed to publish';
   exception when invalid_parameter_value then
-    raise notice 'pass  presby_publish_sasr_snapshot: a parent organization_type other than presbytery is rejected';
+    raise notice 'pass  presby_publish_sasr_snapshot: a current-council organization_type other than presbytery is rejected';
   end $$;
 rollback;
 
@@ -2381,9 +2388,9 @@ begin;
 commit;
 
 -- (j) The partial unique index: rejects a duplicate presbytery_entered row
---     for the same (organization, congregation, year) — the "republish
---     chain" half of this proof already ran in (e) above via two successful
---     presby_publish_sasr_snapshot() calls for the same year.
+--     for the same (organization, congregation, year). The "republish chain"
+--     half of this proof moved to section 34(h) with drizzle/0047, where the
+--     chain now lives (publications.supersedes_id).
 begin;
   select set_config('app.current_org_id', :PRESBY, true);
   do $$
@@ -2704,4 +2711,1427 @@ begin;
       where organization_id = :ALDER and person_id = :ROLE_ADMIN_PERSON
         and position_key = 'CHURCH SECRETARY'),
     1, 'KNOWN GAP, accepted: a raw-SQL insert with an un-folded position_key (''CHURCH SECRETARY'') does not trip staff_positions_no_overlap against the existing lowercase ''church secretary'' row for the same person/org/dates — normalization is application-computed, not DB-enforced (no import surface exists yet for this table)');
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 32. Organization lifecycle + council affiliation, database-admin schema
+--     layer (docs/work-log/2026-09-24-lifecycle-affiliation-returns.md,
+--     Phase 3 increments 1-2 / DECISION-135 through DECISION-139;
+--     drizzle/0043_presby_org_identifiers.sql,
+--     drizzle/0044_presby_org_lifecycle.sql).
+--
+-- Same discipline as every section since 2026-08-25: every mutating block
+-- runs inside `begin; ... rollback;`, and every "expected rejection" wraps a
+-- manual `raise exception 'FAIL — ...'` (default SQLSTATE P0001) in a handler
+-- narrower than P0001, so a broken protection halts the whole script under
+-- ON_ERROR_STOP instead of being swallowed as a NOTICE.
+--
+-- WHY SO MANY LITERAL UUIDS BELOW: psql does not interpolate :VARIABLES
+-- inside dollar-quoted strings, so every id used inside a `do $$ ... $$`
+-- block has to be written out. The \set names at the top of this file and
+-- these literals are the same values.
+-- ---------------------------------------------------------------------------
+
+-- (a) FORCE RLS on both new tenant tables (F1).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('organization_lifecycle_events', 'organization_affiliations')
+        and relforcerowsecurity),
+    2, 'lifecycle: FORCE row level security is set on organization_lifecycle_events and organization_affiliations');
+commit;
+
+-- (b) F38 — THE GRANT SHAPE ON `organizations`, asserted directly.
+--     Before drizzle/0044 the live database gave presby_app INSERT, UPDATE,
+--     DELETE and SELECT on an un-RLS'd, un-triggered table, contradicting
+--     drizzle/0009:93 and the premise this whole design rests on. The
+--     four-privilege proof style of section 29, inverted: exactly ONE
+--     privilege, and it is SELECT.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organizations' and grantee = 'presby_app'),
+    1, 'F38: presby_app holds exactly ONE privilege on organizations');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organizations' and grantee = 'presby_app'
+        and privilege_type = 'SELECT'),
+    1, 'F38: that one privilege is SELECT — insert/update/delete are revoked');
+commit;
+
+-- (c) F40 — the same proof for organization_affiliations (SELECT only: the
+--     DEFINER function is the sole writer), and the append-only shape of
+--     organization_lifecycle_events (SELECT + INSERT, never UPDATE/DELETE).
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_affiliations' and grantee = 'presby_app'),
+    1, 'F40: presby_app holds exactly ONE privilege on organization_affiliations');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_affiliations' and grantee = 'presby_app'
+        and privilege_type = 'SELECT'),
+    1, 'F40: that one privilege is SELECT — presby_transfer_affiliation() is the only write path');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_lifecycle_events' and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT')),
+    2, 'organization_lifecycle_events: presby_app has select + insert');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_lifecycle_events' and grantee = 'presby_app'
+        and privilege_type in ('UPDATE', 'DELETE')),
+    0, 'organization_lifecycle_events: append-only — no update, no delete (the roll_actions precedent)');
+commit;
+
+-- (d) The three organizations guards, from the tenant connection. The
+--     revoke in (b) already stops presby_app, so these prove the TRIGGER
+--     layer is armed too — the owner path is what the triggers exist for,
+--     and its half is proven in src/lib/org-provisioning.test.ts (that suite
+--     runs on PLATFORM_DATABASE_URL, which is BYPASSRLS; BYPASSRLS exempts a
+--     role from POLICIES, never from TRIGGERS).
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into organizations (organization_type, name, slug, path, platform_status)
+    values ('congregation', 'Should Never Exist', 'guard-probe-insert', 'guard_probe_insert', 'unmanaged');
+    raise exception 'FAIL — presby_app inserted into organizations';
+  exception when insufficient_privilege then
+    raise notice 'pass  organizations: presby_app cannot INSERT (F38 revoke)';
+  end $$;
+
+  do $$
+  begin
+    update organizations set parent_id = null
+     where id = '22222222-2222-2222-2222-222222222222';
+    raise exception 'FAIL — presby_app updated organizations.parent_id';
+  exception when insufficient_privilege then
+    raise notice 'pass  organizations: presby_app cannot UPDATE parent_id (F38 revoke + reparent guard)';
+  end $$;
+
+  do $$
+  begin
+    delete from organizations where id = '22222222-2222-2222-2222-222222222222';
+    raise exception 'FAIL — presby_app deleted an organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  organizations: presby_app cannot DELETE — an organization is permanent (the people-permanence twin)';
+  end $$;
+rollback;
+
+-- (e) The affiliation table itself is unwritable from a tenant connection,
+--     even by the council that owns the row.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from organization_affiliations
+      where subject_org_id = '22222222-2222-2222-2222-222222222222'),
+    1, 'northern reach: reads its own affiliation row for Alder Creek');
+  select assert_eq(
+    (select count(*) from organization_affiliations
+      where organization_id = 'f6000000-0000-0000-0000-000000000001'),
+    0, 'northern reach: cannot read the Southern Fields'' own affiliation row for Quillhaven (tenant_isolation)');
+  do $$
+  begin
+    insert into organization_affiliations
+      (organization_id, subject_org_id, parent_org_id, relationship_type,
+       effective_from, authority, minute_reference)
+    values ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+            '11111111-1111-1111-1111-111111111111', 'member_congregation',
+            current_date, 'recorded', 'probe');
+    raise exception 'FAIL — presby_app inserted directly into organization_affiliations';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_affiliations: direct INSERT is revoked (F40 — the EXCLUDE constraint would otherwise be a cross-tenant existence oracle)';
+  end $$;
+rollback;
+
+--     The public projection deliberately reaches past tenant_isolation (who
+--     belongs to which council is public, the same call `organizations`
+--     itself makes) — but its COLUMN LIST is the enforcement point, so the
+--     acting council's own record of WHY never rides along.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from organization_affiliations_public
+      where subject_org_id = '44444444-4444-4444-4444-444444444444'),
+    2, 'organization_affiliations_public: the projection shows BOTH of Quillhaven''s rows, including the Southern Fields'' own closed one, from the Northern Reach''s context');
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'organization_affiliations_public'
+        and column_name in ('reason', 'minute_reference', 'concurrence_reference',
+                            'closed_by_org_id', 'closed_by', 'closed_minute_reference',
+                            'organization_id', 'recorded_by')),
+    0, 'organization_affiliations_public: carries NONE of the acting council''s own record — no reason, no minute, no attribution, not even the owning org id');
+commit;
+
+-- (f) F40 — THE UNIFORM REJECTION MESSAGE. Every cause of a refused
+--     transfer raises the same literal string and the same SQLSTATE, so a
+--     probing caller cannot tell "you are not authorized" from "that
+--     organization has no open affiliation" from "that id does not exist".
+--     DECISION-040's byte-identical discipline, applied to a function.
+--
+--     Three causes, from Alder Creek's own context (a congregation, which
+--     has standing over nothing):
+--       1. an unauthorized actor, real subject, real new parent
+--       2. a subject uuid that exists nowhere
+--       3. a real subject with NO open affiliation (northern reach, a root)
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  declare
+    m1 text; m2 text; m3 text;
+    s1 text; s2 text; s3 text;
+  begin
+    begin
+      perform presby_transfer_affiliation(
+        '33333333-3333-3333-3333-333333333333',   -- bramblewood
+        'f6000000-0000-0000-0000-000000000001',   -- southern fields
+        'member_congregation', current_date, 'Some minute');
+      raise exception 'FAIL — an unauthorized actor transferred an affiliation';
+    exception when insufficient_privilege then
+      m1 := sqlerrm; s1 := sqlstate;
+    end;
+
+    begin
+      perform presby_transfer_affiliation(
+        'dddddddd-dddd-dddd-dddd-dddddddddddd',   -- no such organization
+        'f6000000-0000-0000-0000-000000000001',
+        'member_congregation', current_date, 'Some minute');
+      raise exception 'FAIL — a transfer naming a nonexistent subject was accepted';
+    exception when insufficient_privilege then
+      m2 := sqlerrm; s2 := sqlstate;
+    end;
+
+    begin
+      perform presby_transfer_affiliation(
+        '11111111-1111-1111-1111-111111111111',   -- northern reach: a root, no open affiliation
+        'f6000000-0000-0000-0000-000000000001',
+        'member_presbytery', current_date, 'Some minute');
+      raise exception 'FAIL — a transfer of a subject with no open affiliation was accepted';
+    exception when insufficient_privilege then
+      m3 := sqlerrm; s3 := sqlstate;
+    end;
+
+    if m1 is distinct from 'organization_affiliations: this change is not permitted' then
+      raise exception 'FAIL — unexpected rejection text: %', m1;
+    end if;
+    if m1 is distinct from m2 or m2 is distinct from m3 then
+      raise exception 'FAIL — the rejection text VARIES by cause (% / % / %)', m1, m2, m3;
+    end if;
+    if s1 is distinct from s2 or s2 is distinct from s3 then
+      raise exception 'FAIL — the SQLSTATE varies by cause (% / % / %)', s1, s2, s3;
+    end if;
+    raise notice 'pass  presby_transfer_affiliation: all three rejection causes raise the byte-identical string % with SQLSTATE % (F40)', m1, s1;
+  end $$;
+rollback;
+
+--     And the function cannot be called with no org context at all — the
+--     confused-deputy floor every DEFINER function in this codebase shares.
+begin;
+  do $$
+  begin
+    perform presby_transfer_affiliation(
+      '22222222-2222-2222-2222-222222222222',
+      'f6000000-0000-0000-0000-000000000001',
+      'member_congregation', current_date, 'Some minute');
+    raise exception 'FAIL — presby_transfer_affiliation ran with no org context';
+  exception when insufficient_privilege then
+    raise notice 'pass  presby_transfer_affiliation: no org context is refused with the same uniform message';
+  end $$;
+rollback;
+
+-- (g) presby_org_affiliated() ACROSS A CLOSED HISTORICAL RANGE — the 1990
+--     case, and the reason affiliation has history at all. Quillhaven was
+--     the Southern Fields'' congregation until the 1995 boundary change and
+--     has been the Northern Reach''s since (scripts/seed-dev.sql). A 1990
+--     statistical return was received by the Southern Fields, and no amount
+--     of reading organizations.parent_id can say so.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      '44444444-4444-4444-4444-444444444444',
+      'f6000000-0000-0000-0000-000000000001', date '1990-01-01') as v) t where v),
+    1, 'presby_org_affiliated: Quillhaven WAS affiliated with the Southern Fields in 1990');
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      '44444444-4444-4444-4444-444444444444',
+      '11111111-1111-1111-1111-111111111111', date '1990-01-01') as v) t where v),
+    0, 'presby_org_affiliated: Quillhaven was NOT affiliated with the Northern Reach in 1990');
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      '44444444-4444-4444-4444-444444444444',
+      '11111111-1111-1111-1111-111111111111', current_date) as v) t where v),
+    1, 'presby_org_affiliated: Quillhaven IS affiliated with the Northern Reach today');
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      '44444444-4444-4444-4444-444444444444',
+      'f6000000-0000-0000-0000-000000000001', current_date) as v) t where v),
+    0, 'presby_org_affiliated: Quillhaven is NOT affiliated with the Southern Fields today');
+  -- The closed row''s lower bound is NULL = unbounded below (F41). Without
+  -- that, the whole pre-1901 archive would answer false.
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      '44444444-4444-4444-4444-444444444444',
+      'f6000000-0000-0000-0000-000000000001', date '1899-01-01') as v) t where v),
+    1, 'F41: a null effective_from is UNBOUNDED BELOW — the Southern Fields answers true for 1899, not false');
+  -- The recursive arm: a synod-level question three levels down.
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      'f8000000-0000-0000-0000-000000000002',
+      'f8000000-0000-0000-0000-000000000001', current_date) as v) t where v),
+    1, 'presby_org_affiliated: the Tidewater presbytery resolves up to the Coastal Plain synod');
+  -- presby_affiliation_parent_as_of(), the companion read.
+  select assert_eq(
+    (select count(*) from organizations
+      where id = presby_affiliation_parent_as_of(
+        '44444444-4444-4444-4444-444444444444', date '1990-01-01')
+        and slug = 'southern-fields'),
+    1, 'presby_affiliation_parent_as_of: Quillhaven''s 1990 parent is the Southern Fields');
+  select assert_eq(
+    (select count(*) from organizations
+      where id = presby_affiliation_parent_as_of(
+        '44444444-4444-4444-4444-444444444444', current_date)
+        and slug = 'northern-reach'),
+    1, 'presby_affiliation_parent_as_of: Quillhaven''s parent today is the Northern Reach');
+commit;
+
+-- (h) parent_id/path really are a CACHE of the open row, derived by the one
+--     function — not a second, independently-written source of truth.
+begin;
+  select assert_eq(
+    (select count(*) from organizations o
+      join organization_affiliations a
+        on a.subject_org_id = o.id and a.effective_to is null
+     where o.parent_id is distinct from a.parent_org_id),
+    0, 'derivation: every open affiliation''s parent_org_id equals its subject''s cached organizations.parent_id');
+  select assert_eq(
+    (select count(*) from organizations child
+      join organizations parent on parent.id = child.parent_id
+     where child.path <> parent.path || '.' || replace(child.slug, '-', '_')),
+    0, 'derivation: every child''s path is its parent''s path plus its own label');
+commit;
+
+-- (i) The backfill-completeness assertion, re-run as a standalone proof
+--     rather than trusted from drizzle/0044''s own DO block. Scoped to the
+--     Northern Reach, because presby_app reads organization_affiliations
+--     through tenant_isolation and cannot count another council''s rows —
+--     the GLOBAL form of this assertion is the migration''s, and it is
+--     re-proven on the owner connection in src/lib/org-provisioning.test.ts.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from organizations
+      where parent_id = '11111111-1111-1111-1111-111111111111'),
+    (select count(*) from organization_affiliations
+      where parent_org_id = '11111111-1111-1111-1111-111111111111'
+        and effective_to is null),
+    'backfill completeness (northern reach): every org cached as its child has exactly one open affiliation row to it');
+commit;
+
+-- (j) organization_successions: THE GRANT SHAPE, pinned — Phase 5 Finding 1.
+--
+--     WHAT THIS BLOCK CAN AND CANNOT PROVE, stated up front so nobody reads
+--     more into it than it earns. Until this fix, `presby_app` held SELECT,
+--     INSERT and DELETE on a table with no RLS and no organization_id, and
+--     QA reproduced the consequence: a council inserted a succession row
+--     naming a lifecycle event it could not read. The defence is now TWO
+--     layers, and a tenant connection only ever meets the first:
+--
+--       layer 1, THE GRANT — no INSERT/UPDATE/DELETE for presby_app at all.
+--                Provable here, and proven below.
+--       layer 2, THE TRIGGER — presby_check_succession_event() refuses an
+--                event id the current org does not own, with the uniform
+--                lifecycle literal. NOT provable from this suite: the grant
+--                check fires first, so `presby_app` is refused before the
+--                trigger runs. Its behavioural proof (a foreign event and a
+--                nonexistent event raising byte-identically, from an owner
+--                connection with app.current_org_id set to a foreign
+--                council) lives in src/lib/db/domain/lifecycle.test.ts,
+--                which is the only place the future DEFINER writer's
+--                privilege level can be simulated. What IS proven here is
+--                that the trigger EXISTS, is enabled, and is SECURITY
+--                DEFINER — so a later migration silently dropping it trips
+--                this suite.
+--
+--     Grant half, the 32(b)/(c)/(m) proof style: exactly ONE privilege for
+--     presby_app, and it is SELECT (topology is public; the org tree already
+--     publishes it).
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_successions' and grantee = 'presby_app'),
+    1, 'Finding 1: presby_app holds exactly ONE privilege on organization_successions');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_successions' and grantee = 'presby_app'
+        and privilege_type = 'SELECT'),
+    1, 'Finding 1: that one privilege is SELECT — the future presby_record_lifecycle_event() DEFINER function is the only tenant-side writer');
+  -- presby_platform's half is read from pg_class.relacl rather than
+  -- information_schema, which only shows grants involving the CURRENT role.
+  -- Batch B's finding 5: it held UPDATE, which nothing ever asked for.
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'organization_successions'
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type in ('UPDATE', 'DELETE')),
+    0, 'batch B finding 5: presby_platform has NO update and NO delete on organization_successions');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'organization_successions'
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type in ('SELECT', 'INSERT')),
+    2, 'organization_successions: presby_platform is narrowed to select + insert');
+commit;
+
+--     ...and the grant is not theoretical: the tenant connection is refused
+--     the INSERT that QA's repro used. This is LAYER 1 and says nothing
+--     about the trigger — the message is Postgres'' own `permission denied`,
+--     not the uniform lifecycle literal, precisely because the grant check
+--     fires first.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into organization_successions (event_id, predecessor_org_id, successor_org_id)
+    values ('fb000000-0000-0000-0000-000000000001',
+            '44444444-4444-4444-4444-444444444444',
+            '33333333-3333-3333-3333-333333333333');
+    raise exception 'FAIL — presby_app inserted into organization_successions';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_successions: presby_app cannot INSERT at all (Phase 5 Finding 1, layer 1 — the grant, which fires BEFORE the event-scope trigger)';
+  end $$;
+
+  do $$
+  begin
+    delete from organization_successions where true;
+    raise exception 'FAIL — presby_app deleted from organization_successions';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_successions: presby_app cannot DELETE either — the integrity half of Finding 1';
+  end $$;
+rollback;
+
+--     Layer 2's STRUCTURE (not its behaviour): the three triggers exist and
+--     are enabled, and the event-scope check is SECURITY DEFINER — it must
+--     see past organization_lifecycle_events'' FORCE RLS, or it would read
+--     zero rows for exactly the case it guards (F26).
+begin;
+  select assert_eq(
+    (select count(*) from pg_trigger t
+      join pg_class c on c.oid = t.tgrelid
+     where c.relname = 'organization_successions'
+       and not t.tgisinternal
+       and t.tgenabled = 'O'
+       and t.tgname in ('organization_successions_event_scope',
+                        'organization_successions_cardinality',
+                        'organization_successions_freeze')),
+    3, 'organization_successions: all three triggers are present and enabled — event scope, deferred cardinality, freeze');
+  select assert_eq(
+    (select count(*) from pg_proc where proname = 'presby_check_succession_event' and prosecdef),
+    1, 'presby_check_succession_event is SECURITY DEFINER — it reads organization_lifecycle_events past that table''s FORCE RLS (F26)');
+  select assert_eq(
+    (select count(*) from pg_trigger t
+      join pg_class c on c.oid = t.tgrelid
+     where c.relname = 'organization_successions'
+       and t.tgname = 'organization_successions_cardinality'
+       and t.tgdeferrable and t.tginitdeferred),
+    1, 'succession cardinality is DEFERRABLE INITIALLY DEFERRED — a merged event''s second predecessor cannot exist when the first row is inserted, so an immediate check would make the legal case unwritable');
+commit;
+
+--     THE CARDINALITY BEHAVIOUR ITSELF MOVED, and here is why, so a reader
+--     does not think it was dropped. It used to live in this block, inserting
+--     succession rows as presby_app — which the Finding 1 revoke now forbids,
+--     and no amount of rewriting makes a SELECT-only role insert. Both halves
+--     (one predecessor fails at `set constraints all immediate`; two
+--     predecessors and one successor pass) now run on the owner connection in
+--     src/lib/db/domain/lifecycle.test.ts, alongside the event-scope and
+--     freeze behaviour, for the same reason presby_freeze_lifecycle_event()'s
+--     proof lives there.
+
+-- (k) The lifecycle event's own rules: one level above only, never
+--     self-targeting, and the cache it maintains.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into organization_lifecycle_events
+      (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
+    values ('11111111-1111-1111-1111-111111111111',
+            '11111111-1111-1111-1111-111111111111',   -- itself
+            'dissolved', current_date, 'minute', 'e0000000-0000-0000-0000-0000000000f4');
+    raise exception 'FAIL — a presbytery recorded a lifecycle event against ITSELF';
+  -- insufficient_privilege, not check_violation: a BEFORE INSERT trigger runs
+  -- ahead of the table's own CHECK, so presby_assert_council_authority()
+  -- rejects actor = subject before organization_lifecycle_events_not_self is
+  -- ever evaluated. The CHECK stays as defense in depth for any future writer
+  -- that reaches the table with the trigger disabled.
+  exception when insufficient_privilege then
+    raise notice 'pass  presby_assert_council_authority: a council cannot act on itself (a presbytery cannot constitutionally dissolve itself)';
+  end $$;
+
+  do $$
+  begin
+    insert into organization_lifecycle_events
+      (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
+    values ('11111111-1111-1111-1111-111111111111',
+            'f8000000-0000-0000-0000-000000000002',   -- a PRESBYTERY, two levels off
+            'dissolved', current_date, 'minute', 'e0000000-0000-0000-0000-0000000000f4');
+    raise exception 'FAIL — a presbytery dissolved another presbytery';
+  exception when insufficient_privilege then
+    raise notice 'pass  presby_assert_council_authority: a presbytery may act on congregations and NWCs only (G-3.0301(a)) — never on a presbytery';
+  end $$;
+
+  do $$
+  begin
+    insert into organization_lifecycle_events
+      (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
+    values ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+            'received', current_date, 'minute', 'e0000000-0000-0000-0000-0000000000f4');
+    raise exception 'FAIL — a received event with no external_body was accepted';
+  exception when check_violation then
+    raise notice 'pass  organization_lifecycle_events_external_body_shape: received/dismissed require the counterparty, everything else forbids it';
+  end $$;
+rollback;
+
+--     The dissolution path end to end: the cache moves, the affiliation
+--     closes, and the ARCHIVE still resolves — presby_org_affiliated() must
+--     keep answering true for dates before the closure, which is the whole
+--     reason a dissolved congregation's 1990 return can still be attributed.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  insert into organization_lifecycle_events
+    (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
+  values ('11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
+          'dissolved', date '2026-06-30',
+          'Northern Reach stated meeting, fixture, item 3',
+          'e0000000-0000-0000-0000-0000000000f4');
+
+  select assert_eq(
+    (select count(*) from organizations
+      where id = :QUILLHAVEN and lifecycle_status = 'dissolved'
+        and lifecycle_as_of = date '2026-06-30'),
+    1, 'presby_apply_lifecycle_event: a dissolved event moves the organizations.lifecycle_status cache and dates it');
+  select assert_eq(
+    (select count(*) from organization_affiliations
+      where subject_org_id = :QUILLHAVEN and effective_to is null),
+    0, 'presby_apply_lifecycle_event: the dissolved congregation has no OPEN affiliation left');
+  select assert_eq(
+    (select count(*) from organizations where id = :QUILLHAVEN and parent_id is null),
+    1, 'presby_apply_affiliation_to_org_tree: the derived parent_id follows the closure to null');
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      '44444444-4444-4444-4444-444444444444',
+      '11111111-1111-1111-1111-111111111111', date '2020-01-01') as v) t where v),
+    1, 'archive attribution survives dissolution: presby_org_affiliated still answers true for 2020, after the 2026 closure');
+  select assert_eq(
+    (select count(*) from (select presby_org_affiliated(
+      '44444444-4444-4444-4444-444444444444',
+      '11111111-1111-1111-1111-111111111111', date '2026-12-31') as v) t where v),
+    0, 'archive attribution stops at the closure: false for a date after the dissolution');
+rollback;
+
+-- (l) organization_identifiers (D24, drizzle/0043): readable with NO org
+--     context, the same visibility class as organizations itself — which is
+--     the entire reason pcusa_pin moved off the tenant-isolated
+--     organization_settings, where a presbytery running an import could not
+--     read a member congregation's own PIN.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'organization_identifiers' and (relrowsecurity or relforcerowsecurity)),
+    0, 'organization_identifiers: deliberately NOT row-level secured (public org-tree identity data)');
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'organization_settings' and column_name = 'pcusa_pin'),
+    0, 'D24: organization_settings.pcusa_pin is gone — it lives in organization_identifiers now');
+commit;
+
+-- (m) RULING A5 (the 2026-09-24 tech-lead amendment's correction to
+--     drizzle/0044, applied to the same file and the same migration number).
+--     Batch A resolved organization_lifecycle_events' immutability as
+--     APPEND-ONLY BY GRANT and granted presby_platform full DML on both
+--     lifecycle tables. A grant binds the two application roles; it does not
+--     bind the OWNER, which holds every privilege by ownership and is the
+--     role getPlatformDb()/MIGRATE_DATABASE_URL actually connect as. So the
+--     grant is narrowed AND a freeze trigger fires on every connection.
+begin;
+  -- The narrowed grant: presby_platform keeps select + insert on both
+  -- tables (createOrganization() writes the initial affiliation row) and
+  -- loses update + delete on both.
+  -- Read from pg_class.relacl, NOT information_schema.role_table_grants:
+  -- that view shows only grants the CURRENT user is party to, so from the
+  -- presby_app connection this suite runs as it returns nothing at all about
+  -- presby_platform. aclexplode() over the catalog is role-neutral.
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('organization_lifecycle_events', 'organization_affiliations')
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type in ('UPDATE', 'DELETE')),
+    0, 'A5: presby_platform holds NO update/delete on organization_lifecycle_events or organization_affiliations');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('organization_lifecycle_events', 'organization_affiliations')
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type in ('SELECT', 'INSERT')),
+    4, 'A5: presby_platform keeps select + insert on both — createOrganization()''s affiliation INSERT is the whole reason it exists');
+  -- The freeze trigger is present, ENABLED, row-level, BEFORE, and armed on
+  -- both UPDATE and DELETE (tgtype bits: 1 row, 2 before, 8 delete, 16
+  -- update). This suite runs as presby_app and therefore cannot execute the
+  -- owner-path rejection itself — the behavioural half (an UPDATE and a
+  -- DELETE by neondb_owner both raising) is proven in
+  -- src/lib/db/domain/lifecycle.test.ts, which runs on PLATFORM_DATABASE_URL.
+  -- Same split drizzle/0044's delete guard already uses (block (d) above).
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'organization_lifecycle_events'
+        and t.tgname = 'organization_lifecycle_events_freeze'
+        and t.tgenabled = 'O'
+        and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2
+        and (t.tgtype & 8) = 8 and (t.tgtype & 16) = 16),
+    1, 'A5: organization_lifecycle_events_freeze is a row-level BEFORE UPDATE OR DELETE trigger and is enabled (the roll_actions_freeze standard)');
+  -- And deliberately NO twin on organization_affiliations: closing a row is
+  -- a legitimate UPDATE that presby_transfer_affiliation() performs, so the
+  -- narrowed grant is the right instrument there (Ruling A5.3).
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'organization_affiliations' and t.tgname like '%freeze%'),
+    0, 'A5.3: organization_affiliations has NO freeze trigger — presby_transfer_affiliation() closes rows by UPDATE, and the grant already stops everyone else');
+commit;
+
+--     The tenant half, behaviourally: presby_app cannot reach either verb.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    update organization_lifecycle_events set notes = 'tamper'
+     where organization_id = '11111111-1111-1111-1111-111111111111';
+    raise exception 'FAIL — presby_app updated an organization_lifecycle_events row';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_lifecycle_events: presby_app cannot UPDATE (append-only grant)';
+  end $$;
+
+  do $$
+  begin
+    delete from organization_lifecycle_events
+     where organization_id = '11111111-1111-1111-1111-111111111111';
+    raise exception 'FAIL — presby_app deleted an organization_lifecycle_events row';
+  exception when insufficient_privilege then
+    raise notice 'pass  organization_lifecycle_events: presby_app cannot DELETE — correct a minuted act by recording another act';
+  end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 33. The about-org enforcing trigger — increment 3 (docs/work-log/
+--     2026-09-24-lifecycle-affiliation-returns.md, Phase 3 Data Model
+--     "Increment 3" / R3.14; drizzle/0045_presby_about_org_affiliation.sql).
+--
+--     Four shipped tables carry a row ABOUT another organization. Until this
+--     migration the only thing standing between "the presbytery's own rows"
+--     and "a row about an organization that was never its member" was an
+--     application-layer parent_id check in two TypeScript modules. Now it is
+--     a database property, answered from the AFFILIATION HISTORY — which is
+--     what lets a 1990 return resolve to the council that received it in
+--     1990 rather than to whoever holds the congregation today.
+-- ---------------------------------------------------------------------------
+
+-- (a) All four triggers exist and are enabled. per_capita_rates is NOT among
+--     them and cannot be: Phase 3's Data Model names it as one of the five
+--     tables, but it has no about-org column at all (one row per presbytery
+--     per billing year — there is nothing to check). Asserted by name so the
+--     absence reads as a finding, not an oversight.
+begin;
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where t.tgname in ('congregation_oversight_about_org',
+                         'congregation_statistics_about_org',
+                         'per_capita_records_about_org',
+                         'appointments_about_org')
+        and t.tgenabled = 'O'
+        and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2
+        and (t.tgtype & 4) = 4 and (t.tgtype & 16) = 16),
+    4, 'about-org: four enabled row-level BEFORE INSERT OR UPDATE triggers (congregation_oversight, congregation_statistics, per_capita_records, appointments)');
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'per_capita_rates' and column_name = 'about_org_id'),
+    0, 'about-org: per_capita_rates carries NO about_org_id — Phase 3 named it as a fifth table in error; a rate is per presbytery per billing year');
+commit;
+
+-- (b) A row about an organization this council was NEVER affiliated with is
+--     rejected. Tidewater is a presbytery under the Coastal Plain synod and
+--     has never had anything to do with the Northern Reach.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into congregation_statistics
+      (organization_id, about_org_id, year, provenance, ending_active)
+    values ('11111111-1111-1111-1111-111111111111',
+            'f8000000-0000-0000-0000-000000000002', 2025, 'presbytery_entered', 10);
+    raise exception 'FAIL — a statistics row was written about a never-affiliated organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  congregation_statistics: a row about a never-affiliated organization is refused';
+  end $$;
+
+  do $$
+  begin
+    insert into congregation_oversight
+      (organization_id, about_org_id, viability_score, updated_by)
+    values ('11111111-1111-1111-1111-111111111111',
+            'f8000000-0000-0000-0000-000000000002', 3,
+            'e0000000-0000-0000-0000-0000000000f4');
+    raise exception 'FAIL — an oversight row was written about a never-affiliated organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  congregation_oversight: a row about a never-affiliated organization is refused (as of current_date)';
+  end $$;
+
+  do $$
+  begin
+    insert into appointments
+      (organization_id, person_id, serving_org_id, call_type, starts_on, minute_reference)
+    values ('11111111-1111-1111-1111-111111111111',
+            'c0000000-0000-0000-0000-000000000006',
+            'f8000000-0000-0000-0000-000000000002',
+            'stated_supply', current_date, 'probe');
+    raise exception 'FAIL — an appointment was recorded at a never-affiliated organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  appointments: serving_org_id must be a current member congregation/NWC of the recording presbytery';
+  end $$;
+rollback;
+
+-- (c) THE 1990 CASE, APPLIED TO THE ABOUT-ORG TABLES — the whole reason the
+--     statistics arm asks the question AS OF THE ROW'S YEAR rather than
+--     today. Quillhaven was the Southern Fields' congregation until the 1995
+--     boundary change and has been the Northern Reach's since.
+begin;
+  select set_config('app.current_org_id', :SOUTHERN_FIELDS, true);
+  -- Inside the historical range: ACCEPTED, even though organizations.
+  -- parent_id says the Northern Reach holds Quillhaven today.
+  insert into congregation_statistics
+    (organization_id, about_org_id, year, provenance, ending_active)
+  values ('f6000000-0000-0000-0000-000000000001',
+          '44444444-4444-4444-4444-444444444444', 1990, 'imported', 118);
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where organization_id = :SOUTHERN_FIELDS and about_org_id = :QUILLHAVEN and year = 1990),
+    1, 'about-org (the 1990 case): the Southern Fields MAY record Quillhaven''s 1990 statistics — the council that received the return keeps it');
+
+  -- After the affiliation closed: REFUSED.
+  do $$
+  begin
+    insert into congregation_statistics
+      (organization_id, about_org_id, year, provenance, ending_active)
+    values ('f6000000-0000-0000-0000-000000000001',
+            '44444444-4444-4444-4444-444444444444', 2020, 'imported', 40);
+    raise exception 'FAIL — the Southern Fields recorded 2020 statistics for a congregation it lost in 1995';
+  exception when insufficient_privilege then
+    raise notice 'pass  about-org: an affiliation that closed BEFORE the row''s year refuses the row (Southern Fields, Quillhaven, 2020)';
+  end $$;
+
+  -- And a per-capita bill for a billing year after the transfer, likewise.
+  do $$
+  begin
+    insert into per_capita_records
+      (organization_id, about_org_id, billing_year, basis_year,
+       ending_active_basis, rate_applied, amount_owed)
+    values ('f6000000-0000-0000-0000-000000000001',
+            '44444444-4444-4444-4444-444444444444', 2026, 2024, 40, 12.50, 500.00);
+    raise exception 'FAIL — the Southern Fields billed a congregation it lost in 1995';
+  exception when insufficient_privilege then
+    raise notice 'pass  per_capita_records: billing_year is the as_of — a bill cannot be issued to a congregation that had left by then';
+  end $$;
+rollback;
+
+-- (d) The present-tense arm accepts a real member congregation. Fernwood is
+--     the Northern Reach's and has no oversight row of its own yet.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  insert into congregation_oversight
+    (organization_id, about_org_id, viability_score, updated_by)
+  values ('11111111-1111-1111-1111-111111111111',
+          '55555555-5555-5555-5555-555555555555', 3,
+          'e0000000-0000-0000-0000-0000000000f4');
+  select assert_eq(
+    (select count(*) from congregation_oversight
+      where organization_id = :PRESBY and about_org_id = :FERNWOOD),
+    1, 'about-org: an oversight row about a CURRENT member congregation is accepted');
+rollback;
+
+-- (e) UNIFORM ACROSS CAUSES (F40's discipline, applied to this trigger). "No
+--     such organization", "never affiliated" and "the affiliation closed
+--     before this year" are one message. Deliberately NOT opaque the way
+--     presby_deny_affiliation_change() is: `organizations` (parent_id
+--     included) and organization_affiliations_public are readable by any
+--     tenant connection, so there is no fact here a caller could not already
+--     SELECT — see drizzle/0045's own note.
+begin;
+  select set_config('app.current_org_id', :SOUTHERN_FIELDS, true);
+  do $$
+  declare
+    m1 text; m2 text; m3 text;
+    s1 text; s2 text; s3 text;
+  begin
+    begin
+      insert into congregation_statistics
+        (organization_id, about_org_id, year, provenance, ending_active)
+      values ('f6000000-0000-0000-0000-000000000001',
+              'dddddddd-dddd-dddd-dddd-dddddddddddd', 2020, 'imported', 1);
+      raise exception 'FAIL — a statistics row named a nonexistent organization';
+    exception when insufficient_privilege then
+      m1 := sqlerrm; s1 := sqlstate;
+    end;
+
+    begin
+      insert into congregation_statistics
+        (organization_id, about_org_id, year, provenance, ending_active)
+      values ('f6000000-0000-0000-0000-000000000001',
+              'f8000000-0000-0000-0000-000000000002', 2020, 'imported', 1);
+      raise exception 'FAIL — a statistics row named a never-affiliated organization';
+    exception when insufficient_privilege then
+      m2 := sqlerrm; s2 := sqlstate;
+    end;
+
+    begin
+      insert into congregation_statistics
+        (organization_id, about_org_id, year, provenance, ending_active)
+      values ('f6000000-0000-0000-0000-000000000001',
+              '44444444-4444-4444-4444-444444444444', 2020, 'imported', 1);
+      raise exception 'FAIL — a statistics row named a congregation whose affiliation had closed';
+    exception when insufficient_privilege then
+      m3 := sqlerrm; s3 := sqlstate;
+    end;
+
+    if m1 is distinct from m2 or m2 is distinct from m3 then
+      raise exception 'FAIL — the about-org rejection text VARIES by cause (% / % / %)', m1, m2, m3;
+    end if;
+    if s1 is distinct from s2 or s2 is distinct from s3 then
+      raise exception 'FAIL — the about-org SQLSTATE varies by cause (% / % / %)', s1, s2, s3;
+    end if;
+    raise notice 'pass  about-org: all three rejection causes raise the byte-identical string % with SQLSTATE %', m1, s1;
+  end $$;
+rollback;
+
+-- (f) The UPDATE arm. A payment posting on an existing bill is NOT re-checked
+--     (it moves neither the about-org nor the year), but RE-POINTING a row at
+--     another organization is.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  update per_capita_records set paid_status = 'partial', paid_amount = 100.00
+   where id = :PER_CAPITA_RECORD;
+  select assert_eq(
+    (select count(*) from per_capita_records
+      where id = :PER_CAPITA_RECORD and paid_status = 'partial'),
+    1, 'about-org (UPDATE arm): posting a payment on an existing bill is not re-checked — the about-org and billing_year did not move');
+
+  do $$
+  begin
+    update per_capita_records
+       set about_org_id = 'f8000000-0000-0000-0000-000000000002'
+     where id = 'a6000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL — a bill was re-pointed at a never-affiliated organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  about-org (UPDATE arm): re-pointing about_org_id IS re-checked and refused';
+  end $$;
+rollback;
+
+-- (g) THE COUPLING PHASE 2 CALLED THIS PIPELINE'S RISKIEST (Notes item 3),
+--     proven at the database rather than argued. src/lib/presbytery.ts:143,
+--     169 and src/lib/credentials.ts:522,710 answer "is X my member
+--     congregation?" with `organizations.parent_id = organizationId`; this
+--     trigger answers it with presby_org_affiliated(). At current_date the
+--     two answers MUST be identical for every row, or a presbytery's own UI
+--     offers a congregation the database then refuses. Scoped to the
+--     Northern Reach here (presby_app reads organizations globally, but the
+--     global form is re-proven on the owner connection in
+--     src/lib/db/domain/lifecycle.test.ts).
+begin;
+  select assert_eq(
+    (select count(*) from organizations o
+      where o.parent_id = '11111111-1111-1111-1111-111111111111'
+        and not presby_org_affiliated(o.id, o.parent_id, current_date)),
+    0, 'coupling: every org the parent_id cache calls a child of the Northern Reach is affiliated with it TODAY (the UI and the trigger agree)');
+  select assert_eq(
+    (select count(*) from organizations o
+      where o.parent_id is distinct from '11111111-1111-1111-1111-111111111111'
+        and presby_org_affiliated(o.id, '11111111-1111-1111-1111-111111111111', current_date)
+        and o.parent_id is null),
+    0, 'coupling: no ROOT organization answers affiliated-today to the Northern Reach (the cache is not missing a row)');
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 34. Statistical returns and publication — increments 4 and 5 (docs/
+--     work-log/2026-09-24-lifecycle-affiliation-returns.md, Phase 3 Data
+--     Model "Increment 4"/"Increment 5"; D12/D20/D25/F36/F39;
+--     DECISION-135/137/138; drizzle/0046_presby_statistical_returns.sql and
+--     drizzle/0047_presby_publications.sql).
+--
+--     Publication is now THREE rows written by one DEFINER function in one
+--     transaction: the artifact (statistical_returns, owned by the
+--     congregation), the event (publications, owned by the congregation,
+--     addressed to the recipient council), and the projection
+--     (congregation_statistics, owned by the recipient). This section proves
+--     the properties that only exist BETWEEN them — the recipient can read
+--     what was published TO IT and nothing else, the projection's copy of the
+--     event's facts is exact, and the payload is a closed allow-list rather
+--     than a jsonb column with a nice comment.
+--
+--     WHAT IS DELIBERATELY NOT HERE, and where it lives instead. Two
+--     protections cannot be demonstrated from this connection at all, for the
+--     same reason batch A's deviation 14 and batch B's deviation 10 record:
+--     presby_app holds no UPDATE/DELETE on either new table, so its rejection
+--     arrives from the PERMISSION CHECK before the freeze trigger ever fires,
+--     and withdrawal (the one legitimate UPDATE) has no tenant-side path at
+--     all. This section therefore asserts the grant shape and the triggers'
+--     catalog shape; src/lib/db/domain/publication.test.ts proves the
+--     behaviour on PLATFORM_DATABASE_URL.
+-- ---------------------------------------------------------------------------
+
+-- (a) The isolation and grant shape of all three new tables. sasr_form_versions
+--     is deliberately the odd one out: platform-wide reference data in the
+--     class of `permissions`, so no RLS and SELECT only.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('statistical_returns', 'publications')
+        and relrowsecurity and relforcerowsecurity),
+    2, 'returns/publications: FORCE row level security is set on both new tenant tables (F1)');
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'sasr_form_versions' and (relrowsecurity or relforcerowsecurity)),
+    0, 'sasr_form_versions: NO row level security — a form revision is platform-wide reference data, not a council''s property');
+
+  -- APPEND-ONLY BY GRANT: select+insert and nothing else, on both tables and
+  -- both application roles. A fifth or sixth privilege appearing here is the
+  -- F38 additive-grant mechanism re-widening something, and this assertion is
+  -- what catches it.
+  --
+  -- Read from pg_class.relacl, NOT information_schema.role_table_grants:
+  -- that view shows only grants the CURRENT user is party to, so from the
+  -- presby_app connection this suite runs as it says nothing at all about
+  -- presby_platform. Same catalog read section 32(m) uses.
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('statistical_returns', 'publications')
+        and a.grantee in ('presby_app'::regrole, 'presby_platform'::regrole)
+        and a.privilege_type in ('SELECT', 'INSERT')),
+    8, 'returns/publications: presby_app and presby_platform each hold SELECT and INSERT on both tables');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('statistical_returns', 'publications')
+        and a.grantee in ('presby_app'::regrole, 'presby_platform'::regrole)
+        and a.privilege_type in ('UPDATE', 'DELETE')),
+    0, 'returns/publications: NEITHER role holds UPDATE or DELETE on either table — append-only, and withdrawal has no tenant-side path');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'sasr_form_versions'
+        and a.grantee in ('presby_app'::regrole, 'presby_platform'::regrole)
+        and a.privilege_type in ('INSERT', 'UPDATE', 'DELETE')),
+    0, 'sasr_form_versions: written only by migration — neither application role may insert, update or delete a form revision');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'sasr_form_versions'
+        and a.grantee in ('presby_app'::regrole, 'presby_platform'::regrole)
+        and a.privilege_type = 'SELECT'),
+    2, 'sasr_form_versions: both application roles may READ the form catalog — the field_spec is reference data, not a secret');
+
+  -- The freeze triggers' catalog shape, since their behaviour on the owner
+  -- path is unprovable from here (see this section's header).
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where t.tgname in ('statistical_returns_freeze', 'publications_freeze')
+        and t.tgenabled = 'O'
+        and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2
+        and (t.tgtype & 8) = 8 and (t.tgtype & 16) = 16),
+    2, 'returns/publications: both freeze triggers are enabled, row-level, BEFORE, and armed on UPDATE and DELETE');
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'statistical_returns'
+        and t.tgname in ('statistical_returns_field_spec', 'statistical_returns_about_org')
+        and t.tgenabled = 'O'),
+    2, 'statistical_returns: the field-spec gate and the imported-row about-org check are both enabled');
+
+  -- sasr_reports is gone (Ruling 6 / DECISION-137).
+  select assert_eq(
+    (select count(*) from information_schema.tables
+      where table_schema = 'public' and table_name = 'sasr_reports'),
+    0, 'sasr_reports: dropped — zero rows, zero consumers, a shape stale under D25');
+  -- ...and so is the projection self-chain it used to pair with.
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'congregation_statistics' and column_name = 'supersedes_publication_id'),
+    0, 'congregation_statistics: supersedes_publication_id is dropped — the chain is between EVENTS now (publications.supersedes_id)');
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'congregation_statistics' and column_name in ('published_at', 'minute_reference')),
+    2, 'congregation_statistics: published_at and minute_reference STAY (F39) — round 3 was wrong to move them into a table the presbytery cannot read');
+
+  -- WITHDRAWAL CARRIES PROVENANCE (spec addition, external design review
+  -- 2026-09-24). Three columns, not one: a withdrawal is itself a minuted act,
+  -- so it records who and under which minute — DECISION-135's
+  -- affiliation-close shape (closed_by_org_id / closed_by / closed_on /
+  -- closed_minute_reference) applied to a publication, for the same reason.
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'publications'
+        and column_name in ('withdrawn_at', 'withdrawn_by', 'withdrawn_minute_reference')),
+    3, 'publications: withdrawal is a minuted ACT — withdrawn_at, withdrawn_by and withdrawn_minute_reference, not a bare timestamp');
+  select assert_eq(
+    (select count(*) from pg_constraint where conname = 'publications_withdrawal_shape'),
+    1, 'publications_withdrawal_shape: a withdrawer or a withdrawal minute cannot exist on a row that is not actually withdrawn');
+  -- The read-back returns all three, so that surfacing withdrawn rows later is
+  -- a WHERE-clause change rather than a signature change every caller follows.
+  -- Read from pg_proc.proargnames: a set-returning function's OUT parameters
+  -- are not information_schema.columns rows.
+  select assert_eq(
+    (select count(*) from pg_proc p, unnest(p.proargnames) n
+      where p.proname = 'presby_list_published_returns_to_me'
+        and n in ('withdrawn_at', 'withdrawn_by', 'withdrawn_minute_reference')),
+    3, 'presby_list_published_returns_to_me: the return signature carries the whole withdrawal triple, not just the timestamp');
+commit;
+
+-- (b) The 2024 field_spec is complete and the three older generations are
+--     deliberate, fail-closed placeholders. An empty spec accepts NO key,
+--     which is asserted behaviourally in (f) below, not just structurally.
+begin;
+  select assert_eq(
+    (select count(*) from sasr_form_versions), 4,
+    'sasr_form_versions: four generations seeded (1984, 2014, 2022, 2024)');
+  select assert_eq(
+    (select count(*) from sasr_form_versions v, jsonb_object_keys(v.field_spec -> 'fields') k
+      where v.key = '2024'),
+    60, 'sasr_form_versions: the 2024 spec declares all 60 typed SASR fields — the same set presby_publish_sasr_snapshot()''s parameter list is');
+  select assert_eq(
+    (select count(*) from sasr_form_versions
+      where key <> '2024' and field_spec -> 'fields' <> '{}'::jsonb),
+    0, 'sasr_form_versions: 1984/2014/2022 carry EMPTY specs — fail-closed until F31/F32''s per-tab column mapping exists');
+commit;
+
+-- (c) THE RECIPIENT READ-BACK (Ruling 5 / DECISION-135). The whole reason
+--     this function exists: statistical_returns is owned by the SUBMITTING
+--     CONGREGATION, so the presbytery's tenant policy filters it to zero rows.
+--     The publication EVENT is what grants the read, not the policy.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  -- The direct read the policy refuses...
+  select assert_eq(
+    (select count(*) from statistical_returns),
+    0, 'presby_list_published_returns_to_me: the recipient presbytery reads ZERO statistical_returns rows directly — the artifact lives in the congregation''s tenant space');
+  -- ...and the controlled read that works.
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me()
+      where about_org_id = :ALDER and report_year = 2025),
+    1, 'presby_list_published_returns_to_me: the northern reach reads back the return Alder Creek published TO IT');
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me()
+      where payload ? 'ending_active'),
+    1, 'presby_list_published_returns_to_me: the recipient sees the AS-REPORTED payload, not just the typed projection — which is the half D20 had no mechanism for');
+  -- The narrowing parameters are filters over what the caller may already
+  -- see, never a way to name another council.
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me(:BRAMBLE, null)),
+    0, 'presby_list_published_returns_to_me: narrowing by a congregation that published nothing returns zero, not someone else''s rows');
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me(null, 1900)),
+    0, 'presby_list_published_returns_to_me: narrowing by a year with no publication returns zero');
+commit;
+
+-- A SIBLING PRESBYTERY SEES NOTHING. The function takes no council id at all,
+-- so there is no parameter through which the Western Basin could read the
+-- northern reach's inbox — and its own inbox is empty.
+begin;
+  select set_config('app.current_org_id', :WESTERN_BASIN, true);
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me()),
+    0, 'presby_list_published_returns_to_me: a SIBLING presbytery (western basin) sees none of the northern reach''s publications');
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me(:ALDER, 2025)),
+    0, 'presby_list_published_returns_to_me: naming Alder Creek and the right year from the wrong council still returns zero — the caller is the GUC, never a parameter');
+commit;
+
+-- The PUBLISHING congregation reads its own event row directly (it owns it),
+-- and a third congregation does not.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from publications where recipient_org_id = :PRESBY),
+    1, 'publications: the publishing congregation owns and reads its own publication event');
+  select assert_eq(
+    (select count(*) from statistical_returns where about_org_id = :ALDER),
+    1, 'statistical_returns: the publishing congregation owns and reads its own artifact');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) from publications), 0,
+    'publications: a third congregation (bramblewood) sees none of Alder Creek''s publication events');
+  select assert_eq(
+    (select count(*) from statistical_returns), 0,
+    'statistical_returns: a third congregation sees none of Alder Creek''s artifacts');
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me()), 0,
+    'presby_list_published_returns_to_me: a congregation is never a recipient, so it reads zero');
+commit;
+
+-- (d) F39 — THE PROJECTION EQUALS THE PUBLICATION. Round 3 wanted published_at
+--     and minute_reference moved onto `publications`; Ruling 5 kept them on
+--     the projection on the argument that the copy CANNOT drift, because one
+--     DEFINER function writes both rows in one transaction with the same
+--     instant and neither row is ever updated again. That argument is only
+--     worth having if it is asserted. Joined through the read-back function,
+--     because no single tenant context can see both tables directly.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*)
+       from congregation_statistics cs
+       join presby_list_published_returns_to_me() p on p.publication_id = cs.publication_id),
+    1, 'F39: the northern reach can join its projection rows to their publications (the assertion below is not vacuous)');
+  select assert_eq(
+    (select count(*)
+       from congregation_statistics cs
+       join presby_list_published_returns_to_me() p on p.publication_id = cs.publication_id
+      where cs.published_at is distinct from p.published_at
+         or cs.minute_reference is distinct from p.minute_reference),
+    0, 'F39: every published projection row''s published_at and minute_reference equal its publication''s — the copy Ruling 5 kept cannot drift');
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where provenance = 'published_by_congregation' and publication_id is null),
+    0, 'congregation_statistics_publication_shape: every published row carries a publication_id (the 0047 backfill, re-proven from the tenant side)');
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where provenance <> 'published_by_congregation' and publication_id is not null),
+    0, 'congregation_statistics_publication_shape: no presbytery_entered or imported row carries a publication_id');
+commit;
+
+-- (e) IMMUTABILITY from the tenant side. The rejection arrives from the
+--     absent grant rather than from the trigger (see this section's header),
+--     which is the stronger of the two for this connection — the trigger is
+--     what binds the owner, and publication.test.ts proves that half.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    update publications set minute_reference = 'tampered'
+     where recipient_org_id = '11111111-1111-1111-1111-111111111111';
+    raise exception 'FAIL — a tenant connection updated a publication';
+  exception when insufficient_privilege then
+    raise notice 'pass  publications: a tenant connection cannot UPDATE a publication at all — there is no tenant-side withdrawal path in this pipeline';
+  end $$;
+
+  do $$
+  begin
+    update publications
+       set withdrawn_at = now(),
+           withdrawn_by = 'e0000000-0000-0000-0000-0000000000f4',
+           withdrawn_minute_reference = 'probe'
+     where recipient_org_id = '11111111-1111-1111-1111-111111111111';
+    raise exception 'FAIL — a tenant connection withdrew a publication';
+  exception when insufficient_privilege then
+    raise notice 'pass  publications: withdrawal is not a tenant act today — the triple is owner-only until presby_withdraw_publication() ships in the publish-UI pipeline';
+  end $$;
+
+  do $$
+  begin
+    delete from publications where recipient_org_id = '11111111-1111-1111-1111-111111111111';
+    raise exception 'FAIL — a tenant connection deleted a publication';
+  exception when insufficient_privilege then
+    raise notice 'pass  publications: a publication is an event and is never deleted';
+  end $$;
+
+  do $$
+  begin
+    update statistical_returns set payload = '{"ending_active": 1}'::jsonb
+     where about_org_id = '22222222-2222-2222-2222-222222222222';
+    raise exception 'FAIL — a tenant connection updated a filed return';
+  exception when insufficient_privilege then
+    raise notice 'pass  statistical_returns: a filed return is immutable — file a correcting return and publish it';
+  end $$;
+
+  do $$
+  begin
+    delete from statistical_returns where about_org_id = '22222222-2222-2222-2222-222222222222';
+    raise exception 'FAIL — a tenant connection deleted a filed return';
+  exception when insufficient_privilege then
+    raise notice 'pass  statistical_returns: append-only — DELETE refused';
+  end $$;
+rollback;
+
+-- (f) THE FIELD-SPEC GATE (D8 / sec 9.5 / DECISION-118). Without this trigger
+--     `payload jsonb` is the custom-fields escape hatch D8 refuses; with it,
+--     the spec is a CLOSED allow-list. Four rejections and one acceptance.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+
+  -- The positive control first, so the four rejections below cannot be
+  -- passing for some unrelated reason.
+  insert into statistical_returns
+    (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+  values ('22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222',
+          2027, '2024', 'submitted', '{"ending_active": 214, "receipts_contributions": 1234.50}'::jsonb, true);
+  select assert_eq(
+    (select count(*) from statistical_returns where report_year = 2027),
+    1, 'field_spec: a payload whose keys, types and bounds all match the 2024 spec is accepted');
+
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222',
+            2028, '2024', 'submitted', '{"ending_active": 200, "pastor_favourite_hymn": 4}'::jsonb, true);
+    raise exception 'FAIL — an UNDECLARED payload key was accepted';
+  exception when check_violation then
+    raise notice 'pass  field_spec: an undeclared key is refused — a field with no slot cannot smuggle through (DECISION-118''s allow-list property, now a database property)';
+  end $$;
+
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222',
+            2028, '2024', 'submitted', '{"ending_active": "two hundred"}'::jsonb, true);
+    raise exception 'FAIL — a STRING was accepted for an integer field';
+  exception when check_violation then
+    raise notice 'pass  field_spec: a value of the wrong JSON type is refused';
+  end $$;
+
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222',
+            2028, '2024', 'submitted', '{"ending_active": -5}'::jsonb, true);
+    raise exception 'FAIL — a NEGATIVE count was accepted';
+  exception when check_violation then
+    raise notice 'pass  field_spec: a negative count is refused — "counts are non-negative" lives in the spec''s own min bound, not in a second rule that could drift from it';
+  end $$;
+
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222',
+            2028, '2024', 'submitted', '{"ending_active": 99999999}'::jsonb, true);
+    raise exception 'FAIL — a count above the declared ceiling was accepted';
+  exception when check_violation then
+    raise notice 'pass  field_spec: a value above the declared max is refused (the same v_count_max the publish function validates against, stated once more as an independent second check)';
+  end $$;
+
+  -- A submitted return is ABOUT ITS OWN congregation, by CHECK. Without this
+  -- a congregation could file — and then publish — a return about a DIFFERENT
+  -- congregation, one layer below the confused-deputy guard.
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333',
+            2028, '2024', 'submitted', '{"ending_active": 10}'::jsonb, true);
+    raise exception 'FAIL — a congregation filed a submitted return ABOUT ANOTHER congregation';
+  exception when check_violation then
+    raise notice 'pass  statistical_returns_submitted_is_self: a submitted return is about its own congregation';
+  end $$;
+rollback;
+
+-- The placeholder generations are FAIL-CLOSED, behaviourally. An empty spec
+-- is not "no validation"; it is "no key validates".
+begin;
+  select set_config('app.current_org_id', :SOUTHERN_FIELDS, true);
+  insert into statistical_returns
+    (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+  values ('f6000000-0000-0000-0000-000000000001', '44444444-4444-4444-4444-444444444444',
+          1990, '1984', 'imported', '{}'::jsonb, false);
+  select assert_eq(
+    (select count(*) from statistical_returns where report_year = 1990),
+    1, 'field_spec: an EMPTY payload against a placeholder generation is accepted (the row exists; its fields are owed to F31/F32''s mapping pass)');
+
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('f6000000-0000-0000-0000-000000000001', '44444444-4444-4444-4444-444444444444',
+            1991, '1984', 'imported', '{"ending_active": 100}'::jsonb, false);
+    raise exception 'FAIL — a payload key was accepted against a placeholder generation whose field mapping does not exist yet';
+  exception when check_violation then
+    raise notice 'pass  field_spec: a placeholder generation accepts NO key — fail-closed, not fail-open, until F31/F32''s per-tab mapping lands';
+  end $$;
+rollback;
+
+-- (g) THE IMPORTED-ROW ABOUT-ORG RULE (R3.14), the 1990 case applied to the
+--     archive itself. An imported return is the one cross-org shape this
+--     table has, and it must resolve to the council that ACTUALLY received
+--     the return, not to whoever holds the congregation today. Submitted rows
+--     are exempt (the CHECK in (f) covers them instead).
+begin;
+  select set_config('app.current_org_id', :SOUTHERN_FIELDS, true);
+  -- Inside the historical range: accepted, even though organizations.parent_id
+  -- says the northern reach holds Quillhaven today.
+  insert into statistical_returns
+    (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+  values ('f6000000-0000-0000-0000-000000000001', '44444444-4444-4444-4444-444444444444',
+          1990, '1984', 'imported', '{}'::jsonb, false);
+  select assert_eq(
+    (select count(*) from statistical_returns where about_org_id = :QUILLHAVEN and report_year = 1990),
+    1, 'statistical_returns about-org: the Southern Fields MAY archive Quillhaven''s 1990 return — the council that received it keeps it (F30/F31)');
+
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('f6000000-0000-0000-0000-000000000001', '44444444-4444-4444-4444-444444444444',
+            2020, '2024', 'imported', '{}'::jsonb, false);
+    raise exception 'FAIL — the Southern Fields archived a 2020 return for a congregation it lost in 1995';
+  exception when insufficient_privilege then
+    raise notice 'pass  statistical_returns about-org: an imported return OUTSIDE the about-org''s affiliation range is refused (Southern Fields, Quillhaven, 2020)';
+  end $$;
+
+  do $$
+  begin
+    insert into statistical_returns
+      (organization_id, about_org_id, report_year, form_version_key, provenance, payload, reconciled)
+    values ('f6000000-0000-0000-0000-000000000001', 'f8000000-0000-0000-0000-000000000002',
+            2020, '2024', 'imported', '{}'::jsonb, false);
+    raise exception 'FAIL — a return was archived about a NEVER-affiliated organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  statistical_returns about-org: a return about a never-affiliated organization is refused';
+  end $$;
+rollback;
+
+-- (h) THE FULL PUBLISH PATH, END TO END, AND THE REPUBLISH CHAIN. Three rows,
+--     one transaction, no organization id anywhere in the signature.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  declare
+    v_return_1  uuid;
+    v_return_2  uuid;
+    v_pub_1     uuid;
+    v_pub_2     uuid;
+    v_recipient uuid;
+    v_proj_1    uuid;
+  begin
+    v_return_1 := presby_publish_sasr_snapshot(
+      2029, 'Session stated meeting, 2030-01-10, item 3',
+      p_ending_active => 220, p_ending_baptized => 48,
+      p_avg_weekly_worship_attendance => 170, p_baptisms_children => 5,
+      p_receipts_contributions => 425000.00, p_exp_local_program => 280000.00
+    );
+
+    -- The RETURN VALUE is now the artifact's id, not the projection's — the
+    -- one part of the 0038 contract this rewrite deliberately changes.
+    if not exists (select 1 from statistical_returns where id = v_return_1) then
+      raise exception 'FAIL — presby_publish_sasr_snapshot() did not return a statistical_returns id';
+    end if;
+    raise notice 'pass  presby_publish_sasr_snapshot: returns the ARTIFACT''s id (statistical_returns), the row the function now fundamentally produces';
+
+    select id, recipient_org_id into v_pub_1, v_recipient
+      from publications where artifact_id = v_return_1;
+
+    -- The recipient is derived from the AFFILIATION HISTORY, and there is no
+    -- parameter through which it could be redirected (F26 / D19).
+    if v_recipient is distinct from '11111111-1111-1111-1111-111111111111' then
+      raise exception 'FAIL — Alder Creek''s publication was addressed to % rather than to its current council', v_recipient;
+    end if;
+    raise notice 'pass  presby_publish_sasr_snapshot: the recipient is resolved from presby_affiliation_parent_as_of(), never from organizations.parent_id, and no parameter can redirect it';
+
+    -- The payload really is the as-reported artifact, gated by the same spec.
+    if (select payload -> 'ending_active' from statistical_returns where id = v_return_1) <> '220'::jsonb then
+      raise exception 'FAIL — the artifact''s payload does not carry the reported value';
+    end if;
+    raise notice 'pass  presby_publish_sasr_snapshot: the artifact carries the as-reported payload under the 2024 field_spec';
+
+    -- The projection, read through the congregation's own DEFINER read since
+    -- it lives in the presbytery's tenant space.
+    select id into v_proj_1
+      from presby_list_own_congregation_publications(2029)
+     where publication_id = v_pub_1;
+    if v_proj_1 is null then
+      raise exception 'FAIL — no congregation_statistics projection was written for the publication';
+    end if;
+    raise notice 'pass  presby_publish_sasr_snapshot: the projection is written at the recipient, carries publication_id, and presby_list_own_congregation_publications() still finds it (its contract survived the column change)';
+
+    -- REPUBLISH: a second filing for the same year chains to the first
+    -- through publications.supersedes_id, DERIVED and never caller-supplied.
+    v_return_2 := presby_publish_sasr_snapshot(
+      2029, 'Session stated meeting, 2030-02-14, item 2 (correction)',
+      p_ending_active => 221
+    );
+    select id into v_pub_2 from publications where artifact_id = v_return_2;
+
+    if (select supersedes_id from publications where id = v_pub_2) is distinct from v_pub_1 then
+      raise exception 'FAIL — a same-year republish did not chain to the publication it corrects';
+    end if;
+    raise notice 'pass  publications.supersedes_id: a same-year republish chains to the prior NON-WITHDRAWN publication, derived from the caller''s own history rather than passed in';
+
+    if (select supersedes_id from publications where id = v_pub_1) is not null then
+      raise exception 'FAIL — the FIRST publication acquired a supersedes_id';
+    end if;
+    raise notice 'pass  publications.supersedes_id: the superseded publication itself is untouched — the chain points backwards, and a published event is never edited';
+  end $$;
+
+  -- ...and the OLD PROJECTION ROW STAYS FROZEN. Checked from the presbytery's
+  -- context in the same transaction, because congregation_statistics lives in
+  -- its tenant space and the congregation cannot even see the row.
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where about_org_id = :ALDER and year = 2029 and provenance = 'published_by_congregation'),
+    2, 'republish: BOTH projection rows survive — a correction is a new frozen row, never an UPDATE of the old one');
+  do $$
+  begin
+    update congregation_statistics set ending_active = 999
+     where about_org_id = '22222222-2222-2222-2222-222222222222' and year = 2029;
+    raise exception 'FAIL — a superseded published projection row was updated in place';
+  exception when check_violation then
+    raise notice 'pass  congregation_statistics_freeze: the superseded projection row is still frozen after the republish (the roll_actions/void precedent holds across the retrofit)';
+  end $$;
+rollback;
+
+-- (i) The publish path's own rejections, with the recipient now resolved from
+--     the affiliation history rather than from parent_id.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    perform presby_publish_sasr_snapshot(2029, 'n/a');
+    raise exception 'FAIL — an organization with no current affiliation was allowed to publish';
+  exception when invalid_parameter_value then
+    raise notice 'pass  presby_publish_sasr_snapshot: an organization with no current affiliation is rejected (the northern reach is a root council)';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :TIDEWATER, true);
+  do $$
+  begin
+    perform presby_publish_sasr_snapshot(2029, 'n/a');
+    raise exception 'FAIL — a body whose current council is a synod, not a presbytery, was allowed to publish';
+  exception when invalid_parameter_value then
+    raise notice 'pass  presby_publish_sasr_snapshot: a current council whose organization_type is not presbytery is rejected';
+  end $$;
+rollback;
+
+-- THE INCREMENT-3/INCREMENT-5 COLLISION, surfaced as a named error rather
+-- than as an opaque about-org rejection two rows later. drizzle/0045 checks
+-- the projection against the affiliation AS OF THE REPORT YEAR; D19 resolves
+-- the recipient as of TODAY. Quillhaven is the fixture where those differ:
+-- the northern reach holds it now, the Southern Fields held it in 1990.
+begin;
+  select set_config('app.current_org_id', :QUILLHAVEN, true);
+  do $$
+  begin
+    perform presby_publish_sasr_snapshot(1990, 'n/a', p_ending_active => 40);
+    raise exception 'FAIL — a return was published to a council the congregation did not belong to in the report year';
+  exception when invalid_parameter_value then
+    raise notice 'pass  presby_publish_sasr_snapshot: a report year predating the congregation''s affiliation to its CURRENT council is refused with a named, mappable error — not with drizzle/0045''s opaque about-org message after two rows are already written';
+  end $$;
+
+  -- And the same congregation CAN publish a current year to the same council.
+  do $$
+  declare v_id uuid;
+  begin
+    v_id := presby_publish_sasr_snapshot(2029, 'Quillhaven session, 2030-01-05, item 1', p_ending_active => 41);
+    if v_id is null then
+      raise exception 'FAIL — Quillhaven could not publish a current-year return to its current council';
+    end if;
+    raise notice 'pass  presby_publish_sasr_snapshot: the same congregation publishes a CURRENT year to the same council without complaint — the rejection above is about the year, not the relationship';
+  end $$;
 rollback;

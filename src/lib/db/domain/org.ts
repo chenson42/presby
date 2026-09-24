@@ -4,8 +4,10 @@ import {
   pgEnum,
   boolean,
   check,
+  date,
   text,
   uuid,
+  uniqueIndex,
   timestamp,
   jsonb,
   integer,
@@ -49,7 +51,28 @@ export const organizations = pgTable(
     // "every congregation under this presbytery" is an index scan, not a
     // recursive CTE on every request.
     path: text("path").notNull(),
+    // The pre-provisioning status column (F35). Its conceptual successor is
+    // `lifecycleStatus` below, but it is NOT dropped: five shipped
+    // SECURITY DEFINER functions gate an anonymous public read on
+    // `o.status = 'active'` (drizzle/0020, 0021, 0024, 0041, 0042), and
+    // Postgres records no column dependency inside a function body — the
+    // DROP would succeed and every public site would fail at request time.
+    // See drizzle/0043's header; the removal is its own scoped change.
     status: text("status").notNull().default("active"),
+    // D10. A CACHE of the most recent `organization_lifecycle_events` row,
+    // maintained by `presby_apply_lifecycle_event()`. It cannot answer a
+    // historical question — the events table is the record. Values:
+    // active | merged | divided | dismissed | dissolved.
+    lifecycleStatus: text("lifecycle_status").notNull().default("active"),
+    lifecycleAsOf: date("lifecycle_as_of"),
+    // TEST FIXTURES ONLY. `presby_guard_organizations_delete()` permits a
+    // DELETE only while this is non-null and in the future, so a stale
+    // marker never grants permanent deletability. Deliberately NOT folded
+    // into `platformStatus`: that column answers D9's tenant-participation
+    // question, and mixing a test-lifecycle concern into it would change the
+    // meaning of every `platform_status` query in `presby_user_organizations()`
+    // and the org chooser.
+    deletableUntil: timestamp("deletable_until", { withTimezone: true }),
     // D9. Most congregations in a presbytery will NOT be tenants, so the
     // presbytery's launch-day job is managing data about churches that are not
     // on the platform.
@@ -94,8 +117,11 @@ export const organizationSettings = pgTable("organization_settings", {
   organizationId: uuid("organization_id")
     .primaryKey()
     .references(() => organizations.id, { onDelete: "cascade" }),
-  // Office of the General Assembly church PIN, used for SASR submission.
-  pcusaPin: text("pcusa_pin"),
+  // `pcusaPin` moved to `organizationIdentifiers` (kind = 'pcusa_pin') in
+  // drizzle/0043 — D24. It could not stay here: this table IS tenant-
+  // isolated, so the presbytery running an import could not read a
+  // congregation's own OGA church PIN, the identifier a cross-council
+  // importer needs most.
   // Includes sessionServesAsTrustees, hasDeacons, trackDisabilityPerPerson.
   settings: jsonb("settings").notNull().default({}),
   // Per-congregation 2FA policy. NOT a feature flag: a flag is an environment
@@ -113,6 +139,50 @@ export const organizationSettings = pgTable("organization_settings", {
     .defaultNow()
     .$onUpdate(() => new Date()),
 });
+
+/**
+ * External identifiers for an organization — OGA church PIN, psvonline
+ * congregation id, church360, legacy import keys (D24, drizzle/0043).
+ *
+ * Deliberately NOT tenant-isolated, and that is the whole reason it exists:
+ * `pcusaPin` used to live on `organizationSettings`, which carries the
+ * standard tenant policy, so a presbytery running an import could not read a
+ * member congregation's own PIN. This table is identity data about a public
+ * org-tree entry — the same visibility class as `organizations` itself
+ * (docs/schema-design.md sec 17).
+ *
+ * `organizationId` is a PLAIN FK and is NOT a tenant scope: it is the "which
+ * organization" column, the structural exception `congregationOversight.
+ * aboutOrgId` already takes. There is no tenant column here to compose a
+ * composite key against (F2).
+ *
+ * The unique index is PARTIAL — only VERIFIED identifiers are globally
+ * unique. An unverified import candidate may legitimately collide with a
+ * verified row; that collision is what the resolution step exists to settle.
+ */
+export const organizationIdentifiers = pgTable(
+  "organization_identifiers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // pcusa_pin | psvonline_congregation_id | church360 | legacy_import
+    kind: text("kind").notNull(),
+    valueNormalized: text("value_normalized").notNull(),
+    isVerified: boolean("is_verified").notNull().default(false),
+    source: text("source"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("organization_identifiers_kind_value_verified_idx")
+      .on(t.kind, t.valueNormalized)
+      .where(sql`${t.isVerified}`),
+    index("organization_identifiers_org_idx").on(t.organizationId),
+  ],
+);
 
 /**
  * Optional subdivision inside a congregation. fpcw calls these parishes;

@@ -52,9 +52,12 @@ import {
  * always wins the display, even though the presbytery's own
  * `presbytery_entered`/`imported` row (if any) is never deleted (Phase 1
  * §3). Multiple `published_by_congregation` rows can exist for the same
- * year (a republish chains via `supersedesPublicationId` rather than
- * updating in place) — the one with the latest `publishedAt` is the current
- * one; this module never needs to walk the chain itself, only pick its head.
+ * year (a republish is a new frozen row whose PUBLICATION chains to the one
+ * it corrects via `publications.supersedesId` — drizzle/0047 — rather than
+ * either row being updated in place) — the one with the latest `publishedAt`
+ * is the current one; this module never needs to walk the chain itself, only
+ * pick its head, which is why the chain moving off this table changed
+ * nothing here.
  *
  * CORE SASR FIELDS ONLY (LEAN CALL, same discipline the schema file itself
  * uses for race/officer breakdowns): `SasrAggregateInput`/
@@ -609,8 +612,9 @@ export async function getCongregationStatisticsRollup(
 
 /** Upsert on `(organizationId, aboutOrgId, year, provenance =
  *  'presbytery_entered')` — the partial unique index deliberately excludes
- *  `published_by_congregation` rows, which chain by
- *  `supersedesPublicationId` instead (never written by this function). */
+ *  `published_by_congregation` rows, whose publications chain by
+ *  `publications.supersedesId` instead (never written by this function; only
+ *  `presby_publish_sasr_snapshot()` writes a published row). */
 export async function setCongregationStatistics(
   viewerPersonId: string,
   organizationId: string,

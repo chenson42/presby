@@ -10,6 +10,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
@@ -64,6 +65,8 @@ describe.skipIf(!hasDb)(
       const [a] = await platform
         .insert(organizations)
         .values({
+          // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+          deletableUntil: fixtureDeletableUntil(),
           organizationType: "congregation",
           name: "Fixture Congregation A for find-person.test.ts",
           slug: `find-person-test-a-${stamp}`,
@@ -76,6 +79,8 @@ describe.skipIf(!hasDb)(
       const [b] = await platform
         .insert(organizations)
         .values({
+          // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+          deletableUntil: fixtureDeletableUntil(),
           organizationType: "congregation",
           name: "Fixture Congregation B for find-person.test.ts",
           slug: `find-person-test-b-${stamp}`,

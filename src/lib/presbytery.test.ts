@@ -29,8 +29,14 @@
  * `congregation_statistics_freeze` TRIGGER DISCIPLINE: this file inserts
  * `published_by_congregation` fixture rows directly (via `getPlatformDb()`,
  * since no write path in `presbytery.ts` ever produces one — that is
- * Increment 4a's `presby_publish_sasr_snapshot()`) to exercise the
- * provenance-coalesce read. The freeze trigger rejects UPDATE **and**
+ * `presby_publish_sasr_snapshot()`) to exercise the provenance-coalesce read.
+ * Since `drizzle/0047` a published row is a PROJECTION OF A PUBLICATION and
+ * carries a `publication_id` (NOT NULL for that provenance, by CHECK), so
+ * `makePublication()` below mints the artifact and the event those rows
+ * project. Deliberately NOT by calling `presby_publish_sasr_snapshot()`: these
+ * tests need a CHOSEN `published_at` to exercise the coalesce ordering, and
+ * the function correctly writes `now()`. The function's own contract is
+ * covered in `src/lib/db/domain/publication.test.ts`. The freeze trigger rejects UPDATE **and**
  * DELETE on those rows, so teardown disables `congregation_statistics_
  * freeze` around its own cascade, same trigger-disable convention
  * `officers.test.ts`/`children.test.ts`/`credentials.test.ts` document for
@@ -39,6 +45,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
@@ -61,6 +68,7 @@ describe.skipIf(!hasDb)(
 
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
+    let organizationAffiliations: typeof import("@/lib/db/domain/lifecycle").organizationAffiliations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
     let groups: typeof import("@/lib/db/domain/groups").groups;
     let people: typeof import("@/lib/db/domain/people").people;
@@ -71,6 +79,8 @@ describe.skipIf(!hasDb)(
     let roleGrants: typeof import("@/lib/db/domain/authz").roleGrants;
     let congregationOversight: typeof import("@/lib/db/domain/presbytery").congregationOversight;
     let congregationStatistics: typeof import("@/lib/db/domain/presbytery").congregationStatistics;
+    let statisticalReturns: typeof import("@/lib/db/domain/returns").statisticalReturns;
+    let publications: typeof import("@/lib/db/domain/publication").publications;
     let perCapitaRates: typeof import("@/lib/db/domain/presbytery").perCapitaRates;
     let perCapitaRecords: typeof import("@/lib/db/domain/presbytery").perCapitaRecords;
     let users: typeof import("@/lib/db/schema").users;
@@ -104,6 +114,9 @@ describe.skipIf(!hasDb)(
       } = await import("./presbytery"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
+      ({ organizationAffiliations } = await import(
+        "@/lib/db/domain/lifecycle"
+      ));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
       ({ people, memberships } = await import("@/lib/db/domain/people"));
       ({ permissions, appRoles, appRolePermissions, roleGrants } = await import(
@@ -111,11 +124,22 @@ describe.skipIf(!hasDb)(
       ));
       ({ congregationOversight, congregationStatistics, perCapitaRates, perCapitaRecords } =
         await import("@/lib/db/domain/presbytery"));
+      ({ statisticalReturns } = await import("@/lib/db/domain/returns"));
+      ({ publications } = await import("@/lib/db/domain/publication"));
       ({ users } = await import("@/lib/db/schema"));
 
       const platform = getPlatformDb();
       const stamp = Date.now();
 
+      /**
+       * `parentId` is no longer written onto the `organizations` row — it
+       * cannot be (drizzle/0044's `organizations_guard_insert`). The org is
+       * inserted as a root and an `organization_affiliations` row derives
+       * `parent_id`/`path` through `presby_apply_affiliation_to_org_tree()`.
+       * The fixtures these tests assert against (a presbytery's member
+       * congregations) therefore now exercise the real write path rather
+       * than a raw column value.
+       */
       async function makeOrg(
         label: string,
         organizationType: string,
@@ -124,14 +148,29 @@ describe.skipIf(!hasDb)(
         const [row] = await platform
           .insert(organizations)
           .values({
+            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
+            deletableUntil: fixtureDeletableUntil(),
             organizationType: organizationType as "presbytery",
-            parentId,
             name: `Fixture ${label} for presbytery.test.ts`,
             slug: `presbytery-test-${label.toLowerCase()}-${stamp}`,
             path: `presbytery_test_${label.toLowerCase()}_${stamp}`,
             platformStatus: "unmanaged",
           })
           .returning({ id: organizations.id });
+        if (parentId) {
+          await platform.insert(organizationAffiliations).values({
+            organizationId: parentId,
+            subjectOrgId: row!.id,
+            parentOrgId: parentId,
+            relationshipType:
+              organizationType === "new_worshiping_community"
+                ? "member_nwc"
+                : "member_congregation",
+            effectiveFrom: "2000-01-01",
+            authority: "recorded",
+            minuteReference: `Fixture affiliation for presbytery.test.ts (${label})`,
+          });
+        }
         return row!.id;
       }
 
@@ -259,6 +298,47 @@ describe.skipIf(!hasDb)(
       // Deliberately no membership row anywhere for noMembershipPerson.
     });
 
+    /**
+     * Mint the artifact and the event a `published_by_congregation` projection
+     * row projects (drizzle/0046 + drizzle/0047). Owned by the CONGREGATION
+     * (that is what `publications.organization_id` means), addressed to the
+     * presbytery, with `published_at` chosen by the caller so the coalesce
+     * ordering stays testable.
+     */
+    async function makePublication(
+      aboutOrgId: string,
+      recipientOrgId: string,
+      reportYear: number,
+      publishedAt: Date,
+      endingActive: number,
+    ): Promise<string> {
+      const platform = getPlatformDb();
+      const [artifact] = await platform
+        .insert(statisticalReturns)
+        .values({
+          organizationId: aboutOrgId,
+          aboutOrgId,
+          reportYear,
+          formVersionKey: "2024",
+          provenance: "submitted",
+          payload: { ending_active: endingActive },
+          reconciled: true,
+          attestedAt: publishedAt,
+        })
+        .returning({ id: statisticalReturns.id });
+      const [publication] = await platform
+        .insert(publications)
+        .values({
+          organizationId: aboutOrgId,
+          recipientOrgId,
+          recordClass: "statistical_return",
+          artifactId: artifact!.id,
+          publishedAt,
+        })
+        .returning({ id: publications.id });
+      return publication!.id;
+    }
+
     afterAll(async () => {
       const platform = getPlatformDb();
 
@@ -278,6 +358,34 @@ describe.skipIf(!hasDb)(
           sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`,
         );
       }
+      // The publication and the artifact the projections pointed at. Both are
+      // frozen on EVERY connection (a grant does not bind neondb_owner), and
+      // both would otherwise be reached by the organizations cascade below and
+      // refused there instead — so they come out here, children first.
+      await platform.execute(
+        sql`alter table publications disable trigger publications_freeze`,
+      );
+      await platform.execute(
+        sql`alter table statistical_returns disable trigger statistical_returns_freeze`,
+      );
+      try {
+        await platform
+          .delete(publications)
+          .where(inArray(publications.organizationId, [congA, congB, nwcA, congOutsideB]));
+        await platform
+          .delete(statisticalReturns)
+          .where(
+            inArray(statisticalReturns.organizationId, [congA, congB, nwcA, congOutsideB]),
+          );
+      } finally {
+        await platform.execute(
+          sql`alter table statistical_returns enable trigger statistical_returns_freeze`,
+        );
+        await platform.execute(
+          sql`alter table publications enable trigger publications_freeze`,
+        );
+      }
+
       await platform
         .delete(perCapitaRecords)
         .where(inArray(perCapitaRecords.organizationId, [presbyteryA, presbyteryB]));
@@ -575,12 +683,14 @@ describe.skipIf(!hasDb)(
         );
 
         const platform = getPlatformDb();
+        const publishedAt = new Date("2024-01-10T00:00:00Z");
         await platform.insert(congregationStatistics).values({
           organizationId: presbyteryA,
           aboutOrgId: congB,
           year: 2023,
           provenance: "published_by_congregation",
-          publishedAt: new Date("2024-01-10T00:00:00Z"),
+          publicationId: await makePublication(congB, presbyteryA, 2023, publishedAt, 212),
+          publishedAt,
           endingActive: 212,
         });
 
@@ -593,12 +703,15 @@ describe.skipIf(!hasDb)(
 
       it("a LATER published_by_congregation row (a republish) wins over an earlier one", async () => {
         const platform = getPlatformDb();
+        const firstAt = new Date("2023-01-01T00:00:00Z");
+        const secondAt = new Date("2023-06-01T00:00:00Z");
         await platform.insert(congregationStatistics).values({
           organizationId: presbyteryA,
           aboutOrgId: congB,
           year: 2022,
           provenance: "published_by_congregation",
-          publishedAt: new Date("2023-01-01T00:00:00Z"),
+          publicationId: await makePublication(congB, presbyteryA, 2022, firstAt, 200),
+          publishedAt: firstAt,
           endingActive: 200,
         });
         await platform.insert(congregationStatistics).values({
@@ -606,7 +719,8 @@ describe.skipIf(!hasDb)(
           aboutOrgId: congB,
           year: 2022,
           provenance: "published_by_congregation",
-          publishedAt: new Date("2023-06-01T00:00:00Z"),
+          publicationId: await makePublication(congB, presbyteryA, 2022, secondAt, 205),
+          publishedAt: secondAt,
           endingActive: 205,
         });
 

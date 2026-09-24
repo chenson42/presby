@@ -10,6 +10,7 @@
  * ./events.
  */
 export * from "./org";
+export * from "./lifecycle";
 export * from "./assets";
 export * from "./people";
 export * from "./person-ext";
@@ -18,7 +19,8 @@ export * from "./officers";
 export * from "./groups";
 export * from "./authz";
 export * from "./privacy";
-export * from "./reporting";
+export * from "./returns";
+export * from "./publication";
 export * from "./support";
 export * from "./sites";
 export * from "./org-features";

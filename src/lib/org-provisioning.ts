@@ -2,6 +2,10 @@ import "server-only";
 import { eq, isNull } from "drizzle-orm";
 import { getPlatformDb } from "@/lib/db";
 import { organizations } from "@/lib/db/domain/org";
+import {
+  organizationAffiliations,
+  type RelationshipType,
+} from "@/lib/db/domain/lifecycle";
 import { groupTypes, groups } from "@/lib/db/domain/groups";
 import { appRoles, appRolePermissions, roleGrants } from "@/lib/db/domain/authz";
 import { isReservedSlug } from "@/lib/reserved-slugs";
@@ -30,6 +34,39 @@ export type CreateOrganizationInput = {
   slug: string;
   organizationType: OrganizationType;
   platformStatus: PlatformStatus;
+  /**
+   * HIERARCHICAL PROVISIONING (DECISION-136 / drizzle/0044). All optional and
+   * omitted entirely for a root org (a synod, the GA, an independent
+   * presbytery) — exactly as before this pipeline.
+   *
+   * Setting `parentOrganizationId` does NOT set `organizations.parent_id`.
+   * That column is write-closed by trigger on both connections; it is
+   * derived from the `organization_affiliations` row this function inserts in
+   * the SAME transaction, by the one derivation path
+   * (`presby_apply_affiliation_to_org_tree()`). `deriveOrgPath()` below stays
+   * roots-only and is deliberately NOT extended to prefix a parent path.
+   */
+  parentOrganizationId?: string;
+  /** Required when `parentOrganizationId` is set. */
+  relationshipType?: RelationshipType;
+  /** Defaults to today. A brand-new org's affiliation is NOT unbounded-below. */
+  effectiveFrom?: Date;
+  /**
+   * Omitted => the affiliation row is recorded with `authority = 'backfill'`
+   * and a null `minute_reference`, which is the only shape the
+   * `organization_affiliations_backfill_minute_shape` CHECK permits without
+   * one. Derived here rather than taken as a caller-supplied enum
+   * (DECISION-139) — "is this minuted?" is a fact about the input, not a
+   * choice.
+   */
+  minuteReference?: string;
+  /**
+   * The platform operator's own user id — required when
+   * `parentOrganizationId` is set, ignored for a root org. The affiliation
+   * row's owner is the PARENT council, so the row reads "the presbytery
+   * organized it, the operator recorded it," which is legible and not a lie.
+   */
+  recordedByUserId?: string;
 };
 
 export type CreateOrganizationResult =
@@ -37,6 +74,13 @@ export type CreateOrganizationResult =
   | { kind: "invalid_input"; error: string }
   | { kind: "slug_taken" }
   | { kind: "reserved_slug" }
+  // The database refused the parent/child pairing: no such parent, or the
+  // parent's organization_type is not exactly one level above the child's
+  // (presbytery -> congregation/NWC, synod -> presbytery, GA -> synod —
+  // presby_assert_council_authority(), G-3.0301(a)/G-3.0403(c)/G-3.0502(d)).
+  // Distinct from invalid_input: the shape of what the admin typed is fine,
+  // the polity is not.
+  | { kind: "invalid_parent" }
   // The platform-wide group_types rows (`court`, `roster`) are missing —
   // `npm run db:seed` has not been run against this database with
   // scripts/seed.ts's seedGroupTypes() addition. Distinct from
@@ -62,9 +106,30 @@ export function deriveOrgPath(slug: string): string {
 }
 
 /**
- * Drizzle wraps driver errors (`Failed query: …`) and puts the Postgres error
- * on the `.cause` chain, so reading `err.code` off the top-level object never
- * matched. Walk the chain (bounded) for the first string `code`.
+ * `organization_affiliations.effective_from` is a calendar `date`, and
+ * Drizzle's `date()` column is a string. Built from LOCAL parts, never
+ * `toISOString()`: west of UTC, a late-evening local `new Date()` formats as
+ * tomorrow in UTC, and an affiliation that starts a day early is the exact
+ * off-by-one the `<FormattedDate>` fixture in `e2e/support/seed-orgs.ts` was
+ * pinned to catch elsewhere in this codebase.
+ */
+function toDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * The Postgres SQLSTATE, found ANYWHERE in the error's cause chain.
+ *
+ * Drizzle wraps a driver error in its own `Error: Failed query: ...` and puts
+ * the original on `.cause`, so the SQLSTATE is one (or more) levels down.
+ * This function used to read `err.code` off the top-level object only, which
+ * silently never matched — the "slug already taken" path looked fine because
+ * the pre-check SELECT catches the common case, leaving the TOCTOU branch
+ * that the `catch` exists for permanently dead. Found while building the
+ * hierarchical-provisioning tests; see the work-log's Implementer Notes.
  */
 function pgErrorCode(err: unknown): string | undefined {
   let current: unknown = err;
@@ -83,6 +148,20 @@ function pgErrorCode(err: unknown): string | undefined {
 
 function isUniqueViolation(err: unknown): boolean {
   return pgErrorCode(err) === "23505";
+}
+
+/**
+ * The two ways the database refuses a parent/child pairing:
+ *   42501 insufficient_privilege — presby_assert_council_authority() raised
+ *         through the organization_affiliations BEFORE INSERT trigger (wrong
+ *         types, or the parent is the child).
+ *   23503 foreign_key_violation — there is no organization with that id.
+ * Both are mapped to one result so the caller's copy cannot become an
+ * existence oracle for organization ids.
+ */
+function isRejectedParent(err: unknown): boolean {
+  const code = pgErrorCode(err);
+  return code === "42501" || code === "23503";
 }
 
 /**
@@ -185,6 +264,25 @@ export async function createOrganization(
     return { kind: "reserved_slug" };
   }
 
+  // Hierarchical provisioning is all-or-nothing: an affiliation row with no
+  // relationship type or no recorder is not a record of anything.
+  if (input.parentOrganizationId) {
+    if (!input.relationshipType) {
+      return {
+        kind: "invalid_input",
+        error:
+          "A parent organization needs a relationship type (member_congregation, member_nwc, member_presbytery, or member_synod).",
+      };
+    }
+    if (!input.recordedByUserId) {
+      return {
+        kind: "invalid_input",
+        error:
+          "A parent organization needs the recording user's id — an affiliation row records who entered it.",
+      };
+    }
+  }
+
   const platformDb = getPlatformDb();
 
   // Step 1: the platform-wide group_types rows must already exist —
@@ -229,6 +327,36 @@ export async function createOrganization(
           path,
         })
         .returning({ id: organizations.id });
+
+      // The initial affiliation row, in the SAME commit as the org row
+      // (Ruling 3 is explicit that this is one commit, not two). Note what is
+      // NOT here: any write to `organizations.parent_id` or
+      // `organizations.path`. This INSERT's own AFTER trigger calls
+      // `presby_apply_affiliation_to_org_tree()`, which is the single
+      // derivation path for both columns; calling it again from here would
+      // be a redundant second invocation of the same function, so it is
+      // deliberately omitted (a small, named deviation from Phase 3's
+      // API Contract, which spells the call out explicitly).
+      //
+      // The owner is the PARENT council, never the new org: `reason`,
+      // `minute_reference` and `notes` on an affiliation row are the acting
+      // council's own records.
+      if (input.parentOrganizationId && input.relationshipType) {
+        await tx.insert(organizationAffiliations).values({
+          organizationId: input.parentOrganizationId,
+          subjectOrgId: orgRow.id,
+          parentOrgId: input.parentOrganizationId,
+          relationshipType: input.relationshipType,
+          // A brand-new organization's affiliation is NOT unbounded-below —
+          // the null lower bound means "predates our records" (F41), which is
+          // false for a body being organized today.
+          effectiveFrom: toDateString(input.effectiveFrom ?? new Date()),
+          effectiveTo: null,
+          authority: input.minuteReference ? "recorded" : "backfill",
+          minuteReference: input.minuteReference ?? null,
+          recordedBy: input.recordedByUserId ?? null,
+        });
+      }
 
       const groupRows = await tx
         .insert(groups)
@@ -298,10 +426,17 @@ export async function createOrganization(
     return { kind: "ok", organizationId };
   } catch (err) {
     if (isUniqueViolation(err)) return { kind: "slug_taken" };
+    // Only reachable on the hierarchical path: a root-org insert touches
+    // neither the authority trigger nor the affiliation FK, so mapping these
+    // codes unconditionally would swallow an unrelated failure.
+    if (input.parentOrganizationId && isRejectedParent(err)) {
+      return { kind: "invalid_parent" };
+    }
     throw err;
   }
 }
 
 // Re-exported so callers (the server action, tests) never need to import
-// from @/lib/authz just to get these two type aliases.
-export type { OrganizationType, PlatformStatus };
+// from @/lib/authz or @/lib/db/domain/lifecycle just to get these type
+// aliases.
+export type { OrganizationType, PlatformStatus, RelationshipType };

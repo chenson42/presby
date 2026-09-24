@@ -28,6 +28,10 @@ For no-op reviews (a cycle genuinely produced no actionable findings): `nothing 
 
 <!-- newest entries go here, above the older ones -->
 
+2026-09-24 | agent-instruction | first real presby-specific run (2026-08-19 was a baseline reset): 2 critical (database-admin.md has no presby DDL/RLS guidance at all; full-stack-developer.md's schema instruction contradicts CLAUDE.md), 6 notable (tech-lead/architect/qa/pre-push lack a live-catalog/fixture verification step; no named migration-correction-in-place process; concurrency unaddressed), 3 minor, 3 observations; see 2026-09-24-agent-instruction.md
+
+2026-09-24 | dependencies | 0 critical/high, 7 moderate unchanged (vitest chain now has a clean 4.1.11 fix; drizzle-kit/esbuild chain still has none); npm audit fix reify bug reproduced and root-caused (name packages explicitly as workaround); eslint 10 now unblocked; new time-sensitive item: Vercel deprecates Node 20 in Project Settings 2026-10-01, repo still pinned there; see 2026-09-24-dependencies.md
+
 2026-09-24 | sibling-harvest (ad hoc, operator-requested) | FPCW replacement feature-match vs fpcw-directory @ e988e83 (v2.15.00-v2.15.52): scope confirmed as directory + groups/on-call + reimbursement + finance SoR + youth + mailchimp + kiosk + calendar/Google, cutover Jan 1 at fiscal-year boundary; 3 blockers found (custom domains absent and required day one, finance domain nonexistent, DECISION-060 missing FK gates Google sync); fpcw's service-account DWD model rejected as multitenant anti-pattern in favour of OAuth admin-consent; 11 tracks + 4 open questions; see 2026-09-23-fpcw-feature-match.md
 
 **Reset 2026-08-19.** This file was carried over wholesale when presby was

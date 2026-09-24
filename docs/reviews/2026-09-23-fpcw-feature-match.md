@@ -132,6 +132,27 @@ Recorded here so they don't get re-litigated.
 12. **Screenshot reference runs locally** (answer 7). fpcw-directory ships a
     `docker-compose.yml` with Postgres 16, so B3 diffs against a local instance —
     production is never touched.
+13. **Hard cutover, and deferral means non-use.** *Operator, 2026-09-24: "if I
+    deferred func then it is func that isn't used."*
+
+    This is the structural decision the rest of the plan hangs on, so it is worth
+    stating precisely. fpcw-directory **goes dark at the cutover** — it is not
+    kept alive to serve anything. Therefore anything scheduled **after** the
+    cutover is, by definition, **functionality FPCW does not use today**: it is
+    new presby product, not replacement parity.
+
+    Why this matters beyond scheduling: had any deferred feature been in real use,
+    keeping fpcw-directory alive for it would mean **two systems holding one
+    congregation's data with divergent truth.** Once presby is the member system of
+    record, fpcw-directory's `members` table is frozen — and every deferred feature
+    reads members (`worship_role_assignments.memberId`, `event_signups.memberId`,
+    `member_talents.memberId`, and `payment_requests`' three member FKs plus
+    `committeeGroupId`). That is the dual-Google-sync hazard (⚠️ 1) generalised to
+    all member data. The operator's rule removes the hazard entirely rather than
+    managing it, which is why it is the right rule.
+
+    **The pre-cutover list is therefore the definition of "what FPCW uses."** A
+    feature can only move across that line by changing that claim.
 
 ## 5. Newly discovered blockers
 
@@ -231,6 +252,116 @@ layout parity would cap presby's IA at the app it replaces, contradicting
 
 ## 7. The plan
 
+**Two lines divide this plan**, both operator decisions:
+
+- **A presbytery-first go-live** may precede FPCW entirely — `psvonline-portal`'s
+  functionality, which the Presbytery of Scioto Valley is now asking for. It needs
+  almost none of the FPCW program. See §7.0.
+- **The cutover line** (§4.13): everything below it is functionality FPCW does not
+  use, and is therefore new product rather than parity.
+
+### Pre-cutover — what FPCW uses
+
+Track 0 (hygiene) · A (groups & calendar) · B (visual parity) · C (directory) ·
+D (Google Workspace) · **R (reimbursement)** · F (custom domains, hard blocker) ·
+G (youth) · H (mailchimp) · I (kiosk, last)
+
+### Post-cutover — new product
+
+Finance program: ledger · Vanco · giving · contribution statements · budgets ·
+reconciliation. Then worship · insights · photo-uploads · talents.
+
+Because finance lands after the cutover, **the system-of-record transition is two
+events, not one**: members at the FPCW cutover, finance whenever the ledger ships.
+The January-1 fiscal-boundary constraint therefore binds the **finance** cutover
+only — which frees the member cutover to happen whenever it is ready, and
+dissolves the contribution-statement collision (FPCW issues that year's statements
+from Church360/Vanco, as it does today).
+
+### 7.0 Track P — presbytery-first *(possible first go-live)*
+
+`~/git/psvonline-portal` (29 tables, ~27k lines, v0.3.16, last touched
+2026-08-11) deploys as the **`presby-portal` Vercel project and the legacy
+`presby-portal` Neon database** — the ~39 MB project of answer 2, holding PSV's
+real prototype data.
+
+**The gap is almost entirely UI, not schema.** An earlier draft of this document
+understated presby's presbytery schema; corrected here.
+
+presby already has:
+
+- **`congregation_oversight`** — `organizationId` (the presbytery holding the
+  record) **+ `aboutOrgId`** (the congregation it concerns). This is exactly the
+  right pattern: presbytery-**owned** rows *about* another org, which satisfies
+  *"access flows up by publication, never down by inheritance"* without the
+  presbytery reading into a congregation's own tenant data. It already carries
+  `viabilityScore`, `redevelopmentNotes`, `buildingsNotes`, `insuranceCarrier`,
+  `insuranceExpiresOn`, `latitude`, `longitude`.
+- **`congregation_statistics` — the full SASR**, ~70 columns: gains/losses,
+  demographics (gender, age, race, disability), officer counts, baptisms, youth
+  bands, average worship attendance, receipts, expenses, budget. **With
+  `provenance`, `supersedesPublicationId`, `publishedAt`, `minuteReference`** —
+  the publication and supersession model is already designed.
+- `per_capita_rates`, `per_capita_records`, `organization_service_times`,
+  `organization_profiles`.
+- **Real** (not placeholder) routes: members, officers, groups, staff,
+  **credentials**, roles, events, features, branding.
+
+Every presbytery-facing route is nonetheless an **inert placeholder**:
+`/admin/oversight`, `/admin/reports`, `/admin/committees`, `/admin/insights`.
+
+**Genuine schema gaps vs psvonline:**
+
+| Gap | Note |
+|---|---|
+| Congregation profile fields | `pcusaPin`, `standardName`/`officialName`, address, county, phone/email/website, `yearOrganized`, `congregationType`, `status`. `organizations` carries only id/slug/name/type/parent |
+| Multi-property buildings detail | psvonline's `congregation_buildings` is 26 columns per property (appraised value, square footage, addition years). presby has a single `buildingsNotes` text field — a real gap **if** PSV tracks properties per church |
+| Presbytery committees | `committees`, `committee_assignments`, `appointments`. presby has groups + officer terms, but `/admin/committees` is a stub *(= Increment 1)* |
+
+Covered without new schema: services (`organization_service_times`), credentials
+(`/admin/credentials` is real), ideas (feedback/tickets), per capita.
+
+| | Work |
+|---|---|
+| P1 | Congregation profile fields + buildings detail *(scope depends on §9 Q3)* |
+| P2 | Presbytery committees + assignments + appointments *(= Increment 1)* |
+| P3 | Make `/admin/oversight` real over existing `congregation_oversight` |
+| P4 | Statistical publication over the existing SASR model *(= Increment 4a)* |
+| P5 | Presbytery dashboard / rollups *(= Increment 4b)* |
+| P6 | Reports + per-capita surfaces *(= Increment 5)* |
+| P7 | Port PSV's prototype data from the legacy Neon project |
+
+**Roughly 4–6 pipelines**, and mostly ux/api work over schema that already exists
+rather than new tables. Increments 1/4a/4b/5 are already named in `docs/TODO.md`
+as "ready to build."
+
+### ⚠️ Two model conflicts to resolve before P1
+
+1. **psvonline's congregations are reference rows, not tenants.** Its
+   `congregations` table is org-scoped (`organizationId`) and separate from
+   `organizations` — the presbytery owns ~N congregation rows. presby's model makes
+   each congregation **its own tenant organization**, with the presbytery holding
+   `aboutOrgId` rows concerning it. The port is therefore a **model translation,
+   not a data move**, and it forces a decision: does every PSV congregation get
+   provisioned as an organization (presby's model, ~80 orgs nobody logs into
+   initially), or do congregations stay reference rows under PSV's org (simpler,
+   but diverges from the hierarchy and breaks the path for a congregation to
+   become a real tenant later)? `congregation_oversight.aboutOrgId` implies the
+   former.
+2. **psvonline's `people` is org-scoped; presby's `people` is GLOBAL.** A person
+   is a person regardless of which church is looking. So porting PSV's people
+   risks **duplicating individuals who are also FPCW members** — a pastor can
+   plausibly exist in both datasets. P7 must run through
+   `presby_match_person()` / `matchPerson()`, not a straight insert.
+
+**Why this is a strong candidate to go first:** it needs **none** of Track D
+(Google), E (finance — psvonline tracks per capita with plain amount-paid columns,
+not double-entry), F (custom domains — the org portal lives at `/o/<slug>` on the
+platform host; only public *websites* need custom domains), G, H or I. It is
+Track 0 + Track P, with B and C as polish. And it exercises multitenancy, RLS and
+the org hierarchy against a real tenant **before** FPCW's system of record depends
+on them.
+
 ### Track 0 — Foundation hygiene · *do first, gates Track A*
 
 | | Work |
@@ -290,20 +421,47 @@ Developed against a **test Workspace domain** (needs creating — answer 9), nev
 | E1 | Fund-accounting core, designed against `westervillelions`' `ledger_*` prior art |
 | E2 | **Vanco integration** — settled-transaction import into the ledger, and its credentials/reconciliation semantics (answer 4) |
 | E3 | Giving / contributions recording (what Vanco doesn't originate: cash, check, stock) |
-| E4 | **Contribution statements** (`ledger_acknowledgments` + `ledger_letter_templates` precedent) — IRS Pub 1771, **due each January**, which is also the cutover month (§4.10) |
-| E5 | Reimbursement / payments out — committee approval routing, treasurer-only `paymentInfo`, attachments, PDF receipts, append-only event log |
+| E4 | **Contribution statements** (`ledger_acknowledgments` + `ledger_letter_templates` precedent) — IRS Pub 1771 |
+| E5 | **Treasury half of reimbursement** — the `approved → paid` transition, the treasurer-only `paymentInfo`, and disbursement recording. See Track R for the pre-cutover half |
 | E6 | Budgets, bank reconciliation |
 
 Needs its own Phase 1. **Compare fpcw's `payment_requests` against
-`ledger_reimbursements` before designing E5** — two references, pick deliberately.
+`~/git/westervillelions`' `ledger_reimbursements` before designing E5** — two
+references, pick deliberately.
 
-⚠️ **E4 and the cutover collide.** A January 1 switch means the first
-contribution statements FPCW owes after cutover cover a year recorded in
-Church360/Vanco, not presby. Either presby generates statements from **imported**
-prior-year data (so H2 must import gift-level history, not just balances), or
-FPCW issues that year's statements from the old system and presby's first
-statement year is the *following* January. **Decide this before H2's scope is
-fixed** — it changes what the import must carry.
+Because finance is post-cutover, FPCW continues issuing contribution statements
+from Church360/Vanco for the cutover year, exactly as it does today. No statement
+collision, and **the import need not carry gift-level history** — only what the
+member record requires.
+
+### Track R — Reimbursement, request through approval · *pre-cutover*
+
+**Necessary for cutover** (operator), **but not the full treasury functionality.**
+fpcw's lifecycle is `draft → submitted → approved → paid` (+ `returned`, `void`),
+and the treasury seam is precisely `approved → paid`. Track R stops at `approved`.
+
+| | Work |
+|---|---|
+| R1 | Request creation, incl. **on-behalf-of**; `payeeMemberId` / `requestedByMemberId` / `createdOnBehalfByMemberId` |
+| R2 | Committee approval routing + pre-approving-elder capture; `returned` (`needs_info` / `denied`) and `void` |
+| R3 | Attachments + receipt images, PDF request output |
+| R4 | Append-only request event log (`payment_request_events`) |
+
+**Why this works without a ledger:** fpcw runs a complete reimbursement system
+with **no ledger at all** — `budgetCategory` is free text, not a ledger reference.
+So Track R is genuinely independent of Track E.
+
+Two design notes for forward compatibility:
+
+- **Keep `paid` in the status enum from day one** even though nothing transitions
+  to it. `approved` is a legitimate terminal state for now — the treasurer writes
+  the cheque outside presby, as they do today. Shipping the enum complete avoids
+  an enum migration mid-flight when E5 lands.
+- **Do not build `paymentInfo` pre-cutover.** It is the treasurer-only field fpcw
+  deliberately excludes from every list query (their Phase 2 Ruling 4). Not
+  building it is strictly safer than building it unused, and it belongs with E5.
+- Design `budgetCategory` so it can later *reference* a ledger budget line without
+  rewriting history.
 
 ### Track F — Custom domains · ⚠️ *hard blocker, required day one of cutover*
 
@@ -382,20 +540,44 @@ pipeline (0c) → A2 and B1 in parallel.
 
 ## 9. Open questions
 
-1. **Is worship really a "quick followup"?** Classified as one (answer 1), but it
-   is **12 tables and ~7,400 lines** — services, templates, role assignments,
-   holidays, attendance, external participants. Worth confirming that FPCW uses
-   only a small slice of it, because from the schema it reads like a track.
-2. **The E4 / cutover statement collision** (§Track E). Does presby generate the
-   first post-cutover contribution statements from imported prior-year gift
-   history, or does FPCW issue that year's from the old system? **Decides whether
-   K2 must import gift-level detail or only opening balances.**
-3. **Vanco integration depth** — settled-transaction import only, or hosted
-   payment pages / recurring-gift management too? Sets E2's size.
-4. **Youth vs children's ministry** — presby already has `src/lib/children.ts`
-   and a children's-ministry increment plan. Is FPCW's youth module the same
-   need at a different age band, or genuinely separate? Determines whether G1
-   extends existing work or is new.
+**Presbytery-first (blocks Track P)**
+
+1. **Is presbytery-first the decision, or still under consideration?** The operator
+   said PSV "might even go live before fpcw." Formally sequencing P ahead of the
+   FPCW tracks changes what gets built next.
+2. **Are PSV's congregations provisioned as tenant organizations, or kept as
+   reference rows under PSV's org?** See §7.0's model conflict 1. Decides P1's
+   shape and the size of the provisioning story.
+3. **Does PSV track per-property building detail** (appraised value, square
+   footage, addition years — psvonline's 26-column `congregation_buildings`), or is
+   `congregation_oversight.buildingsNotes` sufficient? Largest single driver of
+   P1's size.
+4. **Does PSV need a public website?** If yes, Track F (custom domains) becomes a
+   presbytery-first blocker too, not just an FPCW one.
+5. **Do PSV committees need Google Groups mailing lists?** If yes, part of Track D
+   moves ahead of the FPCW work.
+6. **Who are PSV's users** — presbytery staff only, or congregation clerks
+   submitting statistics? The latter means congregations must be real tenants with
+   real logins (see Q2), which is a much larger onboarding story.
+
+**FPCW**
+
+7. **Youth vs children's ministry** — presby already has `src/lib/children.ts` and
+   a children's-ministry increment plan. Is FPCW's youth module the same need at a
+   different age band, or genuinely separate? Decides whether Track G extends
+   existing work or is new.
+8. **Vanco integration depth** — settled-transaction import only, or hosted payment
+   pages / recurring-gift management? Sets E2's size. *Low urgency: post-cutover.*
+
+### Resolved by the cutover rule (§4.13)
+
+- *Is worship really a "quick followup"?* — **Moot.** Worship is post-cutover,
+  therefore not functionality FPCW uses. No scoping risk.
+- *The contribution-statement collision* — **Dissolved.** Finance is post-cutover,
+  so FPCW issues statements from Church360/Vanco as it does today, and the import
+  need not carry gift-level history.
+- *Reimbursement in or out* — **In, pre-cutover**, request through approval only;
+  the treasury half (`approved → paid`, `paymentInfo`) goes with Track E.
 
 ### Answered and settled
 

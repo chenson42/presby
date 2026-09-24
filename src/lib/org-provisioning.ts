@@ -61,13 +61,28 @@ export function deriveOrgPath(slug: string): string {
   return slug.replace(/-/g, "_");
 }
 
+/**
+ * Drizzle wraps driver errors (`Failed query: …`) and puts the Postgres error
+ * on the `.cause` chain, so reading `err.code` off the top-level object never
+ * matched. Walk the chain (bounded) for the first string `code`.
+ */
+function pgErrorCode(err: unknown): string | undefined {
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (typeof current === "object" && current !== null && "code" in current) {
+      const code = (current as { code?: unknown }).code;
+      if (typeof code === "string") return code;
+    }
+    current =
+      typeof current === "object" && current !== null && "cause" in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return undefined;
+}
+
 function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: unknown }).code === "23505"
-  );
+  return pgErrorCode(err) === "23505";
 }
 
 /**

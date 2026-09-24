@@ -73,7 +73,11 @@ that overlaps one:
 
 ```
 src/lib/db/domain/     — the presby schema, one file per module (org, people,
-                         roll, officers, groups, authz, privacy, reporting)
+                         roll, officers, groups, authz, privacy, and more —
+                         see the directory for the current list; it grows with
+                         nearly every schema pipeline). DDL is hand-written in
+                         drizzle/00XX_presby_*.sql below, not Drizzle Kit —
+                         see database-admin.md's "Presby Domain Schema"
 src/lib/db/schema.ts   — inherited platform tables (NextAuth adapter, roles,
                          flags, audit, email queue). Church data does NOT go here
 src/lib/db/index.ts    — TWO connections: db (presby_app, RLS enforced) and
@@ -104,7 +108,10 @@ src/app/(org)/o/[slug]/ — org-scoped tree. The slug is the URL identifier and 
                          forbidden. See the (org) contract below
 src/app/(admin)/developer/ — generated schema reference
 drizzle/00XX_presby_*.sql  — hand-written: RLS, triggers, functions. Drizzle Kit
-                             does not emit any of these
+                             does not emit any of these. An unreleased migration
+                             (not yet applied to a shipped environment) may be
+                             corrected in place, same file and number; once
+                             shipped, fix forward with a new migration instead
 scripts/seed-dev.sql   — synthetic fixture, shaped to exercise the findings
 scripts/test-rls.sql   — isolation suite. MUST run as presby_app
 docs/STATE.md          — start here
@@ -291,6 +298,7 @@ Slugs are short, lowercase, hyphenated, and stable. Don't rename them after the 
 13. **What's-new advisory at SHIP IT.** At Phase 6, if the shipped feature introduces member-visible behavior, consider publishing a `whats_new_entries` entry (admin CRUD at `/admin/whats-new`). Not required for internal admin tooling, infrastructure, or bug fixes.
 14. **Keep the functionality map current.** When a feature is added, materially changed, or removed, update its line in `docs/product/functionality-map.md` — both the short Index (if a whole surface/area shifts) and the full-map bullet — **at ship time**, in the same housekeeping cluster as the release-notes entry and the TODO reconciliation (Rule 10); the `/release-notes` skill is the natural place. The map's index is loaded into every session by the SessionStart hook, so a stale map actively misleads. The documentation review is the backstop, not the place to defer a change you just shipped.
 15. **Keep `docs/architecture.md` current, but sparingly.** It is the one document written for an engineer seeing this project for the first time — what/why/how at the level any architect would ask, explicitly not implementation detail — and it stays useful only by staying stable. Update it at Phase 6 **only** when a change is genuinely architectural: a new subsystem (the shape of a pipeline like P3's site-content model, not the pipeline's UI), a changed data flow, a changed deployment/runtime shape, or a reversal of something the document currently states as settled. Most feature work does not touch it — resist updating it just because a pipeline shipped; a document that moves with every commit stops being a stable first read. When it does need a change, make it in the same housekeeping cluster as the functionality-map update (Rule 14) and the TODO reconciliation (Rule 10), not as an afterthought.
+16. **Running pipelines in parallel.** One git worktree and one Neon branch per pipeline (`.env.local` in that worktree points at that branch) — the mechanism `neon-postgres`'s SKILL.md already documents, actually used this time. Migration numbers, `DECISION-NNN` numbers, and `F`-numbers are pre-assigned by the orchestrator at `/new-feature` kickoff, so two concurrent pipelines never claim the same number. Judgment agents (`analyst`, `architect`, `qa`) are read-only and free to run in parallel always — the constraint below is about writers. The shared, hand-edited, newest-first files — `src/lib/db/domain/index.ts`, `drizzle/meta/_journal.json`, `scripts/test-rls.sql`, `scripts/seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md` — are edited only at integration, by the orchestrator, never mid-pipeline by a parallel branch. Integration is serialized one PR at a time through `/merge-pr`, even when the branches have no direct code dependency — the collision risk is shared *files*, not shared *code* — and `scripts/test-rls.sql` is re-run against the merged `development` branch after each merge before the next one lands.
 
 ## Commit Message Standards
 

@@ -61,6 +61,14 @@ Tests don't catch a missing gate — a route that wrongly returns 200 to an unde
 
 A missing or wrong gate is a **FAIL** even if every test passes.
 
+## Schema/RLS Audit (mandatory before PASS on a schema-touching change)
+
+**Verify grants and trigger posture against the live catalog** — `pg_class.relforcerowsecurity`, `pg_policies`, `aclexplode(relacl)`, `pg_trigger` on the actual connection(s) in question — not `information_schema` (only reports grants involving the current role) and not the Drizzle table file in `src/lib/db/domain/` (it can silently disagree with what's actually deployed). This is the schema-work analog of "No self-agreeing DB mocks" above: don't verify a grant claim against the same source that might be wrong.
+
+**Probe each claimed protection on the connection that matters, and state which layer actually refuses it.** "RLS blocks this" is not a verified claim until you've run the query as `presby_app` and watched it return zero rows; "the grant blocks this" is not verified until you've tried the write as the role the design claims can't make it. If the actual refusing layer is a trigger rather than the grant or policy the design doc credits (routine on the `getPlatformDb()`/`neondb_owner` connection — see `database-admin.md`), say so by name — a passing test for the wrong reason is a gap the next schema change will walk straight through.
+
+A schema/RLS change with no live-catalog probe behind its PASS is the same class of gap as a missing feature-gate check.
+
 ## Auth-Touching Features — Stricter Gate
 
 If the diff touches `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, the only acceptable outcomes are:

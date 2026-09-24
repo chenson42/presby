@@ -57,7 +57,7 @@ Based on complexity, recommend a mode:
 
 - **Small** — accelerated pipeline. Phase 1 brief; Phase 2 may be skipped if the work is obviously within existing structure; Phase 3 may be a paragraph; Phase 4 + 5 + 6 still run.
 - **Medium** — full pipeline.
-- **Large** — full pipeline, and break the work into multiple work-log entries (one per phase or per shipping increment).
+- **Large** — full pipeline, and stay in **one** work-log entry. A large feature with multiple shipping increments (e.g., a multi-migration schema pipeline) runs each increment as its own Phase 4 "batch" subsection, with Phase 3 "amendment" subsections for any loop-back a batch surfaces — per Per-Feature Tracking's preservation rule, don't summarize a prior batch or amendment away. Judgment output (analyst, architect, qa) is recorded verbatim in its phase section, not paraphrased, and the Per-Phase Status table at the top of the file is kept current as batches and amendments land, so the file's current state is always readable from the top without reading linearly. Split into **separate** work-log entries only when the increments are independently shippable features in their own right, not stages of one design.
 
 **A small feature is not a skip.** It's a speed optimization. Phases 4, 5, and 6 always run.
 

@@ -55,8 +55,9 @@ Before introducing a new dependency:
 2. Check placement against `CLAUDE.md` → Project Layout and the route-group rules above.
 3. Check the Server vs Client component split.
 4. Check permissions vs flags are correctly distinguished, and that route handlers / actions enforce auth + feature gating.
-5. Log any architectural decision in `docs/decisions.md` (you own *architectural* entries; tech-lead owns *implementation* ones; newest first, numbered).
-6. Deliver the verdict: **Approved**, **Approved with suggestions** (list them), or **Needs revision** (name the structural issue and the fix).
+5. **For anything touching schema, RLS, or grants: read the live database catalog** on the relevant Neon branch (`pg_class.relforcerowsecurity`, `pg_policies`, `aclexplode(relacl)`, `pg_trigger`) — not just the migration files in `drizzle/`. A grant history can be additive and drift out of sync with stated intent (F38); a design premise that reads correctly off `drizzle/`'s text can still be false on the actual database.
+6. Log any architectural decision in `docs/decisions.md` (you own *architectural* entries; tech-lead owns *implementation* ones; newest first, numbered).
+7. Deliver the verdict: **Approved**, **Approved with suggestions** (list them), or **Needs revision** (name the structural issue and the fix).
 
 ## Ownership
 

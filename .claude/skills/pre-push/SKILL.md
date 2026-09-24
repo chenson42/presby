@@ -123,7 +123,7 @@ npm run build
 
 ## Step 5: Schema and Migration Check
 
-The starter uses Drizzle Kit. `src/lib/db/schema.ts` is the source of truth.
+Two schemas, two mechanisms — check both. Platform-shell tables in `src/lib/db/schema.ts` go through Drizzle Kit; church-domain tables in `src/lib/db/domain/*.ts` are hand-written SQL in `drizzle/00XX_presby_*.sql` that Drizzle Kit never generates (see `database-admin.md` → Presby Domain Schema).
 
 1. Check whether `schema.ts` has changed since `main`:
    ```bash
@@ -137,8 +137,14 @@ The starter uses Drizzle Kit. `src/lib/db/schema.ts` is the source of truth.
 3. If the schema changed but no migration was generated, ask the user whether they intended to:
    - Use `npm run db:push` (no migration file, applied directly) — fine for early development on a Neon branch.
    - Run `npm run db:generate` to produce a committed migration — required if forks of the starter need to replay the change.
+4. **Separately, always check `src/lib/db/domain/` and `drizzle/` for hand-written presby DDL**, whether or not `schema.ts` changed — this is the majority of presby's actual schema work and the two checks above will not see it:
+   ```bash
+   git diff main --name-only -- src/lib/db/domain/
+   git diff main --name-only -- drizzle/
+   ```
+   For each new `drizzle/00XX_presby_*.sql` file: confirm its number is the next unused one (`ls drizzle/*.sql | tail -3`), and confirm `drizzle/meta/_journal.json` has a matching `{ idx, tag }` entry. For each *modified* existing migration file: confirm via `docs/TODO.md`/`docs/STATE.md` that it has not yet been applied to a shipped environment — a migration correction in place is fine pre-release, wrong post-release (see `database-admin.md`). Either way, confirm `psql "$APP_DATABASE_URL" -f scripts/test-rls.sql` was run and is green — this skill doesn't run it itself (it's a live-DB check, not a build-time one), but the summary must say so explicitly rather than silently omit it.
 
-If the seed (`scripts/seed.ts`) changed, suggest running `npm run db:seed` against a fresh Neon branch to verify it still applies cleanly.
+If the seed (`scripts/seed.ts` or `scripts/seed-dev.sql`) changed, suggest running `npm run db:seed` / re-applying `scripts/seed-dev.sql` against a fresh Neon branch to verify it still applies cleanly.
 
 ## Step 6: Release Notes and Version Bump
 

@@ -24,7 +24,7 @@ You follow both implementers' conventions — read their agent files before star
 
 - **Server work** → `api-developer.md`: authenticate → authorize → validate → execute → respond; `ActionResult<T>` from actions; `recordAudit()` for security-sensitive mutations; HTML-escape user strings in email bodies.
 - **UI work** → `ux-developer.md`: Server Components by default; mobile-first; four UI states; shadcn primitives; `<FormattedDate>` for dates; no native dialogs.
-- **Schema** — new tables/columns go in `src/lib/db/schema.ts` *first* (schema is the source of truth); follow database-admin's conventions and note `db:push` vs `db:generate` in the handoff.
+- **Schema** — platform-shell tables (users, roles, flags, audit, email queue) go in `src/lib/db/schema.ts` first, applied with Drizzle Kit. **Church-domain tables never go there** (CLAUDE.md → Project Layout: "Church data does NOT go here") — they live in `src/lib/db/domain/*.ts` with hand-written RLS/trigger DDL in `drizzle/00XX_presby_*.sql`, which `database-admin.md` owns end to end (see its "Presby Domain Schema" section). Any work touching `organizations`, `people`, the roll, officers, or groups is schema work for `database-admin`, not this agent, regardless of how small the rest of the feature is.
 
 All `CLAUDE.md` Key Invariants and Workflow Rules apply, including permissions-vs-flags separation and no auto commit/push.
 

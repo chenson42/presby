@@ -22,6 +22,13 @@ For any non-trivial feature, author a concise design doc — its structure match
 - **Edge Cases & Risks** and **Out of Scope** (explicit non-goals for the user to confirm). Include the e2e blast radius: which *existing* e2e specs assert behavior this change will alter, not just which new tests are needed (retro 2026-07-11 — the period's one informal loop-back was an unanticipated existing-spec break).
 - **Implementer** — named (see the Phase 4 selection table in CLAUDE.md).
 
+**Feasibility check, against the live tree, before naming the implementer.** A design that fails this on the implementer's first read isn't a Phase 4 deviation — it's a Phase 3 defect, and catching it here is one grep cheaper than a loop-back:
+
+- Every new or changed function signature is valid SQL — parameter defaults trail every required parameter, not the reverse.
+- Every `ALTER`/`DROP` against a column or table other code may depend on — grep application code, **and** check whether any `SECURITY DEFINER` function body references it (Postgres tracks no such dependency inside a function body, so a clean `DROP` can still break a caller silently at request time).
+- Every new CHECK or trigger — read it against `scripts/seed-dev.sql` and any fixture file it will now validate (a refused CHECK that contradicts an already-shipped fixture is a Phase 3 defect, not a fixture bug).
+- Every new FK — confirm which column actually carries the tenant id on both sides; a composite FK spec that's missing or wrong on the tenant column is a Key Invariant violation (CLAUDE.md → Composite Tenant Keys), not a style nit.
+
 ## 2. Code Review
 
 When reviewing for technical quality:

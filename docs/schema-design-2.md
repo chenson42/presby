@@ -136,8 +136,8 @@ Presbyteries write short names in spreadsheets; matching needs
 
 | # | Decision | Choice | If we change it |
 |---|---|---|---|
-| **D10** | Organization lifecycle | **Organizations get a lifecycle independent of `platform_status`, named from G-3.0301(c)**: `organized`, `received`, `merged`, `divided`, `dismissed`, `dissolved` — plus `active` as the steady state. Each carries an effective date **and a `minute_reference`**, because each is a presbytery act taken *in consultation with the members* and *subject to review*. Plus `merged_into_org_id`. `delete` revoked on `organizations`, mirroring `people`. | Without it, a presbytery cannot hold the history of a church that closed — 87 of PSV's ~172 congregations. Deleting or omitting them silently truncates every trend report. Without the minute reference, a dissolution is unattributable, which is exactly what review exists to prevent. |
-| **D11** | SASR is two things | **Separate the archive from the projection.** `sasr_reports` (presby-generated, typed, current form, reconciles against the roll) is distinct from `sasr_archive` (imported, immutable, form-versioned, `payload jsonb`). | Forcing both into one wide table means adding nullable columns retroactively every time the denomination revises the form — for years you cannot re-derive. |
+| **D10** | Organization lifecycle is an **immutable event history** | `organized`, `received`, `merged`, `divided`, `dismissed`, `dissolved` — the vocabulary of G-3.0301(c) — are **dated, minuted events**, not values of a status column. Organizations are never deleted and historical identity is permanent; a dissolved slug is never reissued. Successor/predecessor relationships hang off the events. *(Rephrased after review round 2 — see the topology note below.)* | Without it, a presbytery cannot hold the history of a church that closed — 87 of PSV's ~172 congregations — and every trend report silently truncates to the survivors. Without the minute reference, a dissolution is unattributable, which is what review exists to prevent. |
+| **D11** | Generated and imported returns have different **reconciliation** semantics | A generated return **must reconcile** against the roll (beginning balance + gains − losses = ending active). An imported historical return **records what was reported** and is never corrected to satisfy a current rule. Separate storage follows: typed and current-form for what we derive; form-versioned `payload jsonb` for what we archive. *(Rescoped after review round 2 so it no longer overlaps D21 — D11 is projection vs imported history; D21 is live vs submitted state.)* | Forcing both into one shape means either adding nullable columns retroactively on every form revision, or "fixing" a 1987 return to satisfy a rule written in 2024. |
 | **D12** | Statistical form versioning | **A `sasr_form_version` reference table**, and every archive row names its version. Typed *reporting views* are built per version; the storage is the payload. | A single flat shape either loses old fields or accumulates them forever (F31). |
 | **D13** | Import quarantine is first-class | **Unresolved rows land in a durable staging table with the raw payload, a reason, and a resolution workflow** — never an error log. Resolution can create a `dissolved` organization (D10). | F32. This is the difference between a 48%-failed import and a 100%-preserved one. |
 | **D14** | Congregation name history | **Organizations carry dated name aliases** (`organization_name_history`), used for import matching and for rendering a historical report under the name in force that year. | Renames are routine over 41 years and `slug` immutability (the `(org)` contract) does not help matching on legacy names. |
@@ -159,8 +159,8 @@ because the distinction matters.
 
 | # | Decision | Choice |
 |---|---|---|
-| **D19** | **Council affiliation is a third axis, with history** | Existence (D10), platform participation (`platform_status`, D9) and **council affiliation** are three axes, not two. A congregation's presbytery can change without the congregation changing — synod redistricting, boundary revision, transfer between presbyteries. `organizations.parent_id` holds only the *current* parent, so **`organization_affiliations`** records `(organization_id, parent_org_id, effective_from, effective_to, reason, minute_reference)`. |
-| **D20** | **Publication is a first-class, immutable event** | The invariant "access flows up by publication" was stated but never modelled. **`publications`**: `source_org_id`, `recipient_org_id`, `record_class`, `effective_period`, `published_at`, `supersedes_id`, `payload_ref`, `attested_by`, `minute_reference`. A recipient council reads **the version published to it**, never the source's live data. |
+| **D19** | **Council affiliation is a third axis, with history — and it owns the truth** | Existence (D10), platform participation (`platform_status`, D9) and **council affiliation** are three axes, not two. A congregation's presbytery can change without the congregation changing — synod redistricting, boundary revision, transfer between presbyteries. **`organization_affiliations`** records `(organization_id, parent_org_id, relationship_type, effective_from, effective_to, reason, authority, minute_reference)`. **Affiliation history is authoritative; `organizations.parent_id` is derived.** |
+| **D20** | **Publication is a first-class, immutable event that *references* an artifact** | The invariant "access flows up by publication" was stated but never modelled. **`publications`** is the *event*: `source_org_id`, `recipient_org_id`, `record_class`, `artifact_id`, `published_at`, `supersedes_id`, `authorized_by`, `minute_reference`, `withdrawn_at`. The artifact it points at is a separate, immutable record (for statistics, the D21 frozen submission). A recipient council reads **the artifact published to it**, never the source's live data. |
 | **D21** | **A submitted return freezes; a generated one does not** | Three states, not two: `statistical_projection` (computed live from the roll, recomputable), `statistical_submission` (frozen attested snapshot at submission), `sasr_archive` (imported, immutable). |
 
 **Why D19 matters more than it looks.** The 41-year archive is the proof: a
@@ -171,16 +171,54 @@ any congregation whose presbytery changed. This was invisible from inside either
 organization module or the statistics module — exactly the class of defect the
 full-domain pass exists to catch.
 
+**D19's three database invariants.** Once the history table exists, `parent_id` and
+the currently-effective affiliation row are *two representations of one fact* — and
+the defect D19 fixes for 1990 would reappear at the present-day boundary the moment
+they disagree. So:
+
+1. **Effective ranges may not overlap** for the same child and relationship type.
+2. **At most one affiliation is current** for a relationship that is singular.
+3. **`organizations.parent_id`, if retained, is maintained *from* the current
+   affiliation and is not independently editable.** Keep it only as a materialized
+   convenience for tree traversal.
+
+This project already has the precedent and the scar tissue for exactly this shape:
+`memberships.current_roll` is a documented **cache** that drifts, with
+`presby_roll_cache_drift()` and a daily reconcile to catch it (F29). `parent_id`
+would be the same category of object — so either derive it strictly, or give it the
+same drift detection. Do not let it become a second editable source of truth.
+
+**Affiliation changes carry provenance.** A redistricting that changes forty years of
+reporting attribution is a governing act, not a data edit — so `effective_from`,
+`authority`, and a minute or governing-action reference, for the same reason D10's
+lifecycle events carry them.
+
 **Why D21 matters.** `roll_actions` is append-only *and correctable by void*. So the
 roll can legitimately change after a return is filed, which means "what the roll
 implies for 2026" and "what this congregation reported for 2026" diverge — and both
 are true. The existing design carries `status: draft | session_approved | submitted`,
 but a status flag does not freeze a payload. Submission must snapshot.
 
-**D20 and D21 compose:** the artifact a congregation publishes to its presbytery
-(D20) *is* the frozen submission (D21). That is what makes the publication invariant
-enforceable rather than aspirational — a presbytery holding a published snapshot
-cannot accidentally be reading a congregation's live tenant data.
+**D20 and D21 compose — but they are two entities, not one.** A second review pass
+caught this document overstating the point. The artifact a congregation publishes to
+its presbytery *is* the frozen submission; **publication references that artifact, it
+does not absorb it.** They answer different questions:
+
+- **The submission** answers *what exactly did this congregation report for 2026?* —
+  and owns `form_version`, `report_year`, `attested_by`, the frozen `payload`. True
+  regardless of where, or whether, it is ever published.
+- **The publication** answers *when, by what authority, and to whom was that artifact
+  delivered?* — and owns `recipient_org_id`, `published_at`, `supersedes_id`,
+  `minute_reference`, `withdrawn_at`. None of which belongs to the artifact.
+
+So `publications.artifact_id → statistical_submissions.id`, with `publications` kept
+generic enough to reference other immutable record classes later. **The practical
+payoff of keeping them separate:** one artifact can be published to more than one
+recipient — or republished after a supersession — without being copied.
+
+That composition is what makes the publication invariant enforceable rather than
+aspirational: a presbytery holding a published artifact cannot accidentally be reading
+a congregation's live tenant data.
 
 ### Accepted: two refinements
 
@@ -221,19 +259,51 @@ figure, keep the invariant.** `CLAUDE.md` names this invariant "Two Hierarchies
 Intersect Nowhere," so renaming it is a change to a project invariant rather than a
 heading tweak — not something to do casually, and not something this review settles.
 
-### Accepted as a go-live gate
+*Resolved in round 2: the reviewer withdrew the objection, and observed that the
+retained framing is the stronger one because it states something **testable** — no
+platform role can acquire ecclesiastical authority merely by its position on the
+platform. That sentence is now the property named in the CI gate above.*
+
+### Accepted as a standing CI property, not a go-live gate
 
 Before any congregation adopts the platform, prove as a **property** — not as a
 collection of permission tests — that no presbytery-level role, *including platform
 support roles operating through normal application paths*, can read an adopting
 congregation's private tenant data except through published, delegated, commissioned
-or explicitly stewarded record classes. This is the central trust proposition of the
-architecture and belongs in `scripts/test-rls.sql`'s suite as a stated property.
+or explicitly stewarded record classes.
+
+**And keep proving it.** Review round 2 is right that this belongs in CI rather than
+in a launch checklist: any future permission change capable of violating the property
+should fail automatically. That is this project's existing idiom — `check:audit`,
+`check:brand-scope`, `check:sql-date`, `check:deps-drift`, `check:secrets` are all
+tripwires that turn a review finding into a build failure. This property is more
+load-bearing than any of them.
+
+It also has a testable companion form, which came out of the heading discussion
+below: **no platform role can acquire ecclesiastical authority merely by its position
+on the platform.** That is assertable, not just assertable-sounding.
 
 Related and already known: the inherited `ADMIN_ROLE` wildcard in
 `src/lib/permissions.ts` is a live violation of the spirit of this gate. It is
 bounded — platform shell only, and the tenant connection cannot bypass RLS — but it
 should be closed before this gate can honestly be called met.
+
+---
+
+### Next step: D10, D19, D20 and D21 are designed together
+
+Review round 2's closing recommendation, accepted: these four are coupled tightly
+enough that designing them sequentially would produce four shapes that do not fit.
+The dependency runs through them in one line —
+
+> permanent organization identity (D10) → historical affiliation (D19) → global person
+> with tenant membership (D1) → append-only roll → live statistical projection →
+> frozen submitted artifact (D21) → immutable publication event (D20) → recipient sees
+> only what was published
+
+— so broad schema discovery is complete and the next pipeline is table-and-constraint
+design across **D10 / D19 / D20 / D21 as one unit.** D22 and D23 are independent of
+that unit and can run separately.
 
 ---
 
@@ -261,6 +331,22 @@ organization_affiliations          (new)   D19 — the THIRD axis
   reason, minute_reference
   -- which council this org belonged to, WHEN. `parent_id` is only the present.
 ```
+
+**Why this is an event ledger and not a status column.** Review round 2 made the
+decisive argument: these events have **topology**, and a single enum plus a single
+`merged_into_org_id` cannot carry it.
+
+| Event | Shape |
+|---|---|
+| `merged` | N organizations → 1 successor |
+| `divided` | 1 organization → **N successors** |
+| `dismissed` | organization → an external ecclesiastical body |
+| `received` | an external body → an organization inside this system |
+
+`divided` is the one that breaks a single merge target outright. So `lifecycle_status`
+is a *derived* convenience for "what is this organization now"; the events are the
+record, and successor/predecessor links hang off them. This round does not design that
+relationship graph — it only declines to foreclose it.
 
 **Existence vs affiliation — the polity distinction.** The external review was right
 that these are separate axes, and the mapping needs care:

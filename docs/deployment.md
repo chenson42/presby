@@ -103,7 +103,7 @@ it should be deliberate rather than a surprise.
 | `AUTH_TOTP_ENCRYPTION_KEY` | `openssl rand -base64 32` |
 | `AUTH_URL` | the canonical `www` host — **not** the apex, which 308s and would bounce `/api/auth/*` |
 | `NEXT_PUBLIC_APP_URL` | same as `AUTH_URL` |
-| `INITIAL_ADMIN_EMAILS` | `chenson42@gmail.com` |
+| `INITIAL_ADMIN_EMAILS` | The operator's own sign-in address. Deliberately **not** written down here — this repo is public, and `npm run check:secrets` treats a real address in a tracked file as a finding. Read it from the deployed environment. |
 | `CRON_SECRET` | generated; the email-queue worker needs it |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | **deferred** — see below |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **deferred** — see below |

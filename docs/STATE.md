@@ -3,7 +3,98 @@
 **Read this first in a new session.** Then `docs/schema-design.md` for rationale
 and the findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-08-31.
+Updated 2026-09-24.
+
+---
+
+## Session handoff — 2026-09-24 (read this FIRST — supersedes the 2026-08-31 entry below)
+
+**Checkpointed ahead of a session refresh.** No code was written this session
+beyond a one-paragraph copy fix. What happened was **planning and schema design**,
+and the artifacts are all committed — but the next step was deliberately *not*
+started, so it is waiting.
+
+### THE NEXT TASK (this is where to resume)
+
+**Table-and-constraint design for D10 / D19 / D20 / D21, as a single unit.**
+
+Read `docs/schema-design-2.md` first — especially §2a. Those four decisions are
+coupled tightly enough that designing them sequentially would produce four shapes
+that do not fit:
+
+> permanent organization identity (D10) → historical affiliation (D19) → global
+> person + tenant membership (D1) → append-only roll → live statistical projection
+> → frozen submitted artifact (D21) → immutable publication event (D20) → recipient
+> sees only what was published
+
+Broad schema discovery is **complete**. This is DDL, constraints, indexes and RLS
+policy — not more shape-finding. D22 (person-merge provenance) and D23 (care
+grants) are independent and can run separately. **Not yet started, and not yet
+routed through `/new-feature`** — it has no work-log entry, so Workflow Rule 8
+applies before any Edit.
+
+### What this session decided (all committed)
+
+The whole session was driven by one reframing: **presby will replace
+fpcw-directory for FPCW and become its system of record for members and finance,
+with a presbytery go-live (PSV) first.**
+
+- **`docs/reviews/2026-09-23-fpcw-feature-match.md`** — the replacement program.
+  Eleven tracks, a dependency spine, confirmed scope, and the settled design
+  decisions. Read this for the *program*; read `schema-design-2.md` for the
+  *model*.
+- **`docs/schema-design-2.md`** — full-domain schema round 2. Decisions **D10–D23**,
+  findings **F30–F33**. Survived two rounds of external review; round 2's
+  corrections are recorded in §2a.
+- **`docs/deployment.md`** — rewritten. The previous draft's central claim was
+  false (it described a `presby-production` Neon project that does not exist).
+
+### Standing instructions established this session
+
+1. **The Book of Order is a design authority, not a lookup of last resort**
+   (`schema-design-2.md` §0a). Before naming a status, role, register or
+   lifecycle, check whether the polity names it; if we diverge, say why. This
+   immediately corrected D10 — G-3.0301(c) states the lifecycle vocabulary
+   verbatim.
+2. **Hard cutover: "if I deferred func then it is func that isn't used."** So the
+   pre-cutover track list *is* the definition of what FPCW uses, and anything
+   post-cutover is new product rather than parity.
+3. **Visual parity with fpcw yes, layout parity no** — layout parity would cap
+   presby's IA at the app it replaces.
+
+### Open decisions waiting on the operator
+
+Four, all in `docs/schema-design-2.md` §10 / the program doc:
+Vanco integration depth · youth vs children's ministry · whether PSV needs Google
+Groups for committees · whether PSV needs a public website (it wants one
+eventually, not today).
+
+### ⚠️ Two things that are NOT schema and should not be forgotten
+
+1. **Live production DB credentials sit in an abandoned Vercel account.** The
+   `community-collective` team is no longer reliably administrable; the **legacy
+   `presby-portal` project is what actually serves `www.presbyportal.org`** and
+   holds valid `presby_app` credentials. Remediate in order: new Vercel project →
+   set env vars → repoint GoDaddy DNS → **then** rotate the Neon password.
+   Rotating first takes the site down. See `docs/deployment.md`.
+2. **Go-live is deferred by decision** (Google OAuth and Resend both), so nobody
+   can sign in to production at all right now — including the operator. That is
+   accepted, not an outage.
+
+### Reviews still overdue
+
+All seven, unchanged: test-coverage and retrospective (14d slot), plus code,
+documentation, security, agent-instruction and dependencies (30d slot), last run
+2026-08-19. The operator's instruction was to run them **after planning
+completes** — planning is now complete, so these are next after the DDL design, or
+before it if preferred. The `security` review is the one with real leverage: it
+lands before any credential-storage design.
+
+### Housekeeping done this session
+
+`.claude/agents/` retuned for cost (opus on architect/qa/database-admin — two of
+the three are read-only, so the spend is small; everything that writes volume
+stays on sonnet). Agent `effort:` declared for the first time in this repo.
 
 ---
 

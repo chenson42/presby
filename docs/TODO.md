@@ -16,6 +16,41 @@ subsection heading, not position in the file, to gauge urgency.
 
 ---
 
+## FPCW replacement program (2026-09-24)
+
+presby will **replace fpcw-directory for FPCW** and become FPCW's **system of
+record for members and finance** (today: Church360 + Vanco). No deadline —
+"build it right". Cutover is a **January 1** switch, at FPCW's fiscal-year
+boundary. Full analysis, confirmed scope, settled design decisions and the
+dependency spine: **`docs/reviews/2026-09-23-fpcw-feature-match.md`**. Lines
+here are the tracking surface only.
+
+- [ ] **Track 0 — foundation hygiene.** `security` + `code` reviews (both overdue), then close **DECISION-060** (`group_memberships.officer_term_id` has no FK at all — the F2 gap) and add the **`group_types` unique constraint on `(organization_id, key)`**, plus the `drizzle/0033` cascade-delete trigger defect. **Gates Track A** — Google Groups sync reads `group_memberships` to compute desired membership, so a mis-scoped row becomes a real person receiving another congregation's mail.
+- [ ] **Track A — groups & calendar schema.** `groups` (hierarchy w/ composite FK + cycle guard, activation, privacy, guests, Google columns, Drive link), **`group_meeting_schedules`** (retires free-text `groups.meetsWhen`; reuse `src/lib/events/recurrence.ts`), `group_guests`, `group_sync_jobs`, `group_on_call_shifts` + rotation, `rooms`, `event_types`, `events` sync columns.
+- [ ] **Track B — visual parity.** Extend the brand role vocabulary to card/popover/border/muted + `--radius` (**a `contract.ts` change — architect-led**; operator approved "flexibility"); make `--font-heading`/`--font-body` load-bearing + a Geist-class pairing; configure FPCW's brand (`#60a7a1`, light-only — `organization_brands.light_only` already exists); record the DECISION-047 consequence for the un-branded `/signin`. **Visual parity is the goal; layout parity is an explicit non-goal.**
+- [ ] **Track C — directory quick wins.** Work-vs-personal email precedence (needs a per-org work-email-domain config, `fpcw.us`); member's groups on their profile; groups search.
+- [ ] **Track D — Google Workspace.** **OAuth admin-consent + per-org encrypted refresh tokens, NOT service-account domain-wide delegation** — fpcw's model is correct single-tenant and an anti-pattern multitenant. Then Groups sync (job queue, `skipReason`, **domain guard shipping with the sync, not at cutover**, adopt-not-create) and Calendar invitations. Needs a **test Workspace domain** (to be created) — never develop against `fpcw.us`. Sensitive scopes need Google app verification: real lead time.
+- [ ] **Track E — finance & reimbursement (largest program).** presby has **zero** financial tables; `/admin/giving` is an inert placeholder. Fund-accounting core + **Vanco integration** + contributions recording + **IRS Pub 1771 contribution statements** + reimbursement (committee routing, treasurer-only `paymentInfo`, attachments, PDF receipts, append-only event log) + budgets/reconciliation. **Design against `~/git/westervillelions`' ~26 `ledger_*` tables** — it already solves acknowledgments, letter templates and reimbursements.
+- [ ] **Track F — custom domains. ⚠️ HARD BLOCKER, required day one of cutover.** FPCW's public site must stay at `westervillefirstpresbyterian.org`; `organization_sites` has no custom-domain support. Host→org resolution **cannot live in `src/proxy.ts`** (Edge cannot reach the database). Architect-led.
+- [ ] **Track G — youth.** ~8,400 lines, 5 tables. **Reconcile with presby's existing `src/lib/children.ts`** children's-ministry work before designing — don't build a parallel model.
+- [ ] **Track H — mailchimp sync.** ~2,300 lines. Must honor `person_privacy` / `contact_methods.doNotContact` **outbound** — a privacy invariant, not just an API call.
+- [ ] **Track I — white-binder kiosk.** ~3,200 lines. **Last item before go-live** (operator).
+- [ ] **Track J — quick followups (operator-classified).** worship, insights, photo-uploads, talents. ⚠️ **Verify worship really is quick — it is 12 tables / ~7,400 lines.**
+- [ ] **Track K — cutover, January 1.** Workspace inventory baseline; **three-source import** (Church360 members/finance + Vanco giving history + fpcw-directory groups/terms/reimbursement/on-call/Google mappings, joined on `church360Id`); every member gets an honest **`opening_balance`** roll action, never a fabricated `profession_of_faith`. Import scripts live in `private/`, not the repo (no general importer, by decision). Then the switch + reconcile.
+- [ ] **Open: is worship really a "quick followup"?** 12 tables, ~7,400 lines. — `docs/reviews/2026-09-23-fpcw-feature-match.md` §9
+- [ ] **Open: the E4/cutover statement collision.** A January 1 switch means the first statements FPCW owes post-cutover cover a year recorded in Church360/Vanco. Either presby generates them from imported gift-level history (so Track K must import gift detail, not just balances) or FPCW issues that year from the old system. **Decide before Track K's scope is fixed.**
+- [ ] **Open: Vanco integration depth** — settled-transaction import only, or hosted payment pages / recurring-gift management? Sets Track E's size.
+- [ ] **Open: youth vs children's ministry** — same need at a different age band, or genuinely separate?
+- [ ] **Stale prior-art paths in `CLAUDE.md`.** The table points at `../fpcw-directory` and `../westervillelions`; both live at `~/git/<repo>`, not beside `presby` under `~/git/presby-platform/`.
+
+## Deployment & production (2026-09-24)
+
+- [ ] **⚠️ Live production DB credentials sit in an abandoned Vercel account.** The operator has lost reliable access to `community-collective`; the **legacy `presby-portal` project is what actually serves `www.presbyportal.org`** and holds valid `presby_app` credentials (the linked `presby` project has **zero** env vars, contradicting `docs/STATE.md`). Remediate in order: new Vercel project in a controlled team → set env vars → repoint GoDaddy DNS → **then** rotate the Neon password. Rotating first takes the site down. — `docs/deployment.md`
+- [ ] **Port the legacy `presby-portal` Neon project's data** (`silent-cloud-95940340`, ~39 MB). Legacy but wanted — **do not delete**.
+- [ ] **Stand up a new Vercel project** in a team the operator controls, and re-link this repo.
+- [ ] Google OAuth and Resend are **deferred by decision** until go-live; production currently has **no way to sign in at all**, including for the operator. Accepted.
+- [ ] First real `site-fpcw` ingest still blocked: `SITES_INGEST_OIDC_AUDIENCE`/`GITHUB_SITES_ORG` unset in production and `last_ingested_commit_sha` is a scratch placeholder.
+
 ## Verification debt (DECISION-045)
 
 Phases 5 and 6 deferred on the foundation pipelines, to be cleared in one

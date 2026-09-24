@@ -28,6 +28,8 @@ For no-op reviews (a cycle genuinely produced no actionable findings): `nothing 
 
 <!-- newest entries go here, above the older ones -->
 
+2026-09-24 | sibling-harvest (ad hoc, operator-requested) | FPCW replacement feature-match vs fpcw-directory @ e988e83 (v2.15.00-v2.15.52): scope confirmed as directory + groups/on-call + reimbursement + finance SoR + youth + mailchimp + kiosk + calendar/Google, cutover Jan 1 at fiscal-year boundary; 3 blockers found (custom domains absent and required day one, finance domain nonexistent, DECISION-060 missing FK gates Google sync); fpcw's service-account DWD model rejected as multitenant anti-pattern in favour of OAuth admin-consent; 11 tracks + 4 open questions; see 2026-09-23-fpcw-feature-match.md
+
 **Reset 2026-08-19.** This file was carried over wholesale when presby was
 scaffolded from `chenson42/claudecode-nextjs-starter` on 2026-08-17 — every
 entry below the divider is that starter project's own review history, not

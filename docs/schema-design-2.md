@@ -653,6 +653,171 @@ implementation choice, not a requirement.
 
 ---
 
+## 2f. Fourth Phase 3 loop-back — external post-merge review (F47–F53)
+
+*(2026-09-24, tech-lead, fourth Phase 3 amendment,
+`docs/work-log/2026-09-24-lifecycle-affiliation-returns.md` — "Amendment
+after external implementation review." `drizzle/0043`–`0047` are on `main`
+but applied only to `development`, so this is a migration correction in
+place, same files and numbers, matching the convention F46 established.)*
+
+An external reviewer read the exported table shapes (constraints, grants,
+RLS, trigger placement — function bodies were collapsed and could not be
+verified) and returned five findings, confirmed real against the working
+tree. **The review's own diagnosis needed one correction before its fixes
+could be trusted: grant-narrowing alone does not bind `getPlatformDb()`
+(F44) — every ruling below that closes a real hole does so with a trigger.**
+
+### F47 — `organization_identifiers` has no write-authority model at all
+
+`presby_app` held `select, insert, update, delete` with no RLS
+(`drizzle/0043:76`) — a tenant connection could rewrite or erase another
+organization's identifier, including `is_verified`, the column that gates
+global uniqueness. Fix: `presby_app` narrowed to `SELECT`; a new `SECURITY
+DEFINER` function `presby_set_organization_identifier()` (actor = self org or
+a council with `presby_org_affiliated()` standing over the subject) becomes
+the sole tenant-side writer; a new `BEFORE UPDATE OR DELETE` guard trigger,
+gated on a new GUC (`presby.identifier_trigger_active` — not a reuse of the
+affiliation GUC; unrelated table, unrelated transaction), closes the owner
+path. `presby_platform` keeps its DML grant, same accepted-risk class as its
+grants elsewhere in this pipeline. INSERT is left ungated beyond the grant
+narrowing — bounded residual, named in `docs/TODO.md`, not solved here.
+
+### F48 — `organization_successions` is missing a UNIQUE, but the cardinality trigger already resists the gaming the review worried about
+
+`UNIQUE (event_id, predecessor_org_id, successor_org_id)` added — correct
+data integrity regardless. But `presby_check_succession_cardinality()`
+already counts `count(distinct …)`, so a duplicate edge cannot inflate
+cardinality; and `presby_freeze_succession()` already blocks every UPDATE on
+every connection, so the cardinality trigger's dead UPDATE-arm concern does
+not need a fix — verified by reading the function bodies, which the
+reviewer's own export could not do.
+
+### F49 — `organization_affiliations`: four proposed CHECKs, three built, and the one table in the pipeline that never got F44's guard-trigger treatment
+
+*(Ratified with one correction after the hardening pass, 2026-09-24, fifth
+Phase 3 loop-back — see the work-log's "Ratification after the hardening
+pass" note. The fourth CHECK below, `organization_affiliations_recorded_
+has_from`, is refused, not built: `scripts/seed-dev.sql`'s Quillhaven row and
+`scripts/test-rls.sql`'s F41 assertion both depend on a `'recorded'` row
+carrying a null `effective_from` when the minuted act itself predates the
+records — a minuted close can legitimately name a beginning nobody can date.
+F41's "null means unbounded below" was never conditioned on `authority =
+'backfill'`, and reworking it to be would have meant editing an assertion
+this same pipeline's own QA proved. The invariant actually worth keeping —
+"a null `minute_reference` appears only on a `'backfill'` row" — is a
+different claim, already true, and needs no new CHECK. `test-rls.sql` pins
+the CHECK's absence and the contradicting fixture row's existence, so the gap
+reads as a ruling, not an oversight.)*
+
+Row shape permitted: a `'recorded'` row with no `effective_from`; an empty
+effective range (`effective_to = effective_from`, which `daterange()`
+constructs without error); `closed_*` set while open or absent while closed;
+`subject_org_id = parent_org_id`. Three of the four proposed CHECKs were
+added — **the closed-shape CHECK deliberately excludes `closed_by`**, which
+is permanently null on every close by design (Ruling A4); the reviewer's
+literal "all four `closed_*` fields" would have broken every legitimate
+close. The fourth, requiring `effective_from` on every `'recorded'` row, is
+refused (see the correction note above). Separately: `drizzle/0044`
+argued explicitly that this table's grant alone was the right instrument,
+before F44 was even discovered later in the same migration file — that
+argument no longer holds. A `BEFORE UPDATE OR DELETE` guard now gates on the
+**reused** `presby.affiliation_trigger_active` GUC (same function, same
+transaction as the `organizations` reparent guard already using it — moved
+earlier in `presby_transfer_affiliation()` so it covers both). The DELETE arm
+cannot be an unconditional freeze like `organization_successions`' — `subject_
+org_id` is `ON DELETE CASCADE` specifically for fixture teardown — so
+`presby_guard_organizations_delete()` now also sets the GUC once it has
+validated `deletable_until`, pre-authorizing the cascade within the same
+transaction without touching any of the 15+ existing teardown call sites.
+
+### F50 — `statistical_returns` has no provenance-shape enforcement
+
+`submitted, reconciled = false, attested_* = null` and `imported, reconciled
+= true` were both legal rows. A `statistical_returns_provenance_shape` CHECK
+closes it — added **after** `drizzle/0047`'s own backfill, whose INSERT must
+first be corrected to supply synthetic `attested_by_name`/`attested_role`
+placeholders (it currently leaves them null, which the new CHECK would
+otherwise reject on the pipeline's own data). INSERT revoked from both roles;
+submitted stays `presby_publish_sasr_snapshot()`-only, imported has no
+application writer until D13's import function ships.
+
+**Correction, ratified after the hardening pass (2026-09-24, fifth Phase 3
+loop-back):** the built CHECK's `submitted` branch does not require
+`attested_by_name`/`attested_role` non-null — only `attested_at`. The literal
+spec above would have made every *live* publish impossible:
+`presby_publish_sasr_snapshot()` writes both text columns NULL on purpose
+(Ruling A4 — no `app.current_user_id` GUC exists, and accepting a
+caller-supplied attester name is exactly the identity claim the function's
+confused-deputy shape refuses), and the backfill's own synthetic placeholders
+are honest only because those rows *are* reconstructions. Ratified as the
+Ruling-A4-consistent shape, the same deviation already accepted for
+`closed_by`. Tightening the two text columns to non-null is folded into the
+existing `docs/TODO.md` line for the `app.current_user_id` GUC — it has no
+separate line.
+
+### F51 — `publications`: an outright CHECK bug, plus three missing integrity mechanisms
+
+`publications_withdrawal_shape` read `withdrawn_at is not null or (withdrawn_
+by is null and withdrawn_minute_reference is null)` — true when `withdrawn_at`
+is set and the other two are anything, including both null, contradicting the
+"move together" comment on the same column. Corrected to a symmetric
+all-null-or-all-set CHECK (binds the owner connection too — CHECKs, unlike
+RLS and unlike grants, are not something F44 exempts). INSERT revoked
+(function-mediated). Supersession made a real chain: a `SECURITY DEFINER`
+`BEFORE INSERT` trigger requires the predecessor to share `organization_id`,
+`recipient_org_id`, `record_class` and (for `statistical_return`) the
+artifact's `report_year`; a partial unique index on `supersedes_id` forbids
+forks. The projection's recipient end is now proven by a second composite FK
+(`publications (id, recipient_org_id)` ← `congregation_statistics
+(publication_id, organization_id)`) alongside the existing source-end FK —
+together the two pin both ends of the same `publications` row.
+
+### F52 — Withdrawal semantics were half Option A, half Option B; ruled Option A throughout
+
+`presby_list_published_returns_to_me()` filtered `withdrawn_at is null`
+(Option B: revoke read authorization) while the `congregation_statistics`
+projection was left untouched by withdrawal (Option A: retain as historical
+record). Per this design's permanence philosophy and G-3.0107, ruled Option A
+throughout: the filter is removed from the read function (withdrawn rows
+return, with the column, for the caller to exclude); `congregation_
+statistics` gains its own `withdrawn_at`, settable through exactly one
+permitted transition on the existing freeze trigger (by-subtraction JSONB
+comparison, the same technique the backfill already uses, rather than
+hand-enumerating ~60 columns). The future `presby_withdraw_publication()`
+(still deferred to the publish-UI pipeline) sets both columns together.
+
+**Correction, ratified after the hardening pass (2026-09-24, fifth Phase 3
+loop-back):** "no such consumer exists yet" was wrong. A live rollup consumer
+of `congregation_statistics` already exists — `getCongregationStatisticsRollup()`
+in `src/lib/presbytery.ts` — and does not filter `withdrawn_at is null`. It is
+a no-op today (nothing can set the column outside the one permitted
+transition, which nothing yet calls), so no behavior changes. Ruled: the
+filter obligation is owned by the future `presby_withdraw_publication()`
+pipeline, which is the first thing that can ever make the column non-null and
+therefore the natural place to add the corresponding read-side filter in the
+same change — not pulled forward into this hardening pass. `docs/TODO.md`'s
+existing line is retargeted to name the function directly rather than a
+hypothetical future consumer.
+
+### F53 — `sasr_form_versions.field_spec` stays mutable forever, even once a return depends on it
+
+Ruled now, not deferred — cheap, and the failure mode (silently redefining
+the meaning of a frozen historical payload) is exactly this pipeline's
+central concern applied to the one table it hadn't reached yet. A `SECURITY
+DEFINER` `BEFORE UPDATE` trigger (DEFINER is load-bearing — an invoker-mode
+version would silently see zero referencing rows under RLS for a tenant other
+than the caller's own, the same F26 shape this pipeline has hit twice)
+rejects a `field_spec` change once any `statistical_returns` row anywhere
+references the key. Placeholder rows remain editable until first use.
+
+**Not reopened:** whether `organization_identifiers` INSERT needs its own
+guard (named residual, `docs/TODO.md`); whether the recipient read-back
+should also expose `withdrawn_by`/`withdrawn_minute_reference` (left to the
+future publish-UI pipeline, which has an actual consumer to design against).
+
+---
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

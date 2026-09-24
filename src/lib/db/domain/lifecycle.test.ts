@@ -133,6 +133,16 @@ describe.skipIf(!hasDb)(
         authority: "recorded",
         minuteReference: "Fixture: predates our records, closed 1995",
         recordedBy: userId,
+        // The close attribution is INLINE as of 2026-09-24 (F49):
+        // `organization_affiliations_closed_shape` refuses a closed row that
+        // carries no attribution, and `organization_affiliations_guard`
+        // refuses the follow-up UPDATE that would otherwise supply it.
+        // `closedBy` stays null on purpose — it is the acting USER, and there
+        // is no `app.current_user_id` GUC (Ruling A4), which is exactly why
+        // that column is excluded from the CHECK.
+        closedByOrgId: presbyteryA,
+        closedOn: TRANSFER_DATE,
+        closedMinuteReference: "Fixture: the 1995 boundary change",
       });
       await platform.insert(organizationAffiliations).values({
         organizationId: presbyteryB,
@@ -605,6 +615,228 @@ describe.skipIf(!hasDb)(
           "presby_platform.INSERT",
           "presby_platform.SELECT",
         ]);
+      });
+    });
+
+    // -------------------------------------------------------------------
+    // The 2026-09-24 hardening pass (F48 / F49 / DECISION-140), on the
+    // connection that matters. `presby_app` holds no INSERT, UPDATE or DELETE
+    // on either table, so from `scripts/test-rls.sql` every probe below would
+    // be refused by the permission check before the constraint or trigger
+    // under test could fire. `PLATFORM_DATABASE_URL` connects as
+    // `neondb_owner`, which owns both tables and holds every privilege by
+    // ownership (F44) — here the CHECK and the trigger are the only things
+    // standing, which is the whole claim.
+    // -------------------------------------------------------------------
+
+    describe("organization_successions_edge_unique (F48 / DECISION-140)", () => {
+      it("refuses the same (event, predecessor, successor) edge twice — one fact written twice is not two facts", async () => {
+        await inRollback(async (tx) => {
+          const [event] = await tx
+            .insert(organizationLifecycleEvents)
+            .values({
+              organizationId: presbyteryB,
+              subjectOrgId: congC,
+              event: "divided",
+              effectiveOn: "2026-02-07",
+              minuteReference: "Fixture: F48 duplicate edge",
+              recordedBy: userId,
+            })
+            .returning({ id: organizationLifecycleEvents.id });
+
+          await tx.insert(organizationSuccessions).values({
+            eventId: event!.id,
+            predecessorOrgId: congC,
+            successorOrgId: congD,
+          });
+          // The IDENTICAL triple, not a different successor: the constraint
+          // is about one fact recorded twice, not about cardinality (which
+          // presby_check_succession_cardinality() already resists, because it
+          // counts `count(distinct …)`).
+          await expectDbError(
+            () =>
+              tx.insert(organizationSuccessions).values({
+                eventId: event!.id,
+                predecessorOrgId: congC,
+                successorOrgId: congD,
+              }),
+            /organization_successions_edge_unique/,
+          );
+        });
+      });
+    });
+
+    describe("organization_affiliations row shape (F49 / DECISION-140)", () => {
+      /** A legal base row, so each probe varies exactly one thing. */
+      function base(overrides: Record<string, unknown>) {
+        return {
+          organizationId: presbyteryA,
+          subjectOrgId: congE,
+          parentOrgId: presbyteryA,
+          relationshipType: "member_congregation",
+          effectiveFrom: "1980-01-01",
+          authority: "recorded",
+          minuteReference: "Fixture: F49 base row",
+          recordedBy: userId,
+          ...overrides,
+        } as never;
+      }
+
+      it("refuses an EMPTY effective range — daterange(d, d) is valid, empty, and overlaps nothing, so the EXCLUDE constraint never sees it", async () => {
+        await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx.insert(organizationAffiliations).values(
+                base({
+                  effectiveFrom: "1980-01-01",
+                  effectiveTo: "1980-01-01",
+                  closedByOrgId: presbyteryA,
+                  closedOn: "1980-01-01",
+                  closedMinuteReference: "Fixture: same-day close",
+                }),
+              ),
+            /organization_affiliations_range_order/,
+          );
+        });
+      });
+
+      it("refuses an INVERTED effective range", async () => {
+        await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx.insert(organizationAffiliations).values(
+                base({
+                  effectiveFrom: "1990-01-01",
+                  effectiveTo: "1980-01-01",
+                  closedByOrgId: presbyteryA,
+                  closedOn: "1980-01-01",
+                  closedMinuteReference: "Fixture: inverted",
+                }),
+              ),
+            /organization_affiliations_range_order/,
+          );
+        });
+      });
+
+      it("refuses a CLOSED row with no close attribution, and an OPEN row that carries some", async () => {
+        await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx
+                .insert(organizationAffiliations)
+                .values(base({ effectiveTo: "1995-01-01" })),
+            /organization_affiliations_closed_shape/,
+          );
+        });
+        await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx.insert(organizationAffiliations).values(
+                base({
+                  closedOn: "1995-01-01",
+                  closedMinuteReference: "Fixture: attribution with no act",
+                }),
+              ),
+            /organization_affiliations_closed_shape/,
+          );
+        });
+      });
+
+      it("accepts a closed row whose closed_by is null — the Ruling A4 exclusion is deliberate, not an oversight", async () => {
+        await inRollback(async (tx) => {
+          await tx.insert(organizationAffiliations).values(
+            base({
+              subjectOrgId: congE,
+              effectiveFrom: "1900-01-01",
+              effectiveTo: "1901-01-01",
+              closedByOrgId: presbyteryA,
+              closedBy: null,
+              closedOn: "1901-01-01",
+              closedMinuteReference: "Fixture: a close with no acting USER",
+            }),
+          );
+        });
+      });
+
+      it("refuses a body that is its own council", async () => {
+        await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx
+                .insert(organizationAffiliations)
+                .values(base({ parentOrgId: congE })),
+            /organization_affiliations_not_self|organization_affiliations: this change is not permitted/,
+          );
+        });
+      });
+    });
+
+    describe("organization_affiliations_guard (F49 / DECISION-140)", () => {
+      it("refuses a raw UPDATE of 1994 affiliation history on the OWNER connection — the grant revoke never bound neondb_owner (F44)", async () => {
+        await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx
+                .update(organizationAffiliations)
+                .set({ minuteReference: "tamper" })
+                .where(eq(organizationAffiliations.subjectOrgId, congD)),
+            /organization_affiliations: this change is not permitted/,
+          );
+        });
+      });
+
+      it("refuses a raw DELETE on the OWNER connection", async () => {
+        await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx
+                .delete(organizationAffiliations)
+                .where(eq(organizationAffiliations.subjectOrgId, congD)),
+            /organization_affiliations: this change is not permitted/,
+          );
+        });
+      });
+
+      it("still lets a deletable_until-stamped fixture organization DELETE cascade cleanly — the test a naive 'always reject DELETE' implementation fails", async () => {
+        // This is the reason the DELETE arm reads a GUC rather than mirroring
+        // organization_successions' unconditional freeze. `subject_org_id` is
+        // ON DELETE CASCADE *specifically* so fixture teardown works, and
+        // `presby_guard_organizations_delete()` arms the flag once it has
+        // validated `deletableUntil` — pre-authorizing the cascade Postgres
+        // fires immediately afterwards, in the same transaction, with no
+        // change to any of the 15+ existing teardown call sites.
+        const platform = getPlatformDb();
+        const slug = `lifecycle-cascade-${stamp}`;
+        const [org] = await platform
+          .insert(organizations)
+          .values({
+            deletableUntil: fixtureDeletableUntil(),
+            organizationType: "congregation",
+            name: "Fixture cascade org for lifecycle.test.ts",
+            slug,
+            path: slug.replace(/-/g, "_"),
+            platformStatus: "unmanaged",
+          })
+          .returning({ id: organizations.id });
+        await platform.insert(organizationAffiliations).values({
+          organizationId: presbyteryA,
+          subjectOrgId: org!.id,
+          parentOrgId: presbyteryA,
+          relationshipType: "member_congregation",
+          effectiveFrom: "2020-01-01",
+          authority: "recorded",
+          minuteReference: "Fixture: cascade teardown",
+          recordedBy: userId,
+        });
+
+        // The plain teardown every fixture already performs.
+        await platform.delete(organizations).where(eq(organizations.id, org!.id));
+
+        const left = await platform.execute(sql`
+          select count(*)::int as n from organization_affiliations
+           where subject_org_id = ${org!.id}::uuid
+        `);
+        expect((left.rows[0] as { n: number }).n).toBe(0);
       });
     });
 

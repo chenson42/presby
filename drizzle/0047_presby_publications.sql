@@ -154,13 +154,28 @@ create table if not exists publications (
     check (record_class in ('statistical_return')),
   constraint publications_not_self_superseding
     check (supersedes_id is null or supersedes_id <> id),
-  -- Attribution without the act it attributes is meaningless: a withdrawer
-  -- or a withdrawal minute can only exist on a row that is actually
-  -- withdrawn. The trigger enforces the TRANSITION; this enforces the
-  -- resulting SHAPE, including for the owner's own writes.
+  -- The three withdrawal columns are all null or all set, and nothing in
+  -- between. The trigger enforces the TRANSITION; this enforces the resulting
+  -- SHAPE, including for the owner's own writes — CHECK constraints bind the
+  -- table owner, unlike RLS policies and unlike grants, so F44 does not
+  -- exempt this one.
+  --
+  -- CORRECTED 2026-09-24 (F51 / DECISION-140, fourth Phase 3 loop-back). The
+  -- first build read:
+  --     check (withdrawn_at is not null
+  --            or (withdrawn_by is null and withdrawn_minute_reference is null))
+  -- which is TRUE whenever withdrawn_at is set, whatever the other two hold —
+  -- including both null. It therefore permitted precisely the unattributable
+  -- withdrawal its own column comment says is impossible, and contradicted
+  -- DECISION-135's affiliation-close shape it was written to mirror. The
+  -- corrected form is symmetric.
   constraint publications_withdrawal_shape
-    check (withdrawn_at is not null
-           or (withdrawn_by is null and withdrawn_minute_reference is null))
+    check ((withdrawn_at is null
+            and withdrawn_by is null
+            and withdrawn_minute_reference is null)
+        or (withdrawn_at is not null
+            and withdrawn_by is not null
+            and withdrawn_minute_reference is not null))
 );
 
 -- The two withdrawal-provenance columns are added idempotently as well as in
@@ -170,15 +185,22 @@ create table if not exists publications (
 alter table publications add column if not exists withdrawn_by uuid references users(id);
 alter table publications add column if not exists withdrawn_minute_reference text;
 
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'publications_withdrawal_shape') then
-    alter table publications
-      add constraint publications_withdrawal_shape
-      check (withdrawn_at is not null
-             or (withdrawn_by is null and withdrawn_minute_reference is null));
-  end if;
-end $$;
+-- The idempotent twin of the constraint above. UNCONDITIONAL DROP FIRST, not
+-- an `if not exists` guard: the 2026-09-24 correction keeps the constraint's
+-- NAME and changes its DEFINITION, so a database that already ran the earlier
+-- form of this migration carries the BROKEN predicate under the right name
+-- and a presence check would leave it there forever. Dropping and re-adding
+-- converges either state, and re-validates the (zero to two) existing rows
+-- against the corrected predicate while it is at it.
+alter table publications drop constraint if exists publications_withdrawal_shape;
+alter table publications
+  add constraint publications_withdrawal_shape
+  check ((withdrawn_at is null
+          and withdrawn_by is null
+          and withdrawn_minute_reference is null)
+      or (withdrawn_at is not null
+          and withdrawn_by is not null
+          and withdrawn_minute_reference is not null));
 
 create index if not exists publications_recipient_idx
   on publications (recipient_org_id);
@@ -199,9 +221,18 @@ create policy tenant_isolation on publications
 -- organization_id is the source congregation. That is deliberate and it is
 -- why presby_list_published_returns_to_me() (section 7 below) exists: the
 -- publication EVENT grants the recipient's read, not the tenant policy.
+-- CORRECTED 2026-09-24 (F51 / DECISION-140): INSERT revoked from both roles
+-- too. A publication is an EVENT produced by a sanctioned act, and the only
+-- writer is presby_publish_sasr_snapshot() — SECURITY DEFINER, so it runs
+-- with its owner's privileges and is unaffected by this revoke, exactly as
+-- presby_transfer_affiliation() is by DECISION-135's revoke on
+-- organization_affiliations. The backfill below is unaffected for the same
+-- reason: it runs as the owner during migration. Leaving INSERT granted
+-- alongside a DEFINER writer is the half-applied function-mediation this
+-- pipeline has now corrected on three tables.
 revoke all on publications from presby_app, presby_platform;
-grant select, insert on publications to presby_app;
-grant select, insert on publications to presby_platform;
+grant select on publications to presby_app;
+grant select on publications to presby_platform;
 
 comment on table publications is
   'The publication EVENT (D20): a source council published an artifact to a recipient council on a date, under a minute. IMMUTABLE except for withdrawn_at, which is the one permitted UPDATE (withdrawal is a column, never a delete). recipient_org_id is resolved once from presby_affiliation_parent_as_of() at write time and never re-derived, so a later redistricting cannot change who received an already-filed return.';
@@ -214,7 +245,7 @@ comment on column publications.withdrawn_by is
 comment on column publications.withdrawn_minute_reference is
   'The withdrawing council''s own minute. Distinct from minute_reference, which authorized the PUBLICATION — one column, one fact.';
 comment on column publications.withdrawn_at is
-  'Withdrawal is a column, not a delete (D20), and it is a MINUTED ACT: withdrawn_at, withdrawn_by and withdrawn_minute_reference move together, exactly once, on a row that is not already withdrawn — DECISION-135''s affiliation-close shape, for the same reason (a close with no attribution is an unattributable mutation of a provenanced record). A withdrawn publication disappears from presby_list_published_returns_to_me(); its congregation_statistics projection row is DELIBERATELY UNTOUCHED — acting on the projection is out of scope for this pipeline and belongs to whichever pipeline ships a withdrawal UI (Phase 3 Edge Cases, "Withdrawn publications and the projection row").';
+  'Withdrawal is a column, not a delete (D20), and it is a MINUTED ACT: withdrawn_at, withdrawn_by and withdrawn_minute_reference move together, exactly once, on a row that is not already withdrawn — DECISION-135''s affiliation-close shape, for the same reason (a close with no attribution is an unattributable mutation of a provenanced record). OPTION A (F52/DECISION-140, 2026-09-24): a withdrawn publication STILL APPEARS in presby_list_published_returns_to_me(), carrying the whole triple, and its congregation_statistics projection row gains its own withdrawn_at rather than vanishing — the recipient retains what it received, marked, and excludes it from current calculations itself.';
 
 -- ---------------------------------------------------------------------------
 -- 2. publications_freeze — immutable except withdrawn_at
@@ -281,6 +312,84 @@ drop trigger if exists publications_freeze on publications;
 create trigger publications_freeze
   before update or delete on publications
   for each row execute function presby_freeze_publication();
+
+-- ---------------------------------------------------------------------------
+-- 2b. presby_check_publication_supersession() — supersession is a CHAIN
+--     (F51 / DECISION-140, added 2026-09-24)
+-- ---------------------------------------------------------------------------
+-- `supersedes_id` was a bare self-FK: any publication could name any other as
+-- the thing it corrects, including one belonging to a different congregation,
+-- addressed to a different council, of a different record class, or about a
+-- different report year. A correction that crosses any of those axes is not a
+-- correction — it is a claim about someone else's filing.
+--
+-- SECURITY DEFINER, and NOT for cross-tenant convenience. `publications` is
+-- FORCE ROW LEVEL SECURITY, so an INVOKER-mode version of this check would
+-- see zero rows for a forged supersedes_id pointing at another org's
+-- publication, conclude "no predecessor found"… and, if written naively,
+-- skip. Written as it is below it would instead reject — but it would reject
+-- for the wrong reason and, worse, would ALSO reject a legitimate predecessor
+-- the caller cannot see under its own policy. Either way the trigger's answer
+-- would depend on the caller's RLS view rather than on the fact. This is the
+-- same F26 shape drizzle/0044's council-authority checker and drizzle/0046's
+-- field-spec freeze both carry; DEFINER is the fix in all three.
+--
+-- ONE UNIFORM LITERAL, CAUSE-BLIND (F40 / DECISION-139's discipline): a
+-- probing caller must not be able to distinguish "no such publication" from
+-- "that publication belongs to another congregation" from "wrong year",
+-- because the first two together are a cross-tenant existence oracle.
+create or replace function presby_check_publication_supersession()
+returns trigger language plpgsql security definer as $$
+declare
+  v_prev_org       uuid;
+  v_prev_recipient uuid;
+  v_prev_class     text;
+  v_prev_artifact  uuid;
+  v_prev_year      integer;
+  v_new_year       integer;
+begin
+  if new.supersedes_id is null then
+    return new;
+  end if;
+
+  select p.organization_id, p.recipient_org_id, p.record_class, p.artifact_id
+    into v_prev_org, v_prev_recipient, v_prev_class, v_prev_artifact
+    from publications p
+   where p.id = new.supersedes_id;
+
+  if v_prev_org is null
+     or v_prev_org is distinct from new.organization_id
+     or v_prev_recipient is distinct from new.recipient_org_id
+     or v_prev_class is distinct from new.record_class
+  then
+    raise exception
+      'publications: supersedes_id must name this council''s own earlier publication of the same record class to the same recipient'
+      using errcode = 'check_violation';
+  end if;
+
+  -- For a statistical return the artifact carries the year, and a correction
+  -- is by definition a correction OF A YEAR. Joined through the artifacts
+  -- rather than stored on the publication so there is one source of truth for
+  -- the year (the return), not two that can disagree.
+  if new.record_class = 'statistical_return' then
+    select r.report_year into v_prev_year
+      from statistical_returns r where r.id = v_prev_artifact;
+    select r.report_year into v_new_year
+      from statistical_returns r where r.id = new.artifact_id;
+    if v_prev_year is distinct from v_new_year then
+      raise exception
+        'publications: supersedes_id must name this council''s own earlier publication of the same record class to the same recipient'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists publications_supersession on publications;
+create trigger publications_supersession
+  before insert on publications
+  for each row execute function presby_check_publication_supersession();
 
 -- ---------------------------------------------------------------------------
 -- 3. The congregation_statistics retrofit — the column and its FK
@@ -352,6 +461,11 @@ begin;
 
 alter table congregation_statistics disable trigger congregation_statistics_freeze;
 alter table publications disable trigger publications_freeze;
+-- statistical_returns_freeze joins them 2026-09-24, for the convergence
+-- UPDATE at the end of this block (F50): a database that ran the EARLIER form
+-- of this migration already holds reconstructed rows with null attestation
+-- text, and a filed return is frozen on every connection.
+alter table statistical_returns disable trigger statistical_returns_freeze;
 
 create temporary table _presby_0047_backfill_map (
   cs_id          uuid primary key,
@@ -404,20 +518,38 @@ begin
     -- that is not identity, provenance or publication bookkeeping IS a SASR
     -- aggregate. drizzle/0046's own assertion guarantees that set equals the
     -- 2024 field_spec, so this cannot silently drift from the spec.
+    -- 'withdrawn_at' is in the subtraction list for the F52 column added at
+    -- the end of this file. It is null on every backfilled row and
+    -- jsonb_strip_nulls would drop it anyway, and on a FRESH apply the column
+    -- does not exist yet so the subtraction is a no-op — it is listed so that
+    -- a re-apply against a database where the column DOES exist, and where
+    -- some future row carries a value, cannot smuggle a key the 2024
+    -- field_spec does not declare into an archived payload.
     v_payload := jsonb_strip_nulls(
       to_jsonb(r) - array[
         'id','organization_id','about_org_id','year','provenance',
         'supersedes_publication_id','published_at','minute_reference',
-        'entered_by','created_at','publication_id'
+        'entered_by','created_at','publication_id','withdrawn_at'
       ]
     );
 
+    -- ATTESTATION PLACEHOLDERS, corrected 2026-09-24 (F50 / DECISION-140).
+    -- The first build left attested_by_name and attested_role null and set
+    -- attested_at from r.published_at, which is NULLABLE — so a reconstructed
+    -- "submitted" row could carry no attestation at all. Both text columns now
+    -- carry synthetic values in the same voice as source_ref two lines below,
+    -- and attested_at falls back the same way the publication's own
+    -- published_at does, so the two rows agree. The values say plainly that
+    -- this is a reconstruction rather than an attestation anybody made.
     insert into statistical_returns (
       organization_id, about_org_id, report_year, form_version_key,
-      provenance, payload, reconciled, attested_at, source_ref, created_at
+      provenance, payload, reconciled,
+      attested_by_name, attested_role, attested_at, source_ref, created_at
     ) values (
       r.about_org_id, r.about_org_id, r.year, '2024',
-      'submitted', v_payload, true, r.published_at,
+      'submitted', v_payload, true,
+      'backfill: reconstructed (drizzle/0047)', 'backfill',
+      coalesce(r.published_at, r.created_at, now()),
       'backfill: reconstructed from congregation_statistics ' || r.id::text || ' (drizzle/0047)',
       coalesce(r.created_at, now())
     )
@@ -513,13 +645,32 @@ begin
     (select count(*) from congregation_statistics where provenance = 'published_by_congregation');
 end $$;
 
+-- CONVERGENCE FOR A DATABASE THAT RAN THE EARLIER FORM OF THIS MIGRATION
+-- (added 2026-09-24, F50). The `development` Neon branch already holds a
+-- reconstructed return minted by the first build, with attested_by_name and
+-- attested_role null — the exact shape statistical_returns_provenance_shape
+-- (section 5 below) is about to refuse, and the reason that CHECK has to be
+-- added after this block rather than in drizzle/0046. Matched on source_ref
+-- rather than on the null columns alone, so this can only ever touch rows
+-- THIS migration minted; idempotent, and a no-op on a fresh apply because the
+-- INSERT above now writes the values directly.
+update statistical_returns
+   set attested_by_name = coalesce(attested_by_name, 'backfill: reconstructed (drizzle/0047)'),
+       attested_role    = coalesce(attested_role, 'backfill'),
+       attested_at      = coalesce(attested_at, created_at)
+ where provenance = 'submitted'
+   and source_ref like 'backfill: reconstructed from congregation_statistics%'
+   and (attested_by_name is null or attested_role is null or attested_at is null);
+
+alter table statistical_returns enable trigger statistical_returns_freeze;
 alter table publications enable trigger publications_freeze;
 alter table congregation_statistics enable trigger congregation_statistics_freeze;
 
 commit;
 
 -- ---------------------------------------------------------------------------
--- 5. The shape CHECK, now that every published row carries a publication
+-- 5. The shape CHECKs and the projection's RECIPIENT end, now that every
+--    published row carries a publication
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -530,6 +681,153 @@ begin
       add constraint congregation_statistics_publication_shape
       check ((provenance = 'published_by_congregation') = (publication_id is not null));
   end if;
+end $$;
+
+-- F50 / DECISION-140, added 2026-09-24. The two provenances were shapes in
+-- prose only: `submitted` with reconciled = false and no attestation at all,
+-- and `imported` with reconciled = true, were both legal rows, and nothing
+-- but presby_publish_sasr_snapshot()'s own discipline — not the schema — kept
+-- a submitted return attested. It is added HERE, after the backfill above,
+-- for the reason drizzle/0046 section 8 spells out.
+--
+-- DEVIATION FROM F50'S LITERAL TEXT, and it is the same deviation, for the
+-- same cause, that Ruling A4 forced on organization_affiliations_closed_shape
+-- (F49): the ruling's predicate requires `attested_by_name is not null and
+-- attested_role is not null`, but presby_publish_sasr_snapshot() —
+-- unchanged by this loop-back, and the ONLY live writer of a submitted row —
+-- writes both as NULL on purpose (see its own comment: there is no
+-- app.current_user_id GUC, and accepting an attester name as a parameter
+-- would be the caller-supplied identity claim its whole shape refuses). The
+-- CHECK as literally worded would make publishing impossible. The two text
+-- columns are therefore excluded and `attested_at` — which the function DOES
+-- write, and which the corrected backfill now always writes — carries the
+-- attestation half of the shape. Tightening the two text columns is blocked
+-- on the acting-user GUC, exactly as closed_by is; recorded as a loop-back
+-- candidate in the work-log rather than silently absorbed.
+--
+-- What the constraint still closes, and it is the half that had no owner:
+--   * a submitted return that claims no reconciliation (D11 applies at write
+--     time to this provenance by definition);
+--   * a submitted return with no attestation instant at all;
+--   * an imported return marked reconciled — an imported 1987 row is a
+--     historical assertion, and if it does not balance that is a fact about
+--     1987, not an error to correct.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'statistical_returns_provenance_shape'
+  ) then
+    alter table statistical_returns
+      add constraint statistical_returns_provenance_shape
+      check ((provenance = 'submitted' and reconciled and attested_at is not null)
+          or (provenance = 'imported' and not reconciled));
+  end if;
+end $$;
+
+-- F51 / DECISION-140, added 2026-09-24: supersession may not FORK. Two
+-- publications naming the same predecessor would make "which one is current"
+-- unanswerable, which is the single question the chain exists to answer.
+-- Partial, because null is the overwhelmingly common value and a plain UNIQUE
+-- would be a no-op on it in Postgres but would still carry the index cost of
+-- every row.
+create unique index if not exists publications_supersedes_once_idx
+  on publications (supersedes_id) where supersedes_id is not null;
+
+-- THE PROJECTION'S RECIPIENT END (F51 / DECISION-140, added 2026-09-24).
+--
+-- The existing congregation_statistics_publication_fk proves the SOURCE end:
+-- (publication_id, about_org_id) -> publications (id, organization_id), i.e.
+-- the projection's congregation is the publication's publishing congregation.
+-- Nothing proved the RECIPIENT end — Presbytery B could hold a projection row
+-- pointing at a publication whose actual recipient_org_id was Presbytery A,
+-- provided the source congregation matched.
+--
+-- Two FKs, sharing publication_id, both pinning to the same single
+-- publications row (id is the primary key), therefore force BOTH
+-- about_org_id = publications.organization_id AND organization_id =
+-- publications.recipient_org_id on that one row. That is what "the projection
+-- is a projection of THIS event" actually means.
+--
+-- The backfill above already satisfies it with no fixup: it writes the
+-- publication's recipient_org_id as r.organization_id, which IS the
+-- projection row's own organization_id.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'publications_id_recipient_key'
+  ) then
+    alter table publications
+      add constraint publications_id_recipient_key unique (id, recipient_org_id);
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint where conname = 'congregation_statistics_publication_recipient_fk'
+  ) then
+    alter table congregation_statistics
+      add constraint congregation_statistics_publication_recipient_fk
+      foreign key (publication_id, organization_id)
+      references publications (id, recipient_org_id);
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 5b. Withdrawal reaches the PROJECTION (F52 / DECISION-140, Option A)
+-- ---------------------------------------------------------------------------
+-- Added 2026-09-24. Option A says the recipient RETAINS a withdrawn artifact
+-- as historical record, marked withdrawn and excluded from current
+-- calculations — so the projection needs somewhere to carry the mark. Without
+-- this column the recipient's typed surface would go on counting a withdrawn
+-- return in every rollup with no way to know, which is the half-Option-A the
+-- read function above was just corrected out of.
+--
+-- Added AFTER the backfill deliberately: the backfill reconstructs each
+-- payload by SUBTRACTING known bookkeeping columns from `to_jsonb(r)`, and a
+-- column that does not yet exist cannot leak into an archived payload. (It is
+-- also named in that subtraction list, for the re-apply case.)
+alter table congregation_statistics add column if not exists withdrawn_at timestamptz;
+
+comment on column congregation_statistics.withdrawn_at is
+  'Set when the publication this row projects is withdrawn (F52/DECISION-140, Option A). The row STAYS — the recipient retains the received artifact as historical record, the same permanence rule that voids a roll action rather than deleting it — and every consumer computing CURRENT totals must filter withdrawn_at is null. Settable through exactly one transition, by presby_reject_published_statistics_write() below; the future presby_withdraw_publication() sets it together with publications.withdrawn_at/by/minute_reference in one transaction.';
+
+-- presby_reject_published_statistics_write() is WIDENED BY EXACTLY ONE
+-- PERMITTED TRANSITION, mirroring presby_freeze_publication()'s shape.
+--
+-- It cannot be edited in drizzle/0038, where it was created: 0038 is released.
+-- `create or replace function` here, in the file that is still unreleased, is
+-- the correct instrument — the trigger definition in 0038 is unchanged and
+-- keeps pointing at this name.
+--
+-- THE COMPARISON IS BY JSONB SUBTRACTION, not by enumerating ~60 columns. The
+-- backfill above already uses that technique; hand-listing the columns would
+-- be a second place that has to be edited every time a SASR field is added,
+-- and the failure mode of forgetting is silent (an unlisted column becomes
+-- freely editable on a published row).
+--
+-- THERE IS NO WITHDRAW FUNCTION YET, and that is deliberate, not an omission.
+-- The future presby_withdraw_publication() — still owned by the publish-UI
+-- pipeline, named in docs/TODO.md — sets publications.withdrawn_at/by/
+-- minute_reference AND this column in ONE transaction; both freeze triggers
+-- permit exactly that pair of transitions and nothing else, which is why they
+-- are written now, before the writer exists, rather than alongside it.
+create or replace function presby_reject_published_statistics_write()
+returns trigger language plpgsql as $$
+begin
+  -- The ONE permitted transition: withdrawn_at moves null -> not null and
+  -- NOTHING ELSE on the row moves. A second withdrawal is refused for the
+  -- same reason publications_freeze refuses one — a withdrawal is itself an
+  -- act, corrected by publishing again, never by editing the act away.
+  if tg_op = 'UPDATE'
+     and old.withdrawn_at is null
+     and new.withdrawn_at is not null
+     and (to_jsonb(old) - 'withdrawn_at') = (to_jsonb(new) - 'withdrawn_at')
+  then
+    return new;
+  end if;
+
+  raise exception
+    'congregation_statistics %: published rows are immutable; republish via presby_publish_sasr_snapshot(), which supersedes automatically (the only permitted UPDATE is a single withdrawal — setting withdrawn_at, and nothing else on the row)',
+    old.id
+    using errcode = 'check_violation';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1071,18 +1369,29 @@ grant execute on function presby_publish_sasr_snapshot(
 -- DISSOLVED congregation's returns after dissolution — which a read gated on
 -- a current affiliation would refuse at exactly the moment it matters.
 --
--- WITHDRAWN PUBLICATIONS ARE EXCLUDED (sec 5 and Ruling 5 both say
--- `withdrawn_at is null`; the Phase 3 API Contract's prose says the opposite,
--- and the work-log records the conflict and this resolution). `withdrawn_at`
--- and its two provenance companions are nevertheless RETAINED IN THE RETURN
--- SIGNATURE — `withdrawn_at` as the API Contract specifies it, plus
--- `withdrawn_by` and `withdrawn_minute_reference` per the 2026-09-24 external
--- review — so that a later decision to surface withdrawn rows is a one-line
--- change to the WHERE clause rather than a signature change every caller has
--- to follow, and so that when it happens the recipient sees WHO withdrew and
--- under which minute rather than merely that something vanished. Under the
--- filter as written all three are always null, and that is stated here rather
--- than left for a reader to discover.
+-- WITHDRAWN PUBLICATIONS ARE RETURNED, NOT FILTERED OUT — reversed
+-- 2026-09-24 (F52 / DECISION-140, Option A decided).
+--
+-- The first build filtered `and p.withdrawn_at is null`, which was Option B
+-- (withdrawal REVOKES the recipient's read authorization) while the
+-- congregation_statistics projection was left untouched by withdrawal, which
+-- is Option A (the recipient RETAINS the received artifact as historical
+-- record, marked withdrawn, excluded from current calculations). Half of each
+-- is the one answer that is certainly wrong.
+--
+-- Option A throughout, for two reasons. This design's whole permanence
+-- philosophy: a roll action is voided rather than deleted, a person is merged
+-- rather than erased, a publication is withdrawn rather than deleted — a
+-- mechanism that makes a withdrawn return simply VANISH from the recipient's
+-- read is the odd one out. And G-3.0107: a ceased council's records become
+-- the property of the next higher council, which reads oddly beside a
+-- disappearing artifact.
+--
+-- The whole withdrawal triple is in the return signature, so the caller
+-- filters — and, when it does, sees WHO withdrew and under which minute
+-- rather than merely that something is gone. A consumer computing CURRENT
+-- totals adds `withdrawn_at is null`; a consumer showing the recipient's
+-- history does not.
 --
 -- Adding the two columns changes the RETURN TYPE, which CREATE OR REPLACE
 -- cannot do, so the function is dropped first. Safe: it ships in this same
@@ -1120,7 +1429,6 @@ language sql stable security definer as $$
     on r.id = p.artifact_id
    and r.organization_id = p.organization_id
   where p.recipient_org_id = presby_current_org()
-    and p.withdrawn_at is null
     and (p_about_org_id is null or r.about_org_id = p_about_org_id)
     and (p_year is null or r.report_year = p_year)
   order by r.report_year desc, p.published_at desc;
@@ -1130,7 +1438,7 @@ revoke all on function presby_list_published_returns_to_me(uuid, integer) from p
 grant execute on function presby_list_published_returns_to_me(uuid, integer) to presby_app;
 
 comment on function presby_list_published_returns_to_me(uuid, integer) is
-  'The recipient side of a publication (Ruling 5 / DECISION-135). Returns the artifact behind every non-withdrawn publication addressed to presby_current_org(), joined through the composite (artifact_id, organization_id) FK. Takes no council id: the caller is the GUC, never a parameter. Filters on the recorded publication rather than on live affiliation, so a dissolved congregation''s returns stay readable by the council that received them (G-3.0107).';
+  'The recipient side of a publication (Ruling 5 / DECISION-135). Returns the artifact behind EVERY publication addressed to presby_current_org(), withdrawn ones included and carrying the whole withdrawal triple — Option A, F52/DECISION-140: the recipient retains the received artifact as historical record and a consumer computing CURRENT totals filters withdrawn_at is null itself. Joined through the composite (artifact_id, organization_id) FK. Takes no council id: the caller is the GUC, never a parameter. Filters on the recorded publication rather than on live affiliation, so a dissolved congregation''s returns stay readable by the council that received them (G-3.0107).';
 
 -- ---------------------------------------------------------------------------
 -- 9. sasr_reports — dropped (Phase 2 Ruling 6 / DECISION-137)

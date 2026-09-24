@@ -84,18 +84,29 @@ insert into organizations (id, organization_type, name, slug, path, platform_sta
 -- the subject's parent_id and path. Order matters for Quillhaven: the CLOSED
 -- historical row goes in first so the OPEN row is the one the derivation
 -- lands on.
+--
+-- The CLOSE ATTRIBUTION IS INLINE, not a follow-up UPDATE (changed
+-- 2026-09-24, F49): organization_affiliations_guard now refuses every UPDATE
+-- outside presby_transfer_affiliation(), on every connection including the
+-- owner this script runs as, and organization_affiliations_closed_shape
+-- refuses a row that is closed without attribution at INSERT time anyway. The
+-- values are the same ones the old trailing UPDATE wrote — the Southern
+-- Fields recorded the row, the Synod closed it at the boundary change.
 insert into organization_affiliations
   (organization_id, subject_org_id, parent_org_id, relationship_type,
-   effective_from, effective_to, authority, minute_reference, reason)
+   effective_from, effective_to, authority, minute_reference, reason,
+   closed_by_org_id, closed_on, closed_minute_reference)
 values
   ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
    '11111111-1111-1111-1111-111111111111', 'member_congregation',
    '1962-05-01', null, 'recorded',
-   'Northern Reach stated meeting, 1962-05-01, item 4', 'Organized'),
+   'Northern Reach stated meeting, 1962-05-01, item 4', 'Organized',
+   null, null, null),
   ('11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333',
    '11111111-1111-1111-1111-111111111111', 'member_congregation',
    '1948-09-12', null, 'recorded',
-   'Northern Reach stated meeting, 1948-09-12, item 2', 'Organized'),
+   'Northern Reach stated meeting, 1948-09-12, item 2', 'Organized',
+   null, null, null),
   -- Quillhaven, the REDISTRICTING fixture: in the Southern Fields until the
   -- 1995 boundary change, in the Northern Reach since. This is what makes
   -- presby_org_affiliated(quillhaven, southern-fields, '1990-01-01') answer
@@ -106,28 +117,20 @@ values
    'f6000000-0000-0000-0000-000000000001', 'member_congregation',
    null, '1995-01-01', 'recorded',
    'Southern Fields stated meeting, 1901-04-02, item 1',
-   'Predates our records; closed by the 1995 boundary change'),
+   'Predates our records; closed by the 1995 boundary change',
+   'f6000000-0000-0000-0000-000000000001', '1995-01-01',
+   'Synod of the Northern Watershed, 1994-10-21, minute 7'),
   ('11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
    '11111111-1111-1111-1111-111111111111', 'member_congregation',
    '1995-01-01', null, 'recorded',
    'Synod of the Northern Watershed, 1994-10-21, minute 7',
-   'Boundary change of 1995'),
+   'Boundary change of 1995',
+   null, null, null),
   ('f8000000-0000-0000-0000-000000000001', 'f8000000-0000-0000-0000-000000000002',
    'f8000000-0000-0000-0000-000000000001', 'member_presbytery',
    '1973-01-01', null, 'recorded',
-   'Coastal Plain synod meeting, 1973-01-01, item 1', 'Organized');
-
--- Close the Quillhaven historical row's attribution: the Southern Fields
--- recorded it, the Synod closed it at the boundary change. Written directly
--- rather than through presby_transfer_affiliation() because that function
--- derives its actor from presby_current_org(), and a seed script has no
--- session. (The function itself is proven in scripts/test-rls.sql.)
-update organization_affiliations
-   set closed_by_org_id = 'f6000000-0000-0000-0000-000000000001',
-       closed_on = '1995-01-01',
-       closed_minute_reference = 'Synod of the Northern Watershed, 1994-10-21, minute 7'
- where subject_org_id = '44444444-4444-4444-4444-444444444444'
-   and effective_to = '1995-01-01';
+   'Coastal Plain synod meeting, 1973-01-01, item 1', 'Organized',
+   null, null, null);
 
 -- require_two_factor differs between the two congregations on purpose: the
 -- isolation suite asserts that presby_two_factor_required() reads the policy

@@ -232,9 +232,15 @@ begin
     from information_schema.columns c
    where c.table_schema = 'public'
      and c.table_name = 'congregation_statistics'
+     -- 'withdrawn_at' joins the bookkeeping list 2026-09-24 (F52): drizzle/
+     -- 0047 adds it to congregation_statistics as Option A's projection-side
+     -- withdrawal mark. It is NOT a SASR aggregate, and without this entry a
+     -- RE-APPLY of 0046 after 0047 fails this very assertion — which is how
+     -- the omission was caught. The same list appears in 0047's backfill
+     -- payload subtraction; the two must stay in step.
      and c.column_name not in ('id','organization_id','about_org_id','year','provenance',
                                'supersedes_publication_id','published_at','minute_reference',
-                               'entered_by','created_at','publication_id')
+                               'entered_by','created_at','publication_id','withdrawn_at')
      and not exists (
        select 1 from sasr_form_versions v,
                      jsonb_object_keys(v.field_spec -> 'fields') k
@@ -332,14 +338,30 @@ create policy tenant_isolation on statistical_returns
   using (organization_id = presby_current_org())
   with check (organization_id = presby_current_org());
 
--- APPEND-ONLY BY GRANT on both application roles. The recipient council reads
+-- READ-ONLY BY GRANT on both application roles. The recipient council reads
 -- this table only through presby_list_published_returns_to_me() (increment 5,
 -- SECURITY DEFINER): a return the congregation owns is invisible to the
 -- presbytery under the policy above, which is the point — the publication
 -- event, not the tenant policy, is what grants the read.
+--
+-- CORRECTED 2026-09-24 (F50 / DECISION-140, fourth Phase 3 loop-back). The
+-- first build also granted INSERT to both roles, alongside the DEFINER writer
+-- — the same half-applied function-mediation DECISION-135 already corrected
+-- on organization_affiliations. INSERT is now revoked from both:
+--   * the SUBMITTED path is presby_publish_sasr_snapshot() (drizzle/0047),
+--     SECURITY DEFINER, which runs with its OWNER's privileges and is
+--     therefore completely unaffected by this revoke;
+--   * the IMPORTED path has no application writer at all yet (D13's import
+--     function is increment 7). Until it ships, the only writer of an
+--     imported row is the migration-time backfill running as owner, which is
+--     correct and is the state today. That function, when it lands, is
+--     DEFINER too.
+-- As everywhere else in this pipeline the revoke is the belt: it binds
+-- presby_app and presby_platform and not neondb_owner (F44). The buckle is
+-- statistical_returns_freeze below, which fires on every connection.
 revoke all on statistical_returns from presby_app, presby_platform;
-grant select, insert on statistical_returns to presby_app;
-grant select, insert on statistical_returns to presby_platform;
+grant select on statistical_returns to presby_app;
+grant select on statistical_returns to presby_platform;
 
 comment on table statistical_returns is
   'The as-reported SASR artifact (D25), IMMUTABLE and append-only. One table, two provenances: submitted (owned by the congregation, D11 reconciliation applied at write time) and imported (owned by the presbytery, a historical assertion that is never reconciled). No unique on (about_org_id, report_year) — a correction is a new row and publications.supersedes_id says which is current (R3.8).';
@@ -551,3 +573,79 @@ drop trigger if exists statistical_returns_about_org on statistical_returns;
 create trigger statistical_returns_about_org
   before insert on statistical_returns
   for each row execute function presby_check_return_about_org();
+
+-- ---------------------------------------------------------------------------
+-- 7. presby_freeze_used_field_spec() — a spec is frozen once a return leans
+--    on it (F53 / DECISION-140, added 2026-09-24)
+-- ---------------------------------------------------------------------------
+-- The hole: `payload` is preserved forever and is validated against
+-- `field_spec` at write time only, so editing a generation's field_spec after
+-- the fact silently changes the DEFINITION THROUGH WHICH a frozen historical
+-- payload is read — a 1987 return whose `ending_active` meant one thing now
+-- means another, with nothing in the database recording that anything moved.
+-- That is this pipeline's central concern (roll actions are voided, not
+-- edited; publications are withdrawn, not deleted; returns are superseded,
+-- not updated) applied to the one table it had not reached.
+--
+-- SECURITY DEFINER IS LOAD-BEARING HERE, not cargo-culted (DECISION-121 asks
+-- that the choice be stated either way). statistical_returns is FORCE ROW
+-- LEVEL SECURITY: an invoker-mode version of this function would see only the
+-- CALLING tenant's returns, so an edit attempted while some other
+-- congregation's context was set — or with no org GUC at all — would find
+-- zero referencing rows and let the change through, for exactly the tenant
+-- whose historical payload it should have protected. That is the F26 shape
+-- this pipeline has already hit twice (drizzle/0044's council-authority
+-- checker, drizzle/0047's supersession checker). The test for this trigger
+-- deliberately attempts the edit under a DIFFERENT tenant's context than the
+-- one holding the referencing row, so an invoker-mode regression fails it.
+--
+-- PLACEHOLDERS STAY FILLABLE. '1984', '2014' and '2022' ship with
+-- {"fields": {}} and nothing references them, so the trigger permits their
+-- eventual mapping; the moment the first return is filed against a key, that
+-- key's spec is done moving.
+--
+-- THE SEED UPSERT ABOVE (section 2) KEEPS WORKING ON RE-APPLY, including for
+-- a key that IS referenced, and it does so without a special case: the
+-- trigger's WHEN clause is `old.field_spec IS DISTINCT FROM new.field_spec`,
+-- and re-applying this file writes byte-identical jsonb, so the trigger never
+-- fires for a no-op convergence. Only a GENUINE spec change to a used
+-- generation is refused — which is the rule. (The alternative, teaching the
+-- seed to skip field_spec for referenced keys, would have made the migration
+-- silently stop converging the 2024 spec the day the first 2024 return was
+-- filed; this way a real divergence is a loud failure instead.)
+create or replace function presby_freeze_used_field_spec()
+returns trigger language plpgsql security definer as $$
+begin
+  if exists (select 1 from statistical_returns where form_version_key = old.key) then
+    raise exception
+      'sasr_form_versions %: this generation''s field_spec is frozen — a filed return is already interpreted through it, and redefining it would silently change what that return says. Publish a new generation instead.',
+      old.key
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists sasr_form_versions_field_spec_freeze on sasr_form_versions;
+create trigger sasr_form_versions_field_spec_freeze
+  before update on sasr_form_versions
+  for each row
+  when (old.field_spec is distinct from new.field_spec)
+  execute function presby_freeze_used_field_spec();
+
+-- ---------------------------------------------------------------------------
+-- 8. statistical_returns_provenance_shape — DELIBERATELY NOT HERE
+-- ---------------------------------------------------------------------------
+-- F50's provenance-shape CHECK lives in drizzle/0047, added AFTER that file's
+-- backfill, and this comment exists so a reader looking for it in the table's
+-- own migration does not conclude it was dropped.
+--
+-- Why it cannot live here: 0047's backfill MINTS submitted statistical_returns
+-- rows out of pre-existing congregation_statistics projections. On a fresh
+-- database the files apply 0046 -> 0047, so a CHECK added here would already
+-- be in force when that backfill ran and would have to be satisfied by
+-- reconstructed rows rather than by rows the application wrote. Keeping the
+-- CHECK next to the backfill it constrains — the same ordering discipline
+-- 0047 already uses for congregation_statistics_publication_fk and
+-- congregation_statistics_publication_shape — is what makes both the
+-- fresh-apply order and a whole-file re-apply correct. This file stays
+-- independently applicable either way.

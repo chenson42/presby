@@ -169,6 +169,22 @@ export const congregationStatistics = pgTable(
      */
     publicationId: uuid("publication_id"),
     /**
+     * Set when the publication this row projects is withdrawn (F52/
+     * DECISION-140, Option A). The ROW STAYS — the recipient retains the
+     * artifact it received, marked, the same permanence rule that voids a
+     * roll action rather than deleting it — and every consumer computing
+     * CURRENT totals must filter `withdrawnAt is null`.
+     *
+     * The only permitted UPDATE of a published row, and it is exactly one
+     * transition: `presby_reject_published_statistics_write()` (widened in
+     * `drizzle/0047`) allows null -> not-null on THIS column with nothing
+     * else on the row moving, compared by JSONB subtraction rather than by
+     * enumerating ~60 columns. There is no writer yet: the future
+     * `presby_withdraw_publication()` sets this and the publication's own
+     * three withdrawal columns in one transaction.
+     */
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    /**
      * Set only for published rows, and it STAYS HERE rather than moving to
      * `publications` (F39): `src/lib/presbytery.ts:522` orders on it and
      * `:533-539` coalesces provenance with it, and the presbytery cannot read
@@ -302,6 +318,19 @@ export const congregationStatistics = pgTable(
       name: "congregation_statistics_publication_fk",
       columns: [t.publicationId, t.aboutOrgId],
       foreignColumns: [publications.id, publications.organizationId],
+    }),
+    /**
+     * The RECIPIENT end (F51/DECISION-140). The FK above proves the SOURCE
+     * end only — `aboutOrgId = publications.organizationId` — so Presbytery B
+     * could still hold a projection of a publication whose real recipient was
+     * Presbytery A, provided the source congregation matched. Both FKs share
+     * `publicationId` and pin to the same single `publications` row, so
+     * together they force both ends of the relationship on that one row.
+     */
+    foreignKey({
+      name: "congregation_statistics_publication_recipient_fk",
+      columns: [t.publicationId, t.organizationId],
+      foreignColumns: [publications.id, publications.recipientOrgId],
     }),
     check(
       "congregation_statistics_publication_shape",

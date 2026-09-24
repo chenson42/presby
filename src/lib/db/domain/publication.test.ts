@@ -51,6 +51,11 @@ const NORTHERN_REACH = "11111111-1111-1111-1111-111111111111";
 const ALDER_CREEK = "22222222-2222-2222-2222-222222222222";
 const BRAMBLEWOOD = "33333333-3333-3333-3333-333333333333";
 const WESTERN_BASIN = "f7000000-0000-0000-0000-000000000001";
+/** The presbytery that held Quillhaven until the 1995 boundary change. */
+const SOUTHERN_FIELDS = "f6000000-0000-0000-0000-000000000001";
+const QUILLHAVEN = "44444444-4444-4444-4444-444444444444";
+/** The presbytery under the Coastal Plain synod — never affiliated with the above. */
+const TIDEWATER = "f8000000-0000-0000-0000-000000000002";
 /** Tobias Renwick — Alder Creek's stated clerk, the `statistics.publish` holder. */
 const CLERK_OF_SESSION = "c0000000-0000-0000-0000-000000000002";
 /** Idris Calloway — the northern reach's stated clerk, `statistics.manage`. */
@@ -542,18 +547,23 @@ describe.skipIf(!hasDb)(
       });
     });
 
-    describe("withdrawal, and what it does NOT touch", () => {
-      it("removes the publication from the recipient's read-back while leaving the projection row exactly where it is", async () => {
-        // THE RULE THE SPEC GIVES, stated because it is a deliberate gap and
-        // not an oversight (Phase 3 Edge Cases, "Withdrawn publications and
-        // the projection row"): withdrawal marks the publication EVENT only.
-        // `congregation_statistics` has no withdrawn_at of its own, and this
-        // pipeline does NOT act on the projection — a withdrawn publication's
-        // projection row stays in the presbytery's typed keyspace, and the
-        // rollup keeps returning it, until some future function explicitly
-        // reacts to withdrawal. Reading the projection is the presbytery's
-        // right either way; what withdrawal revokes is access to the
-        // ARTIFACT.
+    describe("withdrawal — Option A throughout (F52 / DECISION-140)", () => {
+      it("keeps the withdrawn publication in the recipient's read-back, carrying the whole withdrawal triple", async () => {
+        // REVERSED 2026-09-24 (F52 / DECISION-140). This test previously
+        // asserted `visibleAfter === 0`: the read function filtered
+        // `withdrawn_at is null` (Option B — withdrawal REVOKES the
+        // recipient's read) while the projection row was left untouched
+        // (Option A — the recipient RETAINS what it received). Half of each
+        // is the one answer that is certainly wrong, and it is what this test
+        // was pinning.
+        //
+        // Option A throughout: the recipient keeps the artifact, marked. A
+        // withdrawn return still comes back, with withdrawn_at/by/
+        // minute_reference so the recipient can see WHO withdrew it and under
+        // which minute, and every consumer computing CURRENT totals filters
+        // `withdrawn_at is null` itself. Same permanence rule that voids a
+        // roll action rather than deleting it, and G-3.0107's "a ceased
+        // council's records become the property of the next higher council".
         await inOwnerRollback(null, async (tx) => {
           const before = rowsOf(
             await tx.execute(sql`
@@ -590,12 +600,18 @@ describe.skipIf(!hasDb)(
              where recipient_org_id = ${NORTHERN_REACH}::uuid
           `);
 
-          const visibleAfter = rowsOf(
-            await tx.execute(
-              sql`select count(*)::int as n from presby_list_published_returns_to_me()`,
-            ),
-          )[0];
-          expect(visibleAfter!.n).toBe(0);
+          const after = rowsOf(
+            await tx.execute(sql`
+              select withdrawn_at, withdrawn_by, withdrawn_minute_reference
+                from presby_list_published_returns_to_me()
+            `),
+          );
+          expect(after).toHaveLength(1);
+          expect(after[0]!.withdrawn_at).not.toBeNull();
+          expect(after[0]!.withdrawn_by).not.toBeNull();
+          expect(after[0]!.withdrawn_minute_reference).toBe(
+            "Session stated meeting, 2027-03-01, item 2 (withdrawal)",
+          );
 
           const projectionAfter = rowsOf(
             await tx.execute(sql`
@@ -609,42 +625,639 @@ describe.skipIf(!hasDb)(
           expect(projectionAfter!.n).toBe(1);
         });
       });
+
+      it("lets the projection row be MARKED withdrawn, exactly once, with nothing else on the row moving", async () => {
+        // The projection's half of Option A. There is no withdraw FUNCTION in
+        // this pipeline — the future `presby_withdraw_publication()` sets the
+        // publication's triple and this column together in one transaction —
+        // so what is proven here is that both freeze triggers permit exactly
+        // that pair of transitions and nothing else, which is why they are
+        // written before the writer exists.
+        await inOwnerRollback(null, async (tx) => {
+          const [row] = rowsOf(
+            await tx.execute(sql`
+              select id from congregation_statistics
+               where organization_id = ${NORTHERN_REACH}::uuid
+                 and about_org_id = ${ALDER_CREEK}::uuid
+                 and provenance = 'published_by_congregation'
+               limit 1
+            `),
+          );
+          const csId = row!.id as string;
+
+          // Any OTHER change to a published row is still refused, withdrawal
+          // or not — the guard is one permitted transition, not an open door.
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                update congregation_statistics set ending_active = 1 where id = ${csId}::uuid
+              `),
+            /published rows are immutable/,
+          );
+
+          // ...including withdrawal PLUS something else in the same statement.
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                update congregation_statistics
+                   set withdrawn_at = now(), ending_active = 1
+                 where id = ${csId}::uuid
+              `),
+            /published rows are immutable/,
+          );
+
+          // The one permitted transition.
+          await tx.execute(sql`
+            update congregation_statistics set withdrawn_at = now() where id = ${csId}::uuid
+          `);
+          const marked = rowsOf(
+            await tx.execute(sql`
+              select withdrawn_at from congregation_statistics where id = ${csId}::uuid
+            `),
+          )[0];
+          expect(marked!.withdrawn_at).not.toBeNull();
+
+          // ...and only once. A withdrawal is itself an act.
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                update congregation_statistics set withdrawn_at = now() where id = ${csId}::uuid
+              `),
+            /published rows are immutable/,
+          );
+
+          // DELETE is refused as it always was.
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(
+                sql`delete from congregation_statistics where id = ${csId}::uuid`,
+              ),
+            /published rows are immutable/,
+          );
+        });
+      });
     });
 
     // -------------------------------------------------------------------
     // The field_spec gate, from the application connection
     // -------------------------------------------------------------------
 
-    describe("presby_enforce_sasr_field_spec() (D8 / DECISION-118)", () => {
+    /**
+     * MOVED HERE FROM `scripts/test-rls.sql` AND FROM `inOrgRollback`,
+     * 2026-09-24 (F50 / DECISION-140). Both this block and section 34(f) of
+     * the RLS suite used to insert into `statistical_returns` from the TENANT
+     * connection. `INSERT` is now revoked from `presby_app` and
+     * `presby_platform`, so every one of these probes would be refused by the
+     * permission check before the trigger or CHECK under test could fire —
+     * proving the revoke, not the gate.
+     *
+     * On `PLATFORM_DATABASE_URL` (`neondb_owner`) the grant is irrelevant and
+     * the trigger is the only thing standing, which is precisely the property
+     * F44 says has to be proven separately. Nothing durable is written: every
+     * probe is inside a transaction that always rolls back.
+     */
+    describe("presby_enforce_sasr_field_spec() — the closed allow-list, on the owner path (D8 / DECISION-118)", () => {
+      it("accepts a payload whose keys, types and bounds all match the 2024 spec", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await tx.execute(sql`
+            insert into statistical_returns
+              (organization_id, about_org_id, report_year, form_version_key,
+               provenance, payload, reconciled, attested_at)
+            values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2094, '2024',
+                    'submitted',
+                    '{"ending_active": 214, "receipts_contributions": 1234.50}'::jsonb,
+                    true, now())
+          `);
+          const n = rowsOf(
+            await tx.execute(
+              sql`select count(*)::int as n from statistical_returns where report_year = 2094`,
+            ),
+          )[0];
+          expect(n!.n).toBe(1);
+        });
+      });
+
       it("refuses a payload key the form version does not declare", async () => {
-        await inOrgRollback(CLERK_OF_SESSION, ALDER_CREEK, async (tx) => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
           await expectDbError(
             () =>
               tx.execute(sql`
                 insert into statistical_returns
                   (organization_id, about_org_id, report_year, form_version_key,
-                   provenance, payload, reconciled)
+                   provenance, payload, reconciled, attested_at)
                 values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2094, '2024',
-                        'submitted', '{"ending_active": 1, "vestry_size": 3}'::jsonb, true)
+                        'submitted', '{"ending_active": 1, "vestry_size": 3}'::jsonb, true, now())
               `),
             /is not declared by form version 2024/,
           );
         });
       });
 
+      it("refuses a value of the wrong JSON type", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled, attested_at)
+                values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2094, '2024',
+                        'submitted', '{"ending_active": "two hundred"}'::jsonb, true, now())
+              `),
+            /statistical_returns/,
+          );
+        });
+      });
+
       it("refuses a negative count — the bound lives in the spec, not in a second rule that could drift from it", async () => {
-        await inOrgRollback(CLERK_OF_SESSION, ALDER_CREEK, async (tx) => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled, attested_at)
+                values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2094, '2024',
+                        'submitted', '{"ending_active": -1}'::jsonb, true, now())
+              `),
+            /bounds it below at 0/,
+          );
+        });
+      });
+
+      it("refuses a value above the declared ceiling", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled, attested_at)
+                values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2094, '2024',
+                        'submitted', '{"ending_active": 99999999}'::jsonb, true, now())
+              `),
+            /statistical_returns/,
+          );
+        });
+      });
+
+      it("refuses a submitted return ABOUT another congregation", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled, attested_at)
+                values (${ALDER_CREEK}::uuid, ${BRAMBLEWOOD}::uuid, 2094, '2024',
+                        'submitted', '{"ending_active": 10}'::jsonb, true, now())
+              `),
+            /statistical_returns_submitted_is_self/,
+          );
+        });
+      });
+
+      it("treats a PLACEHOLDER generation as fail-closed: an empty payload is fine, any key is not", async () => {
+        await inOwnerRollback(SOUTHERN_FIELDS, async (tx) => {
+          await tx.execute(sql`
+            insert into statistical_returns
+              (organization_id, about_org_id, report_year, form_version_key,
+               provenance, payload, reconciled)
+            values (${SOUTHERN_FIELDS}::uuid, ${QUILLHAVEN}::uuid, 1990, '1984',
+                    'imported', '{}'::jsonb, false)
+          `);
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled)
+                values (${SOUTHERN_FIELDS}::uuid, ${QUILLHAVEN}::uuid, 1991, '1984',
+                        'imported', '{"ending_active": 100}'::jsonb, false)
+              `),
+            /is not declared by form version 1984/,
+          );
+        });
+      });
+    });
+
+    /**
+     * MOVED HERE for the same reason (section 34(g) of `scripts/test-rls.sql`,
+     * F50). The imported-row about-org rule (R3.14) is the one cross-org shape
+     * `statistical_returns` has, and it must resolve to the council that
+     * ACTUALLY received the return, not to whoever holds the congregation
+     * today.
+     */
+    describe("the imported-row about-org rule on the owner path (R3.14)", () => {
+      it("lets the council that received a 1990 return archive it, and refuses one for a year it did not hold the congregation", async () => {
+        await inOwnerRollback(SOUTHERN_FIELDS, async (tx) => {
+          await tx.execute(sql`
+            insert into statistical_returns
+              (organization_id, about_org_id, report_year, form_version_key,
+               provenance, payload, reconciled)
+            values (${SOUTHERN_FIELDS}::uuid, ${QUILLHAVEN}::uuid, 1990, '1984',
+                    'imported', '{}'::jsonb, false)
+          `);
+          const n = rowsOf(
+            await tx.execute(sql`
+              select count(*)::int as n from statistical_returns
+               where about_org_id = ${QUILLHAVEN}::uuid and report_year = 1990
+            `),
+          )[0];
+          expect(n!.n).toBe(1);
+
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled)
+                values (${SOUTHERN_FIELDS}::uuid, ${QUILLHAVEN}::uuid, 2020, '2024',
+                        'imported', '{}'::jsonb, false)
+              `),
+            /statistical_returns/,
+          );
+
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled)
+                values (${SOUTHERN_FIELDS}::uuid, ${TIDEWATER}::uuid, 2020, '2024',
+                        'imported', '{}'::jsonb, false)
+              `),
+            /statistical_returns/,
+          );
+        });
+      });
+    });
+
+    // -------------------------------------------------------------------
+    // F50 / F51 / F53 — the hardening pass, on the connection that matters
+    // -------------------------------------------------------------------
+
+    describe("statistical_returns_provenance_shape (F50 / DECISION-140)", () => {
+      it("refuses a SUBMITTED return that claims no reconciliation", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled, attested_at)
+                values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2095, '2024',
+                        'submitted', '{"ending_active": 1}'::jsonb, false, now())
+              `),
+            /statistical_returns_provenance_shape/,
+          );
+        });
+      });
+
+      it("refuses a SUBMITTED return with no attestation instant at all", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
           await expectDbError(
             () =>
               tx.execute(sql`
                 insert into statistical_returns
                   (organization_id, about_org_id, report_year, form_version_key,
                    provenance, payload, reconciled)
-                values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2094, '2024',
-                        'submitted', '{"ending_active": -1}'::jsonb, true)
+                values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2095, '2024',
+                        'submitted', '{"ending_active": 1}'::jsonb, true)
               `),
-            /bounds it below at 0/,
+            /statistical_returns_provenance_shape/,
           );
+        });
+      });
+
+      it("refuses an IMPORTED return marked reconciled — a 1987 row that does not balance is a fact about 1987", async () => {
+        await inOwnerRollback(SOUTHERN_FIELDS, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled)
+                values (${SOUTHERN_FIELDS}::uuid, ${QUILLHAVEN}::uuid, 1990, '1984',
+                        'imported', '{}'::jsonb, true)
+              `),
+            /statistical_returns_provenance_shape/,
+          );
+        });
+      });
+
+      it("still lets presby_publish_sasr_snapshot() write its submitted row — the CHECK does not outlaw the only live writer", async () => {
+        await inOrgRollback(CLERK_OF_SESSION, ALDER_CREEK, async (tx) => {
+          const published = rowsOf(
+            await tx.execute(sql`
+              select presby_publish_sasr_snapshot(
+                2096, 'Session stated meeting, fixture, item 3', p_ending_active => 7
+              ) as return_id
+            `),
+          )[0];
+          expect(published!.return_id).toBeTruthy();
+        });
+      });
+    });
+
+    describe("publications_withdrawal_shape, corrected (F51 / DECISION-140)", () => {
+      it("refuses a withdrawn_at with no withdrawer and no minute — the exact row the previous predicate allowed", async () => {
+        // FAILING-FIRST RELATIVE TO THE SHIPPED SCHEMA. The old predicate was
+        // `withdrawn_at is not null or (withdrawn_by is null and
+        // withdrawn_minute_reference is null)`, which is TRUE whenever
+        // withdrawn_at is set, whatever the other two hold. This row passed.
+        await inOwnerRollback(null, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                update publications set withdrawn_at = now()
+                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+              `),
+            /a withdrawal must set withdrawn_at|publications_withdrawal_shape|withdrawn_by/,
+          );
+        });
+      });
+
+      it("refuses a withdrawer with no withdrawal, on a direct owner INSERT", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              select id, organization_id from statistical_returns limit 1
+            `),
+          );
+          const [userRow] = rowsOf(
+            await tx.execute(sql`select id from users limit 1`),
+          );
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into publications
+                  (organization_id, recipient_org_id, record_class, artifact_id,
+                   withdrawn_by)
+                values (${ret!.organization_id as string}::uuid, ${NORTHERN_REACH}::uuid,
+                        'statistical_return', ${ret!.id as string}::uuid,
+                        ${userRow!.id as string}::uuid)
+              `),
+            /publications_withdrawal_shape/,
+          );
+        });
+      });
+    });
+
+    describe("publications_supersession — supersession is a CHAIN (F51 / DECISION-140)", () => {
+      /**
+       * Every probe publishes twice through the DEFINER function and then
+       * forges the second publication's `supersedes_id` on the owner
+       * connection, which is the only way to reach the trigger: the function
+       * DERIVES `supersedes_id` and never accepts it.
+       */
+      async function seedTwo(
+        tx: { execute: (q: unknown) => Promise<unknown> },
+      ): Promise<{ first: string; second: string }> {
+        await tx.execute(
+          sql`select set_config('app.current_org_id', ${ALDER_CREEK}, true)`,
+        );
+        await tx.execute(
+          sql`select presby_publish_sasr_snapshot(2097, 'm1', p_ending_active => 1)`,
+        );
+        await tx.execute(
+          sql`select presby_publish_sasr_snapshot(2098, 'm2', p_ending_active => 2)`,
+        );
+        const rows = rowsOf(
+          await tx.execute(sql`
+            select p.id, r.report_year
+              from publications p join statistical_returns r on r.id = p.artifact_id
+             where p.organization_id = ${ALDER_CREEK}::uuid
+               and r.report_year in (2097, 2098)
+             order by r.report_year
+          `),
+        );
+        return { first: rows[0]!.id as string, second: rows[1]!.id as string };
+      }
+
+      it("refuses a predecessor from a different report year", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const { first } = await seedTwo(tx);
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              select r.id from statistical_returns r
+               where r.organization_id = ${ALDER_CREEK}::uuid and r.report_year = 2098
+            `),
+          );
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into publications
+                  (organization_id, recipient_org_id, record_class, artifact_id, supersedes_id)
+                values (${ALDER_CREEK}::uuid, ${NORTHERN_REACH}::uuid,
+                        'statistical_return', ${ret!.id as string}::uuid, ${first}::uuid)
+              `),
+            /supersedes_id must name this council's own earlier publication/,
+          );
+        });
+      });
+
+      it("refuses a predecessor belonging to another congregation, and one addressed to another recipient", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const { first } = await seedTwo(tx);
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              select r.id from statistical_returns r
+               where r.organization_id = ${ALDER_CREEK}::uuid and r.report_year = 2097
+            `),
+          );
+          // Different organization_id on the new row.
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into publications
+                  (organization_id, recipient_org_id, record_class, artifact_id, supersedes_id)
+                values (${BRAMBLEWOOD}::uuid, ${NORTHERN_REACH}::uuid,
+                        'statistical_return', ${ret!.id as string}::uuid, ${first}::uuid)
+              `),
+            /supersedes_id must name this council's own earlier publication|publications_artifact_fk/,
+          );
+          // Different recipient_org_id on the new row.
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into publications
+                  (organization_id, recipient_org_id, record_class, artifact_id, supersedes_id)
+                values (${ALDER_CREEK}::uuid, ${WESTERN_BASIN}::uuid,
+                        'statistical_return', ${ret!.id as string}::uuid, ${first}::uuid)
+              `),
+            /supersedes_id must name this council's own earlier publication/,
+          );
+          // A predecessor that does not exist at all — same literal, so the
+          // trigger is not a cross-tenant existence oracle (F40).
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into publications
+                  (organization_id, recipient_org_id, record_class, artifact_id, supersedes_id)
+                values (${ALDER_CREEK}::uuid, ${NORTHERN_REACH}::uuid,
+                        'statistical_return', ${ret!.id as string}::uuid,
+                        '00000000-0000-0000-0000-0000000000ff'::uuid)
+              `),
+            /supersedes_id must name this council's own earlier publication/,
+          );
+        });
+      });
+
+      it("still chains a legitimate same-year republish, and forbids a FORK off the same predecessor", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${ALDER_CREEK}, true)`,
+          );
+          await tx.execute(
+            sql`select presby_publish_sasr_snapshot(2099, 'm1', p_ending_active => 1)`,
+          );
+          await tx.execute(
+            sql`select presby_publish_sasr_snapshot(2099, 'm2', p_ending_active => 2)`,
+          );
+          const chained = rowsOf(
+            await tx.execute(sql`
+              select count(*)::int as n
+                from publications p join statistical_returns r on r.id = p.artifact_id
+               where p.organization_id = ${ALDER_CREEK}::uuid
+                 and r.report_year = 2099 and p.supersedes_id is not null
+            `),
+          )[0];
+          expect(chained!.n).toBe(1);
+
+          const [predecessor] = rowsOf(
+            await tx.execute(sql`
+              select p.supersedes_id as id
+                from publications p join statistical_returns r on r.id = p.artifact_id
+               where p.organization_id = ${ALDER_CREEK}::uuid
+                 and r.report_year = 2099 and p.supersedes_id is not null
+            `),
+          );
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              select r.id from statistical_returns r
+               where r.organization_id = ${ALDER_CREEK}::uuid and r.report_year = 2099
+               order by r.created_at desc limit 1
+            `),
+          );
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(sql`
+                insert into publications
+                  (organization_id, recipient_org_id, record_class, artifact_id, supersedes_id)
+                values (${ALDER_CREEK}::uuid, ${NORTHERN_REACH}::uuid,
+                        'statistical_return', ${ret!.id as string}::uuid,
+                        ${predecessor!.id as string}::uuid)
+              `),
+            /publications_supersedes_once_idx/,
+          );
+        });
+      });
+    });
+
+    describe("the projection's RECIPIENT end (F51 / DECISION-140)", () => {
+      it("refuses a projection row whose recipient is not the publication's recipient", async () => {
+        // The forgery has to keep the SOURCE end honest to isolate the new
+        // constraint: `about_org_id` must still equal the publication's
+        // `organization_id` (or the older source-end FK fires first) and the
+        // projection's own `organization_id` must be a council the about-org
+        // WAS affiliated with in that year (or drizzle/0045's about-org
+        // trigger fires first). So the mismatch is planted on the
+        // publication: Alder Creek publishes to the WESTERN BASIN, and the
+        // NORTHERN REACH then claims the projection.
+        await inOwnerRollback(null, async (tx) => {
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              select id from statistical_returns
+               where organization_id = ${ALDER_CREEK}::uuid limit 1
+            `),
+          );
+          const [forged] = rowsOf(
+            await tx.execute(sql`
+              insert into publications
+                (organization_id, recipient_org_id, record_class, artifact_id, minute_reference)
+              values (${ALDER_CREEK}::uuid, ${WESTERN_BASIN}::uuid,
+                      'statistical_return', ${ret!.id as string}::uuid, 'fixture')
+              returning id
+            `),
+          );
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into congregation_statistics
+                  (organization_id, about_org_id, year, provenance, publication_id,
+                   published_at, minute_reference)
+                values (${NORTHERN_REACH}::uuid, ${ALDER_CREEK}::uuid,
+                        2093, 'published_by_congregation', ${forged!.id as string}::uuid,
+                        now(), 'forged')
+              `),
+            /congregation_statistics_publication_recipient_fk/,
+          );
+        });
+      });
+    });
+
+    describe("sasr_form_versions.field_spec is frozen once a return leans on it (F53 / DECISION-140)", () => {
+      it("refuses the edit under ANOTHER tenant's context — which is what proves the DEFINER is load-bearing", async () => {
+        // An INVOKER-mode version of the trigger would see zero referencing
+        // `statistical_returns` rows from Bramblewood's context (the seeded
+        // 2024 return belongs to Alder Creek, and the table is FORCE RLS) and
+        // would let this edit through, silently redefining the spec through
+        // which Alder Creek's frozen payload is read. That is the F26 shape
+        // this pipeline has hit twice before.
+        await inOwnerRollback(BRAMBLEWOOD, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                update sasr_form_versions
+                   set field_spec = '{"fields": {}}'::jsonb
+                 where key = '2024'
+              `),
+            /field_spec is frozen/,
+          );
+        });
+      });
+
+      it("leaves an UNUSED placeholder generation freely editable", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          await tx.execute(sql`
+            update sasr_form_versions
+               set field_spec = '{"fields": {"ending_active": {"type": "integer", "min": 0, "max": 100}}}'::jsonb
+             where key = '2022'
+          `);
+          const row = rowsOf(
+            await tx.execute(
+              sql`select field_spec from sasr_form_versions where key = '2022'`,
+            ),
+          )[0];
+          expect(JSON.stringify(row!.field_spec)).toContain("ending_active");
+        });
+      });
+
+      it("permits a byte-identical no-op write, so the migration's own upsert still converges on re-apply", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const before = rowsOf(
+            await tx.execute(
+              sql`select field_spec from sasr_form_versions where key = '2024'`,
+            ),
+          )[0];
+          await tx.execute(sql`
+            update sasr_form_versions
+               set field_spec = ${JSON.stringify(before!.field_spec)}::jsonb
+             where key = '2024'
+          `);
         });
       });
     });

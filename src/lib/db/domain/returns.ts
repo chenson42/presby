@@ -104,6 +104,19 @@ export const sasrFormVersions = pgTable(
     ),
     // sasr_form_versions_no_overlap (GiST EXCLUDE) is in 0046 only — Drizzle
     // cannot express it. See this module's header.
+    //
+    // NOR IS `sasr_form_versions_field_spec_freeze` (F53/DECISION-140), and
+    // it is the reason `payload` can be trusted decades later: a SECURITY
+    // DEFINER BEFORE UPDATE trigger refuses a `fieldSpec` change once ANY
+    // tenant's `statistical_returns` row names the key. Preserving a 1987
+    // payload forever while silently changing the definition through which
+    // the system reads it is the same failure as editing the payload.
+    // DEFINER is load-bearing: `statistical_returns` is FORCE RLS, so an
+    // invoker-mode check would see zero referencing rows for a tenant other
+    // than the caller's own and let the edit through (F26). Placeholder rows
+    // stay editable until first use, and the migration's own
+    // `on conflict … do update` still converges on re-apply because the
+    // trigger's WHEN clause skips a byte-identical write.
   ],
 );
 
@@ -199,6 +212,32 @@ export const statisticalReturns = pgTable(
     check(
       "statistical_returns_submitted_is_self",
       sql`${t.provenance} <> 'submitted' or ${t.aboutOrgId} = ${t.organizationId}`,
+    ),
+    /**
+     * The two provenances were shapes in PROSE only (F50/DECISION-140):
+     * `submitted` with `reconciled = false` and no attestation, and
+     * `imported` with `reconciled = true`, were both legal rows, and nothing
+     * but `presby_publish_sasr_snapshot()`'s own discipline kept a submitted
+     * return attested.
+     *
+     * DEVIATION, same cause as `organizationAffiliations`' closed-shape
+     * exclusion of `closedBy`: F50's literal predicate also requires
+     * `attestedByName` and `attestedRole` to be non-null, but the only live
+     * writer of a submitted row writes both as NULL on purpose — there is no
+     * `app.current_user_id` GUC and accepting an attester name as a function
+     * parameter would be the caller-supplied identity claim that function's
+     * shape refuses (Ruling A4). The CHECK as literally worded would make
+     * publishing impossible, so the two text columns are excluded and
+     * `attestedAt` carries the attestation half. Tightening them is blocked
+     * on the acting-user GUC.
+     *
+     * Lives in `drizzle/0047`, not `0046`: it is added after 0047's backfill,
+     * which mints submitted rows out of pre-existing projections.
+     */
+    check(
+      "statistical_returns_provenance_shape",
+      sql`(${t.provenance} = 'submitted' and ${t.reconciled} and ${t.attestedAt} is not null)
+          or (${t.provenance} = 'imported' and not ${t.reconciled})`,
     ),
   ],
 );

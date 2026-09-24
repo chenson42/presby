@@ -159,6 +159,35 @@ export const organizationSettings = pgTable("organization_settings", {
  * The unique index is PARTIAL — only VERIFIED identifiers are globally
  * unique. An unverified import candidate may legitimately collide with a
  * verified row; that collision is what the resolution step exists to settle.
+ *
+ * THE WRITE-AUTHORITY MODEL IS NOT EXPRESSIBLE HERE and lives in
+ * `drizzle/0043` (F47/DECISION-140). Stated so a reader does not mistake the
+ * absence of RLS for the absence of any rule:
+ *
+ *   - `presby_app` holds `SELECT` ONLY. The first build granted it full DML
+ *     with no RLS, which let any tenant connection rewrite or erase ANOTHER
+ *     organization's identifier — including flipping `isVerified`, the column
+ *     the partial index above makes globally significant.
+ *   - `presby_set_organization_identifier()` (SECURITY DEFINER) is the sole
+ *     tenant-side writer, in this pipeline's confused-deputy shape: no
+ *     acting-council parameter, the actor is `presby_current_org()`, and
+ *     standing is either "the actor IS the subject" or
+ *     `presby_org_affiliated(subject, actor, today)` — the onboarding case
+ *     where a council records a member congregation's OGA PIN. It upserts on
+ *     `(organizationId, kind, valueNormalized)` and is the only path through
+ *     which `isVerified` may be set. Rejections raise ONE literal per table
+ *     (DECISION-139) via `presby_deny_identifier_change()`.
+ *   - `organization_identifiers_guard` (BEFORE UPDATE OR DELETE) refuses both
+ *     unless the transaction-local GUC `presby.identifier_trigger_active` is
+ *     set, which only that function and
+ *     `presby_guard_organizations_delete()` (pre-authorizing the
+ *     fixture-teardown cascade) ever do. The revoke alone does not close
+ *     this: `PLATFORM_DATABASE_URL` connects as `neondb_owner`, which owns
+ *     the table and holds every privilege by ownership (F44).
+ *   - INSERT is deliberately left ungated beyond the grant — a colliding
+ *     verified INSERT is refused by the partial index, and an unverified
+ *     false claim is a named residual in `docs/TODO.md`, not a hole this
+ *     pass closes.
  */
 export const organizationIdentifiers = pgTable(
   "organization_identifiers",

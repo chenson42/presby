@@ -191,6 +191,18 @@ export const organizationSuccessions = pgTable(
   },
   (t) => [
     index("organization_successions_event_idx").on(t.eventId),
+    /**
+     * One event recording the same edge twice is one fact written twice
+     * (F48/DECISION-140). It is NOT closing a cardinality-gaming bug:
+     * `presby_check_succession_cardinality()` counts `count(distinct …)`, so
+     * a duplicate edge could never have satisfied a `merged` event's
+     * two-predecessor rule on its own.
+     */
+    unique("organization_successions_edge_unique").on(
+      t.eventId,
+      t.predecessorOrgId,
+      t.successorOrgId,
+    ),
     check(
       "organization_successions_not_self",
       sql`${t.predecessorOrgId} <> ${t.successorOrgId}`,
@@ -276,8 +288,52 @@ export const organizationAffiliations = pgTable(
       "organization_affiliations_backfill_minute_shape",
       sql`${t.authority} = 'backfill' or ${t.minuteReference} is not null`,
     ),
+    /**
+     * The empty-range loophole (F49/DECISION-140). `daterange(d, d, '[)')` is
+     * a VALID, EMPTY range: it overlaps nothing, so the GIST EXCLUDE below
+     * accepts any number of them. An affiliation that was never in effect for
+     * a single day is not a fact about the church.
+     * `presby_transfer_affiliation()` refuses a same-day close before it can
+     * happen, so the uniform rejection literal fires rather than this
+     * constraint's raw name.
+     */
+    check(
+      "organization_affiliations_range_order",
+      sql`${t.effectiveTo} is null or ${t.effectiveFrom} is null or ${t.effectiveTo} > ${t.effectiveFrom}`,
+    ),
+    /**
+     * A close is an ATTRIBUTABLE ACT: a row is open with no close attribution
+     * at all, or closed with all of it (F49/DECISION-140).
+     *
+     * `closedBy` — the acting USER — is DELIBERATELY EXCLUDED. There is no
+     * `app.current_user_id` GUC in this platform (Ruling A4), so
+     * `presby_transfer_affiliation()` writes it null on every close; a
+     * constraint demanding it would reject every close the system can
+     * currently perform. It joins the tuple when the acting-user GUC lands.
+     */
+    check(
+      "organization_affiliations_closed_shape",
+      sql`(${t.effectiveTo} is null and ${t.closedByOrgId} is null and ${t.closedOn} is null and ${t.closedMinuteReference} is null)
+          or (${t.effectiveTo} is not null and ${t.closedByOrgId} is not null and ${t.closedOn} is not null and ${t.closedMinuteReference} is not null)`,
+    ),
+    check(
+      "organization_affiliations_not_self",
+      sql`${t.subjectOrgId} <> ${t.parentOrgId}`,
+    ),
     // organization_affiliations_no_overlap (GIST EXCLUDE) is in 0044 only —
     // Drizzle cannot express it. See this module's header.
+    //
+    // NOT EXPRESSIBLE HERE EITHER, and load-bearing (F49/DECISION-140):
+    // `organization_affiliations_guard`, a BEFORE UPDATE OR DELETE trigger
+    // that refuses both unless the transaction-local GUC
+    // `presby.affiliation_trigger_active` is set — which only
+    // `presby_transfer_affiliation()` (at its entry) and
+    // `presby_guard_organizations_delete()` (after validating
+    // `deletableUntil`, to pre-authorize the fixture-teardown cascade) ever
+    // do. The grant revoke alone does NOT close this: PLATFORM_DATABASE_URL
+    // connects as `neondb_owner`, which owns the table and holds every
+    // privilege by ownership (F44). drizzle/0044's own earlier comment
+    // arguing the opposite is superseded.
   ],
 );
 

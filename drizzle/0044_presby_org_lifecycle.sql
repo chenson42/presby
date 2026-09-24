@@ -271,6 +271,28 @@ create table if not exists organization_successions (
 create index if not exists organization_successions_event_idx
   on organization_successions (event_id);
 
+-- ADDED 2026-09-24 (F48 / DECISION-140, fourth Phase 3 loop-back). The same
+-- edge recorded twice under one event is not two facts; it is one fact
+-- written twice. Added as a named constraint swap rather than inline so a
+-- database that already has the table from an earlier run converges.
+--
+-- IT IS NOT CLOSING A CARDINALITY-GAMING BUG, and saying so matters so a
+-- future reader does not assume the cardinality trigger was ever weak:
+-- presby_check_succession_cardinality() (section 13) counts
+-- `count(distinct predecessor_org_id)` / `count(distinct successor_org_id)`,
+-- so a duplicate edge could never have inflated a `merged` event's
+-- two-predecessor requirement. This is data integrity in its own right.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'organization_successions_edge_unique'
+  ) then
+    alter table organization_successions
+      add constraint organization_successions_edge_unique
+      unique (event_id, predecessor_org_id, successor_org_id);
+  end if;
+end $$;
+
 revoke insert, update, delete on organization_successions from presby_app;
 grant select on organization_successions to presby_app;
 revoke update, delete on organization_successions from presby_platform;
@@ -345,6 +367,100 @@ alter table organization_affiliations
 alter table organization_affiliations
   add constraint organization_affiliations_subject_org_id_fkey
   foreign key (subject_org_id) references organizations(id) on delete cascade;
+
+-- ROW-SHAPE CONSTRAINTS ADDED 2026-09-24 (F49 / DECISION-140, fourth Phase 3
+-- loop-back). Written as idempotent adds rather than inline in the `create
+-- table if not exists` above, because that statement is a no-op on a database
+-- that already ran an earlier form of this migration — the same pattern the
+-- FK swap directly above uses, and the one drizzle/0047 uses for
+-- publications_withdrawal_shape. They are placed BEFORE the backfill in
+-- section 5 deliberately: the backfill must be proven to satisfy them, not
+-- exempted from them.
+--
+-- CHECK constraints bind the TABLE OWNER, unlike RLS policies and unlike
+-- grants (F44 does not exempt them), so these three close their holes on
+-- getPlatformDb() as well as on presby_app.
+do $$
+begin
+  -- The empty-range loophole. daterange(d, d, '[)') is a VALID, EMPTY range:
+  -- it overlaps nothing, so organization_affiliations_no_overlap (the GIST
+  -- EXCLUDE above) accepts any number of them. An affiliation that was never
+  -- in effect for a single day is not a fact about the church.
+  if not exists (
+    select 1 from pg_constraint where conname = 'organization_affiliations_range_order'
+  ) then
+    alter table organization_affiliations
+      add constraint organization_affiliations_range_order
+      check (effective_to is null
+             or effective_from is null
+             or effective_to > effective_from);
+  end if;
+
+  -- A close is an ATTRIBUTABLE ACT: either the row is open and carries no
+  -- close attribution at all, or it is closed and carries all of it.
+  --
+  -- DEVIATION FROM THE EXTERNAL REVIEW'S LITERAL TEXT, and it is load-bearing:
+  -- the review wrote "all four closed_* provenance fields", but `closed_by`
+  -- (the acting USER) is permanently null on every close by design — this
+  -- platform has no app.current_user_id GUC, only app.current_org_id (Ruling
+  -- A4), so presby_transfer_affiliation() writes `closed_by = null`
+  -- explicitly. A CHECK demanding it would reject every legitimate close the
+  -- system can currently perform. closed_by is excluded ON PURPOSE; it joins
+  -- the tuple the day the acting-user GUC lands.
+  if not exists (
+    select 1 from pg_constraint where conname = 'organization_affiliations_closed_shape'
+  ) then
+    alter table organization_affiliations
+      add constraint organization_affiliations_closed_shape
+      check ((effective_to is null
+              and closed_by_org_id is null
+              and closed_on is null
+              and closed_minute_reference is null)
+          or (effective_to is not null
+              and closed_by_org_id is not null
+              and closed_on is not null
+              and closed_minute_reference is not null));
+  end if;
+
+  -- A body cannot be its own council. The type rule in
+  -- presby_assert_council_authority() already rejects actor = subject, but
+  -- that is a TRIGGER on INSERT; this binds every write path including a
+  -- later UPDATE and the owner's own.
+  if not exists (
+    select 1 from pg_constraint where conname = 'organization_affiliations_not_self'
+  ) then
+    alter table organization_affiliations
+      add constraint organization_affiliations_not_self
+      check (subject_org_id <> parent_org_id);
+  end if;
+end $$;
+
+-- NOT ADDED, and this is a deliberate departure from F49's fourth CHECK
+-- rather than an omission — see the work-log's "Loop-back after external
+-- implementation review" Implementer Notes.
+--
+--   organization_affiliations_recorded_has_from
+--     check (authority <> 'recorded' or effective_from is not null)
+--
+-- Its stated premise ("only 'backfill' rows are null — F41") is false in this
+-- repository. A MINUTED historical affiliation whose start predates the
+-- surviving records is a real, deliberate, currently-asserted shape:
+--   scripts/seed-dev.sql:104-108   Quillhaven's pre-1995 row — authority
+--                                  'recorded', a real Southern Fields minute,
+--                                  effective_from NULL
+--   scripts/test-rls.sql:2972-2977 asserts, with an explicit F41 comment,
+--                                  that presby_org_affiliated(quillhaven,
+--                                  southern-fields, 1899-01-01) is TRUE —
+--                                  which is only true while that row's lower
+--                                  bound is unbounded
+--   src/lib/db/domain/lifecycle.test.ts:125-135  the same shape again
+-- Adding the CHECK would force those rows to authority = 'backfill', which
+-- 0044's own comment defines as "nobody claims a minute for it" — relabelling
+-- a minuted act as an inference to satisfy a constraint about provenance
+-- completeness. F41 ("null means unbounded below, predates our records") and
+-- this CHECK ("a minuted act must state its start") are in genuine tension
+-- and only Phase 3 can resolve which one yields. Flagged as a loop-back
+-- candidate; the other three CHECKs above are unaffected and ship.
 
 create index if not exists organization_affiliations_org_idx
   on organization_affiliations (organization_id);
@@ -671,6 +787,27 @@ begin
     perform presby_deny_affiliation_change();
   end if;
 
+  -- MOVED TO THE TOP 2026-09-24 (F49 / DECISION-140). It used to be set
+  -- inside presby_apply_affiliation_to_org_tree(), immediately before the
+  -- derived-cache rewrite, because the organizations reparent guard was its
+  -- only consumer. organization_affiliations now has its own UPDATE/DELETE
+  -- guard reading the SAME GUC, and this function's own `update ... set
+  -- effective_to` (the close, below) runs before the derivation — so the flag
+  -- has to be armed here, at the entry to the sanctioned path, rather than
+  -- two calls later.
+  --
+  -- ONE GUC, ONE MEANING: "this transaction is running the sanctioned
+  -- affiliation-transfer path." Both consumers (organizations_guard_reparent
+  -- and organization_affiliations_guard) are asking exactly that question,
+  -- inside the same function and the same transaction, so the reuse is the
+  -- minimum-complexity answer rather than a false economy. Contrast
+  -- presby.identifier_trigger_active in drizzle/0043, which is a separate GUC
+  -- precisely because it is a different claim about a different subsystem.
+  -- Transaction-local (is_local => true): a session-scoped value would leave
+  -- both guards DISARMED for the next unrelated request on a pooled
+  -- neon-serverless connection.
+  perform set_config('presby.affiliation_trigger_active', 'true', true);
+
   select a.id, a.parent_org_id, a.effective_from
     into v_current_row_id, v_current_parent, v_current_from
     from organization_affiliations a
@@ -685,8 +822,15 @@ begin
     perform presby_deny_affiliation_change();
   end if;
 
-  -- A close cannot predate the row's own opening.
-  if v_current_from is not null and v_current_from > p_effective_on then
+  -- A close cannot predate the row's own opening, NOR FALL ON IT.
+  -- TIGHTENED FROM `>` TO `>=` 2026-09-24, as a consequence of
+  -- organization_affiliations_range_order (F49): a same-day open-and-close
+  -- produces daterange(d, d, '[)') — valid, empty, and now refused by that
+  -- CHECK. Without this tightening the function would still attempt the close
+  -- and the caller would receive a raw check_violation naming the constraint
+  -- instead of the uniform literal, which is exactly the cause-distinguishing
+  -- surface F40's one-message-per-table rule exists to prevent.
+  if v_current_from is not null and v_current_from >= p_effective_on then
     perform presby_deny_affiliation_change();
   end if;
 
@@ -780,6 +924,56 @@ create trigger organization_affiliations_apply
   after insert or update on organization_affiliations
   for each row execute function presby_apply_affiliation_row();
 
+-- ADDED 2026-09-24 (F49 / DECISION-140, fourth Phase 3 loop-back), and it
+-- REVERSES section 15's own argument below. That comment reasoned that "the
+-- grant alone is the right instrument for THIS table" because closing a row
+-- is a legitimate UPDATE. F44 / Ruling B3 — discovered LATER IN THIS SAME
+-- MIGRATION FILE's pipeline — disproves it: PLATFORM_DATABASE_URL
+-- authenticates as neondb_owner, which owns this table and holds every
+-- privilege by ownership, so the revoke binds nobody who can actually reach
+-- the database today. Without this trigger, getPlatformDb() could rewrite
+-- 1994 affiliation history directly, around the authority check, around the
+-- uniform rejection message and around the provenance rule.
+--
+-- NOT NAMED `%freeze%`, deliberately: this is not organization_lifecycle_
+-- events' unconditional freeze. Closing a row IS legitimate — through
+-- presby_transfer_affiliation(), which arms the GUC at its own entry. The
+-- name says "guard", matching organizations_guard_reparent, whose shape this
+-- mirrors exactly.
+--
+-- SECURITY DEFINER is not used and is not needed: the function reads no
+-- table, only a GUC, so the F26 shape (an invoker-mode reader silently
+-- filtered by the RLS it exists to complement) cannot arise. It fires on
+-- every connection regardless — BYPASSRLS and ownership exempt a role from
+-- policies and grants, never from triggers.
+--
+-- THE DELETE ARM CANNOT BE AN UNCONDITIONAL FREEZE, and this is the detail a
+-- naive "mirror organization_successions" implementation gets wrong.
+-- subject_org_id is ON DELETE CASCADE *specifically* so a deletable_until-
+-- stamped test fixture's teardown can clean up its affiliation rows (see the
+-- FK swap's comment above). An unconditional DELETE freeze would break every
+-- one of the 15+ existing teardown sites the day it shipped. Instead the
+-- DELETE arm reads the same GUC, and presby_guard_organizations_delete()
+-- (section 14) arms it once it has validated OLD.deletable_until — so the
+-- cascade Postgres fires immediately afterwards, in the same transaction, is
+-- pre-authorized, with no change to any call site.
+create or replace function presby_guard_organization_affiliations()
+returns trigger language plpgsql as $$
+begin
+  if coalesce(current_setting('presby.affiliation_trigger_active', true), '') <> 'true' then
+    perform presby_deny_affiliation_change();
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists organization_affiliations_guard on organization_affiliations;
+create trigger organization_affiliations_guard
+  before update or delete on organization_affiliations
+  for each row execute function presby_guard_organization_affiliations();
+
 -- ---------------------------------------------------------------------------
 -- 12. Triggers on organization_lifecycle_events
 -- ---------------------------------------------------------------------------
@@ -818,6 +1012,17 @@ begin
    where id = new.subject_org_id;
 
   if new.event in ('dissolved', 'merged', 'divided', 'dismissed') then
+    -- ARM THE AFFILIATION GUARD (added 2026-09-24, F49). This function is the
+    -- SECOND sanctioned writer of an affiliation close — the external review's
+    -- Ruling 3 named only presby_transfer_affiliation() and would have left
+    -- every dissolution, merger, division and dismissal rejected by
+    -- organization_affiliations_guard. Same GUC, same meaning ("this
+    -- transaction is running a sanctioned affiliation write"), same
+    -- transaction-local scope. It is armed INSIDE this branch rather than at
+    -- the top of the function so an event that closes nothing (organized,
+    -- received) leaves the guard armed for nothing.
+    perform set_config('presby.affiliation_trigger_active', 'true', true);
+
     -- Close the subject's open affiliation. The effective_from guard keeps a
     -- back-dated event from building an inverted daterange, which the
     -- EXCLUDE constraint would reject with a raw Postgres error.
@@ -860,12 +1065,16 @@ create trigger organization_lifecycle_events_apply
 -- trigger`, as an owner-only, conspicuous act, exactly like
 -- presby_guard_organizations_delete().
 --
--- NOT mirrored onto organization_affiliations, deliberately (Ruling A5.3):
--- presby_transfer_affiliation() performs that table's one legitimate UPDATE
--- (closing a row) inside its own transaction, and a freeze trigger there
--- would have to distinguish the DEFINER function's own write from a raw
--- mutation. The narrowed grant in section 15 prevents the raw mutation
--- without that complexity.
+-- NOT mirrored onto organization_affiliations — SUPERSEDED IN PART,
+-- 2026-09-24 (F49 / DECISION-140). Ruling A5.3's reasoning was that closing a
+-- row is a legitimate UPDATE, so a freeze there would have to distinguish the
+-- DEFINER function's own write from a raw mutation, and the narrowed grant
+-- avoided that complexity. The grant does not bind the owner (F44), so the
+-- complexity had to be paid after all — organization_affiliations_guard
+-- (section 11) makes exactly that distinction, via the transaction-local
+-- presby.affiliation_trigger_active GUC that the two sanctioned writers (this
+-- function's close branch and presby_transfer_affiliation()) arm. It is a
+-- GUARD rather than a FREEZE, and the name says so.
 create or replace function presby_freeze_lifecycle_event()
 returns trigger language plpgsql as $$
 begin
@@ -1080,6 +1289,27 @@ begin
       'organizations: an organization is permanent; record a lifecycle event instead of deleting it'
       using errcode = 'insufficient_privilege';
   end if;
+
+  -- ADDED 2026-09-24 (F49 / F47 / DECISION-140). The deletion window has now
+  -- been validated, so this IS a sanctioned teardown — pre-authorize the
+  -- cascades Postgres is about to fire inside this same transaction:
+  --   organization_affiliations (ON DELETE CASCADE on subject_org_id)
+  --     -> organization_affiliations_guard
+  --   organization_identifiers  (ON DELETE CASCADE on organization_id)
+  --     -> organization_identifiers_guard  (drizzle/0043)
+  -- Both guards refuse an unflagged DELETE on every connection, so without
+  -- these two lines every one of the 15+ existing fixture-teardown call sites
+  -- would start failing on a cascade it never asked for. Arming them HERE,
+  -- once, behind the deletable_until check, is the same design goal
+  -- e2e/support/fixture-deletable.ts already states for this guard itself:
+  -- the teardown path stays a plain `delete from organizations`.
+  --
+  -- Two set_config calls rather than one shared flag, because they are two
+  -- claims about two unrelated subsystems (see drizzle/0043 section 4). Both
+  -- transaction-local.
+  perform set_config('presby.affiliation_trigger_active', 'true', true);
+  perform set_config('presby.identifier_trigger_active', 'true', true);
+
   return old;
 end $$;
 
@@ -1107,9 +1337,16 @@ grant select on organization_affiliations to presby_app;
 -- does not depend on the caller's grant at all; the widening only reopened a
 -- raw-mutation path around the function's authority check, its uniform
 -- rejection message and its provenance rule, on the connection with the most
--- reach. No freeze trigger here — see section 12's note on why the grant
--- alone is the right instrument for THIS table and is not for the lifecycle
--- events table.
+-- reach.
+--
+-- SUPERSEDED IN PART, 2026-09-24 (F49 / DECISION-140). This paragraph used to
+-- end "No freeze trigger here — the grant alone is the right instrument for
+-- THIS table." That claim was written before F44 / Ruling B3 was discovered
+-- later in this same pipeline: the grant binds presby_platform, and nothing
+-- authenticates as presby_platform — PLATFORM_DATABASE_URL connects as
+-- neondb_owner, the table's owner. organization_affiliations_guard (section
+-- 11) now closes the owner path for UPDATE and DELETE. The revokes below are
+-- kept and are still correct; they are the belt, not the buckle.
 revoke update, delete on organization_affiliations from presby_platform;
 grant select, insert on organization_affiliations to presby_platform;
 

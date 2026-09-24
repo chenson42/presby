@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -50,8 +51,16 @@ import { users } from "../schema";
  *     `closedOn` / `closedMinuteReference`) applied to a publication, for the
  *     same reason — a close with no attribution is an unattributable mutation
  *     of an otherwise provenanced record.
- *   - There is NO tenant-side withdrawal path in this pipeline: with UPDATE
- *     revoked from `presby_app`, withdrawal is an owner-only act. The
+ *   - `publications_supersession` (BEFORE INSERT, SECURITY DEFINER) makes
+ *     supersession a real CHAIN: the predecessor named by `supersedesId` must
+ *     share `organizationId`, `recipientOrgId`, `recordClass` and — for
+ *     `statistical_return` — the artifact's `reportYear`. Paired with the
+ *     partial unique index on `supersedesId`, which forbids forks.
+ *   - `presby_app` and `presby_platform` hold `SELECT` ONLY as of
+ *     F51/DECISION-140 — INSERT was revoked too, since
+ *     `presby_publish_sasr_snapshot()` (SECURITY DEFINER) is the only writer.
+ *   - There is NO tenant-side withdrawal path in this pipeline: withdrawal is
+ *     an owner-only act. The
  *     intended writer is a future `presby_withdraw_publication()` SECURITY
  *     DEFINER function in the publish-UI pipeline, in the same
  *     confused-deputy shape as `presby_transfer_affiliation()` — no
@@ -123,11 +132,17 @@ export const publications = pgTable(
     /**
      * Withdrawal is a column, not a delete (D20), and it is a MINUTED ACT:
      * these three move together, exactly once, on a row that is not already
-     * withdrawn. A withdrawn publication disappears from
-     * `presby_list_published_returns_to_me()`; its `congregation_statistics`
-     * projection row is DELIBERATELY UNTOUCHED — acting on the projection is
-     * out of scope for this pipeline and belongs to whichever pipeline ships
-     * a withdrawal UI (Phase 3 Edge Cases).
+     * withdrawn.
+     *
+     * OPTION A THROUGHOUT (F52/DECISION-140). A withdrawn publication STILL
+     * APPEARS in `presby_list_published_returns_to_me()`, carrying the whole
+     * triple, and `congregationStatistics` gains its own `withdrawnAt` so the
+     * recipient's projection is MARKED rather than either vanishing or
+     * silently counting. The recipient retains what it received — the same
+     * permanence rule that voids a roll action rather than deleting it, and
+     * G-3.0107's "a ceased council's records become the property of the next
+     * higher council". Every consumer computing CURRENT totals filters
+     * `withdrawnAt is null` itself.
      */
     withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
     /**
@@ -145,6 +160,17 @@ export const publications = pgTable(
   },
   (t) => [
     unique("publications_id_org_key").on(t.id, t.organizationId),
+    /**
+     * The RECIPIENT half of the projection's composite key (F51/
+     * DECISION-140). `congregationStatistics` carries a second composite FK,
+     * `(publicationId, organizationId) -> publications (id, recipientOrgId)`,
+     * alongside the source-end `(publicationId, aboutOrgId) -> publications
+     * (id, organizationId)`. Both pin to the same `publications.id`, so
+     * together they force BOTH ends of the relationship on one row — closing
+     * "Presbytery B holds a projection of a publication whose real recipient
+     * was Presbytery A."
+     */
+    unique("publications_id_recipient_key").on(t.id, t.recipientOrgId),
     foreignKey({
       name: "publications_artifact_fk",
       columns: [t.artifactId, t.organizationId],
@@ -153,6 +179,15 @@ export const publications = pgTable(
     index("publications_recipient_idx").on(t.recipientOrgId),
     index("publications_org_artifact_idx").on(t.organizationId, t.artifactId),
     index("publications_supersedes_idx").on(t.supersedesId),
+    /**
+     * Supersession may not FORK (F51/DECISION-140): two publications naming
+     * the same predecessor make "which one is current" unanswerable, which is
+     * the one question the chain exists to answer. Partial, because null is
+     * the overwhelmingly common value.
+     */
+    uniqueIndex("publications_supersedes_once_idx")
+      .on(t.supersedesId)
+      .where(sql`${t.supersedesId} is not null`),
     check(
       "publications_record_class_allowed",
       sql`${t.recordClass} in ('statistical_return')`,
@@ -161,12 +196,30 @@ export const publications = pgTable(
       "publications_not_self_superseding",
       sql`${t.supersedesId} is null or ${t.supersedesId} <> ${t.id}`,
     ),
-    // Attribution without the act it attributes is meaningless. The trigger
-    // enforces the TRANSITION; this enforces the resulting SHAPE, including
-    // for the owner's own writes.
+    /**
+     * All three withdrawal columns are null, or all three are set. The
+     * trigger enforces the TRANSITION; this enforces the resulting SHAPE,
+     * including for the owner's own writes — CHECK constraints bind the table
+     * owner, unlike RLS policies and unlike grants, so F44 does not exempt it.
+     *
+     * CORRECTED (F51/DECISION-140). It used to read `withdrawnAt is not null
+     * or (withdrawnBy is null and withdrawnMinuteReference is null)`, which is
+     * true whenever `withdrawnAt` is set whatever the other two hold —
+     * permitting exactly the unattributable withdrawal its own column comment
+     * says is impossible.
+     */
     check(
       "publications_withdrawal_shape",
-      sql`${t.withdrawnAt} is not null or (${t.withdrawnBy} is null and ${t.withdrawnMinuteReference} is null)`,
+      sql`(${t.withdrawnAt} is null and ${t.withdrawnBy} is null and ${t.withdrawnMinuteReference} is null)
+          or (${t.withdrawnAt} is not null and ${t.withdrawnBy} is not null and ${t.withdrawnMinuteReference} is not null)`,
     ),
+    // NOT EXPRESSIBLE HERE (F51/DECISION-140): `publications_supersession`, a
+    // SECURITY DEFINER BEFORE INSERT trigger requiring the predecessor named
+    // by `supersedesId` to share `organizationId`, `recipientOrgId`,
+    // `recordClass` and — for `statistical_return` — the artifact's
+    // `reportYear`. DEFINER because `publications` is FORCE RLS: an
+    // invoker-mode check's answer would depend on the caller's policy view
+    // rather than on the fact (F26). One uniform, cause-blind literal, so the
+    // trigger is not a cross-tenant existence oracle (F40).
   ],
 );

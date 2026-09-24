@@ -18,9 +18,15 @@ started, so it is waiting.
 
 **Table-and-constraint design for D10 / D19 / D20 / D21, as a single unit.**
 
-Read `docs/schema-design-2.md` first — especially §2a. Those four decisions are
-coupled tightly enough that designing them sequentially would produce four shapes
-that do not fit:
+Read `docs/schema-design-2.md` first — **§2b, then §2a**. Review round 3
+(2026-09-24, `docs/reviews/2026-09-24-schema-design-round-3.md`) found the §3–§6
+table shapes stale against the decisions and colliding with three built tables —
+`organizations.status`, `organization_settings.pcusa_pin`, and above all
+`congregation_statistics`' **already-built** publication mechanism (DECISION-118/120),
+which D20/D21 had silently duplicated. §3–§8 were rewritten in place; §2b carries
+the change table (D24–D26, F34–F37) and the migration order the pipeline should
+follow. Those four decisions are coupled tightly enough that designing them
+sequentially would produce four shapes that do not fit:
 
 > permanent organization identity (D10) → historical affiliation (D19) → global
 > person + tenant membership (D1) → append-only roll → live statistical projection
@@ -43,9 +49,9 @@ with a presbytery go-live (PSV) first.**
   Eleven tracks, a dependency spine, confirmed scope, and the settled design
   decisions. Read this for the *program*; read `schema-design-2.md` for the
   *model*.
-- **`docs/schema-design-2.md`** — full-domain schema round 2. Decisions **D10–D23**,
-  findings **F30–F33**. Survived two rounds of external review; round 2's
-  corrections are recorded in §2a.
+- **`docs/schema-design-2.md`** — full-domain schema round 2. Decisions **D10–D26**,
+  findings **F30–F37**. Three review rounds; round 2's corrections are in §2a,
+  round 3's (table shapes vs. decisions vs. built schema) in §2b.
 - **`docs/deployment.md`** — rewritten. The previous draft's central claim was
   false (it described a `presby-production` Neon project that does not exist).
 
@@ -81,20 +87,14 @@ eventually, not today).
    can sign in to production at all right now — including the operator. That is
    accepted, not an outage.
 
-### ⚠️ Blocking the push: two critical Next.js CVEs
+### Resolved: the two critical Next.js CVEs (v0.23.3)
 
-`/pre-push` ran clean on everything else — typecheck, 3,206 tests, build, all five
-tripwires — but `npm audit` found **two CRITICAL advisories in `next` itself**.
-Installed 16.3.0; both fixed in **16.3.3**, a patch bump inside the same minor.
-
-`GHSA-2xp9-vwfh-vxw4` is the one that matters: unauthenticated RCE in the **Image
-Optimization API when AVIF is used.** `next/image` is used in five files and
-`next.config.ts` configures `images.remotePatterns`, so the optimizer route is live.
-`www.presbyportal.org` serves `/site/fpcw` publicly today. This is not theoretical.
-
-**The pre-push gate was deliberately NOT stamped.** Bump `next` to >=16.3.3, re-run
-`/pre-push`, then push. Also high and worth taking in the same pass: `sharp`
-<0.35.4, `js-yaml`, `browserslist`.
+`next` 16.3.0 → **16.3.6** (`eslint-config-next` to match), `sharp` → 0.35.4,
+`js-yaml` → 4.3.2, `browserslist` → 4.29.1. Zero critical or high advisories
+remain; the leftover moderates are dev-only (`vitest` 4.1.6 and the `drizzle-kit`
+→ esbuild chain) and tracked in `docs/TODO.md`. Note for the next dependency pass:
+`npm update` on `vitest` trips npm 10.8.2's `edgesOut` reify bug in this tree —
+update packages one at a time.
 
 ### Reviews still overdue
 

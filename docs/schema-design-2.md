@@ -1,7 +1,8 @@
 # Schema design, round 2 — full-domain first pass
 
-**Status:** DRAFT for review. Not implemented. No migrations written.
-**Date:** 2026-09-24.
+**Status:** DRAFT, three review rounds. Not implemented. No migrations written.
+**Date:** 2026-09-24. Round 3 (§2b) reconciled the §3–§8 table shapes with the
+decisions and with the built schema; the DDL pipeline starts from §2b's shapes.
 **Extends** `docs/schema-design.md` (Sections A–L, decisions D1–D9, findings
 F1–F29). Conventions, invariants and RLS rules there apply unchanged and are not
 repeated. New decisions continue at **D10**; new findings at **F30**.
@@ -307,29 +308,109 @@ that unit and can run separately.
 
 ---
 
-## 3. Section M — Organization lifecycle *(new)*
+## 2b. Round-3 review — table shapes reconciled with the decisions and the built schema
+
+A third pass (2026-09-24, `docs/reviews/2026-09-24-schema-design-round-3.md`) read
+§3–§8 against §2/§2a **and against what is already built** in
+`src/lib/db/domain/` and `drizzle/0038`. Verdict: the decisions hold; the table
+shapes had not caught up with them, and three collided with existing tables. All
+sixteen findings (R3.1–R3.16) are accepted. The sections below were **rewritten in
+place** rather than annotated, so §3–§8 now show the round-3 shapes; the review file
+keeps the before/after argument. What changed, by decision:
+
+| # | Decision / finding | Change |
+|---|---|---|
+| **D10** | *(R3.1)* §3 still carried the pre-round-2 shape — editable `lifecycle_status`/`lifecycle_date`/`merged_into_org_id` on `organizations` and an events table with no topology. | Events table + **`organization_successions`** (N→1 and 1→N). `lifecycle_status` is a trigger-maintained cache with F29-style drift detection, or a view. `merged_into_org_id` and `organized_year` dropped. **Not** named after `people.merged_into_id`: a person merge is deduplication (follow the chain), a congregation merge is a polity event (do *not* follow it — that mis-attributes history). |
+| **F35** *(new)* | *(R3.2)* The built `organizations` already has an unused `status text default 'active'`. | The D10 migration drops or repurposes it. Two status columns with one default is the second-source-of-truth hazard D19 names. |
+| **D24** *(new)* | *(R3.3)* `pcusa_pin` already exists on tenant-scoped `organization_settings`; the importer, running as the presbytery, cannot read it. | **`organization_identifiers`** (`kind: pcusa_pin \| psvonline_congregation_id \| church360 \| legacy_import`), mirroring `person_identifiers`. `pcusa_pin` **moves** there. Gives the PSV port an idempotent org mapping (program doc, model conflict 1). |
+| **F36** *(new)* | *(R3.4)* **Publication is already built.** `congregation_statistics` has frozen published rows, `supersedes_publication_id`, `published_at`, `minute_reference`, a freeze trigger and `presby_publish_sasr_snapshot()` (DECISION-118/120). D20/D21 designed a second mechanism and never said what happens to the first. | Option (a) adopted: `congregation_statistics` stays the presbytery's typed keyspace; its published rows become a **projection of a `publications` row** (`publication_id` not null for that provenance; the event columns move to `publications`). The migration **backfills** one publication per existing published row. The publish function writes return → publication → statistics row in one transaction. |
+| **D19** | *(R3.4, rule)* Which presbytery receives a late filing after a redistricting? | **The presbytery of current membership at `published_at`** (the reviewing council, G-3.0107). The archive's attribution function is the same function, so 1990 and 2026 answer the same way. |
+| **D21 → D25** *(new)* | *(R3.5)* The projection is a function, not a row; `statistical_submission` and `sasr_archive` differ only in provenance and owner. | **One table, `statistical_returns`**, `provenance: submitted \| imported`. D11's reconciliation rule applies at write time to `submitted` only. `sasr_reports` survives only as the congregation's working draft; `submitted` stops being a draft status and becomes the existence of a return row. **`sasr_form_versions.field_spec` is enforced by trigger** (keys ⊆ spec, types, bounds) — otherwise DECISION-118's allow-list property is lost. |
+| **D19** | *(R3.6)* Column list lacked `relationship_type`/`authority`; invariants had no mechanisms. | Exclusion constraint on `daterange(effective_from, effective_to, '[)')` per `(organization_id, relationship_type)` — **needs `btree_gist`**, named in the migration (`path` was designed as `ltree` and built as `text`; extensions have slipped before). `parent_id` **and `path`** derived by trigger; direct `UPDATE ... parent_id` rejected outside the trigger's GUC; reparenting rebuilds the subtree's paths. Parent type must fit child type. A dissolution closes the open affiliation. |
+| **D26** *(new)* | *(R3.7)* Lifecycle events and affiliations are acts of a council about an organization (G-3.0301(c)). | Both are **council-owned rows** in the `about_org_id` pattern: `organization_id` = the acting council, `subject_org_id` = the organization acted upon, FORCE RLS, ordinary tenant policy. Minute references and notes stay inside the council's records; the public tree exposes only `(child, parent, from, to)`. `platform_status` remains a platform-admin act — three axes, three write paths. |
+| **D11** | *(R3.8)* `unique (organization_id, about_org_id, report_year)` on the archive breaks on an amended return or a merge year with two predecessors. | Dropped. Deduplication happens in D13's staging workflow where the candidate set is visible. |
+| **F37** *(new)* | *(R3.9)* F33's matching key `(name, city, year)` had no home: `organization_profiles` does not exist for unmanaged congregations. | `organization_name_history` gains `name_type` (as §2a already said), `city`, `state`; index `(lower(name), lower(city))`. |
+| **D16** | *(R3.10)* The grant row absorbed the submission (`submitted_payload`, attestation columns). | The grant is a **credential**; what it produces is a `statistical_returns` row (`provenance = 'submitted'`) plus an automatic `publications` row to the issuing presbytery. `token_hash unique`; one live grant per `(org, about, year)`. **Stated consequence:** a grant-submitted return for an `unmanaged` congregation is owned by the congregation, in a tenant nobody can enter; when it becomes `managed` it inherits its own filing history — D9's handover working as designed. |
+| **F2** | *(R3.11)* Every `person_id` in §7/§8 was drawn bare. | All are composite `(person_id, organization_id) → memberships`. `officiant_person_id` cannot be (a minister of another presbytery has no membership here): **`officiant_name` required, composite `officiant_person_id` optional**, no global reference. `resulting_roll_action_id` is composite to `roll_actions`; a later void leaves the act pointing at the voided action, deliberately. |
+| **D10** | *(R3.12)* Every tenant FK cascades on org delete, and 58 orgs were cascade-deleted from production on 2026-08-31. `revoke delete from presby_app` does not touch the owner path. | A `BEFORE DELETE` guard with an **explicit fixture exemption** — decision open in `docs/TODO.md`. "Never" that fixture cleanup violates monthly is not an invariant. |
+| **D23** | *(R3.13)* Enforcement mechanism was implicit; anything flowing through `role_grants` is transitive by construction. | A separate **`care_grants`** table (grantee, purpose, expires, granted_by, minute_reference), never a catalog permission key; `care_*` tables readable only through SECURITY DEFINER functions that check the grant (the `presby_match_person()` "controlled read, not a policy" idiom) — so §17's two-named-policies rule stands. `care_assignments` does **not** reference the Diaconate group (Stephen ministers and pastors carry care loads). |
+| **§9.1** | *(R3.14)* `about_org_id` is a paper invariant on five tables. | D19 makes it enforceable: `presby_org_affiliated(subject, council, as_of)` (SECURITY DEFINER) called from one trigger on every about-org table; one `test-rls.sql` section. |
+| **F34** *(promoted)* | *(R3.15)* Cross-generation comparability, §10.1. | The normalising view exposes a field for a span **only if every form version in the span maps it**; otherwise the column is absent, so the query fails to compile rather than returning zeros. `field_spec` carries `comparable_to`. |
+| **D13** | *(R3.16)* Staging shape. | `import_batches` (source, worksheet, form version, **column map** — F32's positional arrays only decode per tab) + `import_rows` (raw row, original name, city, candidates, resolution kind, resolver, rationale, resulting return). Presbytery-owned, FORCE RLS. |
+
+**Migration order for the D10/D19/D20/D21 pipeline** (from the review's §D):
+(1) `organization_identifiers`, move `pcusa_pin`, drop `organizations.status`;
+(2) lifecycle events + successions + affiliations as council-owned rows, the
+`parent_id`/`path` triggers, `btree_gist`, the delete guard, backfill one event and
+one affiliation per existing org; (3) `presby_org_affiliated()` and the about-org
+trigger on the five existing tables; (4) `sasr_form_versions` with its enforcing
+trigger, `statistical_returns`; (5) `publications`, the `congregation_statistics`
+retrofit with backfill, the rewritten publish function, `sasr_reports`' fate;
+(6) submission grants — its own security review; (7) name history with city, D13
+staging.
+
+---
+
+## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.
 
 ```
 organizations                      (existing — extended)
-  + lifecycle_status   text not null default 'active'
-        -- vocabulary from G-3.0301(c):
-        active | organized | received | merged | divided | dismissed | dissolved
-  + lifecycle_date     date          -- effective date of the current status
-  + lifecycle_minute_reference text  -- the presbytery act. G-3.0301(c) requires
-                                     -- consultation; review requires attribution
-  + merged_into_org_id uuid          -- set when lifecycle_status = 'merged'
-  + pcusa_pin          text          -- the denomination's own identifier
-  + organized_year     integer
+  - status                          -- DROPPED (F35): unused since provisioning
+                                    -- shipped; would otherwise sit beside the
+                                    -- cache below with the same default
+  + lifecycle_status   text not null default 'active'   -- CACHE, trigger-
+        -- maintained from the events below, never written directly; drift
+        -- check per F29. Vocabulary from G-3.0301(c):
+        active | merged | divided | dismissed | dissolved
+  + lifecycle_as_of    date         -- effective_on of the event that set it
+  parent_id, path                   -- BOTH now derived from the current
+                                    -- affiliation (D19 invariant 3); a direct
+                                    -- UPDATE is rejected outside the trigger
+  -- pcusa_pin: NOT here — see organization_identifiers (D24)
+  -- no merged_into_org_id, no organized_year: both live in the events
 
-organization_lifecycle_events      (new — the history, not just current state)
-  organization_id, event, effective_on, minute_reference, recorded_by, notes
+organization_identifiers           (new)   D24 — mirrors person_identifiers
+  organization_id, kind, value_normalized, is_verified, source
+  -- kind: pcusa_pin | psvonline_congregation_id | church360 | legacy_import
+  unique (kind, value_normalized) where is_verified
 
-organization_affiliations          (new)   D19 — the THIRD axis
-  organization_id, parent_org_id, effective_from, effective_to,
-  reason, minute_reference
-  -- which council this org belonged to, WHEN. `parent_id` is only the present.
+organization_lifecycle_events      (new)   D10 — the record; council-owned (D26)
+  id, organization_id,              -- the ACTING council (the presbytery)
+  subject_org_id,                   -- the organization acted upon
+  event,                            -- organized | received | merged | divided
+                                    -- | dismissed | dissolved
+  effective_on, minute_reference,
+  external_body,                    -- for dismissed / received: the other
+                                    -- denomination or body
+  recorded_by, recorded_at, notes
+  unique (id, organization_id); FORCE RLS, tenant policy
+  -- trigger: sets subject's lifecycle cache; on dissolved/merged/divided/
+  -- dismissed, closes the subject's open affiliation on effective_on
+
+organization_successions           (new)   D10 — the topology
+  event_id, predecessor_org_id, successor_org_id
+  -- merged:  N rows sharing a successor    divided: N rows sharing a predecessor
+  -- CHECK predecessor <> successor; each must be the event's subject or a
+  -- named successor. NOT a merge chain to follow — see §2b on D10.
+
+organization_affiliations          (new)   D19 — the THIRD axis; council-owned
+  id, organization_id,              -- the council with authority over the
+                                    -- change (presbytery, synod, or GA)
+  subject_org_id, parent_org_id,
+  relationship_type,                -- member_congregation | member_presbytery
+                                    -- | member_synod (singular each)
+  effective_from, effective_to,     -- '[)'; null = current
+  reason, minute_reference, recorded_by, recorded_at
+  unique (id, organization_id); FORCE RLS, tenant policy
+  exclude using gist (subject_org_id with =, relationship_type with =,
+                      daterange(effective_from, effective_to, '[)') with &&)
+                                    -- requires btree_gist: name it in the
+                                    -- migration and check it exists
+  -- trigger (SECURITY DEFINER, F26): maintains organizations.parent_id and
+  -- path for the subject and its subtree; checks parent type fits child type
+  -- public projection: a view of (subject, parent, from, to) only
 ```
 
 **Why this is an event ledger and not a status column.** Review round 2 made the
@@ -362,9 +443,12 @@ that these are separate axes, and the mapping needs care:
   congregation moved by synod redistricting has not changed what it is.
 
 ```
-
-organization_name_history          (new)   D14
-  organization_id, name, official_name, effective_from, effective_to
+organization_name_history          (new)   D14 / F37
+  organization_id, name_type,       -- canonical | former_name | historical_name
+                                    -- | abbreviation | legacy_import_name
+  name, city, state,                -- a name AT A PLACE is the matching unit (F33)
+  effective_from, effective_to
+  index (lower(name), lower(city))
 ```
 
 Notes.
@@ -372,13 +456,23 @@ Notes.
 - **`lifecycle_status` and `platform_status` are orthogonal.** A `dissolved`
   congregation was very likely `unmanaged`; a `managed` tenant can dissolve. Two
   axes, two columns — the same discipline as `canAccessAdmin` vs `isPlatformAdmin`
-  (DECISION-044).
-- `delete` revoked on `organizations`, matching `people`.
-- `merged_into_org_id` mirrors `people.merged_into_id` deliberately, so the
-  "follow the merge chain" query shape is learned once.
-- **Open:** does a dissolved congregation keep its `slug`? It must, for historical
-  report URLs — which argues the slug reservation is permanent, not released on
-  dissolution.
+  (DECISION-044). Affiliation is the third axis and has its own write path.
+- **Three axes, three write paths (D26).** Lifecycle and affiliation are council
+  acts, written by the presbytery (or synod/GA) in its own tenant context through
+  `withOrgContext()`, with an audit row. `platform_status` is a platform-admin act
+  through `getPlatformDb()`. Nothing writes `parent_id`, `path` or
+  `lifecycle_status` directly.
+- **`delete` revoked on `organizations` from `presby_app`, plus a `BEFORE DELETE`
+  guard on the owner path.** Every tenant FK cascades on org delete and the owner
+  connection has used that path for fixture cleanup (2026-08-31). The guard needs an
+  explicit fixture exemption — open decision in `docs/TODO.md` (R3.12).
+- **Do not "follow the chain" through `organization_successions`.** A merged
+  congregation's 1987 return stays attributed to the predecessor; the successor
+  has no history before its `organized`/`merged` event. This is the opposite of
+  `people.merged_into_id`, and the different table shape is meant to make the
+  different query obvious.
+- A dissolved congregation keeps its `slug` forever — settled in §2a, folded into
+  D10.
 
 ## 4. Section N — Presbytery oversight *(new)*
 
@@ -418,69 +512,137 @@ Notes.
 - `ministry_credentials` in PSV is **empty** — built, never used. presby's
   `/admin/credentials` is already real. Do not port.
 
-## 5. Section O — The SASR, archive and projection *(revises Section J)*
+## 5. Section O — The SASR: projection, returns, publication *(revises Section J; shape revised in round 3)*
 
-Answers F31 / D11 / D12. **The most consequential part of this pass.**
+Answers F31 / D11 / D12 / D20 / D21 / D25 / F36. **The most consequential part of
+this pass.** Four things, of which only two are new tables:
 
 ```
-sasr_form_versions                (new, platform-wide reference)
-  key (e.g. '1984', '2014', '2022', '2024'), label,
-  effective_first_year, effective_last_year, field_spec jsonb
+-- 1. The PROJECTION is a function, not a row (D21 → D25).
+presby_sasr_projection(org, report_year)   -- computed live from roll_actions,
+                                           -- person_demographics, officer_terms…
+                                           -- recomputable, never stored as truth
 
-sasr_archive                      (new — imported history, IMMUTABLE)
-  organization_id,               -- the presbytery holding the archive
-  about_org_id,                  -- the congregation, possibly `dissolved` (D10)
-  report_year,
-  form_version_key,
-  payload jsonb not null,        -- as-reported, in that year's field names
-  source_ref text,               -- which tab / file / page it came from
-  imported_from_staging_id,      -- provenance back to D13
-  unique (organization_id, about_org_id, report_year)
+sasr_reports                      (existing, unused — becomes the WORKING DRAFT)
+  … status: draft | session_approved ONLY. `submitted` is no longer a status:
+    it is the existence of a statistical_returns row. Keeps the immutable
+    official_beginning_balance and §13's reconciliation rule.
 
-sasr_reports                      (existing design, §13 — presby-GENERATED)
-  … unchanged, keeps `payload jsonb`, the immutable
-    official_beginning_balance and the reconciliation rule
+-- 2. The ARTIFACT: one table, two provenances (D25 — was statistical_submission
+--    + sasr_archive; they differ only in who wrote it and who owns it).
+sasr_form_versions                (new, platform-wide reference, no RLS, seeded)
+  key ('1984', '2014', '2022', '2024'), label,
+  effective_first_year, effective_last_year,     -- ranges may not overlap
+  field_spec jsonb                  -- per field: key, type, bounds, SASR line,
+                                    -- comparable_to (F34)
+  -- ENFORCED by trigger on statistical_returns: payload keys ⊆ spec, types
+  -- match, counts non-negative and bounded. Otherwise DECISION-118's
+  -- allow-list ("a field with no slot cannot smuggle through") is lost.
+
+statistical_returns               (new — IMMUTABLE, append-only)
+  id, organization_id,              -- OWNER: the congregation for submitted,
+                                    -- the presbytery for imported
+  about_org_id,                     -- the congregation; may be dissolved (D10)
+  report_year, form_version_key,
+  provenance,                       -- submitted | imported
+  payload jsonb not null,           -- as-reported, in that version's field names
+  reconciled boolean not null,      -- true only for submitted (D11 applies at
+                                    -- write time); imported is never reconciled
+  attested_by_name, attested_role, attested_at,    -- submitted
+  source_ref, staging_row_id,                      -- imported (D13 provenance)
+  created_at
+  unique (id, organization_id); FORCE RLS
+  -- NO unique on (about, year): a corrected submission is a new row and
+  -- publications.supersedes_id says which is current (R3.8)
+  -- trigger: presby_org_affiliated(about_org_id, organization_id, report_year)
+  -- for imported rows (R3.14)
+
+-- 3. The PUBLICATION EVENT (D20) — references the artifact, never absorbs it.
+publications                      (new — IMMUTABLE; withdrawal is a column, not
+                                   a delete)
+  id, organization_id,              -- OWNER: the source council
+  recipient_org_id,                 -- the presbytery of CURRENT membership at
+                                    -- published_at (D19 rule, §2b)
+  record_class,                     -- 'statistical_return' today; generic
+  artifact_id,                      -- → statistical_returns (id, organization_id)
+  published_at, supersedes_id, authorized_by, minute_reference, withdrawn_at
+  unique (id, organization_id); FORCE RLS
+  -- read by the recipient through a SECURITY DEFINER function that filters
+  -- recipient_org_id = presby_current_org() — the presby_list_own_
+  -- congregation_publications() shape, not a bespoke policy (§17)
+
+-- 4. The presbytery's TYPED KEYSPACE (existing, retrofitted — F36).
+congregation_statistics           (built, drizzle/0038)
+  + publication_id                  -- not null when provenance =
+                                    -- 'published_by_congregation'
+  - supersedes_publication_id, published_at, minute_reference
+                                    -- MOVE to publications; the migration
+                                    -- BACKFILLS one publication per existing
+                                    -- published row before dropping them
+  -- keeps provenance, the freeze trigger, the partial unique index, and every
+  -- consumer (rollup, per-capita basis-year): DECISION-120's "same
+  -- (about_org, year) keyspace regardless of who wrote it" still holds
 ```
+
+`presby_publish_sasr_snapshot()` is rewritten to write, in one transaction: the
+`statistical_returns` row (from the draft, reconciled) → the `publications` row
+(recipient derived from the current affiliation, never passed) → the typed
+`congregation_statistics` projection. Its parameter list stays the allow-list;
+the returns trigger is the second, independent check.
 
 Notes.
 
-- **The archive is not a projection and must never be reconciled.** §13's rule
-  (`official_beginning_balance + gains − losses = ending_active`) applies to what
-  presby generates from its own roll. An imported 1987 row is a historical
+- **An imported return is never reconciled.** §13's rule
+  (`official_beginning_balance + gains − losses = ending_active`) applies at write
+  time to `provenance = 'submitted'`. An imported 1987 row is a historical
   assertion; if it does not balance, that is a fact about 1987, not an error to
-  correct.
+  correct. `reconciled` records which rule was applied.
 - **`about_org_id` must legally reference a non-`active` organization.** This is
   the concrete reason D10 exists.
-- Reporting reads a **union view** over archive + generated, normalised through
-  `sasr_form_versions.field_spec`. Trend queries then span 1984→present without
-  either table growing a column.
-- **Open (F34?):** cross-generation comparability. 1984's age bands do not map onto
-  2024's. A trend chart over "members aged 56–70" is *not* computable across the
-  boundary and the schema should make that impossible to ask naively rather than
-  quietly wrong. Suggest the normalising view expose only fields valid for the
-  requested span.
+- Reporting reads **one table** through a normalising view keyed on
+  `form_version_key`. Trend queries span 1984→present without the table growing a
+  column.
+- **F34 — cross-generation comparability, settled.** The normalising view exposes
+  a field for a requested span **only if every form version in the span maps it**
+  (`field_spec.comparable_to`); otherwise the column is absent, so "members aged
+  56–70, 1984→2024" fails to compile rather than returning zeros.
+- **Which presbytery receives a publication** is the affiliation current at
+  `published_at` — the reviewing council (G-3.0107). The archive's attribution
+  reads the affiliation as of the report year. Both go through
+  `presby_org_affiliated()`, so a redistricting cannot make the live and archival
+  answers disagree.
 
 ## 6. Section P — Submission without an account *(new)*
 
 Answers D16.
 
 ```
-statistics_submission_grants      (new)
-  organization_id,               -- the presbytery issuing it
+statistics_submission_grants      (new — shape revised in round 3: the grant is a
+                                   CREDENTIAL; what it produces is a return)
+  id, organization_id,           -- the presbytery issuing it
   about_org_id,                  -- the congregation being asked
   report_year,
-  token_hash,                    -- never the token itself
+  token_hash unique,             -- never the token itself
   issued_to_name, issued_to_email,
   issued_by, issued_at, expires_at,
-  submitted_at, submitted_payload jsonb,
-  attested_by_name, attested_role, minute_reference,
+  submitted_at, return_id,       -- → statistical_returns; the attestation
+                                 -- columns live on the return, not here
   revoked_at
+  unique (organization_id, about_org_id, report_year)
+    where revoked_at is null and submitted_at is null   -- one live grant
 ```
 
 Notes.
 
 - **Single-purpose, single-year, single-congregation, expiring.** The grant is not
   a login and grants no read access to anything else.
+- **What a grant submission writes:** a `statistical_returns` row owned by the
+  *congregation* (`provenance = 'submitted'`, attested, form-version-validated) and
+  an automatic `publications` row to the issuing presbytery, `authorized_by` the
+  attestation. For an `unmanaged` congregation that return sits in a tenant nobody
+  can enter — deliberately. When the congregation becomes `managed`, it inherits
+  its own filing history on day one and the presbytery's stewardship lapses. That
+  is D9's handover working as designed.
 - Verification is *attestation*, not authentication: the submitter names
   themselves and their office (clerk of session, moderator), and that flows into
   the existing `provenance` / `minute_reference` fields. This matches how the paper
@@ -538,13 +700,23 @@ Notes.
 Answers D17 / D18.
 
 ```
+-- Every person_id below is COMPOSITE (person_id, organization_id) → memberships
+-- (F2). `people` is global; a bare reference would let a presbytery hold a
+-- bereavement note about a congregation's member. (Round 3, R3.11.)
+
 pastoral_acts                     -- the register (D17)
   organization_id, act_type,      -- baptism | marriage | funeral |
                                   -- confirmation | ordination_service
   occurred_on, location,
-  officiant_person_id,            -- may be a minister of another presbytery
+  officiant_name not null,        -- may be a minister of another presbytery,
+  officiant_person_id,            -- who has no membership here — so the name
+                                  -- is the record and the composite reference
+                                  -- is optional. No global people reference.
   minute_reference,
-  resulting_roll_action_id,       -- nullable: a baptism usually produces one
+  resulting_roll_action_id,       -- nullable; composite → roll_actions. A later
+                                  -- void leaves the act pointing at the voided
+                                  -- action, deliberately: the register entry
+                                  -- stands, the roll correction is separate.
   register_number, notes
 
 pastoral_act_participants         -- role-per-person, because a wedding has two
@@ -553,6 +725,15 @@ pastoral_act_participants         -- role-per-person, because a wedding has two
   participant_role               -- baptizand | parent | sponsor | spouse |
                                  -- deceased | next_of_kin | witness
 
+care_grants                       -- D23's mechanism (round 3, R3.13)
+  organization_id, grantee_person_id, purpose,
+  -- bereavement | hospital | crisis | general_care
+  granted_by, granted_on, expires_on, minute_reference, revoked_at
+  -- NEVER a permission-catalog key: anything flowing through role_grants is
+  -- transitive by construction. care_* tables are readable only through
+  -- SECURITY DEFINER functions that check this table — the "controlled read,
+  -- not a policy" idiom — so §17's two-named-policies rule stands.
+
 care_interactions                 -- tier 3 (D18)
   organization_id, person_id, occurred_on, interaction_type,
   -- visit | call | hospital | bereavement | crisis | prayer_request
@@ -560,7 +741,8 @@ care_interactions                 -- tier 3 (D18)
 
 care_assignments                  -- who is responsible for whom
   organization_id, person_id, caregiver_person_id,
-  -- typically a deacon: the diaconate roster is already derived from officer_terms
+  -- often a deacon, but NOT constrained to the derived Diaconate group:
+  -- Stephen ministers and pastors carry care loads too (round 3)
   started_on, ended_on, notes
 ```
 
@@ -574,12 +756,14 @@ Notes.
 - `participant_name` exists for the same reason
   `person_relationships.related_name` does — the other party is not always in the
   system.
-- **Care ministry maps onto the diaconate presby already models.** `care_assignments`
-  should reference the derived Diaconate group rather than inventing a parallel
-  roster (invariant "The Court Is Not a Group").
+- **Care ministry overlaps the diaconate presby already models but is not bounded
+  by it.** The Diaconate group stays the derived roster it is; `care_assignments`
+  does not FK to it (round 3 reversed the earlier suggestion — it over-constrained
+  and would end an assignment with the term).
 - **Tier 3, and the hardest privacy surface in the product.** A bereavement note is
-  more sensitive than a giving record. Visibility must be an explicit grant, never
-  a consequence of holding `directory.view` or being staff.
+  more sensitive than a giving record. Visibility is a `care_grants` row, never a
+  consequence of holding `directory.view`, being staff, or holding any catalog
+  permission. `check:audit` treats every `care_*` mutation as security-sensitive.
 - Households already exist (`households`, `addresses`). This pass adds no household
   tables; it assumes the existing model and flags below that Church360's household
   semantics need a reconciliation pass.
@@ -590,25 +774,38 @@ Notes.
 
 1. **`about_org_id` becomes a recognised pattern**, not a one-off. Presbytery-owned
    rows concerning another organization now appear in oversight, property, loan
-   exposure, viability and the SASR archive. It deserves a documented convention
-   alongside the composite-tenant-key rule — including that `about_org_id` is
-   *not* a tenant FK and must not be confused for one.
+   exposure, viability, returns, lifecycle events and affiliations. It deserves a
+   documented convention alongside the composite-tenant-key rule — including that
+   `about_org_id` is *not* a tenant FK and must not be confused for one. **Round 3
+   gives it teeth:** `presby_org_affiliated(subject, council, as_of)` (SECURITY
+   DEFINER, reads `organization_affiliations`) called from one trigger on every
+   about-org table, `as_of` = the row's year for statistics and `now()` for
+   oversight. It is paper on five built tables today (`presbytery.ts` says so).
 2. **Two "permanent record" invariants now exist** — people and organizations.
-   State them together.
-3. **Append-only appears three times**: `roll_actions`, `ledger_transactions`,
-   `sasr_archive`. One convention, one trigger pattern, one test shape.
+   State them together — and state the one place they differ: a person merge is
+   followed, a congregation merge is not (§3).
+3. **Append-only appears four times**: `roll_actions`, `ledger_transactions`,
+   `statistical_returns`, `publications`. One convention, one trigger pattern, one
+   test shape.
+3a. **Bare `person_id` is never legal on a tenant table.** Same rule as F2, restated
+   because the §7/§8 sketches drew it bare four times. Composite to `memberships`,
+   or a name column when the human has no membership here.
 4. **Tier 3 grows substantially** (demographics, medical, pastoral notes, and now
    care interactions). Worth re-reading the tier model as a whole rather than
    adding to it.
-5. **`payload jsonb` reappears** (sasr_archive, sasr_reports, submission grants).
-   Needs a stated rule on when jsonb is legitimate — here: as-reported external
-   data whose shape we do not control — so it does not become an escape hatch that
-   defeats D8's no-custom-fields decision.
+5. **`payload jsonb` reappears.** Rule: jsonb is legitimate only for as-reported
+   external data whose shape we do not control, **and only when a trigger validates
+   it against a declared spec** — so it does not become an escape hatch that defeats
+   D8's no-custom-fields decision. After round 3 exactly one table qualifies:
+   `statistical_returns` (validated against `sasr_form_versions.field_spec`).
+   `sasr_reports.payload` is the working draft's scratch and never leaves the
+   congregation; the grant row carries no payload at all.
 
 ## 10. Open questions
 
-1. **Cross-generation SASR comparability** (§5). Should the normalising view refuse
-   a query spanning a form-version boundary for fields that do not map?
+1. ~~**Cross-generation SASR comparability** (§5).~~ **Settled as F34 (round 3):**
+   the normalising view exposes a field for a span only if every form version in
+   the span maps it; otherwise the column is absent and the query fails to compile.
 2. ~~Does a dissolved congregation keep its slug forever?~~ **Settled: never
    reissued** — folded into D10 (§2a). Archival identity, not a UI concern.
 3. **Church360 household semantics** vs presby's `households` — same concept?
@@ -622,3 +819,12 @@ Notes.
    (D9) would put a presbytery inside a congregation's tier-3 pastoral data. That
    seems clearly wrong and may be the first case where stewardship must be
    *partial*, not whole-record.
+7. **The organization-deletion exemption** (round 3, R3.12). Fixture cleanup
+   deletes organizations through the owner connection today; the D10 guard needs
+   an explicit exemption (`platform_status = 'fixture'`, or `deletable_until`
+   stamped at test provisioning). Tracked in `docs/TODO.md`; decide before the
+   D10 migration.
+8. **`sasr_reports`' fate** (round 3, R3.5). Survives as the congregation's working
+   draft, or is dropped in favour of computing the projection on demand and
+   freezing straight into `statistical_returns`. Decide in the DDL pipeline's
+   Phase 3; either is consistent with D25.

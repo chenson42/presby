@@ -148,6 +148,95 @@ Presbyteries write short names in spreadsheets; matching needs
 
 ---
 
+## 2a. Round-2 external review — accepted changes
+
+An external review of this draft (2026-09-24) raised three structural points this
+document had missed. All three are accepted; they become **D19–D23**. Two further
+points are accepted as refinements, and one is only half-right — recorded below
+because the distinction matters.
+
+### Accepted: three concepts were implicit that should be schema
+
+| # | Decision | Choice |
+|---|---|---|
+| **D19** | **Council affiliation is a third axis, with history** | Existence (D10), platform participation (`platform_status`, D9) and **council affiliation** are three axes, not two. A congregation's presbytery can change without the congregation changing — synod redistricting, boundary revision, transfer between presbyteries. `organizations.parent_id` holds only the *current* parent, so **`organization_affiliations`** records `(organization_id, parent_org_id, effective_from, effective_to, reason, minute_reference)`. |
+| **D20** | **Publication is a first-class, immutable event** | The invariant "access flows up by publication" was stated but never modelled. **`publications`**: `source_org_id`, `recipient_org_id`, `record_class`, `effective_period`, `published_at`, `supersedes_id`, `payload_ref`, `attested_by`, `minute_reference`. A recipient council reads **the version published to it**, never the source's live data. |
+| **D21** | **A submitted return freezes; a generated one does not** | Three states, not two: `statistical_projection` (computed live from the roll, recomputable), `statistical_submission` (frozen attested snapshot at submission), `sasr_archive` (imported, immutable). |
+
+**Why D19 matters more than it looks.** The 41-year archive is the proof: a
+congregation's 1990 return may have been reported to a *different* presbytery than
+the one holding it today. With only `parent_id`, the archive cannot say which
+council received it, and `sasr_archive.organization_id` becomes quietly wrong for
+any congregation whose presbytery changed. This was invisible from inside either the
+organization module or the statistics module — exactly the class of defect the
+full-domain pass exists to catch.
+
+**Why D21 matters.** `roll_actions` is append-only *and correctable by void*. So the
+roll can legitimately change after a return is filed, which means "what the roll
+implies for 2026" and "what this congregation reported for 2026" diverge — and both
+are true. The existing design carries `status: draft | session_approved | submitted`,
+but a status flag does not freeze a payload. Submission must snapshot.
+
+**D20 and D21 compose:** the artifact a congregation publishes to its presbytery
+(D20) *is* the frozen submission (D21). That is what makes the publication invariant
+enforceable rather than aspirational — a presbytery holding a published snapshot
+cannot accidentally be reading a congregation's live tenant data.
+
+### Accepted: two refinements
+
+| # | Decision | Choice |
+|---|---|---|
+| **D22** | **Person merges are explicit, provenanced and auditable** | `people` is global (D1), so a wrong merge is a **cross-tenant disclosure**, not a data-quality nuisance: it joins one congregation's person to another's view. Therefore — no automatic merge on matching name or email, ever; `presby_match_person()` proposes, a human disposes; every merge records actor, date, rationale and the candidate set considered; and merges are auditable and reversible in effect. |
+| **D23** | **Care-ministry grants are purpose-scoped and non-transitive** | Extending D18: a grant naming care access is purpose-specific, optionally time-limited, separately audited, **non-transitive**, and **excluded from platform-support and impersonation paths except as deliberate break-glass**. "Administrator" must not imply "can read bereavement notes." This is the same reasoning as the existing no-wildcard invariant, applied to the product's most sensitive surface. |
+
+Also folded in: **D13** quarantine rows additionally record the import batch, source
+file/worksheet/row identity, the original organization name, **the candidate matches
+considered**, the resolving actor, date and rationale, and whether resolution mapped
+to an alias or created a historical organization. **D14** becomes *typed* names with
+validity ranges — `canonical`, `former_name`, `historical_name`, `abbreviation`,
+`legacy_import_name` — so the importer has somewhere to keep a dirty matching string
+without implying it was ever an official name.
+
+Two items promoted out of "still open" into decisions: **per-member giving is never
+visible to a parent council** (an invariant with a test, not a default), and **a
+dissolved organization's slug is never reissued** (archival identity, not a UI
+concern — folded into D10).
+
+### Partly accepted: the "two hierarchies" heading
+
+The review objects that "two hierarchies that intersect nowhere" overstates, since
+the councils clearly do interact through publication, delegation and administrative
+commission — and proposes "ecclesiastical standing never implies platform access."
+
+**The proposed wording is better for a general audience, but the original claim is
+not wrong**, and the difference is worth keeping straight. The invariant is about the
+two **axes** — ecclesiastical standing versus platform administration — and those
+genuinely do not intersect: a platform admin is not above a synod. Publication,
+delegation and commission are movements *within* the ecclesiastical axis, not bridges
+between the axes.
+
+The misreading was invited by the presentation, not the claim: the overview figure
+drew the publication arrow inside the same frame as the axis comparison. **Fix the
+figure, keep the invariant.** `CLAUDE.md` names this invariant "Two Hierarchies
+Intersect Nowhere," so renaming it is a change to a project invariant rather than a
+heading tweak — not something to do casually, and not something this review settles.
+
+### Accepted as a go-live gate
+
+Before any congregation adopts the platform, prove as a **property** — not as a
+collection of permission tests — that no presbytery-level role, *including platform
+support roles operating through normal application paths*, can read an adopting
+congregation's private tenant data except through published, delegated, commissioned
+or explicitly stewarded record classes. This is the central trust proposition of the
+architecture and belongs in `scripts/test-rls.sql`'s suite as a stated property.
+
+Related and already known: the inherited `ADMIN_ROLE` wildcard in
+`src/lib/permissions.ts` is a live violation of the spirit of this gate. It is
+bounded — platform shell only, and the tenant connection cannot bypass RLS — but it
+should be closed before this gate can honestly be called met.
+
+---
+
 ## 3. Section M — Organization lifecycle *(new)*
 
 Answers F30 / D10.
@@ -166,6 +255,27 @@ organizations                      (existing — extended)
 
 organization_lifecycle_events      (new — the history, not just current state)
   organization_id, event, effective_on, minute_reference, recorded_by, notes
+
+organization_affiliations          (new)   D19 — the THIRD axis
+  organization_id, parent_org_id, effective_from, effective_to,
+  reason, minute_reference
+  -- which council this org belonged to, WHEN. `parent_id` is only the present.
+```
+
+**Existence vs affiliation — the polity distinction.** The external review was right
+that these are separate axes, and the mapping needs care:
+
+- `dissolved`, `merged`, `divided` — existence changes.
+- **`dismissed` is also an existence change in our universe**, because in PC(USA)
+  usage a congregation is dismissed *to another denomination*: it ceases to be a
+  PC(USA) congregation. It survives as an institution; it leaves the data model's
+  world.
+- `received` — the mirror: received from another denomination.
+- **Transfer between presbyteries is NOT a lifecycle event.** It is an affiliation
+  change (D19), and the draft's original `transferred` state conflated the two. A
+  congregation moved by synod redistricting has not changed what it is.
+
+```
 
 organization_name_history          (new)   D14
   organization_id, name, official_name, effective_from, effective_to
@@ -413,15 +523,15 @@ Notes.
 
 1. **Cross-generation SASR comparability** (§5). Should the normalising view refuse
    a query spanning a form-version boundary for fields that do not map?
-2. **Does a dissolved congregation keep its slug forever?** (§3)
+2. ~~Does a dissolved congregation keep its slug forever?~~ **Settled: never
+   reissued** — folded into D10 (§2a). Archival identity, not a UI concern.
 3. **Church360 household semantics** vs presby's `households` — same concept?
    Needs a field-level pass before the import.
 4. **Who may issue a submission grant** (§6) — presbytery staff only, or may a
    congregation's own clerk request one for themselves?
-5. **Does PSV need per-member giving detail**, or only congregation-level receipts?
-   PSV's archive has congregation-level receipts; per-member giving is a
-   congregation concern. Affects whether Section Q's `giving_*` tables are
-   presbytery-visible at all *(they should not be)*.
+5. ~~Does PSV need per-member giving detail?~~ **Settled: per-member giving is never
+   visible to a parent council** — promoted to an invariant with a test (§2a). PSV's
+   archive carries congregation-level receipts, which is all a presbytery needs.
 6. **Care ministry for `unmanaged` congregations** — stewarded by the presbytery
    (D9) would put a presbytery inside a congregation's tier-3 pastoral data. That
    seems clearly wrong and may be the first case where stewardship must be

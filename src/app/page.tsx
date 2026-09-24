@@ -156,11 +156,12 @@ export default async function Home() {
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg text-primary-foreground/80">
               A congregation doesn&rsquo;t stand alone under Presbyterian
-              polity — every session answers upward, through presbytery and
-              synod, to the General Assembly. PresbyPortal is built around
-              that shape: a membership roll that is the permanent record of
-              who belongs, and courts that connect every level of the church
-              to the ones above it.
+              polity. Session, presbytery, synod and General Assembly are
+              distinct councils, each with its own responsibilities, and
+              their work and their records connect. PresbyPortal is built
+              around that shape: a membership roll that is the permanent
+              record of who belongs, and records that move between councils
+              deliberately rather than by inheritance.
             </p>
             <ConnectionalDiagram />
           </div>

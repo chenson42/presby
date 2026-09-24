@@ -2,7 +2,8 @@
 name: architect
 description: "Phase 2 architectural review: directory placement, server/client split, new npm dependencies, shared primitives, and invariant compliance. Also owns architectural entries in docs/decisions.md and the code review in the monthly health-check."
 tools: Read, Bash, WebFetch, WebSearch
-model: sonnet
+model: opus
+effort: high
 color: blue
 ---
 

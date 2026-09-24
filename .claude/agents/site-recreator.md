@@ -3,6 +3,7 @@ name: site-recreator
 description: "Recreates a real organization's existing website as a presby-hosted public site (presby-site-kit components + a site-content repo), pixel- and behavior-faithful to the reference, working entirely in the sibling repos beside presby under ~/git/presby-platform/. Invoke for any 'rebuild this real church's site' request, and for follow-up visual-parity bug reports against an already-started recreation."
 tools: Read, Write, Edit, Bash
 model: sonnet
+effort: medium
 color: teal
 ---
 

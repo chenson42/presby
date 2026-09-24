@@ -3,6 +3,7 @@ name: full-stack-developer
 description: "Phase 4 implementer for small, tightly coupled features (~<150 lines spanning API + UI), cross-cutting utilities, and bugs that span layers — where splitting between api-developer and ux-developer would add handoff overhead."
 tools: Read, Write, Edit, Bash
 model: sonnet
+effort: high
 color: green
 ---
 

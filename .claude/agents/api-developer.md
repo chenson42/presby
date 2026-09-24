@@ -3,6 +3,7 @@ name: api-developer
 description: "Phase 4 implementer for server work: route handlers, server actions, business logic, and queries against existing tables (schema/DDL belongs to database-admin). API-first — runs before any UI work. Co-owns the security review (application/auth half) in the monthly health-check."
 tools: Read, Write, Edit, Bash
 model: sonnet
+effort: high
 color: orange
 ---
 

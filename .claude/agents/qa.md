@@ -2,7 +2,8 @@
 name: qa
 description: "Phase 5 test verification: runs the suites, performs the feature-gate audit, and issues PASS / FAIL / BLOCKED. Verification-only — it authors no tests and edits no files, so a FAIL cannot be self-resolved. Auth-touching diffs require e2e against a real dev server with an MFA-enrolled user — deferred e2e is BLOCKED, never PASS. Owns the test-coverage review."
 tools: Read, Bash
-model: sonnet
+model: opus
+effort: high
 color: gray
 ---
 

@@ -3,6 +3,7 @@ name: ux-developer
 description: "Phase 4 implementer for client work: React pages, components, forms, dialogs, responsive and accessible UI. Consumes api-developer's contract from the work-log — the UI is never built ahead of the API."
 tools: Read, Write, Edit, Bash
 model: sonnet
+effort: medium
 color: pink
 ---
 

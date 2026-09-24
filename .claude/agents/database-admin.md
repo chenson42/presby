@@ -2,7 +2,8 @@
 name: database-admin
 description: "Phase 4 implementer for schema work: table design in src/lib/db/schema.ts, Drizzle Kit migrations, indexes, constraints, and seeds. Co-owns the security review (schema/data half) in the monthly health-check."
 tools: Read, Write, Edit, Bash
-model: sonnet
+model: opus
+effort: high
 color: cyan
 ---
 

@@ -191,3 +191,68 @@ describe("proxy — /site/* (public organization websites, DECISION-085)", () =>
     expect(location.pathname).toBe("/signin");
   });
 });
+
+describe("proxy — /file-statistics (submission grants, D16/DECISION-147)", () => {
+  // EXACT-PATH entries in PUBLIC_PATHS (a Set, not a prefix match) — the
+  // deliberate amendment over /site/*'s startsWith bypass (Phase 2 BINDING,
+  // `docs/work-log/2026-09-25-submission-grants.md`): a token-bearing path
+  // must not be reachable by a startsWith-style rule the way /site/ needs,
+  // so both segments are named individually and nothing beyond them is
+  // admitted, including a third segment nested under the same prefix.
+
+  it("admits /file-statistics with no auth() call at all", async () => {
+    // No signedIn()/auth mock call on purpose, same discipline the /site/*
+    // block above documents: edgeAuth() must never be consulted for this
+    // path — the token is the credential, not a session.
+    const res = await proxy(request("/file-statistics"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("admits /file-statistics with a ?token= query string, unauthenticated", async () => {
+    const res = await proxy(request("/file-statistics?token=abc123"));
+
+    expect(res.status).toBe(200);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("admits /file-statistics/submitted, the static confirmation page", async () => {
+    const res = await proxy(request("/file-statistics/submitted"));
+
+    expect(res.status).toBe(200);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("does NOT admit /file-statistics/anything-else — exact paths only, no prefix bypass", async () => {
+    // The whole point of using a Set of exact pathnames instead of a
+    // startsWith rule (Phase 2's amendment to Ruling 11): a third segment
+    // under the same prefix must fall through to ordinary edgeAuth()
+    // handling, unlike /site/<slug>/anything, which is deliberately open.
+    auth.mockResolvedValueOnce(null as unknown as Awaited<
+      ReturnType<typeof edgeAuth>
+    >);
+
+    const res = await proxy(request("/file-statistics/anything-else"));
+
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get("location") as string);
+    expect(location.pathname).toBe("/signin");
+    expect(location.searchParams.get("callbackUrl")).toBe(
+      "/file-statistics/anything-else",
+    );
+  });
+
+  it("does not bypass /file-statisticsX or other paths that merely share the prefix", async () => {
+    auth.mockResolvedValueOnce(null as unknown as Awaited<
+      ReturnType<typeof edgeAuth>
+    >);
+
+    const res = await proxy(request("/file-statisticsX"));
+
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get("location") as string);
+    expect(location.pathname).toBe("/signin");
+  });
+});

@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
+import { users } from "../schema";
 
 /**
  * The SASR ARTIFACT and the form generations that give its payload a schema
@@ -22,9 +23,29 @@ import { organizations } from "./org";
  *
  * This module REPLACES `reporting.ts`, which held only `sasrReports` and is
  * deleted with that table in `drizzle/0047` (Phase 2 Ruling 6 /
- * DECISION-137). `statisticsSubmissionGrants` (D16) belongs here too but
- * ships in increment 6, which is its own work-log and its own security pass
- * (Phase 2 Ruling 11) — do not add it ahead of that.
+ * DECISION-137).
+ *
+ * THREE EXPORTS, as this module's own earlier header promised: the form
+ * generations, the artifact, and — since increment 6 (D16/DECISION-147,
+ * `drizzle/0049_presby_submission_grants.sql`,
+ * `docs/work-log/2026-09-25-submission-grants.md`) —
+ * `statisticsSubmissionGrants`, the token-bearing CREDENTIAL a congregation
+ * with no account files through. It lives here rather than in a `grants.ts`
+ * of its own because the grant → return FK makes the two one unit.
+ *
+ * THE COMPOSITE FK ON THAT TABLE IS NOT THE NAIVE ONE, and the correction is
+ * repeated here because `drizzle/0049` is the only place it is actually
+ * enforced (see that table's own comment below):
+ *
+ *     foreign key (return_id, about_org_id)
+ *       references statistical_returns (id, organization_id)
+ *
+ * The grant is owned by the PRESBYTERY (`organization_id`) and the submitted
+ * return it claims is owned by the CONGREGATION, so `about_org_id` is the
+ * column that equals `statistical_returns.organization_id` — the same
+ * correction `drizzle/0047` already made for
+ * `congregation_statistics.publication_id`. Written the naive way, the
+ * constraint would reject every row it was meant to protect (F2).
  *
  * MUCH OF THE REAL ENFORCEMENT IS NOT EXPRESSIBLE IN DRIZZLE and lives only
  * in `0046` — stated here so a reader does not mistake the absence for
@@ -252,6 +273,136 @@ export const statisticalReturns = pgTable(
       "statistical_returns_provenance_shape",
       sql`(${t.provenance} = 'submitted' and ${t.reconciled} and ${t.attestedAt} is not null)
           or (${t.provenance} = 'imported' and not ${t.reconciled})`,
+    ),
+  ],
+);
+
+/**
+ * A token-bearing SUBMISSION GRANT — the third access mechanism alongside
+ * permissions and flags (D16 / DECISION-147). One issuing presbytery, one
+ * congregation, one report year, one write, expiring. It is never mapped into
+ * `FEATURES.*`, a session claim, or the permission resolver: it names its own
+ * subject, so the submission function derives BOTH organization ids from the
+ * row and the application sets no org GUC on the anonymous path.
+ *
+ * `tokenHash` is the sha256 hex of a 32-byte CSPRNG token (the
+ * `requestPasswordReset` precedent, never bcrypt — bcrypt is for low-entropy
+ * secrets). The raw token never enters this database.
+ *
+ * ALMOST NONE OF THE ENFORCEMENT IS VISIBLE HERE. It lives in
+ * `drizzle/0049_presby_submission_grants.sql`, which is the ground truth:
+ *
+ *   - `FORCE ROW LEVEL SECURITY` + the `tenant_isolation` policy scoped to
+ *     `presby_current_org()` (section 1). Without FORCE the owner bypasses
+ *     every policy and RLS is silently inert (F1).
+ *   - THE GRANT SHAPE, which is half the security model: `presby_app` holds
+ *     `select`, `insert` and a COLUMN-LEVEL `update (revoked_at)` and nothing
+ *     else, so the tenant connection cannot reach `submittedAt` or `returnId`
+ *     at all. `presby_platform` holds `select` only — a platform-shell
+ *     connection reading across every tenant may never issue an authorization
+ *     event. Neither holds `delete`.
+ *   - `statistics_submission_grants_live_idx`, a PARTIAL unique on
+ *     `(organization_id, about_org_id, report_year) where revoked_at is null
+ *     and submitted_at is null` — one LIVE grant per congregation-year; a
+ *     revoked or spent one does not block a re-issue. Drizzle has no
+ *     partial-unique builder here.
+ *   - `statistics_submission_grants_return_fk`, the composite FK described in
+ *     this module's header — `(return_id, about_org_id)`, not
+ *     `(return_id, organization_id)`. No cross-file composite-FK builder
+ *     exists in Drizzle, so it is 0049-only.
+ *   - TWO BEFORE INSERT triggers (section 2a/2b): the about-org relationship
+ *     as of TODAY, through `drizzle/0045`'s shared checker, and
+ *     `presby_check_grant_about_org_unmanaged()`, which refuses a grant about
+ *     a `managed` congregation — that one has its own portal and self-files.
+ *     Both are AUTHORITY; the issuance UI's dropdown filter is a convenience.
+ *   - `presby_freeze_statistics_submission_grant()` (BEFORE UPDATE, section
+ *     2c) permits exactly THREE transitions and rejects everything else on
+ *     EVERY connection: the revocation, the CLAIM (`submittedAt` alone) and
+ *     the STAMP (`returnId` alone, from an already-claimed row). The last two
+ *     additionally require the transaction-local GUC
+ *     `presby.grant_claim_active`, armed only inside
+ *     `presby_submit_granted_return()`. A row is terminal once `revokedAt` or
+ *     `returnId` is set. The trigger is the only thing guarding the owner
+ *     path, where no grant binds (F44).
+ *   - `presby_submit_granted_return(token_hash, payload, attested_by_name,
+ *     attested_role)` (section 5) is the ONLY writer of `submittedAt` /
+ *     `returnId`. It re-resolves the recipient from the affiliation history at
+ *     claim time and uses `organizationId` only as a staleness check — a
+ *     stored id is never authority (D19/F80).
+ *
+ * `organizationId` and `aboutOrgId` are PLAIN FKs to `organizations` by the
+ * same section-17 structural exception the rest of this module records. Do not
+ * "fix" them.
+ */
+export const statisticsSubmissionGrants = pgTable(
+  "statistics_submission_grants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** The ISSUING presbytery. Tenant scope, and provenance of issuance only. */
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** The congregation being asked to file. */
+    aboutOrgId: uuid("about_org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    reportYear: integer("report_year").notNull(),
+    /** sha256 hex. NEVER the token. */
+    tokenHash: text("token_hash").notNull(),
+    issuedToName: text("issued_to_name").notNull(),
+    issuedToEmail: text("issued_to_email").notNull(),
+    /** The issuing admin — a real session wrote this row, so there is no Ruling-A4 gap here. */
+    issuedBy: uuid("issued_by")
+      .notNull()
+      .references(() => users.id),
+    issuedAt: timestamp("issued_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** THE CLAIM. Written only by `presby_submit_granted_return()`. */
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    /** THE STAMP. Composite FK to `statistical_returns` is 0049-only. */
+    returnId: uuid("return_id"),
+    /** The issuing presbytery's own revocation — the one tenant-writable column. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("statistics_submission_grants_id_org_key").on(t.id, t.organizationId),
+    unique("statistics_submission_grants_token_hash_key").on(t.tokenHash),
+    index("statistics_submission_grants_about_org_year_idx").on(
+      t.aboutOrgId,
+      t.reportYear,
+    ),
+    index("statistics_submission_grants_org_idx").on(t.organizationId),
+    check(
+      "statistics_submission_grants_token_hash_shape",
+      sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "statistics_submission_grants_report_year_range",
+      sql`${t.reportYear} between 1900 and 2100`,
+    ),
+    check(
+      "statistics_submission_grants_expiry_shape",
+      sql`${t.expiresAt} > ${t.issuedAt}`,
+    ),
+    check(
+      "statistics_submission_grants_name_shape",
+      sql`char_length(btrim(${t.issuedToName})) between 1 and 255`,
+    ),
+    check(
+      "statistics_submission_grants_email_shape",
+      sql`char_length(${t.issuedToEmail}) between 3 and 320`,
+    ),
+    /**
+     * ONE-DIRECTIONAL, not symmetric — F51's lesson applied from the start.
+     * `returnId` implies `submittedAt`; `submittedAt` does NOT require
+     * `returnId`, because the mid-claim state is legal, transient, and closed
+     * by the same transaction that opened it.
+     */
+    check(
+      "statistics_submission_grants_claim_shape",
+      sql`${t.returnId} is null or ${t.submittedAt} is not null`,
     ),
   ],
 );

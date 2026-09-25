@@ -18,6 +18,7 @@ The canonical directory tree lives in `CLAUDE.md` → Project Layout (do not mai
 - `(member)` — auth-only (any signed-in user; no 2FA gate — see CLAUDE.md → Post-Login Landing).
 - `(account)` — auth-only self-serve account surface.
 - `(password-reset)` / `(email-verify)` — public token-consuming flows; enumeration-safe responses.
+- `(statistics-submit)` — the public, token-consuming SASR filing flow (DECISION-147): the token is the credential; no session, no `FEATURES.*` gate, no org context set by the caller; platform palette; exact paths in `src/proxy.ts`'s public list; one uniform response for every failure state including flag-off.
 - `access-pending` — authenticated users with no roles; don't dump them on `/admin`.
 - `api/admin/*` — every handler checks session + the relevant `FEATURES.*` key.
 - `api/webhooks/<provider>` — webhook handlers verify their own signatures; the proxy bypasses them (DECISION-028).

@@ -11,6 +11,13 @@ const PUBLIC_PATHS = new Set([
   "/sitemap.xml",
   "/forgot-password",
   "/reset-password",
+  // Statistical-return submission grants (D16 / DECISION-147) — a public,
+  // session-less, token-authenticated write path on the `(password-reset)`
+  // pattern. EXACT paths only, no prefix: a token-bearing path in a `Set`
+  // entry cannot be reached by a `startsWith`-style bypass the way `/site/`
+  // needs. See docs/work-log/2026-09-25-submission-grants.md Phase 2.
+  "/file-statistics",
+  "/file-statistics/submitted",
 ]);
 
 const PROTECTION_RULES: Array<{ pattern: RegExp; required: string }> = [

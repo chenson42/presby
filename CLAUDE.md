@@ -567,7 +567,7 @@ grep-presence and behaviour-presence are one fact (DECISION-052). It appears in
 exactly the two layouts listed in `scripts/check-brand-scope.mjs`.
 
 `(org)` and `(public)/site/<slug>` are the only brandable route groups.
-Everything else — `(auth)`, `(account)`, `(member)`, `(admin)`,
+Everything else — `(auth)`, `(account)`, `(member)`, `(admin)`, `(statistics-submit)`,
 `(email-verify)`, `(password-reset)`, `access-pending`, `/launch`,
 `/no-organization`, `/developer` — renders in the platform palette. A branded
 403 tells a prober the org is a configured tenant (DECISION-047).

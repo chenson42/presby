@@ -4753,14 +4753,30 @@ begin;
       where proname = 'presby_guard_publication_write'
         and pg_get_functiondef(oid) like '%presby.publication_write_active%'),
     1, 'F55: the chain guard reads presby.publication_write_active');
-  -- The writers that arm it. A guard nobody arms is a table nobody can write;
+  -- The writer that arms it. A guard nobody arms is a table nobody can write;
   -- a writer that forgets to arm it is an outage. Both are pinned here.
+  --
+  -- MOVED BY drizzle/0049 (increment 6, docs/work-log/2026-09-25-submission-
+  -- grants.md): the arming site is no longer inside presby_publish_sasr_
+  -- snapshot(). That function is now a thin caller of the extracted
+  -- presby_write_return_publication_chain(), which is the SINGLE site in the
+  -- database that arms the chain GUC — a property this pair of assertions now
+  -- states directly (exactly one function arms it, and it is the chain
+  -- writer) rather than by naming whichever caller happened to hold it.
+  -- Section 36(d) proves the disarmed direct-INSERT refusal still holds after
+  -- the extraction.
+  select assert_eq(
+    (select count(*) from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.prokind = 'f'
+       and pg_get_functiondef(p.oid) like '%set_config(''presby.publication_write_active'', ''true'', true)%'),
+    1, 'F55: EXACTLY ONE function in the database arms the chain GUC — the single-arming-site property, now a counted fact rather than a claim about one named caller');
   select assert_eq(
     (select count(*) from pg_proc
-      where proname = 'presby_publish_sasr_snapshot'
+      where proname = 'presby_write_return_publication_chain'
         and prosecdef
         and pg_get_functiondef(oid) like '%set_config(''presby.publication_write_active'', ''true'', true)%'),
-    1, 'F55: presby_publish_sasr_snapshot() arms the chain GUC itself — the sole sanctioned writer today, and the reason section 34''s end-to-end publish still passes');
+    1, 'F55: and that one function is presby_write_return_publication_chain() — the extracted chain writer both presby_publish_sasr_snapshot() and presby_submit_granted_return() go through (drizzle/0049)');
 
   -- B-M1 (security review 2026-09-25 sec B) — the trigger-only/internal
   -- helpers hold NO execute grant to the tenant role. A function that only
@@ -4865,6 +4881,14 @@ begin;
          'presby_freeze_used_field_spec', 'presby_check_publication_supersession',
          'presby_publish_sasr_snapshot', 'presby_list_own_congregation_publications',
          'presby_list_published_returns_to_me')
+       -- MERGE NOTE (integration, 2026-09-25): drizzle/0049 re-creates
+       -- presby_publish_sasr_snapshot(), which is in this list, with the
+       -- pg_temp-last form. That needs no change here — the predicate below
+       -- already accepts it, which is exactly the looseness main chose above
+       -- so that this assertion and the catalog-wide one cannot drift into
+       -- disagreeing about what "compliant" means. Section 36 is the
+       -- catalog-wide pg_temp pin (and it covers 0049's functions too);
+       -- section 40(h) pins the pg_temp-LAST spelling for 0049's own four.
        and exists (
          select 1 from unnest(coalesce(p.proconfig, array[]::text[])) as cfg
           where cfg like 'search_path=public%')),
@@ -5942,4 +5966,593 @@ end $$;
 
 -- ===========================================================================
 -- END APPENDED SECTION — pipeline/security-schema-b.
+-- ===========================================================================
+
+-- ===========================================================================
+-- APPENDED BLOCK — section 40 (increment 6, docs/work-log/2026-09-25-
+-- submission-grants.md, Phase 4 batch A). Workflow Rule 16: ONE delimited
+-- block at the END of this file, so integration merges are mechanical.
+-- ===========================================================================
+-- ---------------------------------------------------------------------------
+-- 40. Submission grants — a third credential class, and the affiliation
+--     instant it forces a ruling on (D16 / DECISION-147 / F80;
+--     drizzle/0049_presby_submission_grants.sql).
+--
+--     A GRANT IS NOT A PERMISSION AND NOT A FLAG. It is a token-bearing
+--     CREDENTIAL: one presbytery, one congregation, one report year, one
+--     write, expiring. The whole point of this section is that the mechanism
+--     is enforced in the DATABASE — the tenant connection cannot reach the
+--     claim columns, the claim is not repeatable, the issuance relationship is
+--     a trigger and not a UI filter, and every liveness failure is one
+--     indistinguishable literal.
+--
+--     WHAT THIS SUITE CAN AND CANNOT PROVE, in section 34/35's own idiom.
+--     presby_app holds SELECT, INSERT and a COLUMN-LEVEL UPDATE (revoked_at)
+--     and nothing else on statistics_submission_grants, so the claim and the
+--     stamp arms of the freeze trigger are refused here by the PERMISSION
+--     CHECK before the trigger is ever consulted — which proves the grant, not
+--     the guard. The owner-connection twin of every one of those,
+--     src/lib/db/domain/grants.test.ts, runs on PLATFORM_DATABASE_URL
+--     (neondb_owner, which no grant binds and which BYPASSRLS exempts from
+--     every policy — F44) and is where the trigger itself is the only thing
+--     standing. The stale-credential half of F80 lives there too, because a
+--     grant whose issuing presbytery no longer holds the congregation cannot
+--     be CREATED from a tenant connection at all (the issuance trigger refuses
+--     it), which is itself the point.
+-- ---------------------------------------------------------------------------
+
+-- (a) THE GRANT SHAPE. Isolation, the policy, and the column-level UPDATE that
+--     — independently of any GUC — is what closes the tenant path to the claim
+--     (QA-2's correction to F56: a marker binds the OWNER path only, so a
+--     marker alone would be a guard with a hole in it).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname = 'statistics_submission_grants'
+        and relrowsecurity and relforcerowsecurity),
+    1, 'grants: FORCE row level security is set on the credential table (F1)');
+  select assert_eq(
+    (select count(*) from pg_policies where tablename = 'statistics_submission_grants'),
+    1, 'grants: exactly ONE policy — tenant_isolation, no second named policy (DECISION-112''s refusal still stands)');
+  select assert_eq(
+    (select count(*) from pg_policies
+      where tablename = 'statistics_submission_grants' and policyname = 'tenant_isolation'
+        and qual like '%presby_current_org()%' and with_check like '%presby_current_org()%'),
+    1, 'grants: tenant_isolation scopes BOTH read and write to presby_current_org()');
+
+  -- The column-level grant, read three ways so a future blanket grant cannot
+  -- re-widen it silently (F38's additive-grant drift is the failure mode).
+  select assert_eq(
+    (select count(*) from (select 1) s
+      where has_column_privilege('presby_app', 'statistics_submission_grants', 'revoked_at', 'UPDATE')),
+    1, 'grants: presby_app CAN update revoked_at — a presbytery revokes its own outstanding grant by ordinary tenant DML');
+  select assert_eq(
+    (select count(*) from (select 1) s
+      where has_column_privilege('presby_app', 'statistics_submission_grants', 'submitted_at', 'UPDATE')
+         or has_column_privilege('presby_app', 'statistics_submission_grants', 'return_id', 'UPDATE')),
+    0, 'grants: presby_app can update NEITHER submitted_at NOR return_id — the claim and the stamp are unreachable from the tenant connection by PRIVILEGE, before any GUC is considered');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'statistics_submission_grants'
+        and a.grantee = 'presby_app'::regrole
+        and a.privilege_type in ('UPDATE', 'DELETE')),
+    0, 'grants: presby_app holds no TABLE-level UPDATE and no DELETE at all — the revoked_at privilege is column-scoped (the relacl half of the same fact)');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'statistics_submission_grants'
+        and a.grantee = 'presby_platform'::regrole),
+    1, 'grants: presby_platform holds exactly ONE privilege on the credential table');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'statistics_submission_grants'
+        and a.grantee = 'presby_platform'::regrole and a.privilege_type = 'SELECT'),
+    1, 'grants: and that one privilege is SELECT — a platform-shell connection reading across every tenant may never ISSUE an authorization event (the same narrowing publications got)');
+
+  -- The function-side of the same shape.
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in ('presby_submit_granted_return', 'presby_preview_granted_return')
+        and has_function_privilege('presby_app', p.oid, 'execute')),
+    2, 'grants: presby_app CAN execute the two credential functions — the token, not a session, is what authorizes the act (DECISION-147)');
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in ('presby_write_return_publication_chain',
+                          'presby_check_grant_about_org_unmanaged',
+                          'presby_freeze_statistics_submission_grant')
+        and has_function_privilege('presby_app', p.oid, 'execute')),
+    0, 'B-M1 extended: presby_app holds EXECUTE on NONE of drizzle/0049''s internal/trigger-only functions — the chain writer is reachable only through the two DEFINER wrappers');
+commit;
+
+-- (b) THE FREEZE, TENANT SIDE. Which arm refuses, and WHY it refuses, stated
+--     explicitly per section 35(d)'s "unarmed vs. grant-closed" distinction.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+
+  -- Transition 1, the ONE thing ordinary tenant DML may do.
+  update statistics_submission_grants
+     set revoked_at = now()
+   where id = 'ab000000-0000-0000-0000-000000000002';
+  select assert_eq(
+    (select count(*) from statistics_submission_grants
+      where id = 'ab000000-0000-0000-0000-000000000002' and revoked_at is not null),
+    1, 'grants: the presbytery revokes its own outstanding grant — transition 1, no GUC, ordinary tenant DML');
+
+  -- The claim, from the tenant side, ARMED. The GUC does not help, because the
+  -- privilege check happens first: "a marker is not a privilege" in one probe.
+  do $$
+  declare m text; c text;
+  begin
+    perform set_config('presby.grant_claim_active', 'true', true);
+    update statistics_submission_grants
+       set submitted_at = now()
+     where id = 'ab000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL — a tenant connection claimed a grant by direct UPDATE';
+  exception when insufficient_privilege then
+    get stacked diagnostics m = message_text, c = returned_sqlstate;
+    if m not like 'permission denied%' then
+      raise exception 'FAIL — the claim was refused by the TRIGGER (%), not by the column grant; the column-level privilege is the half that must hold with the GUC armed', m;
+    end if;
+    raise notice 'pass  grants: a tenant connection cannot claim a grant even with presby.grant_claim_active ARMED — the column-level UPDATE grant refuses before the trigger is consulted (a marker is not a privilege)';
+  end $$;
+
+  -- ...and the freeze trigger IS live on the tenant path, proven on the one
+  -- transition the column grant lets through: a second revocation of an
+  -- already-revoked row.
+  do $$
+  declare m text;
+  begin
+    update statistics_submission_grants
+       set revoked_at = now()
+     where id = 'ab000000-0000-0000-0000-000000000003';
+    raise exception 'FAIL — an already-revoked grant was revoked again; the freeze trigger is not firing on the tenant path';
+  exception when check_violation then
+    get stacked diagnostics m = message_text;
+    if m not like '%already revoked at%' then
+      raise exception 'FAIL — the re-revocation raised the wrong refusal: %', m;
+    end if;
+    raise notice 'pass  grants: a revoked grant is TERMINAL — presby_freeze_statistics_submission_grant() fires on the tenant path and refuses the second revocation (issue a new grant instead)';
+  end $$;
+
+  do $$
+  begin
+    delete from statistics_submission_grants where id = 'ab000000-0000-0000-0000-000000000003';
+    raise exception 'FAIL — a tenant connection deleted a credential row';
+  exception when insufficient_privilege then
+    raise notice 'pass  grants: presby_app cannot DELETE a grant — expiry and revocation are the only ways out, and an organization teardown reaches these rows by cascade';
+  end $$;
+rollback;
+
+-- (c) THE CLAIM, END TO END, AS presby_app WITH NO ORG CONTEXT SET AT ALL.
+--     This is the ACTUAL SHAPE OF THE ANONYMOUS REQUEST (DECISION-147): the
+--     application sets no app.current_org_id before calling, because doing so
+--     would be withOrgContext() with the membership check deleted. The
+--     function derives both organization ids from the grant row it just
+--     authenticated, and its SECURITY DEFINER owner is what lets it read a
+--     FORCE-RLS table with no context at all (F26/F44).
+begin;
+  do $$
+  declare
+    v_return_id uuid;
+    v_again     uuid;
+  begin
+    if presby_current_org() is not null then
+      raise exception 'FAIL — this probe must run with NO org context; presby_current_org() returned %', presby_current_org();
+    end if;
+
+    v_return_id := presby_submit_granted_return(
+      'a7f3b4eeb465002f791d57e294ab7224a57a6fffdd6d2708dd307c5adf8f7e0c',
+      '{"ending_active": 39, "ending_baptized": 12, "receipts_contributions": 84000.00}'::jsonb,
+      'Odalys Fenwick', 'clerk_of_session');
+    if v_return_id is null then
+      raise exception 'FAIL — presby_submit_granted_return() returned null for a live grant';
+    end if;
+    raise notice 'pass  grants: an ANONYMOUS caller with no org context files a return through presby_submit_granted_return() — the token is the credential, and the function accepts no organization id it could be lied to with';
+
+    -- NON-REPEATABLE. The same token, the same transaction, immediately.
+    begin
+      v_again := presby_submit_granted_return(
+        'a7f3b4eeb465002f791d57e294ab7224a57a6fffdd6d2708dd307c5adf8f7e0c',
+        '{"ending_active": 999}'::jsonb, 'Someone Else', 'moderator');
+      raise exception 'FAIL — a spent grant was claimed a SECOND time';
+    exception when insufficient_privilege then
+      raise notice 'pass  grants: the SECOND call with the same token is refused — one indexed UPDATE ... RETURNING is the concurrency control, and a double-click, a second tab and a back-button resubmit all lose it here';
+    end;
+  end $$;
+
+  -- The grant row is claimed AND stamped, in the one transaction.
+  --
+  -- Asserted WITHOUT joining statistical_returns, and that is itself a fact
+  -- worth stating: from the issuing presbytery's own context the artifact is
+  -- INVISIBLE under the tenant policy — it is owned by the congregation. The
+  -- recipient reaches it only through presby_list_published_returns_to_me(),
+  -- which is the next assertion. The publication event grants the read, not
+  -- the tenant policy (D20).
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from statistics_submission_grants
+      where id = 'ab000000-0000-0000-0000-000000000001'
+        and submitted_at is not null and return_id is not null),
+    1, 'grants: the claimed row carries BOTH submitted_at and return_id — the atomic claim and the stamp, two sanctioned UPDATEs inside the one transaction');
+  select assert_eq(
+    (select count(*) from statistical_returns where id =
+       (select return_id from statistics_submission_grants
+         where id = 'ab000000-0000-0000-0000-000000000001')),
+    0, 'grants: ...and the artifact itself is INVISIBLE from the issuing presbytery''s context — the composite FK points at a row the congregation owns, and the tenant policy does not grant the recipient a read (that is what the publication event is for)');
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me(:QUILLHAVEN, 2026) v
+      where v.return_id = (select return_id from statistics_submission_grants
+                            where id = 'ab000000-0000-0000-0000-000000000001')
+        and v.attested_by_name = 'Odalys Fenwick'
+        and v.attested_role = 'clerk_of_session'),
+    1, 'grants: the recipient DOES see the grant-filed return through presby_list_published_returns_to_me(), attestation and all — the same read-back drizzle/0047 built, now with a second producer');
+
+  -- The projection landed at the presbytery, about the congregation.
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where organization_id = :PRESBY and about_org_id = :QUILLHAVEN
+        and year = 2026 and provenance = 'published_by_congregation'
+        and ending_active = 39 and receipts_contributions = 84000.00),
+    1, 'grants: the projection is written at the RECIPIENT with the payload''s own values — jsonb_to_record extracted them BY NAME, so a missing key would be a loud NULL rather than a shifted column');
+
+  -- THE ATTESTATION (F57). The first non-null values these two columns have
+  -- ever carried, read from the congregation's own tenant space — which no
+  -- human can enter, because Quillhaven is unmanaged (D9, by design).
+  select set_config('app.current_org_id', :QUILLHAVEN, true);
+  select assert_eq(
+    (select count(*) from statistical_returns
+      where organization_id = :QUILLHAVEN and about_org_id = :QUILLHAVEN
+        and report_year = 2026 and provenance = 'submitted' and reconciled
+        and attested_by_name = 'Odalys Fenwick'
+        and attested_role = 'clerk_of_session'
+        and attested_at is not null),
+    1, 'F57: the grant path records a NAMED attester — the first non-null attested_by_name/attested_role in this platform, and the reason the grant path could not simply delegate to presby_publish_sasr_snapshot() (which writes both as literal null, deliberately)');
+rollback;
+
+-- (d) THE UNIFORM LITERAL. Four causes, one byte-identical message and one
+--     errcode, asserted by string equality rather than by "some error" — a
+--     probe that merely caught an exception would pass while the function
+--     leaked which cause applied, which is the whole enumeration surface.
+begin;
+  do $$
+  declare
+    v_msgs text[] := array[]::text[];
+    v_codes text[] := array[]::text[];
+    m text; c text;
+    v_tokens text[] := array[
+      -- nonexistent
+      '0000000000000000000000000000000000000000000000000000000000000000',
+      -- expired (scripts/seed-dev.sql, 2024)
+      '66fe4afd3f4e7f8e78753707f799bc4b31934c40c83137471cff89f41196844d',
+      -- revoked (scripts/seed-dev.sql, 2023)
+      '429cf4fc640910801810f1326833bfbeb6f478966782dcc4b9b48ef5d6f00444',
+      -- spent: the live grant, claimed immediately below
+      'a7f3b4eeb465002f791d57e294ab7224a57a6fffdd6d2708dd307c5adf8f7e0c'
+    ];
+    t text;
+  begin
+    -- Spend the live one first, so the fourth probe is a genuinely spent grant
+    -- rather than a fixture frozen into a half-claimed state nobody wrote.
+    perform presby_submit_granted_return(
+      'a7f3b4eeb465002f791d57e294ab7224a57a6fffdd6d2708dd307c5adf8f7e0c',
+      '{"ending_active": 39}'::jsonb, 'Odalys Fenwick', 'clerk_of_session');
+
+    foreach t in array v_tokens loop
+      begin
+        perform presby_submit_granted_return(t, '{"ending_active": 1}'::jsonb, 'Probe', 'moderator');
+        raise exception 'FAIL — a dead credential (%) was accepted', t;
+      exception when insufficient_privilege then
+        get stacked diagnostics m = message_text, c = returned_sqlstate;
+        v_msgs := v_msgs || m;
+        v_codes := v_codes || c;
+      end;
+    end loop;
+
+    if array_length(v_msgs, 1) <> 4 then
+      raise exception 'FAIL — expected four refusals, got %', array_length(v_msgs, 1);
+    end if;
+    if exists (select 1 from unnest(v_msgs) x where x <> 'presby_submit_granted_return: grant not usable') then
+      raise exception 'FAIL — the refusals are not byte-identical: %', v_msgs;
+    end if;
+    if exists (select 1 from unnest(v_codes) x where x <> '42501') then
+      raise exception 'FAIL — the refusals do not share one errcode: %', v_codes;
+    end if;
+    raise notice 'pass  grants: nonexistent, expired, revoked and already-spent tokens all raise the IDENTICAL literal (presby_submit_granted_return: grant not usable) under the identical errcode — the caller cannot tell which, which is what DECISION-040''s enumeration rule requires of this page';
+  end $$;
+rollback;
+
+-- (e) ISSUANCE IS GUARDED TOO (F55/DECISION-141: creation as strongly as
+--     mutation, in the shape the act deserves). Issuance is ordinary tenant
+--     DML — the row's organization_id is the caller's own presbytery — so the
+--     guard is two BEFORE INSERT triggers rather than function mediation. The
+--     UI picker's filter is a convenience; THESE are the authority.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+
+  do $$
+  begin
+    insert into statistics_submission_grants
+      (organization_id, about_org_id, report_year, token_hash,
+       issued_to_name, issued_to_email, issued_by, expires_at)
+    values ('11111111-1111-1111-1111-111111111111',
+            '22222222-2222-2222-2222-222222222222', 2026, repeat('c', 64),
+            'Probe', 'probe@example.invalid',
+            'e0000000-0000-0000-0000-0000000000f4', now() + interval '30 days');
+    raise exception 'FAIL — a grant was issued to a MANAGED congregation, which has its own portal and self-files';
+  exception when invalid_parameter_value then
+    raise notice 'pass  grants: statistics_submission_grants_unmanaged refuses a grant about a MANAGED congregation — the exclusion is a database property, not a dropdown filter (Phase 3 ruling 3)';
+  end $$;
+
+  do $$
+  begin
+    insert into statistics_submission_grants
+      (organization_id, about_org_id, report_year, token_hash,
+       issued_to_name, issued_to_email, issued_by, expires_at)
+    values ('11111111-1111-1111-1111-111111111111',
+            'e2e00000-0000-0000-0000-000000000004', 2026, repeat('d', 64),
+            'Probe', 'probe@example.invalid',
+            'e0000000-0000-0000-0000-0000000000f4', now() + interval '30 days');
+    raise exception 'FAIL — a presbytery issued a grant naming ANOTHER presbytery''s congregation';
+  exception when insufficient_privilege then
+    raise notice 'pass  grants: statistics_submission_grants_about_org (drizzle/0045''s shared checker, empty year arg -> current_date) refuses a grant about a congregation this council does not hold TODAY — a presbytery cannot fabricate a return for another presbytery''s church';
+  end $$;
+
+  -- The legitimate case, so the two refusals above cannot be passing because
+  -- issuance is broken outright.
+  insert into statistics_submission_grants
+    (organization_id, about_org_id, report_year, token_hash,
+     issued_to_name, issued_to_email, issued_by, expires_at)
+  values (:PRESBY, :QUILLHAVEN, 2027, repeat('1', 64),
+          'Odalys Fenwick', 'clerk@quillhaven.example.invalid',
+          'e0000000-0000-0000-0000-0000000000f4', now() + interval '45 days');
+  select assert_eq(
+    (select count(*) from statistics_submission_grants
+      where organization_id = :PRESBY and about_org_id = :QUILLHAVEN and report_year = 2027),
+    1, 'grants: an UNMANAGED congregation this presbytery holds today IS grantable — the positive control for the two refusals above');
+
+  -- One live grant per (presbytery, congregation, year). Not an F40 oracle: it
+  -- can only collide with the caller's OWN presbytery's row.
+  do $$
+  begin
+    insert into statistics_submission_grants
+      (organization_id, about_org_id, report_year, token_hash,
+       issued_to_name, issued_to_email, issued_by, expires_at)
+    values ('11111111-1111-1111-1111-111111111111',
+            '44444444-4444-4444-4444-444444444444', 2027, repeat('2', 64),
+            'Odalys Fenwick', 'clerk@quillhaven.example.invalid',
+            'e0000000-0000-0000-0000-0000000000f4', now() + interval '45 days');
+    raise exception 'FAIL — a second LIVE grant was issued for the same congregation and year';
+  exception when unique_violation then
+    raise notice 'pass  grants: statistics_submission_grants_live_idx permits exactly ONE outstanding grant per (presbytery, congregation, year) — revoke before re-issuing; a revoked or spent grant does not block a re-issue';
+  end $$;
+rollback;
+
+-- (f) F80 — THE TWO AFFILIATION INSTANTS, and the late-filing population that
+--     hits the gap. drizzle/0049 moves the year-endpoint collision check into
+--     the shared chain writer, so both callers get it from ONE piece of code.
+--
+--     (i) The STALE-CREDENTIAL half — a grant whose issuing presbytery no
+--     longer holds the congregation — is asserted STRUCTURALLY here and
+--     behaviourally in src/lib/db/domain/grants.test.ts. It cannot be staged
+--     from a tenant connection: creating such a grant requires the issuance
+--     trigger to be absent (it refuses any about-org not affiliated TODAY),
+--     and staging it by transferring the congregation afterwards requires the
+--     two presbyteries' COMMON SUPERIOR as actor, which this fixture's rootless
+--     northern reach does not have (measured, 2026-09-25).
+begin;
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_submit_granted_return'
+        and pg_get_functiondef(oid) like '%presby_affiliation_parent_as_of(v_grant.about_org_id, current_date::date)%'
+        and pg_get_functiondef(oid) like '%v_recipient is distinct from v_grant.organization_id%'),
+    1, 'F80/Phase 3 ruling 2: the claim re-resolves the recipient FRESH from the affiliation history and uses the grant''s stored organization_id only as a staleness equality check — a stored id is never treated as standing (Two Hierarchies)');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_submit_granted_return'
+        and pg_get_functiondef(oid) like '%presby_write_return_publication_chain(%'),
+    1, 'F80: and the grant path reaches the artifact ONLY through the shared chain writer — it does not carry its own copy of the three inserts (F39''s one-function-one-transaction premise survives the second caller)');
+rollback;
+
+--     (ii) The LATE-FILER half, end to end. Quillhaven was the Southern
+--     Fields' until 1995 and the northern reach's since; a grant for report
+--     year 1990 is therefore a return the northern reach may not receive. The
+--     refusal must come from the MOVED check — before any row is written — and
+--     must be the SAME STRING the self-publish caller sees, which is the
+--     observable form of "one shared code path".
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  insert into statistics_submission_grants
+    (organization_id, about_org_id, report_year, token_hash,
+     issued_to_name, issued_to_email, issued_by, expires_at)
+  values (:PRESBY, :QUILLHAVEN, 1990, repeat('b', 64),
+          'Odalys Fenwick', 'clerk@quillhaven.example.invalid',
+          'e0000000-0000-0000-0000-0000000000f4', now() + interval '30 days');
+
+  do $$
+  declare
+    m_grant text; m_pub text; c_grant text; c_pub text;
+    v_returns_before bigint;
+  begin
+    select count(*) into v_returns_before from statistical_returns;
+
+    perform set_config('app.current_org_id', '', true);
+    begin
+      perform presby_submit_granted_return(
+        repeat('b', 64), '{"ending_active": 39}'::jsonb, 'Odalys Fenwick', 'clerk_of_session');
+      raise exception 'FAIL — a 1990 return was filed to a council that did not hold the congregation in 1990';
+    exception when invalid_parameter_value then
+      get stacked diagnostics m_grant = message_text, c_grant = returned_sqlstate;
+    end;
+
+    perform set_config('app.current_org_id', '44444444-4444-4444-4444-444444444444', true);
+    begin
+      perform presby_publish_sasr_snapshot(1990, 'n/a', p_ending_active => 39);
+      raise exception 'FAIL — the self-publish path accepted the same 1990 return';
+    exception when invalid_parameter_value then
+      get stacked diagnostics m_pub = message_text, c_pub = returned_sqlstate;
+    end;
+
+    if m_grant <> m_pub or c_grant <> c_pub then
+      raise exception 'FAIL — the two callers see DIFFERENT refusals (% / %) vs (% / %); the collision check has been duplicated rather than shared',
+        c_grant, m_grant, c_pub, m_pub;
+    end if;
+    if m_grant not like 'presby_write_return_publication_chain:%' then
+      raise exception 'FAIL — the refusal did not come from the shared chain writer: %', m_grant;
+    end if;
+
+    -- NOTHING WAS WRITTEN. The check runs before the first insert and before
+    -- the GUC is armed, which is the difference between a named refusal and
+    -- drizzle/0045''s opaque about-org message two rows later.
+    if (select count(*) from statistical_returns) <> v_returns_before then
+      raise exception 'FAIL — a refused late filing still wrote an artifact';
+    end if;
+    raise notice 'pass  F80: a late filer whose council changed AFTER the report year is refused by ONE shared check, before any of the three rows is written, with a BYTE-IDENTICAL message on the grant path and the self-publish path';
+  end $$;
+rollback;
+
+-- (g) NO DRIFT IN THE RE-CREATED presby_publish_sasr_snapshot(). Section 34(h)
+--     already asserts this function's contract; this re-runs its own test
+--     vector through the refactored body and re-runs F39's equality, because
+--     the extraction in drizzle/0049 is the riskiest change in the pipeline and
+--     it touches a function outside this feature's blast radius.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  declare
+    v_return_1 uuid;
+    v_return_2 uuid;
+    v_pub_1    uuid;
+    v_pub_2    uuid;
+  begin
+    v_return_1 := presby_publish_sasr_snapshot(
+      2029, 'Session stated meeting, 2030-01-10, item 3',
+      p_ending_active => 220, p_ending_baptized => 48,
+      p_avg_weekly_worship_attendance => 170, p_baptisms_children => 5,
+      p_receipts_contributions => 425000.00, p_exp_local_program => 280000.00
+    );
+    if v_return_1 is null or not exists (select 1 from statistical_returns where id = v_return_1) then
+      raise exception 'FAIL — the re-created function no longer returns the ARTIFACT''s id';
+    end if;
+    select id into v_pub_1 from publications where artifact_id = v_return_1;
+    if (select recipient_org_id from publications where id = v_pub_1)
+       is distinct from '11111111-1111-1111-1111-111111111111' then
+      raise exception 'FAIL — the recipient is no longer resolved from the affiliation history';
+    end if;
+    if (select payload -> 'ending_active' from statistical_returns where id = v_return_1) <> '220'::jsonb then
+      raise exception 'FAIL — the artifact''s payload changed shape under the extraction';
+    end if;
+    raise notice 'pass  drizzle/0049: the re-created presby_publish_sasr_snapshot() still returns the artifact id, still resolves the recipient from the affiliation history, and still stores the as-reported payload';
+
+    v_return_2 := presby_publish_sasr_snapshot(
+      2029, 'Session stated meeting, 2030-02-14, item 2 (correction)', p_ending_active => 221);
+    select id into v_pub_2 from publications where artifact_id = v_return_2;
+    if (select supersedes_id from publications where id = v_pub_2) is distinct from v_pub_1 then
+      raise exception 'FAIL — the supersession chain broke under the extraction';
+    end if;
+    raise notice 'pass  drizzle/0049: the DERIVED supersession chain survives the extraction — the helper derives supersedes_id from the source council''s own history, never from a parameter';
+  end $$;
+
+  -- The projection, and F39's equality, read from the recipient's context.
+  select set_config('app.current_org_id', :PRESBY, true);
+  -- Joined through the read-back function, exactly as section 34(d) does and
+  -- for the same reason: no single tenant context can see both tables
+  -- directly, because the projection is the presbytery's and the publication
+  -- is the congregation's.
+  select assert_eq(
+    (select count(*) from congregation_statistics cs
+      join presby_list_published_returns_to_me(:ALDER, 2029) p
+        on p.publication_id = cs.publication_id
+     where cs.published_at = p.published_at
+       and cs.minute_reference is not distinct from p.minute_reference),
+    2, 'F39 re-run after the extraction: BOTH projections still carry the EXACT instant and minute of their own publication — one function, one transaction, two rows, no drift');
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where about_org_id = :ALDER and year = 2029
+        and provenance = 'published_by_congregation'
+        and ending_active = 220 and ending_baptized = 48
+        and avg_weekly_worship_attendance = 170 and baptisms_children = 5
+        and receipts_contributions = 425000.00 and exp_local_program = 280000.00),
+    1, 'drizzle/0049: the jsonb_to_record projection reproduces the 60-column row BYTE FOR BYTE — the same integers and the same numeric scale the old 60-parameter INSERT wrote, counts and money alike');
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where about_org_id = :ALDER and year = 2029
+        and (gains_certificate is not null or race_white is not null or budgeted_income is not null)),
+    0, 'drizzle/0049: an unreported field extracts as NULL rather than as a shifted neighbour — jsonb_strip_nulls dropped it and jsonb_to_record matched BY NAME');
+rollback;
+
+-- (h) CATALOG PINS. A dropped trigger, a lost search_path pin or a
+--     re-widened grant fails this suite rather than surfacing months later.
+begin;
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'statistics_submission_grants'
+        and t.tgenabled = 'O'
+        and t.tgname in ('statistics_submission_grants_about_org',
+                         'statistics_submission_grants_unmanaged',
+                         'statistics_submission_grants_freeze')),
+    3, 'grants: all three triggers exist and are ENABLED — two on creation, one on mutation');
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'statistics_submission_grants'
+        and t.tgname = 'statistics_submission_grants_freeze'
+        and t.tgfoid = 'presby_freeze_statistics_submission_grant'::regproc
+        -- tgtype bits: 1 = FOR EACH ROW, 2 = BEFORE, 16 = UPDATE.
+        and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2 and (t.tgtype & 16) = 16),
+    1, 'grants: the freeze is a row-level BEFORE UPDATE trigger executing the named function — it fires on the OWNER path too, which is the only thing that guards the claim there (F44)');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_freeze_statistics_submission_grant'
+        and pg_get_functiondef(oid) like '%presby.grant_claim_active%'
+        and pg_get_functiondef(oid) not like '%presby.publication_write_active%'),
+    1, 'F56: the freeze reads its OWN unshared GUC (presby.grant_claim_active) and never presby.publication_write_active — claiming a credential and writing an artifact are two claims about two subsystems');
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prokind = 'f'
+        and pg_get_functiondef(p.oid) like '%set_config(''presby.grant_claim_active''%'),
+    1, 'F56: exactly ONE function in the database arms the claim marker — presby_submit_granted_return(), the sanctioned claimant');
+
+  -- F60 / DECISION-148: pg_temp LAST, on every SECURITY DEFINER function
+  -- drizzle/0049 defines. Asserted by exact element match, so a future
+  -- `create or replace` that drops or reorders the clause is caught.
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prosecdef
+        and p.proname in ('presby_write_return_publication_chain',
+                          'presby_publish_sasr_snapshot',
+                          'presby_submit_granted_return',
+                          'presby_preview_granted_return')
+        and 'search_path=public, pg_temp' = any(coalesce(p.proconfig, array['']::text[]))),
+    4, 'F60/DECISION-148: all four SECURITY DEFINER functions drizzle/0049 defines pin search_path = public, pg_temp — pg_temp named LAST so it cannot shadow public');
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and not p.prosecdef
+        and p.proname in ('presby_check_grant_about_org_unmanaged',
+                          'presby_freeze_statistics_submission_grant')),
+    2, 'DECISION-121: the two new trigger functions stay SECURITY INVOKER — one reads `organizations` (no RLS at all) and the other reads OLD/NEW and a GUC, so DEFINER would be cargo cult');
+
+  -- The read-only preview the public page resolves through: same liveness
+  -- predicate, no mutation, no cross-tenant column in its return type.
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_preview_granted_return'
+        and provolatile = 's' and prosecdef),
+    1, 'grants: presby_preview_granted_return() is STABLE and SECURITY DEFINER — the page resolves a token without writing anything, and a dead token returns NO ROW rather than a distinguishable error');
+  select assert_eq(
+    (select count(*) from presby_preview_granted_return('a7f3b4eeb465002f791d57e294ab7224a57a6fffdd6d2708dd307c5adf8f7e0c')),
+    1, 'grants: the preview resolves a LIVE token to one row (the congregation''s own public name and the report year — nothing another organization owns)');
+  select assert_eq(
+    (select (select count(*) from presby_preview_granted_return('66fe4afd3f4e7f8e78753707f799bc4b31934c40c83137471cff89f41196844d'))
+          + (select count(*) from presby_preview_granted_return('429cf4fc640910801810f1326833bfbeb6f478966782dcc4b9b48ef5d6f00444'))
+          + (select count(*) from presby_preview_granted_return('0000000000000000000000000000000000000000000000000000000000000000'))),
+    0, 'grants: expired, revoked and nonexistent tokens all preview to NO ROW — the page cannot tell them apart, so its copy cannot either');
+commit;
+
+\echo ''
+\echo '======================================================'
+\echo ' Section 40 (submission grants) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION — pipeline/submission-grants.
 -- ===========================================================================

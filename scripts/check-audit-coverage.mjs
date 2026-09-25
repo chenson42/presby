@@ -32,7 +32,17 @@ async function* walk(dir) {
 
 // Allow whitespace/newlines between `db`, `.`, and the verb — multi-line
 // fluent calls are common.
-const MUTATION_RE = /\bdb\s*\.\s*(insert|update|delete)\b/;
+//
+// `execute` is included alongside insert/update/delete (added
+// docs/work-log/2026-09-25-submission-grants.md, Phase 2/3 ruling 11):
+// src/app/(statistics-submit)/actions.ts calls a SECURITY DEFINER function
+// via `db.execute(sql`select presby_submit_granted_return(...)`)`, which is a
+// real mutation this regex previously could not see at all — the tripwire
+// would have passed that file whether or not recordAudit() was present.
+// Verified tree-wide at the time of the extension to be a no-op everywhere
+// else: the only other `.execute(`-bearing `actions.ts` under `src/app/` was
+// `(admin)/admin/2fa/actions.ts`, which already calls `recordAudit`.
+const MUTATION_RE = /\bdb\s*\.\s*(insert|update|delete|execute)\b/;
 const AUDIT_RE = /\bauditEvents\b|\brecordAudit\b/;
 const EXEMPT_RE = /\/\/\s*audit-exempt:/i;
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
@@ -11,6 +12,7 @@ import {
   getCongregationStatisticsRollup,
   getPerCapitaOverview,
 } from "@/lib/presbytery";
+import { listStatisticsGrants } from "@/lib/statistics-grants";
 import { isFlagEnabled } from "@/lib/flags";
 import {
   PlaceholderFlagOff,
@@ -24,8 +26,11 @@ import { PerCapitaRateForm } from "./per-capita-rate-form";
 import { GenerateRecordsButton } from "./generate-records-button";
 import { PerCapitaRecordsTable } from "./per-capita-records-table";
 import { RecordPaymentForm } from "./record-payment-form";
+import { IssueGrantForm } from "./issue-grant-form";
+import { GrantsTable } from "./grants-table";
 
 const REPORTS_FLAG = "org_portal.reports";
+const SUBMISSION_GRANTS_FLAG = "statistics.submission_grants";
 const AREA = "Per-Capita, SASR & Imports";
 const REPORTS_ORG_TYPES: readonly OrganizationType[] = ["presbytery"];
 
@@ -119,7 +124,7 @@ export default async function ReportsPage({
   // this page renderable the same way in both a real request and a test,
   // same shape `admin/credentials/page.tsx` uses for its own three
   // sequential reads.
-  const statisticsSection = await renderStatisticsSection({
+  const { jsx: statisticsSection, rollup } = await renderStatisticsSection({
     slug,
     personId: resolved.org.personId,
     organizationId: resolved.org.organizationId,
@@ -135,6 +140,14 @@ export default async function ReportsPage({
     billingYear,
   });
 
+  const submissionGrantsSection = await renderSubmissionGrantsSection({
+    slug,
+    personId: resolved.org.personId,
+    organizationId: resolved.org.organizationId,
+    orgName: resolved.org.name,
+    rollup,
+  });
+
   return (
     <section className="space-y-10">
       <div>
@@ -144,6 +157,7 @@ export default async function ReportsPage({
 
       {statisticsSection}
       {perCapitaSection}
+      {submissionGrantsSection}
     </section>
   );
 }
@@ -161,20 +175,22 @@ async function renderStatisticsSection({
   orgName: string;
   year: number;
 }) {
-  let result;
+  let result: Awaited<ReturnType<typeof getCongregationStatisticsRollup>> | null = null;
+  let jsx: ReactNode;
   try {
     result = await getCongregationStatisticsRollup(personId, organizationId, year);
   } catch (err) {
     if (err instanceof OrgAccessError) throw err;
-    return (
+    jsx = (
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">Congregation Statistics</h2>
         <ReportsSectionLoadError slug={slug} />
       </section>
     );
+    return { jsx, rollup: result };
   }
 
-  return (
+  jsx = (
     <section className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-xl font-semibold">Congregation Statistics</h2>
@@ -211,6 +227,8 @@ async function renderStatisticsSection({
       )}
     </section>
   );
+
+  return { jsx, rollup: result };
 }
 
 async function renderPerCapitaSection({
@@ -289,6 +307,107 @@ async function renderPerCapitaSection({
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * Third section, increment 6 (D16/DECISION-147): "Submission grants" — a
+ * presbytery clerk issues a one-time, expiring, token-authenticated link
+ * that lets an `unmanaged`/`invited` congregation file its SASR return with
+ * no account. TRIPLE-GATED: this page's own `org_portal.reports` flag
+ * (already checked above the caller), the `statistics.submission_grants`
+ * flag (checked here — a flag never substitutes for a permission,
+ * DECISION-003), and `statistics.manage` (checked inside
+ * `listStatisticsGrants()`/`issueStatisticsGrantAction()`). `managed`-status
+ * exclusion is enforced by a DATABASE TRIGGER at issuance
+ * (`presby_check_grant_about_org_unmanaged()`), never by this filter alone —
+ * this reuses `getCongregationStatisticsRollup()`'s own read (same shape the
+ * "Congregation Statistics" section above already queries) purely to build
+ * the picker's convenience filter.
+ */
+async function renderSubmissionGrantsSection({
+  slug,
+  personId,
+  organizationId,
+  orgName,
+  rollup,
+}: {
+  slug: string;
+  personId: string;
+  organizationId: string;
+  orgName: string;
+  /** The SAME read `renderStatisticsSection()` already made for this
+   *  request — reused rather than queried a second time, so this section
+   *  neither doubles the DB round trip nor drifts from the "Congregation
+   *  Statistics" section's own view of which congregations exist. `null`
+   *  only when that read itself threw (a load error, already rendered by
+   *  the statistics section). */
+  rollup: Awaited<ReturnType<typeof getCongregationStatisticsRollup>> | null;
+}) {
+  const grantsFlagOn = await isFlagEnabled(SUBMISSION_GRANTS_FLAG);
+  if (!grantsFlagOn) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold">Submission grants</h2>
+        <p className="text-sm text-muted-foreground">
+          Submission grants aren&apos;t turned on for {orgName} yet.
+        </p>
+      </section>
+    );
+  }
+
+  const grantsResult = await listStatisticsGrants(personId, organizationId).catch(
+    () => null,
+  );
+
+  if (!rollup || !grantsResult) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold">Submission grants</h2>
+        <ReportsSectionLoadError slug={slug} />
+      </section>
+    );
+  }
+
+  if (rollup.kind === "forbidden" || grantsResult.kind === "forbidden") {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold">Submission grants</h2>
+        <ReportsSectionForbidden section="submission grants" name={orgName} />
+      </section>
+    );
+  }
+
+  if (rollup.kind !== "ok" || grantsResult.kind !== "ok") {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold">Submission grants</h2>
+        <ReportsSectionLoadError slug={slug} />
+      </section>
+    );
+  }
+
+  const issuableCongregations = rollup.data
+    .filter((row) => row.platformStatus !== "managed")
+    .map((row) => ({ organizationId: row.organizationId, name: row.name }));
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Submission grants</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Let an unmanaged or invited congregation file its statistical report
+          without an account, using a one-time emailed link.
+        </p>
+      </div>
+
+      <GrantsTable slug={slug} grants={grantsResult.data} />
+
+      <div className="max-w-2xl space-y-4">
+        <h3 className="text-lg font-semibold">Issue a grant</h3>
+        <IssueGrantForm slug={slug} congregations={issuableCongregations} />
+      </div>
     </section>
   );
 }

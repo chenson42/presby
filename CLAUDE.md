@@ -332,6 +332,11 @@ pipeline's own Phase 4/5 loop-backs.
   above — not as a new migration. It closes as a single commit:
   `fix(schema): …` with `Caught-By: human-review` and `Discovered-In:
   post-merge` (and the pipeline's `Work-Log:` trailer, as always).
+- **Before it closes:** read the drafted release-note entry against the round's
+  own accepted-residual list (the DDL comments, the `schema-design-2.md`
+  subsection, the decision entry). The note is written for a non-engineer and
+  must not deny a residual the technical record admits — the 0.25.2 note did,
+  and Phase 6 caught it after the push.
 - **Before the next round:** regenerate the review export with
   `scripts/export-table-definitions.py` so a subsequent external read sees the
   corrected shape, not the one that was just fixed.

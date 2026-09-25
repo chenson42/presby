@@ -9,7 +9,20 @@ import * as schema from "./schema";
  *   db          presby_app.       RLS ENFORCED, ALWAYS. Every tenant-facing
  *                                 route. The role is created NOBYPASSRLS and
  *                                 must stay that way.
- *   platformDb  presby_platform.  Bypasses RLS. Platform admin pages only.
+ *   platformDb  neondb_owner      Bypasses RLS. Platform admin pages only.
+ *               (via PLATFORM_DATABASE_URL).
+ *
+ * CORRECTED 2026-09-25 (B-I3 / DECISION-146): this comment used to name
+ * `presby_platform` as the second connection's role. It never was.
+ * `presby_platform` exists in the catalog and holds grants on 83 tables, but
+ * it is `rolcanlogin = false` (measured) and nothing has ever connected as
+ * it; `PLATFORM_DATABASE_URL` authenticates as `neondb_owner`. This matters
+ * beyond tidiness: `neondb_owner` OWNS every table, so it holds every
+ * privilege by ownership independent of any grant or revoke, and it is
+ * `rolbypassrls = true`. Reasoning of the shape "X cannot happen on this
+ * connection because the grant forbids it" is false here (F44) — only a
+ * trigger binds this path. The same wrong role name was also fixed in
+ * scripts/seed.ts.
  *
  * This is the boundary that survives application bugs. `users.is_platform_admin`
  * decides which PAGES are reachable; it does not decide whether a query is

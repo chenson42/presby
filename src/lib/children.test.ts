@@ -156,7 +156,12 @@ describe.skipIf(!hasDb)(
       ) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: first, lastName: last, dateOfBirth })
+          .values({
+            firstName: first,
+            lastName: last,
+            dateOfBirth,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         trackedPeopleIds.push(p!.id);
         return p!.id;

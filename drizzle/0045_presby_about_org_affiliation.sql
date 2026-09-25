@@ -179,7 +179,7 @@ revoke execute on function presby_deny_about_org_write(text, text) from presby_a
 -- NEW.organization_id is read the same way purely for symmetry.
 create or replace function presby_check_about_org_affiliated()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_about_col text  := tg_argv[0];

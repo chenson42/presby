@@ -68,6 +68,11 @@ export const appRoles = pgTable(
   },
   (t) => [
     unique("app_roles_org_key").on(t.organizationId, t.key),
+    // The composite-FK anchor role_grants.role_id now references (B-M3,
+    // drizzle/0048 section 7). Note organizationId is NULLABLE here (a
+    // template row), which is exactly what makes the composite FK from
+    // role_grants enforce clone-not-grant under MATCH SIMPLE.
+    unique("app_roles_id_org_key").on(t.id, t.organizationId),
     index("app_roles_template_idx").on(t.organizationTypeScope),
   ],
 );
@@ -108,9 +113,12 @@ export const roleGrants = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    roleId: uuid("role_id")
-      .notNull()
-      .references(() => appRoles.id, { onDelete: "cascade" }),
+    // Composite since B-M3 (drizzle/0048 section 7) — see the
+    // `role_grants_role_fk` entry below. Not a design decision that a
+    // template may be granted directly: role-definitions.ts ADOPTS a template
+    // by CLONING it into an org-scoped app_roles row, and the composite FK
+    // makes that code convention a database property.
+    roleId: uuid("role_id").notNull(),
     personId: uuid("person_id"),
     groupId: uuid("group_id"),
     startsOn: date("starts_on").notNull().defaultNow(),
@@ -148,6 +156,19 @@ export const roleGrants = pgTable(
       foreignColumns: [groups.id, groups.organizationId],
       name: "role_grants_group_fk",
     }),
+    /**
+     * Composite Tenant Keys (F2 / B-M3). `.onDelete("cascade")` reproduces
+     * the single-column FK's existing behaviour exactly — a shape change,
+     * not a behaviour change; deactivateRole()'s append-only trail still
+     * depends on it. DDL: drizzle/0048 section 7.
+     */
+    foreignKey({
+      columns: [t.roleId, t.organizationId],
+      foreignColumns: [appRoles.id, appRoles.organizationId],
+      name: "role_grants_role_fk",
+    }).onDelete("cascade"),
+    // B-L6: this FK column had no index at all (measured 2026-09-25).
+    index("role_grants_role_idx").on(t.roleId),
   ],
 );
 

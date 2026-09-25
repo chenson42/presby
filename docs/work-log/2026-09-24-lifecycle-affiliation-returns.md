@@ -17,9 +17,9 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-09-24 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-09-24 |
-| 3 — Technical design | tech-lead | Complete, amended after batch A, amended again after batches B and C, amended a third time after Phase 5 Finding 1, amended a fourth time after an external post-merge review, ratified a fifth time after the resulting hardening pass, amended a sixth time after a second-round external post-merge review, ratified a seventh time after the resulting round-two hardening build, ruled an eighth time on QA's re-verification FAIL, ruled a tenth and final time on F59 and QA's Finding 1 after the ninth pass | Design complete, increments 1–5 specified; five Phase 4 deviations ruled on after batch A (4 accepted, 1 fixed before batch B — see "Amendment after batch A"); thirteen further items ruled on after batches B and C, none requiring a Phase 4 loop-back — see "Amendment after batches B and C"; QA's Finding 1 (`organization_successions` was policy-mediated, not function-mediated, contra Phase 2 Ruling 1) confirmed and routed to database-admin — see "Amendment after Phase 5" below; an external reviewer's five findings against the exported table shapes (F47–F52) ruled on and routed to database-admin as a migration correction in place — see "Amendment after external implementation review" below; two loop-back candidates and nine deviations from that pass ratified — one CHECK (`organization_affiliations_recorded_has_from`) refused against fixture/test evidence, one CHECK shape (`statistical_returns_provenance_shape`'s attestation exclusion) confirmed Ruling-A4-consistent, no further Phase 4 change required — see "Ratification after the hardening pass" below; a second-round external review's five items (two blockers, two informational, one confirmation) ruled on as F54–F58, generalizing F44/F49's "creation guarded as strongly as mutation" rule to `organization_lifecycle_events`/`organization_successions`, the return→publication→projection chain, the withdrawal pair, and `organization_identifiers` — see "Amendment after external review, round 2" below; database-admin's round-two build ratified as built with one factual correction (the seed's arming site), the `publications` withdrawal literal's one-message-per-reason discipline confirmed, the Finding 1 follow-on revoke ratified as Ruling-1-consistent with its grant-coupling recorded, B-M1/B-M2 ratified as built, and Finding 4a's guard predicate left unchanged pending its own scoped decision — no further Phase 4 change required — see "Ratification after hardening round two" below; QA's re-verification FAIL on two design claims (QA-1 the lifecycle marker is transaction-scoped not event-scoped; QA-2 the tenant can arm the withdrawal marker and write `congregation_statistics.withdrawn_at` alone) ruled: QA-1 partially accepted (id-scoped marker, per-declared-act binding) with full cross-transaction closure declined and named as an accepted, owner-connection-bounded residual (F44 precedent) rather than built; QA-2 accepted in full via column-level privilege narrowing on `congregation_statistics` (`withdrawn_at`, `publication_id`), which also closes the previously-accepted F55/item-7 INSERT-side residual for free; QA-3 accepted (citation fix). Routed to database-admin as the ninth Phase 4 pass — see "Ruling on QA-1/QA-2 after hardening round two" below; **tenth and final ruling:** F59 (the ninth pass's one deviation — the `INSERT` half of the QA-2 fix, built, measured incompatible with Drizzle's insert builder, and removed) accepted as built, with the closing instrument named definitively (a raw column-list SQL insert in `src/lib/presbytery.ts`, over a `SECURITY DEFINER` function) and tracked in `docs/TODO.md`, not built; QA's Finding 1 precision gaps (wrong FK credited, bound overstated) corrected in place in `drizzle/0047` §10 and `docs/schema-design-2.md` F59 — comments/docs only, no DDL or application change, no Phase 4/5 re-loop — see "Ruling on F59 and QA Finding 1 after the ninth pass" below. **This is the last correction on `drizzle/0043`–`0047`.** | 2026-09-25 |
-| 4 — Implementation | database-admin | Complete, re-opened three times (Phase 5 Finding 1; external implementation review; the round-2 creation-guard hardening) — **the round-2 loop-back is now COMPLETE (2026-09-25): F54–F58 / DECISION-141 built as a correction in place to `drizzle/0043`–`0047`, plus the security review's B-M1 and B-M2 and the follow-on revoke of `presby_app`'s unused INSERT on `organization_lifecycle_events`. test-rls 402/exit 0 (baseline 384), DB-backed vitest 142 passed, 9 failing-first proofs, whole-file double-apply idempotence proven. See "Loop-back after external review, round 2 — COMPLETE"** — **re-opened a fourth time and now COMPLETE PENDING QA (ninth pass, 2026-09-25): QA-1/QA-2 corrections built in place in `drizzle/0044` and `drizzle/0047`. test-rls 402 → 412/exit 0, DB-backed vitest 142 → 147 passed (lifecycle 38 → 43), whole-file double-apply idempotence re-proven, two failing-first proofs watched. ONE DEVIATION: the INSERT half of Ruling 2 was built, measured to break `setCongregationStatistics()`, and removed — recorded as F59 and owed back to Phase 3. See "Ninth pass — QA-1/QA-2 corrections"** | Six passes green. All three batches green. Increments 1–2 + fixture sweep + `createOrganization()` (batch A); Ruling A5's correction to `drizzle/0044` + increment 3 (`drizzle/0045`, the about-org enforcing trigger) (batch B); increments 4–5 (`drizzle/0046`, `drizzle/0047`), the `congregation_statistics` retrofit and backfill, the rewritten publish function, `presby_list_published_returns_to_me()` and the `sasr_reports` drop (batch C). Then the Finding 1 loop-back, then the external-review hardening pass (F47–F53 / DECISION-140) as a correction in place to `drizzle/0043`–`0047`: six of the seven items built, `organization_affiliations_recorded_has_from` refused as contradicting F41's asserted fixture. test-rls 384/exit 0, DB-backed vitest 119 passed, 33 failing-first proofs. Five loop-back candidates for tech-lead, none blocking. Round 2 (2026-09-25) added the two lifecycle guards + the event-side cardinality trigger, the three publication-chain guards, the withdrawal conjunct on both halves, the identifiers INSERT widening, the fixture sweep across `test-rls.sql`/`lifecycle.test.ts`/`publication.test.ts`/`org-identifiers.test.ts`/`presbytery.test.ts`/`seed-dev.sql`, B-M1/B-M2, and — accepted mid-task by the orchestrator, ratification owed from tech-lead — the revoke of presby_app's unused INSERT on `organization_lifecycle_events` with the two helper grants it unlocked; one residual named for Phase 3 (the same marker-vs-privilege gap on `congregation_statistics`, which the live tenant write path keeps open). Ninth pass (2026-09-25, QA-1/QA-2): the lifecycle marker now carries the event id and the guard binds `new.id`/`new.event_id` to it (per-declared-act, with the cross-transaction re-arm named as an accepted F44-class residual); `congregation_statistics` gains a catalog-generated column-level UPDATE grant excluding `withdrawn_at`/`publication_id`, closing the defect QA measured; the symmetric INSERT narrowing is NOT built (F59 — Postgres requires INSERT privilege on every column in the target list, including `DEFAULT`-valued ones, and Drizzle's insert builder emits them all), so the item-7 INSERT residual stands | 2026-09-25 |
-| 5 — Verification | qa | **Re-verified after the ninth pass — all checks green and every QA-1/QA-2/QA-3 claim independently re-measured on the live catalog.** `test-rls.sql` 412/exit 0 as `presby_app` (6 runs); five DB-backed vitest files 147/147 serial, 0 skipped (`lifecycle` 43, `presbytery` 34); `npm run typecheck` PASS; `npm run check` all five tripwires PASS; `drizzle/0044`+`0047` re-applied whole with identical row counts. Both failing-first proofs performed by QA, not accepted on report: boolean-marker regression → 3 red at `lifecycle.test.ts:900,983,1049` and `test-rls.sql` exit 3 at `:4710`; column-revoke revert → `test-rls.sql` exit 3 at `:2147` with QA's original defect (`UPDATE 1` on `withdrawn_at`, armed) reproduced exactly. F59 reproduced independently (one-column INSERT revoke → `presbytery.test.ts` 5 red, `permission denied for table congregation_statistics`) — the deviation is real. Four advisory findings, none verdict-changing: (1) F59's residual is reachable and its stated bound credits the wrong of the two composite FKs and does not constrain the fabricated row's year or values — carry to Phase 6; (2) two transient reds traced to a concurrent pipeline writing the shared `development` Neon branch (Finding 5, live); (3) `npm test` skips all 765 DB-backed assertions, so CI covers none of this work; (4) §10's INSERT restatement leaves stale `attacl` entries. Feature-Gate Audit: no protected routes touched. Not auth-touching, so the stricter e2e gate does not apply. Earlier rows: round-two re-verification FAIL escalated QA-1/QA-2/QA-3 to Phase 3 (2026-09-25); hardening-pass and Finding-1 re-verifications PASS (2026-09-24). | **PASS** | 2026-09-25 |
+| 3 — Technical design | tech-lead | Complete, amended after batch A, amended again after batches B and C, amended a third time after Phase 5 Finding 1, amended a fourth time after an external post-merge review, ratified a fifth time after the resulting hardening pass, amended a sixth time after a second-round external post-merge review, ratified a seventh time after the resulting round-two hardening build, ruled an eighth time on QA's re-verification FAIL, ruled a tenth and final time on F59 and QA's Finding 1 after the ninth pass | Design complete, increments 1–5 specified; five Phase 4 deviations ruled on after batch A (4 accepted, 1 fixed before batch B — see "Amendment after batch A"); thirteen further items ruled on after batches B and C, none requiring a Phase 4 loop-back — see "Amendment after batches B and C"; QA's Finding 1 (`organization_successions` was policy-mediated, not function-mediated, contra Phase 2 Ruling 1) confirmed and routed to database-admin — see "Amendment after Phase 5" below; an external reviewer's five findings against the exported table shapes (F47–F52) ruled on and routed to database-admin as a migration correction in place — see "Amendment after external implementation review" below; two loop-back candidates and nine deviations from that pass ratified — one CHECK (`organization_affiliations_recorded_has_from`) refused against fixture/test evidence, one CHECK shape (`statistical_returns_provenance_shape`'s attestation exclusion) confirmed Ruling-A4-consistent, no further Phase 4 change required — see "Ratification after the hardening pass" below; a second-round external review's five items (two blockers, two informational, one confirmation) ruled on as F54–F58, generalizing F44/F49's "creation guarded as strongly as mutation" rule to `organization_lifecycle_events`/`organization_successions`, the return→publication→projection chain, the withdrawal pair, and `organization_identifiers` — see "Amendment after external review, round 2" below; database-admin's round-two build ratified as built with one factual correction (the seed's arming site), the `publications` withdrawal literal's one-message-per-reason discipline confirmed, the Finding 1 follow-on revoke ratified as Ruling-1-consistent with its grant-coupling recorded, B-M1/B-M2 ratified as built, and Finding 4a's guard predicate left unchanged pending its own scoped decision — no further Phase 4 change required — see "Ratification after hardening round two" below; QA's re-verification FAIL on two design claims (QA-1 the lifecycle marker is transaction-scoped not event-scoped; QA-2 the tenant can arm the withdrawal marker and write `congregation_statistics.withdrawn_at` alone) ruled: QA-1 partially accepted (id-scoped marker, per-declared-act binding) with full cross-transaction closure declined and named as an accepted, owner-connection-bounded residual (F44 precedent) rather than built; QA-2 accepted in full via column-level privilege narrowing on `congregation_statistics` (`withdrawn_at`, `publication_id`), which also closes the previously-accepted F55/item-7 INSERT-side residual for free; QA-3 accepted (citation fix). Routed to database-admin as the ninth Phase 4 pass — see "Ruling on QA-1/QA-2 after hardening round two" below; **tenth and final ruling:** F59 (the ninth pass's one deviation — the `INSERT` half of the QA-2 fix, built, measured incompatible with Drizzle's insert builder, and removed) accepted as built, with the closing instrument named definitively (a raw column-list SQL insert in `src/lib/presbytery.ts`, over a `SECURITY DEFINER` function) and tracked in `docs/TODO.md`, not built; QA's Finding 1 precision gaps (wrong FK credited, bound overstated) corrected in place in `drizzle/0047` §10 and `docs/schema-design-2.md` F59 — comments/docs only, no DDL or application change, no Phase 4/5 re-loop — see "Ruling on F59 and QA Finding 1 after the ninth pass" below. **This is the last correction on `drizzle/0043`–`0047`.** — superseded: **ruled an eleventh time** (2026-09-25) on a third external post-merge review (F60–F64), at the operator's initiative. F60 `pg_temp` on all `SECURITY DEFINER` `search_path` pins (DECISION-148); F61 reopens and closes F59; F62 the two deferred cardinality wrappers become `SECURITY DEFINER`; F63/F64 wording corrections. See "Ruling on the third external review (F60–F64)" — and the tenth Phase 4 pass's **D1**, which corrects Ruling 3's stated mechanism against a live PostgreSQL 18.6 measurement (the remedy stands; the reasoning in 13b3 replaces the ruling's). | 2026-09-25 |
+| 4 — Implementation | database-admin | Complete, re-opened three times (Phase 5 Finding 1; external implementation review; the round-2 creation-guard hardening) — **the round-2 loop-back is now COMPLETE (2026-09-25): F54–F58 / DECISION-141 built as a correction in place to `drizzle/0043`–`0047`, plus the security review's B-M1 and B-M2 and the follow-on revoke of `presby_app`'s unused INSERT on `organization_lifecycle_events`. test-rls 402/exit 0 (baseline 384), DB-backed vitest 142 passed, 9 failing-first proofs, whole-file double-apply idempotence proven. See "Loop-back after external review, round 2 — COMPLETE"** — **re-opened a fourth time and now COMPLETE PENDING QA (ninth pass, 2026-09-25): QA-1/QA-2 corrections built in place in `drizzle/0044` and `drizzle/0047`. test-rls 402 → 412/exit 0, DB-backed vitest 142 → 147 passed (lifecycle 38 → 43), whole-file double-apply idempotence re-proven, two failing-first proofs watched. ONE DEVIATION: the INSERT half of Ruling 2 was built, measured to break `setCongregationStatistics()`, and removed — recorded as F59 and owed back to Phase 3. See "Ninth pass — QA-1/QA-2 corrections"** — **re-opened a FIFTH time and now COMPLETE (tenth pass, 2026-09-25, third external review F60–F64): `, pg_temp` appended to all 21 `SECURITY DEFINER` `search_path` pins in `drizzle/0043`–`0047` (the shadowing exploit reproduced live against this pipeline's own `presby_org_affiliated()` and shown neutralized); `setCongregationStatistics()` moved off Drizzle's insert builder onto an explicit-column raw-SQL upsert and `congregation_statistics`' `INSERT` grant narrowed to 68 catalog-generated columns, closing F59 for good; the two deferred cardinality wrappers converted to `SECURITY DEFINER` (with Ruling 3's stated mechanism **corrected by measurement** — a deferred trigger inherits the QUEUING security context, so the predicted failure is real on the direct-tenant-INSERT path, not the DEFINER-writer path); four stale DDL comments corrected. test-rls 412 → **433/exit 0**, DB-backed vitest 147 → **148** (presbytery 34 → 35), five failing-first proofs run, whole-file double-apply idempotence re-proven with identical row counts and no stale `attacl` entries (Finding 4 closed). SIX DEVIATIONS, all recorded: D1 the F62 mechanism correction, D2 two `test-rls.sql` §35 blocks that asserted the behaviour F61 closes (retired/inverted in place), D3 §29 and B-M2 assertion updates, D4 one stale B-M1 reachability caption, D5 `docs/decisions.md` DECISION-141 ¶3 still carries the F63 phrase (flagged, orchestrator-owned), D6 the two `docs/TODO.md` edits owed at integration. See "Tenth pass — third external review (F60–F64)"** | Six passes green. All three batches green. Increments 1–2 + fixture sweep + `createOrganization()` (batch A); Ruling A5's correction to `drizzle/0044` + increment 3 (`drizzle/0045`, the about-org enforcing trigger) (batch B); increments 4–5 (`drizzle/0046`, `drizzle/0047`), the `congregation_statistics` retrofit and backfill, the rewritten publish function, `presby_list_published_returns_to_me()` and the `sasr_reports` drop (batch C). Then the Finding 1 loop-back, then the external-review hardening pass (F47–F53 / DECISION-140) as a correction in place to `drizzle/0043`–`0047`: six of the seven items built, `organization_affiliations_recorded_has_from` refused as contradicting F41's asserted fixture. test-rls 384/exit 0, DB-backed vitest 119 passed, 33 failing-first proofs. Five loop-back candidates for tech-lead, none blocking. Round 2 (2026-09-25) added the two lifecycle guards + the event-side cardinality trigger, the three publication-chain guards, the withdrawal conjunct on both halves, the identifiers INSERT widening, the fixture sweep across `test-rls.sql`/`lifecycle.test.ts`/`publication.test.ts`/`org-identifiers.test.ts`/`presbytery.test.ts`/`seed-dev.sql`, B-M1/B-M2, and — accepted mid-task by the orchestrator, ratification owed from tech-lead — the revoke of presby_app's unused INSERT on `organization_lifecycle_events` with the two helper grants it unlocked; one residual named for Phase 3 (the same marker-vs-privilege gap on `congregation_statistics`, which the live tenant write path keeps open). Ninth pass (2026-09-25, QA-1/QA-2): the lifecycle marker now carries the event id and the guard binds `new.id`/`new.event_id` to it (per-declared-act, with the cross-transaction re-arm named as an accepted F44-class residual); `congregation_statistics` gains a catalog-generated column-level UPDATE grant excluding `withdrawn_at`/`publication_id`, closing the defect QA measured; the symmetric INSERT narrowing is NOT built (F59 — Postgres requires INSERT privilege on every column in the target list, including `DEFAULT`-valued ones, and Drizzle's insert builder emits them all), so the item-7 INSERT residual stands | 2026-09-25 |
+| 5 — Verification | qa | **IN PROGRESS — re-verification owed for the tenth pass (third external review, F60–F64).** Implementer reports: `test-rls.sql` **433/exit 0** as `presby_app` (baseline 412); five DB-backed vitest files **148/148** serial; `npm run typecheck` and `npm run check` green; `drizzle/0043`–`0047` re-applied whole, in order, twice, exit 0 both times with identical row counts and ACL shapes. Five failing-first proofs run and cited in the Phase 4 section; six deviations recorded, one of which (**D1**) corrects a Phase 3 ruling's stated mechanism by measurement and is owed back to Phase 3 as a correction of record. Earlier row: **Re-verified after the ninth pass — all checks green and every QA-1/QA-2/QA-3 claim independently re-measured on the live catalog.** `test-rls.sql` 412/exit 0 as `presby_app` (6 runs); five DB-backed vitest files 147/147 serial, 0 skipped (`lifecycle` 43, `presbytery` 34); `npm run typecheck` PASS; `npm run check` all five tripwires PASS; `drizzle/0044`+`0047` re-applied whole with identical row counts. Both failing-first proofs performed by QA, not accepted on report: boolean-marker regression → 3 red at `lifecycle.test.ts:900,983,1049` and `test-rls.sql` exit 3 at `:4710`; column-revoke revert → `test-rls.sql` exit 3 at `:2147` with QA's original defect (`UPDATE 1` on `withdrawn_at`, armed) reproduced exactly. F59 reproduced independently (one-column INSERT revoke → `presbytery.test.ts` 5 red, `permission denied for table congregation_statistics`) — the deviation is real. Four advisory findings, none verdict-changing: (1) F59's residual is reachable and its stated bound credits the wrong of the two composite FKs and does not constrain the fabricated row's year or values — carry to Phase 6; (2) two transient reds traced to a concurrent pipeline writing the shared `development` Neon branch (Finding 5, live); (3) `npm test` skips all 765 DB-backed assertions, so CI covers none of this work; (4) §10's INSERT restatement leaves stale `attacl` entries. Feature-Gate Audit: no protected routes touched. Not auth-touching, so the stricter e2e gate does not apply. Earlier rows: round-two re-verification FAIL escalated QA-1/QA-2/QA-3 to Phase 3 (2026-09-25); hardening-pass and Finding-1 re-verifications PASS (2026-09-24). | **PASS** | 2026-09-25 **Re-verified after the tenth pass (F60–F64), 2026-09-25: PASS — 24/24 DEFINER functions pin `public, pg_temp`, the shadowing probe no longer flips `presby_org_affiliated()`/`presby_affiliation_parent_as_of()` with a same-body control isolating the clause as the cause; the forged projection now refuses at the GRANT (`42501`, with the FAIL-if-trigger branch present); F62's role-resolution measurement re-run on both fire paths confirms D1; test-rls 433/exit 0 before and after a double re-apply with byte-identical row counts and ACLs; four advisory findings.** |
 | 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES — follow-ups tracked in docs/TODO.md; CLAUDE.md, architecture.md, functionality map updated in the ship commit | 2026-09-24 — **Addendum 2026-09-25 (hardening rounds 1–2, v0.24.1 + v0.25.2): SHIP WITH NOTES; the 0.25.2 release note denied two accepted residuals and was corrected in the recording commit; a release-note-vs-accepted-residuals check added to CLAUDE.md's external post-merge review convention. See the addendum at the end of this file.** |
 
 ---
@@ -5277,5 +5277,575 @@ Neither item rises to NEEDS REWORK: the schema, its guards, its tests, and every
 | Phase | Owner | Status | Verdict | Date |
 |---|---|---|---|---|
 | 6 — Shipped vs intent (addendum, hardening rounds 1–2) | analyst | Complete | SHIP WITH NOTES — two follow-ups, both closed by the orchestrator in the recording commit; the original v0.24.0 verdict and its follow-ups stand unchanged | 2026-09-25 |
+
+---
+
+# Phase 3 — Technical Design (tech-lead), continued → Ruling on the third external review (F60–F64)
+
+**Date:** 2026-09-25
+**Scope:** a third-round external post-merge review, arrived after v0.25.2 shipped, recorded in `docs/schema-design-2.md` §2h as F60–F64. This is the **eleventh** Phase 3 loop-back on this pipeline. The tenth loop-back's "this is the last correction on `drizzle/0043`–`0047`" sentence is superseded by the operator's decision to run this round — noted once, not relitigated.
+
+A mid-task coordinator message (from the concurrent security pipeline's architect) supplied one piece of live evidence and one correction request, both folded into the F60 ruling below: (1) a reproduced exploit against an *older* function (`presby_two_factor_required`) proves `SET search_path = public` alone is a live gap, not hardening cleanup, and (2) a claim that `presby_freeze_used_field_spec()` (`drizzle/0046`) has no `SET search_path` at all. On direct inspection (`drizzle/0046:692-704`), that claim is **incorrect**: the function already carries `set search_path = public` (line 694), added under B-M2. It is one of this pipeline's 21 already-compliant-to-`public` functions, not a zero-search_path case. Recorded here so the two pipelines' function inventories reconcile against the same source rather than against each other's summaries.
+
+## Ruling 1 (F60) — `pg_temp` appended to all `SECURITY DEFINER` functions in `drizzle/0043`–`0047`, in place; scoped, not catalog-wide, `test-rls.sql` assertion this round
+
+**Measured, not assumed, against the live files.** `drizzle/0043`–`0047` define exactly **21** `SECURITY DEFINER` functions today, and all 21 already carry `set search_path = public` (verified function-by-function, not by counting `set search_path` occurrences in isolation, since a stray comment could produce a false match): `presby_set_organization_identifier` (0043); `presby_assert_council_authority`, `presby_affiliation_parent_as_of`, `presby_org_affiliated`, `presby_apply_affiliation_to_org_tree`, `presby_transfer_affiliation`, `presby_check_affiliation_authority`, `presby_apply_affiliation_row`, `presby_check_lifecycle_authority`, `presby_apply_lifecycle_event`, `presby_check_succession_event`, `presby_check_succession_cardinality` — no, **not** this one today, see Ruling 3 below — `presby_guard_organizations_insert`, `presby_guard_organizations_reparent`, `presby_guard_organizations_delete` (0044); `presby_check_about_org_affiliated` (0045); `presby_check_return_about_org`, `presby_freeze_used_field_spec` (0046); `presby_check_publication_supersession`, `presby_list_own_congregation_publications`, `presby_publish_sasr_snapshot`, `presby_list_published_returns_to_me` (0047). None is missing the clause outright. **This ruling appends `, pg_temp` to all 21**, in place, since 0043–0047 are unreleased (per the `drizzle/` convention in CLAUDE.md's Project Layout).
+
+**Why this is a security fix, not cleanup — the demonstrated mechanism.** The coordinator's reproduction: as `presby_app`, `create temp table people (id uuid)`, then call a `SET search_path = public`-only `SECURITY DEFINER` function that reads `people` unqualified — it resolves to the caller's own session-local temp table, not the real one, because an unqualified `search_path` searches the *unnamed* `pg_temp` schema **first**, ahead of every named schema in the list. `has_database_privilege('presby_app', current_database(), 'TEMP')` is `true` by PUBLIC default and has never been revoked in this schema. `set search_path = public, pg_temp` — `pg_temp` explicit and **last** — closes it: the named schema is searched before the caller's own temp namespace regardless of what the caller has created there. This generalizes to every `SECURITY DEFINER` function in this pipeline that reads any unqualified relation — which is all of them; none qualifies its table references with `public.`.
+
+**Routing, restated exactly.** The older-migration sweep (the security pipeline's own count is 14 missing the clause outright, reconciled against a broader "28 older `DEFINER` functions" figure from an earlier QA sweep — the two numbers describe different scopes and reconciling them is `0048`'s job, not this ruling's) and the `presby_app`/`presby_platform`/`PUBLIC`-hold-no-`CREATE`-on-`public` assertion both go to the concurrent security pipeline's `drizzle/0048`, whose B-M2 item is widened to cover both.
+
+**The `test-rls.sql` assertion added this round is scoped to this pipeline's own function set, not the whole catalog.** Ruled, with reasons: (1) `0048` has not landed yet, so a genuinely catalog-wide assertion added now would fail immediately on every not-yet-fixed older function — an assertion that starts red on arrival is not a usable regression gate; (2) a hand-maintained allow-list of the 14 (or 28) older names is exactly the kind of hand-transcribed, drift-prone list this schema's own conventions avoid elsewhere (the catalog-generated column grants in `drizzle/0047` §10 are the precedent for *not* doing this), and the coordinator's own message already shows two independent sweeps of "the older functions" disagreeing on count — an allow-list frozen today would be wrong before `0048` even ships; (3) two pipelines hand-maintaining one shared allow-list across two branches is the exact cross-pipeline file coupling Workflow Rule 16 exists to avoid, even though `test-rls.sql` itself is a shared, orchestrator-only-at-integration file. **Ruled:** the assertion in this round filters `pg_proc`/`pg_get_function_identity_arguments` by an explicit array of this pipeline's 21 function names (23 after Ruling 3 below converts two more to `DEFINER`) and asserts `proconfig` contains a `search_path` entry ending in `pg_temp` for every one of them, with a comment stating plainly that this does **not** cover the rest of the catalog. **`0048` widens this exact assertion** — drops the name-array filter to become catalog-wide — rather than adding a second, parallel assertion elsewhere, so there is never a moment where two assertions could disagree about what "compliant" means. Placed as new `test-rls.sql` §36.
+
+## Ruling 2 (F61) — closes the residual the tenth loop-back accepted; `setCongregationStatistics()` moves off Drizzle's insert builder, `INSERT` grant narrows to 68 columns
+
+**F59's blocker does not apply to this fix, and that is the whole reason it is buildable now where the ninth pass's attempt was not.** F59 measured that Postgres requires column-level `INSERT` privilege on *every column in the INSERT target list*, including one supplied as the bare `DEFAULT` keyword, and that drizzle-orm 0.45's `insert()` builder always emits **every** column of the table in that target list. The ninth pass narrowed the grant while leaving the call site on Drizzle's builder, so it broke immediately. This ruling changes **both** halves together: the call site stops using Drizzle's `insert()`/`onConflictDoUpdate()` builder for this one table, so the SQL it emits only ever names the columns it actually sets — the `DEFAULT`-column requirement never triggers, because those columns are never in the target list at all, not even as `DEFAULT`.
+
+**`src/lib/presbytery.ts:617-680`, `setCongregationStatistics()`.** Rewrite the body's write (currently `tx.insert(congregationStatistics).values({...}).onConflictDoUpdate({...}).returning(...)`) as a single parameterized raw-SQL upsert via Drizzle's `sql` tag (already imported in this file — `targetWhere: sql\`...\`` at line ~666), naming exactly the same 23 columns the current code already sets and no others:
+
+- Identifying/conflict-target columns (4): `organization_id`, `about_org_id`, `year`, `provenance` (literal `'presbytery_entered'`)
+- Value columns (19, unchanged from the current `values` object): `minute_reference`, `gains_professions_under18`, `gains_professions_18plus`, `gains_certificate`, `gains_other`, `losses_certificate`, `losses_deaths`, `losses_other`, `ending_active`, `ending_baptized`, `ending_affiliate`, `ending_other_participants`, `avg_weekly_worship_attendance`, `potential_giving_units`, `baptisms_children`, `baptisms_adults`, `officers_ruling_elder_count`, `officers_deacon_count`, `entered_by`
+
+`ON CONFLICT (organization_id, about_org_id, year, provenance) WHERE provenance IN ('presbytery_entered', 'imported') DO UPDATE SET` the same 19 value columns to their `EXCLUDED` values — byte-identical semantics to the current upsert, `RETURNING id`. Function signature, parameters, and every caller are unchanged. `id` and `created_at` are never named (default-generated), which is exactly why this shape needs no privilege on them either.
+
+**`drizzle/0047` §10 — the `INSERT` grant becomes column-level, catalog-generated, excluding three columns, not two.** Rebuild the `DO` block that already generates the 69-column `UPDATE` grant to also generate an `INSERT` grant over `information_schema.columns` for `congregation_statistics`, **excluding** `publication_id`, `withdrawn_at`, and — new, beyond what F59's abandoned attempt or the eighth loop-back's ruling named — `published_at`. **Why `published_at` too, when the task only strictly requires closing the `publication_id` gap:** the `congregation_statistics_publication_shape` CHECK already forces `(provenance = 'published_by_congregation') = (publication_id IS NOT NULL)` — so revoking `publication_id` alone is *sufficient* to close the F59/Finding-1 residual outright (any row claiming `published_by_congregation` provenance now fails at the grant the moment it names `publication_id`, and fails the CHECK if it omits it, since the column would then default `NULL`). The CHECK does **not**, however, reach `published_at`: nothing stops a `presbytery_entered` row from carrying a fabricated `published_at` timestamp today if that column stayed table-level-INSERT-open, and `published_at` is real content the rollup at `src/lib/presbytery.ts:522,533-539` orders and coalesces on. The live `presbytery_entered` write never names it (matches the current `values` object exactly), so excluding it costs nothing and closes a softer forgery vector the CHECK is silent on. `supersedes_id`/`supersedes_publication_id` does **not** need naming here — it was moved off this table entirely to `publications.supersedes_id` at Ruling 5/F39 and no longer exists as a `congregation_statistics` column.
+
+Resulting shape: **68 of 71 columns** carry a column-level `INSERT` grant for `presby_app` (71 − {`publication_id`, `withdrawn_at`, `published_at`}); table-level ACL for `presby_app` on `congregation_statistics` drops `INSERT` entirely, leaving `{DELETE, SELECT}` at table level (matching the `UPDATE` grant's existing table-level shape, which already carries no table-level `UPDATE`). The `UPDATE` grant (69 columns, excluding only `publication_id`/`withdrawn_at`) is **unchanged** — it was already correct and narrowing it further to also exclude `published_at` is not required by anything measured this round; the resulting asymmetry (`UPDATE` permits `published_at`, `INSERT` does not) is intentional, not an oversight, and is noted inline in the DDL comment: the live path never updates `published_at` either, and the FK/CHECK/GUC stack still governs any attempt to make such an update meaningful. **`presby_publish_sasr_snapshot()` is unaffected** — it runs `SECURITY DEFINER` and is grant-exempt per F44.
+
+**Follow the Finding-4 note already on file.** `drizzle/0047` §10 already carries a note (added at the tenth loop-back) that a whole-file re-apply after an interim column-level `INSERT` narrowing leaves stale per-column `INSERT` entries in `pg_attribute.attacl`. Since this ruling makes the narrowing permanent rather than interim, the restating `DO` block issues an explicit `revoke insert on congregation_statistics from presby_app` immediately before the catalog-generated re-grant, so a whole-file re-apply is idempotent and leaves no stale `attacl` entries — closing Finding 4 for good rather than leaving it as a one-line caveat.
+
+**`docs/TODO.md`'s F59 line (currently under Next Up) is retired by this fix** — the closing instrument it names is exactly what this ruling builds. I do not edit `docs/TODO.md` in this ruling (outside this task's file-edit scope); database-admin or the orchestrator removes that line in the same commit that ships this pass, per Workflow Rule 10.
+
+## Ruling 3 (F62) — the two deferred cardinality wrapper trigger functions become `SECURITY DEFINER` now; a throwaway `SECURITY DEFINER` test double proves the real future path through a forced deferred-check, not just to function return
+
+**This is not a "measure and maybe fix later" question — static analysis of the already-shipped grants already predicts the failure, and the file's own comment already recorded this exact failure happening once before under different circumstances.** `drizzle/0044:1504-1519` revokes `presby_app`'s `EXECUTE` on the shared helper `presby_lifecycle_event_cardinality_check(uuid)`, granting it only to `presby_platform`, with the comment explaining why: while `presby_app` briefly held direct `INSERT` on `organization_lifecycle_events`, "its deferred cardinality check called this function AS `presby_app`, and revoking the grant failed the check at commit with `permission denied for function`." That sentence is a general fact about how **deferred constraint triggers resolve their role**, not a fact scoped to the historical circumstance that produced it: a deferred `AFTER` constraint trigger fires at `COMMIT` (or `SET CONSTRAINTS ... IMMEDIATE`) under the **session's ambient role**, not under whatever role happened to be transiently current inside an earlier `SECURITY DEFINER` call that has since returned. Once `presby_record_lifecycle_event()` ships as `SECURITY DEFINER`, the `INSERT`s into `organization_lifecycle_events`/`organization_successions` happen *while that function is executing* (as `neondb_owner`, transiently) — but the deferred trigger these `INSERT`s schedule does not fire until `COMMIT`, by which point the `SECURITY DEFINER` call has already returned and the ambient role has reverted to `presby_app`. At that moment, `presby_check_succession_cardinality()`/`presby_check_lifecycle_event_cardinality()` (both `SECURITY INVOKER` today) run as `presby_app`, call `perform presby_lifecycle_event_cardinality_check(...)`, and hit the exact same `permission denied for function` — this time as a **permanent, structural** defect in the future writer's only path, not a transient historical circumstance. `organization_lifecycle_events`' RLS policy (`organization_id = presby_current_org()`) is not the blocking layer here — the acting org's context is unchanged for the whole transaction, so the one event row stays visible to its own recording org throughout; `organization_successions` carries no RLS at all (deliberately, per its own table comment). The privilege check on the explicit function call is the sole blocker, and it is real and reachable, not hypothetical.
+
+**Ruled: `presby_check_succession_cardinality()` and `presby_check_lifecycle_event_cardinality()` become `SECURITY DEFINER`, `set search_path = public, pg_temp` (per Ruling 1 — this raises the pipeline's `DEFINER` count in 0043–0047 from 21 to 23; both are included in Ruling 1's name-array assertion), owned by `neondb_owner` as usual for anything created by these migrations.** Once `DEFINER`, their internal call to `presby_lifecycle_event_cardinality_check()` executes as the function's own owner — who, as the object owner, holds implicit execute rights on it regardless of the existing `revoke ... from presby_app` (ownership is exempt from a role's own ACL entries; no separate grant is needed). This closes the gap permanently and independent of whatever grant shape a future ruling gives `presby_record_lifecycle_event()` itself. The shared helper `presby_lifecycle_event_cardinality_check(uuid)` **stays `SECURITY INVOKER`** — its own comment's reasoning ("both callers run inside the writer's own transaction against tables that writer just touched") is unchanged by this ruling; it now simply runs under its callers' newly-elevated ambient role rather than under `presby_app`'s.
+
+**The test, honestly scoped.** `presby_record_lifecycle_event()` does not exist yet, so proving the real path requires a stand-in. `test-rls.sql` runs entirely as `presby_app` (its own header: "MUST be run as presby_app, never as the owner") and `presby_app` cannot itself create a `SECURITY DEFINER` function owned by `neondb_owner` — so the stand-in must be created by the migration, not by the test file. **Add a throwaway, explicitly-labeled test-only `SECURITY DEFINER` function to `drizzle/0044`** (not `scripts/seed-dev.sql` — that file is fixture *data*, shaped to exercise findings, not a home for schema objects; a function belongs in the migration whose behavior it exercises, consistent with "hand-written DDL... below" per CLAUDE.md's Project Layout), named `presby_test_only_lifecycle_writer_f62(p_subject_org_id uuid, p_event text, p_effective_on date, p_minute_reference text, p_recorded_by uuid, p_predecessors uuid[], p_successors uuid[]) returns uuid`, `EXECUTE` granted to `presby_app` only. Body: mint a fresh event id, `set_config('presby.lifecycle_write_active', <id>::text, true)`, insert the event row (`organization_id := presby_current_org()`), then one `organization_successions` row per predecessor×successor pair, and return the event id — mirroring the real future writer's essential shape closely enough that the measurement is representative, without pretending to be the production API. **Comment the function clearly as scaffolding that must be dropped in the same migration that ships `presby_record_lifecycle_event()`** — a coupling recorded here and, at ship time, as a `docs/TODO.md` line on that function's existing entry (not added by me in this ruling, per this task's file-edit scope; database-admin or the orchestrator adds it in the same commit, per Workflow Rule 10).
+
+**`test-rls.sql` §38 (new), as `presby_app`, reusing the existing `PRESBY`/`ALDER`/`BRAMBLE`/`FERNWOOD` fixtures already established for this pipeline's other lifecycle probes:**
+
+1. **Positive control.** `select presby_test_only_lifecycle_writer_f62('merged', :FERNWOOD-as-subject, current_date, 'test minute', :some-user, ARRAY[:ALDER, :BRAMBLE], ARRAY[:FERNWOOD])` inside `begin;` — 2 distinct predecessors, 1 successor, a well-formed `merged` shape. Then `set constraints all immediate;`. **Before Ruling 3's fix:** expect `permission denied for function presby_lifecycle_event_cardinality_check` — this is the failing-first proof, run once by database-admin and recorded in the migration comment, mirroring this pipeline's established discipline (QA's own failing-first proofs throughout this work-log). **After the fix:** expect success, no exception. `rollback;` — never commit, for the reason below.
+2. **Negative control, same transaction shape.** Repeat with `ARRAY[:ALDER]` (one predecessor only) for a `merged` event. Expect the **existing** cardinality message unchanged — `'organization_successions: a merged event needs at least 2 predecessors and exactly 1 successor (found % / %)'`, `check_violation` — proving the deferred trigger's actual logic still runs correctly under `presby_app`'s ambient role once `DEFINER`'d, not merely that it no longer raises a privilege error. `rollback;`.
+3. **Catalog shape.** `pg_proc.prosecdef = true` for both `presby_check_succession_cardinality` and `presby_check_lifecycle_event_cardinality`; both carry `search_path` ending in `pg_temp` (folds into Ruling 1's §36 assertion by including these two names in its array).
+
+**Why `SET CONSTRAINTS ALL IMMEDIATE` inside a rolled-back transaction, not a real `COMMIT`, is ruled an honest proof of "which role is active."** Postgres does not change `current_user`/`session_user` at a transaction boundary absent an explicit `SET ROLE`/`SET SESSION AUTHORIZATION`, neither of which appears anywhere in this call chain — the ambient role at `SET CONSTRAINTS ALL IMMEDIATE` time, mid-transaction, is identical to the ambient role at `COMMIT` time, because nothing between those two points changes it. A real `COMMIT` would additionally create a **permanent, undeletable** `organization_lifecycle_events`/`organization_successions` fixture (both tables refuse `UPDATE`/`DELETE` on every connection, owner included, by design) — exactly the outcome QA's own re-verification explicitly declined to produce for the adjacent QA-1 residual, for the identical reason. **Ruled:** the rolled-back `SET CONSTRAINTS ALL IMMEDIATE` form is the correct instrument, not a compromise.
+
+**The PostgreSQL-version-sensitivity comment.** `drizzle/0044`'s new section (call it 13b3, immediately after the two deferred-trigger definitions) gets one comment: "Measured on PostgreSQL 18.6 (the `development` Neon branch). Deferred-constraint-trigger role resolution follows ordinary session-role semantics — the role active when a deferred trigger fires is the session's ambient role at that instant, unaffected by which role was current inside an earlier, already-returned `SECURITY DEFINER` call in the same transaction. This is not documented by PostgreSQL as version-contingent behavior, but is stated here as measured, per the reviewer's caution, rather than assumed — re-verify if the production Postgres major version ever diverges from 18.x."
+
+## Ruling 4 (F63) — "GUC = workflow marker; privilege = authority boundary" replaces "a sanctioned function wrote this row" everywhere that phrase appears
+
+**Found, by direct grep rather than by re-deriving from the reviewer's paraphrase — the overstated phrase lives in exactly two places, not scattered through the DDL generally:**
+
+1. `docs/decisions.md`, DECISION-141's second paragraph: "...the guard's job is proving 'a sanctioned function wrote this,' a claim that does not vary by provenance..." — **corrected in this ruling** (see the dated correction note appended to DECISION-141, and new DECISION-148 below).
+2. `drizzle/0046:409-427`, §4b's own comment: "...one claim ('a sanctioned function wrote this row')..." and "...the claim the guard proves does not vary by provenance..." — **routed to database-admin's Phase 4 pass** (I do not edit `drizzle/` files in this ruling). Replacement text: "one claim the marker records — 'this transaction is part of one sanctioned publish operation' — not a claim about who may write. For `statistical_returns` and `publications` the missing `INSERT` grant on every application role makes an armed marker equivalent to the sanctioned path for tenant roles, because there is no other way in; for `congregation_statistics`, that equivalence had to be built separately (Ruling 2/F61's column-level grant) — the GUC alone never proved it, which is exactly what F59 demonstrated before this pass closed it."
+
+No other `drizzle/0043`–`0047` file repeats the phrase (checked `0043`, `0044`, `0045`, `0047` directly — `0047`'s `publications_guard`/`congregation_statistics_publication_guard` comments state the mechanism without the "proves" framing and need no change).
+
+## Ruling 5 (F64) — three stale comments, folded into the same Phase 4 pass
+
+All three are documentation-only corrections in files this pass already touches, so no separate pass is warranted:
+
+1. `drizzle/0046:53-54` — "`presby_app` gets `select, insert` and nothing else, and `presby_platform` the same" → both are `SELECT`-only as shipped (`drizzle/0046:362-364`). Correct the header to say so.
+2. `drizzle/0043:99` — the `organization_identifiers` table comment says the guard "refuses every UPDATE and DELETE"; F58 widened it to `INSERT`, `UPDATE`, and `DELETE`. Correct to the triple.
+3. `drizzle/0047:237-238,250-251` — the `publications` table comment and the `publications_freeze` section header both say "immutable except for `withdrawn_at`"; the permitted transition is the complete triple (`withdrawn_at`, `withdrawn_by`, `withdrawn_minute_reference`), as `publications.withdrawn_at`'s own column comment already correctly states. Correct both headers to match the column comment rather than the other way around.
+
+## Decision log
+
+**DECISION-148** (new): every `SECURITY DEFINER` function pins `search_path = public, pg_temp`; the tenant roles hold no `CREATE` on schema `public`. Text in `docs/decisions.md`, recommended as a standing rule for the `database-admin` agent file's own checklist, not scoped to this pipeline.
+
+**DECISION-141**: dated correction note appended (eleventh loop-back) — supersedes the tenth loop-back's "last correction" sentence; records F59 reopened-and-closed (not merely reaccepted) and points to this ruling and `docs/schema-design-2.md` §2h for full detail.
+
+## Files touched (by this ruling, tech-lead — docs only)
+
+`docs/schema-design-2.md` (§2h: F63's wording fix applied directly, plus a summary "Ruling on the third external review" subsection pointing here for full detail), `docs/decisions.md` (DECISION-141 correction note; new DECISION-148), this work-log (this section).
+
+**Not touched, by design, per this task's scope:** `drizzle/`, `scripts/`, `src/`, `docs/TODO.md`. The F59 TODO line's retirement and the F62 scaffold-function's TODO coupling note are both named above as the implementer's/orchestrator's task at ship time (Workflow Rule 10), not done here.
+
+## Implementer brief
+
+**Implementer: database-admin, one pass, for everything below** (Rulings 1–3 and 5 are DDL/test-SQL; the `src/lib/presbytery.ts` half of Ruling 2 is ~30 lines of SQL-in-TS touching a file database-admin has already edited in this pipeline's ninth pass for doc comments — one implementer, not a split, per this task's own steer). This is the **tenth Phase 4 pass** on this pipeline (the ninth was QA-1/QA-2; the intervening tenth-loop-back Phase 3 ruling on F59/QA-Finding-1 required no Phase 4 rebuild).
+
+**Files, in build order:**
+
+1. `drizzle/0044_presby_org_lifecycle.sql`
+   - Convert `presby_check_succession_cardinality()` and `presby_check_lifecycle_event_cardinality()` to `security definer set search_path = public, pg_temp` (Ruling 3).
+   - Add the throwaway `presby_test_only_lifecycle_writer_f62(...)` function, `EXECUTE` to `presby_app` only, clearly commented as test scaffolding coupled to `presby_record_lifecycle_event()`'s future migration (Ruling 3).
+   - Append `, pg_temp` to all 21 existing `set search_path = public` clauses in this file (13 of the pipeline's 21) (Ruling 1).
+   - Add the PostgreSQL-18.6 measurement comment (Ruling 3).
+2. `drizzle/0043_presby_org_identifiers.sql` — append `, pg_temp` (1 clause) (Ruling 1); fix the `organization_identifiers` table comment (Ruling 5.2).
+3. `drizzle/0045_presby_about_org_affiliation.sql` — append `, pg_temp` (1 clause) (Ruling 1).
+4. `drizzle/0046_presby_statistical_returns.sql` — append `, pg_temp` (2 clauses) (Ruling 1); rewrite §4b's "proves"/"one claim" wording (Ruling 4); fix the stale header grant claim (Ruling 5.1).
+5. `drizzle/0047_presby_publications.sql` — append `, pg_temp` (4 clauses) (Ruling 1); rewrite §10's `INSERT` grant to the catalog-generated 68-column form with the `revoke insert` restated first (Ruling 2); fix the `publications` table/section comments (Ruling 5.3).
+6. `src/lib/presbytery.ts` — rewrite `setCongregationStatistics()`'s write to the explicit-column raw-SQL upsert (Ruling 2). No signature change; no caller changes.
+7. `scripts/test-rls.sql` — new §36 (F60, the 23-function-scoped `proconfig`/`pg_temp` catalog assertion), §37 (F61: armed self-insert of a `published_by_congregation` row naming `publication_id` refused `insufficient_privilege` with the grant named as the refusing layer in the comment; unarmed refused the same way; positive control — the rewritten `presbytery_entered` upsert shape succeeds and is idempotent on a second call with changed values; `has_column_privilege` false for `INSERT` on `publication_id`/`withdrawn_at`/`published_at`; `has_column_privilege` true for `INSERT` on `minute_reference` and `ending_active` as positive controls; no table-level `INSERT` in `relacl`; exactly 68 column-level `INSERT` grantees in `pg_attribute.attacl`), §38 (F62, per Ruling 3 above — positive control, negative control, catalog shape).
+8. `src/lib/presbytery.test.ts` — add one assertion exercising the new raw-SQL upsert shape directly (call twice with different values for the same `(organization_id, about_org_id, year, provenance)`, confirm the second call updates rather than duplicates, matching `onConflictDoUpdate`'s prior semantics exactly) alongside the existing 34.
+
+**Acceptance criteria:**
+
+- Whole-file re-apply of `drizzle/0043`–`0047`, in order, twice in a row: exit 0 both times; row counts identical across all affected tables before/after (matching the ninth pass's own verification discipline); no stale `pg_attribute.attacl` entries after the second apply (Finding 4, closed by the `revoke insert` restated first in §10).
+- `scripts/test-rls.sql` as `presby_app`: exit 0, growing from 412 passes by roughly a dozen to fifteen new assertions across §36–§38 (exact count is database-admin's to report, not pre-specified here).
+- `npm run typecheck`, `npm run check` (all five tripwires): green.
+- `src/lib/presbytery.test.ts`: 35/35 (34 existing + 1 new). `src/lib/db/domain/lifecycle.test.ts`, `publication.test.ts`: unchanged pass counts, still green (nothing in this pass touches their assertions).
+- Failing-first proof performed and recorded (not just asserted) for Ruling 3: the `permission denied for function` failure reproduced once, before the `SECURITY DEFINER` conversion, then shown fixed after — mirroring this pipeline's established discipline throughout.
+- No `console.log`, no native browser dialogs (n/a — no UI in this pass). No new `FEATURES.*` key, no route/action surface touched — this pass changes no auth/feature-gate surface, so Phase 4's stricter e2e gate does not apply (same disposition as the ninth pass).
+- `docs/TODO.md`: the F59 Next-Up line retired (closed, not deferred); the F62 scaffold-function's coupling to `presby_record_lifecycle_event()`'s future migration added as a note on that function's existing TODO line. Both are the implementer's or orchestrator's edit at ship time (Workflow Rule 10), not pre-built here.
+
+## Per-Phase Status (eleventh loop-back)
+
+Phase 3 row: **ruled an eleventh time**, on a third external post-merge review (F60–F64). F60 — all 21 `SECURITY DEFINER` functions in `drizzle/0043`–`0047` gain `, pg_temp`, in place; ruled a live security gap (demonstrated cross-pipeline), not cleanup; the coordinator's claim that `presby_freeze_used_field_spec()` lacks `SET search_path` is corrected (it already has `public`, needs only `pg_temp` appended); `test-rls.sql`'s new assertion is scoped to this pipeline's function set (23 after Ruling 3), with `0048` ruled to widen it rather than duplicate it. F61 — closes the tenth loop-back's accepted F59 residual for good: `setCongregationStatistics()` moves off Drizzle's insert builder, the `congregation_statistics` `INSERT` grant narrows to 68 catalog-generated columns (excluding `publication_id`, `withdrawn_at`, `published_at`); the `docs/TODO.md` F59 line is retired. F62 — the two deferred lifecycle-cardinality wrapper trigger functions become `SECURITY DEFINER` now, closing a `permission denied for function` failure this file's own comment already predicted would recur once the future writer ships; proven via a throwaway `SECURITY DEFINER` test-double writer and `SET CONSTRAINTS ALL IMMEDIATE` inside a rolled-back transaction, ruled an honest proof of "which role is active" without creating a permanent undeletable fixture. F63 — "GUC = workflow marker; privilege = authority boundary" replaces the overstated "proves a sanctioned function wrote this row" phrasing in `docs/decisions.md` (corrected here) and `drizzle/0046` §4b (routed to Phase 4). F64 — three stale comments folded into the same Phase 4 pass. `docs/decisions.md` gets a dated DECISION-141 correction note and new DECISION-148. **Next: Phase 4, database-admin, tenth pass** — implementer brief above.
+
+---
+
+# Phase 4 — Implementation (database-admin) → Tenth pass — third external review (F60–F64)
+
+**Date:** 2026-09-25
+**Migration mode:** **hand-written, corrected in place.** `drizzle/0043`–`0047` are unreleased (merged to `main`, not applied to a shipped environment — `docs/STATE.md`/`docs/TODO.md`), so per CLAUDE.md's `drizzle/` rule the correction lands in the same five files at the same five numbers. **No new migration number, no new `_journal.json` entry** — the existing `{43,0043_presby_org_identifiers}` … `{47,0047_presby_publications}` entries already agree with the files on disk (verified; 45 entries total).
+**Applied with:** `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/00XX_presby_*.sql` against the `development` Neon branch (owner, direct endpoint). Never against `$APP_DATABASE_URL`.
+**Neon branch:** `development` (PostgreSQL 18.6), this pipeline's alone this pass.
+
+## Files modified
+
+| File | What changed |
+|---|---|
+| `drizzle/0043_presby_org_identifiers.sql` | F60: `, pg_temp` on 1 `set search_path` clause. F64.2: the `organization_identifiers` table comment now says the guard refuses **INSERT, UPDATE and DELETE** (F58 widened it; the comment still said the pair). |
+| `drizzle/0044_presby_org_lifecycle.sql` | F60: `, pg_temp` on 13 clauses. F62: `presby_check_succession_cardinality()` and `presby_check_lifecycle_event_cardinality()` converted to `security definer set search_path = public, pg_temp`; new section **13b3** (the measurement, the corrected reasoning, the failing-first record) and the throwaway `presby_test_only_lifecycle_writer_f62(...)` scaffold, `EXECUTE` to `presby_app` only; 13b's "No SECURITY DEFINER" note corrected. |
+| `drizzle/0045_presby_about_org_affiliation.sql` | F60: `, pg_temp` on 1 clause. |
+| `drizzle/0046_presby_statistical_returns.sql` | F60: `, pg_temp` on 2 clauses. F63: §4b's "one claim ('a sanctioned function wrote this row')" replaced with the marker/privilege split. F64.1: the header's `select, insert` grant claim corrected to SELECT-only (verified against the live ACL). |
+| `drizzle/0047_presby_publications.sql` | F60: `, pg_temp` on 4 clauses. F61: §10 rebuilt — catalog-generated **column-level INSERT** grant (68 of 71 columns), `revoke insert … from presby_app` restated first, comment rewritten. F64.3: the `publications` table comment and the §2 header now say "immutable except the withdrawal **triple**". Plus §3b's stale "INSERT is deliberately NOT narrowed" paragraph. |
+| `src/lib/presbytery.ts` | F61: `setCongregationStatistics()`'s write moved off Drizzle's `insert()/onConflictDoUpdate()` builder to an explicit-column parameterized raw-SQL upsert (23 named columns, `on conflict … do update set` on the 19 value columns, `returning id`). Signature, parameters and every caller unchanged. |
+| `src/lib/presbytery.test.ts` | +1 test: the raw-SQL upsert's conflict arm writes **all 19** value columns from `EXCLUDED`, including back to `null`, on one row. 34 → **35**. |
+| `scripts/test-rls.sql` | New **§36** (F60), **§37** (F61), **§38** (F62); §29's grant-count assertion 15 → 14 with both missing table-level entries named; §35's B-M2 assertion retargeted; two §35 blocks retired/inverted in place (below). |
+
+## Deviations from the ruling — read these, they are not cosmetic
+
+### D1. Ruling 3's stated mechanism for F62 is wrong, and the measurement is in the migration
+
+Ruling 3 reasoned that a deferred constraint trigger fires "under the session's ambient role" at `COMMIT`, so a `SECURITY DEFINER` writer's `INSERT`s would schedule triggers that later run as `presby_app` and hit `permission denied for function presby_lifecycle_event_cardinality_check`. **Measured on PostgreSQL 18.6, that is false for the path the ruling names.** An after-trigger event carries the security context current **when it was queued**, not the ambient role when it fires.
+
+Probe (scratch table + deferred constraint trigger raising `current_user`, dropped afterwards):
+
+| How the event was queued | `current_user` inside the deferred trigger | `session_user` |
+|---|---|---|
+| plain `INSERT` as `presby_app` | `presby_app` | `presby_app` |
+| `INSERT` inside a `SECURITY DEFINER` function | **`neondb_owner`** | `presby_app` |
+
+Identical at `SET CONSTRAINTS ALL IMMEDIATE` and at a real `COMMIT`. So the section-38 positive control **succeeds both before and after** the conversion — there was never a failure on the writer path to watch fail.
+
+**The predicted failure is real on the *direct tenant INSERT* path**, and that is where it was reproduced (see Failing-first below). The conversion was built anyway, and 13b3 now carries the corrected argument with two reasons that survive the measurement:
+
+1. **Grant.** DEFINER dissolves 13b's own "re-grant INSERT and this EXECUTE grant must come back" coupling outright — the wrappers reach the helper by **ownership**, so the revoke keeps meaning what it says.
+2. **Visibility, which no grant can fix, and which is the stronger reason.** `presby_lifecycle_event_cardinality_check()` opens with `select e.event … where e.id = p_event_id` and **returns silently** when that finds nothing (the legitimate `ON DELETE CASCADE` no-op). Run as INVOKER under a role for which `organization_lifecycle_events`' FORCE-RLS policy hides the event row, the entire cardinality check degrades into that no-op and **passes** — the F26 shape, arriving through a deferred trigger instead of a direct read, and failing *open*. DEFINER is the only thing that makes the check see the aggregate it is checking.
+
+Owed back to Phase 3 only as a correction of record: the remedy is unchanged, the reasoning in `docs/schema-design-2.md` §2h / the ruling is not.
+
+### D2. Two `test-rls.sql` §35 blocks asserted the behaviour F61 closes, and had to be retired *in place*
+
+The ruling named three new sections and did not name these. Both were found by running the suite, not by reading:
+
+- **§35(c)'s third block** armed `presby.publication_write_active` as `presby_app` and asserted the forged `published_by_congregation` INSERT **succeeded**, captioned "which is how `presby_publish_sasr_snapshot()` writes it". It was never that — the snapshot function runs DEFINER as the owner and is grant-exempt (F44), so the tenant reproducing the write only ever proved F59's residual, *stated as a passing test*. Retired, with the full reasoning left in the file rather than deleted quietly; §37(a) now asserts the refusal.
+- **§35's "INSERT IS DELIBERATELY NOT NARROWED" assertion** (`presby_app` **DOES** hold INSERT on `publication_id`, expected 1) is **inverted**, not deleted, and the inversion points at §37(d) so it reads as a correction rather than a dropped test.
+
+### D3. §29's grant-count assertion and §35's B-M2 assertion needed updating
+
+§29 counted 15 `role_table_grants` rows for `presby_app` across the four presbytery tables; the table-level INSERT revoke makes it 14. Updated, with **both** missing entries (UPDATE and INSERT) asserted individually as 0 rather than absorbed into the smaller number. §35's B-M2 assertion required the exact string `search_path=public`; it is retargeted to the weaker "starts with `public`" claim, with the `pg_temp` requirement living in **§36 alone** — deliberately, so the two cannot drift into disagreeing about what "compliant" means, and so `0048` widens exactly one assertion.
+
+### D4. One stale B-M1 reachability claim corrected, no grant changed
+
+§35(e) justified keeping `presby_deny_publication_write()`'s EXECUTE grant with "presby_app still holds INSERT because the live tenant path writes that table". After F61 that is no longer true: the `published_by_congregation` branch is refused at the grant before the trigger, and the `presbytery_entered` branch never fires the guard (the `WHEN` clause). The grant is **kept** — revoking it belongs with B-M1's own reachability review in the security pipeline's `0048`, not smuggled into an F60–F64 correction pass — but the assertion's caption now says the state is conservative rather than repeating a false reason.
+
+### D5. `docs/decisions.md` DECISION-141 ¶3 still carries the F63 phrase
+
+Ruling 4 says the `docs/decisions.md` half of F63 was "corrected in this ruling". The dated eleventh-loop-back correction note at `docs/decisions.md:57` does not actually restate ¶3's *"the guard's job is proving 'a sanctioned function wrote this,' a claim that does not vary by provenance"*. The `drizzle/0046` §4b half **is** done here. `docs/decisions.md` is an orchestrator-only-at-integration file (Workflow Rule 16) and is outside this pass's brief, so it is flagged rather than edited.
+
+### D6. `docs/TODO.md` not touched
+
+The F59 line's retirement and the F62 scaffold's coupling note are Workflow Rule 16 shared-file edits, owed at integration. Named here so they are not lost: **(a)** retire the Next-Up F59 line — closed, not deferred; **(b)** add to `presby_record_lifecycle_event()`'s existing line: *"drops `presby_test_only_lifecycle_writer_f62()` and `scripts/test-rls.sql` §38 in the same migration."*
+
+## Failing-first proofs — run, not asserted
+
+1. **F60, the exploit itself, on this pipeline's own function.** As `presby_app`: `has_database_privilege('presby_app', current_database(), 'TEMP')` = `t`. `select presby_org_affiliated(:QUILLHAVEN, :COASTAL_SYNOD, current_date)` → **`f`** (the truth). Then `create temp table organization_affiliations (…)` + one forged row, same call → **`t`**. A tenant connection could make a cross-council authority predicate answer *yes*. **After the fix:** `f` and `f`. Re-run with a temp `organizations` table shadowing `presby_assert_council_authority()`'s unqualified read: unaffected.
+2. **F60, the assertion.** §36 run before the clause landed: `ERROR: FAIL F60: all 23 pin search_path with pg_temp explicit and LAST — expected 23, got 0`, and the inventory assertion at `test-rls.sql:4924` `expected 23, got 21` (the two wrappers still INVOKER).
+3. **F61, the insert probe.** §37(a) run before the grant narrowed: `test-rls.sql:5046 ERROR: FAIL — presby_app armed presby.publication_write_active and INSERTED a published_by_congregation projection; F59's residual is open again`. **After:** refused, and `sqlerrm like 'permission denied for%'` confirms the **grant** did it (the probe raises a distinct FAIL if a trigger refuses instead).
+4. **F62, the privilege error, on the path where it is real.** With the scaffold installed, the wrappers still INVOKER, and `insert on organization_successions` **temporarily** granted to `presby_app` (revoked immediately after): a direct tenant INSERT of a third edge, GUC armed to the event's own id, then `set constraints all immediate` → `ERROR: permission denied for function presby_lifecycle_event_cardinality_check`, raised from `presby_check_succession_cardinality()` line 6. After the DEFINER conversion the same probe clears the privilege check.
+5. **F62, negative control after the fix.** A `merged` event with one predecessor still raises `organization_successions: a merged event needs at least 2 predecessors and exactly 1 successor (found 1 / 1)` with `check_violation`, byte-identical — the conversion changed the role, not the logic. §38 FAILs loudly if that arm ever returns `insufficient_privilege` instead.
+
+## Idempotence — the whole-file, twice-over proof
+
+`drizzle/0043` → `0047`, in order, whole files, applied **twice in a row** with `-v ON_ERROR_STOP=1`. Every one of the ten invocations exited **0**. Row counts and ACL shapes captured before, after pass 1 and after pass 2 — **all three snapshots byte-identical** (`diff` clean):
+
+```
+organizations 15 · organization_lifecycle_events 0 · organization_successions 0
+organization_affiliations 10 · organization_identifiers 0 · sasr_form_versions 4
+statistical_returns 1 · publications 1 · congregation_statistics 2
+congregation_oversight 2 · per_capita_records 1
+presby_app attacl INSERT entries 68 · attacl UPDATE entries 69
+presby_app relacl entries on congregation_statistics 2 (SELECT, DELETE — no table-level INSERT or UPDATE)
+public DEFINER functions pinning exactly `search_path=public, pg_temp` 24 (the pipeline's 23 + the F62 scaffold)
+```
+
+**QA Finding 4 is closed, not caveated.** The 68 stays 68 across a second whole-file apply because §10 now issues `revoke insert on congregation_statistics from presby_app` *before* the catalog-generated re-grant — a table-level revoke drops every column-level entry with it, so each verb's pair is a full restatement rather than an increment.
+
+## Verification
+
+| Check | Result |
+|---|---|
+| `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql` | **exit 0, 433 passes** (baseline 412 → +21 net: +23 added across §29/§36/§37/§38, −2 retired in §35) |
+| `src/lib/presbytery.test.ts` | **35/35** (34 + 1 new) |
+| Five DB-backed vitest files, serial (`--no-file-parallelism`, `.env.local`) | **148/148, 5 files** — `lifecycle`, `publication`, `org-identifiers`, `presbytery`, `org-provisioning`. 147 → 148. |
+| `npm run typecheck` | PASS |
+| `npm run check` (all five tripwires) | PASS |
+| `drizzle/meta/_journal.json` | 45 entries; 43–47 present and matching the filenames. No new entry — corrections in place. |
+| Post-fix shadowing probe as `presby_app` | Refused/unaffected on both `organization_affiliations` and `organizations` shadowing attempts |
+
+No `console.log`, no native dialogs, no UI, no new `FEATURES.*` key, no route or action surface touched — the stricter auth e2e gate does not apply (same disposition as the ninth pass).
+
+## Handoff
+
+**Next agent: qa (Phase 5).**
+
+**Local apply:**
+```bash
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0043_presby_org_identifiers.sql
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0044_presby_org_lifecycle.sql
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0045_presby_about_org_affiliation.sql
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0046_presby_statistical_returns.sql
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0047_presby_publications.sql
+psql "$APP_DATABASE_URL"     -v ON_ERROR_STOP=1 -f scripts/test-rls.sql
+```
+No seed change this pass — `scripts/seed-dev.sql` and `e2e/support/seed-orgs.ts` are untouched, so no `db:seed` re-run is required.
+
+**New/changed surface for the next implementer:**
+- No new tables, columns or relationships. One new **function**: `presby_test_only_lifecycle_writer_f62(uuid, text, date, text, uuid, uuid[], uuid[]) returns uuid`, `SECURITY DEFINER`, `EXECUTE` to `presby_app` — **scaffolding**, and the migration that ships `presby_record_lifecycle_event()` must drop it and delete `test-rls.sql` §38 in the same commit.
+- `presby_app`'s ACL on `congregation_statistics` is now `{SELECT, DELETE}` at table level plus column-level `UPDATE` (69) and `INSERT` (68). **Any future code path inserting into this table from the tenant connection must name its columns explicitly** — Drizzle's `insert()` builder will fail with `permission denied for table congregation_statistics`. `src/lib/presbytery.ts:setCongregationStatistics()` is the worked example.
+- Every `SECURITY DEFINER` function in `0043`–`0047` now pins `search_path = public, pg_temp`. DECISION-148 makes this standing; the security pipeline's `0048` sweeps the older migrations and **widens `test-rls.sql` §36** (drops its name-array filter) rather than adding a parallel assertion.
+
+**`test-rls.sql` sections added or touched:** **§36** (F60, new), **§37** (F61, new), **§38** (F62, new); **§29** (grant count 15 → 14, two zero-assertions added), **§35** (B-M2 retargeted; one block retired; one assertion inverted; one B-M1 caption corrected).
+
+**Owed at integration, by the orchestrator (Workflow Rule 16):** the two `docs/TODO.md` edits in D6, and the `docs/decisions.md` DECISION-141 ¶3 wording in D5.
+
+---
+
+# Phase 3 — Technical Design (tech-lead), continued → Ratification of the tenth pass (twelfth loop-back)
+
+**Date:** 2026-09-25
+**Scope:** database-admin's tenth Phase 4 pass (F60–F64), read in full including all six deviations. Ratified as built, with one correction to my own Ruling 3's stated mechanism — D1 below — and one doc fix (D5) applied now rather than deferred to integration, since I hold write access to `docs/decisions.md` and the coordinator asked for it directly.
+
+## D1 — Ruling 3's mechanism was wrong; amended, not merely noted
+
+**My Ruling 3 said:** a deferred constraint trigger fires under the session's *ambient* role at `COMMIT`/`SET CONSTRAINTS ALL IMMEDIATE`, so a `SECURITY DEFINER` writer's `INSERT`s would schedule a trigger that later runs as `presby_app` (the role active by the time the writer's own `DEFINER` call has returned), hitting `permission denied for function presby_lifecycle_event_cardinality_check`.
+
+**Measured on PostgreSQL 18.6, that is false.** database-admin's probe (a scratch table plus a deferred constraint trigger raising `current_user`) shows an after-trigger event carries the security context current **when the triggering row was queued**, not the role ambient when the trigger later fires — and this is identical whether the trigger is forced early via `SET CONSTRAINTS ALL IMMEDIATE` or left to fire at a real `COMMIT`:
+
+| How the event was queued | `current_user` inside the deferred trigger |
+|---|---|
+| plain `INSERT` as `presby_app` | `presby_app` |
+| `INSERT` inside a `SECURITY DEFINER` function | `neondb_owner` |
+
+So the future `presby_record_lifecycle_event()` writer path — the one Ruling 3 was written to protect — was **never at risk**: its `INSERT`s are queued while the function's `SECURITY DEFINER` context is active, and the deferred trigger they schedule inherits *that* context, not `presby_app`'s. **Amended:** Ruling 3's mechanism paragraph is superseded by the table above; the predicted `permission denied` failure is real, but only on a **direct tenant `INSERT`** — a role briefly (mis)granted table-level `INSERT` on `organization_lifecycle_events`/`organization_successions` outside any `SECURITY DEFINER` wrapper, which is exactly what database-admin's failing-first proof #4 reproduces by temporarily granting `INSERT` to `presby_app`, observing the failure, and revoking it again. That path is already closed today by the existing table-level `INSERT` revoke (`drizzle/0044:230-231, 326-327`), independent of anything in this pass.
+
+**The `SECURITY DEFINER` conversion still stands, ratified, on the two reasons `drizzle/0044` §13b3 now carries** — neither of which I named, and both of which are sound on their own terms:
+
+1. **Grant-coupling dissolution.** `DEFINER` reaches the shared helper by ownership, so the existing "if `INSERT` is ever re-granted to `presby_app`, this `EXECUTE` grant must return with it" coupling (`drizzle/0044:1515-1516`) simply stops applying — one less place a future re-grant can be done half-right.
+2. **The real F26 shape, and the stronger of the two.** `presby_lifecycle_event_cardinality_check()` opens with a `SELECT` against `organization_lifecycle_events` and returns silently (a legitimate no-op) when it finds no row — that branch exists for the `ON DELETE CASCADE` case, where the parent event was removed in the same transaction. Run `INVOKER` under a role for which the event row is **RLS-invisible** rather than genuinely absent, that same branch fires for the wrong reason: the check silently passes instead of checking anything, because it cannot see the aggregate it exists to validate. This is F26 verbatim ("an invoker-mode reader is filtered by the RLS it exists to complement... and silently reads zero rows for exactly the case it guards"), arriving through a deferred trigger rather than a direct read, and it fails **open** — a cardinality violation on an event the checking role cannot see would ship uncaught. `SECURITY DEFINER` is the only instrument that makes the check see the row it is checking, and this reason does not depend on which role happens to be active when the trigger fires.
+
+**Disposition:** the corrected mechanism is recorded here and stands as the canonical explanation going forward; `docs/schema-design-2.md` §2h's Ruling-3 summary is understood to be superseded by this note rather than independently re-edited, since the summary there points to the work-log for full detail and this note is that detail. No further Phase 4 work follows — the fix built is the fix that should have been built, for reasons that hold regardless of which mechanism motivated it.
+
+## D2 — ratified: the two retired/inverted §35 blocks
+
+Both were real defects, found by running the suite rather than by re-reading the ruling, and both are exactly what closing F59 requires: a block that armed the GUC and asserted a forged `published_by_congregation` `INSERT` **succeeded** (captioned, wrongly, as how `presby_publish_sasr_snapshot()` writes — that function is `DEFINER` and grant-exempt; the tenant reproduction only ever proved the residual, dressed as a passing test) is retired in place with its reasoning kept in the file; the "INSERT is deliberately not narrowed" positive assertion is inverted rather than deleted, pointing at its replacement in §37(d). Retiring or inverting rather than silently removing is the correct instrument — a future reader sees that the old claim was true once and is not anymore, not that a test vanished. Ratified as built.
+
+## D3/D4 — noted, no ruling required
+
+Both are consequences of F60/F61 that database-admin was right to fold in without a separate Phase 3 pass: §29's grant count (15→14, two explicit zero-assertions) and §35's B-M2 string-match relaxation (moved to "starts with `public`", with the `pg_temp` requirement living solely in §36 so the two assertions cannot drift apart) are mechanical follow-ons of grants this ruling already specified. §35(e)'s corrected caption (the reachability claim for keeping `presby_deny_publication_write()`'s `EXECUTE` grant) is a documentation fix, not a grant change, and correctly left the grant itself for the security pipeline's own B-M1 reachability review rather than deciding it here.
+
+## D5 — applied now
+
+`docs/decisions.md` DECISION-141 ¶3's "the guard's job is proving 'a sanctioned function wrote this'" is corrected in place (not merely noted in a trailing correction paragraph), since F63's own instruction was to carry the GUC-marker/privilege-boundary language everywhere the stronger claim appears, and I hold write access to this file. Done in this pass — see the inline bracketed correction at that sentence.
+
+## D6 — confirmed, no action here
+
+Both `docs/TODO.md` edits (the F59 line's retirement; the `presby_record_lifecycle_event()` line's new note about dropping the F62 scaffold and its `test-rls.sql` §38) remain owed at integration, per Workflow Rule 16 — `docs/TODO.md` is a shared, orchestrator-only-at-integration file and stays untouched by both the implementer and this ratification.
+
+## Pass counts confirmed against my own acceptance criteria
+
+- `scripts/test-rls.sql`: **412 → 433** (net +21: +23 added across §29/§36/§37/§38, −2 retired/absorbed in §35). My acceptance criteria asked for "growing... by roughly a dozen to fifteen new assertions, exact count is database-admin's to report" — the reported net is larger than my rough estimate because it nets in the two §35 retirements and §29's two new zero-assertions, which I had not enumerated; the underlying additions (§36/§37/§38) are in the range I expected. **Confirmed, no discrepancy** — my criterion was deliberately non-prescriptive on the exact number.
+- `src/lib/presbytery.test.ts`: **34 → 35**, exactly as specified (34 existing + 1 new exercising the raw-SQL upsert's full-`EXCLUDED` conflict arm, including a write back to `null`). **Confirmed.**
+- Five DB-backed vitest files: 147 → 148 (the one new `presbytery.test.ts` case). **Consistent, not separately required by my criteria, noted as confirming evidence.**
+- Whole-file re-apply twice over, idempotent, zero drift in row counts or ACL shape: **confirmed**, and QA Finding 4 (stale `attacl` entries after a whole-file re-apply) is reported closed outright, not merely caveated, by the `revoke insert` restated first in §10 — matching what my Ruling 2 specified.
+- `npm run typecheck`, `npm run check`: **PASS**, as required.
+- No `console.log`, no native dialogs, no new `FEATURES.*` key, no route/action surface touched: **confirmed** — the stricter auth e2e gate does not apply, same disposition as the ninth pass.
+
+## Per-Phase Status (twelfth loop-back)
+
+Phase 3 row: **ratified the tenth Phase 4 pass**, with one amendment (D1 — Ruling 3's stated mechanism corrected; the `SECURITY DEFINER` conversion itself stands, now on the grant-coupling and F26-visibility reasons `drizzle/0044` §13b3 records) and one doc fix applied directly (D5 — DECISION-141 ¶3's wording corrected in `docs/decisions.md`). D2–D4 ratified/noted with no further Phase 3 action. D6 confirmed owed at integration, untouched here. All pass counts checked against my Phase 3 acceptance criteria and confirmed with no discrepancy. **Next: qa (Phase 5)**, per database-admin's own handoff — QA is re-verifying concurrently per the coordinator.
+
+# Phase 5 — Verification (qa), continued
+
+## Re-verification after the tenth pass (2026-09-25, qa) — recorded verbatim by the orchestrator
+
+**Date:** 2026-09-25
+**Verified by:** qa (read-only; wrote no files)
+**Scope:** the tenth Phase 4 pass (F60–F64) against the eleventh Phase 3 ruling, `docs/schema-design-2.md` §2h, DECISION-148, and database-admin's six deviations D1–D6.
+**Environment:** main tree `/Users/cshenso/git/presby-platform/presby`, `development` Neon branch (PostgreSQL 18.6), `.env.local`. Quiet branch — no concurrent pipeline writes observed; final catalog snapshot byte-identical to the pre-QA baseline.
+
+## Type Check
+
+`npm run typecheck`: **PASS**
+
+## Unit Tests
+
+| Invocation | Result |
+|---|---|
+| `npm run test` (no `.env.local`, as documented) | 275 files: **246 passed, 29 skipped**; 4006 tests: **3240 passed, 766 skipped** |
+| `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism` (the documented DB-backed invocation) | 275 files: **274 passed, 1 failed, 0 skipped**; 4006 tests: **4003 passed, 3 failed, 0 skipped** |
+| Five DB-backed files, serial (`presbytery`, `lifecycle`, `publication`, `org-identifiers`, `org-provisioning`) | **148/148, 5 files** — matches the report exactly |
+| `src/lib/presbytery.test.ts` alone | **35/35** — matches the claimed 34 + 1 |
+
+**The 29 skips in the plain run are not unverified specs.** They are the `describe.skipIf(!hasDb)` DB-backed files, and all 766 of their tests executed under the `.env.local` invocation (0 skipped there). Every spec in the repo ran green in one invocation or the other, with the single exception below.
+
+Failures: 3, all in `src/lib/rate-limit.test.ts:256`, `:279` and one adjacent — **not caused by this diff and not a regression.** Root cause measured, not inferred: `.env.local` carries `RATE_LIMIT_DISABLED=true` (required by Playwright `globalSetup`), which makes `checkRateLimit()` always allow. `npx vitest run src/lib/rate-limit.test.ts` without `.env.local` → **15/15**. No file in this diff touches rate limiting. Recorded as Finding 1 below.
+
+`npm run check` (all five tripwires — audit, sql-date, deps-drift, brand-scope, secrets): **PASS**.
+
+## Schema/RLS Audit — live-catalog probes
+
+Every claim below was probed against `pg_proc`/`pg_class`/`pg_attribute`/`aclexplode`/`pg_trigger`/`pg_policies`/`pg_roles` on the connection named, never against `information_schema` grants and never against `src/lib/db/domain/`.
+
+### F60 — `search_path = public, pg_temp`
+
+**Inventory, derived independently.** I parsed all five migration files for `create or replace function` and classified each by its own header rather than trusting the report's count: **24** `SECURITY DEFINER` functions are defined in `drizzle/0043`–`0047` (the pipeline's 23 plus `presby_test_only_lifecycle_writer_f62`). The live catalog agrees exactly: all 24 are `prosecdef = t`, all 24 carry `proconfig` `search_path=public, pg_temp`, all owned by `neondb_owner`. **Zero non-compliant. Nothing to list.**
+
+**Catalog-wide context, which independently reconciles the `0048` routing.** 38 `SECURITY DEFINER` functions exist in `public`; 14 lack a `pg_temp`-terminated `search_path`, and all 14 are older-migration functions outside this pipeline: `presby_effective_permissions`, `presby_guard_membership_insert`, `presby_link_person`, `presby_match_person`, `presby_membership_is_active`, `presby_person_unclaimed_or_own_org`, `presby_public_committee_roster`, `presby_public_staff_roster`, `presby_published_site`, `presby_reconcile_current_roll`, `presby_roll_cache_drift`, `presby_sync_current_roll`, `presby_two_factor_required`, `presby_user_organizations`. 24 + 14 = 38. The security pipeline's "14 missing" figure is confirmed from this side.
+
+**Shadowing probe, run by me as `presby_app` in a rolled-back transaction.** Decoy: `create temp table organization_affiliations (...)` holding a forged quillhaven → coastal-plain-synod edge.
+
+| Call | Baseline | With decoy planted |
+|---|---|---|
+| `presby_org_affiliated(quillhaven, coastal-plain-synod, current_date)` | `false` | **`false`** |
+| `presby_affiliation_parent_as_of(quillhaven, current_date)` (second function, my choice) | `11111111…` (northern-reach) | **`11111111…`** — the real parent, not the forged synod |
+
+**The decoy no longer flips the answer on either function.**
+
+**The clause is the control, not a revoke.** `has_database_privilege('presby_app', current_database(), 'TEMP')` = **`true`** — still held, never revoked. To prove the `pg_temp` clause is what refuses, I built two `pg_temp` functions with byte-identical bodies differing only in their `search_path` pin, against the same planted decoy:
+
+```
+search_path=public         (pre-F60 shape)  -> true   <- forged answer
+search_path=public,pg_temp (post-F60 shape) -> false  <- truth
+```
+
+Companion half (0048's to assert, already true in fact): `has_schema_privilege` `CREATE` on `public` is **`false`** for both `presby_app` and `presby_platform`.
+
+### F61 — the projection's creation closes at the grant
+
+Probed as `presby_app`, `app.current_org_id` = the recipient council `11111111…` (northern-reach), against the real publication `994f9867-b097-4268-a260-af29c7063ed3` (source alder-creek, recipient northern-reach) — QA's earlier Finding 1 repro:
+
+| Probe | Outcome | Refusing layer |
+|---|---|---|
+| (a) marker armed, `published_by_congregation`, **naming `publication_id`** | `42501` · `permission denied for table congregation_statistics` | **the GRANT** |
+| (b) same row, marker unarmed | `42501` · `permission denied for table …` | **the GRANT** |
+| (c) marker armed, published provenance, `publication_id` **omitted** | `42501` · `publication chain: this row may only be written by a sanctioned publication function` | the trigger (grant passes, guard refuses) |
+| (d) `presbytery_entered` row carrying a fabricated `published_at` | `42501` · `permission denied for table …` | **the GRANT** — the third exclusion is load-bearing |
+
+**One precision point worth recording, and the suite already handles it.** SQLSTATE alone cannot name the layer here: `congregation_statistics_publication_guard` raises `42501` too, as (c) shows. Distinguishing them requires `SQLERRM`. `scripts/test-rls.sql:5055-5062` and `:5081-5088` do exactly that — each probe carries an explicit `raise exception 'FAIL — a TRIGGER refused this insert, not the grant'` branch (`scripts/test-rls.sql:5059`) if `sqlerrm not like 'permission denied for%'`. The claim "the grant refuses this" is therefore asserted, not assumed, and a revert of the column narrowing fails the suite rather than passing under the marker.
+
+**Grant shape, from `aclexplode` on the live catalog:**
+
+- `pg_class.relacl` for `presby_app` on `congregation_statistics` = **`{DELETE, SELECT}`** — no table-level `INSERT`, no table-level `UPDATE`.
+- `pg_attribute.attacl` for `presby_app`: **68 `INSERT`**, **69 `UPDATE`**.
+- `has_column_privilege` `INSERT`: `publication_id` **f**, `withdrawn_at` **f**, `published_at` **f**; `minute_reference` **t**, `ending_active` **t**, `id` **t**, `created_at` **t**.
+- Columns with no `INSERT` grant, enumerated from the catalog: exactly `publication_id`, `published_at`, `withdrawn_at`. The documented `UPDATE`/`INSERT` asymmetry is real and intentional — `published_at` `UPDATE` = **t**.
+- `relforcerowsecurity` = **t** on `congregation_statistics`, `publications`, `statistical_returns`, `organization_lifecycle_events`, `organization_affiliations`.
+
+**The raw-SQL upsert (`src/lib/presbytery.ts:663`) read for column-list correctness, not inferred from green tests.** 23 columns named (4 identifying + 19 value), 19 in the `do update set`. All 23 verified against the live catalog: **every one exists and every one carries the `INSERT` grant** — zero name drift against the Drizzle table. The conflict target matches `congregation_statistics_entered_unique_idx` byte-for-byte, partial predicate included. Diffed against the replaced `onConflictDoUpdate()` form: same 23, same 19, same target, same `targetWhere`. `id` and `created_at` are never named, which is why no privilege on them is needed.
+
+### F62 — deferred-trigger role resolution, re-measured by me
+
+`drizzle/0044` §13b3 and `scripts/test-rls.sql` §38 read in full. I then built my own scratch deferred constraint trigger and measured it independently:
+
+| How the after-event was queued | `current_user` inside the deferred trigger | `session_user` |
+|---|---|---|
+| plain `INSERT` as `presby_app` | **`presby_app`** | `presby_app` |
+| `INSERT` inside a `SECURITY DEFINER` function | **`neondb_owner`** | `presby_app` |
+
+**Identical at `SET CONSTRAINTS ALL IMMEDIATE` (rolled back) and at a real `COMMIT`.** I ran both fire paths.
+
+**D1's correction of Ruling 3 is right.** Ruling 3's premise — a deferred constraint trigger fires "under the session's ambient role" at `COMMIT` — is **false** for the path the ruling named. An after-trigger event carries the security context current when it was **queued**. The `permission denied for function presby_lifecycle_event_cardinality_check` failure the ruling predicted is therefore unreachable through a `SECURITY DEFINER` writer and real only on the **direct tenant INSERT** path, exactly as D1 states. §38's positive control consequently passes in both states, and both §38 and §13b3 say so in plain text rather than presenting it as a watched failure — that is the honest reporting I would want here, not a glossed one.
+
+**D1's reason #2 independently corroborated, and it is the stronger one.** `presby_lifecycle_event_cardinality_check()` returns silently on a missed lookup (`drizzle/0044:1480`, `if v_event is null then return;`). `pg_roles` shows `neondb_owner.rolbypassrls = t` and `presby_app.rolbypassrls = f`, and `organization_lifecycle_events` carries `FORCE` RLS with `tenant_isolation` on `organization_id = presby_current_org()`. So under `SECURITY INVOKER` the whole cardinality check degrades into the no-op for any role the policy filters — the F26 shape, arriving through a deferred trigger, failing **open**. `SECURITY DEFINER` is what makes the check see the aggregate it checks. The remedy stands even though the ruling's stated mechanism did not.
+
+**Catalog shape:** `presby_check_succession_cardinality` and `presby_check_lifecycle_event_cardinality` are both `prosecdef = t` with `search_path=public, pg_temp`; the shared helper stays `SECURITY INVOKER`; `presby_app` still holds no `EXECUTE` on it.
+
+**Method note, stated because it deviates from the task's "(rolled back)".** The measurement cannot be done wholly inside one rolled-back transaction: `neondb_owner` cannot `SET ROLE presby_app` (`permission denied to set role`), and `presby_app` cannot create a `SECURITY DEFINER` function owned by another role. I created three scratch objects on the owner connection, probed from the app connection, and dropped them. Residue verified **0** (`pg_class`/`pg_proc` named `qa_f62%`), and the final full snapshot is byte-identical to the pre-QA baseline.
+
+### F63 / F64 — the four comment corrections
+
+| # | Location | Present? | Verified against |
+|---|---|---|---|
+| F63 | `drizzle/0046` §4b — "GUC = workflow marker; privilege = authority boundary" replaces "a sanctioned function wrote this row" | **yes** | text; states `set_config()` has no privilege check |
+| F64.1 | `drizzle/0046` header — `select, insert` → both roles SELECT-only | **yes** | live `relacl`: `presby_app\|SELECT`, `presby_platform\|SELECT` |
+| F64.2 | `drizzle/0043` `organization_identifiers` table comment → INSERT, UPDATE **and** DELETE | **yes** | live `pg_trigger`: `organization_identifiers_guard` fires on ins/upd/del, `tgenabled='O'` |
+| F64.3 | `drizzle/0047` `publications` table comment **and** §2 header → the withdrawal **triple** | **yes** | matches `publications.withdrawn_at`'s own column comment |
+
+**D5 is closed, not outstanding.** `docs/decisions.md` DECISION-141 ¶3 now carries the correction inline at the sentence itself, not only in a trailing note. The remaining grep hits for the old phrase are historical records in the work-log, which is correct. **D6 is closed too** — `docs/TODO.md`'s F59 Next-Up line is retired and the F60–F64 Done line is present.
+
+## Suites and idempotence
+
+| Check | Result |
+|---|---|
+| `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql` | **exit 0, 433 `pass`** — 0 `ERROR`, 0 skips. Matches the claimed 433 exactly |
+| Same, re-run after the double re-apply | **exit 0, 433** |
+| Whole-file re-apply `0043`→`0047` in order, **twice** | all ten invocations **exit 0**; no `WARNING`/`ERROR` in any apply log |
+| Row counts + ACL shapes, before / after pass 1 / after pass 2 | **`diff` clean, all three identical** |
+| `drizzle/meta/_journal.json` | 45 entries, 43–47 present and matching filenames, **file unmodified** — corrections in place, no new number |
+
+Snapshot (identical across all three captures, and identical again after every probe in this report):
+
+```
+organizations 15 · organization_lifecycle_events 0 · organization_successions 0
+organization_affiliations 10 · organization_identifiers 0 · sasr_form_versions 4
+statistical_returns 1 · publications 1 · congregation_statistics 2
+congregation_oversight 2 · per_capita_records 1
+attacl INSERT 68 · attacl UPDATE 69 · relacl(congregation_statistics, presby_app) 2
+public DEFINER functions pinning exactly `search_path=public, pg_temp` 24
+```
+
+**Finding 4 is closed, confirmed by measurement rather than by reading the fix.** 68 stayed 68 across a second whole-file apply, because `drizzle/0047` §10 issues `revoke insert on congregation_statistics from presby_app` before the catalog-generated re-grant (`drizzle/0047:1826`) — a table-level revoke drops every column-level entry with it, making each verb a full restatement.
+
+## D2 — are the retired and inverted §35 blocks honest?
+
+**Yes, on both counts, and the inversion does assert refusal at the grant layer with a FAIL branch.**
+
+- The retired §35(c) third block (`scripts/test-rls.sql:4520-4541`) is **not deleted quietly.** Its full reasoning stays in the file, it names why the original caption ("which is how `presby_publish_sasr_snapshot()` writes it") was never true — the snapshot function runs DEFINER and is grant-exempt per F44 — and it points forward to §37(a). It also correctly notes the guard's own behaviour is still proven where it is actually reachable, on the owner connection in `publication.test.ts`, rather than pretending a tenant probe that can no longer reach a mechanism proves anything about it.
+- The "INSERT IS DELIBERATELY NOT NARROWED" assertion (`scripts/test-rls.sql:4655-4667`) is **inverted, not dropped**, moved to §37(d), and the inversion is captioned as a correction with the ninth pass's measurement explicitly left standing rather than contradicted.
+- The honesty test you asked me to apply: §37(a) and §37(b) each assert the refusal **and** carry an explicit FAIL branch (`scripts/test-rls.sql:5059`, `:5085`) that fires if a trigger refused instead of the grant. A revert of the column narrowing produces a red suite, not a green one under the marker. That is the right shape.
+
+D3 verified: §29 now asserts **14** with both missing table-level entries named individually as 0 (`scripts/test-rls.sql:2144-2162`), and the `pg_temp` requirement lives in §36 alone so `0048` widens exactly one assertion. D4 verified: `presby_deny_publication_write()`'s EXECUTE grant is kept with a caption that now says the state is conservative rather than repeating the false reachability reason.
+
+## End-to-End Tests
+
+**Not run — and this is not a deferred required check.** The diff touches no `route.ts`, no `"use server"` action, no page, no component, no middleware, and none of `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/`, `src/lib/auth/` (verified by `git diff --name-only`). **The stricter auth gate does not apply**, same disposition as the ninth pass. Separately, no spec under `e2e/` covers `/o/<slug>/admin/reports`, so an e2e run would exercise nothing this pass changed.
+
+The one changed runtime path — `setCongregationStatistics()`'s rewritten write — is exercised end-to-end at the layer that can actually break: `presbytery.test.ts` drives it through `withOrgContext()` on the real RLS-enforced `presby_app` connection and the real neon-serverless driver (including the new `tx.execute(...).rows` unwrap), and `test-rls.sql` §37(c) issues the identical 23-column statement as `presby_app`. See Finding 3 for the residual recommendation.
+
+## Regression Tests Added (verified, not authored — I wrote nothing)
+
+| Test | Location | Guards against | Failing-first? |
+|---|---|---|---|
+| F61 grant refusal, armed | `scripts/test-rls.sql:5062` | the forged `published_by_congregation` projection (QA Finding 1 / F59 residual) | **yes** — database-admin recorded the pre-fix red (`test-rls.sql:5046 ERROR: FAIL …`); I confirm the post-fix green and, independently, the refusal itself |
+| F61 grant refusal, unarmed | `scripts/test-rls.sql:5088` | the guard answering ahead of the grant | n/a (new assertion) |
+| F61 positive control + idempotence | `scripts/test-rls.sql:5118`, `:5142`, `:5147` | the narrowing breaking the shipped `presbytery_entered` path | n/a |
+| F61 column-privilege shape | `scripts/test-rls.sql:5157`, `:5161`, `:5165`, `:5171`, `:5175`, `:5186`, `:5197` | a revert to table-level INSERT, or stale `attacl` after re-apply | n/a |
+| F60 inventory + `pg_temp` LAST | `scripts/test-rls.sql:4952`, `:4978`, `:5003` | a new or reverted DEFINER function without `pg_temp` | **yes** — pre-fix `expected 23, got 0` and `expected 23, got 21` recorded |
+| F62 catalog shape | `scripts/test-rls.sql:5292`, `:5298`, `:5303`, `:5312` | reverting either wrapper to INVOKER, or re-granting the helper | n/a |
+| F62 negative control | `scripts/test-rls.sql:5278` | a DEFINER conversion silently disabling the cardinality logic | n/a |
+| Raw-SQL upsert conflict semantics | `src/lib/presbytery.test.ts:726` | the `do update set` arm merging instead of overwriting from `EXCLUDED` | n/a |
+
+**I could not independently watch the F62 direct-INSERT `permission denied` failure fail before the fix** — reproducing it requires temporarily granting `INSERT` on `organization_successions` to `presby_app`, which is a mutation I will not make. I accept database-admin's recorded reproduction (`drizzle/0044` §13b3, with the raising function and line named) on the strength of the surrounding evidence I *did* verify independently: the revoke exists, the helper is INVOKER, and my own role-resolution measurement confirms the direct-INSERT path queues under `presby_app`. Saying so rather than implying I watched it.
+
+## Coverage on Critical Modules
+
+Untouched by this pass. Re-checked anyway: `permissions.test.ts` + `flags.test.ts` + `two-factor.test.ts` = **44/44**, aggregate 92.72% statements / **100% branch**. `src/lib/two-factor.ts`: **91.3%** statements, **100%** branch (above the 90% target; uncovered `35-39`). `src/lib/permissions.ts` and `src/lib/flags.ts` did not surface as separate rows under the scoped v8 include — their suites are green and neither file appears in this diff; the full re-measure belongs to the release-slot `test-coverage` review, not here.
+
+## Feature-Gate Audit
+
+*Verified by reading the route/action bodies, not by inferring from green tests.*
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| — | — | — | **No protected routes or server actions touched.** `git diff --name-only` contains no `src/app/**`, no `route.ts`, no `actions.ts`. |
+
+The one changed library function has a single caller, `setCongregationStatisticsAction` (`src/app/(org)/o/[slug]/admin/reports/actions.ts:54`), **unchanged by this pass**. I read it anyway: `auth()` → `resolveOrgContext(session.user.id, slug)` → `setCongregationStatistics()`, which itself checks `hasPermission(tx, viewerPersonId, organizationId, STATISTICS_MANAGE)` inside `withOrgContext()`. This is the tenant-authorization axis, which is correct for an `(org)` route — `FEATURES.*`/`hasFeature()` is the platform axis and does not apply here (DECISION-035). `organizationId` never comes from client form data. The audit write (`AUDIT_ACTIONS.CONGREGATION_STATISTICS_ENTERED`) is present and `npm run check:audit` is green.
+
+## Findings — advisory, none verdict-changing
+
+**Finding 1 — no single vitest invocation runs the whole suite green, and this predates the pass.** With `.env.local` loaded (required for the 766 DB-backed tests), `RATE_LIMIT_DISABLED=true` makes 3 tests in `src/lib/rate-limit.test.ts` fail; without it, those 3 pass and 766 others skip. Measured both ways, cause proven. Not introduced here and not in this diff — but "3 failed" in a full run is exactly the kind of noise that trains a reader to ignore red. Worth a `docs/TODO.md` line: have `rate-limit.test.ts` stub `RATE_LIMIT_DISABLED` for its own scope.
+
+**Finding 2 — §36's 23-name array is hand-maintained.** A new `SECURITY DEFINER` function added to `0043`–`0047` without being added to the array passes unnoticed, and the inventory assertion's `= 23` would hide it only if the new function *also* appeared in the array. The tech-lead ruled this trade-off explicitly (allow-list vs. catalog-wide) and `0048` drops the filter, so this is time-boxed, not open-ended. I independently confirmed the array is complete *today* by deriving the inventory from the files and cross-checking all 38 catalog DEFINER functions. Noting it so the `0048` widening is not quietly skipped.
+
+**Finding 3 — `src/lib/presbytery.test.ts:726`'s comment slightly overstates its own reach.** It claims "a column dropped from the raw SQL's `do update set` list would … fail here," but the test asserts null-reversion on 3 of the 19 value columns (plus 2 set positively) — 14 columns' conflict-arm behaviour is unasserted. A *typo* in any of the 19 still fails loudly at runtime; only a clean *omission* would slip through. Low risk, and the F61 regression itself is well covered. Suggest either asserting all 19 or softening the comment — the implementer's call, not a gate.
+
+**Finding 4 — a manual browser smoke of the statistics form is recommended, not required.** The write path under `/o/<slug>/admin/reports` changed shape (Drizzle builder → raw SQL). Every layer below the unchanged server action is exercised against the real driver and the real RLS connection, so I am not treating this as an unmet prerequisite. But per this repo's own "a page that returns 200 is not a page that works," one save through the form before merge is cheap insurance.
+
+## Verdict
+
+**PASS**
+
+Every claim in database-admin's tenth pass that I could reach was verified independently on the live catalog and reproduced rather than accepted: F60's 24-of-24 `pg_temp` pins and the shadowing refusal (with a control isolating the clause as the cause, and `TEMP` confirmed still held); F61's grant-layer refusal of the forged projection, the 68/69/`{SELECT,DELETE}` ACL shape, and the 23-column upsert's correctness against the real column contract; F62's role-resolution measurement, re-run by me on both fire paths, which confirms **D1's correction of Ruling 3 is right** and whose stated remedy survives the corrected reasoning on the visibility argument I also verified (`rolbypassrls`, the `FORCE` policy, and the helper's silent-return at `drizzle/0044:1480`); F63/F64's four corrections, each checked against the catalog where it makes a factual claim. `test-rls.sql` exit 0 at **433** passes with zero errors and zero skips, before and after a double whole-file re-apply that left row counts and ACL shapes byte-identical. D2's retired and inverted blocks are honest — the inversion asserts refusal at the grant layer and carries a FAIL branch if a trigger answers instead. D5 and D6 have been closed by the orchestrator.
+
+No auth surface, route, or action is touched, so the stricter Phase 4/5 e2e gate does not apply and this is a genuine PASS, not a deferred advisory.
+
+## Per-Phase Status (eleventh loop-back)
+
+| Phase | Agent | Status | Verdict | Date |
+|---|---|---|---|---|
+| 5 — Test Verification | qa | Complete (re-verification after the tenth pass) | **PASS** | 2026-09-25 |
+
+## Handoff
+
+**Next agent: analyst (Phase 6).** The pipeline's Phase 6 already issued SHIP IT on the prior state; this addendum re-opens it only for the F60–F64 delta. Analyst should compare the shipped delta against §2h's five findings — in particular that **F59 is closed, not reaccepted** (the residual DECISION-141's tenth-loop-back correction described is now refused at the grant, reproduced by QA), and that **F62 shipped with its ruling's mechanism corrected on measurement** (D1), which is a change of record worth carrying into the Phase 6 verdict rather than leaving buried in a deviation note. Findings 1–4 above are follow-up candidates for `docs/TODO.md`, none blocking.
+
+
+
+I wrote no files and left no database residue; the working tree and the catalog snapshot are exactly as I found them.
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst), continued → Third external review addendum (F60–F64, v0.25.4)
+
+*Recorded verbatim by the orchestrator, 2026-09-25. Follow-ups 1 and 2 and the release-note phrasing note applied in the recording commit.*
+
+**Scope:** the third external post-merge review round only — F60–F64, the eleventh/twelfth Phase 3 loop-backs, the tenth Phase 4 pass, and QA's "Re-verification after the tenth pass." The pipeline's original Phase 6 SHIP IT and the two prior hardening-round addenda stand unchanged; this section judges only the delta since.
+
+**Read:** `docs/schema-design-2.md` §2h (`docs/schema-design-2.md:1191-1373`); the tech-lead's eleventh ruling and twelfth-loop-back ratification (`docs/work-log/2026-09-24-lifecycle-affiliation-returns.md:5283-5583`); database-admin's tenth pass with six deviations (`:5401-5528`); QA's re-verification (`:5586-5791`); `docs/decisions.md` DECISION-148 (`:7-9`) and DECISION-141's F63 correction (`:39-49`); `docs/release-notes/v0.25.md` 0.25.4 (`:76-89`); `docs/TODO.md` (Done line `:292`, tenth-pass follow-ups `:115`, test-coverage punch-list `:113`, `presby_record_lifecycle_event()` line `:54`).
+
+## VERDICT
+
+**SHIP WITH NOTES**
+
+## ONE-LINE TAKE
+
+> The reviewer's two blockers — `pg_temp` and F59's residual — are genuinely closed, the team caught and honestly corrected its own wrong reasoning about F62 along the way (in the DDL and the work-log, if not in the one document that calls itself canonical), and one small integration-time housekeeping obligation from the ruling itself never landed.
+
+## What's Working
+
+- **F60** is real security work, not cleanup, and it's proven as such: QA independently reproduced the pre-fix exploit on this pipeline's own `presby_org_affiliated()` (temp-table decoy flips a cross-council authority answer from `false` to `true`), confirmed all 24 in-pipeline `DEFINER` functions now pin `search_path=public, pg_temp` on the live catalog, and isolated the `pg_temp` clause itself as the cause with a controlled before/after pair — not just a green test. The scoped, name-array assertion (rather than a hand-frozen allow-list of the *older*, not-yet-fixed functions) is the right call, and the widening path to `0048` is unambiguous.
+- **F59 is closed, not reaccepted, this time verified at the mechanism that matters.** QA drove all four probes from the ninth pass's still-open residual (armed+named, unarmed, armed+omitted, fabricated `published_at`) and confirmed the refusal happens at the **grant** in three of four cases and named the trigger as the refusing layer in the fourth (`SQLERRM`, not `SQLSTATE`, since both raise `42501`). The suite's own FAIL branch (`scripts/test-rls.sql:5059`, `:5085`) means a regression to table-level `INSERT` fails loudly, not silently.
+- **F62's self-correction is the most creditable thing in this round.** The ruling's stated mechanism (a deferred trigger fires under the ambient role at `COMMIT`) was wrong, database-admin caught it by actually measuring rather than trusting the ruling, and the fix was kept anyway on two reasons that survive the correction — grant-coupling dissolution and, more importantly, the F26 fail-open shape (an `INVOKER` check that can't see the row it's checking silently passes). QA re-measured the same probe independently and confirmed D1's correction is right. This is exactly the "state the residual exactly as far as it goes and no further" discipline CLAUDE.md's external-review convention asks for, applied to the team's own prior claim, not just to the schema.
+- **F63/F64** — all four corrections verified against the live catalog or the column comment they're supposed to match, not just against the diff.
+- **Idempotence and coverage are re-proven, not re-asserted:** whole-file double re-apply byte-identical three ways; `test-rls.sql` 412→433 with the two `§35` retirements handled honestly (retired-in-place with reasoning kept, not silently deleted); `presbytery.test.ts` 34→35; no auth/route/action surface touched, so the stricter e2e gate correctly doesn't apply.
+
+## Intent-vs-Shipped Diff
+
+- Reviewer asked for `pg_temp` explicit-and-last on every `SECURITY DEFINER` function in this pipeline. Shipped exactly, plus a correction of the coordinator's own claim about `presby_freeze_used_field_spec()` (it already had `public`, just needed `pg_temp` appended) — verified true on direct inspection. **Matches.**
+- Reviewer asked that F59 not be an acceptable final state. Shipped: the write path moved off Drizzle's all-column builder, the grant narrowed to 68 columns (three exclusions, not two — `published_at` added beyond the strict requirement), and QA reproduced the refusal at the grant independently. **Matches, and closes the loop the tenth loop-back had prematurely called done.**
+- Reviewer asked the deferred lifecycle path be tested through `COMMIT` as the tenant role, "if necessary" converting the wrappers to `DEFINER`. Shipped: tested through both `SET CONSTRAINTS ALL IMMEDIATE` and a real `COMMIT` fire path (by QA, independently), which disproved the ruling's own premise — and the team wrote that down rather than quietly building around the discrepancy. **Matches, and exceeds — the reviewer got a truer answer than they asked for.**
+- Reviewer asked the `§4b` overclaim be corrected and named it should propagate "wherever the DDL comments repeat the stronger claim." Shipped in `drizzle/0046` §4b and `docs/decisions.md` DECISION-141 ¶3 (both verified inline, not just in a trailing note). **Matches** — but see the note on `docs/schema-design-2.md` §2h below, which is a different document than either of the two the reviewer or F63 named, and which the pipeline's own convention separately obligates to stay accurate.
+
+## Edge Cases
+
+- Empty state / mobile / failure microcopy / audit events: not applicable — no UI or application-facing writer ships in this round (the sole existing caller, `setCongregationStatisticsAction`, is unchanged and still audits under `AUDIT_ACTIONS.CONGREGATION_STATISTICS_ENTERED`).
+- Permission gate: confirmed unaffected — QA read the caller and confirmed `hasPermission(..., STATISTICS_MANAGE)` inside `withOrgContext()` is untouched; `organizationId` never comes from client input.
+- **The one edge case this round's own process didn't fully close:** an integration-time TODO obligation the ruling itself created.
+
+## Follow-Ups
+
+1. **`docs/TODO.md`'s `presby_record_lifecycle_event()` line (`docs/TODO.md:54`) is missing the F62 scaffold-coupling note.** Database-admin's D6 and the tech-lead's twelfth-loop-back ratification both explicitly named this as "owed at integration" — *"add to `presby_record_lifecycle_event()`'s existing line: 'drops `presby_test_only_lifecycle_writer_f62()` and `scripts/test-rls.sql` §38 in the same migration.'"* QA's Phase 5 report checked only that the F59 Next-Up line was retired and the F60–F64 Done line was present (`:5691`, correct as far as it goes) — it did not check this specific coupling note, and it isn't there. The scaffold function's own inline `COMMENT ON FUNCTION` (`drizzle/0044_presby_org_lifecycle.sql:1695`) does state the drop obligation clearly on its own, which is why this is a note and not a blocker — but Workflow Rule 10 requires the tracked line, and a future implementer working from `docs/TODO.md` alone (this pipeline's own established practice for exactly this kind of coupling) would miss it. **Action: add the note to that line now.**
+2. **`docs/schema-design-2.md` §2h still states F62's original, disproven mechanism as ruled fact, with no pointer to the correction.** The section explicitly says it exists "so this section stays the canonical record, per this document's own convention" (`docs/schema-design-2.md:1300-1306`), yet its F62 paragraph (`:1339-1360`) repeats "a deferred constraint trigger fires under the session's ambient role" as the reasoning, unamended. The correction is carried honestly in two other places — `drizzle/0044`'s §13b3 DDL comment (`:1580-1622`, thorough and explicit) and the work-log's twelfth-loop-back ratification (`:5535-5554`, which explicitly says "the corrected mechanism is recorded here and stands as the canonical explanation going forward... §2h's Ruling-3 summary is understood to be superseded by this note rather than independently re-edited") — but that disclaimer is itself only in the work-log, not in §2h. A reader who opens `schema-design-2.md` alone — the document positioned as the canonical review-findings log — gets the wrong story with no signpost that it's wrong. **Action: one sentence in §2h's F62 paragraph pointing to the twelfth-loop-back correction**, consistent with how the document already handles other mid-flight corrections (e.g., D11's `~~struck~~` / "superseded" convention visible elsewhere in the same file at `:363`).
+3. Already tracked, confirmed present, not re-added: QA Findings 2–4 (`docs/TODO.md:115`); QA Finding 1 / the rate-limit hermeticity issue, folded into the pre-existing coverage punch-list item 1 (`docs/TODO.md:113,219`).
+4. **The 0.25.4 release note is not misleading against the accepted-residual list**, checked specifically: the owner-connection re-arm residual is correctly left unclaimed (bullet 2 scopes its "closed" language to "created by the application"); the older-14-functions gap is explicitly named as deferred to a separate release; the hand-maintained §36 array (internal test-suite fragility, not user-facing) is appropriately omitted. One soft note, not a correction: bullet 3's phrasing ("now runs with the privileges it needs regardless of which connection recorded the act") is written from the ruling's original, since-corrected narrative rather than the truer one QA and D1 established (the real gap was a *visibility* failure for a role that can't see the row it's checking, not a privilege failure reachable on any live path today) — and the note's own closing line, "No functional change on any screen," already keeps this honest for a member reader. Not worth a fix commit on its own; worth folding into Follow-Up 2's correction pass since both stem from the same unpropagated D1 note.
+
+Neither follow-up rises to NEEDS REWORK. The shipped security fix is correctly built, independently reproduced by QA at the mechanism level (not the test-pass level) for all five findings, and the gaps found here are both documentation/housekeeping — one a missed cross-reference the pipeline's own rules already required, the other a canonical document not yet updated to match a correction its own author already made honestly elsewhere.
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 6 — Shipped vs intent (addendum, third external review round, F60–F64) | analyst | Complete | **SHIP WITH NOTES** — two follow-ups above; the original v0.24.0 verdict and the two prior hardening-round addenda stand unchanged | 2026-09-25 |
+
+**Workflow Rule 12 (feedback row):** not applicable — this pipeline did not originate from in-app member feedback.
+**Workflow Rule 13 (what's-new advisory):** not applicable — internal schema/security hardening, zero member-visible behavior change, and the release note itself states this ("No functional change on any screen").
+**Workflow Rule 10 (TODO reconciliation):** partially incomplete as shipped — Follow-Up 1 above is the missing piece; recommend the orchestrator add it in the same commit that records this addendum, per how the pipeline has handled every prior addendum's follow-ups.
+
+
 
 ---

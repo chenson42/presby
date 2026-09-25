@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
-import { getPlatformDb, type db } from "@/lib/db";
+import { type db } from "@/lib/db";
 import { groupMemberships, groups, groupTypes } from "@/lib/db/domain/groups";
 import { memberships, people } from "@/lib/db/domain/people";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
@@ -50,27 +50,17 @@ import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
  * sets `ends_on` on the existing row. No group deletion/archival exists in
  * v1 either; there is deliberately no `deleteGroup`/`archiveGroup` export.
  *
- * READING `group_types` PLATFORM-TEMPLATE ROWS REQUIRES `getPlatformDb()`, A
- * GAP PHASE 3'S DESIGN DID NOT NAME AND THIS COMMIT DISCOVERED BY RUNNING THE
- * INTEGRATION SUITE AGAINST A REAL DATABASE, NOT BY READING THE SQL. `group_
- * types`' `tenant_isolation` RLS policy (`drizzle/0009_presby_rls.sql`) is
- * the standard `organization_id = presby_current_org()` predicate with no
- * NULL-organization_id exception — under `presby_app` (the connection
- * `withOrgContext()`/`tx` uses), a platform-template row
- * (`organization_id IS NULL`) is INVISIBLE, full stop: `NULL = <anything>`
- * evaluates to NULL, never true, regardless of which org's context is set.
- * `scripts/seed.ts`'s own `seedGroupTypes()` header names this exact
- * property to explain why it seeds through `platformDb`, and
- * `src/lib/org-provisioning.ts`'s `createOrganization()` already reads these
- * same rows through `getPlatformDb()` for the identical reason — this
- * module's two group-type reads (`getGroupFormOptions`, `createGroup`'s own
- * re-validation) follow that exact, already-sanctioned precedent, never the
- * `tx` this function otherwise uses for every tenant-scoped read/write.
- * Confirmed safe: both queries hard-filter to `organization_id is null` in
- * the query itself, so no tenant-scoped row can ever be returned by a
- * platform-bypassing connection here — the same shape `presby_has_permission`
- * (a `SECURITY DEFINER` function, a different mechanism for the same
- * "correctly needs to see past RLS" problem) exists to solve.
+ * `group_types` PLATFORM-TEMPLATE ROWS ARE READ THROUGH `tx`, NOT
+ * `getPlatformDb()` (B-M4, `drizzle/0048_presby_security_b.sql` section 5).
+ * They used to be invisible under `presby_app`: `group_types`' old
+ * `tenant_isolation` policy (`drizzle/0009_presby_rls.sql`) was the standard
+ * `organization_id = presby_current_org()` predicate with no NULL exception,
+ * and `NULL = <anything>` is never true, so a platform-template row was
+ * unreadable from the tenant connection and three reads in this module
+ * escaped to `getPlatformDb()` to see them. 0048 splits that policy on
+ * `drizzle/0032`'s `app_roles_select` model — the SELECT arm now admits
+ * `organization_id is null`, I/U/D stay own-org-only — so the escapes are
+ * gone and every read here is back on the RLS-enforced connection.
  *
  * `setGroupMembershipPublicListed()` (docs/work-log/
  * 2026-08-28-public-directory-primitives.md, Phase 3) IS THE FIRST AUDITED
@@ -217,16 +207,13 @@ interface GroupListRow {
  * excluded here at the query layer, the first of the two enforcement layers
  * protecting Flow 2/4's guard.
  *
- * DOES NOT JOIN `group_types` UNDER `tx` — every group's `group_type_id`
- * resolves to a platform-template row (`organization_id is null`,
- * DECISION-110 ruling 1), and `group_types`' RLS policy is the standard
- * `organization_id = presby_current_org()` predicate with no NULL exception
- * (this file's header). An `inner join` to `group_types` under `tx` would
- * silently drop every one of these rows from the result — caught by running
- * this module's own integration suite against a real database, not by
- * reading the SQL. Names are resolved with a SEPARATE `getPlatformDb()`
- * lookup instead, keyed on the (small, bounded) set of distinct
- * `group_type_id`s this org's groups actually use.
+ * Group-type display names are resolved by a SEPARATE batched lookup
+ * (`groupTypeNamesByIds`) rather than an `inner join`, keyed on the small,
+ * bounded set of distinct `group_type_id`s this org's groups actually use.
+ * That lookup now runs on `tx` like everything else here — before B-M4 an
+ * `inner join` (or any `tx` read) silently dropped every row, because
+ * platform-template rows were invisible to `presby_app`; see this file's
+ * header.
  */
 export async function listGroups(
   viewerPersonId: string,
@@ -253,6 +240,7 @@ export async function listGroups(
 
     const rows = (result as unknown as { rows?: GroupListRow[] }).rows ?? [];
     const groupTypeNames = await groupTypeNamesByIds(
+      tx,
       rows.map((row) => row.group_type_id),
     );
 
@@ -268,18 +256,19 @@ export async function listGroups(
 }
 
 /**
- * Batched `getPlatformDb()` lookup backing `listGroups`/`getGroup`'s
- * group-type display name — see `listGroups`'s own header for why this
- * cannot be a plain join under `tx`.
+ * Batched lookup backing `listGroups`/`getGroup`/`listDerivedGroups`'s
+ * group-type display name — see `listGroups`'s own header for why it is a
+ * separate query rather than a join.
  */
 async function groupTypeNamesByIds(
+  tx: OrgTx,
   ids: string[],
 ): Promise<Map<string, string>> {
   const distinctIds = Array.from(new Set(ids));
   if (distinctIds.length === 0) {
     return new Map();
   }
-  const rows = await getPlatformDb()
+  const rows = await tx
     .select({ id: groupTypes.id, name: groupTypes.name })
     .from(groupTypes)
     .where(inArray(groupTypes.id, distinctIds));
@@ -314,9 +303,9 @@ interface DerivedGroupListRow {
  * zero new write paths and does not touch "The Court Is Not a Group"'s
  * enforcement at all (CLAUDE.md; DECISION-110).
  *
- * Same `getPlatformDb()` group-type-name lookup as `listGroups`, for the
- * identical reason (`group_types` platform-template rows are invisible
- * under `tx` — see this file's header).
+ * Same batched group-type-name lookup as `listGroups`, for the identical
+ * reason (it is a separate query rather than a join — see this file's
+ * header).
  */
 export async function listDerivedGroups(
   viewerPersonId: string,
@@ -345,6 +334,7 @@ export async function listDerivedGroups(
     const rows =
       (result as unknown as { rows?: DerivedGroupListRow[] }).rows ?? [];
     const groupTypeNames = await groupTypeNamesByIds(
+      tx,
       rows.map((row) => row.group_type_id),
     );
 
@@ -421,7 +411,9 @@ export async function getGroup(
       return { kind: "invalid_target" };
     }
 
-    const groupTypeNames = await groupTypeNamesByIds([groupRow.group_type_id]);
+    const groupTypeNames = await groupTypeNamesByIds(tx, [
+      groupRow.group_type_id,
+    ]);
 
     const rosterResult = await tx.execute(sql`
       select gm.id as group_membership_id,
@@ -483,7 +475,6 @@ export async function getGroup(
  * `MANAGEABLE_GROUP_TYPE_KEYS`; `court`/`roster` never appear here regardless
  * of what a hand-crafted request sends. `createGroup` independently
  * re-validates the chosen id server-side too — never trust this list alone.
- * Read through `getPlatformDb()`, not `tx` — see this file's header for why.
  *
  * `people` is the identical F21 current-membership shape
  * `getOfficerFormOptions` uses — never a bare `select * from people`.
@@ -497,7 +488,7 @@ export async function getGroupFormOptions(
       return { kind: "forbidden" };
     }
 
-    const groupTypeRows = await getPlatformDb()
+    const groupTypeRows = await tx
       .select({ id: groupTypes.id, key: groupTypes.key, name: groupTypes.name })
       .from(groupTypes)
       .where(
@@ -581,9 +572,7 @@ export async function createGroup(
       };
     }
 
-    // Read through getPlatformDb(), not tx — see this file's header for why
-    // `tx` (presby_app, RLS-enforced) can never see a platform-template row.
-    const [groupType] = await getPlatformDb()
+    const [groupType] = await tx
       .select({ id: groupTypes.id, key: groupTypes.key })
       .from(groupTypes)
       .where(

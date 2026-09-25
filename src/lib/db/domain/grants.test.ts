@@ -4,7 +4,7 @@
  * `docs/work-log/2026-09-25-submission-grants.md`).
  *
  * WHY THIS FILE EXISTS, and what it proves that `scripts/test-rls.sql` section
- * 36 structurally cannot. `presby_app` holds `select`, `insert` and a
+ * 40 structurally cannot. `presby_app` holds `select`, `insert` and a
  * COLUMN-LEVEL `update (revoked_at)` on `statistics_submission_grants` and
  * nothing else, so every probe of the claim and the stamp is refused there by
  * the PERMISSION CHECK before `presby_freeze_statistics_submission_grant()` is

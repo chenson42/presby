@@ -1256,7 +1256,7 @@ third insert and still enforces the same predicate independently (defense in
 depth against a direct-INSERT bypass of the chain writer), but a legitimate
 call through either DEFINER function can never reach it as a *refusal*,
 because the same check already ran and would have raised first. **Fixture:**
-`test-rls.sql` §36(f) — the Tidewater/Coastal Plain transfer fixture, both
+`test-rls.sql` §40(f) — the Tidewater/Coastal Plain transfer fixture, both
 directions (a grant issued by the OLD presbytery before a transfer is dead
 post-transfer via the affiliation re-verification in ruling 2; a grant issued
 by the NEW presbytery for a report year that predates the transfer is refused
@@ -1324,7 +1324,7 @@ call support and gets one attempt).
 
 **9. Edge cases** — below.
 
-**10. `test-rls.sql` §36 and the DB-backed vitest files owed** — below.
+**10. `test-rls.sql` §40 and the DB-backed vitest files owed** — below.
 
 **11. `check:audit` `execute` extension — TAKEN.** `scripts/check-audit-
 coverage.mjs`'s `MUTATION_RE` is extended to `/\bdb\s*\.\s*(insert|update|
@@ -1341,7 +1341,17 @@ extension does something. One-line change, folded into api-developer's Phase
 4 pass; no new test file (the script has none today) — the fixture proof is
 the tree itself.
 
-### `test-rls.sql` §36 — "Submission grants — a third credential class, and the affiliation instant it forces a ruling on (F80/DECISION-147)"
+### `test-rls.sql` §40 — "Submission grants — a third credential class, and the affiliation instant it forces a ruling on (F80/DECISION-147)"
+
+> **Renumbered at integration (2026-09-25).** This block was authored as §36,
+> the next free number at the time. `main` landed §36–§39 first (the lifecycle
+> pipeline's F60/F61/F62 sections and the security pipeline's round-B section),
+> so the merge renumbered this block to **§40** and every `§36` reference in
+> this work-log now reads `§40`. The sub-part letters `(a)`–`(h)` are
+> unchanged. The `scripts/test-rls.sql:NNNN` line numbers cited in the
+> failing-first table and the Phase 4 notes below are the PRE-MERGE
+> line numbers and are kept verbatim as the record of what was run; the same
+> assertions now sit roughly 1,050 lines lower in the merged file.
 
 Appended as one Rule-16-delimited block, next available section number.
 Mirrors §35's style and its "what this suite can and cannot prove" caveat —
@@ -1432,7 +1442,7 @@ null, email }`, `src/lib/audit.ts:304-323`) is used exactly as
    return()`, `presby_preview_granted_return()`. `src/lib/db/domain/returns.ts`
    extended. `scripts/seed-dev.sql` gains one appended fixture block (a live
    grant + one already-expired one, for `page.test.tsx`/e2e fixtures) —
-   Rule 16 delimited block at the file's end. `scripts/test-rls.sql` §36
+   Rule 16 delimited block at the file's end. `scripts/test-rls.sql` §40
    (below) and `src/lib/db/domain/grants.test.ts` (owner-connection proofs:
    unarmed claim/stamp refused, armed-and-correctly-shaped claim then stamp
    accepted once and refused on repeat, revoke accepted, mixed-shape
@@ -1624,7 +1634,7 @@ collision check is ever reached.
 
 **Handoff:** to **database-admin** (Phase 4, schema batch first) —
 `drizzle/0049_presby_submission_grants.sql`, `src/lib/db/domain/returns.ts`,
-`scripts/seed-dev.sql` (appended block), `scripts/test-rls.sql` §36
+`scripts/seed-dev.sql` (appended block), `scripts/test-rls.sql` §40
 (appended block), `src/lib/db/domain/grants.test.ts`. Then **api-developer**
 (`src/lib/statistics-grants.ts`, `src/lib/sasr-fields.ts`,
 `src/app/(statistics-submit)/actions.ts`, the two `reports/actions.ts`
@@ -1670,7 +1680,7 @@ concurrent lifecycle pipeline, and `idx` matches the filename's own number.
   the migration loudly if FORCE RLS, the policy, the column-level grant, the
   four `search_path` pins or the single-arming-site property is not in place.
 - `src/lib/db/domain/grants.test.ts` (19 tests, DB-backed, owner connection) —
-  the `PLATFORM_DATABASE_URL` twin of `test-rls.sql` §36, plus the two things no
+  the `PLATFORM_DATABASE_URL` twin of `test-rls.sql` §40, plus the two things no
   tenant connection can stage at all (the stale credential, and the disarmed
   direct INSERT on the chain).
 
@@ -1682,7 +1692,7 @@ concurrent lifecycle pipeline, and `idx` matches the filename's own number.
   `src/lib/db/domain/index.ts` change** — the architect's ruling holds: this
   module is already exported, so the shared barrel file is untouched.
 - `drizzle/meta/_journal.json` — one appended entry.
-- `scripts/test-rls.sql` — §36 appended as one Rule-16-delimited block at the
+- `scripts/test-rls.sql` — §40 appended as one Rule-16-delimited block at the
   END (eight sub-parts, 44 new assertions), **plus two unavoidable mid-file
   corrections in §35** (see Deviation 1).
 - `scripts/seed-dev.sql` — one appended block before the file's closing
@@ -1748,7 +1758,7 @@ always the same end state, with no row-count change.
 
 **2. `scripts/test-rls.sql` as `presby_app` — exit 0, 456 passes (from 412).**
 `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql`. The
-baseline on this branch before any of this work was 412; §36 adds 43 and the
+baseline on this branch before any of this work was 412; §40 adds 43 and the
 split §35 arming pin adds 1.
 
 **3. The `pg_proc.proconfig` pin, F60/DECISION-148:**
@@ -1766,7 +1776,7 @@ Stated rather than omitted, per Phase 3: F60's rule targets `SECURITY DEFINER`
 functions. The two trigger functions are INVOKER — one reads `organizations`
 (verified `relrowsecurity = f`, no RLS at all) and the other reads `OLD`/`NEW`
 and one GUC — so DEFINER would be the cargo cult DECISION-121 warns against.
-`test-rls.sql` §36(h) asserts both halves.
+`test-rls.sql` §40(h) asserts both halves.
 
 **4. DB-backed vitest, serial** (`dotenv -e .env.local -- vitest run
 --no-file-parallelism`): `publication.test.ts` (43) · `lifecycle.test.ts` ·
@@ -1790,14 +1800,14 @@ mechanism restored, and the suite confirmed green again.
 
 | Mechanism removed | Suite | Exact failure | Restored |
 |---|---|---|---|
-| `alter table … disable trigger statistics_submission_grants_freeze` | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5044: ERROR: FAIL — an already-revoked grant was revoked again; the freeze trigger is not firing on the tenant path` (§36(b)) | exit 0, 456 |
+| `alter table … disable trigger statistics_submission_grants_freeze` | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5044: ERROR: FAIL — an already-revoked grant was revoked again; the freeze trigger is not firing on the tenant path` (§40(b)) | exit 0, 456 |
 | the same, against the owner-path twin | `grants.test.ts` | 4 failed / 15 passed — every test in "the freeze trigger, on the connection where no grant binds" | 19 passed |
-| the `set_config('presby.grant_claim_active', …)` line removed from `presby_submit_granted_return()` (the claim's ARMING) | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5090: ERROR: statistics_submission_grants ab0000…0001: a grant may only be claimed by the sanctioned submission function` (§36(c)); i.e. the freeze refuses even the sanctioned claimant when it fails to declare the act | exit 0, 456 |
-| the atomic claim's guard predicate (`and submitted_at is null and revoked_at is null and expires_at > now()`) AND the `submitted_at` liveness pre-check, both removed | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5090: ERROR: statistics_submission_grants ab0000…0001: already claimed by return 680e231d-…; a spent grant is immutable`. §36(c)'s second-call assertion no longer sees the uniform literal. **Worth recording precisely:** the second claim is caught by the freeze trigger's terminal check rather than sailing through — the two mechanisms are genuinely in series, and the assertion is not vacuous either way | exit 0, 456 |
-| `drop trigger statistics_submission_grants_unmanaged` | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5213: ERROR: FAIL — a grant was issued to a MANAGED congregation, which has its own portal and self-files` (§36(e)) | exit 0, 456 |
+| the `set_config('presby.grant_claim_active', …)` line removed from `presby_submit_granted_return()` (the claim's ARMING) | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5090: ERROR: statistics_submission_grants ab0000…0001: a grant may only be claimed by the sanctioned submission function` (§40(c)); i.e. the freeze refuses even the sanctioned claimant when it fails to declare the act | exit 0, 456 |
+| the atomic claim's guard predicate (`and submitted_at is null and revoked_at is null and expires_at > now()`) AND the `submitted_at` liveness pre-check, both removed | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5090: ERROR: statistics_submission_grants ab0000…0001: already claimed by return 680e231d-…; a spent grant is immutable`. §40(c)'s second-call assertion no longer sees the uniform literal. **Worth recording precisely:** the second claim is caught by the freeze trigger's terminal check rather than sailing through — the two mechanisms are genuinely in series, and the assertion is not vacuous either way | exit 0, 456 |
+| `drop trigger statistics_submission_grants_unmanaged` | `test-rls.sql` | exit 3 — `psql:scripts/test-rls.sql:5213: ERROR: FAIL — a grant was issued to a MANAGED congregation, which has its own portal and self-files` (§40(e)) | exit 0, 456 |
 | the same | `grants.test.ts` | 1 failed / 18 passed — "refuses a grant about a MANAGED congregation" | 19 passed |
 
-### `test-rls.sql` §36 — the eight sub-parts, as delivered
+### `test-rls.sql` §40 — the eight sub-parts, as delivered
 
 - **(a) grant shape** — FORCE RLS; exactly one policy, scoped both ways;
   `has_column_privilege` true on `revoked_at` and false on `submitted_at` /
@@ -1861,7 +1871,7 @@ mechanism restored, and the suite confirmed green again.
      F60/DECISION-148 requires the re-created body to pin `public, pg_temp`, so
      the exact match had to widen to accept either spelling. The assertion's
      *subject* is unchanged (a function that drops the clause entirely still
-     fails); §36(h) pins the `pg_temp`-last form for 0049's own four. Both edits
+     fails); §40(h) pins the `pg_temp`-last form for 0049's own four. Both edits
      carry an inline comment naming `drizzle/0049` so the integration merge and
      the lifecycle pipeline's own `0043–0047` sweep can see why they moved.
 2. **`src/lib/db/domain/publication.test.ts`, two assertions updated** — the
@@ -1870,7 +1880,7 @@ mechanism restored, and the suite confirmed green again.
    Both comments now point at `drizzle/0049` and at `grants.test.ts`'s
    byte-equality proof. Not listed in my brief, but leaving them red was not an
    option and rewriting them to pass without explaining why would be worse.
-3. **Phase 3's `test-rls.sql` §36(f)(i) is structural here, behavioural in
+3. **Phase 3's `test-rls.sql` §40(f)(i) is structural here, behavioural in
    `grants.test.ts`, and the reason is a measured fact about the fixture.** A
    stale credential cannot be staged from a tenant connection at all:
    `statistics_submission_grants_about_org` refuses any INSERT whose about-org
@@ -1886,7 +1896,7 @@ mechanism restored, and the suite confirmed green again.
    writer's own name.** Phase 3's prose said the self-publish caller's message
    text was "unchanged" while its own DDL gave the helper its own message
    prefix; the DDL wins, because one shared string is the observable form of
-   one shared code path, and §36(f)(ii) asserts the two callers see a
+   one shared code path, and §40(f)(ii) asserts the two callers see a
    byte-identical refusal. Every moved check keeps its **errcode**
    (`invalid_parameter_value`), which is what §34's own assertions test and what
    any future caller would branch on. Phase 2's grep (no application caller
@@ -1900,7 +1910,7 @@ mechanism restored, and the suite confirmed green again.
 6. **Three seed fixtures, not two, and deliberately no already-submitted one.**
    Live / expired / revoked, one per report year so the partial unique is
    satisfied by construction. A "spent" fixture would have to freeze a
-   half-claimed row nobody actually wrote; §36(c) and §36(d) spend the live one
+   half-claimed row nobody actually wrote; §40(c) and §40(d) spend the live one
    inside a rolled-back transaction instead, which is the real state machine.
    The three raw dev-only tokens are documented in the seed block itself
    (`dev-grant-quillhaven-2026` is the working link on a fresh branch) and are
@@ -2068,7 +2078,7 @@ live catalog exactly.
   with `auditFacts` populated, the non-repeatable-claim proof, and the
   flag-off same-bucket proof). Uses Marrowbone (`invited`, real Northern
   Reach child) at report years this file owns exclusively (209x) — never
-  touches the seeded Quillhaven fixtures Batch A/`test-rls.sql` §36 rely on.
+  touches the seeded Quillhaven fixtures Batch A/`test-rls.sql` §40 rely on.
   Teardown follows `presbytery.test.ts`'s disable/enable-freeze-trigger
   convention, ordered child-before-parent (`statistics_submission_grants`
   before `statistical_returns` — the composite FK the other direction
@@ -2891,7 +2901,7 @@ URL carries only `?token=` (no slug, no id, no year — e2e case 7 and my own fe
 
 **4. The chain — verified row by row.** After the successful claim: exactly **1** `statistical_returns`, **1** `publications`, **1** `congregation_statistics`. The return is owned by the **congregation** (`organization_id = about_org_id = 4444…`, Quillhaven), `provenance='submitted'`, `attested_by_name='Odalys Fenwick'`, `attested_role='clerk_of_session'`, `attested_at` non-null (F57's first non-null values, reached through the real anonymous path). The publication runs congregation → `recipient_org_id = 1111…`, which equals `presby_affiliation_parent_as_of(about_org, current_date)` — resolved from the affiliation history, not from the grant row. The projection is owned by the **presbytery**, `provenance='published_by_congregation'`, and carries the payload's own value (`ending_active = 77`). **F39: `congregation_statistics.published_at = publications.published_at` → true.** Grant row `submitted_at` set and `return_id` stamped to the returned uuid. The "Congregation reported" badge is confirmed by e2e case 4 against a real browser.
 
-**5. F80 — read the assertions; the chain no longer half-writes.** `scripts/test-rls.sql:5259-5340` §36(f) and `src/lib/db/domain/grants.test.ts:410`. (f)(i) is a structural pin that `presby_submit_granted_return()` re-resolves the recipient via `presby_affiliation_parent_as_of(v_grant.about_org_id, current_date::date)` and uses the stored `organization_id` only as an equality staleness check — with the behavioural half in `grants.test.ts` (Deviation 3's reason is sound: the fixture's rootless Northern Reach has no common superior, so no tenant connection can stage a transfer). (f)(ii) is the late filer end to end: a 1990 grant for a congregation the Northern Reach did not hold in 1990 is refused, the grant path's and the self-publish path's messages are compared for **byte equality**, the refusal is asserted to come from `presby_write_return_publication_chain:`, and a `statistical_returns` row count before/after proves **nothing was written**. Precise reading for Phase 6: the F80 fix is *not* "the late filer can now file" — a return for a year before the congregation joined the council is still, deliberately, refused. What changed is that the refusal is now one named, early check in the shared writer, before the first insert, instead of an opaque `congregation_statistics_about_org` rejection on the third insert after two rows had been written. That is the abort the fix removes.
+**5. F80 — read the assertions; the chain no longer half-writes.** `scripts/test-rls.sql:5259-5340` §40(f) and `src/lib/db/domain/grants.test.ts:410`. (f)(i) is a structural pin that `presby_submit_granted_return()` re-resolves the recipient via `presby_affiliation_parent_as_of(v_grant.about_org_id, current_date::date)` and uses the stored `organization_id` only as an equality staleness check — with the behavioural half in `grants.test.ts` (Deviation 3's reason is sound: the fixture's rootless Northern Reach has no common superior, so no tenant connection can stage a transfer). (f)(ii) is the late filer end to end: a 1990 grant for a congregation the Northern Reach did not hold in 1990 is refused, the grant path's and the self-publish path's messages are compared for **byte equality**, the refusal is asserted to come from `presby_write_return_publication_chain:`, and a `statistical_returns` row count before/after proves **nothing was written**. Precise reading for Phase 6: the F80 fix is *not* "the late filer can now file" — a return for a year before the congregation joined the council is still, deliberately, refused. What changed is that the refusal is now one named, early check in the shared writer, before the first insert, instead of an opaque `congregation_statistics_about_org` rejection on the third insert after two rows had been written. That is the abort the fix removes.
 
 **6. Audit — all three keys exercised end to end and inspected.** `issued` and `submitted` came from the e2e run; I drove `revoked` myself through the real UI (shadcn `AlertDialog`, buttons `["Cancel", "Yes, revoke"]` — no native dialog, Workflow Rule 2 holds) because **no test and no prior run had ever written that row**.
 - `tenant.statistics_grant.issued` — session actor, `resource_type='statistics_submission_grants'`, metadata `{aboutOrgId, reportYear, organizationId}`.
@@ -2913,9 +2923,9 @@ URL carries only `?token=` (no slug, no id, no year — e2e case 7 and my own fe
 ## Regression Tests Present (authored by the implementer; I ran and read them, I added none)
 
 - `src/app/(statistics-submit)/file-statistics/page.test.tsx:115` — *"renders the SAME generic notice as a dead token, never the form"* — guards the page-level flag-off enumeration leak Batch C found and fixed.
-- `scripts/test-rls.sql:5044` §36(b) — the freeze trigger on the tenant path; proven non-vacuous above.
-- `scripts/test-rls.sql:5291` §36(f)(ii) — F80, both callers' refusals compared for byte equality, zero rows written.
-- `scripts/test-rls.sql` §36(d) — the uniform literal asserted by **string equality** and errcode `42501`, across four causes.
+- `scripts/test-rls.sql:5044` §40(b) — the freeze trigger on the tenant path; proven non-vacuous above.
+- `scripts/test-rls.sql:5291` §40(f)(ii) — F80, both callers' refusals compared for byte equality, zero rows written.
+- `scripts/test-rls.sql` §40(d) — the uniform literal asserted by **string equality** and errcode `42501`, across four causes.
 - `src/lib/db/domain/grants.test.ts:410` — the F80 stale-credential half on the owner connection.
 - `src/app/(statistics-submit)/actions.test.ts` — the no-session audit shape and a token-absence grep over the serialized call.
 
@@ -3026,7 +3036,7 @@ Not yours, and not a reason to hold the loop-back — for the **orchestrator**: 
 - **Release note: yes.** Member-visible, and a new public URL. Suggested framing: *a presbytery clerk can email a congregation with no account a one-time link to file its annual statistical report*.
 - **What's-new advisory: yes, but not yet.** The flag ships **off**; the surface is presbytery-clerk-facing plus an emailed link. Publish a `whats_new_entries` row when the flag is first turned on for a real presbytery, not at merge. Worth saying out loud at Phase 6 so it isn't lost with the flag.
 - **TODO candidates:** the three Phase 3 deferrals already drafted (congregation filing-history page; bounce visibility for issued-grant emails; `presby_withdraw_publication()` UI), plus, from this pass: the e2e chain-row residue (Advisory 3), the stale `post-login-routing` assertions and the `public-sites` bundle fixture (FAIL-2), `rate-limit.test.ts` under DB env (Advisory 5), and a `proxy.test.ts` case for the two new public paths (Advisory 6).
-- **Integration facts.** The branch sits at `6f9f481`, **two commits behind `main`** (`9356755`) — **rebase before integration** to pick up the round-three `0043–0047` changes. Every change on this branch is an uncommitted working-tree change; there is no commit yet. The Rule 16 shared-file discipline held with **two declared exceptions**, both in `scripts/test-rls.sql` §35 (mid-file, not the appended block): the F55 arming-site pin, rewritten to assert "exactly one function arms it, and it is the chain writer" — which I verified live and which is strictly stronger; and B-M2's `search_path` exact-match widened to accept the `pg_temp` spelling. Both are correct and both carry inline `drizzle/0049` comments, but the integrating merge must expect them in §35, not §36, and must re-run `test-rls.sql` on the merged `development` branch. Also unedited on this branch and owed at integration: `docs/decisions.md` (DECISION-147), `docs/TODO.md`, `docs/STATE.md`, `docs/reviews/log.md`, release notes, `docs/product/functionality-map.md`, `docs/schema-design-2.md` §6's corrected sketch and the F80 resolution, `CLAUDE.md`'s un-brandable-group list, `.claude/agents/architect.md`'s route-group rules, and a `src/lib/dev-docs.ts` `INVARIANTS` entry for the credential mechanism marked `trigger`.
+- **Integration facts.** The branch sits at `6f9f481`, **two commits behind `main`** (`9356755`) — **rebase before integration** to pick up the round-three `0043–0047` changes. Every change on this branch is an uncommitted working-tree change; there is no commit yet. The Rule 16 shared-file discipline held with **two declared exceptions**, both in `scripts/test-rls.sql` §35 (mid-file, not the appended block): the F55 arming-site pin, rewritten to assert "exactly one function arms it, and it is the chain writer" — which I verified live and which is strictly stronger; and B-M2's `search_path` exact-match widened to accept the `pg_temp` spelling. Both are correct and both carry inline `drizzle/0049` comments, but the integrating merge must expect them in §35, not §40, and must re-run `test-rls.sql` on the merged `development` branch. Also unedited on this branch and owed at integration: `docs/decisions.md` (DECISION-147), `docs/TODO.md`, `docs/STATE.md`, `docs/reviews/log.md`, release notes, `docs/product/functionality-map.md`, `docs/schema-design-2.md` §6's corrected sketch and the F80 resolution, `CLAUDE.md`'s un-brandable-group list, `.claude/agents/architect.md`'s route-group rules, and a `src/lib/dev-docs.ts` `INVARIANTS` entry for the credential mechanism marked `trigger`.
 
 
 

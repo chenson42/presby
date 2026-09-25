@@ -30,7 +30,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
@@ -51,6 +51,7 @@ describe.skipIf(!hasDb)(
     let deactivateRole: typeof import("./role-definitions").deactivateRole;
     let adoptTemplate: typeof import("./role-definitions").adoptTemplate;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
+    let withOrgContext: typeof import("@/lib/authz").withOrgContext;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
     let groups: typeof import("@/lib/db/domain/groups").groups;
@@ -98,6 +99,7 @@ describe.skipIf(!hasDb)(
         adoptTemplate,
       } = await import("./role-definitions"));
       ({ getPlatformDb } = await import("@/lib/db"));
+      ({ withOrgContext } = await import("@/lib/authz"));
       ({ organizations } = await import("@/lib/db/domain/org"));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
       ({ people, memberships } = await import("@/lib/db/domain/people"));
@@ -265,7 +267,11 @@ describe.skipIf(!hasDb)(
       async function person(first: string, last: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: first, lastName: last })
+          .values({
+            firstName: first,
+            lastName: last,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         return p!.id;
       }
@@ -642,7 +648,11 @@ describe.skipIf(!hasDb)(
 
         const [personRow] = await platform
           .insert(people)
-          .values({ firstName: "Wilhelmina", lastName: "Adeyemi-Okoro" })
+          .values({
+            firstName: "Wilhelmina",
+            lastName: "Adeyemi-Okoro",
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         presbyteryAdminPerson = personRow!.id;
         await platform.insert(memberships).values({
@@ -1123,6 +1133,147 @@ describe.skipIf(!hasDb)(
         await expect(
           listRoleDefinitions(randomUUID(), orgA),
         ).rejects.toMatchObject({ name: "OrgAccessError" });
+      });
+    });
+
+    // -----------------------------------------------------------------
+    // Security review round B — app_role_permissions RLS (B-H2) and the
+    // role_grants composite FK (B-M3).
+    // docs/work-log/2026-09-25-security-schema-b.md;
+    // drizzle/0048_presby_security_b.sql sections 4 and 7.
+    //
+    // app_role_permissions carried NO row-level security at all: as
+    // presby_app under one congregation's context it returned every
+    // organization's 71 binding rows, 43 of them pointing at role_ids that
+    // session could not see through app_roles, and an INSERT naming one of
+    // those invisible role_ids succeeded. Tenancy is INDIRECT here — the
+    // table has no organization_id — so the policy reaches through
+    // role_id -> app_roles.
+    // -----------------------------------------------------------------
+    describe("app_role_permissions isolation and the role_grants composite FK", () => {
+      async function rejectionChain(pr: Promise<unknown>): Promise<string> {
+        const err = await pr.then(
+          () => null,
+          (e: unknown) => e,
+        );
+        expect(err).not.toBeNull();
+        const chain: string[] = [];
+        for (
+          let e = err as { message?: string; cause?: unknown } | undefined;
+          e;
+
+        ) {
+          if (e.message) chain.push(e.message);
+          e = e.cause as { message?: string; cause?: unknown } | undefined;
+        }
+        return chain.join(" | ");
+      }
+
+      it("a tenant sees only its own roles' bindings and the global templates' — regression for B-H2 cross-tenant app_role_permissions read", async () => {
+        const leaked = await withOrgContext(adminPerson, orgA, async (tx) =>
+          tx.execute(sql`
+            select count(*)::int as n
+              from app_role_permissions arp
+             where not exists (
+               select 1 from app_roles r
+                where r.id = arp.role_id
+                  and (r.organization_id = ${orgA}::uuid
+                       or r.organization_id is null))
+          `),
+        );
+        expect((leaked.rows[0] as { n: number }).n).toBe(0);
+      });
+
+      it("a tenant cannot bind a permission to another organization's role — regression for B-H2 cross-tenant app_role_permissions write", async () => {
+        // orgBAdminRole is invisible to an orgA session through app_roles;
+        // before B-H2 the INSERT below still landed.
+        const platform = getPlatformDb();
+        // orderBy, not a bare limit(1): without it the chosen role varies run
+        // to run and so does whichever binding it already holds.
+        const [orgBRole] = await platform
+          .select({ id: appRoles.id })
+          .from(appRoles)
+          .where(eq(appRoles.organizationId, orgB))
+          .orderBy(appRoles.key)
+          .limit(1);
+        expect(orgBRole).toBeDefined();
+
+        const bindingsBefore = await platform
+          .select({ permissionKey: appRolePermissions.permissionKey })
+          .from(appRolePermissions)
+          .where(eq(appRolePermissions.roleId, orgBRole!.id));
+
+        const invisible = await withOrgContext(adminPerson, orgA, async (tx) =>
+          tx
+            .select({ id: appRoles.id })
+            .from(appRoles)
+            .where(eq(appRoles.id, orgBRole!.id)),
+        );
+        expect(invisible).toHaveLength(0);
+
+        const chain = await rejectionChain(
+          withOrgContext(adminPerson, orgA, async (tx) =>
+            tx
+              .insert(appRolePermissions)
+              .values({ roleId: orgBRole!.id, permissionKey: "roles.manage" }),
+          ),
+        );
+        expect(chain).toMatch(/row-level security/);
+
+        // And nothing landed: orgB's role holds exactly the bindings it held
+        // before. (An equality on one key would be wrong — the fixture role
+        // may legitimately already carry it.)
+        const bindingsAfter = await platform
+          .select({ permissionKey: appRolePermissions.permissionKey })
+          .from(appRolePermissions)
+          .where(eq(appRolePermissions.roleId, orgBRole!.id));
+        expect(bindingsAfter.map((r) => r.permissionKey).sort()).toEqual(
+          bindingsBefore.map((r) => r.permissionKey).sort(),
+        );
+      });
+
+      it("a GLOBAL template's own bindings stay readable through tx — the `or organization_id is null` arm is load-bearing for adoptTemplate", async () => {
+        // adoptTemplate() reads the template's bindings through this table on
+        // `tx` before cloning them. Drop that arm of the SELECT policy and
+        // adoption silently clones an EMPTY permission set — which is why
+        // this assertion asserts a non-zero count, not merely "no error".
+        const rows = await withOrgContext(adminPerson, orgA, async (tx) =>
+          tx.execute(sql`
+            select count(*)::int as n
+              from app_role_permissions arp
+              join app_roles r on r.id = arp.role_id
+             where r.organization_id is null
+          `),
+        );
+        expect((rows.rows[0] as { n: number }).n).toBeGreaterThan(0);
+      });
+
+      it("role_grants refuses a direct grant of a global template role — regression for B-M3 role_grants.role_id composite FK", async () => {
+        // Adoption CLONES a template into an org-scoped app_roles row
+        // (role-definitions.ts:771-850); a template is never granted
+        // directly. The composite FK turns that code convention into a
+        // database property.
+        const platform = getPlatformDb();
+        const [template] = await platform
+          .select({ id: appRoles.id })
+          .from(appRoles)
+          .where(isNull(appRoles.organizationId))
+          .limit(1);
+        expect(template).toBeDefined();
+
+        const chain = await rejectionChain(
+          withOrgContext(adminPerson, orgA, async (tx) =>
+            tx.insert(roleGrants).values({
+              organizationId: orgA,
+              roleId: template!.id,
+              personId: adminPerson,
+              startsOn: "2026-01-01",
+            }),
+          ),
+        );
+        expect(chain).toMatch(
+          /role_grants_role_fk|foreign key|row-level security/,
+        );
       });
     });
   },

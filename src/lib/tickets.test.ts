@@ -74,6 +74,18 @@ describe.skipIf(!hasDb)("tickets.ts (Postgres-backed, real dev database)", () =>
   let plainMemberPerson: string; // orgA — active membership, no tickets.file
   let lapsedSubmitterPerson: string; // orgA — feedback filed while active, membership later ended
   let noMembershipPerson: string; // no membership ANYWHERE
+  // EVERY person this fixture inserts, tracked on the way in.
+  //
+  // The named list this replaced missed `outsidePerson` (the orgB
+  // enumeration-discipline fixture), so this file leaked one `people` row per
+  // run. Harmless clutter before N-6; after it, each leaked row carries a
+  // two-hour `deletable_until` window and becomes undeletable on EVERY
+  // connection once that window closes — `presby_app` holds no DELETE grant
+  // and the owner path hits presby_guard_people_delete(). Three such rows had
+  // accumulated on the pipeline branch by 2026-09-25 and were removed with
+  // minutes to spare. Tracking at insert rather than naming ids at teardown
+  // is what stops the next fixture from re-opening it.
+  const trackedPeopleIds: string[] = [];
 
   let outsideOrgBTicketId: string; // a real ticket, but at orgB, not orgA
 
@@ -203,8 +215,13 @@ describe.skipIf(!hasDb)("tickets.ts (Postgres-backed, real dev database)", () =>
     async function person(first: string, last: string) {
       const [p] = await platform
         .insert(people)
-        .values({ firstName: first, lastName: last })
+        .values({
+          firstName: first,
+          lastName: last,
+          deletableUntil: fixtureDeletableUntil(),
+        })
         .returning({ id: people.id });
+      trackedPeopleIds.push(p!.id);
       return p!.id;
     }
 
@@ -291,12 +308,10 @@ describe.skipIf(!hasDb)("tickets.ts (Postgres-backed, real dev database)", () =>
         sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
       );
     }
-    for (const id of [
-      filerPerson,
-      plainMemberPerson,
-      lapsedSubmitterPerson,
-      noMembershipPerson,
-    ].filter(Boolean)) {
+    // trackedPeopleIds, not a hand-written list of the four ids this file
+    // happens to hold in `let`s — `outsidePerson` is a block-local `const`
+    // inside beforeAll and was invisible to the old list (G2).
+    for (const id of trackedPeopleIds.filter(Boolean)) {
       await platform.delete(people).where(eq(people.id, id));
     }
     await platform.delete(users).where(eq(users.id, grantingUserId));

@@ -145,7 +145,11 @@ describe.skipIf(!hasDb)(
       async function person(first: string, last: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: first, lastName: last })
+          .values({
+            firstName: first,
+            lastName: last,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         trackedPeopleIds.push(p!.id);
         return p!.id;
@@ -241,7 +245,11 @@ describe.skipIf(!hasDb)(
         const platform = getPlatformDb();
         const [stranger] = await platform
           .insert(people)
-          .values({ firstName: "Stray", lastName: `Elsewhere${stamp}` })
+          .values({
+            firstName: "Stray",
+            lastName: `Elsewhere${stamp}`,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         trackedPeopleIds.push(stranger!.id);
 
@@ -276,7 +284,11 @@ describe.skipIf(!hasDb)(
         const platform = getPlatformDb();
         const [stranger] = await platform
           .insert(people)
-          .values({ firstName: "Stray2", lastName: `Elsewhere2${stamp}` })
+          .values({
+            firstName: "Stray2",
+            lastName: `Elsewhere2${stamp}`,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         trackedPeopleIds.push(stranger!.id);
 
@@ -388,7 +400,11 @@ describe.skipIf(!hasDb)(
         const platform = getPlatformDb();
         const [orgBEditor] = await platform
           .insert(people)
-          .values({ firstName: "OrgB", lastName: `Editor${stamp}` })
+          .values({
+            firstName: "OrgB",
+            lastName: `Editor${stamp}`,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         trackedPeopleIds.push(orgBEditor!.id);
         const [orgBRole] = await platform

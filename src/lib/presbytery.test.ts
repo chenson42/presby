@@ -281,7 +281,11 @@ describe.skipIf(!hasDb)(
       async function person(first: string, last: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: first, lastName: last })
+          .values({
+            firstName: first,
+            lastName: last,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         return p!.id;
       }
@@ -710,6 +714,91 @@ describe.skipIf(!hasDb)(
         const row = rollup.data.find((r) => r.organizationId === congA);
         expect(row?.provenance).toBe("presbytery_entered");
         expect(row?.endingActive).toBe(150);
+      });
+
+      // F61 (eleventh Phase 3 loop-back, drizzle/0047 section 10).
+      // setCongregationStatistics() no longer uses Drizzle's insert()
+      // builder — presby_app holds no table-level INSERT on
+      // congregation_statistics, only a column-level grant on 68 of 71
+      // columns — so its write is now an explicit-column raw-SQL upsert.
+      // This test exercises that shape directly: EVERY value column set on
+      // the first call, a DIFFERENT subset on the second, and the assertion
+      // that the conflict arm writes all 19 from EXCLUDED (including back to
+      // null) rather than merging. A column dropped from the raw SQL's
+      // `do update set` list would pass the older upsert test above and fail
+      // here.
+      it("the explicit-column raw-SQL upsert writes every value column from EXCLUDED on conflict, including back to null", async () => {
+        const full = {
+          minuteReference: "Minute 2022-1",
+          gainsProfessionsUnder18: 1,
+          gainsProfessions18Plus: 2,
+          gainsCertificate: 3,
+          gainsOther: 4,
+          lossesCertificate: 5,
+          lossesDeaths: 6,
+          lossesOther: 7,
+          endingActive: 100,
+          endingBaptized: 110,
+          endingAffiliate: 5,
+          endingOtherParticipants: 9,
+          avgWeeklyWorshipAttendance: 60,
+          potentialGivingUnits: 55,
+          baptismsChildren: 2,
+          baptismsAdults: 1,
+          officersRulingElderCount: 6,
+          officersDeaconCount: 3,
+        };
+        const first = await setCongregationStatistics(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congA,
+          2022,
+          full,
+        );
+        expect(first.kind).toBe("ok");
+
+        const rollupFirst = await getCongregationStatisticsRollup(
+          clerkPerson,
+          presbyteryA,
+          2022,
+        );
+        if (rollupFirst.kind !== "ok") throw new Error("expected ok");
+        const afterFirst = rollupFirst.data.find((r) => r.organizationId === congA);
+        expect(afterFirst?.minuteReference).toBe("Minute 2022-1");
+        expect(afterFirst?.endingBaptized).toBe(110);
+        expect(afterFirst?.officersDeaconCount).toBe(3);
+
+        // Second call, same conflict key, only two fields supplied. Every
+        // other value column must be UPDATED to null, not left standing —
+        // that is what `set x = excluded.x` for all 19 means, and it is the
+        // semantics `onConflictDoUpdate({ set: values })` had.
+        const second = await setCongregationStatistics(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congA,
+          2022,
+          { minuteReference: "Minute 2022-2 (revised)", endingActive: 222 },
+        );
+        expect(second.kind).toBe("ok");
+        if (first.kind === "ok" && second.kind === "ok") {
+          expect(second.data.id).toBe(first.data.id);
+        }
+
+        const rollupSecond = await getCongregationStatisticsRollup(
+          clerkPerson,
+          presbyteryA,
+          2022,
+        );
+        if (rollupSecond.kind !== "ok") throw new Error("expected ok");
+        const afterSecond = rollupSecond.data.find((r) => r.organizationId === congA);
+        expect(afterSecond?.minuteReference).toBe("Minute 2022-2 (revised)");
+        expect(afterSecond?.endingActive).toBe(222);
+        expect(afterSecond?.endingBaptized).toBeNull();
+        expect(afterSecond?.officersDeaconCount).toBeNull();
+        expect(afterSecond?.gainsProfessionsUnder18).toBeNull();
+        expect(afterSecond?.provenance).toBe("presbytery_entered");
       });
 
       it("a published_by_congregation row wins the coalesce over a presbytery_entered row for the same year", async () => {

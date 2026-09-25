@@ -44,7 +44,7 @@
  */
 
 :root {
-  --radius: 0.5rem;
+  --radius: 0.625rem;
 
   --background: hsl(0 0% 100%);
   --foreground: hsl(215 66% 15%);
@@ -170,20 +170,35 @@
    * can retune corner roundness in one place; its registry default for that
    * variable is 0.625rem.
    *
-   * `--radius` here stays 0.5rem — the value already in this file before P0.5
-   * — rather than adopting shadcn's 0.625rem default. Checked against every
-   * `rounded-*` utility actually in the tree (rounded-md ×97, rounded-lg ×23,
-   * rounded-full ×23, rounded-xl ×6, rounded-sm ×5; `full` and the un-remapped
-   * `xs`/`2xl`/`3xl` are untouched by this mapping) at 0.5rem:
+   * `--radius` is 0.625rem — the shadcn registry default, and the value
+   * fpcw-directory (a sibling repo) already ships. It stayed at 0.5rem from
+   * P0.5 through Track B (docs/work-log/2026-09-25-brand-visual-parity.md)
+   * deliberately: Track B's `maxDiffPixels: 0` visual-parity harness needed a
+   * pixel-stable target to prove its OTHER changes (colour, type pairing)
+   * moved nothing else, and a radius bump bundled into that work would have
+   * repainted every corner in the app and made every one of its diffs
+   * unreadable. This is that bump, done on its own as a follow-on Polish
+   * work-log (docs/work-log/2026-09-25-platform-radius.md) once Track B had
+   * shipped and had a settled baseline to re-capture from. It is a platform
+   * value, not a per-org one — DECISION-048 ruled out letting an org's brand
+   * retune corner roundness; it did not freeze the platform's own choice.
    *
-   *   --radius-sm  = var(--radius) - 4px = 4px   (Tailwind default sm: 4px)
-   *   --radius-md  = var(--radius) - 2px = 6px   (Tailwind default md: 6px)
-   *   --radius-lg  = var(--radius)       = 8px   (Tailwind default lg: 8px)
-   *   --radius-xl  = var(--radius) + 4px = 12px  (Tailwind default xl: 12px)
+   * Because every `rounded-*` consumer moves at once (occurrences in `src/`:
+   * rounded-md ×102, rounded-lg ×81, rounded-xl ×13, rounded-sm ×7; `full` and
+   * the un-remapped `xs`/`2xl`/`3xl` are untouched by this mapping),
+   * `maxDiffPixels: 0` against an unchanged baseline would report every route
+   * as failed and tell a reviewer nothing — every corner in every screenshot
+   * moves by design. This change was verified instead by re-baselining the
+   * visual-parity harness (`npm run visual:baseline`) both before and after
+   * the edit and reviewing the resulting screenshots as before/after pairs
+   * (20 routes × 2 viewports × 2 colour schemes = 80 pairs; 67 re-captured,
+   * 13 unchanged within Playwright's comparator threshold — see the work-log),
+   * not by diffing against the old baseline.
    *
-   * All four are byte-identical to what already renders — the remap is a
-   * provable no-op, not an approximation. Do NOT "align with the registry" by
-   * bumping --radius to 0.625rem; that moves all four and repaints the app.
+   *   --radius-sm  = var(--radius) - 4px = 6px   (was 4px at 0.5rem)
+   *   --radius-md  = var(--radius) - 2px = 8px   (was 6px at 0.5rem)
+   *   --radius-lg  = var(--radius)       = 10px  (was 8px at 0.5rem)
+   *   --radius-xl  = var(--radius) + 4px = 14px  (was 12px at 0.5rem)
    */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

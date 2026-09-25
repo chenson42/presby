@@ -404,6 +404,12 @@ export const INVARIANTS: {
     enforcement: "database",
   },
   {
+    title: "A submission grant is a credential, and it spends exactly once",
+    detail:
+      "A presbytery-issued SASR submission grant (D16/DECISION-147) is not a permission and not a flag: it is a token-bearing credential naming one presbytery, one congregation and one report year, and it authorizes exactly one write before it is spent. The token hash is the whole authority, so the caller supplies NO organization id and no org context is set on its behalf — presby_submit_granted_return() is the single SECURITY DEFINER write path, it re-resolves the recipient council from the affiliation history at claim time (presby_affiliation_parent_as_of), and it goes through the same presby_write_return_publication_chain() a self-filing congregation uses, so a granted return is the identical immutable artifact + publication + projection triple. Two mechanisms make the single-spend real and neither is sufficient alone: presby_freeze_statistics_submission_grant() refuses a second claim, a claim of a revoked or expired grant, and any transition not declared by the sanctioned function, on EVERY connection including the owner (F44); and the column-level grant leaves presby_app with UPDATE on revoked_at only, so the tenant connection cannot reach submitted_at or return_id at all — refused by privilege before the trigger is consulted. Issuance is guarded as strongly as mutation (F55/DECISION-141): a grant may only be issued to an unmanaged congregation, by trigger. Every liveness failure — expired, revoked, already spent, nonexistent, flag off — surfaces as one byte-identical literal, so the public page cannot become an enumeration oracle.",
+    enforcement: "trigger",
+  },
+  {
     title: "The SASR is a projection, never a data-entry screen",
     detail:
       "If a report field cannot be derived, the gap is in the operational model, not in the report.",

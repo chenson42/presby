@@ -1276,6 +1276,8 @@ with a throwaway `SECURITY DEFINER` writer, committed and then cleaned up, or a
 rolled-back transaction with `SET CONSTRAINTS ALL IMMEDIATE` as the tenant role,
 belongs in this round so the future writer pipeline inherits a proven path.
 
+> **Correction after the tenth pass (twelfth Phase 3 loop-back, 2026-09-25):** the ruling's stated mechanism — that a deferred constraint trigger fires under the session's ambient role at COMMIT — is **false** on PostgreSQL 18.6, measured by database-admin and re-measured by QA on both fire paths: an after-trigger event carries the security context current when it was *queued* (plain INSERT as `presby_app` → `presby_app`; INSERT inside a `SECURITY DEFINER` function → `neondb_owner`). The predicted permission failure is therefore reachable only on the direct tenant INSERT path, which the table-level revoke already closes. The conversion of the two wrapper trigger functions to `SECURITY DEFINER` **stands** on the two reasons `drizzle/0044` §13b3 records: it dissolves 13b's re-grant coupling, and it stops the cardinality check's `event not found → return` no-op from failing *open* under a role RLS hides the event row from (F26 arriving through a deferred trigger). The work-log's twelfth-loop-back ratification is the canonical explanation; the ruling summary below §2h is superseded on this point.
+
 ### F63 — §4b's wording overstates what the marker proves
 
 > "The current wording says the GUC proves that 'a sanctioned function wrote

@@ -5791,3 +5791,61 @@ No auth surface, route, or action is touched, so the stricter Phase 4/5 e2e gate
 I wrote no files and left no database residue; the working tree and the catalog snapshot are exactly as I found them.
 
 ---
+
+# Phase 6 — Shipped vs Intent (analyst), continued → Third external review addendum (F60–F64, v0.25.4)
+
+*Recorded verbatim by the orchestrator, 2026-09-25. Follow-ups 1 and 2 and the release-note phrasing note applied in the recording commit.*
+
+**Scope:** the third external post-merge review round only — F60–F64, the eleventh/twelfth Phase 3 loop-backs, the tenth Phase 4 pass, and QA's "Re-verification after the tenth pass." The pipeline's original Phase 6 SHIP IT and the two prior hardening-round addenda stand unchanged; this section judges only the delta since.
+
+**Read:** `docs/schema-design-2.md` §2h (`docs/schema-design-2.md:1191-1373`); the tech-lead's eleventh ruling and twelfth-loop-back ratification (`docs/work-log/2026-09-24-lifecycle-affiliation-returns.md:5283-5583`); database-admin's tenth pass with six deviations (`:5401-5528`); QA's re-verification (`:5586-5791`); `docs/decisions.md` DECISION-148 (`:7-9`) and DECISION-141's F63 correction (`:39-49`); `docs/release-notes/v0.25.md` 0.25.4 (`:76-89`); `docs/TODO.md` (Done line `:292`, tenth-pass follow-ups `:115`, test-coverage punch-list `:113`, `presby_record_lifecycle_event()` line `:54`).
+
+## VERDICT
+
+**SHIP WITH NOTES**
+
+## ONE-LINE TAKE
+
+> The reviewer's two blockers — `pg_temp` and F59's residual — are genuinely closed, the team caught and honestly corrected its own wrong reasoning about F62 along the way (in the DDL and the work-log, if not in the one document that calls itself canonical), and one small integration-time housekeeping obligation from the ruling itself never landed.
+
+## What's Working
+
+- **F60** is real security work, not cleanup, and it's proven as such: QA independently reproduced the pre-fix exploit on this pipeline's own `presby_org_affiliated()` (temp-table decoy flips a cross-council authority answer from `false` to `true`), confirmed all 24 in-pipeline `DEFINER` functions now pin `search_path=public, pg_temp` on the live catalog, and isolated the `pg_temp` clause itself as the cause with a controlled before/after pair — not just a green test. The scoped, name-array assertion (rather than a hand-frozen allow-list of the *older*, not-yet-fixed functions) is the right call, and the widening path to `0048` is unambiguous.
+- **F59 is closed, not reaccepted, this time verified at the mechanism that matters.** QA drove all four probes from the ninth pass's still-open residual (armed+named, unarmed, armed+omitted, fabricated `published_at`) and confirmed the refusal happens at the **grant** in three of four cases and named the trigger as the refusing layer in the fourth (`SQLERRM`, not `SQLSTATE`, since both raise `42501`). The suite's own FAIL branch (`scripts/test-rls.sql:5059`, `:5085`) means a regression to table-level `INSERT` fails loudly, not silently.
+- **F62's self-correction is the most creditable thing in this round.** The ruling's stated mechanism (a deferred trigger fires under the ambient role at `COMMIT`) was wrong, database-admin caught it by actually measuring rather than trusting the ruling, and the fix was kept anyway on two reasons that survive the correction — grant-coupling dissolution and, more importantly, the F26 fail-open shape (an `INVOKER` check that can't see the row it's checking silently passes). QA re-measured the same probe independently and confirmed D1's correction is right. This is exactly the "state the residual exactly as far as it goes and no further" discipline CLAUDE.md's external-review convention asks for, applied to the team's own prior claim, not just to the schema.
+- **F63/F64** — all four corrections verified against the live catalog or the column comment they're supposed to match, not just against the diff.
+- **Idempotence and coverage are re-proven, not re-asserted:** whole-file double re-apply byte-identical three ways; `test-rls.sql` 412→433 with the two `§35` retirements handled honestly (retired-in-place with reasoning kept, not silently deleted); `presbytery.test.ts` 34→35; no auth/route/action surface touched, so the stricter e2e gate correctly doesn't apply.
+
+## Intent-vs-Shipped Diff
+
+- Reviewer asked for `pg_temp` explicit-and-last on every `SECURITY DEFINER` function in this pipeline. Shipped exactly, plus a correction of the coordinator's own claim about `presby_freeze_used_field_spec()` (it already had `public`, just needed `pg_temp` appended) — verified true on direct inspection. **Matches.**
+- Reviewer asked that F59 not be an acceptable final state. Shipped: the write path moved off Drizzle's all-column builder, the grant narrowed to 68 columns (three exclusions, not two — `published_at` added beyond the strict requirement), and QA reproduced the refusal at the grant independently. **Matches, and closes the loop the tenth loop-back had prematurely called done.**
+- Reviewer asked the deferred lifecycle path be tested through `COMMIT` as the tenant role, "if necessary" converting the wrappers to `DEFINER`. Shipped: tested through both `SET CONSTRAINTS ALL IMMEDIATE` and a real `COMMIT` fire path (by QA, independently), which disproved the ruling's own premise — and the team wrote that down rather than quietly building around the discrepancy. **Matches, and exceeds — the reviewer got a truer answer than they asked for.**
+- Reviewer asked the `§4b` overclaim be corrected and named it should propagate "wherever the DDL comments repeat the stronger claim." Shipped in `drizzle/0046` §4b and `docs/decisions.md` DECISION-141 ¶3 (both verified inline, not just in a trailing note). **Matches** — but see the note on `docs/schema-design-2.md` §2h below, which is a different document than either of the two the reviewer or F63 named, and which the pipeline's own convention separately obligates to stay accurate.
+
+## Edge Cases
+
+- Empty state / mobile / failure microcopy / audit events: not applicable — no UI or application-facing writer ships in this round (the sole existing caller, `setCongregationStatisticsAction`, is unchanged and still audits under `AUDIT_ACTIONS.CONGREGATION_STATISTICS_ENTERED`).
+- Permission gate: confirmed unaffected — QA read the caller and confirmed `hasPermission(..., STATISTICS_MANAGE)` inside `withOrgContext()` is untouched; `organizationId` never comes from client input.
+- **The one edge case this round's own process didn't fully close:** an integration-time TODO obligation the ruling itself created.
+
+## Follow-Ups
+
+1. **`docs/TODO.md`'s `presby_record_lifecycle_event()` line (`docs/TODO.md:54`) is missing the F62 scaffold-coupling note.** Database-admin's D6 and the tech-lead's twelfth-loop-back ratification both explicitly named this as "owed at integration" — *"add to `presby_record_lifecycle_event()`'s existing line: 'drops `presby_test_only_lifecycle_writer_f62()` and `scripts/test-rls.sql` §38 in the same migration.'"* QA's Phase 5 report checked only that the F59 Next-Up line was retired and the F60–F64 Done line was present (`:5691`, correct as far as it goes) — it did not check this specific coupling note, and it isn't there. The scaffold function's own inline `COMMENT ON FUNCTION` (`drizzle/0044_presby_org_lifecycle.sql:1695`) does state the drop obligation clearly on its own, which is why this is a note and not a blocker — but Workflow Rule 10 requires the tracked line, and a future implementer working from `docs/TODO.md` alone (this pipeline's own established practice for exactly this kind of coupling) would miss it. **Action: add the note to that line now.**
+2. **`docs/schema-design-2.md` §2h still states F62's original, disproven mechanism as ruled fact, with no pointer to the correction.** The section explicitly says it exists "so this section stays the canonical record, per this document's own convention" (`docs/schema-design-2.md:1300-1306`), yet its F62 paragraph (`:1339-1360`) repeats "a deferred constraint trigger fires under the session's ambient role" as the reasoning, unamended. The correction is carried honestly in two other places — `drizzle/0044`'s §13b3 DDL comment (`:1580-1622`, thorough and explicit) and the work-log's twelfth-loop-back ratification (`:5535-5554`, which explicitly says "the corrected mechanism is recorded here and stands as the canonical explanation going forward... §2h's Ruling-3 summary is understood to be superseded by this note rather than independently re-edited") — but that disclaimer is itself only in the work-log, not in §2h. A reader who opens `schema-design-2.md` alone — the document positioned as the canonical review-findings log — gets the wrong story with no signpost that it's wrong. **Action: one sentence in §2h's F62 paragraph pointing to the twelfth-loop-back correction**, consistent with how the document already handles other mid-flight corrections (e.g., D11's `~~struck~~` / "superseded" convention visible elsewhere in the same file at `:363`).
+3. Already tracked, confirmed present, not re-added: QA Findings 2–4 (`docs/TODO.md:115`); QA Finding 1 / the rate-limit hermeticity issue, folded into the pre-existing coverage punch-list item 1 (`docs/TODO.md:113,219`).
+4. **The 0.25.4 release note is not misleading against the accepted-residual list**, checked specifically: the owner-connection re-arm residual is correctly left unclaimed (bullet 2 scopes its "closed" language to "created by the application"); the older-14-functions gap is explicitly named as deferred to a separate release; the hand-maintained §36 array (internal test-suite fragility, not user-facing) is appropriately omitted. One soft note, not a correction: bullet 3's phrasing ("now runs with the privileges it needs regardless of which connection recorded the act") is written from the ruling's original, since-corrected narrative rather than the truer one QA and D1 established (the real gap was a *visibility* failure for a role that can't see the row it's checking, not a privilege failure reachable on any live path today) — and the note's own closing line, "No functional change on any screen," already keeps this honest for a member reader. Not worth a fix commit on its own; worth folding into Follow-Up 2's correction pass since both stem from the same unpropagated D1 note.
+
+Neither follow-up rises to NEEDS REWORK. The shipped security fix is correctly built, independently reproduced by QA at the mechanism level (not the test-pass level) for all five findings, and the gaps found here are both documentation/housekeeping — one a missed cross-reference the pipeline's own rules already required, the other a canonical document not yet updated to match a correction its own author already made honestly elsewhere.
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 6 — Shipped vs intent (addendum, third external review round, F60–F64) | analyst | Complete | **SHIP WITH NOTES** — two follow-ups above; the original v0.24.0 verdict and the two prior hardening-round addenda stand unchanged | 2026-09-25 |
+
+**Workflow Rule 12 (feedback row):** not applicable — this pipeline did not originate from in-app member feedback.
+**Workflow Rule 13 (what's-new advisory):** not applicable — internal schema/security hardening, zero member-visible behavior change, and the release note itself states this ("No functional change on any screen").
+**Workflow Rule 10 (TODO reconciliation):** partially incomplete as shipped — Follow-Up 1 above is the missing piece; recommend the orchestrator add it in the same commit that records this addendum, per how the pipeline has handled every prior addendum's follow-ups.
+
+
+
+---

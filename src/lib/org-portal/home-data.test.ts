@@ -96,7 +96,12 @@ describe.skipIf(!hasDb)(
       async function person(first: string, last: string, preferred?: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: first, lastName: last, preferredName: preferred ?? null })
+          .values({
+            firstName: first,
+            lastName: last,
+            preferredName: preferred ?? null,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         return p!.id;
       }

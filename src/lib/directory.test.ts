@@ -221,7 +221,12 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     async function person(first: string, last: string, dob: string | null) {
       const [p] = await platform
         .insert(people)
-        .values({ firstName: first, lastName: last, dateOfBirth: dob })
+        .values({
+          firstName: first,
+          lastName: last,
+          dateOfBirth: dob,
+          deletableUntil: fixtureDeletableUntil(),
+        })
         .returning({ id: people.id });
       return p!.id;
     }
@@ -1467,7 +1472,11 @@ describe.skipIf(!hasDb)(
       async function person(first: string, last: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: first, lastName: last })
+          .values({
+            firstName: first,
+            lastName: last,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         allPeople.push(p!.id);
         return p!.id;

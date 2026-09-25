@@ -24,7 +24,7 @@
  * `presby_app`-shaped DELETE cannot do for an approved row (nor should it).
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
@@ -196,7 +196,11 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     async function person(first: string, last: string) {
       const [p] = await platform
         .insert(people)
-        .values({ firstName: first, lastName: last })
+        .values({
+          firstName: first,
+          lastName: last,
+          deletableUntil: fixtureDeletableUntil(),
+        })
         .returning({ id: people.id });
       return p!.id;
     }
@@ -810,6 +814,90 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         outsiderPerson,
       );
       expect(result).toEqual({ kind: "ok", actions: [] });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // THE ROLL IS THE SYSTEM OF RECORD, enforced by a composite key (B-M3).
+  // docs/work-log/2026-09-25-security-schema-b.md;
+  // drizzle/0048_presby_security_b.sql section 7.
+  //
+  // `roll_actions.voids_action_id` was a PLAIN self-FK to roll_actions(id),
+  // so a void recorded in one congregation could cite — and claim to
+  // annul — an approved action on ANOTHER congregation's roll. RLS filters
+  // the read; it does not filter that write (F2). The FK is now
+  // (voids_action_id, organization_id) -> (id, organization_id).
+  // -------------------------------------------------------------------------
+  describe("roll_actions.voids_action_id composite FK (B-M3)", () => {
+    it("refuses a void that cites another congregation's roll action — regression for B-M3 roll_actions.voids_action_id", async () => {
+      const platform = getPlatformDb();
+      // Any approved action belonging to some OTHER organization. The
+      // seed-dev fixture guarantees several; skip rather than pass vacuously
+      // if this database somehow has none.
+      const [foreign] = await platform
+        .select({
+          id: rollActions.id,
+          organizationId: rollActions.organizationId,
+        })
+        .from(rollActions)
+        .where(ne(rollActions.organizationId, orgA))
+        .limit(1);
+      expect(foreign).toBeDefined();
+
+      const chain = await platform
+        .insert(rollActions)
+        .values({
+          organizationId: orgA,
+          personId: rollSubject,
+          kind: "void",
+          effectiveDate: "2026-03-01",
+          approvalStatus: "pending",
+          proposedBy: proposerUserId2,
+          voidsActionId: foreign!.id,
+        })
+        .then(
+          () => "NO ERROR — the cross-org void was accepted",
+          (e: unknown) => {
+            const parts: string[] = [];
+            for (
+              let cur = e as { message?: string; cause?: unknown } | undefined;
+              cur;
+
+            ) {
+              if (cur.message) parts.push(cur.message);
+              cur = cur.cause as
+                | { message?: string; cause?: unknown }
+                | undefined;
+            }
+            return parts.join(" | ");
+          },
+        );
+      expect(chain).toMatch(/roll_actions_voids_fk|foreign key/);
+    });
+
+    it("still permits a void that cites an action on its OWN roll", async () => {
+      const platform = getPlatformDb();
+      const [target] = await platform
+        .select({ id: rollActions.id })
+        .from(rollActions)
+        .where(eq(rollActions.organizationId, orgA))
+        .limit(1);
+      expect(target).toBeDefined();
+
+      const [voided] = await platform
+        .insert(rollActions)
+        .values({
+          organizationId: orgA,
+          personId: rollSubject,
+          kind: "void",
+          effectiveDate: "2026-03-02",
+          approvalStatus: "pending",
+          proposedBy: proposerUserId2,
+          voidsActionId: target!.id,
+        })
+        .returning({ id: rollActions.id });
+      expect(voided?.id).toBeDefined();
+      await platform.delete(rollActions).where(eq(rollActions.id, voided!.id));
     });
   });
 });

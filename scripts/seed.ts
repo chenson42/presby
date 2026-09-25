@@ -18,8 +18,10 @@ if (!process.env.DATABASE_URL) {
 if (!process.env.PLATFORM_DATABASE_URL) {
   throw new Error(
     "Set PLATFORM_DATABASE_URL in .env.local before running the seed — " +
-      "seedGroupTypes() needs the RLS-bypassing platform connection (see " +
-      "its own comment for why).",
+      "every global-catalog write here (roles, features, role_features, " +
+      "feature_flags, group_types) needs the RLS-bypassing, owner " +
+      "connection; presby_app holds SELECT only on those tables since " +
+      "drizzle/0048 (see the platformDb comment below for why).",
   );
 }
 
@@ -40,15 +42,36 @@ if (initialAdmins.length === 0) {
 const sql = neon(process.env.DATABASE_URL);
 const db = drizzle(sql, { schema });
 
-// RLS-bypassing connection (presby_platform role), used ONLY by
-// seedGroupTypes() below — group_types is a FORCE-RLS tenant table
-// (drizzle/0009_presby_rls.sql) whose tenant_isolation policy is
-// `organization_id = presby_current_org()`. A platform-wide template row has
-// `organization_id IS NULL`, and NULL never equals anything under standard
-// SQL equality — not even under a matching org context — so `db` (the plain
-// presby_app connection every other seed function here correctly uses) can
-// NEVER insert one; confirmed by running this script against a real database
-// before this comment was written (see work-log Phase 4 Implementer Notes).
+// The RLS-bypassing connection. It authenticates as `neondb_owner`, NOT as
+// `presby_platform` — this comment said `presby_platform` until 2026-09-25
+// and was wrong (B-I3 / DECISION-146): that role exists in the catalog but is
+// `rolcanlogin = false` and nothing has ever connected as it. `neondb_owner`
+// owns every table, so it holds every privilege by ownership and bypasses RLS
+// (F44). See src/lib/db/index.ts for the same correction.
+//
+// EVERY GLOBAL-CATALOG WRITE IN THIS FILE RUNS HERE, for two distinct
+// reasons:
+//
+//   1. group_types (seedGroupTypes) — a FORCE-RLS tenant table
+//      (drizzle/0009) whose SELECT policy now admits `organization_id is
+//      null` (drizzle/0048 section 5) but whose INSERT arm still does not.
+//      A platform-wide template row has `organization_id IS NULL`, so `db`
+//      can never insert one.
+//
+//   2. roles, features, role_features, feature_flags (seedRoles,
+//      seedFeatures, seedFlags, bindAdminFeatures,
+//      bindSupportOperatorFeatures) — drizzle/0048 section 2 (B-H3) revokes
+//      INSERT/UPDATE/DELETE on the global catalogs from `presby_app` and
+//      leaves it SELECT-only. These five functions ran on `db` until then; a
+//      fresh `npm run db:seed` would now fail with `permission denied` on
+//      the very first statement. The revoke and this connection swap are ONE
+//      ATOMIC UNIT — neither half ships without the other.
+//
+// Everything that is genuinely tenant/user data (seedLocalAdmin,
+// seedMemberUser, seedMfaAdminUser and their user_roles rows) deliberately
+// stays on `db`: those tables keep their full CRUD grant, and running them
+// through the tenant connection is the only part of this script that
+// exercises the grant model a real sign-in depends on.
 const platformSql = neon(process.env.PLATFORM_DATABASE_URL);
 const platformDb = drizzle(platformSql, { schema });
 
@@ -64,14 +87,14 @@ async function seedRoles() {
     { name: MEMBER_ROLE, displayName: "Member", isSystem: true, sortOrder: 100 },
   ];
   for (const r of defs) {
-    await db.insert(schema.roles).values(r).onConflictDoNothing();
+    await platformDb.insert(schema.roles).values(r).onConflictDoNothing();
   }
   console.log("seeded roles");
 }
 
 async function seedFeatures() {
   for (const f of FEATURE_CATALOG) {
-    await db.insert(schema.features).values(f).onConflictDoNothing();
+    await platformDb.insert(schema.features).values(f).onConflictDoNothing();
   }
   console.log(`seeded ${FEATURE_CATALOG.length} features`);
 }
@@ -717,7 +740,7 @@ async function seedFlags() {
     },
   ];
   for (const f of defaults) {
-    await db.insert(schema.featureFlags).values(f).onConflictDoNothing();
+    await platformDb.insert(schema.featureFlags).values(f).onConflictDoNothing();
   }
   console.log(`seeded ${defaults.length} feature flags`);
 }
@@ -786,12 +809,12 @@ async function seedGroupTypes() {
 }
 
 async function bindAdminFeatures() {
-  const admin = await db.query.roles.findFirst({
+  const admin = await platformDb.query.roles.findFirst({
     where: eq(schema.roles.name, ADMIN_ROLE),
   });
   if (!admin) return;
   for (const key of Object.values(FEATURES)) {
-    await db
+    await platformDb
       .insert(schema.roleFeatures)
       .values({ roleId: admin.id, featureKey: key })
       .onConflictDoNothing();
@@ -800,7 +823,7 @@ async function bindAdminFeatures() {
 }
 
 async function bindSupportOperatorFeatures() {
-  const role = await db.query.roles.findFirst({
+  const role = await platformDb.query.roles.findFirst({
     where: eq(schema.roles.name, SUPPORT_OPERATOR_ROLE),
   });
   if (!role) return;
@@ -818,7 +841,7 @@ async function bindSupportOperatorFeatures() {
     FEATURES.ADMIN_TICKETS,
     FEATURES.ADMIN_FEEDBACK,
   ]) {
-    await db
+    await platformDb
       .insert(schema.roleFeatures)
       .values({ roleId: role.id, featureKey: key })
       .onConflictDoNothing();

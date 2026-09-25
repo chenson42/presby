@@ -37,7 +37,19 @@ export const groupTypes = pgTable(
     key: text("key").notNull(), // committee | small_group | choir | team | court
     name: text("name").notNull(),
   },
-  (t) => [index("group_types_org_idx").on(t.organizationId, t.key)],
+  (t) => [
+    /**
+     * NULLS NOT DISTINCT is load-bearing, not stylistic (B-L1, drizzle/0048
+     * section 5). Every row here is global (organization_id IS NULL —
+     * DECISION-110 ruling 1), and under the default NULLS DISTINCT a plain
+     * `unique (organization_id, key)` constrains nothing for exactly the rows
+     * that exist. That is how 1,557 duplicate rows accumulated. Replaces the
+     * old non-unique `group_types_org_idx`, which the migration drops.
+     */
+    unique("group_types_org_key")
+      .on(t.organizationId, t.key)
+      .nullsNotDistinct(),
+  ],
 );
 
 export const groups = pgTable(

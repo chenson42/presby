@@ -230,7 +230,12 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     async function person(first: string, last: string, dob: string | null = null) {
       const [p] = await platform
         .insert(people)
-        .values({ firstName: first, lastName: last, dateOfBirth: dob })
+        .values({
+          firstName: first,
+          lastName: last,
+          dateOfBirth: dob,
+          deletableUntil: fixtureDeletableUntil(),
+        })
         .returning({ id: people.id });
       trackedPeopleIds.push(p!.id);
       return p!.id;
@@ -353,12 +358,30 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     }
     // createPerson's own "new identity" tests insert additional people rows
     // this array never tracked — sweep by the stamped surname instead.
-    await platform.delete(people).where(eq(people.lastName, `NewPerson${stamp}`));
-    // rollAction.kind "none" (DECISION-128/129) tests' own "new identity"
-    // people rows — same sweep-by-surname reasoning as NewPerson above.
-    await platform.delete(people).where(eq(people.lastName, `StaffOnly${stamp}`));
-    await platform.delete(people).where(eq(people.lastName, `StaffDirectoryLeak${stamp}`));
-    await platform.delete(people).where(eq(people.lastName, `StaffFindPersonLeak${stamp}`));
+    //
+    // THESE FOUR SWEEPS STAMP AT TEARDOWN, unlike every other people fixture
+    // in the suite, and the difference is not laziness: these rows were
+    // created by PRODUCTION code (src/lib/people.ts's createPerson, reached
+    // through proposeRollAction/createStaffPerson), which must never stamp
+    // deletable_until — a production person row carrying a deletion window
+    // is exactly what presby_guard_people_delete() exists to prevent. There
+    // is no fixture INSERT to stamp, so the window is opened here, narrowly,
+    // against the same surname predicate the DELETE uses. Rows a fixture
+    // inserts are still stamped at insert (N-6 / drizzle/0048 section 8).
+    for (const surname of [
+      `NewPerson${stamp}`,
+      // rollAction.kind "none" (DECISION-128/129) tests' own "new identity"
+      // people rows — same sweep-by-surname reasoning as NewPerson above.
+      `StaffOnly${stamp}`,
+      `StaffDirectoryLeak${stamp}`,
+      `StaffFindPersonLeak${stamp}`,
+    ]) {
+      await platform
+        .update(people)
+        .set({ deletableUntil: fixtureDeletableUntil() })
+        .where(eq(people.lastName, surname));
+      await platform.delete(people).where(eq(people.lastName, surname));
+    }
     await platform.delete(users).where(eq(users.id, grantingUserId));
   });
 
@@ -376,7 +399,11 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       const platform = getPlatformDb();
       const [bare] = await platform
         .insert(people)
-        .values({ firstName: "Bare", lastName: `Grantless${stamp}` })
+        .values({
+          firstName: "Bare",
+          lastName: `Grantless${stamp}`,
+          deletableUntil: fixtureDeletableUntil(),
+        })
         .returning({ id: people.id });
       trackedPeopleIds.push(bare!.id);
       await platform
@@ -861,6 +888,86 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       expect(matchResult.kind).toBe("ok");
       if (matchResult.kind !== "ok") return;
       expect(matchResult.personIds).not.toContain(created.personId);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Never Hard-Delete a Person, on the OWNER path (N-6).
+  // docs/work-log/2026-09-25-security-schema-b.md;
+  // drizzle/0048_presby_security_b.sql section 8.
+  //
+  // `people` was presby_app = arw (DELETE clawed back in drizzle/0009:376)
+  // and carried ZERO triggers, so the invariant was enforced on the tenant
+  // connection by a grant and on the owner connection — the one
+  // getPlatformDb() uses, and the one the 2026-08-31 cascade went through —
+  // by nothing at all. A revoke never binds neondb_owner (F44); only a
+  // trigger does.
+  // -------------------------------------------------------------------------
+  describe("presby_guard_people_delete — the owner-path delete guard (N-6)", () => {
+    it("refuses to hard-delete an unstamped person on the platform connection — regression for N-6 people delete guard", async () => {
+      const platform = getPlatformDb();
+      const [row] = await platform
+        .insert(people)
+        .values({ firstName: "Unstamped", lastName: `GuardProbe${stamp}` })
+        .returning({ id: people.id });
+      const personId = row!.id;
+      try {
+        await expect(
+          platform.delete(people).where(eq(people.id, personId)),
+        ).rejects.toThrow();
+        // Still there. That is the whole claim.
+        const still = await platform
+          .select({ id: people.id })
+          .from(people)
+          .where(eq(people.id, personId));
+        expect(still).toHaveLength(1);
+      } finally {
+        await platform
+          .update(people)
+          .set({ deletableUntil: fixtureDeletableUntil() })
+          .where(eq(people.id, personId));
+        await platform.delete(people).where(eq(people.id, personId));
+      }
+    });
+
+    it("permits the delete while deletable_until is in the future, and refuses it once expired", async () => {
+      const platform = getPlatformDb();
+      // Expired stamp: a stale marker must NOT grant permanent deletability —
+      // the same predicate organizations uses (drizzle/0044).
+      const [expired] = await platform
+        .insert(people)
+        .values({
+          firstName: "Expired",
+          lastName: `GuardProbe${stamp}`,
+          deletableUntil: new Date(Date.now() - 60_000),
+        })
+        .returning({ id: people.id });
+      await expect(
+        platform.delete(people).where(eq(people.id, expired!.id)),
+      ).rejects.toThrow();
+
+      // Live stamp: this is the fixture-teardown path every DB-backed suite
+      // in this repo depends on.
+      await platform
+        .update(people)
+        .set({ deletableUntil: fixtureDeletableUntil() })
+        .where(eq(people.id, expired!.id));
+      await platform.delete(people).where(eq(people.id, expired!.id));
+      const gone = await platform
+        .select({ id: people.id })
+        .from(people)
+        .where(eq(people.id, expired!.id));
+      expect(gone).toHaveLength(0);
+    });
+
+    it("the tenant connection still holds no DELETE on people at all", async () => {
+      // Two layers, and neither substitutes for the other: the grant stops
+      // presby_app, the trigger stops the owner.
+      const platform = getPlatformDb();
+      const [granted] = await platform.execute(
+        sql`select has_table_privilege('presby_app', 'people', 'DELETE') as ok`,
+      ).then((r) => r.rows as Array<{ ok: boolean }>);
+      expect(granted!.ok).toBe(false);
     });
   });
 });

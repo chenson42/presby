@@ -108,7 +108,10 @@ export const personMilestones = pgTable(
     performedByOrgId: uuid("performed_by_org_id").references(
       () => organizations.id,
     ),
-    rollActionId: uuid("roll_action_id").references(() => rollActions.id),
+    // Composite (B-M3, drizzle/0048 section 7) — see the foreignKey entry
+    // below; the plain `.references(() => rollActions.id)` it replaces let a
+    // milestone in org B cite a roll action in org A (F2).
+    rollActionId: uuid("roll_action_id"),
     notes: text("notes"),
   },
   (t) => [
@@ -128,6 +131,14 @@ export const personMilestones = pgTable(
       foreignColumns: [memberships.personId, memberships.organizationId],
       name: "person_milestones_officiant_fk",
     }),
+    // Composite Tenant Keys (F2 / B-M3). DDL: drizzle/0048 section 7.
+    foreignKey({
+      columns: [t.rollActionId, t.organizationId],
+      foreignColumns: [rollActions.id, rollActions.organizationId],
+      name: "person_milestones_roll_action_fk",
+    }),
+    // B-L6: this FK column had no index at all (measured 2026-09-25).
+    index("person_milestones_roll_action_idx").on(t.rollActionId),
   ],
 );
 

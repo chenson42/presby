@@ -192,7 +192,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       where: eq(featureFlags.key, "sites.public_render"),
     });
     originalPublicRenderEnabled = existingFlag?.enabled ?? false;
-    await db
+    // getPlatformDb(), not db: drizzle/0048 section 2 (B-H3) revokes INSERT on
+    // feature_flags from presby_app — a flag is CREATED by the seeder on the
+    // owner connection, never by a tenant request. The UPDATE half of this
+    // upsert would still be permitted; the INSERT half is not.
+    await getPlatformDb()
       .insert(featureFlags)
       .values({ key: "sites.public_render", enabled: true })
       .onConflictDoUpdate({
@@ -293,7 +297,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
     async function person(first: string, last: string): Promise<string> {
       const [p] = await platform
         .insert(people)
-        .values({ firstName: first, lastName: last })
+        .values({
+          firstName: first,
+          lastName: last,
+          deletableUntil: fixtureDeletableUntil(),
+        })
         .returning({ id: people.id });
       return p!.id;
     }
@@ -547,7 +555,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         where: eq(featureFlags.key, "ui.brand_theming"),
       });
       originalBrandThemingEnabled = existing?.enabled ?? false;
-      await db
+      // getPlatformDb(), not db: drizzle/0048 section 2 (B-H3) revokes INSERT on
+      // feature_flags from presby_app — a flag is CREATED by the seeder on the
+      // owner connection, never by a tenant request. The UPDATE half of this
+      // upsert would still be permitted; the INSERT half is not.
+      await getPlatformDb()
         .insert(featureFlags)
         .values({ key: "ui.brand_theming", enabled: true })
         .onConflictDoUpdate({
@@ -1439,7 +1451,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       async function personActiveAt(label: string, organizationId: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: "Fixture", lastName: label })
+          .values({
+            firstName: "Fixture",
+            lastName: label,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         await platform.insert(memberships).values({
           personId: p!.id,
@@ -1537,7 +1553,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         where: eq(featureFlags.key, "sites.public_staff_directory"),
       });
       originalPublicStaffDirectoryEnabled = existing?.enabled ?? false;
-      await db
+      // getPlatformDb(), not db: drizzle/0048 section 2 (B-H3) revokes INSERT on
+      // feature_flags from presby_app — a flag is CREATED by the seeder on the
+      // owner connection, never by a tenant request. The UPDATE half of this
+      // upsert would still be permitted; the INSERT half is not.
+      await getPlatformDb()
         .insert(featureFlags)
         .values({ key: "sites.public_staff_directory", enabled: true })
         .onConflictDoUpdate({
@@ -1550,7 +1570,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       async function personAt(label: string): Promise<string> {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: "Zz", lastName: `${label} ${rosterStamp}` })
+          .values({
+            firstName: "Zz",
+            lastName: `${label} ${rosterStamp}`,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         await platform.insert(memberships).values({
           organizationId: orgLive,
@@ -1890,7 +1914,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         where: eq(featureFlags.key, "sites.public_committee_directory"),
       });
       originalPublicCommitteeDirectoryEnabled = existing?.enabled ?? false;
-      await db
+      // getPlatformDb(), not db: drizzle/0048 section 2 (B-H3) revokes INSERT on
+      // feature_flags from presby_app — a flag is CREATED by the seeder on the
+      // owner connection, never by a tenant request. The UPDATE half of this
+      // upsert would still be permitted; the INSERT half is not.
+      await getPlatformDb()
         .insert(featureFlags)
         .values({ key: "sites.public_committee_directory", enabled: true })
         .onConflictDoUpdate({
@@ -1918,7 +1946,11 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       async function personAt(label: string): Promise<string> {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: "Zz", lastName: `${label} ${committeeStamp}` })
+          .values({
+            firstName: "Zz",
+            lastName: `${label} ${committeeStamp}`,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         await platform.insert(memberships).values({
           organizationId: orgLive,

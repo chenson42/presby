@@ -7,7 +7,7 @@ import {
   timestamp,
   index,
   unique,
-  type AnyPgColumn,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./org";
 import { users } from "../schema";
@@ -61,19 +61,16 @@ export const events = pgTable(
     // The one legitimate timestamptz column (an instant, not a schedule
     // fact) — DECISION-113 ruling 3's own carve-out.
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-    // Self-referential, standard Drizzle explicit-return-type idiom to break
-    // TS circularity (`(): AnyPgColumn => events.id`). Deliberately NOT a
-    // composite (id, organizationId) self-FK — architect's Phase 2 ruling
-    // that a self-referencing composite FK is not expressible here without
-    // circularity, the same class as groups' own derived-check. The same-org
-    // property is enforced entirely at the application layer (see src/lib/
-    // events.ts's "Same-org parent guard") — an accepted, narrow deviation
-    // from Composite Tenant Keys, same class as
-    // groupMemberships.officerTermId (DECISION-060), flagged here rather
-    // than silently accepted.
-    parentEventId: uuid("parent_event_id").references(
-      (): AnyPgColumn => events.id,
-    ),
+    // Self-referential AND composite (B-M3, drizzle/0048 section 7). The
+    // earlier single-column `.references((): AnyPgColumn => events.id)` was
+    // an accepted F2 deviation on the premise that a self-referencing
+    // composite FK could not be expressed here without TS circularity. That
+    // premise was wrong: the `(t) => [...]` array is stored as
+    // table[ExtraConfigBuilder] and is not invoked until after the module
+    // finishes loading, so plain column references need no lazy thunk. The
+    // constraint itself is enforced by
+    // drizzle/0048_presby_security_b.sql's `events_parent_fk`.
+    parentEventId: uuid("parent_event_id"),
     // Convenience generation string only (e.g. "weekly", "2nd Tuesday") —
     // NEVER parsed at read time (DECISION-113 ruling 1). Set ONLY on a
     // series' first (parent) row; null on every generated child and on every
@@ -100,5 +97,18 @@ export const events = pgTable(
     // list, extendSeriesPattern's latest-occurrence lookup).
     index("events_org_parent_idx").on(t.organizationId, t.parentEventId),
     unique("events_id_org_key").on(t.id, t.organizationId),
+    // Composite Tenant Keys (F2 / B-M3). A child occurrence may only point at
+    // a parent in ITS OWN org. No new index: events_org_parent_idx above
+    // already leads with the same pair. DDL: drizzle/0048 section 7.
+    foreignKey({
+      columns: [t.parentEventId, t.organizationId],
+      // `t.id` / `t.organizationId`, NOT `events.id` / `events.organizationId`:
+      // on a SELF-referencing composite FK, naming the table inside its own
+      // `(t) => [...]` array makes the table's inferred type depend on itself
+      // (TS7022/TS7024 — measured). `t` is the same column set and carries
+      // the same table reference, with no circularity.
+      foreignColumns: [t.id, t.organizationId],
+      name: "events_parent_fk",
+    }),
   ],
 );

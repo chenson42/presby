@@ -203,7 +203,11 @@ describe.skipIf(!hasDb)(
       async function person(first: string, last: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: first, lastName: last })
+          .values({
+            firstName: first,
+            lastName: last,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         trackedPeopleIds.push(p!.id);
         return p!.id;
@@ -267,6 +271,16 @@ describe.skipIf(!hasDb)(
         );
       }
       for (const id of trackedPeopleIds) {
+        // trackedPeopleIds holds BOTH fixture-inserted rows (stamped at
+        // insert) and rows createStaffPersonAction() created through
+        // production code, which never stamps deletable_until and must not.
+        // Opening the window here for the latter is the narrow exception the
+        // N-6 guard's fixture story allows; see src/lib/people.test.ts's
+        // afterAll for the same reasoning at greater length.
+        await platform
+          .update(people)
+          .set({ deletableUntil: fixtureDeletableUntil() })
+          .where(eq(people.id, id));
         await platform.delete(people).where(eq(people.id, id));
       }
       await platform.delete(users).where(eq(users.id, grantingUserId));

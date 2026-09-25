@@ -185,6 +185,27 @@
       "breakpoints": true
     },
     {
+      "idx": 26,
+      "version": "7",
+      "when": 1787014049186,
+      "tag": "0026_presby_org_feature_toggles",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1787014050186,
+      "tag": "0027_presby_member_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1787014051186,
+      "tag": "0028_presby_people_write_rls_fix",
+      "breakpoints": true
+    },
+    {
       "idx": 29,
       "version": "7",
       "when": 1787014052186,
@@ -315,6 +336,13 @@
       "version": "7",
       "when": 1787014070186,
       "tag": "0047_presby_publications",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787014071186,
+      "tag": "0048_presby_security_b",
       "breakpoints": true
     }
   ]

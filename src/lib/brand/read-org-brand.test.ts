@@ -161,7 +161,11 @@ describe.skipIf(!hasDb)(
       async function personActiveAt(label: string, organizationId: string) {
         const [p] = await platform
           .insert(people)
-          .values({ firstName: "Fixture", lastName: label })
+          .values({
+            firstName: "Fixture",
+            lastName: label,
+            deletableUntil: fixtureDeletableUntil(),
+          })
           .returning({ id: people.id });
         // ended_on defaults to null — that null IS "active" per
         // presby_membership_is_active() (drizzle/0015).

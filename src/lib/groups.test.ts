@@ -28,7 +28,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
@@ -65,6 +65,7 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
   let setGroupMembershipPublicListed: typeof import("./groups").setGroupMembershipPublicListed;
   let setGroupMembershipPublicDisplayOrder: typeof import("./groups").setGroupMembershipPublicDisplayOrder;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
+  let withOrgContext: typeof import("@/lib/authz").withOrgContext;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
   let groups: typeof import("@/lib/db/domain/groups").groups;
@@ -115,6 +116,7 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       setGroupMembershipPublicDisplayOrder,
     } = await import("./groups"));
     ({ getPlatformDb } = await import("@/lib/db"));
+    ({ withOrgContext } = await import("@/lib/authz"));
     ({ organizations } = await import("@/lib/db/domain/org"));
     ({ groupTypes, groups, groupMemberships } = await import(
       "@/lib/db/domain/groups"
@@ -147,19 +149,40 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
     orgA = await makeOrg("A");
     orgB = await makeOrg("B");
 
+    // THIS HELPER WAS THE DUPLICATE GENERATOR (B-L1, drizzle/0048 section 5).
+    // It used to lead with `insert(...).onConflictDoNothing()`, and
+    // `group_types` had NO unique constraint at all — only a plain index —
+    // so the conflict clause never fired and every single run of this file
+    // inserted a fresh platform-wide row named after its own key. 1,557
+    // duplicates had accumulated by 2026-09-25 (118 lowercase `court`, 220
+    // lowercase `roster`, 51 lowercase `committee`) alongside the properly
+    // cased seeded rows. Read-first now, and write the seeded catalog's own
+    // display name rather than the key, so this file behaves identically
+    // against a seeded database and a freshly migrated one.
+    const GROUP_TYPE_CATALOG_NAMES: Record<string, string> = {
+      court: "Court",
+      roster: "Roster",
+      committee: "Committee",
+      small_group: "Small Group",
+      choir: "Choir",
+      team: "Team",
+    };
     async function findOrCreateGroupType(key: string) {
-      const [gt] = await platform
-        .insert(groupTypes)
-        .values({ organizationId: null, key, name: key })
-        .onConflictDoNothing()
-        .returning({ id: groupTypes.id });
-      if (gt?.id) return gt.id;
       const [existing] = await platform
         .select({ id: groupTypes.id })
         .from(groupTypes)
-        .where(eq(groupTypes.key, key))
+        .where(and(isNull(groupTypes.organizationId), eq(groupTypes.key, key)))
         .limit(1);
-      return existing!.id;
+      if (existing?.id) return existing.id;
+      const [gt] = await platform
+        .insert(groupTypes)
+        .values({
+          organizationId: null,
+          key,
+          name: GROUP_TYPE_CATALOG_NAMES[key] ?? key,
+        })
+        .returning({ id: groupTypes.id });
+      return gt!.id;
     }
     rosterTypeId = await findOrCreateGroupType("roster");
     courtTypeId = await findOrCreateGroupType("court");
@@ -233,7 +256,11 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
     async function person(first: string, last: string) {
       const [p] = await platform
         .insert(people)
-        .values({ firstName: first, lastName: last })
+        .values({
+          firstName: first,
+          lastName: last,
+          deletableUntil: fixtureDeletableUntil(),
+        })
         .returning({ id: people.id });
       return p!.id;
     }
@@ -739,7 +766,11 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       expect(session).toEqual({
         groupId: sessionGroupA,
         name: "Session",
-        groupTypeName: "court",
+        // "Court", not "court": drizzle/0048 section 5 normalized the
+        // surviving platform-template row's display name to scripts/seed.ts's
+        // catalog value, so the casing lottery among 118 duplicate rows is no
+        // longer what decides this string.
+        groupTypeName: "Court",
         memberCount: 0,
         derivedFrom: "session",
       });
@@ -758,7 +789,7 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       expect(activeMembership).toEqual({
         groupId: activeMembershipGroupA,
         name: "Active Membership",
-        groupTypeName: "roster",
+        groupTypeName: "Roster",
         memberCount: 4,
         derivedFrom: "active_membership",
       });
@@ -1196,6 +1227,75 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       await expect(listGroups(randomUUID(), orgA)).rejects.toMatchObject({
         name: "OrgAccessError",
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Security review round B — the group_types half.
+  // docs/work-log/2026-09-25-security-schema-b.md;
+  // drizzle/0048_presby_security_b.sql section 5.
+  // -------------------------------------------------------------------------
+  describe("group_types policy split and de-dup (B-M4 / B-L1)", () => {
+    // Drizzle wraps every driver error in a `Failed query: ...` DrizzleQueryError,
+    // so the Postgres message (the constraint name, or "row-level security
+    // policy") is only ever on the CAUSE chain. Matching the outer message
+    // would assert nothing more than "something went wrong."
+    async function rejectionChain(p: Promise<unknown>): Promise<string> {
+      const err = await p.then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).not.toBeNull();
+      const chain: string[] = [];
+      for (let e = err as { message?: string; cause?: unknown } | undefined; e; ) {
+        if (e.message) chain.push(e.message);
+        e = e.cause as { message?: string; cause?: unknown } | undefined;
+      }
+      return chain.join(" | ");
+    }
+
+    it("a second platform-wide row for an existing key is rejected — regression for B-L1 group_types duplicates", async () => {
+      const platform = getPlatformDb();
+      // The default NULLS DISTINCT form of unique (organization_id, key)
+      // would ACCEPT this, because every row here has a NULL
+      // organization_id and NULLs are distinct — which is exactly how 1,557
+      // duplicate rows accumulated behind an index that looked like it
+      // covered the case. drizzle/0048 uses NULLS NOT DISTINCT.
+      const chain = await rejectionChain(
+        platform
+          .insert(groupTypes)
+          .values({ organizationId: null, key: "court", name: "Court" }),
+      );
+      expect(chain).toMatch(/group_types_org_key|duplicate key/);
+    });
+
+    it("reads platform-template group types through the RLS-enforced connection, not getPlatformDb() — regression for B-M4", async () => {
+      // Before the policy split, group_types' tenant_isolation policy was
+      // `organization_id = presby_current_org()` with no NULL arm, so a
+      // platform-template row was invisible to presby_app and three reads in
+      // src/lib/groups.ts escaped to getPlatformDb() to see it. This asserts
+      // the escape is genuinely unnecessary now: getGroupFormOptions() reads
+      // group_types on `tx` and must still return the four manageable types.
+      const result = await getGroupFormOptions(clerkPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(
+        result.data.groupTypes.map((t) => t.key).sort(),
+      ).toEqual(["choir", "committee", "small_group", "team"]);
+    });
+
+    it("a tenant cannot mint a platform-wide group type — the INSERT arm stays own-org-only", async () => {
+      // DECISION-110 ruling 1 as a database property: the SELECT arm admits
+      // organization_id IS NULL, the INSERT arm does not.
+      const chain = await rejectionChain(
+        withOrgContext(clerkPerson, orgA, async (tx) =>
+          tx.insert(groupTypes).values({
+            organizationId: null,
+            key: `smuggled-${Date.now()}`,
+            name: "Smuggled",
+          }),
+        ),
+      );
+      expect(chain).toMatch(/row-level security/);
     });
   });
 });

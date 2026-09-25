@@ -97,6 +97,18 @@ export const people = pgTable(
       (): AnyPgColumn => people.id,
     ),
 
+    /**
+     * TEST-FIXTURE DELETION WINDOW, AND NOTHING ELSE (N-6, drizzle/0048
+     * section 8) — the people-table twin of `organizations.deletableUntil`
+     * (D10, drizzle/0044). Enforced by `presby_guard_people_delete()`, a
+     * BEFORE DELETE trigger Drizzle cannot express: it refuses the DELETE
+     * unless this is non-null and in the future, and it fires on the
+     * `getPlatformDb()` owner path too, which a revoke never reaches (F44).
+     * Stamp it with `fixtureDeletableUntil()` at fixture INSERT, never at
+     * teardown. Production person rows never carry a value here.
+     */
+    deletableUntil: timestamp("deletable_until", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

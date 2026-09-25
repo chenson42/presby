@@ -9,7 +9,6 @@ import {
   index,
   unique,
   foreignKey,
-  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
@@ -86,9 +85,13 @@ export const rollActions = pgTable(
     approvedBy: uuid("approved_by").references(() => users.id),
     denialReason: text("denial_reason"),
 
-    voidsActionId: uuid("voids_action_id").references(
-      (): AnyPgColumn => rollActions.id,
-    ),
+    // Self-referential AND composite (B-M3, drizzle/0048 section 7). THE
+    // ROLL IS THE SYSTEM OF RECORD, so this is the highest-value of the five
+    // composites: a void must cite an action in its own congregation's roll.
+    // No lazy thunk is needed — the `(t) => [...]` array below is not invoked
+    // until after the module finishes loading, unlike `.references()` on a
+    // column, which is evaluated inside the same synchronous pgTable() call.
+    voidsActionId: uuid("voids_action_id"),
     // Nullable for the same reason as officer_terms.recorded_by (F24):
     // opening_balance and imported actions predate the platform.
     proposedBy: uuid("proposed_by").references(() => users.id),
@@ -116,6 +119,16 @@ export const rollActions = pgTable(
       foreignColumns: [memberships.personId, memberships.organizationId],
       name: "roll_actions_person_fk",
     }),
+    // Composite Tenant Keys (F2 / B-M3). DDL: drizzle/0048 section 7.
+    foreignKey({
+      columns: [t.voidsActionId, t.organizationId],
+      // Self-reference via `t`, not `rollActions` — see events.ts's
+      // events_parent_fk for why (TS7022 circularity).
+      foreignColumns: [t.id, t.organizationId],
+      name: "roll_actions_voids_fk",
+    }),
+    // B-L6: this FK column had no index at all (measured 2026-09-25).
+    index("roll_actions_voids_idx").on(t.voidsActionId),
   ],
 );
 

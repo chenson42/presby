@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, getPlatformDb } from "@/lib/db";
 
 // Vercel cron invokes via GET. See vercel.json for the schedule (0 3 * * *).
 // Runs daily at 03:00 UTC to prune expired tokens from three tables:
@@ -68,8 +68,27 @@ export async function GET(req: Request) {
   // while every report shows the right one.
   //
   // A non-zero count here is normal on any day an action takes effect. A
-  // non-zero count that PERSISTS across runs means something else is wrong.
-  const rollReconcile = await db.execute(
+  // non-zero count that PERSISTS across runs means something else is wrong —
+  // and this field is now the ONLY routine signal for that, because
+  // presby_roll_cache_drift()'s `= 0` assertion left scripts/test-rls.sql in
+  // the same change (C-4; the drift function is no longer callable from the
+  // tenant role at all).
+  //
+  // THIS ONE STATEMENT RUNS ON getPlatformDb(), NOT db (C-4 / B-L3,
+  // drizzle/0048 section 6). presby_reconcile_current_roll() is a
+  // parameterless CROSS-ORG WRITER of memberships.current_roll: it is
+  // SECURITY DEFINER, takes no org argument, and derives no actor from
+  // presby_current_org(), so it is neither F26's case (a trigger that must
+  // see across orgs inside a guarded operation) nor DECISION-135's sanctioned
+  // function-mediated shape. 0048 revokes EXECUTE from presby_app and PUBLIC,
+  // leaving the owner connection as its only caller.
+  //
+  // Only this statement moves. The three token DELETEs above deliberately
+  // stay on `db` — moving the whole handler to one connection would widen
+  // them from presby_app to owner for no reason (Phase 2 §2(b)). This route
+  // is src/app/api/cron/, not src/app/(org)/, so the (org) contract's
+  // getPlatformDb() ban is not crossed.
+  const rollReconcile = await getPlatformDb().execute(
     sql`select presby_reconcile_current_roll() as fixed`,
   );
   const rolledForward = Number(

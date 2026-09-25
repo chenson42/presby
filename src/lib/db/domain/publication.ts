@@ -8,7 +8,6 @@ import {
   unique,
   uniqueIndex,
   uuid,
-  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
@@ -126,10 +125,14 @@ export const publications = pgTable(
     publishedAt: timestamp("published_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
-    /** The publication this one corrects. Derived, never caller-supplied. */
-    supersedesId: uuid("supersedes_id").references(
-      (): AnyPgColumn => publications.id,
-    ),
+    /**
+     * The publication this one corrects. Derived, never caller-supplied.
+     *
+     * Self-referential AND composite since B-M3 (drizzle/0048 section 7) —
+     * see the `publications_supersedes_fk` entry below. The single-column
+     * form it replaces let a correction chain cross councils (F2).
+     */
+    supersedesId: uuid("supersedes_id"),
     /**
      * Null everywhere today: there is no acting-USER context in this platform
      * (only `app.current_org_id` exists as a GUC — Ruling A4), and accepting
@@ -193,6 +196,19 @@ export const publications = pgTable(
       name: "publications_artifact_fk",
       columns: [t.artifactId, t.organizationId],
       foreignColumns: [statisticalReturns.id, statisticalReturns.organizationId],
+    }),
+    /**
+     * Composite Tenant Keys (F2 / B-M3). A correction must supersede a
+     * publication issued by the SAME publishing council. No new index:
+     * publications_supersedes_idx and publications_supersedes_once_idx below
+     * both already lead with supersedesId. DDL: drizzle/0048 section 7.
+     */
+    foreignKey({
+      name: "publications_supersedes_fk",
+      columns: [t.supersedesId, t.organizationId],
+      // Self-reference via `t`, not `publications` — see events.ts's
+      // events_parent_fk for why (TS7022 circularity).
+      foreignColumns: [t.id, t.organizationId],
     }),
     index("publications_recipient_idx").on(t.recipientOrgId),
     index("publications_org_artifact_idx").on(t.organizationId, t.artifactId),

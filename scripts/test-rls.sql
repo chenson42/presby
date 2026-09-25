@@ -412,10 +412,10 @@ rollback;
 begin;
   select set_config('app.current_org_id', :ALDER, true);
 
-  -- The cache and the replay must agree for today, or one of them is lying.
-  select assert_eq(
-    (select count(*) from presby_roll_cache_drift()),
-    0, 'roll: cache agrees with replay');
+  -- REMOVED 2026-09-25 (C-4 / drizzle/0048 section 6). The assertion that
+  -- used to sit here called presby_roll_cache_drift(); presby_app no longer
+  -- holds EXECUTE on it, so the call would raise and ON_ERROR_STOP would
+  -- abandon every assertion below. See section 36 for what replaced it.
 
   -- The replay answers "then", which the cache cannot. 2010 predates every
   -- action in the fixture, including the 2011 baptism.
@@ -4869,3 +4869,635 @@ begin;
        and pg_get_functiondef(p.oid) like '%set_config(''presby.withdrawal_write_active''%'),
     0, 'F56: and NOTHING in the database arms it yet — deliberate: the transition is unreachable on every connection until presby_withdraw_publication() ships');
 commit;
+
+-- ===========================================================================
+-- BEGIN APPENDED SECTION — pipeline/security-schema-b (Workflow Rule 16).
+-- One delimited block, appended at the END of the file. The ONE mid-file edit
+-- this pipeline makes is at line ~414, where the presby_roll_cache_drift()
+-- assertion was removed; it is pre-authorized (kickoff scope item 2) and is
+-- flagged there and here so the integration merge stays mechanical.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 36. Security review round B — the grant model, the search_path pin, the
+--     app_role_permissions policy, the group_types split, the roll-function
+--     revokes, the composite tenant FKs and the people delete guard.
+--     docs/work-log/2026-09-25-security-schema-b.md;
+--     drizzle/0048_presby_security_b.sql.
+--
+--     Runs as presby_app like the rest of the file (CLAUDE.md). That is not
+--     incidental here: the whole point of 36.1-36.3 is what THIS role can and
+--     cannot do, and every one of those assertions is vacuous on the owner
+--     connection.
+-- ---------------------------------------------------------------------------
+begin;
+
+  -- 36.1 F70 — the privilege facts the search_path pin sits on top of.
+  --
+  -- B-M2 rated the missing `SET search_path` on 28 SECURITY DEFINER functions
+  -- as not-exploitable BECAUSE presby_app holds no CREATE on schema public or
+  -- on the database. Both halves of that measurement are true and are
+  -- asserted here — and they were NOT sufficient, which is why the next
+  -- assertion exists.
+  select assert_eq(
+    (select count(*) from (values
+       (has_schema_privilege('presby_app','public','CREATE')),
+       (has_database_privilege('presby_app', current_database(), 'CREATE')),
+       (has_schema_privilege('presby_platform','public','CREATE')),
+       (has_database_privilege('presby_platform', current_database(), 'CREATE')),
+       (has_schema_privilege('public','public','CREATE')),
+       (has_database_privilege('public', current_database(), 'CREATE'))
+     ) as t(v) where v),
+    0, 'F70: presby_app, presby_platform and PUBLIC hold no CREATE on schema public or on the database');
+
+  -- 36.2 ...and TEMP, which they DO hold, which is the hole the CREATE
+  -- measurement above missed. Asserted as a KNOWN-TRUE FACT, deliberately not
+  -- flipped to false: TEMP is granted to PUBLIC by default and nothing in
+  -- drizzle/ revokes it. `revoke temporary on database ... from public` was
+  -- specified at Phase 3 and dropped at Phase 4 with a measurement: it makes
+  -- line 1292 of this very file (`create temporary table t20_fresh_person`)
+  -- raise `permission denied to create temporary tables`, and under
+  -- ON_ERROR_STOP that abandons every assertion after it. So the pg_temp-last
+  -- clause asserted in 36.3 IS the control, not the absence of TEMP. If a
+  -- later housekeeping pass removes that temp table and lands the revoke,
+  -- this assertion flips to 0 and the accompanying comment goes with it.
+  select assert_eq(
+    (select count(*) from (values
+       (has_database_privilege('presby_app', current_database(), 'TEMP'))
+     ) as t(v) where v),
+    1, 'F70: presby_app still inherits PUBLIC''s default TEMP — the pg_temp-last search_path clause is the control, NOT the absence of TEMP');
+
+  -- 36.3 Every SECURITY DEFINER function in schema public pins
+  -- `search_path = public, pg_temp`, pg_temp LAST.
+  --
+  -- WHY pg_temp MUST BE NAMED: when it is absent from search_path, PostgreSQL
+  -- searches it FIRST — ahead of public and ahead of pg_catalog. Proven live
+  -- on 2026-09-25 as presby_app, in a rolled-back transaction: with
+  -- `SET search_path = public` (the pre-0048 clause),
+  -- `create temp table people (id uuid, user_id uuid, merged_into_id uuid)`
+  -- made presby_two_factor_required() answer FALSE for a user who genuinely
+  -- requires 2FA. With `public, pg_temp` it answers TRUE with the identical
+  -- decoy in place. That function is the 2FA enforcement predicate, so the
+  -- attacker-chosen answer was "this user does not need 2FA."
+  --
+  -- The 21 names below are a DATED ALLOW-LIST, not a permanent exemption:
+  -- they are drizzle/0043-0047's functions, which the lifecycle pipeline's
+  -- eleventh loop-back widens to `public, pg_temp` in place on main,
+  -- concurrently with this pipeline. When that lands, DELETE the list and
+  -- this paragraph; the assertion then covers every DEFINER function with no
+  -- exceptions. Re-verify membership against the live catalog before
+  -- assuming this list is still exactly right (Workflow Rule 16 risk, named).
+  select assert_eq(
+    (select count(*) from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prosecdef
+        and p.proname not in (
+          'presby_set_organization_identifier', 'presby_assert_council_authority',
+          'presby_affiliation_parent_as_of', 'presby_org_affiliated',
+          'presby_apply_affiliation_to_org_tree', 'presby_transfer_affiliation',
+          'presby_check_affiliation_authority', 'presby_apply_affiliation_row',
+          'presby_check_lifecycle_authority', 'presby_apply_lifecycle_event',
+          'presby_check_succession_event', 'presby_guard_organizations_insert',
+          'presby_guard_organizations_reparent', 'presby_guard_organizations_delete',
+          'presby_check_about_org_affiliated', 'presby_check_return_about_org',
+          'presby_freeze_used_field_spec', 'presby_check_publication_supersession',
+          'presby_publish_sasr_snapshot', 'presby_list_own_congregation_publications',
+          'presby_list_published_returns_to_me')
+        and not ('search_path=public, pg_temp' = any(coalesce(p.proconfig, array['']::text[])))),
+    0, 'F70: every SECURITY DEFINER function in public outside the dated 0043-0047 allow-list pins search_path = public, pg_temp');
+
+  -- And the fourteen 0001-0042 functions 0048 altered are actually fourteen —
+  -- a bare "0 non-compliant" would also pass if a CREATE OR REPLACE had
+  -- deleted them all. This is the assertion that catches the drift-remediation
+  -- trap 0048's own header warns about: re-running 0009/0010/0012/0013/0014/
+  -- 0015/0020/0021/0024/0028/0041/0042 after 0048 silently strips the clause.
+  select assert_eq(
+    (select count(*) from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prosecdef
+        and p.proname in (
+          'presby_effective_permissions','presby_guard_membership_insert',
+          'presby_link_person','presby_match_person',
+          'presby_reconcile_current_roll','presby_roll_cache_drift',
+          'presby_sync_current_roll','presby_membership_is_active',
+          'presby_person_unclaimed_or_own_org','presby_public_committee_roster',
+          'presby_public_staff_roster','presby_published_site',
+          'presby_two_factor_required','presby_user_organizations')
+        and 'search_path=public, pg_temp' = any(coalesce(p.proconfig, array['']::text[]))),
+    14, 'F70: all fourteen 0001-0042 SECURITY DEFINER functions still carry the clause 0048 installed (a re-applied earlier migration strips it)');
+
+  -- presby_current_org() is NOT and must never be in that sweep: it is
+  -- SECURITY INVOKER, so there is no definer privilege to escalate into.
+  select assert_eq(
+    (select count(*) from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'presby_current_org' and p.prosecdef),
+    0, 'F70: presby_current_org() stays SECURITY INVOKER — a name-based DEFINER sweep must not pull it in');
+
+  -- 36.4 B-H3 — the grant model, one assertion per table class. Before 0048
+  -- none of this was written down in drizzle/ at all, so a database rebuilt
+  -- from the migration history failed at first sign-in; and four of the five
+  -- classes were also WIDER than any call site needs.
+
+  -- (a) Full CRUD: the fourteen tables with a measured INSERT/UPDATE/DELETE
+  --     call site on this connection. 14 tables x 4 privileges.
+  select assert_eq(
+    (select count(*) from unnest(array[
+       'users','accounts','sessions','verification_tokens',
+       'user_totp','user_totp_recovery_codes','user_totp_pending_enrollments',
+       'password_reset_tokens','email_verification_tokens',
+       'user_roles','whats_new_entries','email_queue','feedback','feedback_prompt_state'
+     ]) tbl
+     cross join unnest(array['SELECT','INSERT','UPDATE','DELETE']) priv
+     where has_table_privilege('presby_app', tbl, priv)),
+    56, 'B-H3: presby_app holds full CRUD on all fourteen platform-shell tables the adapter and the (account)/(auth)/(admin) actions write');
+
+  -- (b) audit_events is APPEND-ONLY, and now the grant says so.
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app','audit_events','SELECT')),
+       (has_table_privilege('presby_app','audit_events','INSERT'))
+     ) as t(v) where v),
+    2, 'B-H3: presby_app can read and append audit_events');
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app','audit_events','UPDATE')),
+       (has_table_privilege('presby_app','audit_events','DELETE'))
+     ) as t(v) where v),
+    0, 'B-H3: presby_app can NEITHER update NOR delete audit_events — append-only is a grant, not a convention');
+
+  -- (c) feature_flags: UPDATE yes (the admin flags action), INSERT/DELETE no
+  --     (only scripts/seed.ts creates a flag, and it does that as the owner).
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app','feature_flags','SELECT')),
+       (has_table_privilege('presby_app','feature_flags','UPDATE'))
+     ) as t(v) where v),
+    2, 'B-H3: presby_app can read and toggle feature_flags');
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app','feature_flags','INSERT')),
+       (has_table_privilege('presby_app','feature_flags','DELETE'))
+     ) as t(v) where v),
+    0, 'B-H3: presby_app can neither create nor drop a feature flag');
+
+  -- (d) The global catalogs are SELECT-only. scripts/seed.ts's five catalog
+  --     writers moved to the owner connection in the same commit as this
+  --     revoke; landing one without the other breaks `npm run db:seed`.
+  select assert_eq(
+    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds']) tbl
+     where has_table_privilege('presby_app', tbl, 'SELECT')),
+    5, 'B-H3: presby_app reads every global catalog');
+  select assert_eq(
+    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds']) tbl
+     cross join unnest(array['INSERT','UPDATE','DELETE']) priv
+     where has_table_privilege('presby_app', tbl, priv)),
+    0, 'B-H3: presby_app cannot write ANY global catalog — a tenant request can no longer invent a permission key or a platform role');
+
+  -- (e) The org tree stays SELECT-only (already true; restated in 0048 so the
+  --     file is a self-sufficient statement of the posture).
+  select assert_eq(
+    (select count(*) from unnest(array['organizations','organization_identifiers','organization_successions','sasr_form_versions']) tbl
+     cross join unnest(array['INSERT','UPDATE','DELETE']) priv
+     where has_table_privilege('presby_app', tbl, priv)),
+    0, 'B-H3: the org tree and the SASR form catalog stay SELECT-only for presby_app');
+
+  -- 36.5 C-3 — the INVERTED FORCE catch-all.
+  --
+  -- The obvious predicate — "every table WITH an organization_id column
+  -- carries FORCE" — is the SAME predicate as drizzle/0009's tenant_tables
+  -- array, and that predicate is exactly what missed app_role_permissions,
+  -- the one table in this review with a demonstrated cross-tenant write. It
+  -- would have passed green all year with the hole open. It is also blind in
+  -- the other direction: eight FORCE tables (people, addresses,
+  -- contact_methods, person_identifiers, person_relationships,
+  -- administrative_commissions, org_delegations, transfer_certificates) carry
+  -- no organization_id at all.
+  --
+  -- So: EVERY table in schema public carries FORCE, except the named 25.
+  -- The 51st table fails closed whether or not it has an organization_id.
+  -- This list is the same 25 names as the B-H3 grant model in
+  -- drizzle/0048 section 2; keep the two in sync.
+  select assert_eq(
+    (select count(*) from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind = 'r' and not c.relforcerowsecurity
+        and c.relname not in (
+          -- NextAuth adapter + the platform auth shell.
+          'users','accounts','sessions','verification_tokens',
+          'user_totp','user_totp_recovery_codes','user_totp_pending_enrollments',
+          'password_reset_tokens','email_verification_tokens',
+          -- Platform-shell application tables (admin-only surfaces).
+          'user_roles','whats_new_entries','email_queue','feedback','feedback_prompt_state',
+          -- Append-only platform log, and the platform rollout switch.
+          'audit_events','feature_flags',
+          -- Global catalogs: code- or migration-seeded, no tenant axis.
+          'permissions','features','role_features','roles','migration_seeds',
+          -- The org tree is PUBLIC information by design (the four-way miss
+          -- response in CLAUDE.md depends on it), so it is SELECT-only rather
+          -- than RLS-filtered. organization_identifiers is the one
+          -- tenant-shaped exemption and is documented in its own table
+          -- comment; sasr_form_versions has no organization_id at all.
+          'organizations','organization_successions','organization_identifiers','sasr_form_versions'
+        )),
+    0, 'C-3: every table in schema public carries FORCE ROW LEVEL SECURITY except the 25 named platform-shell / global-catalog / org-tree tables');
+
+  -- The list is not allowed to rot in the other direction either: if a table
+  -- on it GAINS force (or is dropped), this count moves and the reader is
+  -- told to prune the list rather than discovering a silently stale one.
+  select assert_eq(
+    (select count(*) from unnest(array[
+       'users','accounts','sessions','verification_tokens',
+       'user_totp','user_totp_recovery_codes','user_totp_pending_enrollments',
+       'password_reset_tokens','email_verification_tokens',
+       'user_roles','whats_new_entries','email_queue','feedback','feedback_prompt_state',
+       'audit_events','feature_flags',
+       'permissions','features','role_features','roles','migration_seeds',
+       'organizations','organization_successions','organization_identifiers','sasr_form_versions'
+     ]) tbl
+     join pg_class c on c.relname = tbl
+     join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+     where not c.relforcerowsecurity),
+    25, 'C-3: every one of the 25 allow-listed names still exists and still lacks FORCE — the allow-list has not gone stale');
+
+commit;
+
+-- ---------------------------------------------------------------------------
+-- 36.6 B-H2 — app_role_permissions. It carried NO row-level security at all:
+--      as presby_app under Alder Creek's context, app_roles correctly
+--      filtered to 15 rows while app_role_permissions returned all 71, 43 of
+--      them bound to role_ids this session could not see — and an INSERT
+--      naming one of those invisible role_ids succeeded (reproduced live,
+--      rolled back, 2026-09-25).
+--
+--      Tenancy is INDIRECT here: the table has no organization_id of its own,
+--      so the policy reaches through role_id -> app_roles.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from (values
+       ((select relrowsecurity from pg_class where oid = 'app_role_permissions'::regclass)),
+       ((select relforcerowsecurity from pg_class where oid = 'app_role_permissions'::regclass))
+     ) as t(v) where v),
+    2, 'B-H2: app_role_permissions has RLS ENABLED and FORCED (F1 — without FORCE the policies are inert for the owner and every naive test still passes)');
+
+  select assert_eq(
+    (select count(*) from pg_policies
+      where schemaname = 'public' and tablename = 'app_role_permissions'
+        and policyname in ('app_role_permissions_select','app_role_permissions_insert',
+                           'app_role_permissions_update','app_role_permissions_delete')),
+    4, 'B-H2: the four-policy split is in place, not a single tenant_isolation catch-all');
+
+  -- UPDATE is revoked, so the UPDATE policy above is deliberately inert until
+  -- a future caller and a future review grant it.
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app','app_role_permissions','SELECT')),
+       (has_table_privilege('presby_app','app_role_permissions','INSERT')),
+       (has_table_privilege('presby_app','app_role_permissions','DELETE'))
+     ) as t(v) where v),
+    3, 'B-H2: presby_app keeps select/insert/delete — setRolePermissions() needs all three');
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app','app_role_permissions','UPDATE'))
+     ) as t(v) where v),
+    0, 'B-H2: UPDATE is revoked — there is no live UPDATE caller, so the grant does not exist either');
+commit;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+
+  -- Every visible binding belongs either to one of THIS org's roles or to a
+  -- global template. Not one belongs to another congregation.
+  select assert_eq(
+    (select count(*) from app_role_permissions arp
+      where not exists (
+        select 1 from app_roles r
+         where r.id = arp.role_id
+           and (r.organization_id = :ALDER::uuid or r.organization_id is null))),
+    0, 'B-H2: alder sees no binding belonging to another organization''s role');
+
+  -- The `or organization_id is null` arm of the SELECT policy is LOAD-BEARING,
+  -- not decorative: src/lib/role-definitions.ts's adoptTemplateRole() reads a
+  -- GLOBAL template's own bindings through this table on `tx` before cloning
+  -- them into the new org-scoped role. Drop the arm and adoption silently
+  -- clones an empty permission set.
+  select assert_eq(
+    (select count(*) from app_role_permissions arp
+       join app_roles r on r.id = arp.role_id
+      where r.organization_id is null
+        and r.id = :COMMITTEE_CHAIR_TEMPLATE_ROLE::uuid),
+    (select count(*) from app_role_permissions arp
+       join app_roles r on r.id = arp.role_id
+      where r.id = :COMMITTEE_CHAIR_TEMPLATE_ROLE::uuid),
+    'B-H2: the committee_chair TEMPLATE''s own bindings stay readable — adoptTemplateRole() clones them through this path');
+rollback;
+
+-- The write half, which is what B-H2 actually was. Each arm is attempted
+-- against a role this session cannot even see through app_roles.
+do $$
+declare
+  foreign_role uuid;
+begin
+  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+  select r.id into foreign_role from app_roles r
+   where r.organization_id is not null
+     and r.organization_id <> '22222222-2222-2222-2222-222222222222'::uuid
+   limit 1;
+  if foreign_role is not null then
+    raise exception 'FAIL B-H2: a foreign org''s app_roles row is VISIBLE under alder context';
+  end if;
+  -- f0000000-...-03 is a Southern Fields role (seed-dev.sql); invisible above.
+  begin
+    insert into app_role_permissions (role_id, permission_key)
+    values ('f0000000-0000-0000-0000-000000000003', 'people.manage');
+    raise exception 'FAIL B-H2: cross-tenant INSERT into app_role_permissions SUCCEEDED';
+  exception when insufficient_privilege then
+    raise notice 'pass  B-H2: cross-tenant INSERT into app_role_permissions is refused by app_role_permissions_insert';
+  end;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 36.7 B-M4 + B-L1 — group_types. Its tenant_isolation policy was
+--      `organization_id = presby_current_org()` with no NULL arm, and 1563 of
+--      1563 rows are global (DECISION-110 ruling 1), so the entire catalog
+--      was invisible to presby_app and three reads in src/lib/groups.ts
+--      escaped to getPlatformDb() to see it. Those three are back on `tx`.
+-- ---------------------------------------------------------------------------
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+
+  select assert_eq(
+    (select count(*) from pg_policies
+      where schemaname = 'public' and tablename = 'group_types'
+        and policyname in ('group_types_select','group_types_insert',
+                           'group_types_update','group_types_delete')),
+    4, 'B-M4: group_types carries the four-policy split (drizzle/0032''s app_roles_select model), not tenant_isolation');
+  select assert_eq(
+    (select count(*) from pg_policies
+      where schemaname = 'public' and tablename = 'group_types' and policyname = 'tenant_isolation'),
+    0, 'B-M4: the old NULL-false tenant_isolation policy is gone');
+
+  -- The six platform templates are now readable from the tenant connection.
+  select assert_eq(
+    (select count(*) from group_types where organization_id is null),
+    6, 'B-M4: all six platform-wide group_types templates are visible to presby_app (they were invisible, hence the getPlatformDb() escapes in src/lib/groups.ts)');
+
+  -- B-L1: exactly one row per key. 1557 duplicates were removed by
+  -- drizzle/0048 section 5, and the constraint is what keeps it that way.
+  select assert_eq(
+    (select count(*) from group_types where organization_id is null),
+    (select count(distinct key) from group_types where organization_id is null),
+    'B-L1: one platform-wide group_types row per key — 1557 duplicates removed and the constraint prevents their return');
+
+  -- NULLS NOT DISTINCT is the whole point. A plain unique (organization_id,
+  -- key) constrains NOTHING here, because every row's organization_id is
+  -- NULL and NULLs are distinct by default — which is how the duplicates
+  -- accumulated under an index that looked like it covered this.
+  select assert_eq(
+    (select count(*) from pg_constraint c
+       join pg_index i on i.indexrelid = c.conindid
+      where c.conname = 'group_types_org_key'
+        and c.contype = 'u'
+        and i.indnullsnotdistinct),
+    1, 'B-L1: group_types_org_key is UNIQUE NULLS NOT DISTINCT — the default NULLS DISTINCT form would constrain nothing on a table whose every row is global');
+rollback;
+
+-- The INSERT arm stays own-org-only: a tenant may not mint a platform
+-- template. This is what keeps DECISION-110 ruling 1 true at the database.
+do $$ begin
+  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+  begin
+    insert into group_types (organization_id, key, name) values (null, 'smuggled', 'Smuggled');
+    raise exception 'FAIL B-M4: a tenant minted a PLATFORM-WIDE group_type';
+  exception when insufficient_privilege then
+    raise notice 'pass  B-M4: the SELECT arm admits globals but the INSERT arm does not — a tenant cannot mint a platform template';
+  end;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 36.8 C-4 + B-L3 — the two cross-org roll functions leave the tenant role's
+--      surface. presby_roll_cache_drift() is a SECURITY DEFINER reader with
+--      no org predicate; presby_reconcile_current_roll() is a parameterless
+--      cross-org WRITER of memberships.current_roll. Neither is F26's case (a
+--      trigger inside a guarded operation) and neither is DECISION-135's
+--      shape (derive the actor from presby_current_org(), check standing,
+--      then act). CREATE FUNCTION grants EXECUTE to PUBLIC by default, so
+--      there was never a grant statement to delete — only an explicit revoke
+--      closes it.
+--
+--      This replaces the `presby_roll_cache_drift() = 0` assertion deleted
+--      from section 10. That was a DATA claim (is the cache in sync today?),
+--      not an isolation claim; its ops home is the daily cron's existing
+--      `rollCacheRolledForward` field, and an on-call engineer can still call
+--      the function ad hoc as neondb_owner.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from (values
+       (has_function_privilege('presby_app','presby_roll_cache_drift()','EXECUTE')),
+       (has_function_privilege('presby_app','presby_reconcile_current_roll()','EXECUTE')),
+       (has_function_privilege('public','presby_roll_cache_drift()','EXECUTE')),
+       (has_function_privilege('public','presby_reconcile_current_roll()','EXECUTE'))
+     ) as t(v) where v),
+    0, 'C-4/B-L3: neither presby_app nor PUBLIC holds EXECUTE on presby_roll_cache_drift() or presby_reconcile_current_roll()');
+commit;
+
+do $$ begin
+  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+  begin
+    perform presby_roll_cache_drift();
+    raise exception 'FAIL C-4: presby_app CALLED the cross-org drift reader';
+  exception when insufficient_privilege then
+    raise notice 'pass  C-4: presby_app is refused EXECUTE on presby_roll_cache_drift() at the call, not merely by catalog inspection';
+  end;
+  begin
+    perform presby_reconcile_current_roll();
+    raise exception 'FAIL B-L3: presby_app CALLED the cross-org reconcile writer';
+  exception when insufficient_privilege then
+    raise notice 'pass  B-L3: presby_app is refused EXECUTE on presby_reconcile_current_roll() — the daily cron now calls it on the owner connection';
+  end;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 36.9 B-M3 + B-L6 — five single-column tenant->tenant FKs became composite
+--      (F2), and the three FK columns with no index at all got one.
+--
+--      role_grants.role_id is the one that changes behaviour rather than just
+--      shape: the composite FK makes "adopt a template by CLONING it, never
+--      by granting it directly" (src/lib/role-definitions.ts:771-850) a
+--      DATABASE property instead of a code convention.
+--
+--      groups.group_type_id is DELIBERATELY EXCLUDED and must stay so. Every
+--      group_types row is global (organization_id IS NULL), so under MATCH
+--      SIMPLE a composite FK from a NOT NULL groups.organization_id would
+--      reject every row in the table; and the F2 hazard it would close cannot
+--      arise, because no org-owned group type exists by design.
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where contype = 'f'
+        and conname in ('events_parent_fk','person_milestones_roll_action_fk',
+                        'publications_supersedes_fk','roll_actions_voids_fk',
+                        'role_grants_role_fk')
+        and array_length(conkey, 1) = 2
+        and array_length(confkey, 1) = 2),
+    5, 'B-M3: all five tenant->tenant FKs are COMPOSITE — a two-column key on both ends');
+
+  -- The single-column originals are gone, not merely shadowed.
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname in ('events_parent_event_id_fkey',
+                        'person_milestones_roll_action_id_roll_actions_id_fk',
+                        'publications_supersedes_id_fkey',
+                        'roll_actions_voids_action_id_roll_actions_id_fk',
+                        'role_grants_role_id_app_roles_id_fk')),
+    0, 'B-M3: the five single-column originals are dropped, not left alongside');
+
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'app_roles_id_org_key' and contype = 'u'
+        and array_length(conkey, 1) = 2),
+    1, 'B-M3: app_roles carries unique (id, organization_id) — the anchor role_grants_role_fk references');
+
+  -- The cascade is preserved exactly. deactivateRole()'s append-only trail
+  -- depends on it; turning it into RESTRICT here would be a second, unrelated
+  -- risk decision smuggled into one diff.
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'role_grants_role_fk' and confdeltype = 'c'),
+    1, 'B-M3: role_grants_role_fk keeps ON DELETE CASCADE — a shape change, not a behaviour change');
+
+  select assert_eq(
+    (select count(*) from pg_indexes
+      where schemaname = 'public'
+        and indexname in ('person_milestones_roll_action_idx','roll_actions_voids_idx','role_grants_role_idx')),
+    3, 'B-L6: the three FK columns that had no index at all now have one');
+
+  -- The documented exclusion, asserted so a future F2 sweep does not "fix" it.
+  select assert_eq(
+    (select count(*) from pg_constraint c
+      where c.contype = 'f'
+        and c.conrelid = 'groups'::regclass
+        and c.confrelid = 'group_types'::regclass
+        and array_length(c.conkey, 1) = 2),
+    0, 'B-M3: groups.group_type_id stays a PLAIN single-column FK — a composite one would reject every row in the table (DECISION-110 ruling 1)');
+commit;
+
+-- role_grants: the composite FK now refuses to grant a global template
+-- directly. Attempted on the tenant connection under a real org context.
+do $$ begin
+  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+  begin
+    insert into role_grants (organization_id, role_id, person_id, starts_on)
+    values ('22222222-2222-2222-2222-222222222222',
+            '00000000-0000-0000-0000-000000000001',
+            'c0000000-0000-0000-0000-000000000001', current_date);
+    raise exception 'FAIL B-M3: a GLOBAL template role was granted directly — clone-not-grant is not enforced';
+  exception
+    when foreign_key_violation then
+      raise notice 'pass  B-M3: role_grants_role_fk refuses a direct grant of a global template — adoption must clone (src/lib/role-definitions.ts:771-850)';
+    when insufficient_privilege then
+      raise notice 'pass  B-M3: refused before the FK could even be evaluated (RLS), which is also a refusal';
+  end;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 36.10 N-6 — people gets the owner-path BEFORE DELETE guard organizations
+--       already had. people is presby_app = arw (drizzle/0009:376 clawed
+--       DELETE back) and carried ZERO triggers, so "Never Hard-Delete a
+--       Person" was enforced on the tenant connection by a grant and on the
+--       owner connection by NOTHING — and getPlatformDb() connects as
+--       neondb_owner, whom no grant binds (F44). Only a trigger reaches that
+--       path: BYPASSRLS and ownership bypass RLS, never triggers.
+--
+--       The trigger's own behaviour cannot be exercised from THIS connection
+--       (presby_app is refused at the grant first, asserted below), which is
+--       the point — it is an owner-path control. Its behaviour is covered by
+--       the DB-backed vitest suites, every one of which runs its teardown
+--       through getPlatformDb().
+-- ---------------------------------------------------------------------------
+begin;
+  select assert_eq(
+    (select count(*) from pg_trigger
+      where tgrelid = 'people'::regclass and tgname = 'people_guard_delete'
+        and not tgisinternal and tgenabled = 'O'),
+    1, 'N-6: people carries an ENABLED people_guard_delete trigger (a disabled one is the same as no trigger)');
+
+  select assert_eq(
+    (select count(*) from pg_trigger t
+      where t.tgrelid = 'people'::regclass and t.tgname = 'people_guard_delete'
+        and (t.tgtype & 8) = 8     -- TRIGGER_TYPE_DELETE  (1<<3)
+        and (t.tgtype & 2) = 2     -- TRIGGER_TYPE_BEFORE  (1<<1)
+        and (t.tgtype & 1) = 1),   -- TRIGGER_TYPE_ROW     (1<<0)
+    1, 'N-6: it is BEFORE DELETE FOR EACH ROW — an AFTER trigger cannot refuse the delete');
+
+  select assert_eq(
+    (select count(*) from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'presby_guard_people_delete'
+        and p.prosecdef
+        and 'search_path=public, pg_temp' = any(coalesce(p.proconfig, array['']::text[]))),
+    1, 'N-6: presby_guard_people_delete() ships SECURITY DEFINER with the pg_temp-last pin already on it — never a 15th non-compliant function');
+
+  -- The exemption column exists and is the SAME mechanism organizations uses
+  -- (a persisted per-row claim stamped at fixture INSERT), not a GUC arm any
+  -- owner-connection caller could set.
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_schema = 'public' and table_name = 'people'
+        and column_name = 'deletable_until' and data_type = 'timestamp with time zone'),
+    1, 'N-6: people.deletable_until exists, matching organizations.deletable_until exactly (D10, drizzle/0044)');
+
+  -- THE FIXTURE-LEAK CANARY IS DELIBERATELY NOT HERE, AND MUST NOT BE PUT
+  -- BACK. It shipped here on 2026-09-25 as
+  --
+  --   select assert_eq(
+  --     (select count(*) from people where deletable_until is not null),
+  --     0, 'N-6: no person row carries a deletion window right now');
+  --
+  -- and QA caught it as an assertion that CANNOT FAIL. This suite runs as
+  -- presby_app, this block sets no org context, and `people` is FORCE ROW
+  -- LEVEL SECURITY — so `select count(*) from people` returns 0 of 678 rows
+  -- on this connection no matter what the table holds. It reported `pass` in
+  -- a green 456-assertion run while three leaked stamped rows were sitting in
+  -- `people`. That is B-H1's exact failure mode and the reason F1 exists: an
+  -- assertion that agrees with itself proves nothing.
+  --
+  -- The claim is an OWNER-PATH claim about rows this connection is not
+  -- allowed to see, so it cannot honestly be made from here at all — not with
+  -- an org context either, since a leak can be in any org. It now lives where
+  -- the owner connection is available:
+  --
+  --   src/lib/db/fixture-deletable.test.ts
+  --
+  -- a DB-backed vitest spec reading through getPlatformDb().
+
+  -- The tenant connection is refused at the GRANT, before the trigger is
+  -- reached. Both layers, stated separately.
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app','people','DELETE'))
+     ) as t(v) where v),
+    0, 'N-6: presby_app still holds no DELETE on people — the trigger is the OWNER-path layer, not a replacement for the revoke');
+rollback;
+
+do $$ begin
+  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+  begin
+    delete from people where id = 'c0000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL N-6: presby_app DELETED a person row';
+  exception when insufficient_privilege then
+    raise notice 'pass  N-6: a person record is never hard-deleted from the tenant connection (merge via merged_into_id instead)';
+  end;
+end $$;
+
+\echo ''
+\echo '======================================================'
+\echo ' Section 36 (security review round B) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION — pipeline/security-schema-b.
+-- ===========================================================================

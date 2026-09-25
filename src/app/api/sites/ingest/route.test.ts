@@ -229,7 +229,11 @@ describe.skipIf(!hasDb)(
         where: eq(featureFlags.key, "sites.public_render"),
       });
       originalPublicRenderEnabled = existingFlag?.enabled ?? false;
-      await db
+      // getPlatformDb(), not db: drizzle/0048 section 2 (B-H3) revokes INSERT on
+      // feature_flags from presby_app — a flag is CREATED by the seeder on the
+      // owner connection, never by a tenant request. The UPDATE half of this
+      // upsert would still be permitted; the INSERT half is not.
+      await getPlatformDb()
         .insert(featureFlags)
         .values({ key: "sites.public_render", enabled: true })
         .onConflictDoUpdate({

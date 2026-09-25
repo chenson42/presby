@@ -98,6 +98,17 @@ src/components/brand/  — brand-tokens.tsx (the :root-scoped <style> emitter �
 src/components/ui/     — GENERATED shadcn primitives. Add with `npm run ui:add`,
                          never raw `shadcn add`; don't hand-edit without a
                          header comment recording the divergence
+src/components/shared/ — cross-cutting, non-generated UI: avatar menu, org
+                         switcher, global nav, feedback prompt, pagination,
+                         button-group. Platform-palette by default; anything
+                         rendered inside (org)/(public) still inherits brand
+                         tokens via the cascade (see The Brand Is a Cascade
+                         Override), not a per-component override
+src/components/org-portal/ — tenant-portal-specific composition (tile grid,
+                         portal footer, and similar (org)-only pieces).
+                         Distinct from src/components/shared/ because these
+                         compose org-portal-only concepts platform-shell
+                         pages never use
 src/proxy.ts           — Edge gate (admin + 2FA on /admin and /o/*). Edge
                          runtime: never import @/lib/db here
 src/app/launch/        — the post-login router. destination.ts holds the matrix
@@ -300,6 +311,35 @@ Slugs are short, lowercase, hyphenated, and stable. Don't rename them after the 
 15. **Keep `docs/architecture.md` current, but sparingly.** It is the one document written for an engineer seeing this project for the first time — what/why/how at the level any architect would ask, explicitly not implementation detail — and it stays useful only by staying stable. Update it at Phase 6 **only** when a change is genuinely architectural: a new subsystem (the shape of a pipeline like P3's site-content model, not the pipeline's UI), a changed data flow, a changed deployment/runtime shape, or a reversal of something the document currently states as settled. Most feature work does not touch it — resist updating it just because a pipeline shipped; a document that moves with every commit stops being a stable first read. When it does need a change, make it in the same housekeeping cluster as the functionality-map update (Rule 14) and the TODO reconciliation (Rule 10), not as an afterthought.
 16. **Running pipelines in parallel.** One git worktree and one Neon branch per pipeline (`.env.local` in that worktree points at that branch) — the mechanism `neon-postgres`'s SKILL.md already documents, actually used this time. Migration numbers, `DECISION-NNN` numbers, and `F`-numbers are pre-assigned by the orchestrator at `/new-feature` kickoff, so two concurrent pipelines never claim the same number. Judgment agents (`analyst`, `architect`, `qa`) are read-only and free to run in parallel always — the constraint below is about writers. The shared, hand-edited, newest-first files — `src/lib/db/domain/index.ts`, `drizzle/meta/_journal.json`, `scripts/test-rls.sql`, `scripts/seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md` — are edited only at integration, by the orchestrator, never mid-pipeline by a parallel branch. Integration is serialized one PR at a time through `/merge-pr`, even when the branches have no direct code dependency — the collision risk is shared *files*, not shared *code* — and `scripts/test-rls.sql` is re-run against the merged `development` branch after each merge before the next one lands.
 
+### External post-merge schema review
+
+A migration can merge to `main` and still be **unreleased** — not yet applied
+to a shipped environment (see the `drizzle/` line in Project Layout above,
+which already states the in-place-correction rule this practice uses). For
+schema work at this stage, an operator may run an external, out-of-pipeline
+review against `scripts/export-table-definitions.py`'s output (verbatim DDL
+per migration, function bodies collapsed to signature + `file:line`) — a
+second set of eyes on the exported shape, distinct from the six-phase
+pipeline's own Phase 4/5 loop-backs.
+
+- **What it produces:** a numbered findings series, folded into
+  `docs/schema-design-2.md` as its own lettered review-round subsection.
+- **Which phase it reopens:** Phase 3, by default — tech-lead rules on each
+  finding before any DDL changes. Loop-back numbering and the `docs/decisions.md`
+  entry recording the ruling follow the pipeline's usual conventions.
+- **How the fix ships:** because the migration is unreleased, the correction
+  lands in place — same file, same migration number, per the `drizzle/` rule
+  above — not as a new migration. It closes as a single commit:
+  `fix(schema): …` with `Caught-By: human-review` and `Discovered-In:
+  post-merge` (and the pipeline's `Work-Log:` trailer, as always).
+- **Before the next round:** regenerate the review export with
+  `scripts/export-table-definitions.py` so a subsequent external read sees the
+  corrected shape, not the one that was just fixed.
+
+Runs at operator initiative, not on a fixed cadence — Workflow Rule 16's
+parallel-pipeline discipline still applies if other work is in flight
+concurrently.
+
 ## Commit Message Standards
 
 Every commit's first line:
@@ -335,7 +375,9 @@ npm run build        # Production build
 npm run start        # Run the production build
 npm run lint         # ESLint
 npm run typecheck    # tsc --noEmit
-npm run test         # Vitest unit tests (run once)
+npm run test         # Vitest unit tests (run once). A DB-backed subset needs
+                      # .env.local and --no-file-parallelism — see
+                      # docs/testing.md → "Running the DB-backed suites"
 npm run test:watch   # Vitest in watch mode
 npm run test:e2e     # Playwright end-to-end tests (needs the dev server running)
 npm run db:push      # Sync Drizzle schema to the live database (lossy — dev only)
@@ -525,6 +567,13 @@ Everything else — `(auth)`, `(account)`, `(member)`, `(admin)`,
 `/no-organization`, `/developer` — renders in the platform palette. A branded
 403 tells a prober the org is a configured tenant (DECISION-047).
 
+One narrow exception, page-scoped and flagged: `/signin` renders a
+congregation's brand when `ui.branded_signin` is on **and** the sanitized
+`callbackUrl`'s slug resolves to a live published public site (DECISION-094).
+It is a single page in `(auth)`, not a third brandable route group —
+`/totp`, `/forgot-password` and `/reset-password` stay platform-chrome — and
+the flag is seeded off.
+
 **Un-brandable does not mean logo-free.** Brand-as-chrome is scoped to two
 layouts; logo-as-content on a neutral plate is legal wherever the caller is
 authorized.
@@ -560,7 +609,7 @@ through a browser.
 | 1 | no | no | `/o/<slug>` |
 | 0 | no | no | `/no-organization` |
 | 0 | yes | no | `/admin` |
-| everything else | | | `/orgs` |
+| everything else | | | `/home` |
 
 Absent from the table on purpose, because they are enforced elsewhere: an
 unverified 2FA challenge fires at the Edge on the **destination** (`/admin`,
@@ -575,19 +624,24 @@ enforces on `/admin`; `isPlatformAdmin` is `users.is_platform_admin`, read live,
 and gates the Developer portal. Routing on either alone ships a bug in opposite
 directions.
 
-**`/orgs` is the chooser and never auto-forwards**, even for a one-organization
+**`/home` is the chooser and never auto-forwards**, even for a one-organization
 user — otherwise a platform admin with no congregations could never reach the
 Developer card. Deep links to `/o/<slug>` must work without it, so the chooser is
 a convenience and every org route authorizes itself. Cards carry **no membership
-language** (DECISION-039): organization name and type only.
+language** (DECISION-039): organization name and type only. `/orgs` no longer
+exists as a page — it is a permanent `next.config.ts` redirect to `/home`
+(DECISION-124/125) — so a deep link or bookmark to `/orgs` still lands correctly,
+one 308 hop later.
 
 **`/` never redirects a signed-in user** (DECISION-034). They are entitled to
 read the front page, P2 wants it static, and P5 makes the meaning of `/`
 host-dependent.
 
-**`/home` survives** as the platform-shell page carrying what's-new and the
-feedback prompt. It is no longer a landing target. `(member)` stays auth-only
-with no 2FA gate; it renders no tenant data.
+**`/home` is the landing target**, merged with the former `/orgs` chooser
+(DECISION-124/125), and also carries what's-new and the feedback prompt.
+`(member)` stays auth-only with no 2FA gate; it lists the user's own
+organizations (name and type only, DECISION-039) but renders no other tenant
+data.
 
 ### The `(org)` contract
 
@@ -620,4 +674,4 @@ tenants is not, so the copy may not vary — including its response time.
 `loading.tsx` opens a Suspense boundary, so Next flushes a 200 before the page
 resolves: `/launch` degrades from a 307 to a client-side redirect, and
 `notFound()` on `/o/<slug>` renders the 404 page at HTTP 200. Measured
-2026-08-18. Segments that always render (`/orgs`, `/no-organization`) keep theirs.
+2026-08-18. Segments that always render (`/home`, `/no-organization`) keep theirs.

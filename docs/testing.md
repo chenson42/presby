@@ -146,6 +146,28 @@ menu is P1.
 
 ---
 
+## Running the DB-backed suites
+
+Most Vitest suites are pure unit tests and `npm run test` covers them. A
+subset (~30 files) talks to the real `development` database and needs
+`.env.local` loaded and `--no-file-parallelism`, or teardown races between
+suites produce spurious failures:
+
+```bash
+npx dotenv -e .env.local -- npx vitest run --no-file-parallelism
+```
+
+Separately, `scripts/test-rls.sql` is the isolation suite — it **must** run as
+`presby_app` (`$APP_DATABASE_URL`), never as the owner (`$MIGRATE_DATABASE_URL`):
+`neondb_owner` has `rolbypassrls = t`, so running it as the owner proves
+nothing, no matter how many assertions pass.
+
+```bash
+psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql
+```
+
+---
+
 ## Two things that will bite you
 
 **Rate limiting.** Sign-in is capped at 5/min per ip:email, and a blocked

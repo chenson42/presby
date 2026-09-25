@@ -89,6 +89,24 @@ the live production database**, inside a team with impaired access.
 WordPress at `westervillefirstpresbyterian.org` — so the outage is acceptable, but
 it should be deliberate rather than a surprise.
 
+### ⏰ [YOU] Before 2026-10-01: set this project's Node.js version to 22.x
+
+Vercel disables Node 20 on its platform on that date, and this repo has been on
+Node 22 since `11ab488` (`.nvmrc`, `package.json`'s `engines.node`). Set it in
+Vercel Project Settings on whichever project ends up serving `presbyportal.org`
+(see the account remediation above) — the dashboard setting is not tracked in
+this repo, so only the operator can change it. Full tracking: `docs/TODO.md`'s
+Deployment & production section.
+
+---
+
+## Migrations
+
+**A Vercel deploy does not run database migrations.** `npm run db:migrate`
+against a target database is a separate, deliberate step — run it by hand
+after a deploy, never assume it happened as part of one. As of this writing,
+`production` has **not** been migrated to the latest schema; `development` has.
+
 ---
 
 ## Environment variables

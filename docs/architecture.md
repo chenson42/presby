@@ -2,7 +2,7 @@
 
 *A first read for engineers joining the project. This document explains what we're building and why, what actually works today, and the handful of decisions that shape everything else. It intentionally stays high-level — each section links to the document that has the actual detail, rules, and rationale.*
 
-*Last written: 2026-08-27. The project is named **PresbyPortal** (`presbyportal.org`, DECISION-126) — that naming period is over. The code itself, deliberately, hasn't caught up yet: the database role, every SQL function, and every migration filename still use the `presby` prefix, and that's staying put on purpose until a dedicated rename pipeline runs (a live Postgres role and every RLS policy in this codebase reference it by name — see `docs/STATE.md`). This document uses PresbyPortal in prose and `presby` where it names an actual identifier in the code.*
+*Last written: 2026-09-25. The project is named **PresbyPortal** (`presbyportal.org`, DECISION-126) — that naming period is over. The code itself, deliberately, hasn't caught up yet: the database role, every SQL function, and every migration filename still use the `presby` prefix, and that's staying put on purpose until a dedicated rename pipeline runs (a live Postgres role and every RLS policy in this codebase reference it by name — see `docs/STATE.md`). This document uses PresbyPortal in prose and `presby` where it names an actual identifier in the code.*
 
 ---
 

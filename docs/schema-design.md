@@ -1196,7 +1196,14 @@ connection, which is what makes a tenant-visible access log possible later.
 
 ---
 
-## 13. Section J — SASR projection
+## 13. Section J — SASR projection — SUPERSEDED, see note below
+
+> **Superseded 2026-09-24** (`docs/schema-design-2.md` §5, "Section O — The
+> SASR: projection, returns, publication"). `sasr_reports` as specified below
+> was dropped outright (DECISION-137); the live design is a form-versioned
+> `statistical_returns` row, an immutable `publications` event, and a
+> `congregation_statistics` projection. Kept below for historical context only
+> — do not build against it.
 
 Field list confirmed against the 2024 Guide to Statistical Reporting.
 
@@ -1407,8 +1414,10 @@ helper that sets the GUC after verifying membership. Nothing spans two orgs in a
 The important realization: **cross-org reads are almost never needed, because publication moves the
 data to the reader's org.** A presbytery reading its congregations' statistics reads `sasr_reports`
 rows that live at the *presbytery*, not congregation rows. The org switcher runs sequential scoped
-transactions. `person_links` and `transfer_certificates` are the only genuine two-org reads, and both
-have explicit policies. This is the publish-upward design paying for itself.
+transactions. `administrative_commissions`, `org_delegations`, and `transfer_certificates` are the
+genuine two-org reads, and all three have explicit policies (`person_links`, an earlier design, was
+deleted when two-sided transfers were redesigned around `transfer_certificates` — see F9). This is
+the publish-upward design paying for itself.
 
 ---
 

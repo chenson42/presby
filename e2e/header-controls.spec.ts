@@ -154,6 +154,17 @@ test.describe("org switcher — a user with two organizations", () => {
     // unit test instead — see global-nav.test.tsx, "keeps the truncate
     // mechanism wired for a name long enough to need it" — which isn't
     // constrained by fixture data.
+    //
+    // WHY THIS NO LONGER ASSERTS `span.truncate` HERE (org-switcher-touch-
+    // target, 2026-09-25): every `/o/<slug>` page is compact (a real orgMark
+    // is always present — org_portal.chrome_v2 is fully rolled out), and
+    // compact mode replaces the visible name span with `sr-only` entirely —
+    // there is no `span.truncate` in the DOM to find. That assertion moved to
+    // the "keeps the truncation safety valve wired" test below, which visits
+    // `/home` (no orgMark, so `compact=false` and the name renders truncate-
+    // able) instead of asserting a state this page can no longer reach. This
+    // test keeps only what still applies at `/o/<slug>`: one row, no wrap, no
+    // horizontal overflow.
     await page.setViewportSize(NARROW);
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}`);
 
@@ -176,21 +187,29 @@ test.describe("org switcher — a user with two organizations", () => {
       () => document.documentElement.scrollWidth,
     );
     expect(documentWidth).toBeLessThanOrEqual(360);
+  });
 
-    // The org name is un-clipped at this width now — confirming the better
-    // behavior actually shipped, not just that the old assertion is gone.
-    const fullyVisible = await page
-      .getByTestId(SWITCHER)
-      .locator("span.truncate")
-      .evaluate((el) => el.scrollWidth <= el.clientWidth);
+  test("keeps the truncation safety valve wired on a page with no org logo", async ({
+    page,
+  }) => {
+    // RETARGETED (org-switcher-touch-target, 2026-09-25) from `/o/<slug>`,
+    // where the switcher is always compact (see the comment above) and the
+    // `span.truncate` name span never renders — `compact` is driven by the
+    // presence of an orgMark, and `/home` has none, so the org-multi user's
+    // switcher here renders the ordinary (non-compact) name span and the
+    // valve is actually exercised.
+    await page.setViewportSize(NARROW);
+    await page.goto("/home");
+
+    const nameSpan = page.getByTestId(SWITCHER).locator("span.truncate");
+    await expect(nameSpan).toBeVisible();
+
+    const fullyVisible = await nameSpan.evaluate(
+      (el) => el.scrollWidth <= el.clientWidth,
+    );
     expect(fullyVisible).toBe(true);
 
-    // The safety valve stays wired even though it isn't visually clipping
-    // this name today — see global-nav.test.tsx for the proof it engages.
-    const nameSpanClass = await page
-      .getByTestId(SWITCHER)
-      .locator("span.truncate")
-      .getAttribute("class");
+    const nameSpanClass = await nameSpan.getAttribute("class");
     expect(nameSpanClass).toContain("truncate");
   });
 });

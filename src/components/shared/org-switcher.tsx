@@ -88,7 +88,7 @@ export interface OrgSwitcherProps {
 // This file carries e2e structural locators (header-controls.spec.ts:153)
 // the P0.5 design doc names explicitly; left otherwise untouched.
 // ui-ok: Radix DropdownMenuTrigger with a bespoke 44px touch target, not a hand-rolled button
-const SWITCHER_TRIGGER_CLASS = "inline-flex min-h-11 min-w-0 max-w-full items-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground active:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[state=open]:bg-accent disabled:pointer-events-none disabled:opacity-50";
+const SWITCHER_TRIGGER_CLASS = "inline-flex min-h-11 min-w-11 max-w-full items-center justify-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground active:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[state=open]:bg-accent disabled:pointer-events-none disabled:opacity-50";
 
 export function OrgSwitcher({
   currentName = null,

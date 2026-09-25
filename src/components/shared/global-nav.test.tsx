@@ -280,6 +280,12 @@ describe("GlobalNav — orgMark prop (portal-chrome, docs/work-log/2026-08-25-po
     const visibleName = trigger.querySelector("span.truncate");
     expect(visibleName).toBeNull();
     expect(trigger.textContent).toContain(WRENFIELD.name); // sr-only text still present
+    // Regression for org-switcher-touch-target: with the name suppressed to
+    // sr-only, the visible content is icon-only (16px) + padding, and
+    // `min-w-0` set no floor -- the trigger collapsed to ~32px, under the
+    // 44px accessibility floor. `min-w-11` is the width-floor half of the
+    // shared min-h-11/min-w-11 hit-target pair.
+    expect(trigger.className).toContain("min-w-11");
   });
 
   it("falls back to the platform wordmark when orgMark is present but currentOrgSlug is not (defensive — the caller never actually does this)", async () => {

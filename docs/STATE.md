@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-25 evening (rounds two and three shipped; security §B merged; grants at Phase 5)
+## RESUME HERE — updated 2026-09-25 night (rounds two and three shipped; security §B and submission grants merged)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -42,10 +42,10 @@ FAIL). Uncommitted in the tree for it: `src/app/globals.css` and the work-log.
 `pipeline/security-schema-b` **merged** as PR #13 (`42ec0e9`, v0.25.5, `drizzle/0048`,
 DECISION-146; `development` re-migrated 0043→0048 and `test-rls.sql` 476/exit 0 there;
 every DEFINER function in `public` pins `pg_temp`, catalog-wide). `pipeline/submission-grants`
-(worktree `../presby-wt-grants`, Neon `pipeline-submission-grants`, `drizzle/0049`,
-DECISION-147, F80) is at Phase 5 — the platform's first unauthenticated write path; on
-SHIP IT it merges `main` (0048 + round three), re-runs `test-rls.sql`, then lands as
-0.26.0 via PR + `/merge-pr`. The lifecycle pipeline's **third** external round (F60–F64)
+(`drizzle/0049`, DECISION-147, F80 — the platform's first unauthenticated write path,
+SHIP WITH NOTES) **merged** as PR #14, v0.26.0; `development` re-migrated through 0049
+and `test-rls.sql` re-run there (520). Flag `statistics.submission_grants` seeded OFF —
+what's-new owed at first enablement. The lifecycle pipeline's **third** external round (F60–F64)
 shipped as v0.25.4 (`afc2afb`) — F59 closed, pg_temp pinned, DECISION-148.
 **CI on `main` has been red since 2026-08-30 on 7 lint errors** (TODO, top of Next Up) —
 PR checks are not a signal until that is fixed.

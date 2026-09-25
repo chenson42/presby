@@ -898,7 +898,7 @@ To **database-admin** for Phase 4, per the Implementer and Implementation Order 
 
 **D1 (TEMP revoke dropped, deferred with a TODO) — ratified, and it corrects a real defect in my own Phase 3 design.** I re-checked my own investigation: my Phase 3 "no legitimate temp-table use by `presby_app`" claim came from a grep whose own exclusion filter (`grep -vi "test-rls\|pg_temp_"`) stripped every matching line's filename, silently discarding every real hit in `scripts/test-rls.sql` — including line 1292's pre-existing `create temporary table t20_fresh_person`, present since before this pipeline started (confirmed via `git show HEAD:scripts/test-rls.sql`). The revoke I specified would have broken a real, load-bearing, already-shipped regression test (section 20a, the F21 "insert-permissive, read-restrictive" fix). Database-admin's fix is correct: drop the revoke, ship the `pg_temp`-last clause alone as the primary control (exactly Phase 2 §3's own stated priority), and defer with a named prerequisite (removing the suite's own temp table, itself a non-parallel housekeeping act under Rule 16). Nothing to add.
 
-**D2 (assertions 2/3 contradicted; assertion 2 shipped) — ratified**, and it is the direct, correct consequence of D1: my Phase 3 §(b) wrote two assertions assuming the revoke would land in the same file; once it doesn't, asserting `TEMP = false` would be asserting a falsehood. Shipping assertion 2 alone, as a documented known-true fact with a forward pointer to when it flips, is exactly right — confirmed by reading `scripts/test-rls.sql` §36.2 directly.
+**D2 (assertions 2/3 contradicted; assertion 2 shipped) — ratified**, and it is the direct, correct consequence of D1: my Phase 3 §(b) wrote two assertions assuming the revoke would land in the same file; once it doesn't, asserting `TEMP = false` would be asserting a falsehood. Shipping assertion 2 alone, as a documented known-true fact with a forward pointer to when it flips, is exactly right — confirmed by reading `scripts/test-rls.sql` §39.2 directly.
 
 **D4 (self-referencing composite FKs use `t.id`/`t.organizationId`, not the table binding, to avoid TS7022) — ratified**, and it is a second real gap in my Phase 3 feasibility check. I verified the *runtime* timing correctly (`pgTable()`'s third-argument callback is stored, not invoked, until after module load — confirmed by reading `node_modules/drizzle-orm/pg-core/table.js`), and that answer is still true. What I missed is that TypeScript's static inference doesn't know that — writing `foreignColumns: [events.id, events.organizationId]` inside `events`' own config array makes the compiler try to resolve `events`'s type from an expression that mentions `events`, which is exactly TS7022/TS7024. `t.id`/`t.organizationId` are the identical columns without the circular type reference. I confirmed this was applied consistently across **all three** self-referencing composites (`events.parent_event_id`, `roll_actions.voids_action_id`, `publications.supersedes_id` — read all three diffs directly), not just the subset the coordinator's message named. Two feasibility misses in one design is worth naming plainly rather than downplaying: **my Phase 3 "Feasibility note" on self-referencing composite FKs was runtime-correct and TypeScript-wrong**, and Phase 4 is the layer that's supposed to catch exactly this class of gap before it reaches QA — which it did.
 
@@ -915,7 +915,7 @@ To **database-admin** for Phase 4, per the Implementer and Implementation Order 
 
 **Pass-count confirmation, against my Phase 3 acceptance criteria:**
 
-- **`scripts/test-rls.sql`: 412 → 456, confirmed.** My own static grep (`grep -c "select assert_eq(\|raise notice 'pass"`) gives 413/458 on the current file versus HEAD — a rough proxy that over-counts by one in each direction due to an imprecise pattern, not a real discrepancy. Database-admin's number comes from an actual `psql -v ON_ERROR_STOP=1 -q -f scripts/test-rls.sql` run against `presby_app` with an explicit `pass`-notice count and `exit=0` (P3), which is the authoritative measurement — a live suite run beats a static grep, and I have no basis to doubt it. The arithmetic (412 baseline − 1 deleted at `:414-418` + 45 new = 456) is internally consistent and matches Acceptance Criterion 2's "roughly 412 + 10–15" only in direction, not magnitude — I under-estimated how many individual assertions §36.4's per-table-class grant checks alone would need; 45 new assertions across ten subsections (36.1–36.10) is a reasonable, not-inflated count for the ground actually covered. No concern.
+- **`scripts/test-rls.sql`: 412 → 456, confirmed.** My own static grep (`grep -c "select assert_eq(\|raise notice 'pass"`) gives 413/458 on the current file versus HEAD — a rough proxy that over-counts by one in each direction due to an imprecise pattern, not a real discrepancy. Database-admin's number comes from an actual `psql -v ON_ERROR_STOP=1 -q -f scripts/test-rls.sql` run against `presby_app` with an explicit `pass`-notice count and `exit=0` (P3), which is the authoritative measurement — a live suite run beats a static grep, and I have no basis to doubt it. The arithmetic (412 baseline − 1 deleted at `:414-418` + 45 new = 456) is internally consistent and matches Acceptance Criterion 2's "roughly 412 + 10–15" only in direction, not magnitude — I under-estimated how many individual assertions §39.4's per-table-class grant checks alone would need; 45 new assertions across ten subsections (39.1–39.10) is a reasonable, not-inflated count for the ground actually covered. No concern.
 - **`aclexplode`: zero added / 20 removed, confirmed independently before I read database-admin's own count.** From my Phase 3 grant-model spec alone: `audit_events` (revoke `UPDATE`,`DELETE` = 2) + `feature_flags` (revoke `INSERT`,`DELETE` = 2) + the five catalog tables `permissions`/`features`/`role_features`/`roles`/`migration_seeds` (revoke `INSERT`,`UPDATE`,`DELETE` each = 15) + `app_role_permissions` (revoke `UPDATE` = 1) = **20**, matching database-admin's P2 table entry for entry. Zero additions is the correct outcome of a design built entirely from restating already-live grants (no `grant` statement in §2 targets a table/privilege pair `presby_app` didn't already hold) — this is the acceptance criterion's "no-op-or-narrowing, never a widening" proven mechanically, not asserted.
 
 **Three findings beyond the coordinator's checklist, surfaced because ratification means reading the diff, not just the summary of it:**
@@ -1074,7 +1074,7 @@ Phase 4's cited lines and pass counts match mine exactly in all five.
 - `src/lib/people.test.ts:907,933,962` — the N-6 guard trio (unstamped refused / valid-window permitted / expired-window refused / `presby_app` holds no DELETE). Behavioural, not catalog-shaped.
 - `src/lib/roll.test.ts`, `src/lib/groups.test.ts` — B-M3 and B-L1/B-M4 regressions.
 - `src/app/api/cron/maintenance/route.test.ts` — *"runs the roll-cache reconcile on the PLATFORM connection, and the three token DELETEs on the tenant one — regression for C-4"*, plus the converse assertion that the platform handle is not a shortcut for the whole handler. Two handles in the mock, per-statement attribution asserted.
-- `scripts/test-rls.sql` section 36, subsections 36.1–36.10 (614 appended lines, +45 assertions).
+- `scripts/test-rls.sql` section 39, subsections 39.1–39.10 (614 appended lines, +45 assertions).
 
 ## Feature-Gate Audit
 
@@ -1136,7 +1136,7 @@ Carry these forward; they are facts, not open questions.
 
 4. **`presby_platform` still holds `SELECT,INSERT,UPDATE,DELETE` on `app_role_permissions`** (and broadly elsewhere) while being `rolcanlogin = false`. Harmless today, and DECISION-146 already defers the question, but Phase 4's own TODO line asking whether to drop the role or give it a login is the right call and should not be lost.
 
-5. **Deviations D1–D4 all verified as described.** D1: the `revoke temporary … from public` is absent, with the measurement in the migration comment; `scripts/test-rls.sql:1292`'s `create temporary table t20_fresh_person` as `presby_app` is the blocker, and the suite asserts `TEMP = true` as a known-true fact (36.2) rather than shipping D2's contradictory pair. D2: only assertion 2 ships; assertions 2 and 3 as designed were mutually unsatisfiable and dropping 3 was correct. D3: 21 names confirmed against the live catalog. D4: `foreignColumns: [t.id, t.organizationId]` compiles clean and emits identical constraints — verified in `pg_constraint`, and `npm run typecheck` is green.
+5. **Deviations D1–D4 all verified as described.** D1: the `revoke temporary … from public` is absent, with the measurement in the migration comment; `scripts/test-rls.sql:1292`'s `create temporary table t20_fresh_person` as `presby_app` is the blocker, and the suite asserts `TEMP = true` as a known-true fact (39.2) rather than shipping D2's contradictory pair. D2: only assertion 2 ships; assertions 2 and 3 as designed were mutually unsatisfiable and dropping 3 was correct. D3: 21 names confirmed against the live catalog. D4: `foreignColumns: [t.id, t.organizationId]` compiles clean and emits identical constraints — verified in `pg_constraint`, and `npm run typecheck` is green.
 
 6. **No user-visible behaviour changed.** Workflow Rule 13 (what's-new) does not apply; Rule 14 (functionality map) likely does not either — this is internal hardening.
 
@@ -1631,7 +1631,7 @@ fourteen platform-shell tables; **0** of 15 catalog-write grants present;
 
 ## Tests are mine (QA runs them)
 
-**`scripts/test-rls.sql` — section 36**, one delimited block appended at the
+**`scripts/test-rls.sql` — section 39**, one delimited block appended at the
 end (614 lines), plus the one pre-authorized mid-file edit. `git diff -U0`
 reports exactly two hunks: `@@ -415,4 +415,4 @@` and `@@ -4871,0 +4872,614 @@`.
 The `:414-418` `presby_roll_cache_drift()` assertion is replaced in place by a
@@ -1640,16 +1640,16 @@ line-for-line mechanical for the integration merge. Subsections:
 
 | § | Covers |
 |---|---|
-| 36.1 | no `CREATE` on schema `public` or the database for `presby_app`, `presby_platform`, `PUBLIC` |
-| 36.2 | `TEMP` asserted as a known-true fact, with the D1 reasoning |
-| 36.3 | `proconfig` = `public, pg_temp` on every `prosecdef` outside the dated allow-list; **and** that the fourteen altered functions still carry it (a bare "0 non-compliant" would also pass if they had all been dropped — this is the assertion that catches 0048's own drift-remediation trap); `presby_current_org()` stays INVOKER |
-| 36.4 | B-H3, one assertion per table class: full-CRUD 14×4, `audit_events` append-only both ways, `feature_flags` update-but-not-create, catalogs SELECT-only both ways, org tree SELECT-only |
-| 36.5 | C-3's **inverted** FORCE catch-all with the literal 25-name allow-list, plus a second assertion that the allow-list itself has not gone stale |
-| 36.6 | B-H2: enabled+forced, four policies, grant shape, no foreign binding visible, the template arm still readable, and the cross-tenant INSERT refused |
-| 36.7 | B-M4 four-policy split, `tenant_isolation` gone, six templates visible, one row per key, `indnullsnotdistinct`, and a tenant refused when minting a platform template |
-| 36.8 | C-4/B-L3 both functions, both roles, asserted at the catalog **and** at the call |
-| 36.9 | B-M3 five composites, five originals gone, the `app_roles_id_org_key` anchor, `confdeltype='c'`, B-L6's three indexes, and the `groups.group_type_id` exclusion asserted so a future sweep does not "fix" it |
-| 36.10 | N-6 trigger present/enabled/`BEFORE DELETE FOR EACH ROW`, the guard function's own `pg_temp` pin, the column's type, no production row carrying a window, and `presby_app` still holding no `DELETE` |
+| 39.1 | no `CREATE` on schema `public` or the database for `presby_app`, `presby_platform`, `PUBLIC` |
+| 39.2 | `TEMP` asserted as a known-true fact, with the D1 reasoning |
+| 39.3 | `proconfig` = `public, pg_temp` on every `prosecdef` outside the dated allow-list; **and** that the fourteen altered functions still carry it (a bare "0 non-compliant" would also pass if they had all been dropped — this is the assertion that catches 0048's own drift-remediation trap); `presby_current_org()` stays INVOKER |
+| 39.4 | B-H3, one assertion per table class: full-CRUD 14×4, `audit_events` append-only both ways, `feature_flags` update-but-not-create, catalogs SELECT-only both ways, org tree SELECT-only |
+| 39.5 | C-3's **inverted** FORCE catch-all with the literal 25-name allow-list, plus a second assertion that the allow-list itself has not gone stale |
+| 39.6 | B-H2: enabled+forced, four policies, grant shape, no foreign binding visible, the template arm still readable, and the cross-tenant INSERT refused |
+| 39.7 | B-M4 four-policy split, `tenant_isolation` gone, six templates visible, one row per key, `indnullsnotdistinct`, and a tenant refused when minting a platform template |
+| 39.8 | C-4/B-L3 both functions, both roles, asserted at the catalog **and** at the call |
+| 39.9 | B-M3 five composites, five originals gone, the `app_roles_id_org_key` anchor, `confdeltype='c'`, B-L6's three indexes, and the `groups.group_type_id` exclusion asserted so a future sweep does not "fix" it |
+| 39.10 | N-6 trigger present/enabled/`BEFORE DELETE FOR EACH ROW`, the guard function's own `pg_temp` pin, the column's type, no production row carrying a window, and `presby_app` still holding no `DELETE` |
 
 **Vitest.** New regression tests, each named for what it protects:
 
@@ -1722,11 +1722,16 @@ deferrals (B-M1, B-M2 residual, B-L2, B-L5, B-I1–I6):
   `create temporary table t20_fresh_person`, which only a non-parallel
   housekeeping pass should touch.
 - **Delete the 13 hand-enumerated per-table FORCE assertions** now superseded
-  by §36.5's catch-all — deferred for the same shared-file reason (Phase 3
+  by §39.5's catch-all — deferred for the same shared-file reason (Phase 3
   named this deviation; it stands).
-- **Shrink the F70 dated allow-list to empty** once the lifecycle pipeline's
+- ~~**Shrink the F70 dated allow-list to empty** once the lifecycle pipeline's
   eleventh loop-back lands `public, pg_temp` on the 21 functions from
-  0043–0047, and delete the paragraph in §36.3 that explains it.
+  0043–0047, and delete the paragraph in §39.3 that explains it.~~ **DONE at
+  integration (2026-09-25)** — `main`'s `afc2afb` pinned all 23 (the 21 plus
+  the two cardinality wrappers F62 converted), so the merge emptied the
+  allow-list, dropped the `p.proname not in (…)` clause and replaced the
+  paragraph. §39.3's proconfig assertion is now catalog-wide with no
+  exceptions.
 - **`scripts/test-rls.sql` still runs `db:migrate`-unverified assertions about
   `presby_platform`** — that role is `rolcanlogin = false` and nothing connects
   as it; the DECISION-146 follow-up (a platform-shell DML accessor, then
@@ -1735,7 +1740,7 @@ deferrals (B-M1, B-M2 residual, B-L2, B-L5, B-I1–I6):
 
 **Cross-pipeline heads-up, restated because it now has teeth:**
 `pipeline/submission-grants` (`drizzle/0049`) adds new `SECURITY DEFINER`
-functions. Once §36.3 is on `development`, any new DEFINER function without
+functions. Once §39.3 is on `development`, any new DEFINER function without
 `SET search_path = public, pg_temp` fails that assertion at integration. It is
 a one-line clause per function, but it has to be written before the merge, not
 after.
@@ -1776,15 +1781,25 @@ npm run db:seed          # required: the catalog writers moved connections
 the `_journal.json` 26/27/28 back-fill lands — see the from-scratch section.
 `scripts/seed-dev.sql` did not change and does not need re-running.
 
-**`test-rls.sql` sections touched:** section 36 added (new); section 10's
+**`test-rls.sql` sections touched:** section 39 added (new); section 10's
 `:414-418` replaced.
 
 **Run the suite with:**
 
 ```bash
 psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f scripts/test-rls.sql
-# expect: exit 0, 456 "pass" notices, zero FAIL
+# expect: exit 0, 476 "pass" notices, zero FAIL
 ```
+
+**Integration measurement (2026-09-25, after `git merge main`).** Numbers
+above this line are the pre-merge branch figures; these are the shipped ones.
+Measured on the `pipeline-security-schema-b` Neon branch as `presby_app`:
+**exit 0, 476 `pass` notices, zero FAIL** — 432 from sections 1–38 (`main`'s
+433 minus the one `:414-418` assertion this pipeline deletes) plus **44** from
+section 39. The "45 new / 456 total" figure quoted earlier in this log is one
+stale: it predates the second-pass replacement of §39.10's vacuous `assert_eq`
+with an explanatory comment (recorded further down this file), which the
+`832a9ee` commit message already captured as 412 → 455. 433 − 1 + 44 = 476.
 
 **Next agent after QA:** `analyst` for Phase 6. No `api-developer` handoff is
 needed — the two application follow-ons this pipeline owed are already in the
@@ -1941,7 +1956,7 @@ measurement rather than by reading teardowns.
 
 | File | Change |
 |---|---|
-| `scripts/test-rls.sql` | The vacuous `assert_eq` at §36.10 replaced in place by an explanatory comment. Still one appended block at EOF plus the pre-authorized `:415` edit — this is a third hunk, inside the appended block, so the integration merge is unaffected. |
+| `scripts/test-rls.sql` | The vacuous `assert_eq` at §39.10 replaced in place by an explanatory comment. Still one appended block at EOF plus the pre-authorized `:415` edit — this is a third hunk, inside the appended block, so the integration merge is unaffected. |
 | `src/lib/db/fixture-deletable.test.ts` | **New.** The canary, on `getPlatformDb()`, with its own can-it-fail proof. |
 | `src/lib/db/fixture-deletable.ts` | Exports `FIXTURE_TEARDOWN_WINDOW_MS`; adds `STALE_FIXTURE_STAMP_GRACE_MS` and `staleFixtureStampCutoff()` with the reasoning and the stated blind spot. No behaviour change to `fixtureDeletableUntil()`. |
 | `src/lib/tickets.test.ts` | `trackedPeopleIds` array; `person()` tracks at insert; teardown iterates it. |

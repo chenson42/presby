@@ -51,8 +51,12 @@
 -- about the same congregation from two predecessors.
 --
 -- IMMUTABILITY IS BELT AND BRACES, and the belt is not enough on its own.
--- `presby_app` gets `select, insert` and nothing else, and `presby_platform`
--- the same — but Ruling A5's own finding from batch B applies here in full:
+-- `presby_app` and `presby_platform` are both SELECT-ONLY as shipped (section
+-- 3 below revokes insert/update/delete from both; this header claimed `select,
+-- insert` until F64 corrected it on 2026-09-25 — the INSERT half went away when
+-- creation became function-mediated under presby.publication_write_active,
+-- F55/DECISION-141). But Ruling A5's own finding from batch B applies here in
+-- full:
 -- PLATFORM_DATABASE_URL connects as `neondb_owner`, which is a MEMBER of
 -- both roles and holds every privilege by ownership regardless, so no grant
 -- binds it. `presby_freeze_statistical_return()` does, because BYPASSRLS
@@ -418,13 +422,29 @@ create trigger statistical_returns_freeze
 -- ONE GUC FOR THREE TABLES, deliberately: presby.publication_write_active is
 -- read by this trigger, by publications_guard and by congregation_statistics_
 -- publication_guard (both drizzle/0047). Publishing IS one atomic operation
--- across the three — same function, same transaction, one claim ("a sanctioned
--- function wrote this row"). Splitting it per table would be the identifier
--- table's no-reuse case misapplied. It is also deliberately NOT split by
--- provenance: when D13's import function ships it arms this same GUC rather
--- than a second presby.import_write_active, because the claim the guard
--- proves does not vary by provenance, and OR-ing two GUCs that mean the same
--- thing is complexity without protection.
+-- across the three — same function, same transaction.
+--
+-- WHAT THE MARKER ACTUALLY PROVES, restated 2026-09-25 (F63, eleventh Phase 3
+-- loop-back) after the earlier wording here overstated it. THE GUC IS A
+-- WORKFLOW MARKER; THE PRIVILEGE IS THE AUTHORITY BOUNDARY. The marker records
+-- one claim — "this transaction is part of one sanctioned publish operation" —
+-- and it is NOT a claim about who may write: set_config() has no privilege
+-- check, so any role holding the DML grant can arm it.
+--
+-- For `statistical_returns` and `publications`, the MISSING INSERT grant on
+-- every application role is what makes an armed marker equivalent to the
+-- sanctioned path for tenant roles, because there is no other way in. For
+-- `congregation_statistics`, that equivalence had to be built separately —
+-- the column-level INSERT grant at drizzle/0047 section 10 (F61) — and the
+-- GUC alone never proved it, which is exactly what F59 demonstrated before
+-- this pass closed it.
+--
+-- Splitting the marker per table would be the identifier table's no-reuse case
+-- misapplied. It is also deliberately NOT split by provenance: when D13's
+-- import function ships it arms this same GUC rather than a second
+-- presby.import_write_active, because the claim the marker RECORDS does not
+-- vary by provenance, and OR-ing two GUCs that mean the same thing is
+-- complexity without protection.
 --
 -- ARMED TODAY IN THREE PLACES, all verified rather than assumed:
 --   * presby_publish_sasr_snapshot() (drizzle/0047 section 7), once, after
@@ -624,7 +644,7 @@ create trigger statistical_returns_field_spec
 -- way.
 create or replace function presby_check_return_about_org()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   if new.provenance <> 'imported' then
@@ -691,7 +711,7 @@ create trigger statistical_returns_about_org
 -- filed; this way a real divergence is a loud failure instead.)
 create or replace function presby_freeze_used_field_spec()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   if exists (select 1 from statistical_returns where form_version_key = old.key) then

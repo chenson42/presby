@@ -14,7 +14,7 @@
 -- *** fourteen functions defined in 0009/0010/0012/0013/0014/0015/0020/0021/
 -- *** 0024/0028/0041/0042; re-running any of those files after this one
 -- *** would silently strip the search_path clause this file installs.
--- *** scripts/test-rls.sql's proconfig assertion (section 36, added
+-- *** scripts/test-rls.sql's proconfig assertion (section 39, added
 -- *** alongside this file) is what catches that if it happens anyway.
 --
 -- Sections:
@@ -43,7 +43,7 @@
 -- as neondb_owner and holds every privilege by ownership. A grant documents
 -- intent and binds presby_app; only a trigger binds the owner.
 --
--- The 25-name exemption list in section 9 of scripts/test-rls.sql (the C-3
+-- The 25-name exemption list in section 39.5 of scripts/test-rls.sql (the C-3
 -- inverted FORCE catch-all) is the same set of tables named here. The two
 -- lists are literal and kept in sync by this comment: if you add a table to
 -- one, add it to the other.
@@ -122,10 +122,13 @@ grant select on sasr_form_versions to presby_app;
 --
 -- The nineteen 0043-0047 functions plus presby_affiliation_parent_as_of and
 -- presby_assert_council_authority (21 by measurement on this branch) are
--- deliberately excluded: they are owned by the lifecycle pipeline's
--- concurrent eleventh loop-back, which widens them to `public, pg_temp` in
--- place on main. scripts/test-rls.sql section 36 carries them as a dated
--- allow-list until that lands.
+-- deliberately excluded from THIS file: they are owned by the lifecycle
+-- pipeline's eleventh loop-back (F60), which pinned them to
+-- `public, pg_temp` in place in drizzle/0043-0047 themselves. That landed on
+-- main on 2026-09-25, together with the two cardinality wrappers F62
+-- converted to DEFINER (23 in total), so the dated allow-list
+-- scripts/test-rls.sql carried for them is gone: section 39.3 now asserts the
+-- pin CATALOG-WIDE, and section 36 asserts it over those 23 by name.
 -- ---------------------------------------------------------------------------
 
 alter function presby_effective_permissions(uuid, uuid, date) set search_path = public, pg_temp;
@@ -156,7 +159,7 @@ alter function presby_user_organizations(uuid) set search_path = public, pg_temp
 -- "secondary at best"; removing the suite's own temp table is a mid-file edit
 -- to a shared file during a parallel pipeline (Workflow Rule 16), so it is
 -- deferred to a non-parallel housekeeping pass and named in docs/TODO.md.
--- scripts/test-rls.sql section 36 asserts the TEMP privilege as a KNOWN-TRUE
+-- scripts/test-rls.sql section 39.2 asserts the TEMP privilege as a KNOWN-TRUE
 -- fact so the next reader does not re-derive "safe" from the CREATE check
 -- alone (which is precisely the reasoning B-M2 got wrong).
 
@@ -519,7 +522,7 @@ create trigger people_guard_delete
 --   and scripts/seed.ts:43 — are corrected in the same commit. getPlatformDb()
 --   connects as neondb_owner; presby_platform exists in the catalog but is
 --   rolcanlogin = false and nothing has ever connected as it (DECISION-146).
--- * scripts/test-rls.sql section 36 is the assertion half of this file. It
+-- * scripts/test-rls.sql section 39 is the assertion half of this file. It
 --   deletes the old :414-418 presby_roll_cache_drift() call (section 6 above
 --   revokes presby_app's EXECUTE, so leaving it is a hard break, not a stale
 --   comment) and adds the C-3 inverted FORCE catch-all, the F70 proconfig

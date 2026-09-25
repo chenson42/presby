@@ -654,7 +654,7 @@ create or replace function presby_assert_council_authority(
   p_context text default 'organization_affiliations'
 ) returns void
 language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_actor_type   organization_type;
@@ -703,7 +703,7 @@ create or replace function presby_affiliation_parent_as_of(
   p_as_of date
 ) returns uuid
 language sql stable security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
   select a.parent_org_id
     from organization_affiliations a
@@ -723,7 +723,7 @@ create or replace function presby_org_affiliated(
   p_as_of date
 ) returns boolean
 language sql stable security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
   with recursive ancestry as (
     select a.parent_org_id as org_id, 1 as depth
@@ -775,7 +775,7 @@ create or replace function presby_apply_affiliation_to_org_tree(
   p_as_of date default current_date
 ) returns void
 language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_old_path    text;
@@ -880,7 +880,7 @@ create or replace function presby_transfer_affiliation(
   p_concurrence_reference text default null
 ) returns uuid
 language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_actor          uuid := presby_current_org();
@@ -1006,7 +1006,7 @@ grant execute on function presby_transfer_affiliation(uuid, uuid, text, date, te
 -- ---------------------------------------------------------------------------
 create or replace function presby_check_affiliation_authority()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   perform presby_assert_council_authority(
@@ -1021,7 +1021,7 @@ create trigger organization_affiliations_authority
 
 create or replace function presby_apply_affiliation_row()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   perform presby_apply_affiliation_to_org_tree(
@@ -1238,7 +1238,7 @@ create trigger organization_lifecycle_events_guard
 
 create or replace function presby_check_lifecycle_authority()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   perform presby_assert_council_authority(
@@ -1256,7 +1256,7 @@ create trigger organization_lifecycle_events_authority
 -- at all, same-org or not.
 create or replace function presby_apply_lifecycle_event()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_status text;
@@ -1384,7 +1384,7 @@ create trigger organization_lifecycle_events_freeze
 -- which layer each of its assertions proves.
 create or replace function presby_check_succession_event()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_event_org uuid;
@@ -1455,9 +1455,14 @@ create trigger organization_successions_guard
 -- the event id, called from two deferred constraint triggers — this one on
 -- organization_successions and a new one on organization_lifecycle_events
 -- (13b2) — rather than copied, so the two cannot drift apart by hand-editing
--- one of them. No SECURITY DEFINER: both callers run inside the writer's own
--- transaction against tables that writer just touched, so the F26 cross-tenant
--- read shape does not arise.
+-- one of them. THIS SHARED HELPER stays SECURITY INVOKER: it runs inside the
+-- writer's own transaction against tables that writer just touched, so the F26
+-- cross-tenant read shape does not arise for the helper itself. Its two
+-- wrapper callers ARE SECURITY DEFINER as of 2026-09-25 (F62, section 13b3
+-- below), so this body now runs under the owner's context however it is
+-- reached — which is what keeps its opening `select ... where e.id =
+-- p_event_id` from silently finding nothing and turning the whole check into
+-- the ON DELETE CASCADE no-op.
 --
 -- The "parent event removed in the same transaction" no-op moved INTO the
 -- shared function, so both callers inherit it.
@@ -1523,8 +1528,14 @@ grant execute on function presby_lifecycle_event_cardinality_check(uuid) to pres
 -- scripts/test-rls.sql section 32 and src/lib/db/domain/lifecycle.test.ts
 -- assert the messages, so a drift here fails the suite rather than passing
 -- quietly.
+--
+-- SECURITY DEFINER since 2026-09-25 (F62 / Ruling 3) — the full argument, and
+-- the measurement that corrected the ruling's premise about which role a
+-- deferred trigger runs as, are in section 13b3 below.
 create or replace function presby_check_succession_cardinality()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql security definer
+set search_path = public, pg_temp
+as $$
 declare
   v_event_id uuid := coalesce(new.event_id, old.event_id);
 begin
@@ -1548,8 +1559,13 @@ create constraint trigger organization_successions_cardinality
 -- make the legal case unwritable. At COMMIT the aggregate must be complete,
 -- and either trigger alone is sufficient to say so — in the ordinary case both
 -- fire in one transaction and agree.
+--
+-- SECURITY DEFINER since 2026-09-25 (F62 / Ruling 3), for the same two reasons
+-- its successions-side twin is; see section 13b3 below.
 create or replace function presby_check_lifecycle_event_cardinality()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql security definer
+set search_path = public, pg_temp
+as $$
 begin
   perform presby_lifecycle_event_cardinality_check(new.id);
   return null;
@@ -1560,6 +1576,126 @@ create constraint trigger organization_lifecycle_events_cardinality
   after insert on organization_lifecycle_events
   deferrable initially deferred
   for each row execute function presby_check_lifecycle_event_cardinality();
+
+-- (13b3) THE DEFERRED PATH IS PROVEN THROUGH THE COMMIT-TIME CHECK, NOT ONLY
+-- TO FUNCTION RETURN (F62 / eleventh Phase 3 loop-back, Ruling 3, 2026-09-25).
+--
+-- MEASURED ON PostgreSQL 18.6 (the `development` Neon branch), 2026-09-25,
+-- and the measurement CORRECTS Ruling 3's stated premise. The ruling reasoned
+-- that a deferred constraint trigger fires "under the session's ambient role"
+-- at COMMIT, so a SECURITY DEFINER writer's INSERTs would schedule triggers
+-- that later run as presby_app. That is HALF right, and the half that is wrong
+-- matters enough to write down rather than let a future reader re-derive it
+-- from the same plausible-but-incomplete reasoning:
+--
+--   * An after-trigger event carries the security context that was current
+--     WHEN THE EVENT WAS QUEUED, not the one current when it fires. Probe
+--     (scratch table + deferred constraint trigger raising current_user,
+--     dropped afterwards): an INSERT performed inside a SECURITY DEFINER
+--     function reports `current_user = neondb_owner, session_user =
+--     presby_app` inside the deferred trigger — at `SET CONSTRAINTS ALL
+--     IMMEDIATE` and at a real COMMIT alike.
+--   * A DIRECT INSERT by the tenant role queues an event with presby_app's own
+--     context, and the deferred trigger then reports `current_user =
+--     presby_app`.
+--
+-- So the `permission denied` failure the ruling predicted is REAL, but it is
+-- reachable on the DIRECT TENANT INSERT path, not through a DEFINER writer.
+-- This is not documented by PostgreSQL as version-contingent behavior, but is
+-- stated here as measured rather than assumed — re-verify if the production
+-- Postgres major version ever diverges from 18.x.
+--
+-- WHY THE TWO WRAPPERS ABOVE ARE `SECURITY DEFINER` ANYWAY, on the corrected
+-- reading. The revoke at 13b (presby_app lost EXECUTE on
+-- presby_lifecycle_event_cardinality_check) is correct and stays. Two reasons
+-- survive the correction, and the second is the stronger one:
+--
+--   1. GRANT. The direct-tenant-INSERT path above is grant-closed today
+--      (presby_app holds SELECT only on both lifecycle tables) but 13b's own
+--      comment already couples "re-grant INSERT and this EXECUTE grant must
+--      come back" — a coupling that rots quietly. DEFINER removes the coupling
+--      outright: the wrappers reach the helper BY OWNERSHIP (an owner is
+--      exempt from its own object's ACL entries), so no grant has to come back
+--      and the revoke keeps meaning exactly what it says.
+--   2. VISIBILITY, which no grant can fix. presby_lifecycle_event_cardinality_
+--      check() opens with `select e.event ... where e.id = p_event_id` and
+--      RETURNS SILENTLY when that finds nothing (the legitimate ON DELETE
+--      CASCADE no-op). Run as INVOKER under a role for which
+--      organization_lifecycle_events' FORCE-RLS policy hides the event row,
+--      the whole cardinality check degrades into that no-op and passes — the
+--      F26 shape, arriving through a deferred trigger instead of a direct
+--      read, and failing OPEN rather than closed. DEFINER is the only thing
+--      that makes the check see the aggregate it is checking.
+--
+-- FAILING-FIRST, RUN NOT ASSUMED (database-admin, tenth Phase 4 pass,
+-- 2026-09-25). With the test double below installed and the two wrappers still
+-- INVOKER: a direct tenant INSERT of one more succession edge (INSERT
+-- temporarily granted on organization_successions, GUC armed to the event's
+-- own id) failed at `set constraints all immediate` with exactly `ERROR:
+-- permission denied for function presby_lifecycle_event_cardinality_check`,
+-- raised from presby_check_succession_cardinality() line 6. After the DEFINER
+-- conversion the same probe passes the privilege check and the temporary grant
+-- was revoked again. The section-38 positive control (a well-formed `merged`
+-- aggregate written through the test double) succeeds both before and after —
+-- honestly reported, because of the queued-context fact above — and the
+-- negative control raises the cardinality literal unchanged in both states.
+--
+-- THE TEST DOUBLE, and why it lives in a migration rather than in the suite.
+-- scripts/test-rls.sql runs as presby_app, and presby_app cannot create a
+-- SECURITY DEFINER function owned by neondb_owner — so the stand-in has to be
+-- created by the migration. It is NOT a production API and must not acquire
+-- callers: it performs no standing check, takes the acting council from
+-- presby_current_org(), and exists only so the deferred path can be exercised
+-- as a tenant role before the real writer exists.
+--
+-- ##### SCAFFOLDING — DROP THIS FUNCTION IN THE SAME MIGRATION THAT SHIPS
+-- ##### presby_record_lifecycle_event(). The real writer supersedes it
+-- ##### entirely; leaving both would give the tenant connection a second,
+-- ##### unchecked way into the lifecycle aggregate. Tracked in docs/TODO.md on
+-- ##### presby_record_lifecycle_event()'s own line.
+create or replace function presby_test_only_lifecycle_writer_f62(
+  p_subject_org_id  uuid,
+  p_event           text,
+  p_effective_on    date,
+  p_minute_reference text,
+  p_recorded_by     uuid,
+  p_predecessors    uuid[],
+  p_successors      uuid[]
+) returns uuid
+language plpgsql security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_event_id uuid := gen_random_uuid();
+  v_pred uuid;
+  v_succ uuid;
+begin
+  -- The essential shape of the real writer: one transaction, one act, the
+  -- aggregate's own id as the marker (F54 / DECISION-141).
+  perform set_config('presby.lifecycle_write_active', v_event_id::text, true);
+
+  insert into organization_lifecycle_events
+    (id, organization_id, subject_org_id, event, effective_on, minute_reference,
+     recorded_by)
+  values
+    (v_event_id, presby_current_org(), p_subject_org_id, p_event, p_effective_on,
+     p_minute_reference, p_recorded_by);
+
+  foreach v_pred in array coalesce(p_predecessors, array[]::uuid[]) loop
+    foreach v_succ in array coalesce(p_successors, array[]::uuid[]) loop
+      insert into organization_successions (event_id, predecessor_org_id, successor_org_id)
+      values (v_event_id, v_pred, v_succ);
+    end loop;
+  end loop;
+
+  return v_event_id;
+end $$;
+
+comment on function presby_test_only_lifecycle_writer_f62(uuid, text, date, text, uuid, uuid[], uuid[]) is
+  'TEST SCAFFOLDING (F62, 2026-09-25). A throwaway SECURITY DEFINER stand-in for the future presby_record_lifecycle_event(), existing only so scripts/test-rls.sql section 38 can drive the deferred cardinality path as presby_app through SET CONSTRAINTS ALL IMMEDIATE. It performs NO standing check. DROP IT in the same migration that ships presby_record_lifecycle_event().';
+
+revoke all on function presby_test_only_lifecycle_writer_f62(uuid, text, date, text, uuid, uuid[], uuid[]) from public;
+grant execute on function presby_test_only_lifecycle_writer_f62(uuid, text, date, text, uuid, uuid[], uuid[]) to presby_app;
 
 -- (13c) THE FREEZE. Same instrument and same reasoning as
 -- presby_freeze_lifecycle_event() in section 12: a grant binds presby_app and
@@ -1611,7 +1747,7 @@ create trigger organization_successions_freeze
 -- 58-org cascade went through it.
 create or replace function presby_guard_organizations_insert()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   if coalesce(current_setting('presby.affiliation_trigger_active', true), '') <> 'true' then
@@ -1630,7 +1766,7 @@ create trigger organizations_guard_insert
 
 create or replace function presby_guard_organizations_reparent()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   if coalesce(current_setting('presby.affiliation_trigger_active', true), '') <> 'true' then
@@ -1654,7 +1790,7 @@ create trigger organizations_guard_reparent
 -- return to the successor, the mis-attribution D19 exists to prevent.
 create or replace function presby_guard_organizations_delete()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   if old.deletable_until is null or old.deletable_until <= now() then

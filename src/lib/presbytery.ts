@@ -637,50 +637,79 @@ export async function setCongregationStatistics(
     const cong = await resolveMemberCongregation(tx, organizationId, aboutOrgId);
     if (!cong) return { kind: "invalid_target" };
 
-    const values = {
-      minuteReference: input.minuteReference ?? null,
-      gainsProfessionsUnder18: input.gainsProfessionsUnder18 ?? null,
-      gainsProfessions18Plus: input.gainsProfessions18Plus ?? null,
-      gainsCertificate: input.gainsCertificate ?? null,
-      gainsOther: input.gainsOther ?? null,
-      lossesCertificate: input.lossesCertificate ?? null,
-      lossesDeaths: input.lossesDeaths ?? null,
-      lossesOther: input.lossesOther ?? null,
-      endingActive: input.endingActive ?? null,
-      endingBaptized: input.endingBaptized ?? null,
-      endingAffiliate: input.endingAffiliate ?? null,
-      endingOtherParticipants: input.endingOtherParticipants ?? null,
-      avgWeeklyWorshipAttendance: input.avgWeeklyWorshipAttendance ?? null,
-      potentialGivingUnits: input.potentialGivingUnits ?? null,
-      baptismsChildren: input.baptismsChildren ?? null,
-      baptismsAdults: input.baptismsAdults ?? null,
-      officersRulingElderCount: input.officersRulingElderCount ?? null,
-      officersDeaconCount: input.officersDeaconCount ?? null,
-      enteredBy: actingUserId,
-    };
+    // EXPLICIT-COLUMN RAW SQL, NOT Drizzle's insert() builder — and that is a
+    // security requirement, not a style choice (F61 / eleventh Phase 3
+    // loop-back; docs/schema-design-2.md sec 2h).
+    //
+    // `presby_app` no longer holds table-level INSERT on this table. It holds
+    // a column-level INSERT grant on 68 of 71 columns, excluding
+    // `publication_id`, `withdrawn_at` and `published_at` (drizzle/0047
+    // section 10), which is what stops a tenant connection from self-arming
+    // `presby.publication_write_active` and forging a permanent
+    // `published_by_congregation` projection.
+    //
+    // Drizzle's `insert()` builder cannot be used against a column-level
+    // grant: drizzle-orm 0.45 emits EVERY column of the table in the INSERT
+    // target list, filling unspecified ones with `DEFAULT` — and Postgres
+    // requires column-level INSERT privilege on every column in the target
+    // list, including one supplied as the bare `DEFAULT` keyword (measured,
+    // F59). Naming the columns by hand is the only shape that keeps the
+    // excluded three out of the target list entirely.
+    //
+    // Semantics are byte-identical to the `onConflictDoUpdate()` form this
+    // replaces: same 23 columns, same partial conflict target, same 19
+    // columns updated from EXCLUDED. `id` and `created_at` are never named,
+    // which is exactly why no privilege on them is needed either.
+    const result = await tx.execute(sql`
+      insert into congregation_statistics (
+        organization_id, about_org_id, year, provenance,
+        minute_reference,
+        gains_professions_under18, gains_professions_18plus,
+        gains_certificate, gains_other,
+        losses_certificate, losses_deaths, losses_other,
+        ending_active, ending_baptized, ending_affiliate,
+        ending_other_participants, avg_weekly_worship_attendance,
+        potential_giving_units, baptisms_children, baptisms_adults,
+        officers_ruling_elder_count, officers_deacon_count, entered_by
+      ) values (
+        ${organizationId}::uuid, ${aboutOrgId}::uuid, ${year}::integer, 'presbytery_entered',
+        ${input.minuteReference ?? null},
+        ${input.gainsProfessionsUnder18 ?? null}, ${input.gainsProfessions18Plus ?? null},
+        ${input.gainsCertificate ?? null}, ${input.gainsOther ?? null},
+        ${input.lossesCertificate ?? null}, ${input.lossesDeaths ?? null}, ${input.lossesOther ?? null},
+        ${input.endingActive ?? null}, ${input.endingBaptized ?? null}, ${input.endingAffiliate ?? null},
+        ${input.endingOtherParticipants ?? null}, ${input.avgWeeklyWorshipAttendance ?? null},
+        ${input.potentialGivingUnits ?? null}, ${input.baptismsChildren ?? null}, ${input.baptismsAdults ?? null},
+        ${input.officersRulingElderCount ?? null}, ${input.officersDeaconCount ?? null}, ${actingUserId}::uuid
+      )
+      on conflict (organization_id, about_org_id, year, provenance)
+        where provenance in ('presbytery_entered', 'imported')
+      do update set
+        minute_reference = excluded.minute_reference,
+        gains_professions_under18 = excluded.gains_professions_under18,
+        gains_professions_18plus = excluded.gains_professions_18plus,
+        gains_certificate = excluded.gains_certificate,
+        gains_other = excluded.gains_other,
+        losses_certificate = excluded.losses_certificate,
+        losses_deaths = excluded.losses_deaths,
+        losses_other = excluded.losses_other,
+        ending_active = excluded.ending_active,
+        ending_baptized = excluded.ending_baptized,
+        ending_affiliate = excluded.ending_affiliate,
+        ending_other_participants = excluded.ending_other_participants,
+        avg_weekly_worship_attendance = excluded.avg_weekly_worship_attendance,
+        potential_giving_units = excluded.potential_giving_units,
+        baptisms_children = excluded.baptisms_children,
+        baptisms_adults = excluded.baptisms_adults,
+        officers_ruling_elder_count = excluded.officers_ruling_elder_count,
+        officers_deacon_count = excluded.officers_deacon_count,
+        entered_by = excluded.entered_by
+      returning id
+    `);
 
-    const [row] = await tx
-      .insert(congregationStatistics)
-      .values({
-        organizationId,
-        aboutOrgId,
-        year,
-        provenance: "presbytery_entered",
-        ...values,
-      })
-      .onConflictDoUpdate({
-        target: [
-          congregationStatistics.organizationId,
-          congregationStatistics.aboutOrgId,
-          congregationStatistics.year,
-          congregationStatistics.provenance,
-        ],
-        targetWhere: sql`${congregationStatistics.provenance} in ('presbytery_entered', 'imported')`,
-        set: values,
-      })
-      .returning({ id: congregationStatistics.id });
-
-    return { kind: "ok", data: { id: row!.id } };
+    const row = (result as unknown as { rows?: Array<{ id?: string }> })
+      .rows?.[0];
+    return { kind: "ok", data: { id: row!.id! } };
   });
 }
 

@@ -96,7 +96,7 @@ grant select, insert, update, delete on organization_identifiers
   to presby_platform;
 
 comment on table organization_identifiers is
-  'External identifiers for an organization (OGA church PIN, psvonline congregation id, legacy import keys). D24. Deliberately NOT tenant-isolated — identity data about a public org-tree entry, same class as organizations. pcusa_pin lived on organization_settings (tenant-isolated) until drizzle/0043, where a cross-council importer running as the presbytery could not read it. presby_app holds SELECT ONLY (F47/DECISION-140): presby_set_organization_identifier() is the sole tenant-side writer and organization_identifiers_guard refuses every UPDATE and DELETE outside it, on EVERY connection including the owner.';
+  'External identifiers for an organization (OGA church PIN, psvonline congregation id, legacy import keys). D24. Deliberately NOT tenant-isolated — identity data about a public org-tree entry, same class as organizations. pcusa_pin lived on organization_settings (tenant-isolated) until drizzle/0043, where a cross-council importer running as the presbytery could not read it. presby_app holds SELECT ONLY (F47/DECISION-140): presby_set_organization_identifier() is the sole tenant-side writer and organization_identifiers_guard refuses every INSERT, UPDATE and DELETE outside it (widened from the UPDATE/DELETE pair to the full triple by F58/DECISION-141 — creation is guarded as strongly as mutation), on EVERY connection including the owner.';
 
 -- ---------------------------------------------------------------------------
 -- 2. Move pcusa_pin off organization_settings
@@ -207,7 +207,7 @@ create or replace function presby_set_organization_identifier(
   p_source text default null
 ) returns uuid
 language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_actor uuid := presby_current_org();

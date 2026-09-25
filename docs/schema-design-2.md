@@ -1188,6 +1188,189 @@ scoped Phase 1–3 decision, not a rider on this ratification.
 
 ---
 
+## 2h. Eleventh Phase 3 loop-back — third-round external post-merge review (F60–F64)
+
+*(2026-09-25, operator's external reviewer reading the regenerated export after
+v0.25.2; recorded by the orchestrator per CLAUDE.md's "External post-merge
+schema review" convention. Reviewer's status: "D10/D19/D20/D21 model: yes.
+Lifecycle implementation: yes. Publication artifact/event implementation: yes.
+Final security/integrity sign-off: not quite. I would fix the SECURITY DEFINER
+search paths and close F59. After those two changes, I would stop looking for
+another schema redesign and move on to the next pipeline." Tech-lead's ruling
+follows as the eleventh loop-back; the tenth's "last correction" sentence is
+superseded by the operator's decision to run this round.)*
+
+**What the reviewer accepted.** "This pass closes the two blockers from my
+previous review. The lifecycle aggregate is now guarded from creation through
+commit-time cardinality, and statistical_returns / publications creation is
+mediated rather than merely frozen afterward." The event-side deferred
+constraint closes the zero-succession hole for `merged` and `divided`; the
+event-id GUC is "materially better than the original boolean marker"; the
+owner-level residual is correctly documented as F44-class ("a raw owner can
+deliberately re-arm a GUC, and an owner can disable a trigger entirely — not
+something these guards should pretend to solve"). QA-2's distinction is
+endorsed: **GUC = workflow marker; privilege = authority boundary.**
+
+### F60 — `SECURITY DEFINER … SET search_path = public` is not safe enough; `pg_temp` must be explicitly last — a security finding, not cleanup
+
+> "PostgreSQL's safe pattern for SECURITY DEFINER functions is to put `pg_temp`
+> explicitly last: `SET search_path = public, pg_temp`. Otherwise the temporary
+> schema can be searched ahead of `public`, which means a caller able to create
+> temporary objects may be able to shadow unqualified relations referenced by
+> the definer function." Applies to every `SECURITY DEFINER` function in this
+> pipeline (`presby_set_organization_identifier()`,
+> `presby_assert_council_authority()`, `presby_org_affiliated()`,
+> `presby_transfer_affiliation()`, and the rest) — and the reviewer would "grep
+> the older migrations for the same pattern." Separately: "assert that
+> `presby_app`, `presby_platform`, and PUBLIC do not have CREATE privilege on
+> schema `public`."
+
+Measured at recording time: `drizzle/0043`–`0047` carry 21 `set search_path`
+clauses and **no** `pg_temp` anywhere in `drizzle/`. **Routing:** the
+pipeline's own functions (0043–0047) are corrected in place here; the
+older-migration sweep and the schema-`public` CREATE assertion are released
+surface and go as a new migration in the concurrent security §B pipeline
+(`2026-09-25-security-schema-b`, `drizzle/0048`), whose B-M2 item already covers
+the 28 older `DEFINER` functions without `SET search_path` — its scope is
+widened to "`public, pg_temp` on every `DEFINER` function, plus the CREATE
+assertion pinned in `test-rls.sql`."
+
+### F61 — F59 is not an acceptable final state: the projection can claim different facts under a real publication's identity, which cuts against D20
+
+> "Today `presby_app` can self-arm `presby.publication_write_active` and insert a
+> permanent `published_by_congregation` projection with arbitrary year/content,
+> provided it points at a real publication addressed to that council. The
+> source/recipient FKs prove *whose* publication the projection references. They
+> do not prove that the projection contains the facts that were actually
+> published. You now have an immutable publication event, an immutable
+> statistical artifact, but a presbytery-side typed projection that can still
+> claim different facts under that publication's identity. Because
+> `congregation_statistics` feeds operational calculations, I think this is
+> worth closing rather than leaving as an accepted residual."
+
+The fix is the one the tenth ruling already named: move
+`setCongregationStatistics()` off Drizzle's all-column `INSERT` onto
+explicit-column SQL; replace the table-level `INSERT` grant with a column-level
+`INSERT` grant excluding at least `publication_id` and `withdrawn_at`. "The
+legitimate `presbytery_entered` path does not need those columns.
+`presby_publish_sasr_snapshot()` runs `SECURITY DEFINER` and is unaffected by
+the tenant grant. That closes F59 without introducing another `SECURITY
+DEFINER` API." Supersedes the tenth ruling's acceptance of F59 as built and the
+`docs/TODO.md` line that tracked the closing instrument.
+
+### F62 — the deferred lifecycle cardinality path must be tested through COMMIT as the tenant role, not stopped at function return
+
+> "Your deferred lifecycle cardinality trigger functions are `SECURITY INVOKER`,
+> and `presby_app` no longer has `EXECUTE` on the shared cardinality helper.
+> Before `presby_record_lifecycle_event()` ships, test the real future path all
+> the way through COMMIT: `presby_app` → `SECURITY DEFINER` writer → `INSERT`
+> lifecycle event/successions → deferred trigger at COMMIT. On PostgreSQL 18,
+> deferred trigger execution semantics should line up with this design. On an
+> older version, verify rather than assume which role is active when the
+> deferred trigger finally executes. If necessary, the two deferred wrapper
+> trigger functions could become `SECURITY DEFINER` when the writer ships."
+
+The `development` branch is PostgreSQL 18.6 (measured by the security
+pipeline's analyst). A `test-rls.sql` probe that exercises exactly that path
+with a throwaway `SECURITY DEFINER` writer, committed and then cleaned up, or a
+rolled-back transaction with `SET CONSTRAINTS ALL IMMEDIATE` as the tenant role,
+belongs in this round so the future writer pipeline inherits a proven path.
+
+### F63 — §4b's wording overstates what the marker proves
+
+> "The current wording says the GUC proves that 'a sanctioned function wrote
+> this row.' That is slightly too strong. The GUC proves only that the marker is
+> armed. For `statistical_returns` and `publications`, the missing DML grants
+> make an armed marker effectively equivalent to the sanctioned path for tenant
+> roles. For `congregation_statistics`, F59 proves that it does not." Carry
+> "GUC = workflow marker; privilege = authority boundary" into §4b (and wherever
+> the DDL comments repeat the stronger claim).
+
+### F64 — three stale migration comments (documentation defects, fixed before the files are declared final)
+
+- `drizzle/0046`'s header still says `presby_app` and `presby_platform` receive
+  `select, insert` on `statistical_returns`; the final implementation makes both
+  SELECT-only.
+- The `organization_identifiers` table comment says the guard refuses UPDATE and
+  DELETE; F58 widened it to INSERT, UPDATE and DELETE.
+- The `publications` table comment says "immutable except for `withdrawn_at`";
+  the permitted transition is the complete withdrawal triple: `withdrawn_at`,
+  `withdrawn_by`, `withdrawn_minute_reference`.
+
+### Ruling on the third external review (2026-09-25, tech-lead) — F60–F64
+
+Full ruling, evidence, and the implementer brief live in
+`docs/work-log/2026-09-24-lifecycle-affiliation-returns.md` ("Phase 3 —
+Technical Design (tech-lead), continued → Ruling on the third external review
+(F60–F64)"). Summarized here so this section stays the canonical record, per
+this document's own convention:
+
+**F60 — accepted as a live gap, not cleanup.** A concurrent security-pipeline
+probe (`presby_two_factor_required`, an older function, reproduced on the
+security pipeline's own branch) demonstrated the exploit directly: a
+`presby_app` session can `create temp table people (id uuid)` and a
+`SET search_path = public`-only `SECURITY DEFINER` function resolves the
+unqualified relation to `pg_temp` first, returning an attacker-shaped answer
+instead of erroring. `public, pg_temp` (in that order) is the fix, not a
+style preference. All 21 `SECURITY DEFINER` functions in `drizzle/0043`–`0047`
+already carry `set search_path = public` (added under B-M2); none is missing
+the clause outright, including `presby_freeze_used_field_spec()`
+(`drizzle/0046:692-704`), which a cross-pipeline report flagged as a
+zero-search_path case and which this ruling corrects: it already has the
+clause and simply needs `, pg_temp` appended like the other 20. All 21 are
+corrected in place. The `test-rls.sql` assertion added this round is scoped
+to this pipeline's 21 function names, not the whole catalog — see the
+work-log for why an allow-list of the older, not-yet-fixed functions was
+rejected in favor of a name-filtered assertion that the security pipeline's
+`0048` widens (drops the name filter) rather than duplicates.
+
+**F61 — closed, superseding the tenth loop-back's acceptance of F59.**
+`setCongregationStatistics()` (`src/lib/presbytery.ts:617-680`) moves off
+Drizzle's insert builder onto an explicit-column raw SQL upsert; the
+`congregation_statistics` `INSERT` grant becomes column-level, catalog-generated
+like its `UPDATE` sibling, excluding `publication_id`, `withdrawn_at`, **and**
+`published_at` (three, not two — `published_at` is never named by the live
+`presbytery_entered` write and closes a softer forgery vector the
+`congregation_statistics_publication_shape` CHECK does not reach). This fully
+closes the F59/Finding-1 residual: a `published_by_congregation` row now
+requires `publication_id`, which `presby_app` can no longer supply under any
+arming of the GUC.
+
+**F62 — ruled: the two deferred wrapper trigger functions become `SECURITY
+DEFINER` now, not pending.** Static analysis of the already-shipped grants
+(`drizzle/0044:1517-1519`, revoking `presby_app`'s `EXECUTE` on
+`presby_lifecycle_event_cardinality_check()`) shows the `INVOKER` shape will
+fail the moment `presby_record_lifecycle_event()` ships: a deferred
+constraint trigger fires under the session's ambient role, not under
+whatever role was transiently current inside an earlier `SECURITY DEFINER`
+call — so at `COMMIT`, `presby_check_succession_cardinality()` /
+`presby_check_lifecycle_event_cardinality()` (both `INVOKER`) run as
+`presby_app`, which lacks `EXECUTE` on the shared helper, reproducing the
+exact `permission denied for function` failure the file's own section 13b
+comment already records happening once before. Making both wrappers
+`SECURITY DEFINER` closes this permanently, independent of whatever grant
+shape the future writer needs. A `test-rls.sql` probe (a throwaway
+`SECURITY DEFINER` test-double writer, since `presby_app` cannot create one
+itself) proves the failure before the fix and the pass after, via
+`SET CONSTRAINTS ALL IMMEDIATE` inside a rolled-back transaction rather than
+a real `COMMIT` — ruled an honest proof of "which role is active" (role
+context does not change at a transaction boundary absent an explicit `SET
+ROLE`), and preferred over a real `COMMIT` specifically to avoid creating a
+permanent, undeletable lifecycle-event fixture, the same reason QA already
+declined a literal commit in its own re-verification.
+
+**F63 — applied.** `docs/decisions.md`'s DECISION-141 line and
+`drizzle/0046`'s §4b comment both stated the GUC "proves" a sanctioned write;
+both are corrected to "GUC = workflow marker; privilege = authority
+boundary" (§4b in Phase 4; the decisions.md line here, by dated correction
+note).
+
+**F64 — routed to the same Phase 4 pass as F60–F62,** since all three stale
+comments sit in files this pass already touches.
+
+Implementer: **database-admin**, one pass, covering F60/F61/F62/F64
+(F63's doc half is applied here). Full brief in the work-log.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

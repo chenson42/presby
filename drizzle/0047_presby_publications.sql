@@ -235,7 +235,7 @@ grant select on publications to presby_app;
 grant select on publications to presby_platform;
 
 comment on table publications is
-  'The publication EVENT (D20): a source council published an artifact to a recipient council on a date, under a minute. IMMUTABLE except for withdrawn_at, which is the one permitted UPDATE (withdrawal is a column, never a delete). recipient_org_id is resolved once from presby_affiliation_parent_as_of() at write time and never re-derived, so a later redistricting cannot change who received an already-filed return.';
+  'The publication EVENT (D20): a source council published an artifact to a recipient council on a date, under a minute. IMMUTABLE except for the WITHDRAWAL TRIPLE — withdrawn_at, withdrawn_by and withdrawn_minute_reference, which move together in the one permitted UPDATE (withdrawal is a column, never a delete; see the withdrawn_at column comment, which this sentence now matches — F64 corrected it on 2026-09-25 from the narrower "except for withdrawn_at"). recipient_org_id is resolved once from presby_affiliation_parent_as_of() at write time and never re-derived, so a later redistricting cannot change who received an already-filed return.';
 comment on column publications.recipient_org_id is
   'The council the artifact was published TO — the presbytery of current membership at published_at (D19/G-3.0108(a)), resolved via presby_affiliation_parent_as_of() and NEVER from organizations.parent_id. Fixed at write time. The recipient reads through presby_list_published_returns_to_me(), which filters on THIS column rather than on live affiliation, because G-3.0107 makes a ceased council''s records the property of the next higher council — a presbytery must still read a dissolved congregation''s returns after dissolution.';
 comment on column publications.minute_reference is
@@ -248,7 +248,8 @@ comment on column publications.withdrawn_at is
   'Withdrawal is a column, not a delete (D20), and it is a MINUTED ACT: withdrawn_at, withdrawn_by and withdrawn_minute_reference move together, exactly once, on a row that is not already withdrawn — DECISION-135''s affiliation-close shape, for the same reason (a close with no attribution is an unattributable mutation of a provenanced record). OPTION A (F52/DECISION-140, 2026-09-24): a withdrawn publication STILL APPEARS in presby_list_published_returns_to_me(), carrying the whole triple, and its congregation_statistics projection row gains its own withdrawn_at rather than vanishing — the recipient retains what it received, marked, and excludes it from current calculations itself.';
 
 -- ---------------------------------------------------------------------------
--- 2. publications_freeze — immutable except withdrawn_at
+-- 2. publications_freeze — immutable except the WITHDRAWAL TRIPLE
+--    (withdrawn_at, withdrawn_by, withdrawn_minute_reference, moving together)
 -- ---------------------------------------------------------------------------
 -- presby_freeze_lifecycle_event()'s shape (drizzle/0044), widened by exactly
 -- one permitted transition. Everything here fires on the owner path too,
@@ -337,10 +338,12 @@ begin
   --                            Closed now by a COLUMN-level narrowing (section
   --                            10 at the foot of this file): presby_app holds
   --                            UPDATE on every column EXCEPT withdrawn_at and
-  --                            publication_id. INSERT is deliberately NOT
-  --                            narrowed — section 10 records the measurement
-  --                            that makes a column-level INSERT revoke
-  --                            incompatible with Drizzle's insert builder.
+  --                            publication_id. INSERT went the same way on
+  --                            2026-09-25 (F61, eleventh loop-back), once
+  --                            setCongregationStatistics() moved off Drizzle's
+  --                            all-column insert builder: no table-level INSERT
+  --                            survives, and the column list excludes those two
+  --                            plus published_at.
   --
   -- So this trigger's own guarantee is the owner-connection one: on
   -- neondb_owner, where no grant binds (F44), the transition is refused unless
@@ -427,7 +430,7 @@ create trigger publications_guard
 -- because the first two together are a cross-tenant existence oracle.
 create or replace function presby_check_publication_supersession()
 returns trigger language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_prev_org       uuid;
@@ -997,7 +1000,7 @@ create or replace function presby_list_own_congregation_publications(
 )
 returns setof congregation_statistics
 language sql stable security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
   select *
     from congregation_statistics
@@ -1155,7 +1158,7 @@ create or replace function presby_publish_sasr_snapshot(
 )
 returns uuid
 language plpgsql security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare
   v_org            uuid := presby_current_org();
@@ -1584,7 +1587,7 @@ returns table (
   withdrawn_minute_reference text
 )
 language sql stable security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
   select
     p.id, p.published_at, p.minute_reference,
@@ -1635,8 +1638,9 @@ drop table if exists sasr_reports;
 
 
 -- ---------------------------------------------------------------------------
--- 10. congregation_statistics — COLUMN-LEVEL UPDATE for presby_app
---     (QA-2 / DECISION-141 correction, 2026-09-25, eighth Phase 3 loop-back)
+-- 10. congregation_statistics — COLUMN-LEVEL UPDATE **and INSERT** for
+--     presby_app (QA-2 / DECISION-141 correction, 2026-09-25, eighth Phase 3
+--     loop-back; the INSERT half added at the ELEVENTH loop-back, F61)
 -- ---------------------------------------------------------------------------
 -- WHAT WAS WRONG. Sections 3b and 5b above gated the withdrawal pair behind a
 -- transaction-local GUC (presby.withdrawal_write_active) and claimed the
@@ -1666,9 +1670,10 @@ drop table if exists sasr_reports;
 --                    and it runs as the owner. Excluded for symmetry: nothing
 --                    on the tenant path has ever updated it.
 --
--- UPDATE ONLY — THE INSERT HALF OF THE RULING IS NOT BUILDABLE AND IS NOT
--- BUILT. Measured on the development branch, 2026-09-25, during this pass,
--- rather than inferred:
+-- THE INSERT HALF, BUILT AT LAST (F61, eleventh Phase 3 loop-back,
+-- 2026-09-25). It is NOT a change of mind about the measurement below — the
+-- measurement still holds exactly as written — it is a change to the OTHER
+-- half of the pair, which is what made it buildable:
 --
 --   (1) Postgres requires column-level INSERT privilege on every column that
 --       appears in the INSERT TARGET LIST, including one whose value is the
@@ -1681,53 +1686,55 @@ drop table if exists sasr_reports;
 --       filling every unspecified one with `default`. It has no supported way
 --       to omit a column.
 --
---   Together those two facts mean a column-level INSERT revoke on ANY column
---   of this table breaks setCongregationStatistics() (src/lib/presbytery.ts:
---   663), the shipped, member-facing write path — which the ruling that asked
---   for this narrowing explicitly required to be left working. Verified by
---   building the INSERT half first and running src/lib/presbytery.test.ts
---   against it: 5 failures, the first two `permission denied for table
---   congregation_statistics` on exactly that upsert, the other three cascading
---   from the missing rows. The INSERT half was then removed.
+--   The ninth Phase 4 pass narrowed the grant and left setCongregation-
+--   Statistics() on Drizzle's builder; it broke immediately (5 failures in
+--   src/lib/presbytery.test.ts, the first two `permission denied for table
+--   congregation_statistics` on exactly that upsert) and the INSERT half was
+--   removed. F61 changes BOTH halves together: src/lib/presbytery.ts's
+--   setCongregationStatistics() now emits an explicit-column raw-SQL upsert
+--   naming exactly the 23 columns it sets, so fact (1) never triggers — the
+--   excluded columns are not in the target list at all, not even as DEFAULT.
 --
---   CONSEQUENCE, named rather than quietly dropped: the seventh loop-back's
---   item-7 residual (presby_app can self-arm presby.publication_write_active
---   and INSERT a fabricated `published_by_congregation` row) is NOT closed by
---   this pass and stays where it was — accepted (tenth and final Phase 3
---   loop-back on this pipeline, 2026-09-25, ruling on F59), bounded by the
---   CHECK congregation_statistics_publication_shape plus the composite FK
---   congregation_statistics_publication_recipient_fk (publication_id,
---   organization_id) -> publications (id, recipient_org_id) — NOT
---   congregation_statistics_publication_fk, which this paragraph named until
---   QA's Phase 5 re-verification (Finding 1) caught the misattribution: that
---   FK pins the row's SOURCE congregation (about_org_id), not which council
---   may insert. Read the bound narrowly, per the same finding: it forces the
---   row to name a real publication already addressed to the inserting
---   council, and nothing more — it does NOT constrain the row's content. QA
---   demonstrated a fabricated row for report year 2024 inserting cleanly
---   against a real 2025 publication, with an arbitrary ending_active and
---   minute_reference; it did not collide with the genuine projection because
---   congregation_statistics_entered_unique_idx is partial
---   (presbytery_entered/imported only), and congregation_statistics_freeze
---   then made it permanent. Stated honestly, the residual is: a recipient
---   council on the tenant connection, self-arming
---   presby.publication_write_active, can manufacture a permanent projection
---   row for a year the congregation never published, bounded only to
---   publications actually addressed to it. What is NOT bounded at all today
---   is the UPDATE half, and that is what this section closes. Routed back to
---   Phase 3 in the work-log's ninth Phase 4 pass and ruled on in the tenth:
---   the closing instrument, if this residual is ever judged worth the cost,
---   is moving setCongregationStatistics()'s write off Drizzle's insert
---   builder onto an explicit column-list raw SQL insert (naming only the
---   columns it sets — never publication_id or withdrawn_at), an
---   api-developer change in src/lib/presbytery.ts, not a migration — chosen
---   over a SECURITY DEFINER function because this is the only
---   tenant-connection Drizzle insert() target on this table today
---   (presby_publish_sasr_snapshot() already runs DEFINER and is grant-exempt
---   per F44; scripts/seed-dev.sql writes raw SQL), so fixing this one call
---   site alone would fully satisfy F59's general rule with no new
---   privilege-elevation surface to review. Tracked in docs/TODO.md, not built
---   here.
+-- WHAT THE NARROWING CLOSES, stated as the residual it retires. Until this
+-- pass, presby_app held table-level INSERT here, so a recipient council on
+-- the tenant connection could self-arm presby.publication_write_active
+-- (a GUC is a marker, not a privilege) and manufacture a PERMANENT
+-- published_by_congregation projection row — an immutable typed projection
+-- claiming facts that were never published, bounded only to publications
+-- actually addressed to it. QA demonstrated it end to end; the external
+-- reviewer's F61 judged it worth closing rather than accepting, because
+-- congregation_statistics feeds operational calculations. It is now closed at
+-- the privilege layer: the row must name publication_id to satisfy the CHECK
+-- congregation_statistics_publication_shape, and presby_app can no longer
+-- name that column at all.
+--
+-- THREE COLUMNS ARE EXCLUDED FROM INSERT, NOT TWO, and the third is the one
+-- the CHECK is silent about:
+--
+--   publication_id — sufficient on its own to close the residual above: a row
+--                    claiming published_by_congregation provenance fails at
+--                    the grant the moment it names this column, and fails the
+--                    CHECK if it omits it (the column would default NULL).
+--   withdrawn_at   — a row cannot be born withdrawn. Symmetric with the
+--                    UPDATE exclusion, same reasoning.
+--   published_at   — NOT reachable by the CHECK. Nothing stopped a
+--                    presbytery_entered row from carrying a fabricated
+--                    publication timestamp, and published_at is real content
+--                    the rollup at src/lib/presbytery.ts orders and coalesces
+--                    on. The live presbytery_entered write never names it, so
+--                    excluding it costs nothing and closes a softer forgery
+--                    vector.
+--
+-- THE RESULTING ASYMMETRY IS DELIBERATE: UPDATE excludes two columns,
+-- INSERT excludes three. Narrowing the UPDATE grant further to also exclude
+-- published_at is not required by anything measured this round and would be
+-- scope creep; the live path never updates it either, and the FK/CHECK/GUC
+-- stack still governs any attempt to make such an update meaningful.
+--
+-- presby_publish_sasr_snapshot() IS UNAFFECTED: it runs SECURITY DEFINER and
+-- is grant-exempt per F44. So is neondb_owner, for the same reason — the
+-- owner-side guarantee on the published branch is the trigger in section 3b,
+-- never this grant.
 --
 -- REVOKE FIRST, THEN GRANT, and in that order for a reason Postgres makes
 -- non-obvious: column privileges are ADDITIVE on top of a table-level grant,
@@ -1737,48 +1744,71 @@ drop table if exists sasr_reports;
 -- it, so this pair is the whole statement of intent and is idempotent by
 -- construction — re-applying it reproduces exactly the same ACL.
 --
--- THE COLUMN LIST IS GENERATED FROM THE CATALOG, never hand-transcribed. This
--- table carries ~70 columns and grows with every SASR field; a hand-typed list
--- would be a second place to edit, whose failure mode is silent (a newly added
--- column becomes unwritable by the live path, at runtime, not at tsc). The
--- DO block below reads information_schema.columns and excludes exactly the two
--- names above, so a column added tomorrow is granted automatically and the
--- exclusion set stays the only thing this migration asserts.
+-- BOTH COLUMN LISTS ARE GENERATED FROM THE CATALOG, never hand-transcribed.
+-- This table carries 71 columns and grows with every SASR field; a hand-typed
+-- list would be a second place to edit, whose failure mode is silent (a newly
+-- added column becomes unwritable by the live path, at runtime, not at tsc).
+-- The DO block below reads information_schema.columns twice and excludes
+-- exactly the names above, so a column added tomorrow is granted automatically
+-- and the exclusion sets stay the only thing this migration asserts.
 --
 -- SCOPE, stated so it is not read as wider than it is:
 --   * presby_platform is UNTOUCHED — it keeps its whole-table DML grant, the
 --     same accepted-risk class as its grants elsewhere in this pipeline (F47).
---   * presby_app keeps its table-level INSERT, SELECT and DELETE. Only UPDATE
---     is narrowed.
+--   * presby_app keeps its table-level SELECT and DELETE. UPDATE and INSERT
+--     are both narrowed to column level; no table-level entry for either verb
+--     survives in relacl.
 --   * neondb_owner is unaffected: it holds every privilege by ownership, which
 --     no grant or revoke can change (F44). The owner-side guarantee on these
---     two columns is the trigger in section 5b, not this grant.
---   * The grant is NOT narrowed to the 19 columns setCongregationStatistics()
---     writes today. Every SASR demographic/financial column is schema-complete
---     v1 with no application code yet; foreclosing them here would be a
---     different and much larger scope question (v1 field coverage, D13's
---     import function) riding on this ruling's coattails.
+--     columns is the trigger in sections 3b and 5b, not this grant.
+--   * The grants are NOT narrowed to the 19 value columns
+--     setCongregationStatistics() writes today. Every SASR demographic/
+--     financial column is schema-complete v1 with no application code yet;
+--     foreclosing them here would be a different and much larger scope
+--     question (v1 field coverage, D13's import function) riding on this
+--     ruling's coattails.
 --
--- Proven by scripts/test-rls.sql section 35(d) (has_column_privilege for both
--- excluded columns on UPDATE = false, a positive control column = true, and
--- the armed tenant UPDATE now refused with `permission denied` rather than
--- accepted) and by src/lib/presbytery.test.ts, which exercises the live
+-- REVOKE FIRST, THEN GRANT, FOR BOTH VERBS — and for INSERT that ordering is
+-- what closes QA's Finding 4 outright rather than leaving it as a caveat. A
+-- bare table-level grant restores table-level privilege but does not clear
+-- column-level entries a prior narrowing left in pg_attribute.attacl (measured:
+-- 70 stale entries after one branch's replay). Revoking the verb first drops
+-- every column-level entry with it, so each pair below is a FULL restatement
+-- and a whole-file re-apply converges on exactly the same ACL, twice running.
+--
+-- Proven by scripts/test-rls.sql section 35(d) (the UPDATE half) and section
+-- 37 (the INSERT half: an armed published_by_congregation insert refused by
+-- the GRANT and not by a trigger, the live presbytery_entered upsert shape
+-- still succeeding and still idempotent, has_column_privilege false on the
+-- three excluded columns and true on two positive controls, no table-level
+-- INSERT in relacl, and exactly 68 column-level INSERT entries in attacl),
+-- and by src/lib/presbytery.test.ts, which exercises the live
 -- setCongregationStatistics() INSERT and UPDATE branches end to end on the
 -- presby_app connection.
 do $$
 declare
-  v_cols text;
-  v_n    integer;
+  v_update_cols text;
+  v_update_n    integer;
+  v_insert_cols text;
+  v_insert_n    integer;
 begin
   select string_agg(quote_ident(column_name), ', ' order by ordinal_position),
          count(*)
-    into v_cols, v_n
+    into v_update_cols, v_update_n
     from information_schema.columns
    where table_schema = 'public'
      and table_name   = 'congregation_statistics'
      and column_name not in ('withdrawn_at', 'publication_id');
 
-  if v_cols is null then
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position),
+         count(*)
+    into v_insert_cols, v_insert_n
+    from information_schema.columns
+   where table_schema = 'public'
+     and table_name   = 'congregation_statistics'
+     and column_name not in ('withdrawn_at', 'publication_id', 'published_at');
+
+  if v_update_cols is null or v_insert_cols is null then
     raise exception
       'congregation_statistics: no grantable columns found — refusing to issue an empty grant';
   end if;
@@ -1787,27 +1817,17 @@ begin
   -- so this is a full restatement and not an increment.
   execute 'revoke update on congregation_statistics from presby_app';
   execute format(
-    'grant update (%s) on congregation_statistics to presby_app', v_cols);
+    'grant update (%s) on congregation_statistics to presby_app', v_update_cols);
 
-  -- INSERT is RESTATED, not narrowed. It is already granted by drizzle/0038
-  -- in a clean replay, so this is a no-op there; it is here because this
-  -- section is the single place that states presby_app's write ACL on this
-  -- table, and because an interim build of this very section (2026-09-25,
-  -- during the ninth Phase 4 pass) did revoke it before the Drizzle
-  -- measurement above came in — a development branch that ran that build
-  -- needs this line to get back to the intended shape without a replay.
-  -- NOTE (QA Phase 5 re-verification, Finding 4): unlike the UPDATE pair
-  -- above, this restatement is NOT a full one — a bare table-level grant
-  -- restores table-level INSERT but does not clear any column-level INSERT
-  -- entries a prior interim narrowing left in pg_attribute.attacl (measured:
-  -- 70 stale entries after one such branch's replay). Effective privilege is
-  -- correct either way (table-level covers every column), so this is
-  -- cosmetic, not a defect — but a `revoke insert on congregation_statistics
-  -- from presby_app;` immediately before this line would clear them, if a
-  -- future edit to this section ever makes that matter.
-  execute 'grant insert on congregation_statistics to presby_app';
+  -- Same shape for INSERT (F61). The revoke is not decoration: drizzle/0038
+  -- granted table-level INSERT here and an interim build of this very section
+  -- granted it again, so without this line a re-apply would leave the
+  -- table-level entry standing and the column list would buy nothing.
+  execute 'revoke insert on congregation_statistics from presby_app';
+  execute format(
+    'grant insert (%s) on congregation_statistics to presby_app', v_insert_cols);
 
   raise notice
-    'congregation_statistics: presby_app granted column-level UPDATE on % columns (withdrawn_at, publication_id excluded); table-level INSERT left intact — see this section''s comment for the measurement',
-    v_n;
+    'congregation_statistics: presby_app granted column-level UPDATE on % columns (withdrawn_at, publication_id excluded) and column-level INSERT on % columns (those two plus published_at excluded); no table-level UPDATE or INSERT remains',
+    v_update_n, v_insert_n;
 end $$;

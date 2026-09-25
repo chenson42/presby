@@ -20,6 +20,14 @@
 import { test, expect, type Page } from "@playwright/test";
 import { E2E_USERS, storageStatePath } from "./support/users";
 import { E2E_ORGS, E2E_ENDED_ON } from "./support/seed-orgs";
+import { assertAdminFixtureHasNoOrgs } from "./support/assert-fixture-invariants";
+
+// Test 1 below routes on the `admin` fixture carrying ZERO organization
+// memberships (CLAUDE.md Post-Login Landing, row 4). A shared-dev-database
+// membership left over from manual verification breaks that silently and
+// reads as a routing regression — see
+// docs/work-log/2026-09-25-e2e-red-on-main.md.
+test.beforeAll(assertAdminFixtureHasNoOrgs);
 
 /**
  * Sign-in is TWO soft navigations, not one, and a spec that waits for the first

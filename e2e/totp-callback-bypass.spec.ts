@@ -55,9 +55,7 @@ test.describe("2FA callback-bypass regression", () => {
     await expect(
       page.getByRole("heading", { name: /two-factor authentication/i }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: /welcome/i }),
-    ).not.toBeVisible();
+    await expect(page.getByTestId("greeting-band")).not.toBeVisible();
 
     // Network-forced re-verification: a REAL top-level navigation Playwright
     // observes directly, from the same session. This reproduces Phase 1's own
@@ -74,9 +72,12 @@ test.describe("2FA callback-bypass regression", () => {
     await page.getByPlaceholder(/123456/).fill(code);
     await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
-    await expect(
-      page.getByRole("heading", { name: /welcome/i }),
-    ).toBeVisible();
+    // Not a literal "Welcome" match — /admin's greeting band is time-of-day
+    // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
+    // so the stable hook is the testid plus the fixture's own display name.
+    await expect(page.getByTestId("greeting-band")).toContainText(
+      E2E_USERS["mfa-enrolled"].name,
+    );
   });
 
   test("2 — /o/e2e-alpha callbackUrl: session-expiry / mid-visit re-auth on /o/* is the same vulnerable shape and is covered by the same fix", async ({
@@ -125,9 +126,12 @@ test.describe("2FA callback-bypass regression", () => {
     await page.getByPlaceholder(/123456/).fill(code);
     await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
-    await expect(
-      page.getByRole("heading", { name: /welcome/i }),
-    ).toBeVisible();
+    // Not a literal "Welcome" match — /admin's greeting band is time-of-day
+    // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
+    // so the stable hook is the testid plus the fixture's own display name.
+    await expect(page.getByTestId("greeting-band")).toContainText(
+      E2E_USERS["mfa-enrolled"].name,
+    );
   });
 
   test("4 — a non-2FA user's direct callbackUrl landing stays one hop, no spurious /totp detour", async ({
@@ -142,9 +146,12 @@ test.describe("2FA callback-bypass regression", () => {
     await signInWithCallback(page, "admin", "/admin");
 
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
-    await expect(
-      page.getByRole("heading", { name: /welcome/i }),
-    ).toBeVisible();
+    // Not a literal "Welcome" match — /admin's greeting band is time-of-day
+    // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
+    // so the stable hook is the testid plus the fixture's own display name.
+    await expect(page.getByTestId("greeting-band")).toContainText(
+      E2E_USERS.admin.name,
+    );
 
     expect(requests.some((u) => new URL(u).pathname === "/totp")).toBe(false);
   });

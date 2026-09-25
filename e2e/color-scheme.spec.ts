@@ -33,7 +33,7 @@ import { test, expect } from "@playwright/test";
 // fall back to a value that coincidentally matched.
 
 const LIGHT_BACKGROUND = "rgb(255, 255, 255)"; // hsl(0 0% 100%)
-const DARK_BACKGROUND = "rgb(15, 23, 41)"; // hsl(222 47% 11%)
+const DARK_BACKGROUND = "rgb(6, 18, 35)"; // hsl(215 71% 8%), globals.css .dark --background
 
 async function bodyBackground(page: import("@playwright/test").Page) {
   return page.evaluate(

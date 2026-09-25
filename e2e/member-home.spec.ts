@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { E2E_USERS } from "./support/users";
+import { assertAdminFixtureHasNoOrgs } from "./support/assert-fixture-invariants";
 
 const ADMIN_EMAIL = E2E_USERS.admin.email;
 const ADMIN_PASSWORD = E2E_USERS.admin.password;
@@ -9,6 +10,10 @@ const MFA_ADMIN_EMAIL = E2E_USERS["mfa-admin"].email;
 const MFA_ADMIN_PASSWORD = E2E_USERS["mfa-admin"].password;
 
 test.describe("Member home and routing invariants", () => {
+  // This suite routes on the `admin` fixture carrying ZERO organization
+  // memberships (CLAUDE.md Post-Login Landing, row 4). See
+  // docs/work-log/2026-09-25-e2e-red-on-main.md.
+  test.beforeAll(assertAdminFixtureHasNoOrgs);
   // test 1: unauthenticated redirect — no seeded users needed
   test("unauthenticated user visiting /home is redirected to /signin", async ({ page }) => {
     await page.goto("/home");

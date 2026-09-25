@@ -56,8 +56,9 @@ test.describe("Full login path with an MFA-enrolled user", () => {
     // means the session is now 2FA-verified, which the proxy re-checks on
     // every request to /admin.
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
-    await expect(
-      page.getByRole("heading", { name: /welcome/i }),
-    ).toBeVisible();
+    // Not a literal "Welcome" match — /admin's greeting band is time-of-day
+    // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
+    // so the stable hook is the testid plus the fixture's own display name.
+    await expect(page.getByTestId("greeting-band")).toContainText(USER.name);
   });
 });

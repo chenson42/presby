@@ -47,7 +47,7 @@ export function GreetingBand({
         motionEnabled && "animate-in fade-in-0 duration-700",
       )}
     >
-      <h1 className="text-2xl font-semibold">
+      <h1 className="text-2xl font-semibold" data-testid="greeting-band">
         {displayName ? `${greeting}, ${displayName}.` : "Welcome."}
       </h1>
     </div>

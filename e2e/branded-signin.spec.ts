@@ -318,9 +318,13 @@ test.describe.serial("Org-branded /signin", () => {
     // Same admin-role, no-organizations shape totp-full-login.spec.ts
     // exercises — /launch's matrix lands it on /admin once verified.
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
-    await expect(
-      page.getByRole("heading", { name: /welcome/i }),
-    ).toBeVisible({ timeout: 10_000 });
+    // Not a literal "Welcome" match — /admin's greeting band is time-of-day
+    // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
+    // so the stable hook is the testid plus the fixture's own display name.
+    await expect(page.getByTestId("greeting-band")).toContainText(
+      USER.name,
+      { timeout: 10_000 },
+    );
   });
 
   // -------------------------------------------------------------------

@@ -180,3 +180,92 @@ describe("computeDestination — the requested path", () => {
     ).toEqual({ path: "/o/alder-creek", reason: "single-org" });
   });
 });
+
+/**
+ * Encodes CLAUDE.md's Post-Login Landing table (CLAUDE.md:606-612) row for
+ * row, verbatim, so the doc and computeDestination() cannot silently diverge
+ * again — docs/work-log/2026-09-25-e2e-red-on-main.md, Phase 1 traced the
+ * "/admin vs /home" e2e failures to shared-dev-database drift rather than a
+ * mismatch between this file and the table, but found no test that would
+ * have caught a REAL mismatch either. Every case here is additive: none of
+ * the existing `it()`s above change.
+ *
+ * | Enterable orgs   | canAccessAdmin | isPlatformAdmin | Destination                             |
+ * |------------------|----------------|-----------------|------------------------------------------|
+ * | any              | any            | any             | the sanitized `?next=`, if enterable      |
+ * | 1                | no             | no              | `/o/<slug>`                               |
+ * | 0                | no             | no              | `/no-organization`                        |
+ * | 0                | yes            | no              | `/admin`                                  |
+ * | everything else  |                |                 | `/home`                                   |
+ */
+describe("computeDestination — CLAUDE.md's Post-Login Landing table (CLAUDE.md:606-612)", () => {
+  it("row 1 — any/any/any → the sanitized ?next=, if its slug is enterable", () => {
+    expect(
+      computeDestination(
+        input({
+          enterableOrgs: [ALDER],
+          canAccessAdmin: true,
+          isPlatformAdmin: true,
+          requestedPath: "/o/alder-creek/roll",
+        }),
+      ),
+    ).toEqual({ path: "/o/alder-creek/roll", reason: "requested-path" });
+  });
+
+  it("row 2 — 1/no/no → /o/<slug>", () => {
+    expect(
+      computeDestination(
+        input({
+          enterableOrgs: [ALDER],
+          canAccessAdmin: false,
+          isPlatformAdmin: false,
+        }),
+      ),
+    ).toEqual({ path: "/o/alder-creek", reason: "single-org" });
+  });
+
+  it("row 3 — 0/no/no → /no-organization", () => {
+    expect(
+      computeDestination(
+        input({ enterableOrgs: [], canAccessAdmin: false, isPlatformAdmin: false }),
+      ),
+    ).toEqual({ path: "/no-organization", reason: "no-organization" });
+  });
+
+  it("row 4 — 0/yes/no → /admin", () => {
+    expect(
+      computeDestination(
+        input({ enterableOrgs: [], canAccessAdmin: true, isPlatformAdmin: false }),
+      ),
+    ).toEqual({ path: "/admin", reason: "platform-admin-only" });
+  });
+
+  it("row 5 — everything else → /home", () => {
+    const everythingElse: DestinationInput[] = [
+      // 2+ orgs, no platform access.
+      input({ enterableOrgs: [ALDER, FERNWOOD] }),
+      // 1 org plus canAccessAdmin.
+      input({ enterableOrgs: [ALDER], canAccessAdmin: true }),
+      // 1 org plus isPlatformAdmin.
+      input({ enterableOrgs: [ALDER], isPlatformAdmin: true }),
+      // 0 orgs, isPlatformAdmin only (not canAccessAdmin) — the row 4
+      // exception: an is_platform_admin holder never lands on /admin.
+      input({ enterableOrgs: [], isPlatformAdmin: true }),
+      // 0 orgs, both predicates.
+      input({ enterableOrgs: [], canAccessAdmin: true, isPlatformAdmin: true }),
+      // 2+ orgs, both predicates.
+      input({
+        enterableOrgs: [ALDER, FERNWOOD],
+        canAccessAdmin: true,
+        isPlatformAdmin: true,
+      }),
+    ];
+
+    for (const testCase of everythingElse) {
+      expect(computeDestination(testCase)).toEqual({
+        path: "/home",
+        reason: "chooser",
+      });
+    }
+  });
+});

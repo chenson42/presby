@@ -1,9 +1,15 @@
 import { test, expect } from "@playwright/test";
 import { E2E_USERS } from "./support/users";
+import { assertAdminFixtureHasNoOrgs } from "./support/assert-fixture-invariants";
 
 const ADMIN = E2E_USERS.admin;
 
 test.describe("Admin sign-in", () => {
+  // This suite routes on the `admin` fixture carrying ZERO organization
+  // memberships (CLAUDE.md Post-Login Landing, row 4). See
+  // docs/work-log/2026-09-25-e2e-red-on-main.md.
+  test.beforeAll(assertAdminFixtureHasNoOrgs);
+
   test("seeded admin reaches the admin dashboard, not /access-pending", async ({ page }) => {
     await page.goto("/signin");
 
@@ -27,9 +33,10 @@ test.describe("Admin sign-in", () => {
       "admin should reach /admin, not be bounced to /access-pending",
     ).toBe("/admin");
 
-    await expect(
-      page.getByRole("heading", { name: /welcome/i }),
-    ).toBeVisible();
+    // Not a literal "Welcome" match — /admin's greeting band is time-of-day
+    // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
+    // so the stable hook is the testid plus the fixture's own display name.
+    await expect(page.getByTestId("greeting-band")).toContainText(ADMIN.name);
 
     // Each admin section appears twice on the dashboard — once in the
     // sidebar nav and once as a card. `.first()` keeps the assertion strict

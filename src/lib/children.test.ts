@@ -532,5 +532,65 @@ describe.skipIf(!hasDb)(
         );
       });
     });
+
+    describe("audit metadata shape — no family-structure content (H-new-2 companion regression, 2026-09-25)", () => {
+      // Companion to person-sensitive.test.ts's H-new-2 regression: neither
+      // writer may put `relationship` (e.g. "parent"/"guardian") into
+      // audit_events metadata — resourceId + childPersonId already identify
+      // what changed, matching removeGuardianLink's already-correct shape.
+      it("addGuardianLink's and updateGuardianLink's metadata are exactly { organizationId, childPersonId } — no relationship value", async () => {
+        mockRecordAudit.mockClear();
+        const added = await addGuardianLink(rosterHolder, orgA, childNoGuardian, {
+          relatedName: "Uncle Someone",
+          relationship: "guardian",
+          isEmergencyContact: false,
+        });
+        expect(added.kind).toBe("ok");
+        if (added.kind !== "ok") return;
+
+        const addCall = mockRecordAudit.mock.calls[0]![0] as {
+          metadata: unknown;
+        };
+        expect(addCall.metadata).toEqual({
+          organizationId: orgA,
+          childPersonId: childNoGuardian,
+        });
+        expect(Object.keys(addCall.metadata as object).sort()).toEqual(
+          ["childPersonId", "organizationId"].sort(),
+        );
+        expect(addCall.metadata).not.toHaveProperty("relationship");
+
+        mockRecordAudit.mockClear();
+        const updated = await updateGuardianLink(
+          rosterHolder,
+          orgA,
+          childNoGuardian,
+          added.linkId,
+          {
+            relatedName: "Uncle Someone",
+            relationship: "caregiver",
+            isEmergencyContact: true,
+          },
+        );
+        expect(updated.kind).toBe("ok");
+
+        const updateCall = mockRecordAudit.mock.calls[0]![0] as {
+          metadata: unknown;
+        };
+        expect(updateCall.metadata).toEqual({
+          organizationId: orgA,
+          childPersonId: childNoGuardian,
+        });
+        expect(Object.keys(updateCall.metadata as object).sort()).toEqual(
+          ["childPersonId", "organizationId"].sort(),
+        );
+        expect(updateCall.metadata).not.toHaveProperty("relationship");
+
+        // Clean up the row this test created so it doesn't leak into any
+        // other test in this file that reads childNoGuardian's link set.
+        mockRecordAudit.mockClear();
+        await removeGuardianLink(rosterHolder, orgA, childNoGuardian, added.linkId);
+      });
+    });
   },
 );

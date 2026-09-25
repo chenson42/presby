@@ -692,11 +692,19 @@ export async function setPersonDisabilities(
   );
 
   if (result.kind === "ok") {
+    // SECURITY (2026-09-25 security review, H-new-2): metadata must never
+    // carry the actual tier-3 category set — /admin/audit renders `metadata`
+    // verbatim to any FEATURES.ADMIN_AUDIT holder, a platform-shell
+    // permission with no tenant scoping and no tier check. `resourceId`
+    // already names the person and the action name already says what kind of
+    // change happened; `categoryCount` adds only magnitude (a substantive
+    // edit vs. a clear-all), never the category values themselves. Matches
+    // the shape every sibling function in this file already uses.
     await recordAudit({
       action: AUDIT_ACTIONS.TENANT_PERSON_DISABILITY_SET,
       resourceType: "person_disabilities",
       resourceId: personId,
-      metadata: { organizationId, categories: input.categories },
+      metadata: { organizationId, categoryCount: input.categories.length },
     });
   }
 

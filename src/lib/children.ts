@@ -506,11 +506,17 @@ export async function addGuardianLink(
   );
 
   if (result.kind === "ok") {
+    // SECURITY (2026-09-25 security review, H-new-2 companion): metadata must
+    // not carry family-structure content — `resourceId` already names the
+    // relationship row and `childPersonId` already scopes it; `relationship`
+    // itself (e.g. "parent", "guardian") is the change content, not needed to
+    // identify what changed. Matches removeGuardianLink's already-correct
+    // shape below.
     await recordAudit({
       action: AUDIT_ACTIONS.TENANT_PERSON_RELATIONSHIP_ADDED,
       resourceType: "person_relationship",
       resourceId: result.linkId,
-      metadata: { organizationId, childPersonId, relationship: input.relationship },
+      metadata: { organizationId, childPersonId },
     });
   }
 
@@ -578,11 +584,14 @@ export async function updateGuardianLink(
   );
 
   if (result.kind === "ok") {
+    // SECURITY (2026-09-25 security review, H-new-2 companion) — same
+    // reasoning as addGuardianLink above: no relationship content in the
+    // audit metadata.
     await recordAudit({
       action: AUDIT_ACTIONS.TENANT_PERSON_RELATIONSHIP_UPDATED,
       resourceType: "person_relationship",
       resourceId: result.linkId,
-      metadata: { organizationId, childPersonId, relationship: input.relationship },
+      metadata: { organizationId, childPersonId },
     });
   }
 

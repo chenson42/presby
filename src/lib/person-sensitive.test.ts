@@ -807,5 +807,89 @@ describe.skipIf(!hasDb)(
         expect(rows.map((r) => r.category)).toEqual(["sight"]);
       });
     });
+
+    describe("audit metadata shape — no tier-2/tier-3 payload content (H-new-2 regression, 2026-09-25)", () => {
+      // Each action's own correct shape, not one literal object copied four
+      // times — addPersonNote legitimately differs from its siblings
+      // (visibility is a tag, not content). Exact key-set assertions so a
+      // future re-addition of the removed field is caught, not just a
+      // "was called" check.
+      it("addPersonNote's metadata is exactly { organizationId, personId, visibility } — no note body/content", async () => {
+        mockRecordAudit.mockClear();
+        const result = await addPersonNote(
+          pastoralClergyPerson,
+          orgA,
+          authorUserId,
+          targetPerson,
+          {
+            noteType: "general",
+            visibility: "staff",
+            body: "Confidential pastoral content that must never reach the audit log.",
+          },
+        );
+        expect(result.kind).toBe("ok");
+        const call = mockRecordAudit.mock.calls[0]![0] as { metadata: unknown };
+        expect(call.metadata).toEqual({
+          organizationId: orgA,
+          personId: targetPerson,
+          visibility: "staff",
+        });
+        expect(Object.keys(call.metadata as object).sort()).toEqual(
+          ["organizationId", "personId", "visibility"].sort(),
+        );
+      });
+
+      it("setPersonDemographics' metadata is exactly { organizationId } — no gender/racialEthnic content", async () => {
+        mockRecordAudit.mockClear();
+        const result = await setPersonDemographics(
+          demographicsPerson,
+          orgA,
+          targetPerson,
+          { gender: "non_binary_genderqueer", racialEthnic: ["asian"], source: "self" },
+        );
+        expect(result).toEqual({ kind: "ok" });
+        const call = mockRecordAudit.mock.calls[0]![0] as { metadata: unknown };
+        expect(call.metadata).toEqual({ organizationId: orgA });
+        expect(Object.keys(call.metadata as object)).toEqual(["organizationId"]);
+      });
+
+      it("setPersonMedical's metadata is exactly { organizationId } — no allergy/medication content", async () => {
+        mockRecordAudit.mockClear();
+        const result = await setPersonMedical(medicalPerson, orgA, targetPerson, {
+          allergies: "peanuts",
+          medicalNotes: "carries an EpiPen",
+          medications: "epinephrine",
+          authorizedPickup: "Grandmother only",
+        });
+        expect(result).toEqual({ kind: "ok" });
+        const call = mockRecordAudit.mock.calls[0]![0] as { metadata: unknown };
+        expect(call.metadata).toEqual({ organizationId: orgA });
+        expect(Object.keys(call.metadata as object)).toEqual(["organizationId"]);
+      });
+
+      it("setPersonDisabilities' metadata is exactly { organizationId, categoryCount } — no category values (the H-new-2 leak)", async () => {
+        mockRecordAudit.mockClear();
+        const categories = ["hearing", "mobility", "sight"];
+        const result = await setPersonDisabilities(
+          disabilitiesPerson,
+          orgA,
+          targetPerson,
+          { categories },
+        );
+        expect(result).toEqual({ kind: "ok" });
+        const call = mockRecordAudit.mock.calls[0]![0] as { metadata: unknown };
+        expect(call.metadata).toEqual({
+          organizationId: orgA,
+          categoryCount: categories.length,
+        });
+        expect(Object.keys(call.metadata as object).sort()).toEqual(
+          ["organizationId", "categoryCount"].sort(),
+        );
+        // Fails before the fix: the pre-fix metadata included `categories`,
+        // which would make this deep-equal assertion fail (extra key) even
+        // though categoryCount happened to be present too.
+        expect(call.metadata).not.toHaveProperty("categories");
+      });
+    });
   },
 );

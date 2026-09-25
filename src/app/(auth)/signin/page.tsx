@@ -64,6 +64,9 @@ export default async function SignInPage({
       className={cn(
         "mx-auto max-w-sm px-6 py-24",
         siteBrand?.brand?.fontPairing.bodyClassName,
+        siteBrand?.brand?.fontPairing.pairingClassName,
+        siteBrand?.brand?.fontPairing.headingVariableClassName,
+        siteBrand?.brand?.fontPairing.bodyVariableClassName,
       )}
     >
       <BrandTokens

@@ -143,6 +143,23 @@ export type ResolvedTypePairing = {
   readonly headingVariable: string;
   /** The CSS custom property this pairing's body face is bound to. */
   readonly bodyVariable: string;
+  /**
+   * `next/font`'s own `.variable` class. Applying it to a DOM node DEFINES
+   * `headingVariable` on that node (and its descendants) with the real,
+   * self-hosted font-stack value — the piece that was missing (DECISION-143).
+   * `headingVariable`/`bodyVariable` above are unchanged: they still just
+   * name the property.
+   */
+  readonly headingVariableClassName: string;
+  readonly bodyVariableClassName: string;
+  /**
+   * The static alias class in `globals.css` (`.pairing-<key>`) that maps the
+   * generic `--font-heading`/`--font-body` properties onto this pairing's
+   * specific ones. String, not a lookup, because the caller already has the
+   * resolved pairing and would otherwise need the raw `TypePairingKey` for
+   * this alone.
+   */
+  readonly pairingClassName: string;
 };
 
 /**
@@ -158,24 +175,36 @@ const RESOLVED_PAIRINGS = {
     bodyClassName: classicBody.className,
     headingVariable: "--font-heading-classic",
     bodyVariable: "--font-body-classic",
+    headingVariableClassName: classicHeading.variable,
+    bodyVariableClassName: classicBody.variable,
+    pairingClassName: "pairing-classic",
   },
   modern: {
     headingClassName: modernHeading.className,
     bodyClassName: modernBody.className,
     headingVariable: "--font-heading-modern",
     bodyVariable: "--font-body-modern",
+    headingVariableClassName: modernHeading.variable,
+    bodyVariableClassName: modernBody.variable,
+    pairingClassName: "pairing-modern",
   },
   warm: {
     headingClassName: warmHeading.className,
     bodyClassName: warmBody.className,
     headingVariable: "--font-heading-warm",
     bodyVariable: "--font-body-warm",
+    headingVariableClassName: warmHeading.variable,
+    bodyVariableClassName: warmBody.variable,
+    pairingClassName: "pairing-warm",
   },
   contemporary: {
     headingClassName: contemporaryHeading.className,
     bodyClassName: contemporaryBody.className,
     headingVariable: "--font-heading-contemporary",
     bodyVariable: "--font-body-contemporary",
+    headingVariableClassName: contemporaryHeading.variable,
+    bodyVariableClassName: contemporaryBody.variable,
+    pairingClassName: "pairing-contemporary",
   },
 } as const satisfies Record<TypePairingKey, ResolvedTypePairing>;
 

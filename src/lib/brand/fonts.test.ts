@@ -59,6 +59,32 @@ describe("resolveTypePairing", () => {
       expect(resolved.bodyClassName.length).toBeGreaterThan(0);
       expect(resolved.headingVariable).toMatch(/^--font-heading-/);
       expect(resolved.bodyVariable).toMatch(/^--font-body-/);
+      // DECISION-143: the wiring mechanism (fonts.ts exposes next/font's
+      // .variable class; globals.css's static .pairing-<key> rules alias the
+      // generic property onto it). Every resolved pairing must carry all
+      // three fields the three call sites apply alongside bodyClassName.
+      expect(resolved.headingVariableClassName).toEqual(expect.any(String));
+      expect(resolved.headingVariableClassName.length).toBeGreaterThan(0);
+      expect(resolved.bodyVariableClassName).toEqual(expect.any(String));
+      expect(resolved.bodyVariableClassName.length).toBeGreaterThan(0);
+      expect(resolved.pairingClassName).toBe(`pairing-${key}`);
+    },
+  );
+
+  // BRAND_UTILITY_RE, copied verbatim from scripts/check-brand-scope.mjs
+  // (not imported: that script is a build tripwire over source text, not a
+  // module with a stable export surface). Guards Phase 2 Ruling 3's warning
+  // (i): a `pairing-<key>` class name must never match the pattern that
+  // gates `*-brand*` utilities to the two brandable route groups, because
+  // this class is applied inside `(auth)/signin`, which is not one of them.
+  const BRAND_UTILITY_RE =
+    /(?<![a-zA-Z0-9-])(bg|text|border|ring|from|via|to|fill|stroke|outline|decoration|shadow|accent|caret|divide|placeholder)-brand(-[a-z0-9]+)*(?![a-zA-Z0-9])/;
+
+  it.each(TYPE_PAIRINGS.map((p) => p.key))(
+    "%s's pairingClassName never matches the *-brand* utility pattern (C1 scope)",
+    (key) => {
+      const resolved = resolveTypePairing(key);
+      expect(BRAND_UTILITY_RE.test(resolved.pairingClassName)).toBe(false);
     },
   );
 

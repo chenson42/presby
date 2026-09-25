@@ -1,7 +1,7 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.24.2` · surveyed 2026-09-25.**
+knows what exists without re-reconning. **Version `0.25.0` · surveyed 2026-09-25.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
 a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries
@@ -82,7 +82,7 @@ inherited from the starter.
 - Storage — `organization_brands` (one row per org, FORCE RLS, no public grant ever) + `organization_brand_history`; set/neutralise by the platform operator only (`org.branding`'s tenant-facing editor is still P1-blocked). `src/lib/db/domain/org.ts`
 - `(org)` emission — **live**, gated by `ui.brand_theming`. `(org)/o/[slug]/layout.tsx` resolves the caller's own membership, reads the org's brand (null-safe: flag off / not a member / never branded all render the platform default), and `<BrandTokens>` emits both colour schemes as one `:root`-scoped `<style>` element — reaches Radix portals, not just the layout's own DOM subtree. `src/lib/brand/read-org-brand.ts`, `src/components/brand/brand-tokens.tsx`
 - Un-brandable by construction — the DECISION-040 access-denied/ended/404 pages and every route outside `(org)`/`(public)/site/<slug>` never receive brand tokens; enforced by `scripts/check-brand-scope.mjs` (E1–E3, C1–C2 all live tree-wide as of `a8`/`c4`).
-- Font pairing — per-org heading/body face resolved to self-hosted `next/font/google` faces; applied to `(org)`'s body text today (heading-face differentiation not yet wired — see `docs/TODO.md`). `src/lib/brand/fonts.ts`
+- Font pairing — per-org heading/body face resolved to self-hosted `next/font/google` faces; **load-bearing since 2026-09-25 (v0.25.0, DECISION-143)**: `--font-heading`/`--font-body` are wired through static `.pairing-<key>` classes plus `@layer base` `h1`–`h6`/`body` consumers with `inherit` fallbacks, applied on `(org)`, `(public)/site/<slug>` and `/signin`, so headings render in the pairing's heading face and un-branded surfaces are byte-identical; the `body{}` consumer is inert by construction (body copy still comes from `bodyClassName`). No fifth pairing (Geist refused on merit; FPCW is `contemporary`). `src/lib/brand/fonts.ts`, `src/app/globals.css`, `docs/work-log/2026-09-25-brand-visual-parity.md`
 - `(public)/site/<slug>` emission (anonymous visitors) is **live but flag-gated off** — see Public websites (P3) below.
 - Light-only mode — `organization_brands.light_only`; when set, both `(org)` and `(public)/site/<slug>` force the light palette even when a visitor's OS/browser prefers dark, for a congregation whose real identity has no dark variant. Admin toggle on the same brand form, folded into the existing `ORG_BRAND_SET` audit event. `src/lib/db/domain/org.ts`, `docs/work-log/2026-08-24-light-only-brand.md`
 

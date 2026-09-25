@@ -172,6 +172,9 @@ export default async function OrgSlugLayout({
         className={cn(
           "mx-auto max-w-6xl px-6 py-12",
           orgBrand?.fontPairing.bodyClassName,
+          orgBrand?.fontPairing.pairingClassName,
+          orgBrand?.fontPairing.headingVariableClassName,
+          orgBrand?.fontPairing.bodyVariableClassName,
         )}
       >
         {children}

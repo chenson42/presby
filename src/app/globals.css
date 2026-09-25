@@ -191,6 +191,44 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/*
+ * Per-org type pairing wiring (DECISION-143). `--font-heading`/`--font-body`
+ * are declared `brandable`/`additive`/`nonColour` in
+ * src/lib/brand/contract.ts's TOKEN_POLICY but carry no seed-derived value —
+ * a per-org brand selects one of four CURATED pairings (TYPE_PAIRINGS), never
+ * an arbitrary font. `next/font/google` calls are static, module-scope
+ * (src/lib/brand/fonts.ts), so the real font-stack values cannot live here as
+ * literals; each pairing's `.variable` class (applied by the caller alongside
+ * the matching `.pairing-<key>` class below) is what DEFINES
+ * `--font-heading-<key>`/`--font-body-<key>` with the actual, self-hosted
+ * font-stack. This block is pure indirection — no font data, no colour.
+ *
+ * NOT emitted by <BrandTokens> (DECISION-143): a font role would force
+ * ROLE_TO_TOKEN's codomain open past PlatformTokenName and hand the
+ * seed-based generator two properties it has no way to derive a value for.
+ * These four rules are static CSS, applied by a plain `className`, exactly
+ * like every other non-generated utility in this file.
+ */
+.pairing-classic {
+  --font-heading: var(--font-heading-classic);
+  --font-body: var(--font-body-classic);
+}
+
+.pairing-modern {
+  --font-heading: var(--font-heading-modern);
+  --font-body: var(--font-body-modern);
+}
+
+.pairing-warm {
+  --font-heading: var(--font-heading-warm);
+  --font-body: var(--font-body-warm);
+}
+
+.pairing-contemporary {
+  --font-heading: var(--font-heading-contemporary);
+  --font-body: var(--font-body-contemporary);
+}
+
 @layer base {
   /*
    * Tailwind's preflight defaults `border-color` to `currentColor`; shadcn
@@ -207,6 +245,39 @@
   body {
     background: var(--background);
     color: var(--foreground);
+  }
+
+  /*
+   * Consumers of the generic --font-heading/--font-body properties
+   * (DECISION-143). `inherit` is the fallback, not a bare unset: on any
+   * un-branded surface (no ancestor carries a `.pairing-<key>` class) the
+   * property is undefined, so `var(--font-heading, inherit)` resolves to
+   * `inherit` — the platform default already established by ordinary CSS
+   * inheritance (Inter, set on <body> by src/app/layout.tsx:19). Every
+   * un-branded surface renders byte-identically to today.
+   *
+   * ASYMMETRY, NAMED RATHER THAN HIDDEN: the `.pairing-<key>` class (and the
+   * two `.variable` classes) are applied at the SAME element `bodyClassName`
+   * already occupies today — `<main>` in the two brandable layouts and
+   * `(auth)/signin`, never `<html>`/`<body>` (owned by the shared root
+   * layout, unreachable from any of the three call sites). `--font-heading`
+   * therefore reaches every h1-h6 that is a DESCENDANT of that `<main>` —
+   * i.e., every heading on the page — and the rule below is what actually
+   * changes rendering. `--font-body`'s rule, below, targets the literal HTML
+   * `<body>` element, which never carries the variable, so it resolves to
+   * `inherit` unconditionally and paints nothing new: body copy keeps
+   * getting its font from the EXISTING, UNCHANGED `bodyClassName`
+   * application, not from this rule. Both properties are wired to a real
+   * consumer (satisfying the TOKEN_POLICY comment that they wait for a
+   * consumer to exist) even though today only one of them moves a pixel —
+   * see the work-log for the reasoning.
+   */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading, inherit);
+  }
+
+  body {
+    font-family: var(--font-body, inherit);
   }
 
   /*

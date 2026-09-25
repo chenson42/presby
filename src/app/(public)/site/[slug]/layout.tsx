@@ -56,7 +56,15 @@ export default async function PublicSiteLayout({
   return (
     <>
       <BrandTokens brand={brand?.tokens ?? null} lightOnly={brand?.lightOnly ?? false} />
-      <main className={cn("min-h-screen", brand?.fontPairing.bodyClassName)}>
+      <main
+        className={cn(
+          "min-h-screen",
+          brand?.fontPairing.bodyClassName,
+          brand?.fontPairing.pairingClassName,
+          brand?.fontPairing.headingVariableClassName,
+          brand?.fontPairing.bodyVariableClassName,
+        )}
+      >
         {children}
       </main>
     </>

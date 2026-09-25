@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-25 (round two shipped; parallel pipelines in flight)
+## RESUME HERE — updated 2026-09-25 evening (rounds two and three shipped; security §B merged; grants at Phase 5)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -37,6 +37,18 @@ work-log is the source of truth): `docs/work-log/2026-09-25-platform-radius.md`
 (Polish — `--radius` 0.5rem → 0.625rem, one token + comment rewrite, 67 re-captured
 before/after pairs + 13 sub-threshold; Phase 5 re-verification after a text-only
 FAIL). Uncommitted in the tree for it: `src/app/globals.css` and the work-log.
+
+**Wave 2 (2026-09-25 afternoon), Rule 16 for real this time — one worktree + one Neon branch per pipeline:**
+`pipeline/security-schema-b` **merged** as PR #13 (`42ec0e9`, v0.25.5, `drizzle/0048`,
+DECISION-146; `development` re-migrated 0043→0048 and `test-rls.sql` 476/exit 0 there;
+every DEFINER function in `public` pins `pg_temp`, catalog-wide). `pipeline/submission-grants`
+(worktree `../presby-wt-grants`, Neon `pipeline-submission-grants`, `drizzle/0049`,
+DECISION-147, F80) is at Phase 5 — the platform's first unauthenticated write path; on
+SHIP IT it merges `main` (0048 + round three), re-runs `test-rls.sql`, then lands as
+0.26.0 via PR + `/merge-pr`. The lifecycle pipeline's **third** external round (F60–F64)
+shipped as v0.25.4 (`afc2afb`) — F59 closed, pg_temp pinned, DECISION-148.
+**CI on `main` has been red since 2026-08-30 on 7 lint errors** (TODO, top of Next Up) —
+PR checks are not a signal until that is fixed.
 
 **Next, in order:** close the radius pipeline (Phase 6, `style(ui):` commit,
 release-note line, TODO lines for the visual-harness comparator caveat and the

@@ -118,10 +118,37 @@ describe.skipIf(!hasDb)(
       expect(chain.join(" :: ")).toMatch(pattern);
     }
 
-    /** Seed one identifier row for Alder Creek inside the caller's transaction. */
+    /**
+     * Arm `presby.identifier_trigger_active`, transaction-local, exactly as
+     * `presby_set_organization_identifier()` does at entry. Needed by every
+     * fixture that writes this table directly since 2026-09-24 (F58 /
+     * DECISION-141): `organization_identifiers_guard` is now a BEFORE INSERT
+     * trigger as well as BEFORE UPDATE/DELETE, and it fires on this owner
+     * connection like every other trigger.
+     */
+    async function armIdentifierWrite(tx: {
+      execute: (q: unknown) => Promise<unknown>;
+    }): Promise<void> {
+      await tx.execute(
+        sql`select set_config('presby.identifier_trigger_active', 'true', true)`,
+      );
+    }
+
+    /**
+     * Seed one identifier row for Alder Creek inside the caller's transaction.
+     *
+     * Arms the guard for the insert — a fixture standing in for the sanctioned
+     * writer has to make the same claim the sanctioned writer makes — and then
+     * DISARMS it again before returning. The disarm is load-bearing, not
+     * tidiness: the GUC is transaction-local, so leaving it set would
+     * pre-authorize the very UPDATE and DELETE the callers below exist to see
+     * refused, and both of those tests would silently stop testing anything.
+     * (Measured: they failed exactly that way on the first run of this sweep.)
+     */
     async function seedAlderIdentifier(tx: {
       execute: (q: unknown) => Promise<unknown>;
     }): Promise<string> {
+      await armIdentifierWrite(tx);
       const rows = rowsOf(
         await tx.execute(sql`
           insert into organization_identifiers
@@ -130,6 +157,9 @@ describe.skipIf(!hasDb)(
                   'org-identifiers.test.ts fixture')
           returning id
         `),
+      );
+      await tx.execute(
+        sql`select set_config('presby.identifier_trigger_active', 'false', true)`,
       );
       return rows[0]!.id as string;
     }
@@ -167,16 +197,37 @@ describe.skipIf(!hasDb)(
         });
       });
 
-      it("is armed on UPDATE and DELETE only — INSERT is deliberately left to the grant and the partial unique index", async () => {
-        // Named residual, not an oversight (F47 / docs/TODO.md): a colliding
-        // VERIFIED insert is already refused by
-        // organization_identifiers_kind_value_verified_idx, and an unverified
-        // false claim about another org is the bounded presby_platform-only
-        // risk class this pipeline has accepted elsewhere. Engineering a
-        // bootstrap-vs-tenant distinction into an INSERT guard is more
-        // machinery than today's problem needs.
+      it("refuses a raw INSERT on the OWNER connection with the GUC unarmed — creation guarded as strongly as mutation (F58)", async () => {
+        // THIS ASSERTION INVERTS A PREVIOUS ONE, deliberately. Until
+        // 2026-09-24 this test read "is armed on UPDATE and DELETE only —
+        // INSERT is deliberately left to the grant and the partial unique
+        // index", and asserted that a raw INSERT got as far as
+        // organization_identifiers_kind_value_verified_idx. F58 / DECISION-141
+        // closed that residual: an identifier claim's CREATION is as much an
+        // authorized act as its mutation, and the sole sanctioned writer
+        // already armed the GUC unconditionally, so the "more machinery than
+        // today's problem needs" premise was false.
+        //
+        // The value below is NON-COLLIDING on purpose: `70000003` collides
+        // with nothing, so the unique index cannot be what refuses it and the
+        // guard is provably the only layer in play.
+        await inOwnerRollback(null, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into organization_identifiers
+                  (organization_id, kind, value_normalized, is_verified)
+                values (${BRAMBLEWOOD}::uuid, 'pcusa_pin', '70000003', false)
+              `),
+            new RegExp(UNIFORM_DENIAL),
+          );
+        });
+      });
+
+      it("still lets the partial unique index refuse a COLLIDING verified INSERT once the guard is armed — the two layers are independent", async () => {
         await inOwnerRollback(null, async (tx) => {
           await seedAlderIdentifier(tx);
+          await armIdentifierWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -186,6 +237,32 @@ describe.skipIf(!hasDb)(
               `),
             /organization_identifiers_kind_value_verified_idx/,
           );
+        });
+      });
+
+      it("fires on INSERT, UPDATE and DELETE — the catalog shape, so a re-narrowed trigger fails here too", async () => {
+        const platform = getPlatformDb();
+        const rows = rowsOf(
+          await platform.execute(sql`
+            select (tgtype & 1) = 1 as is_row,
+                   (tgtype & 2) = 2 as is_before,
+                   (tgtype & 4) = 4 as on_insert,
+                   (tgtype & 8) = 8 as on_delete,
+                   (tgtype & 16) = 16 as on_update,
+                   tgenabled::text as enabled
+              from pg_trigger
+             where tgrelid = 'organization_identifiers'::regclass
+               and tgname = 'organization_identifiers_guard'
+          `),
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          is_row: true,
+          is_before: true,
+          on_insert: true,
+          on_delete: true,
+          on_update: true,
+          enabled: "O",
         });
       });
     });

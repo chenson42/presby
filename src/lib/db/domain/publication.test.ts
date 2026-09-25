@@ -124,6 +124,63 @@ describe.skipIf(!hasDb)(
     }
 
     /**
+     * Arm `presby.publication_write_active`, transaction-local, exactly as
+     * `presby_publish_sasr_snapshot()` does before its own three inserts
+     * (F55 / DECISION-141, 2026-09-24).
+     *
+     * WHY EVERY DIRECT-INSERT FIXTURE BELOW NEEDS IT. `statistical_returns`,
+     * `publications` and the `published_by_congregation` branch of
+     * `congregation_statistics` are one atomic act — a filed return, the
+     * publication event that files it, and the recipient's projection of it —
+     * and since the sixth Phase 3 loop-back all three refuse an unmarked
+     * `INSERT` on every connection, this owner one included, where no grant
+     * binds. A fixture writing any of them directly is standing in for the
+     * sanctioned function and has to make the same claim it makes. Without
+     * this, every CHECK and field-spec probe below would be refused one layer
+     * earlier, by the guard, and would stop proving what it names.
+     *
+     * The live tenant path (`presbytery_entered` / `imported` rows through
+     * `setCongregationStatistics()`) is deliberately NOT affected: the
+     * projection guard carries a `WHEN (new.provenance =
+     * ''published_by_congregation'')` clause, so those inserts never invoke it.
+     */
+    async function armPublicationWrite(tx: {
+      execute: (q: unknown) => Promise<unknown>;
+    }): Promise<void> {
+      await tx.execute(
+        sql`select set_config('presby.publication_write_active', 'true', true)`,
+      );
+    }
+
+    /**
+     * Arm `presby.withdrawal_write_active` (F56 / DECISION-141, 2026-09-24).
+     *
+     * A SEPARATE, UNSHARED FLAG from the one above, and deliberately so: the
+     * future `presby_withdraw_publication()` runs in a different transaction
+     * at a different time from the publish path, so there is no
+     * transaction-local claim for it to piggyback on. Nothing in the database
+     * arms this yet, so until that function ships the withdrawal transition is
+     * unreachable ON THIS CONNECTION — the owner one, where no grant binds
+     * (F44) and the trigger conjunct is the only layer — and these fixtures
+     * are what prove the shape the function will depend on still works.
+     *
+     * NOT "on every connection", which is what this comment used to say and
+     * what QA-2 disproved on 2026-09-25: a GUC is a marker any role can set,
+     * so `presby_app` could arm it and write `congregation_statistics.
+     * withdrawn_at` with its whole-table UPDATE grant. That half is closed by
+     * a column-level grant instead (`drizzle/0047` section 10), asserted in
+     * `scripts/test-rls.sql` section 35(d). Two different mechanisms for two
+     * different connections; this file owns the owner-side one.
+     */
+    async function armWithdrawalWrite(tx: {
+      execute: (q: unknown) => Promise<unknown>;
+    }): Promise<void> {
+      await tx.execute(
+        sql`select set_config('presby.withdrawal_write_active', 'true', true)`,
+      );
+    }
+
+    /**
      * Drizzle wraps a driver error in its own `Failed query: …` and hangs the
      * real one off `.cause`, so a bare `rejects.toThrow(/…/)` matches the
      * wrapper's text and never the database's. Same helper shape as
@@ -445,6 +502,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses an UPDATE that moves any column outside the withdrawal triple", async () => {
         await inOwnerRollback(null, async (tx) => {
+          await armWithdrawalWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -458,6 +516,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses withdrawal attribution with no withdrawal — withdrawn_by and withdrawn_minute_reference alone are not an act", async () => {
         await inOwnerRollback(null, async (tx) => {
+          await armWithdrawalWrite(tx);
           const [userRow] = rowsOf(
             await tx.execute(sql`select id from users limit 1`),
           );
@@ -479,6 +538,11 @@ describe.skipIf(!hasDb)(
         // for, on the connection that can actually perform it: set once,
         // then any further UPDATE raises, then DELETE raises.
         await inOwnerRollback(null, async (tx) => {
+          await armWithdrawalWrite(tx);
+          // Stands in for the future presby_withdraw_publication() (F56 /
+          // DECISION-141): the transition is well-shaped AND sanctioned, and
+          // since 2026-09-24 the trigger requires both.
+          await armWithdrawalWrite(tx);
           const [userRow] = rowsOf(
             await tx.execute(sql`select id from users limit 1`),
           );
@@ -565,6 +629,7 @@ describe.skipIf(!hasDb)(
         // roll action rather than deleting it, and G-3.0107's "a ceased
         // council's records become the property of the next higher council".
         await inOwnerRollback(null, async (tx) => {
+          await armWithdrawalWrite(tx);
           const before = rowsOf(
             await tx.execute(sql`
               select set_config('app.current_org_id', ${NORTHERN_REACH}, true) as _;
@@ -592,6 +657,9 @@ describe.skipIf(!hasDb)(
           const [userRow] = rowsOf(
             await tx.execute(sql`select id from users limit 1`),
           );
+          // The sanctioned-writer marker the future presby_withdraw_
+          // publication() sets (F56 / DECISION-141).
+          await armWithdrawalWrite(tx);
           await tx.execute(sql`
             update publications
                set withdrawn_at = now(),
@@ -634,6 +702,10 @@ describe.skipIf(!hasDb)(
         // that pair of transitions and nothing else, which is why they are
         // written before the writer exists.
         await inOwnerRollback(null, async (tx) => {
+          await armWithdrawalWrite(tx);
+          // Both halves of the pair are gated on the same marker (F56 /
+          // DECISION-141), so the projection's half arms it here too.
+          await armWithdrawalWrite(tx);
           const [row] = rowsOf(
             await tx.execute(sql`
               select id from congregation_statistics
@@ -723,6 +795,7 @@ describe.skipIf(!hasDb)(
     describe("presby_enforce_sasr_field_spec() — the closed allow-list, on the owner path (D8 / DECISION-118)", () => {
       it("accepts a payload whose keys, types and bounds all match the 2024 spec", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await tx.execute(sql`
             insert into statistical_returns
               (organization_id, about_org_id, report_year, form_version_key,
@@ -743,6 +816,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a payload key the form version does not declare", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -759,6 +833,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a value of the wrong JSON type", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -775,6 +850,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a negative count — the bound lives in the spec, not in a second rule that could drift from it", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -791,6 +867,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a value above the declared ceiling", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -807,6 +884,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a submitted return ABOUT another congregation", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -823,6 +901,7 @@ describe.skipIf(!hasDb)(
 
       it("treats a PLACEHOLDER generation as fail-closed: an empty payload is fine, any key is not", async () => {
         await inOwnerRollback(SOUTHERN_FIELDS, async (tx) => {
+          await armPublicationWrite(tx);
           await tx.execute(sql`
             insert into statistical_returns
               (organization_id, about_org_id, report_year, form_version_key,
@@ -856,6 +935,7 @@ describe.skipIf(!hasDb)(
     describe("the imported-row about-org rule on the owner path (R3.14)", () => {
       it("lets the council that received a 1990 return archive it, and refuses one for a year it did not hold the congregation", async () => {
         await inOwnerRollback(SOUTHERN_FIELDS, async (tx) => {
+          await armPublicationWrite(tx);
           await tx.execute(sql`
             insert into statistical_returns
               (organization_id, about_org_id, report_year, form_version_key,
@@ -907,6 +987,7 @@ describe.skipIf(!hasDb)(
     describe("statistical_returns_provenance_shape (F50 / DECISION-140)", () => {
       it("refuses a SUBMITTED return that claims no reconciliation", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -923,6 +1004,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a SUBMITTED return with no attestation instant at all", async () => {
         await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -939,6 +1021,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses an IMPORTED return marked reconciled — a 1987 row that does not balance is a fact about 1987", async () => {
         await inOwnerRollback(SOUTHERN_FIELDS, async (tx) => {
+          await armPublicationWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
@@ -967,26 +1050,282 @@ describe.skipIf(!hasDb)(
       });
     });
 
+    // -------------------------------------------------------------------
+    // The 2026-09-24 round-two hardening (F55 / DECISION-141): the return ->
+    // publication -> projection chain is ONE sanctioned act, and creation is
+    // guarded as strongly as mutation. The grants revoked at F50/F51 bind
+    // presby_app and presby_platform; they bind nothing on THIS connection
+    // (F44), and the CHECK constraints prove a row's SHAPE, never its
+    // PROVENANCE. These probes are the reviewer's "false submitted artifact"
+    // repro at each of the three tables.
+    // -------------------------------------------------------------------
+
+    describe("the publication-chain creation guard (F55 / DECISION-141)", () => {
+      it("refuses a fabricated statistical_returns row on the owner connection — every CHECK satisfied, no publish in progress", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into statistical_returns
+                  (organization_id, about_org_id, report_year, form_version_key,
+                   provenance, payload, reconciled, attested_at)
+                values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2094, '2024',
+                        'submitted', '{"ending_active": 212}'::jsonb, true, now())
+              `),
+            /publication chain: this row may only be written by a sanctioned publication function/,
+          );
+        });
+      });
+
+      it("refuses a fabricated publications row on the owner connection — the event is an act, not a row anyone may write", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              select id, organization_id from statistical_returns limit 1
+            `),
+          );
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into publications
+                  (organization_id, recipient_org_id, record_class, artifact_id,
+                   minute_reference)
+                values (${ret!.organization_id as string}::uuid, ${NORTHERN_REACH}::uuid,
+                        'statistical_return', ${ret!.id as string}::uuid,
+                        'Fabricated session minute')
+              `),
+            /publication chain: this row may only be written by a sanctioned publication function/,
+          );
+        });
+      });
+
+      it("refuses a fabricated published_by_congregation projection — the repro stopped one step earlier than the other two", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const [pub] = rowsOf(
+            await tx.execute(sql`
+              select id, organization_id, recipient_org_id from publications
+               where recipient_org_id = ${NORTHERN_REACH}::uuid limit 1
+            `),
+          );
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                insert into congregation_statistics
+                  (organization_id, about_org_id, year, provenance, publication_id,
+                   published_at, minute_reference, ending_active)
+                values (${pub!.recipient_org_id as string}::uuid,
+                        ${pub!.organization_id as string}::uuid,
+                        2094, 'published_by_congregation', ${pub!.id as string}::uuid,
+                        now(), 'Fabricated session minute', 999)
+              `),
+            /publication chain: this row may only be written by a sanctioned publication function/,
+          );
+        });
+      });
+
+      it("leaves the LIVE tenant path alone: a presbytery_entered projection inserts with no marker at all (the WHEN clause)", async () => {
+        // The regression that matters most in this loop-back. A table-wide
+        // guard on congregation_statistics — which is what the review's prose
+        // implied — would have broken setCongregationStatisticsAction, a
+        // shipped, member-facing write path. The WHEN clause means the trigger
+        // is never invoked for these two provenances at all.
+        await inOwnerRollback(NORTHERN_REACH, async (tx) => {
+          await tx.execute(sql`
+            insert into congregation_statistics
+              (organization_id, about_org_id, year, provenance, ending_active)
+            values (${NORTHERN_REACH}::uuid, ${ALDER_CREEK}::uuid, 2094,
+                    'presbytery_entered', 41)
+          `);
+          await tx.execute(sql`
+            insert into congregation_statistics
+              (organization_id, about_org_id, year, provenance, ending_active)
+            values (${NORTHERN_REACH}::uuid, ${ALDER_CREEK}::uuid, 2095,
+                    'imported', 42)
+          `);
+          const rows = rowsOf(
+            await tx.execute(sql`
+              select count(*)::int as n from congregation_statistics
+               where organization_id = ${NORTHERN_REACH}::uuid
+                 and about_org_id = ${ALDER_CREEK}::uuid
+                 and year in (2094, 2095)
+            `),
+          );
+          expect(rows[0]!.n).toBe(2);
+        });
+      });
+
+      it("accepts the same three rows when the marker IS set — the guard gates the path, not the row", async () => {
+        await inOwnerRollback(ALDER_CREEK, async (tx) => {
+          await armPublicationWrite(tx);
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              insert into statistical_returns
+                (organization_id, about_org_id, report_year, form_version_key,
+                 provenance, payload, reconciled, attested_at)
+              values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2093, '2024',
+                      'submitted', '{"ending_active": 212}'::jsonb, true, now())
+              returning id
+            `),
+          );
+          const [pub] = rowsOf(
+            await tx.execute(sql`
+              insert into publications
+                (organization_id, recipient_org_id, record_class, artifact_id,
+                 minute_reference)
+              values (${ALDER_CREEK}::uuid, ${NORTHERN_REACH}::uuid,
+                      'statistical_return', ${ret!.id as string}::uuid,
+                      'Fixture: an armed publish')
+              returning id
+            `),
+          );
+          expect(pub!.id).toBeTruthy();
+
+          // The projection belongs to the RECIPIENT presbytery even though
+          // this transaction is in the congregation's context: the owner
+          // connection is not filtered by the policy, which is exactly the
+          // shape presby_publish_sasr_snapshot() relies on when it writes the
+          // recipient's row from the publisher's context.
+          await tx.execute(sql`
+            insert into congregation_statistics
+              (organization_id, about_org_id, year, provenance, publication_id,
+               published_at, minute_reference, ending_active)
+            values (${NORTHERN_REACH}::uuid, ${ALDER_CREEK}::uuid, 2093,
+                    'published_by_congregation', ${pub!.id as string}::uuid,
+                    now(), 'Fixture: an armed publish', 212)
+          `);
+          const rows = rowsOf(
+            await tx.execute(sql`
+              select count(*)::int as n from congregation_statistics
+               where publication_id = ${pub!.id as string}::uuid
+            `),
+          );
+          expect(rows[0]!.n).toBe(1);
+        });
+      });
+
+      it("arms the marker inside presby_publish_sasr_snapshot() itself, and all three guards are live — the catalog shape", async () => {
+        const platform = getPlatformDb();
+        const triggers = rowsOf(
+          await platform.execute(sql`
+            select c.relname::text as relname, t.tgname::text as tgname,
+                   p.proname::text as proname,
+                   pg_get_triggerdef(t.oid) like '%published_by_congregation%' as scoped,
+                   t.tgenabled::text as enabled
+              from pg_trigger t
+              join pg_class c on c.oid = t.tgrelid
+              join pg_proc p on p.oid = t.tgfoid
+             where p.proname = 'presby_guard_publication_write'
+             order by 1, 2
+          `),
+        );
+        expect(
+          triggers.map(
+            (r) => `${r.relname}.${r.tgname} scoped=${r.scoped} enabled=${r.enabled}`,
+          ),
+        ).toEqual([
+          "congregation_statistics.congregation_statistics_publication_guard scoped=true enabled=O",
+          "publications.publications_guard scoped=false enabled=O",
+          "statistical_returns.statistical_returns_guard scoped=false enabled=O",
+        ]);
+
+        const armed = rowsOf(
+          await platform.execute(sql`
+            select count(*)::int as n from pg_proc p
+             join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.prokind = 'f'
+              and p.proname = 'presby_publish_sasr_snapshot'
+              and p.prosecdef
+              and pg_get_functiondef(p.oid)
+                  like '%set_config(''presby.publication_write_active'', ''true'', true)%'
+          `),
+        );
+        expect(armed[0]!.n).toBe(1);
+      });
+    });
+
     describe("publications_withdrawal_shape, corrected (F51 / DECISION-140)", () => {
       it("refuses a withdrawn_at with no withdrawer and no minute — the exact row the previous predicate allowed", async () => {
         // FAILING-FIRST RELATIVE TO THE SHIPPED SCHEMA. The old predicate was
         // `withdrawn_at is not null or (withdrawn_by is null and
         // withdrawn_minute_reference is null)`, which is TRUE whenever
         // withdrawn_at is set, whatever the other two hold. This row passed.
+        //
+        // SPLIT IN TWO 2026-09-24 (F56 / DECISION-141), and the split is the
+        // point. This probe previously ran with no withdrawal marker set and
+        // matched `/a withdrawal must set withdrawn_at|publications_withdrawal
+        // _shape|withdrawn_by/`. Once the sanctioned-writer conjunct landed,
+        // the unarmed statement is refused by the GUARD, one layer earlier —
+        // and the old regex is loose enough that it would have gone on
+        // passing while proving something else entirely. So: this half ARMS
+        // the marker, which is the only way the shape CHECK is still the
+        // thing under test, and the half below proves the guard on its own.
         await inOwnerRollback(null, async (tx) => {
+          await armWithdrawalWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
                 update publications set withdrawn_at = now()
                  where recipient_org_id = ${NORTHERN_REACH}::uuid
               `),
-            /a withdrawal must set withdrawn_at|publications_withdrawal_shape|withdrawn_by/,
+            /publications_withdrawal_shape/,
+          );
+        });
+      });
+
+      it("refuses the SAME withdrawal with no sanctioned withdrawal writer, one layer earlier and with a different message (F56)", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const [userRow] = rowsOf(
+            await tx.execute(sql`select id from users limit 1`),
+          );
+          // A perfectly well-shaped withdrawal triple — nothing here trips
+          // publications_withdrawal_shape, the freeze's column comparison, or
+          // the already-withdrawn check. The only thing wrong with it is that
+          // no sanctioned withdrawal function performed it, and until
+          // presby_withdraw_publication() exists, none can.
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                update publications
+                   set withdrawn_at = now(),
+                       withdrawn_by = ${userRow!.id as string}::uuid,
+                       withdrawn_minute_reference = 'Fabricated withdrawal minute'
+                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+              `),
+            /a withdrawal is an authorized act and may only be recorded by the sanctioned withdrawal function/,
+          );
+        });
+      });
+
+      it("refuses the PROJECTION half of the pair with the marker unarmed, so neither half is independently reachable (F56)", async () => {
+        await inOwnerRollback(null, async (tx) => {
+          const [row] = rowsOf(
+            await tx.execute(sql`
+              select id from congregation_statistics
+               where organization_id = ${NORTHERN_REACH}::uuid
+                 and about_org_id = ${ALDER_CREEK}::uuid
+                 and provenance = 'published_by_congregation'
+               limit 1
+            `),
+          );
+          // The transition that WAS permitted before this loop-back:
+          // withdrawn_at null -> not null with nothing else moving. It is the
+          // legitimate shape, which is exactly why the marker is what has to
+          // refuse it — a publication withdrawn without its projection, or the
+          // reverse, is a recipient silently disagreeing with the act.
+          await expectDbError(
+            () =>
+              tx.execute(sql`
+                update congregation_statistics set withdrawn_at = now()
+                 where id = ${row!.id as string}::uuid
+              `),
+            /published rows are immutable/,
           );
         });
       });
 
       it("refuses a withdrawer with no withdrawal, on a direct owner INSERT", async () => {
         await inOwnerRollback(null, async (tx) => {
+          await armPublicationWrite(tx);
           const [ret] = rowsOf(
             await tx.execute(sql`
               select id, organization_id from statistical_returns limit 1
@@ -1044,6 +1383,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a predecessor from a different report year", async () => {
         await inOwnerRollback(null, async (tx) => {
+          await armPublicationWrite(tx);
           const { first } = await seedTwo(tx);
           const [ret] = rowsOf(
             await tx.execute(sql`
@@ -1067,6 +1407,7 @@ describe.skipIf(!hasDb)(
 
       it("refuses a predecessor belonging to another congregation, and one addressed to another recipient", async () => {
         await inOwnerRollback(null, async (tx) => {
+          await armPublicationWrite(tx);
           const { first } = await seedTwo(tx);
           const [ret] = rowsOf(
             await tx.execute(sql`
@@ -1117,6 +1458,7 @@ describe.skipIf(!hasDb)(
 
       it("still chains a legitimate same-year republish, and forbids a FORK off the same predecessor", async () => {
         await inOwnerRollback(null, async (tx) => {
+          await armPublicationWrite(tx);
           await tx.execute(
             sql`select set_config('app.current_org_id', ${ALDER_CREEK}, true)`,
           );
@@ -1178,6 +1520,7 @@ describe.skipIf(!hasDb)(
         // publication: Alder Creek publishes to the WESTERN BASIN, and the
         // NORTHERN REACH then claims the projection.
         await inOwnerRollback(null, async (tx) => {
+          await armPublicationWrite(tx);
           const [ret] = rowsOf(
             await tx.execute(sql`
               select id from statistical_returns

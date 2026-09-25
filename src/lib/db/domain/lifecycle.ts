@@ -57,7 +57,30 @@ import { users } from "../schema";
  *     at all (Phase 5 Finding 1) — see the table's own doc comment below.
  *   - `organization_successions` cardinality per event type is a DEFERRED
  *     CONSTRAINT TRIGGER — a `merged` event's second predecessor cannot
- *     exist at the moment the first row is inserted.
+ *     exist at the moment the first row is inserted. Since 2026-09-24 it is
+ *     checked from BOTH ends: the shared body lives in
+ *     `presby_lifecycle_event_cardinality_check()` and a second deferred
+ *     trigger on `organization_lifecycle_events` calls it, so an event
+ *     committed with ZERO succession rows is refused at commit
+ *     (`drizzle/0044_presby_org_lifecycle.sql` section 13b/13b2, F54).
+ *   - **INSERT on BOTH tables is closed unless the transaction-local GUC
+ *     `presby.lifecycle_write_active` carries the id of the lifecycle event
+ *     being recorded** (F54 / DECISION-141, corrected 2026-09-25 per QA-1,
+ *     `drizzle/0044` sections 12a and 13a2 — one `presby_guard_lifecycle_
+ *     write()` BEFORE INSERT trigger on each, raising the existing
+ *     `presby_deny_lifecycle_change()` literal). The marker is an event id as
+ *     text, NOT a boolean: the events branch requires `new.id` to equal it,
+ *     the successions branch requires `new.event_id` to. So the transaction
+ *     declares WHICH act it is recording and may write only rows belonging to
+ *     that act. It does NOT make a committed act's topology immutable — a
+ *     transaction that re-arms to a settled event's own id is not refused;
+ *     that residual is owner-connection-bounded (F44) and recorded on
+ *     `docs/TODO.md`'s `presby_record_lifecycle_event()` line. Nothing arms
+ *     it yet, by design: the future `presby_record_lifecycle_event()` will,
+ *     and until it ships a Drizzle `insert()` into either table from ANY
+ *     connection — including `getPlatformDb()`, which no grant binds (F44) —
+ *     fails at runtime, not at `tsc`. Test fixtures arm it themselves, with
+ *     a client-generated id; see `lifecycle.test.ts`'s `armLifecycleWrite()`.
  *
  * `subject_org_id` / `parent_org_id` are PLAIN FKs to `organizations` and are
  * deliberately NOT composite tenant FKs (F2's structural exception,
@@ -172,6 +195,19 @@ export const organizationLifecycleEvents = pgTable(
  * trigger in 0044, not expressible here. Deferred, so an in-progress `merged`
  * is legal until commit and a mistake is unwound by ROLLBACK — which is why
  * the freeze above costs no legitimate flow.
+ *
+ * `organization_successions_guard` (BEFORE INSERT, `drizzle/0044` section
+ * 13a2, F54/DECISION-141) closes the creation surface the list above left
+ * open: a later raw-owner INSERT of an EXTRA edge into an already-valid,
+ * already-committed merge changes what the minute says happened without
+ * violating cardinality (3 predecessors still satisfies "at least 2") and
+ * without tripping the event-scope check (the event exists and is in scope).
+ * Only `presby.lifecycle_write_active` distinguishes that write from the
+ * sanctioned one, and since 2026-09-25 (QA-1) it does so per-act rather than
+ * globally: the marker carries the event id, so the edge must name the act
+ * the transaction declared. An owner connection that re-arms to the settled
+ * event's own id is still accepted — the named residual in 0044 section 12a.
+ * Not expressible in Drizzle.
  */
 export const organizationSuccessions = pgTable(
   "organization_successions",

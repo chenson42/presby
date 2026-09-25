@@ -1371,6 +1371,19 @@ values
 -- The payload keys are the 2024 field_spec's own keys — drizzle/0046's
 -- presby_enforce_sasr_field_spec() rejects anything else, which is the point
 -- of the spec and is worth a fixture proving it from the seed side too.
+--
+-- ARM THE SANCTIONED-WRITE GUC before all three (F55 / DECISION-141,
+-- 2026-09-24). statistical_returns, publications and a
+-- published_by_congregation congregation_statistics row are each BEFORE
+-- INSERT-guarded now (drizzle/0046 section 4b, drizzle/0047 sections 2a and
+-- 3b): creation of a publication artifact is an authorized act, and a raw
+-- connection — including this owner one — cannot perform it unmarked. Seeding
+-- a fixture publication IS a sanctioned write, so the seed says so rather than
+-- disabling the triggers. Transaction-local, and this whole file is one
+-- transaction (`begin;` at the top, `commit;` at the bottom), so one call
+-- covers all three inserts and nothing leaks past the commit.
+select set_config('presby.publication_write_active', 'true', true);
+
 insert into statistical_returns
   (id, organization_id, about_org_id, report_year, form_version_key, provenance,
    payload, reconciled, attested_by_name, attested_role, attested_at)

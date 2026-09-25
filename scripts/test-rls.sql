@@ -2128,7 +2128,15 @@ begin;
 commit;
 
 -- The presby_app grant shape, proven directly (same style as section 28's
--- appointments proof) — 4 tables x 4 privileges.
+-- appointments proof) — 4 tables x 4 privileges, MINUS the one table-level
+-- UPDATE that drizzle/0047 section 10 replaced with a column list.
+--
+-- NARROWED 2026-09-25 (QA-2): congregation_statistics' table-level UPDATE was
+-- revoked and re-granted per column, excluding withdrawn_at and
+-- publication_id, so this count is 15 rather than 16 and the missing entry is
+-- named rather than absorbed into a smaller number. The column-level shape
+-- that replaced it is asserted in section 35(d); keeping BOTH means a revert
+-- in either direction fails the suite.
 begin;
   select assert_eq(
     (select count(*) from information_schema.role_table_grants
@@ -2136,7 +2144,13 @@ begin;
                             'per_capita_rates', 'per_capita_records')
         and grantee = 'presby_app'
         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')),
-    16, 'presbytery program: presby_app has full select/insert/update/delete on all four new tables');
+    15, 'presbytery program: presby_app has full select/insert/update/delete on all four new tables, EXCEPT congregation_statistics'' table-level UPDATE — column-scoped since QA-2 (see 35(d))');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'congregation_statistics'
+        and grantee = 'presby_app'
+        and privilege_type = 'UPDATE'),
+    0, 'QA-2: and the one missing entry is exactly that — congregation_statistics carries no table-level UPDATE for presby_app');
 commit;
 
 -- (b) Known-fixture sanity: the presbytery sees its own rows on all four
@@ -2772,16 +2786,23 @@ begin;
       where table_name = 'organization_affiliations' and grantee = 'presby_app'
         and privilege_type = 'SELECT'),
     1, 'F40: that one privilege is SELECT — presby_transfer_affiliation() is the only write path');
+  -- NARROWED 2026-09-25: select, insert -> SELECT only. The INSERT grant was
+  -- written when this table's INSERT was policy-mediated; F54/DECISION-141
+  -- made it function-mediated (presby.lifecycle_write_active), the future
+  -- presby_record_lifecycle_event() is SECURITY DEFINER and gains nothing
+  -- from a tenant grant, and no application path inserts here. 32(k) below
+  -- carries the behavioural half and the pointer to where the table's
+  -- trigger/CHECK proofs moved.
   select assert_eq(
     (select count(*) from information_schema.role_table_grants
       where table_name = 'organization_lifecycle_events' and grantee = 'presby_app'
-        and privilege_type in ('SELECT', 'INSERT')),
-    2, 'organization_lifecycle_events: presby_app has select + insert');
+        and privilege_type = 'SELECT'),
+    1, 'organization_lifecycle_events: presby_app has SELECT');
   select assert_eq(
     (select count(*) from information_schema.role_table_grants
       where table_name = 'organization_lifecycle_events' and grantee = 'presby_app'
-        and privilege_type in ('UPDATE', 'DELETE')),
-    0, 'organization_lifecycle_events: append-only — no update, no delete (the roll_actions precedent)');
+        and privilege_type in ('INSERT', 'UPDATE', 'DELETE')),
+    0, 'organization_lifecycle_events: and no INSERT, UPDATE or DELETE — append-only was already the rule (the roll_actions precedent); as of 2026-09-25 appending is function-mediated too');
 commit;
 
 -- (d) The three organizations guards, from the tenant connection. The
@@ -3124,8 +3145,9 @@ begin;
        and t.tgenabled = 'O'
        and t.tgname in ('organization_successions_event_scope',
                         'organization_successions_cardinality',
-                        'organization_successions_freeze')),
-    3, 'organization_successions: all three triggers are present and enabled — event scope, deferred cardinality, freeze');
+                        'organization_successions_freeze',
+                        'organization_successions_guard')),
+    4, 'organization_successions: all four triggers are present and enabled — event scope, deferred cardinality, freeze, and (2026-09-24, F54) the creation guard');
   select assert_eq(
     (select count(*) from pg_proc where proname = 'presby_check_succession_event' and prosecdef),
     1, 'presby_check_succession_event is SECURITY DEFINER — it reads organization_lifecycle_events past that table''s FORCE RLS (F26)');
@@ -3148,8 +3170,53 @@ commit;
 --     freeze behaviour, for the same reason presby_freeze_lifecycle_event()'s
 --     proof lives there.
 
--- (k) The lifecycle event's own rules: one level above only, never
---     self-targeting, and the cache it maintains.
+-- (k) The lifecycle event's own rules — MOVED, and the move is the point.
+--     presby_app held `select, insert` on organization_lifecycle_events until
+--     2026-09-25; this block used that INSERT to reach the table's authority
+--     trigger, its external-body CHECK and presby_apply_lifecycle_event()'s
+--     cache maintenance. drizzle/0044 now grants presby_app SELECT ONLY (the
+--     Phase 2 Ruling 1 shape organization_successions has carried since Phase
+--     5 Finding 1), so the grant refuses before any trigger or CHECK can fire
+--     and every one of those probes would pass, or fail, for the wrong reason.
+--
+--     They now run on the owner connection in
+--     src/lib/db/domain/lifecycle.test.ts, under "the lifecycle event's own
+--     rules (moved from test-rls.sql 32(k), 2026-09-25)": a council acting on
+--     itself, a presbytery acting on a presbytery, the received/dismissed
+--     external-body CHECK, and the whole dissolution path (the
+--     lifecycle_status cache moves and is dated, the affiliation closes, the
+--     derived parent_id follows it to null, and presby_org_affiliated() still
+--     answers true for a date BEFORE the closure and false after — the
+--     property that lets a dissolved congregation's 1990 return stay
+--     attributable). Exactly the split 32(j) above already records for the
+--     succession cardinality proofs, for exactly the same reason.
+--
+--     What stays here is the half only a tenant connection can show: that the
+--     grant is the first thing a tenant meets, and that it is SELECT.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('organization_lifecycle_events', 'organization_successions')
+        and a.grantee = 'presby_app'::regrole),
+    2, 'lifecycle tables: presby_app holds exactly TWO privileges in total across both — one each');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('organization_lifecycle_events', 'organization_successions')
+        and a.grantee = 'presby_app'::regrole
+        and a.privilege_type = 'SELECT'),
+    2, 'lifecycle tables: and both of them are SELECT — organization_lifecycle_events lost its INSERT on 2026-09-25, so the two halves of the one immutable aggregate are finally consistent (Phase 2 Ruling 1: function-mediated, never policy-mediated)');
+  -- presby_platform is UNCHANGED on both, and that is deliberate: it is the
+  -- statement of intent for the day a real non-owner platform login exists,
+  -- inert today because PLATFORM_DATABASE_URL authenticates as neondb_owner
+  -- (F44).
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('organization_lifecycle_events', 'organization_successions')
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type in ('SELECT', 'INSERT')),
+    4, 'lifecycle tables: presby_platform keeps select + insert on both, unchanged');
+commit;
+
 begin;
   select set_config('app.current_org_id', :PRESBY, true);
   do $$
@@ -3157,77 +3224,12 @@ begin;
     insert into organization_lifecycle_events
       (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
     values ('11111111-1111-1111-1111-111111111111',
-            '11111111-1111-1111-1111-111111111111',   -- itself
-            'dissolved', current_date, 'minute', 'e0000000-0000-0000-0000-0000000000f4');
-    raise exception 'FAIL — a presbytery recorded a lifecycle event against ITSELF';
-  -- insufficient_privilege, not check_violation: a BEFORE INSERT trigger runs
-  -- ahead of the table's own CHECK, so presby_assert_council_authority()
-  -- rejects actor = subject before organization_lifecycle_events_not_self is
-  -- ever evaluated. The CHECK stays as defense in depth for any future writer
-  -- that reaches the table with the trigger disabled.
+            '33333333-3333-3333-3333-333333333333',
+            'organized', current_date, 'minute', 'e0000000-0000-0000-0000-0000000000f4');
+    raise exception 'FAIL — presby_app inserted into organization_lifecycle_events';
   exception when insufficient_privilege then
-    raise notice 'pass  presby_assert_council_authority: a council cannot act on itself (a presbytery cannot constitutionally dissolve itself)';
+    raise notice 'pass  organization_lifecycle_events: presby_app cannot INSERT at all — the grant fires BEFORE the authority trigger, the GUC guard and the CHECKs, which is why 32(k) behaviour moved to the owner connection';
   end $$;
-
-  do $$
-  begin
-    insert into organization_lifecycle_events
-      (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
-    values ('11111111-1111-1111-1111-111111111111',
-            'f8000000-0000-0000-0000-000000000002',   -- a PRESBYTERY, two levels off
-            'dissolved', current_date, 'minute', 'e0000000-0000-0000-0000-0000000000f4');
-    raise exception 'FAIL — a presbytery dissolved another presbytery';
-  exception when insufficient_privilege then
-    raise notice 'pass  presby_assert_council_authority: a presbytery may act on congregations and NWCs only (G-3.0301(a)) — never on a presbytery';
-  end $$;
-
-  do $$
-  begin
-    insert into organization_lifecycle_events
-      (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
-    values ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
-            'received', current_date, 'minute', 'e0000000-0000-0000-0000-0000000000f4');
-    raise exception 'FAIL — a received event with no external_body was accepted';
-  exception when check_violation then
-    raise notice 'pass  organization_lifecycle_events_external_body_shape: received/dismissed require the counterparty, everything else forbids it';
-  end $$;
-rollback;
-
---     The dissolution path end to end: the cache moves, the affiliation
---     closes, and the ARCHIVE still resolves — presby_org_affiliated() must
---     keep answering true for dates before the closure, which is the whole
---     reason a dissolved congregation's 1990 return can still be attributed.
-begin;
-  select set_config('app.current_org_id', :PRESBY, true);
-  insert into organization_lifecycle_events
-    (organization_id, subject_org_id, event, effective_on, minute_reference, recorded_by)
-  values ('11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
-          'dissolved', date '2026-06-30',
-          'Northern Reach stated meeting, fixture, item 3',
-          'e0000000-0000-0000-0000-0000000000f4');
-
-  select assert_eq(
-    (select count(*) from organizations
-      where id = :QUILLHAVEN and lifecycle_status = 'dissolved'
-        and lifecycle_as_of = date '2026-06-30'),
-    1, 'presby_apply_lifecycle_event: a dissolved event moves the organizations.lifecycle_status cache and dates it');
-  select assert_eq(
-    (select count(*) from organization_affiliations
-      where subject_org_id = :QUILLHAVEN and effective_to is null),
-    0, 'presby_apply_lifecycle_event: the dissolved congregation has no OPEN affiliation left');
-  select assert_eq(
-    (select count(*) from organizations where id = :QUILLHAVEN and parent_id is null),
-    1, 'presby_apply_affiliation_to_org_tree: the derived parent_id follows the closure to null');
-  select assert_eq(
-    (select count(*) from (select presby_org_affiliated(
-      '44444444-4444-4444-4444-444444444444',
-      '11111111-1111-1111-1111-111111111111', date '2020-01-01') as v) t where v),
-    1, 'archive attribution survives dissolution: presby_org_affiliated still answers true for 2020, after the 2026 closure');
-  select assert_eq(
-    (select count(*) from (select presby_org_affiliated(
-      '44444444-4444-4444-4444-444444444444',
-      '11111111-1111-1111-1111-111111111111', date '2026-12-31') as v) t where v),
-    0, 'archive attribution stops at the closure: false for a date after the dissolution');
 rollback;
 
 -- (l) organization_identifiers (D24, drizzle/0043): readable with NO org
@@ -3343,8 +3345,9 @@ begin;
         and t.tgname = 'organization_identifiers_guard'
         and t.tgenabled = 'O'
         and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2
+        and (t.tgtype & 4) = 4
         and (t.tgtype & 8) = 8 and (t.tgtype & 16) = 16),
-    1, 'F47: organization_identifiers_guard is an enabled row-level BEFORE UPDATE OR DELETE trigger — the buckle, since the revoke above does not bind the owner (F44)');
+    1, 'F58: organization_identifiers_guard is an enabled row-level BEFORE INSERT OR UPDATE OR DELETE trigger — widened from UPDATE/DELETE on 2026-09-24 (DECISION-141), because creation of an identifier claim is as much an authorized act as changing one, and the revoke does not bind the owner (F44)');
   -- A NEW GUC, not a reuse of presby.affiliation_trigger_active: unrelated
   -- table, unrelated subsystem, no shared transaction in practice.
   select assert_eq(
@@ -4388,3 +4391,481 @@ begin;
     raise notice 'pass  presby_publish_sasr_snapshot: the same congregation publishes a CURRENT year to the same council without complaint — the rejection above is about the year, not the relationship';
   end $$;
 rollback;
+
+-- ---------------------------------------------------------------------------
+-- 35. Creation guarded as strongly as mutation — F54-F58 / DECISION-141
+--     (docs/work-log/2026-09-24-lifecycle-affiliation-returns.md, sixth Phase
+--     3 loop-back; docs/schema-design-2.md sec 2g)
+-- ---------------------------------------------------------------------------
+-- The rule this section exists to prove: if an immutable record represents an
+-- authorized act, its INSERT needs the same GUC-gated-trigger treatment its
+-- UPDATE/DELETE already got. A revoked grant proves nothing on the connection
+-- that matters (neondb_owner, F44) and a shape CHECK proves a row is
+-- well-formed, never that it arrived through the sanctioned path.
+--
+-- WHAT THIS SUITE CAN AND CANNOT PROVE, stated once. Running as presby_app:
+--   * organization_lifecycle_events, organization_successions,
+--     statistical_returns, publications — presby_app holds no INSERT grant on
+--     any of the four (the events table lost its INSERT on 2026-09-25), so
+--     the permission check fires BEFORE the new guards and this suite can
+--     only prove the GRANT, which it does at 32(j) and 32(k) and 34. The
+--     guards themselves are proven on the owner connection in
+--     src/lib/db/domain/lifecycle.test.ts and publication.test.ts, which is
+--     the connection they exist for: no grant binds neondb_owner (F44).
+--   * congregation_statistics — the one table in this family where presby_app
+--     still holds INSERT, because the live tenant path writes it. So the
+--     WHEN-scoped projection guard IS reachable and IS behaviourally proven
+--     here, in (c), together with the regression proof that the two
+--     non-published provenances never reach it.
+-- (e) below pins the catalog shape of every mechanism only the other files
+-- can exercise, so a dropped trigger fails this suite too.
+
+-- (a) The lifecycle aggregate's creation guard (F54) — PROVEN ON THE OWNER
+--     CONNECTION, not here, and the reason is the same one that emptied
+--     32(k) above: as of 2026-09-25 presby_app holds SELECT only on BOTH
+--     lifecycle tables, so the grant refuses every INSERT before
+--     organization_lifecycle_events_guard or organization_successions_guard
+--     can be reached. A tenant connection can no longer distinguish "the
+--     guard refused me" from "the grant refused me", and a probe that cannot
+--     tell those apart proves neither.
+--
+--     src/lib/db/domain/lifecycle.test.ts carries the behaviour, on
+--     PLATFORM_DATABASE_URL (neondb_owner), which is the connection the guard
+--     exists for in the first place (F44 — no grant binds it): an unarmed
+--     INSERT into each table refused with the uniform literal, an armed
+--     event + succession pair accepted in one transaction, the reviewer's
+--     third-predecessor repro refused with its positive control, a
+--     zero-succession merge and a zero-succession division refused at commit,
+--     and a lawful dissolution accepted. What remains here is (e)'s catalog
+--     assertions, which fail this suite if any of those mechanisms is dropped.
+--
+--     The grant-shape half is 32(k) above; the behavioural "presby_app cannot
+--     INSERT at all" probe is there too, next to the grant it proves.
+
+
+-- (c) The publication chain's projection guard, and the WHEN clause that keeps
+--     the live tenant path out of it (F55).
+--
+--     THE REVIEWER'S "FALSE SUBMITTED ARTIFACT" REPRO, at the projection end:
+--     a fabricated published_by_congregation row, satisfying congregation_
+--     statistics_publication_shape and its composite FK by pointing at the
+--     seeded publication, refused because the transaction is not a publish.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  declare
+    -- The publication id is READ FROM THE PROJECTION, never hard-coded: on a
+    -- freshly-seeded database it is scripts/seed-dev.sql's a9000000-...-0001,
+    -- and on a database that was MIGRATED instead it is whatever drizzle/
+    -- 0047's backfill minted. (Measured: this branch carries the backfilled
+    -- one. A hard-coded id made this probe fail on the FK instead of on the
+    -- guard, which would have proven nothing.) presby_app cannot SELECT the
+    -- publication itself here — that row belongs to the congregation — but it
+    -- owns the projection that names it, and a foreign-key check bypasses row
+    -- security by design, so the reference resolves.
+    v_pub uuid := (select publication_id from congregation_statistics
+                    where id = 'a4000000-0000-0000-0000-000000000002');
+  begin
+    insert into congregation_statistics
+      (organization_id, about_org_id, year, provenance, publication_id,
+       published_at, minute_reference, ending_active)
+    values ('11111111-1111-1111-1111-111111111111',
+            '22222222-2222-2222-2222-222222222222',
+            2027, 'published_by_congregation',
+            v_pub,
+            now(), 'Fabricated session minute', 999);
+    raise exception 'FAIL — a published_by_congregation projection was fabricated outside presby_publish_sasr_snapshot()';
+  exception when insufficient_privilege then
+    raise notice 'pass  F55: congregation_statistics_publication_guard refuses a published_by_congregation INSERT with presby.publication_write_active unarmed — the projection is part of a publication, not a row anyone may write';
+  -- Attribution, not defensiveness. From the RECIPIENT's context the
+  -- composite FK to publications (id, organization_id) is itself unresolvable
+  -- (that table is FORCE RLS and the publication belongs to the CONGREGATION),
+  -- so with the guard dropped this insert fails on the FK instead — which is a
+  -- failure, but of a different mechanism. Naming it keeps the failing-first
+  -- proof honest: if this branch fires, the guard did NOT do the refusing.
+  when foreign_key_violation then
+    raise exception 'FAIL — congregation_statistics_publication_guard did not fire; the composite FK refused the row instead';
+  end $$;
+rollback;
+
+--     THE REGRESSION THAT MATTERS MOST in this whole loop-back: the two
+--     provenances the live tenant path writes never reach that trigger at all.
+--     A table-wide guard would have broken setCongregationStatisticsAction
+--     outright; the WHEN clause is what makes the fix surgical. Sections 29
+--     and 33 already insert eight presbytery_entered/imported rows and are
+--     UNCHANGED by this loop-back, which is the real proof — this is the
+--     explicit, named restatement of it.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  insert into congregation_statistics
+    (organization_id, about_org_id, year, provenance, ending_active)
+  values ('11111111-1111-1111-1111-111111111111',
+          '22222222-2222-2222-2222-222222222222',
+          2028, 'presbytery_entered', 41);
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where organization_id = :PRESBY and about_org_id = :ALDER and year = 2028),
+    1, 'F55: a presbytery_entered row is written by an ordinary tenant connection with NO GUC armed — the WHEN clause keeps the live path out of the guard entirely');
+rollback;
+
+--     ...and the identical row IS accepted once the transaction says it is a
+--     publish. The guard gates the PATH, not the row — which is what keeps it
+--     a provenance check rather than a second, hidden CHECK constraint.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select set_config('presby.publication_write_active', 'true', true);
+  insert into congregation_statistics
+    (organization_id, about_org_id, year, provenance, publication_id,
+     published_at, minute_reference, ending_active)
+  select '11111111-1111-1111-1111-111111111111',
+         '22222222-2222-2222-2222-222222222222',
+         2027, 'published_by_congregation', cs.publication_id,
+         now(), 'Fixture: armed projection write', 212
+    from congregation_statistics cs
+   where cs.id = :STAT_ALDER_PUBLISHED;
+  select assert_eq(
+    (select count(*) from congregation_statistics
+      where organization_id = :PRESBY and about_org_id = :ALDER and year = 2027
+        and provenance = 'published_by_congregation'),
+    1, 'F55: the identical projection IS accepted with presby.publication_write_active armed — which is how presby_publish_sasr_snapshot() writes it');
+rollback;
+
+-- (d) The withdrawal pair's projection half (F56), CORRECTED 2026-09-25 after
+--     QA-2. The one permitted transition — withdrawn_at null -> not null,
+--     nothing else moving — was independently reachable on each of the two
+--     tables, so a raw connection could withdraw one half and leave the other
+--     disagreeing. The sixth loop-back added a GUC-gated trigger conjunct to
+--     each and this section then asserted the pair was "closed on both until
+--     presby_withdraw_publication() exists". QA measured otherwise on THIS
+--     connection: a GUC is a marker, not a privilege — set_config() has no
+--     privilege check — and presby_app held whole-table UPDATE on
+--     congregation_statistics, so it could arm the marker itself and write
+--     withdrawn_at alone. The block below used to perform exactly that and
+--     assert SUCCESS, three sections before another block asserted the
+--     opposite.
+--
+--     What closes it is a COLUMN-LEVEL GRANT (drizzle/0047 section 10):
+--     presby_app now holds UPDATE on every column of congregation_statistics
+--     EXCEPT withdrawn_at and publication_id. The refusing layer on this
+--     connection is therefore the GRANT, not the trigger, and it refuses
+--     whether or not the marker is armed. The trigger's own branch — which
+--     still matters, because it is the only layer binding neondb_owner (F44)
+--     and the future presby_withdraw_publication() — is proven on the owner
+--     connection in src/lib/db/domain/publication.test.ts.
+--
+--     UNARMED: the failure is now a privilege error, raised before the
+--     trigger runs, so the old `when check_violation` handler would no longer
+--     catch it. Expect insufficient_privilege and name check_violation
+--     explicitly as a FAIL, so a reverted grant is reported as "the trigger
+--     did the refusing" rather than passing quietly.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    update congregation_statistics
+       set withdrawn_at = now()
+     where id = 'a4000000-0000-0000-0000-000000000002';
+    raise exception 'FAIL — half of a withdrawal pair was recorded with no sanctioned withdrawal writer';
+  exception
+    when insufficient_privilege then
+      raise notice 'pass  F56/QA-2: the congregation_statistics withdrawal transition is refused for presby_app at the GRANT layer, unarmed — presby_app holds no UPDATE on withdrawn_at at all';
+    when check_violation then
+      raise exception 'FAIL — the column grant did not refuse; the trigger did. drizzle/0047 section 10''s revoke/grant pair has been reverted or never applied';
+  end $$;
+rollback;
+
+--     ARMED, and this is the block QA named: it used to arm the marker and
+--     assert the UPDATE SUCCEEDED, as "future plumbing" proof. It now asserts
+--     the opposite, which is the whole point of the correction — arming buys
+--     the tenant nothing, because a marker is not a privilege. The future
+--     presby_withdraw_publication() is unaffected: it is SECURITY DEFINER and
+--     runs as the owner, where no grant applies.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select set_config('presby.withdrawal_write_active', 'true', true);
+  do $$
+  begin
+    update congregation_statistics
+       set withdrawn_at = now()
+     where id = 'a4000000-0000-0000-0000-000000000002';
+    raise exception 'FAIL — presby_app armed presby.withdrawal_write_active and wrote withdrawn_at; a GUC is being treated as a privilege (QA-2)';
+  exception when insufficient_privilege then
+    raise notice 'pass  F56/QA-2: ARMED makes no difference — presby_app still cannot write congregation_statistics.withdrawn_at, because the column grant refuses before any trigger is consulted';
+  end $$;
+rollback;
+
+--     The grant shape itself, asserted directly rather than only through
+--     behaviour, so a partial revert (one column re-granted, or the whole
+--     table re-granted) fails here even if no probe above happens to reach it.
+--     has_column_privilege() is the right instrument: it answers the question
+--     Postgres actually asks at execution time, table-level and column-level
+--     grants combined.
+begin;
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'withdrawn_at', 'UPDATE')
+                 then 1 else 0 end)::bigint,
+    0, 'QA-2: presby_app holds no UPDATE on congregation_statistics.withdrawn_at — the withdrawal half of the pair is grant-closed on the tenant connection');
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'publication_id', 'UPDATE')
+                 then 1 else 0 end)::bigint,
+    0, 'QA-2: presby_app holds no UPDATE on congregation_statistics.publication_id — the projection''s link back to its publication is written by presby_publish_sasr_snapshot() alone');
+  -- THE POSITIVE CONTROL, and it is not optional: without it a blanket
+  -- `revoke update on congregation_statistics from presby_app` would satisfy
+  -- both assertions above while silently breaking setCongregationStatistics().
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'minute_reference', 'UPDATE')
+                 then 1 else 0 end)::bigint,
+    1, 'QA-2: presby_app DOES hold UPDATE on congregation_statistics.minute_reference — the narrowing is two columns wide, not a table-wide revoke');
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'ending_active', 'UPDATE')
+                 then 1 else 0 end)::bigint,
+    1, 'QA-2: and on ending_active — a second live column of the setCongregationStatistics() upsert, so the positive control is not a single lucky pick');
+  -- The table-level UPDATE is GONE, replaced by the column list. relacl, not
+  -- has_column_privilege(), because this is the distinction the two disagree
+  -- on: a table-level grant would make every has_column_privilege() true.
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'congregation_statistics'
+        and a.grantee = 'presby_app'::regrole
+        and a.privilege_type = 'UPDATE'),
+    0, 'QA-2: presby_app holds no TABLE-level UPDATE on congregation_statistics — the privilege is column-scoped, which is the only shape that can exclude a column');
+  -- ...and the column-level grants are really there, in pg_attribute.attacl,
+  -- which is where a column grant lives and where a table-level grant does not
+  -- appear at all.
+  select assert_eq(
+    (select count(distinct a.grantee) from pg_attribute att,
+            aclexplode(att.attacl) a
+      where att.attrelid = 'congregation_statistics'::regclass
+        and a.grantee = 'presby_app'::regrole
+        and a.privilege_type = 'UPDATE'),
+    1, 'QA-2: the column-level UPDATE grants exist in pg_attribute.attacl — the revoke/grant pair ran, rather than the table simply losing UPDATE');
+commit;
+
+--     INSERT IS DELIBERATELY NOT NARROWED, and that is asserted rather than
+--     left silent, because the ruling that produced this section originally
+--     asked for it and a future reader will wonder why it is missing.
+--     Measured during the ninth Phase 4 pass: Postgres requires column-level
+--     INSERT privilege on every column in the INSERT TARGET LIST even when
+--     its value is the DEFAULT keyword, and Drizzle's insert builder emits
+--     EVERY column of the table with `default` for the unspecified ones. So a
+--     column-level INSERT revoke here breaks setCongregationStatistics()
+--     outright (measured: 5 failures in src/lib/presbytery.test.ts, two of
+--     them `permission denied for table congregation_statistics` on that
+--     upsert). The seventh loop-back's item-7 residual therefore stands,
+--     bounded as it already was by congregation_statistics_publication_shape
+--     and the composite FK to publications. drizzle/0047 section 10 carries
+--     the full argument.
+begin;
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'publication_id', 'INSERT')
+                 then 1 else 0 end)::bigint,
+    1, 'QA-2 (residual, deliberate): presby_app DOES hold INSERT on congregation_statistics.publication_id — a column-level INSERT revoke is incompatible with Drizzle''s insert builder, see drizzle/0047 section 10');
+commit;
+
+--     The other half stays grant-closed from here: presby_app holds no UPDATE
+--     on publications at all, so its withdrawal conjunct is proven on the
+--     owner connection (src/lib/db/domain/publication.test.ts). Asserted so
+--     the split is deliberate rather than an omission.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'publications'
+        and a.grantee = 'presby_app'::regrole
+        and a.privilege_type = 'UPDATE'),
+    0, 'F56: presby_app holds no UPDATE on publications — the publication half of the withdrawal pair is unreachable from a tenant connection before any trigger is consulted');
+commit;
+
+-- (e) The catalog. Every mechanism this loop-back added, pinned by shape, so
+--     a dropped trigger or an un-armed writer fails THIS suite as well as the
+--     owner-connection ones.
+begin;
+  -- The two lifecycle guards, sharing one function and one GUC.
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where t.tgname in ('organization_lifecycle_events_guard', 'organization_successions_guard')
+        and t.tgenabled = 'O'
+        and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2 and (t.tgtype & 4) = 4
+        and t.tgfoid = 'presby_guard_lifecycle_write'::regproc),
+    2, 'F54: both lifecycle tables carry an enabled row-level BEFORE INSERT guard, and both execute the SAME function — one aggregate, one claim, one flag');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_guard_lifecycle_write'
+        and pg_get_functiondef(oid) like '%presby.lifecycle_write_active%'
+        and pg_get_functiondef(oid) like '%presby_deny_lifecycle_change%'),
+    1, 'F54: presby_guard_lifecycle_write() reads presby.lifecycle_write_active and raises the EXISTING per-table literal via presby_deny_lifecycle_change() — reuse, not a fresh string (DECISION-139)');
+  -- QA-1 (2026-09-25, eighth Phase 3 loop-back): the marker carries an EVENT
+  -- ID, not the boolean 'true', and the guard compares the row in front of it
+  -- against that value — new.id on the events table, new.event_id on the
+  -- successions table. A regression to the boolean sentinel is invisible to
+  -- every behavioural probe a tenant connection can run (presby_app holds
+  -- SELECT only on both tables, so the grant refuses long before the guard),
+  -- which is why this is a structural assertion here and a behavioural one on
+  -- the owner connection in src/lib/db/domain/lifecycle.test.ts.
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_guard_lifecycle_write'
+        and pg_get_functiondef(oid) like '%tg_table_name%'
+        and pg_get_functiondef(oid) like '%new.id::text%'
+        and pg_get_functiondef(oid) like '%new.event_id::text%'),
+    1, 'QA-1: presby_guard_lifecycle_write() binds each row to the act the transaction DECLARED — it branches on tg_table_name and compares new.id / new.event_id against the armed event id, rather than checking a self-armable boolean');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_guard_lifecycle_write'
+        and pg_get_functiondef(oid) like '%<> ''true''%'),
+    0, 'QA-1: the boolean sentinel is gone — the guard no longer compares presby.lifecycle_write_active against the literal ''true'', which named no act and which any later transaction could re-assert');
+  -- The event-side cardinality half, and the shared body both ends call.
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'organization_lifecycle_events'
+        and t.tgname = 'organization_lifecycle_events_cardinality'
+        and t.tgenabled = 'O' and t.tgdeferrable and t.tginitdeferred
+        and (t.tgtype & 4) = 4),
+    1, 'F54: the event-side cardinality check is a DEFERRABLE INITIALLY DEFERRED AFTER INSERT constraint trigger — a merged event''s succession rows cannot exist when the event row is written, so an immediate check would make the legal case unwritable');
+  select assert_eq(
+    (select count(*) from pg_proc where proname = 'presby_lifecycle_event_cardinality_check'),
+    1, 'F54: the counting/raising body is extracted into ONE shared function, so the two ends cannot drift apart');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname in ('presby_check_succession_cardinality', 'presby_check_lifecycle_event_cardinality')
+        and pg_get_functiondef(oid) like '%presby_lifecycle_event_cardinality_check%'),
+    2, 'F54: both cardinality triggers call the shared function rather than carrying a copy');
+
+  -- The publication chain: one function, one GUC, three tables.
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where t.tgname in ('statistical_returns_guard', 'publications_guard',
+                         'congregation_statistics_publication_guard')
+        and t.tgenabled = 'O'
+        and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2 and (t.tgtype & 4) = 4
+        and t.tgfoid = 'presby_guard_publication_write'::regproc),
+    3, 'F55: all three tables in the return -> publication -> projection chain carry an enabled row-level BEFORE INSERT guard executing one shared function');
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'congregation_statistics'
+        and t.tgname = 'congregation_statistics_publication_guard'
+        and pg_get_triggerdef(t.oid) like '%published_by_congregation%'),
+    1, 'F55: and ONLY the projection guard carries a WHEN clause — presbytery_entered and imported rows never invoke it, which is how the live tenant write path is untouched');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_guard_publication_write'
+        and pg_get_functiondef(oid) like '%presby.publication_write_active%'),
+    1, 'F55: the chain guard reads presby.publication_write_active');
+  -- The writers that arm it. A guard nobody arms is a table nobody can write;
+  -- a writer that forgets to arm it is an outage. Both are pinned here.
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_publish_sasr_snapshot'
+        and prosecdef
+        and pg_get_functiondef(oid) like '%set_config(''presby.publication_write_active'', ''true'', true)%'),
+    1, 'F55: presby_publish_sasr_snapshot() arms the chain GUC itself — the sole sanctioned writer today, and the reason section 34''s end-to-end publish still passes');
+
+  -- B-M1 (security review 2026-09-25 sec B) — the trigger-only/internal
+  -- helpers hold NO execute grant to the tenant role. A function that only
+  -- ever runs inside a SECURITY DEFINER caller or inside the trigger
+  -- machinery (whose EXECUTE check happens at CREATE TRIGGER time, not at
+  -- fire time) needs none, and granting it widens what a tenant connection
+  -- can call for nothing.
+  -- The oid form of has_function_privilege(), not the signature-string form:
+  -- presby_publish_sasr_snapshot() takes 64 parameters and the string form
+  -- requires every one of them spelled out (measured — the string form raised
+  -- `function … does not exist` on the first run).
+  select assert_eq(
+    (select count(*) from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('presby_deny_identifier_change',
+                         'presby_deny_affiliation_change',
+                         'presby_deny_lifecycle_change',
+                         'presby_assert_council_authority',
+                         'presby_apply_affiliation_to_org_tree',
+                         'presby_lifecycle_event_cardinality_check',
+                         'presby_deny_about_org_write',
+                         'presby_check_about_org_affiliated',
+                         'presby_check_return_about_org')
+       and has_function_privilege('presby_app', p.oid, 'execute')),
+    0, 'B-M1: presby_app holds EXECUTE on NONE of the nine trigger-only/internal helpers in drizzle/0043-0047');
+  -- ...and the ONE remaining exception still does. Two of the three original
+  -- exceptions (presby_deny_lifecycle_change, presby_lifecycle_event_
+  -- cardinality_check) became revocable on 2026-09-25 when presby_app lost
+  -- INSERT on organization_lifecycle_events: with SELECT on both lifecycle
+  -- tables, no tenant DML can reach either INVOKER caller. The third cannot,
+  -- and the distinction is the whole of B-M1's "check each" instruction —
+  -- presby_guard_publication_write() IS reachable, on the
+  -- published_by_congregation branch of congregation_statistics, where
+  -- presby_app still holds INSERT because the live tenant path writes that
+  -- table. Revoking it would replace the chain's uniform rejection literal
+  -- with `permission denied for function …`.
+  select assert_eq(
+    (select count(*) from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname = 'presby_deny_publication_write'
+       and has_function_privilege('presby_app', p.oid, 'execute')),
+    1, 'B-M1: presby_deny_publication_write KEEPS execute — its INVOKER caller is reachable from the one table in this family presby_app can still INSERT into');
+  -- ...and the seven application-callable functions are untouched, so the
+  -- narrowing above cannot have been done by over-revoking.
+  select assert_eq(
+    (select count(*) from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('presby_set_organization_identifier',
+                         'presby_transfer_affiliation',
+                         'presby_affiliation_parent_as_of',
+                         'presby_org_affiliated',
+                         'presby_publish_sasr_snapshot',
+                         'presby_list_published_returns_to_me',
+                         'presby_list_own_congregation_publications')
+       and has_function_privilege('presby_app', p.oid, 'execute')),
+    7, 'B-M1: every application-callable function keeps its grant');
+
+  -- B-M2 (same review) — every SECURITY DEFINER function in drizzle/0043-0047
+  -- pins `search_path = public`. presby_app holds no CREATE on the public
+  -- schema, so this is standard hardening rather than a live fix; it is
+  -- asserted because the pin is invisible in the function body and a future
+  -- `create or replace` that drops the clause would be silent.
+  select assert_eq(
+    (select count(*) from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.prosecdef
+       and p.proname in (
+         'presby_set_organization_identifier', 'presby_assert_council_authority',
+         'presby_affiliation_parent_as_of', 'presby_org_affiliated',
+         'presby_apply_affiliation_to_org_tree', 'presby_transfer_affiliation',
+         'presby_check_affiliation_authority', 'presby_apply_affiliation_row',
+         'presby_check_lifecycle_authority', 'presby_apply_lifecycle_event',
+         'presby_check_succession_event', 'presby_guard_organizations_insert',
+         'presby_guard_organizations_reparent', 'presby_guard_organizations_delete',
+         'presby_check_about_org_affiliated', 'presby_check_return_about_org',
+         'presby_freeze_used_field_spec', 'presby_check_publication_supersession',
+         'presby_publish_sasr_snapshot', 'presby_list_own_congregation_publications',
+         'presby_list_published_returns_to_me')
+       and 'search_path=public' = any(coalesce(p.proconfig, array['']::text[]))),
+    21, 'B-M2: all 21 SECURITY DEFINER functions in drizzle/0043-0047 pin search_path = public');
+  -- The three new guards are deliberately INVOKER and are deliberately NOT in
+  -- that list: they read a GUC and touch no table, so there is no search_path
+  -- to poison and no owner privilege to escalate into.
+  select assert_eq(
+    (select count(*) from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and not p.prosecdef
+       and p.proname in ('presby_guard_lifecycle_write',
+                         'presby_guard_publication_write',
+                         'presby_guard_organization_identifiers')),
+    3, 'B-M2: the three GUC-only guards stay SECURITY INVOKER — they read no table, so DEFINER would be cargo cult (DECISION-121)');
+
+  -- The withdrawal pair, both halves.
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname in ('presby_freeze_publication', 'presby_reject_published_statistics_write')
+        and pg_get_functiondef(oid) like '%presby.withdrawal_write_active%'),
+    2, 'F56: BOTH withdrawal functions require presby.withdrawal_write_active — neither half of the pair is independently reachable');
+  -- prokind/pronamespace are not decoration: pg_get_functiondef() raises on an
+  -- aggregate, so an unrestricted scan of pg_proc errors out before it can
+  -- answer anything (measured, 2026-09-24).
+  select assert_eq(
+    (select count(*) from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.prokind = 'f'
+       and pg_get_functiondef(p.oid) like '%set_config(''presby.withdrawal_write_active''%'),
+    0, 'F56: and NOTHING in the database arms it yet — deliberate: the transition is unreachable on every connection until presby_withdraw_publication() ships');
+commit;

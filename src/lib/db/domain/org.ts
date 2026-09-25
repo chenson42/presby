@@ -177,17 +177,20 @@ export const organizationSettings = pgTable("organization_settings", {
  *     `(organizationId, kind, valueNormalized)` and is the only path through
  *     which `isVerified` may be set. Rejections raise ONE literal per table
  *     (DECISION-139) via `presby_deny_identifier_change()`.
- *   - `organization_identifiers_guard` (BEFORE UPDATE OR DELETE) refuses both
- *     unless the transaction-local GUC `presby.identifier_trigger_active` is
- *     set, which only that function and
+ *   - `organization_identifiers_guard` (BEFORE INSERT OR UPDATE OR DELETE)
+ *     refuses all three unless the transaction-local GUC
+ *     `presby.identifier_trigger_active` is set, which only that function and
  *     `presby_guard_organizations_delete()` (pre-authorizing the
  *     fixture-teardown cascade) ever do. The revoke alone does not close
  *     this: `PLATFORM_DATABASE_URL` connects as `neondb_owner`, which owns
  *     the table and holds every privilege by ownership (F44).
- *   - INSERT is deliberately left ungated beyond the grant — a colliding
- *     verified INSERT is refused by the partial index, and an unverified
- *     false claim is a named residual in `docs/TODO.md`, not a hole this
- *     pass closes.
+ *   - INSERT JOINED THAT LIST 2026-09-24 (F58/DECISION-141), reversing the
+ *     residual this comment previously recorded ("INSERT is deliberately left
+ *     ungated beyond the grant"). Creation of an identifier claim is as much
+ *     an authorized act as changing one, and the widening cost nothing: the
+ *     sole sanctioned writer already armed the GUC at entry, before both its
+ *     INSERT and its UPDATE branch. The partial unique index still refuses a
+ *     COLLIDING verified insert; the two layers are independent.
  */
 export const organizationIdentifiers = pgTable(
   "organization_identifiers",

@@ -196,13 +196,43 @@ create policy tenant_isolation on organization_lifecycle_events
 -- presby_freeze_lifecycle_event() (section 12 below) refuses UPDATE and
 -- DELETE on every connection, owner included — the roll_actions_freeze
 -- standard (drizzle/0009:358-373), not a substitute for the grant.
-revoke update, delete on organization_lifecycle_events from presby_app;
+--
+-- NARROWED AGAIN 2026-09-25: presby_app is SELECT-ONLY. The INSERT grant
+-- above outlived its justification. It was written when this table's INSERT
+-- was policy-mediated; F54/DECISION-141 made INSERT function-mediated (the
+-- presby.lifecycle_write_active guard, section 12a), and Phase 2 Ruling 1
+-- already settled that cross-council access to the three-axis tables is
+-- "function-mediated, never policy-mediated". The future writer,
+-- presby_record_lifecycle_event(), is SECURITY DEFINER and runs with the
+-- owner's privileges whatever its caller holds — exactly the argument point 1
+-- above makes about presby_platform — so the tenant grant buys that function
+-- nothing, and no application path inserts here today (searched: no
+-- non-test, non-dev-docs reference in src/). It is the same shape
+-- organization_successions has carried since Phase 5 Finding 1: SELECT for
+-- presby_app, select+insert for presby_platform, the two lifecycle tables
+-- finally consistent with each other.
+--
+-- TWO CONSEQUENCES, both deliberate and both load-bearing elsewhere in this
+-- file, so they are stated here rather than discovered later:
+--   * presby_deny_lifecycle_change() and presby_lifecycle_event_cardinality_
+--     check() lose their presby_app EXECUTE grants (section 6 and section
+--     13b). They were granted ONLY because an INVOKER guard/trigger reached
+--     them on a tenant INSERT. With no INSERT on either lifecycle table,
+--     presby_app can no longer fire either path. If a future ruling
+--     re-grants INSERT here, BOTH grants must come back with it or the
+--     uniform rejection literal degrades to `permission denied for function`
+--     and the deferred cardinality check fails with the wrong error.
+--   * scripts/test-rls.sql can no longer exercise this table's triggers or
+--     CHECKs at all — the grant refuses first. Those probes moved to
+--     src/lib/db/domain/lifecycle.test.ts (owner connection), the same move
+--     section 32(j) already records for the succession cardinality proofs.
+revoke insert, update, delete on organization_lifecycle_events from presby_app;
 revoke update, delete on organization_lifecycle_events from presby_platform;
-grant select, insert on organization_lifecycle_events to presby_app;
+grant select on organization_lifecycle_events to presby_app;
 grant select, insert on organization_lifecycle_events to presby_platform;
 
 comment on table organization_lifecycle_events is
-  'Minuted lifecycle acts on an organization: G-3.0301(a) for a presbytery acting on a congregation or NWC, G-3.0403(c) for a synod on a presbytery, G-3.0502(d) for the GA on a synod. APPEND-ONLY on every connection: no UPDATE/DELETE grant to presby_app or presby_platform, and presby_freeze_lifecycle_event() refuses both on the owner path too (the roll_actions_freeze standard). Correct a recorded act by recording another act. organizations.lifecycle_status is a cache of this table, never the record.';
+  'Minuted lifecycle acts on an organization: G-3.0301(a) for a presbytery acting on a congregation or NWC, G-3.0403(c) for a synod on a presbytery, G-3.0502(d) for the GA on a synod. APPEND-ONLY on every connection: no UPDATE/DELETE grant to presby_app or presby_platform, and presby_freeze_lifecycle_event() refuses both on the owner path too (the roll_actions_freeze standard). presby_app is SELECT-ONLY as of 2026-09-25 — INSERT is function-mediated (presby.lifecycle_write_active, F54/DECISION-141) and the future presby_record_lifecycle_event() is SECURITY DEFINER, so the tenant grant bought it nothing. Correct a recorded act by recording another act. organizations.lifecycle_status is a cache of this table, never the record.';
 
 -- ---------------------------------------------------------------------------
 -- 3. organization_successions
@@ -544,10 +574,52 @@ begin
     using errcode = 'insufficient_privilege';
 end $$;
 
+-- B-M1 (security review 2026-09-25 sec B, applied 2026-09-25). A function
+-- that only ever runs INSIDE another function or a trigger needs no EXECUTE
+-- grant to any application role: the caller that reaches it is either a
+-- SECURITY DEFINER function (running as the owner) or the trigger machinery
+-- itself, which checks EXECUTE when the trigger is CREATED, never when it
+-- fires. Granting it anyway widens the tenant connection's reachable surface
+-- for nothing. `revoke ... from presby_app` is written explicitly rather than
+-- by deleting the old grant line, because these files are re-applied in place
+-- on a database that already ran the earlier form.
+--
+-- BOTH HELPERS ARE REVOKED, and the second one only became revocable on
+-- 2026-09-25. Every caller was enumerated rather than assumed:
+--   * presby_deny_affiliation_change() — callers are presby_transfer_
+--     affiliation(), presby_apply_affiliation_to_org_tree() and
+--     presby_assert_council_authority() (all SECURITY DEFINER, all running as
+--     the owner) and presby_guard_organization_affiliations() /
+--     presby_guard_organizations_insert() / _reparent() (INVOKER, but
+--     presby_app holds SELECT only on both organization_affiliations and
+--     organizations, so it cannot fire any of them).
+--   * presby_deny_lifecycle_change() — callers are presby_assert_council_
+--     authority() and presby_check_succession_event() (SECURITY DEFINER) and
+--     presby_guard_lifecycle_write() (INVOKER, section 12a). That last one
+--     was reachable by presby_app until the INSERT grant on
+--     organization_lifecycle_events was revoked in section 2 of this file on
+--     2026-09-25; with SELECT only on BOTH lifecycle tables, no tenant DML
+--     can reach it.
+--
+-- THE COUPLING IS EXPLICIT, because it is the kind that rots quietly: this
+-- revoke is valid ONLY while presby_app holds no INSERT on either lifecycle
+-- table. Re-grant INSERT there and this grant must come back in the same
+-- migration, or the table's uniform rejection literal (DECISION-139/F40)
+-- degrades to `permission denied for function presby_deny_lifecycle_change`
+-- — a different string carrying the same errcode, which is exactly the
+-- byte-identical-message regression F40 exists to prevent.
 revoke all on function presby_deny_affiliation_change() from public;
 revoke all on function presby_deny_lifecycle_change() from public;
-grant execute on function presby_deny_affiliation_change() to presby_app;
-grant execute on function presby_deny_lifecycle_change() to presby_app;
+revoke execute on function presby_deny_affiliation_change() from presby_app;
+revoke execute on function presby_deny_lifecycle_change() from presby_app;
+-- presby_platform KEEPS (in fact gains) execute, and for the reason presby_app
+-- lost it: presby_platform still holds INSERT on both lifecycle tables, so a
+-- real, non-owner presby_platform login WOULD reach presby_guard_lifecycle_
+-- write() and must be able to raise the table's own literal rather than a
+-- privilege error. Inert today — PLATFORM_DATABASE_URL authenticates as
+-- neondb_owner, which owns the function (F44) — and a statement of intent for
+-- the day it is not.
+grant execute on function presby_deny_lifecycle_change() to presby_platform;
 
 -- ---------------------------------------------------------------------------
 -- 7. presby_assert_council_authority()
@@ -581,7 +653,9 @@ create or replace function presby_assert_council_authority(
   p_subject_org_id uuid,
   p_context text default 'organization_affiliations'
 ) returns void
-language plpgsql security definer as $$
+language plpgsql security definer
+set search_path = public
+as $$
 declare
   v_actor_type   organization_type;
   v_subject_type organization_type;
@@ -609,8 +683,12 @@ begin
   end if;
 end $$;
 
+-- B-M1: trigger-only. Both callers (presby_check_lifecycle_authority and
+-- presby_check_affiliation_authority, section 11/12) are SECURITY DEFINER, so
+-- this runs as the owner however it is reached; no application code calls it,
+-- and scripts/test-rls.sql reaches it only THROUGH the triggers.
 revoke all on function presby_assert_council_authority(uuid, uuid, text) from public;
-grant execute on function presby_assert_council_authority(uuid, uuid, text) to presby_app;
+revoke execute on function presby_assert_council_authority(uuid, uuid, text) from presby_app;
 
 -- ---------------------------------------------------------------------------
 -- 8. The read path: presby_affiliation_parent_as_of() / presby_org_affiliated()
@@ -624,7 +702,9 @@ create or replace function presby_affiliation_parent_as_of(
   p_subject_org_id uuid,
   p_as_of date
 ) returns uuid
-language sql stable security definer as $$
+language sql stable security definer
+set search_path = public
+as $$
   select a.parent_org_id
     from organization_affiliations a
    where a.subject_org_id = p_subject_org_id
@@ -642,7 +722,9 @@ create or replace function presby_org_affiliated(
   p_council_org_id uuid,
   p_as_of date
 ) returns boolean
-language sql stable security definer as $$
+language sql stable security definer
+set search_path = public
+as $$
   with recursive ancestry as (
     select a.parent_org_id as org_id, 1 as depth
       from organization_affiliations a
@@ -676,11 +758,25 @@ grant execute on function presby_org_affiliated(uuid, uuid, date) to presby_app;
 -- leave the organizations guards DISARMED for the next unrelated request on
 -- a pooled neon-serverless connection — the same hazard src/lib/db/index.ts
 -- documents for app.current_org_id.
+--
+-- IT IS ALSO SET LATE, NOT FIRST (B-M1, security review 2026-09-25 sec B,
+-- added 2026-09-24's loop-back, applied 2026-09-25). The first build armed the
+-- guard as this function's opening statement, before the subject lookup, the
+-- parent lookup, the missing-parent-path check and the cycle check — so every
+-- rejection path below left an armed marker behind for the remainder of the
+-- caller's transaction, pre-authorising writes to `organizations` that this
+-- function had just decided not to make. Arming immediately before the first
+-- UPDATE keeps the marker's scope equal to the writes it exists to authorise.
+-- (No live exploit: every caller is a DEFINER function that raises on the
+-- rejection paths, so the transaction aborts anyway. It is the same
+-- narrow-the-window discipline presby_publish_sasr_snapshot() follows.)
 create or replace function presby_apply_affiliation_to_org_tree(
   p_subject_org_id uuid,
   p_as_of date default current_date
 ) returns void
-language plpgsql security definer as $$
+language plpgsql security definer
+set search_path = public
+as $$
 declare
   v_old_path    text;
   v_label       text;
@@ -688,8 +784,6 @@ declare
   v_parent_path text;
   v_new_path    text;
 begin
-  perform set_config('presby.affiliation_trigger_active', 'true', true);
-
   select o.path, replace(o.slug, '-', '_')
     into v_old_path, v_label
     from organizations o
@@ -730,6 +824,10 @@ begin
     v_new_path := v_parent_path || '.' || v_label;
   end if;
 
+  -- Every validation above has passed; from here the function WRITES. Arm the
+  -- guard now, not at entry (see the header note on B-M1).
+  perform set_config('presby.affiliation_trigger_active', 'true', true);
+
   update organizations
      set parent_id = v_new_parent,
          path = v_new_path
@@ -746,8 +844,14 @@ begin
   end if;
 end $$;
 
+-- B-M1: internal. Its three callers — presby_apply_affiliation_row(),
+-- presby_apply_lifecycle_event() and presby_transfer_affiliation() — are all
+-- SECURITY DEFINER. Nothing in src/ calls it directly (src/lib/org-
+-- provisioning.ts only names it in comments), and a tenant connection holding
+-- EXECUTE on the one function that rewrites parent_id and path for a whole
+-- subtree is precisely the surface this item exists to close.
 revoke all on function presby_apply_affiliation_to_org_tree(uuid, date) from public;
-grant execute on function presby_apply_affiliation_to_org_tree(uuid, date) to presby_app;
+revoke execute on function presby_apply_affiliation_to_org_tree(uuid, date) from presby_app;
 
 -- ---------------------------------------------------------------------------
 -- 10. presby_transfer_affiliation() — the ONLY write path (DECISION-135)
@@ -775,7 +879,9 @@ create or replace function presby_transfer_affiliation(
   p_reason text default null,
   p_concurrence_reference text default null
 ) returns uuid
-language plpgsql security definer as $$
+language plpgsql security definer
+set search_path = public
+as $$
 declare
   v_actor          uuid := presby_current_org();
   v_current_row_id uuid;
@@ -899,7 +1005,9 @@ grant execute on function presby_transfer_affiliation(uuid, uuid, text, date, te
 -- 11. Triggers on organization_affiliations
 -- ---------------------------------------------------------------------------
 create or replace function presby_check_affiliation_authority()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   perform presby_assert_council_authority(
     new.parent_org_id, new.subject_org_id, 'organization_affiliations');
@@ -912,7 +1020,9 @@ create trigger organization_affiliations_authority
   for each row execute function presby_check_affiliation_authority();
 
 create or replace function presby_apply_affiliation_row()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   perform presby_apply_affiliation_to_org_tree(
     new.subject_org_id, coalesce(new.effective_from, current_date));
@@ -977,8 +1087,159 @@ create trigger organization_affiliations_guard
 -- ---------------------------------------------------------------------------
 -- 12. Triggers on organization_lifecycle_events
 -- ---------------------------------------------------------------------------
+-- (12a) THE CREATION GUARD — organization_lifecycle_events and
+-- organization_successions are ONE immutable aggregate, and INSERT on both is
+-- gated by ONE transaction-local GUC (F54 / DECISION-141, added 2026-09-24,
+-- sixth Phase 3 loop-back).
+--
+-- WHY, in one sentence: both tables already refuse UPDATE and DELETE on every
+-- connection (the two freeze triggers below and in section 13c), but their
+-- INSERT was mediated by a GRANT plus a shape CHECK — and a grant binds
+-- presby_app and presby_platform, never neondb_owner, which is the role
+-- getPlatformDb() and MIGRATE_DATABASE_URL actually connect as (F44). A shape
+-- CHECK proves a row is WELL-FORMED; it never proves the row arrived through
+-- the SANCTIONED PATH. The external reviewer's repro is precise: after a valid
+-- `merged` A+B -> C is committed, a later raw-owner INSERT of a THIRD
+-- predecessor edge into the same event changes what the minute says happened,
+-- without violating cardinality (2 predecessors becomes 3, still >= 2) and
+-- without tripping the event-scope trigger (the event exists and, on a
+-- context-less owner connection, the actor check is skipped by design). Only a
+-- trigger reading a transaction-local marker can tell that write apart from
+-- the sanctioned writer's own.
+--
+-- ONE GUC ACROSS BOTH TABLES, and the EXISTING literal reused: this is the
+-- affiliation/organizations reuse case (DECISION-139/140), not the identifier
+-- table's no-reuse case. One future writer (presby_record_lifecycle_event(),
+-- named in docs/TODO.md) inserts the event row and its succession rows in ONE
+-- transaction, making one claim — "this transaction is recording a sanctioned
+-- lifecycle act". Two flags would be two names for one fact.
+--
+-- THE MARKER CARRIES AN EVENT ID, NOT A BOOLEAN (corrected 2026-09-25, eighth
+-- Phase 3 loop-back, QA-1). Until this correction the GUC held the literal
+-- 'true': a self-armable sentinel that named no act. QA measured the
+-- consequence on the owner connection — arm the boolean in any transaction,
+-- and a third predecessor edge appends cleanly to an already-committed,
+-- already-valid `merged` event, because the guard (armed), the event-scope
+-- trigger (the event exists; on a context-less connection the actor
+-- comparison is skipped by design) and cardinality (3 >= 2) all pass. The
+-- marker now carries the organization_lifecycle_events.id, as text, that THIS
+-- transaction is recording, and the guard compares the row in front of it
+-- against that value:
+--
+--   set_config('presby.lifecycle_write_active', <event id>::text, true)
+--
+-- WHAT THIS DOES AND DOES NOT GUARANTEE, stated exactly, because the previous
+-- version of this comment overclaimed and that overclaim is what QA-1 caught:
+--
+--   GUARANTEED — the transaction that arms the marker DECLARES WHICH ACT it
+--   is recording, and every row either table accepts in that transaction must
+--   belong to that declared act. An armed writer cannot write a row belonging
+--   to some OTHER event, in either table, by accident or by drift: the events
+--   branch requires new.id = the armed id, the successions branch requires
+--   new.event_id = the armed id. "Some sanctioned act is in progress" has
+--   become "this specific row belongs to the act now being recorded", which
+--   is what presby_record_lifecycle_event()'s contract (mint one fresh id,
+--   insert the event and its successions in one transaction, never accept a
+--   caller-supplied id for an existing act) satisfies by construction.
+--
+--   NOT GUARANTEED, and named rather than papered over — an ACCEPTED RESIDUAL
+--   of the F44 class: a later, separate transaction that deliberately re-arms
+--   the marker to an ALREADY-COMMITTED event's own id is NOT refused. The id
+--   is not a secret, so an actor who sets the marker to the target's own id
+--   satisfies this check trivially. Closing that needs the guard to prove the
+--   referenced event row was created in the CURRENT transaction (an xmin /
+--   pg_current_xact_id() check), which would require turning this function
+--   into a SECURITY DEFINER reader of a FORCE-RLS table (F26) — an idiom that
+--   exists nowhere else in this schema — to close a gap reachable only from an
+--   owner-level connection, which can defeat any trigger here with
+--   `alter table ... disable trigger` regardless (F44's standing fact; see
+--   drizzle/0047 section 5a, which uses that escape hatch deliberately). The
+--   residual is recorded on docs/TODO.md's presby_record_lifecycle_event()
+--   line and is that function's own scoped design question, not a bolt-on
+--   here. Ruling: work-log 2026-09-24-lifecycle-affiliation-returns.md,
+--   "Ruling on QA-1/QA-2 after hardening round two", Ruling 1.
+--
+-- NO '*' WILDCARD FOR BACKFILL CONTEXT, deliberately. A future migration or
+-- backfill inserting several historical lifecycle events in one transaction
+-- re-arms the GUC to EACH event's own id immediately before that event's own
+-- insert (and its succession rows), exactly mirroring the runtime writer's
+-- contract. One mechanism, no special case — the same "one GUC, one claim"
+-- discipline as DECISION-139/141.
+--
+-- NOTHING ARMS presby.lifecycle_write_active TODAY, and that is the ruling,
+-- not an oversight: until presby_record_lifecycle_event() ships, INSERT on
+-- both tables is closed on every connection, which is the reviewer's own
+-- fallback suggestion ("seriously consider making successions read-only
+-- outside migrations") reached as a consequence of gating the aggregate rather
+-- than as a separate rule. Verified before ruling: no application code writes
+-- either table (createOrganization() writes only the initial affiliation;
+-- scripts/seed-dev.sql writes neither; no migration backfill inserts into
+-- either), so the entire cost of this guard falls on direct-INSERT test
+-- fixtures, which arm the GUC themselves — scripts/test-rls.sql section 32(k)
+-- and src/lib/db/domain/lifecycle.test.ts. A migration or backfill that ever
+-- does insert a lifecycle event must arm it the same way.
+--
+-- FIRING ORDER, checked rather than assumed: triggers on one table fire in
+-- alphabetical order by NAME, so on organization_lifecycle_events
+-- `..._authority` sorts before `..._guard`, and on organization_successions
+-- `..._event_scope` sorts before `..._guard`. Both existing checks therefore
+-- still run FIRST and their assertions are unchanged; the GUC guard is the
+-- last BEFORE-INSERT layer, ahead of the table's CHECK constraints. A test
+-- that wants to prove a CHECK or an authority rejection must arm the GUC, or
+-- it proves the guard instead — which is exactly what the fixture sweep in
+-- this loop-back is.
+--
+-- SECURITY DEFINER is NOT used and is not needed: this function reads no
+-- table, only a GUC, so F26's "an invoker-mode reader is filtered by the RLS
+-- it exists to complement" shape cannot arise (same reasoning as
+-- presby_guard_organization_identifiers(), drizzle/0043 section 4).
+--
+-- ONE LITERAL FOR ALL THREE SUB-REASONS (unarmed, wrong table, wrong id):
+-- every branch below raises through the EXISTING presby_deny_lifecycle_change()
+-- helper, preserving F40's one-claim-one-literal discipline
+-- (DECISION-139/141). The caller learns "this change is not permitted" and
+-- nothing about which of the three produced it.
+create or replace function presby_guard_lifecycle_write()
+returns trigger language plpgsql as $$
+declare
+  -- Null when unset; never the empty string, so an unarmed transaction and a
+  -- deliberately-blanked one take the same branch.
+  v_armed text := nullif(current_setting('presby.lifecycle_write_active', true), '');
+  v_row   text;
+begin
+  if v_armed is null then
+    perform presby_deny_lifecycle_change();
+  end if;
+
+  -- Which column carries the declared act's id depends on which half of the
+  -- aggregate is being written. tg_table_name, not a second trigger function:
+  -- one claim, one guard (section 12a).
+  if tg_table_name = 'organization_lifecycle_events' then
+    v_row := new.id::text;
+  elsif tg_table_name = 'organization_successions' then
+    v_row := new.event_id::text;
+  else
+    -- A third table attached this guard without extending the branch. Refuse
+    -- rather than fall through to an implicit pass.
+    perform presby_deny_lifecycle_change();
+  end if;
+
+  if v_row is distinct from v_armed then
+    perform presby_deny_lifecycle_change();
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists organization_lifecycle_events_guard on organization_lifecycle_events;
+create trigger organization_lifecycle_events_guard
+  before insert on organization_lifecycle_events
+  for each row execute function presby_guard_lifecycle_write();
+
 create or replace function presby_check_lifecycle_authority()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   perform presby_assert_council_authority(
     new.organization_id, new.subject_org_id, 'organization_lifecycle_events');
@@ -994,7 +1255,9 @@ create trigger organization_lifecycle_events_authority
 -- revoke at the bottom of this file, presby_app cannot UPDATE organizations
 -- at all, same-org or not.
 create or replace function presby_apply_lifecycle_event()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 declare
   v_status text;
 begin
@@ -1120,7 +1383,9 @@ create trigger organization_lifecycle_events_freeze
 -- owner and therefore has no grant stopping it. scripts/test-rls.sql says
 -- which layer each of its assertions proves.
 create or replace function presby_check_succession_event()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 declare
   v_event_org uuid;
   v_actor     uuid := presby_current_org();
@@ -1146,29 +1411,74 @@ create trigger organization_successions_event_scope
   before insert on organization_successions
   for each row execute function presby_check_succession_event();
 
+-- (13a2) THE CREATION GUARD, the second half of section 12a's one aggregate
+-- (F54 / DECISION-141, added 2026-09-24). Same GUC, same function, same
+-- literal — see 12a for the whole argument, which is not repeated here
+-- precisely because the claim is ONE claim across both tables.
+--
+-- WHAT THIS TRIGGER DOES ABOUT THE REVIEWER'S REPRO — restated exactly, after
+-- QA-1 measured the previous version of this comment to be an overclaim
+-- (2026-09-25, eighth Phase 3 loop-back; the earlier text said this trigger
+-- "stops" a later, separate INSERT of a third predecessor edge into an
+-- already-valid, already-committed `merged` event, and it does not).
+--
+-- Cardinality cannot see that write (3 >= 2 is still valid) and the
+-- event-scope trigger cannot (the event exists, and on a context-less owner
+-- connection the actor comparison is deliberately skipped). This guard is the
+-- only layer that can say anything at all about it, and what it says is:
+--
+--   REFUSED — the writing transaction is unarmed, or armed for a DIFFERENT
+--   act than the one this row's event_id names. That is the whole of the
+--   guarantee: a transaction declares which act it is recording and may write
+--   only rows belonging to that act.
+--
+--   NOT REFUSED — a transaction that deliberately arms the marker to the
+--   settled event's OWN id. Accepted residual, owner-connection-bounded,
+--   F44 class; the full argument and the reason it is declined rather than
+--   built are in section 12a above.
+drop trigger if exists organization_successions_guard on organization_successions;
+create trigger organization_successions_guard
+  before insert on organization_successions
+  for each row execute function presby_guard_lifecycle_write();
+
 -- (13b) CARDINALITY — DEFERRED, and that is not optional.
 -- A `merged` event needs >= 2 predecessor rows, which cannot be true at the
 -- instant the first row is inserted. An IMMEDIATE trigger would make the
 -- legal case unwritable.
-create or replace function presby_check_succession_cardinality()
-returns trigger language plpgsql as $$
+--
+-- CHECKED FROM BOTH ENDS SINCE 2026-09-24 (F54 / DECISION-141). The counting
+-- and raising logic lived only on organization_successions' own insert/delete,
+-- so an event row committed with ZERO succession rows was never checked at
+-- all: a `merged` or `divided` lifecycle event with no edges satisfied every
+-- constraint the schema had, because the only trigger that could object never
+-- fired. The body below is therefore EXTRACTED into a shared function keyed on
+-- the event id, called from two deferred constraint triggers — this one on
+-- organization_successions and a new one on organization_lifecycle_events
+-- (13b2) — rather than copied, so the two cannot drift apart by hand-editing
+-- one of them. No SECURITY DEFINER: both callers run inside the writer's own
+-- transaction against tables that writer just touched, so the F26 cross-tenant
+-- read shape does not arise.
+--
+-- The "parent event removed in the same transaction" no-op moved INTO the
+-- shared function, so both callers inherit it.
+create or replace function presby_lifecycle_event_cardinality_check(p_event_id uuid)
+returns void language plpgsql as $$
 declare
-  v_event_id uuid := coalesce(new.event_id, old.event_id);
-  v_event    text;
-  v_pred     integer;
-  v_succ     integer;
+  v_event text;
+  v_pred  integer;
+  v_succ  integer;
 begin
   select e.event into v_event
-    from organization_lifecycle_events e where e.id = v_event_id;
+    from organization_lifecycle_events e where e.id = p_event_id;
   -- Parent event removed in the same transaction (ON DELETE CASCADE): there
   -- is no cardinality left to check.
   if v_event is null then
-    return null;
+    return;
   end if;
 
   select count(distinct predecessor_org_id), count(distinct successor_org_id)
     into v_pred, v_succ
-    from organization_successions where event_id = v_event_id;
+    from organization_successions where event_id = p_event_id;
 
   if v_event = 'merged' and not (v_pred >= 2 and v_succ = 1) then
     raise exception
@@ -1184,7 +1494,43 @@ begin
       'organization_successions: a % event carries no succession rows (found % / %)',
       v_event, v_pred, v_succ using errcode = 'check_violation';
   end if;
+end $$;
 
+-- EXECUTE WAS THE NAMED EXCEPTION TO B-M1 (security review 2026-09-25 sec B)
+-- FOR ONE DAY, AND IS NOW REVOKED TOO — the history is kept because the
+-- mechanism it turns on is easy to get wrong twice. Both callers are SECURITY
+-- INVOKER trigger functions, so this body runs as whoever fired the trigger,
+-- not as the owner. While presby_app held INSERT on
+-- organization_lifecycle_events its deferred cardinality check called this
+-- function AS presby_app, and revoking the grant failed the check at commit
+-- with `permission denied for function` — a real failure, in the wrong
+-- vocabulary, caught by a failing run of scripts/test-rls.sql, not by
+-- reasoning. The 2026-09-25 revoke of that INSERT grant (section 2) removed
+-- the only tenant path into either caller: presby_app now holds SELECT on
+-- organization_lifecycle_events and SELECT on organization_successions, so it
+-- can fire neither the AFTER INSERT trigger on the events table nor the
+-- AFTER INSERT OR DELETE one on the successions table.
+--
+-- SAME COUPLING as presby_deny_lifecycle_change() in section 6: if INSERT is
+-- ever re-granted to presby_app on either lifecycle table, this grant must
+-- return in the same migration.
+revoke all on function presby_lifecycle_event_cardinality_check(uuid) from public;
+revoke execute on function presby_lifecycle_event_cardinality_check(uuid) from presby_app;
+grant execute on function presby_lifecycle_event_cardinality_check(uuid) to presby_platform;
+
+-- The successions-side caller, now a thin wrapper. Its messages, its errcode
+-- and its pass/fail outcomes are byte-identical to the pre-refactor form —
+-- scripts/test-rls.sql section 32 and src/lib/db/domain/lifecycle.test.ts
+-- assert the messages, so a drift here fails the suite rather than passing
+-- quietly.
+create or replace function presby_check_succession_cardinality()
+returns trigger language plpgsql as $$
+declare
+  v_event_id uuid := coalesce(new.event_id, old.event_id);
+begin
+  if v_event_id is not null then
+    perform presby_lifecycle_event_cardinality_check(v_event_id);
+  end if;
   return null;
 end $$;
 
@@ -1193,6 +1539,27 @@ create constraint trigger organization_successions_cardinality
   after insert or delete on organization_successions
   deferrable initially deferred
   for each row execute function presby_check_succession_cardinality();
+
+-- (13b2) THE EVENT-SIDE HALF of the same check, closing the zero-succession
+-- hole directly (F54 / DECISION-141, added 2026-09-24).
+--
+-- DEFERRED for the same reason 13b is: a `merged` event row is necessarily
+-- inserted BEFORE the succession rows it needs, so an IMMEDIATE trigger would
+-- make the legal case unwritable. At COMMIT the aggregate must be complete,
+-- and either trigger alone is sufficient to say so — in the ordinary case both
+-- fire in one transaction and agree.
+create or replace function presby_check_lifecycle_event_cardinality()
+returns trigger language plpgsql as $$
+begin
+  perform presby_lifecycle_event_cardinality_check(new.id);
+  return null;
+end $$;
+
+drop trigger if exists organization_lifecycle_events_cardinality on organization_lifecycle_events;
+create constraint trigger organization_lifecycle_events_cardinality
+  after insert on organization_lifecycle_events
+  deferrable initially deferred
+  for each row execute function presby_check_lifecycle_event_cardinality();
 
 -- (13c) THE FREEZE. Same instrument and same reasoning as
 -- presby_freeze_lifecycle_event() in section 12: a grant binds presby_app and
@@ -1243,7 +1610,9 @@ create trigger organization_successions_freeze
 -- owner path (getPlatformDb()) is the one that matters — the 2026-08-31
 -- 58-org cascade went through it.
 create or replace function presby_guard_organizations_insert()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   if coalesce(current_setting('presby.affiliation_trigger_active', true), '') <> 'true' then
     raise exception
@@ -1260,7 +1629,9 @@ create trigger organizations_guard_insert
   execute function presby_guard_organizations_insert();
 
 create or replace function presby_guard_organizations_reparent()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   if coalesce(current_setting('presby.affiliation_trigger_active', true), '') <> 'true' then
     raise exception
@@ -1282,7 +1653,9 @@ create trigger organizations_guard_reparent
 -- following organization_successions would attribute a predecessor's 1987
 -- return to the successor, the mis-attribution D19 exists to prevent.
 create or replace function presby_guard_organizations_delete()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   if old.deletable_until is null or old.deletable_until <= now() then
     raise exception

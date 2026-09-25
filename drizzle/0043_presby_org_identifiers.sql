@@ -180,8 +180,24 @@ begin
     using errcode = 'insufficient_privilege';
 end $$;
 
+-- B-M1 (security review 2026-09-25 sec B, applied 2026-09-25). A function
+-- that only ever runs INSIDE another function or a trigger needs no EXECUTE
+-- grant to any application role: the caller that reaches it is either a
+-- SECURITY DEFINER function (running as the owner) or the trigger machinery
+-- itself, which checks EXECUTE when the trigger is CREATED, never when it
+-- fires. Granting it anyway widens the tenant connection's reachable surface
+-- for nothing. `revoke ... from presby_app` is written explicitly rather than
+-- by deleting the old grant line, because these files are re-applied in place
+-- on a database that already ran the earlier form.
+--
+-- REACHABILITY CHECKED, not assumed: the two callers are
+-- presby_set_organization_identifier() (SECURITY DEFINER, runs as owner) and
+-- presby_guard_organization_identifiers() (INVOKER) — and presby_app holds
+-- SELECT ONLY on organization_identifiers, so it can never fire that trigger.
+-- Contrast presby_deny_lifecycle_change() and presby_deny_publication_write()
+-- in 0044/0046, which KEEP their grants for exactly the opposite reason.
 revoke all on function presby_deny_identifier_change() from public;
-grant execute on function presby_deny_identifier_change() to presby_app;
+revoke execute on function presby_deny_identifier_change() from presby_app;
 
 create or replace function presby_set_organization_identifier(
   p_organization_id uuid,
@@ -190,7 +206,9 @@ create or replace function presby_set_organization_identifier(
   p_is_verified boolean default false,
   p_source text default null
 ) returns uuid
-language plpgsql security definer as $$
+language plpgsql security definer
+set search_path = public
+as $$
 declare
   v_actor uuid := presby_current_org();
   v_id    uuid;
@@ -260,16 +278,31 @@ comment on function presby_set_organization_identifier(uuid, text, text, boolean
 -- triggers — which is the whole reason this exists rather than the revoke
 -- above being treated as sufficient (F44 / Ruling B3 / DECISION-140).
 --
--- SCOPE IS UPDATE AND DELETE ONLY, deliberately narrower than the external
--- review's prose. Those are the two operations its own example names ("change
--- or delete Congregation B's OGA PIN"). INSERT is left ungated beyond the
--- grant narrowing: a colliding `is_verified = true` INSERT is already refused
--- by organization_identifiers_kind_value_verified_idx, and an INSERT of a
--- FALSE, unverified claim about another org is the same bounded,
--- presby_platform-only residual this pipeline has accepted elsewhere.
--- Engineering a bootstrap-vs-tenant distinction into an INSERT guard is more
--- machinery than today's problem needs; named as an accepted residual in
--- docs/TODO.md rather than solved here.
+-- SCOPE IS INSERT, UPDATE AND DELETE — WIDENED 2026-09-24 (F58 / DECISION-141,
+-- sixth Phase 3 loop-back). The first build scoped this to UPDATE and DELETE
+-- and argued at length for the narrower scope: "a colliding is_verified = true
+-- INSERT is already refused by organization_identifiers_kind_value_verified_
+-- idx", and "engineering a bootstrap-vs-tenant distinction into an INSERT
+-- guard is more machinery than today's problem needs". The second external
+-- review's closing rule — if an immutable record represents an authorized act,
+-- CREATION must be guarded as strongly as MUTATION — is the correction, and
+-- the "more machinery" premise turned out to be false: the sole sanctioned
+-- writer (presby_set_organization_identifier(), section 3) already arms
+-- presby.identifier_trigger_active AT ENTRY, before BOTH its INSERT and its
+-- UPDATE branch, so the bootstrap-vs-tenant distinction needed no machinery at
+-- all. Widening the operation list is the whole change: the function body is
+-- untouched (its `tg_op = 'DELETE'` branch already falls through for INSERT,
+-- returning `new`), and no sanctioned caller changes.
+--
+-- The one-time pcusa_pin backfill in section 2 needs no arming and was checked
+-- rather than assumed: it is a plain `insert ... select` that runs BEFORE this
+-- trigger is created, later in this same file, and on a re-apply it is skipped
+-- entirely by its own column-existence guard. Migration ordering, not a GUC,
+-- is what protects it. createOrganization() and scripts/seed-dev.sql write no
+-- identifier row at all (verified by search). The delete-cascade path is armed:
+-- presby_guard_organizations_delete() (drizzle/0044:1284) sets this GUC itself
+-- once it has validated the deletable_until fixture window, which is what lets
+-- a fixture-org teardown cascade through this table.
 --
 -- NEW GUC, not a reuse of presby.affiliation_trigger_active: unrelated
 -- subsystem, unrelated table, no shared transaction in practice. Reusing it
@@ -291,5 +324,5 @@ end $$;
 
 drop trigger if exists organization_identifiers_guard on organization_identifiers;
 create trigger organization_identifiers_guard
-  before update or delete on organization_identifiers
+  before insert or update or delete on organization_identifiers
   for each row execute function presby_guard_organization_identifiers();

@@ -152,6 +152,14 @@ export const congregationStatistics = pgTable(
     provenance: text("provenance").notNull(),
     /**
      * The `publications` row this projection projects (F36, drizzle/0047).
+     *
+     * A `published_by_congregation` row cannot be INSERTED at all unless the
+     * transaction-local GUC `presby.publication_write_active` is set
+     * (`congregation_statistics_publication_guard`, drizzle/0047 section 3b,
+     * F55/DECISION-141). The guard carries `WHEN (new.provenance =
+     * 'published_by_congregation')`, so the LIVE tenant path —
+     * `setCongregationStatistics()`'s `presbytery_entered` rows, and
+     * `imported` ones — never invokes it and is completely unaffected.
      * NOT NULL exactly when `provenance = 'published_by_congregation'`
      * (CHECK in 0047).
      *
@@ -179,9 +187,27 @@ export const congregationStatistics = pgTable(
      * transition: `presby_reject_published_statistics_write()` (widened in
      * `drizzle/0047`) allows null -> not-null on THIS column with nothing
      * else on the row moving, compared by JSONB subtraction rather than by
-     * enumerating ~60 columns. There is no writer yet: the future
-     * `presby_withdraw_publication()` sets this and the publication's own
-     * three withdrawal columns in one transaction.
+     * enumerating ~60 columns.
+     *
+     * AND the transaction must be the sanctioned withdrawal writer
+     * (F56/DECISION-141, 2026-09-24): the transition additionally requires
+     * the transaction-local GUC `presby.withdrawal_write_active`, which
+     * NOTHING sets today. Before that conjunct each table permitted its half
+     * independently, which is how a projection could end up disagreeing with
+     * the publication it projects.
+     *
+     * THAT GUC IS NOT WHAT CLOSES THE TENANT CONNECTION, corrected 2026-09-25
+     * (QA-2). A GUC is a marker any role can `set_config()`; `presby_app`
+     * held whole-table UPDATE here for the live `setCongregationStatistics()`
+     * path and could therefore arm the marker and write this column itself —
+     * measured, not theorised. What closes it is a COLUMN-LEVEL grant
+     * (`drizzle/0047` section 10): `presby_app` holds UPDATE on every column
+     * of this table EXCEPT `withdrawn_at` and `publication_id`. The GUC
+     * conjunct still binds the one connection a grant cannot — `neondb_owner`
+     * (F44) — which is the connection the future
+     * `presby_withdraw_publication()` will run on as a DEFINER function,
+     * setting this and the publication's own three withdrawal columns in one
+     * transaction.
      */
     withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
     /**

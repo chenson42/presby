@@ -161,8 +161,13 @@ begin
     using errcode = 'insufficient_privilege';
 end $$;
 
+-- B-M1 (security review 2026-09-25 sec B, applied 2026-09-25): trigger-only.
+-- Its single caller, presby_check_about_org_affiliated() below, is SECURITY
+-- DEFINER and therefore runs as the owner even when a tenant INSERT fires it,
+-- so the rejection literal is raised with the owner's privileges and the
+-- tenant grant buys nothing.
 revoke all on function presby_deny_about_org_write(text, text) from public;
-grant execute on function presby_deny_about_org_write(text, text) to presby_app, presby_platform;
+revoke execute on function presby_deny_about_org_write(text, text) from presby_app, presby_platform;
 
 -- ---------------------------------------------------------------------------
 -- 2. The enforcing trigger function — ONE function, four tables
@@ -173,7 +178,9 @@ grant execute on function presby_deny_about_org_write(text, text) to presby_app,
 -- The row is read through to_jsonb(NEW) because the column NAME is dynamic;
 -- NEW.organization_id is read the same way purely for symmetry.
 create or replace function presby_check_about_org_affiliated()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 declare
   v_about_col text  := tg_argv[0];
   v_year_col  text  := nullif(tg_argv[1], '');
@@ -219,8 +226,13 @@ begin
   return new;
 end $$;
 
+-- B-M1: this is a TRIGGER function and nothing else. EXECUTE on a trigger
+-- function is checked when the trigger is CREATED (by the owner, here), never
+-- when it fires, so revoking the application roles' grant does not touch the
+-- live tenant write path — scripts/test-rls.sql sections 29 and 33 insert
+-- congregation_statistics as presby_app and are the proof.
 revoke all on function presby_check_about_org_affiliated() from public;
-grant execute on function presby_check_about_org_affiliated() to presby_app, presby_platform;
+revoke execute on function presby_check_about_org_affiliated() from presby_app, presby_platform;
 
 -- ---------------------------------------------------------------------------
 -- 3. The four triggers

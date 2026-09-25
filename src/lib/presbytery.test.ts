@@ -41,6 +41,19 @@
  * freeze` around its own cascade, same trigger-disable convention
  * `officers.test.ts`/`children.test.ts`/`credentials.test.ts` document for
  * `group_memberships_reject_derived`.
+ *
+ * SANCTIONED-WRITE ARMING (F55 / DECISION-141, 2026-09-24). All three tables
+ * this file writes by hand — `statistical_returns`, `publications` and a
+ * `published_by_congregation` `congregation_statistics` row — are now
+ * BEFORE INSERT-guarded on every connection, the owner one included, and the
+ * guard reads a TRANSACTION-LOCAL GUC. So every such fixture write goes
+ * through `armedPublicationWrite()` below, which opens one transaction, arms
+ * `presby.publication_write_active` and mints the artifact, the event and the
+ * projection inside it. The `presbytery_entered` / `imported` writes this file
+ * makes through `setCongregationStatistics()` are deliberately UNCHANGED: the
+ * guard's `WHEN (new.provenance = 'published_by_congregation')` clause means
+ * it is never invoked for them, and their continuing to pass untouched is the
+ * regression proof that the live tenant path was not caught by this fix.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -305,14 +318,41 @@ describe.skipIf(!hasDb)(
      * presbytery, with `published_at` chosen by the caller so the coalesce
      * ordering stays testable.
      */
+    /**
+     * One transaction with `presby.publication_write_active` armed (F55 /
+     * DECISION-141). Every hand-written row in the return -> publication ->
+     * projection chain has to be minted inside one of these: the three guard
+     * triggers fire on the owner connection too, and the GUC they read is
+     * transaction-local, so an auto-commit `platform.insert(...)` would arm
+     * nothing that survives to the next statement.
+     */
+    async function armedPublicationWrite<T>(
+      body: (
+        tx: Parameters<
+          Parameters<ReturnType<typeof getPlatformDb>["transaction"]>[0]
+        >[0],
+      ) => Promise<T>,
+    ): Promise<T> {
+      const platform = getPlatformDb();
+      return platform.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('presby.publication_write_active', 'true', true)`,
+        );
+        return body(tx);
+      });
+    }
+
     async function makePublication(
+      tx: Parameters<
+        Parameters<ReturnType<typeof getPlatformDb>["transaction"]>[0]
+      >[0],
       aboutOrgId: string,
       recipientOrgId: string,
       reportYear: number,
       publishedAt: Date,
       endingActive: number,
     ): Promise<string> {
-      const platform = getPlatformDb();
+      const platform = tx;
       const [artifact] = await platform
         .insert(statisticalReturns)
         .values({
@@ -682,16 +722,24 @@ describe.skipIf(!hasDb)(
           { endingActive: 40 },
         );
 
-        const platform = getPlatformDb();
         const publishedAt = new Date("2024-01-10T00:00:00Z");
-        await platform.insert(congregationStatistics).values({
-          organizationId: presbyteryA,
-          aboutOrgId: congB,
-          year: 2023,
-          provenance: "published_by_congregation",
-          publicationId: await makePublication(congB, presbyteryA, 2023, publishedAt, 212),
-          publishedAt,
-          endingActive: 212,
+        await armedPublicationWrite(async (tx) => {
+          await tx.insert(congregationStatistics).values({
+            organizationId: presbyteryA,
+            aboutOrgId: congB,
+            year: 2023,
+            provenance: "published_by_congregation",
+            publicationId: await makePublication(
+              tx,
+              congB,
+              presbyteryA,
+              2023,
+              publishedAt,
+              212,
+            ),
+            publishedAt,
+            endingActive: 212,
+          });
         });
 
         const rollup = await getCongregationStatisticsRollup(clerkPerson, presbyteryA, 2023);
@@ -702,26 +750,41 @@ describe.skipIf(!hasDb)(
       });
 
       it("a LATER published_by_congregation row (a republish) wins over an earlier one", async () => {
-        const platform = getPlatformDb();
         const firstAt = new Date("2023-01-01T00:00:00Z");
         const secondAt = new Date("2023-06-01T00:00:00Z");
-        await platform.insert(congregationStatistics).values({
-          organizationId: presbyteryA,
-          aboutOrgId: congB,
-          year: 2022,
-          provenance: "published_by_congregation",
-          publicationId: await makePublication(congB, presbyteryA, 2022, firstAt, 200),
-          publishedAt: firstAt,
-          endingActive: 200,
-        });
-        await platform.insert(congregationStatistics).values({
-          organizationId: presbyteryA,
-          aboutOrgId: congB,
-          year: 2022,
-          provenance: "published_by_congregation",
-          publicationId: await makePublication(congB, presbyteryA, 2022, secondAt, 205),
-          publishedAt: secondAt,
-          endingActive: 205,
+        await armedPublicationWrite(async (tx) => {
+          await tx.insert(congregationStatistics).values({
+            organizationId: presbyteryA,
+            aboutOrgId: congB,
+            year: 2022,
+            provenance: "published_by_congregation",
+            publicationId: await makePublication(
+              tx,
+              congB,
+              presbyteryA,
+              2022,
+              firstAt,
+              200,
+            ),
+            publishedAt: firstAt,
+            endingActive: 200,
+          });
+          await tx.insert(congregationStatistics).values({
+            organizationId: presbyteryA,
+            aboutOrgId: congB,
+            year: 2022,
+            provenance: "published_by_congregation",
+            publicationId: await makePublication(
+              tx,
+              congB,
+              presbyteryA,
+              2022,
+              secondAt,
+              205,
+            ),
+            publishedAt: secondAt,
+            endingActive: 205,
+          });
         });
 
         const rollup = await getCongregationStatisticsRollup(clerkPerson, presbyteryA, 2022);

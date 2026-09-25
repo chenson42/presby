@@ -400,6 +400,77 @@ create trigger statistical_returns_freeze
   for each row execute function presby_freeze_statistical_return();
 
 -- ---------------------------------------------------------------------------
+-- 4b. The CREATION guard — one GUC for the whole return -> publication ->
+--     projection chain (F55 / DECISION-141, added 2026-09-24, sixth Phase 3
+--     loop-back)
+-- ---------------------------------------------------------------------------
+-- The freeze above closes UPDATE and DELETE on every connection. INSERT was
+-- left to the grant (section 3 revokes it from both application roles) plus
+-- the shape CHECK and the field-spec trigger — and neither proves PROVENANCE.
+-- A raw owner-connection INSERT that satisfies statistical_returns_provenance_
+-- shape, the composite FKs and the 2024 field spec is, at the database,
+-- indistinguishable from presby_publish_sasr_snapshot()'s own write: a
+-- fabricated "the congregation attested and submitted this" artifact that no
+-- session ever minuted. A grant cannot say otherwise, because neondb_owner
+-- holds every privilege by ownership (F44); only a trigger reading a
+-- transaction-local marker can.
+--
+-- ONE GUC FOR THREE TABLES, deliberately: presby.publication_write_active is
+-- read by this trigger, by publications_guard and by congregation_statistics_
+-- publication_guard (both drizzle/0047). Publishing IS one atomic operation
+-- across the three — same function, same transaction, one claim ("a sanctioned
+-- function wrote this row"). Splitting it per table would be the identifier
+-- table's no-reuse case misapplied. It is also deliberately NOT split by
+-- provenance: when D13's import function ships it arms this same GUC rather
+-- than a second presby.import_write_active, because the claim the guard
+-- proves does not vary by provenance, and OR-ing two GUCs that mean the same
+-- thing is complexity without protection.
+--
+-- ARMED TODAY IN THREE PLACES, all verified rather than assumed:
+--   * presby_publish_sasr_snapshot() (drizzle/0047 section 7), once, after
+--     its validation block and before its first insert;
+--   * drizzle/0047's backfill DO block, once, before its PASS 1 loop;
+--   * scripts/seed-dev.sql, once, before its statistical_returns /
+--     publications / congregation_statistics fixture rows — all three of
+--     which land inside that file's single transaction.
+-- Nothing else in the tree writes either table (searched: no application
+-- code, no other migration). Direct-INSERT test fixtures arm it themselves.
+--
+-- No SECURITY DEFINER: the function reads a GUC and no table, so F26's
+-- filtered-reader shape cannot arise (same reasoning as drizzle/0043 section
+-- 4 and drizzle/0044 section 12a).
+create or replace function presby_deny_publication_write()
+returns void language plpgsql as $$
+begin
+  raise exception 'publication chain: this row may only be written by a sanctioned publication function'
+    using errcode = 'insufficient_privilege';
+end $$;
+
+-- B-M1 (security review 2026-09-25 sec B): this one KEEPS its grant, for the
+-- same reason presby_deny_lifecycle_change() does (drizzle/0044 section 6).
+-- presby_guard_publication_write() is SECURITY INVOKER, and on
+-- congregation_statistics it is reachable by presby_app — the WHEN-scoped
+-- published_by_congregation branch. Revoking EXECUTE would turn the guard's
+-- uniform literal into `permission denied for function
+-- presby_deny_publication_write` on the tenant path.
+revoke all on function presby_deny_publication_write() from public;
+grant execute on function presby_deny_publication_write() to presby_app, presby_platform;
+
+create or replace function presby_guard_publication_write()
+returns trigger language plpgsql as $$
+begin
+  if coalesce(current_setting('presby.publication_write_active', true), '') <> 'true' then
+    perform presby_deny_publication_write();
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists statistical_returns_guard on statistical_returns;
+create trigger statistical_returns_guard
+  before insert on statistical_returns
+  for each row execute function presby_guard_publication_write();
+
+-- ---------------------------------------------------------------------------
 -- 5. presby_enforce_sasr_field_spec() — THE GATE (D8 / sec 9.5)
 -- ---------------------------------------------------------------------------
 -- SECURITY INVOKER, a deliberate departure from the DEFINER default
@@ -552,7 +623,9 @@ create trigger statistical_returns_field_spec
 -- presby_org_affiliated() is itself DEFINER so the read would succeed either
 -- way.
 create or replace function presby_check_return_about_org()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   if new.provenance <> 'imported' then
     return new;
@@ -566,8 +639,11 @@ begin
   return new;
 end $$;
 
+-- B-M1: trigger-only and SECURITY DEFINER; see drizzle/0045's note on
+-- presby_check_about_org_affiliated() for why a trigger function needs no
+-- EXECUTE grant to the role whose DML fires it.
 revoke all on function presby_check_return_about_org() from public;
-grant execute on function presby_check_return_about_org() to presby_app, presby_platform;
+revoke execute on function presby_check_return_about_org() from presby_app, presby_platform;
 
 drop trigger if exists statistical_returns_about_org on statistical_returns;
 create trigger statistical_returns_about_org
@@ -614,7 +690,9 @@ create trigger statistical_returns_about_org
 -- silently stop converging the 2024 spec the day the first 2024 return was
 -- filed; this way a real divergence is a loud failure instead.)
 create or replace function presby_freeze_used_field_spec()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer
+set search_path = public
+as $$
 begin
   if exists (select 1 from statistical_returns where form_version_key = old.key) then
     raise exception

@@ -37,6 +37,20 @@ import { organizations } from "./org";
  *     number must sit inside its declared bounds (min defaulting to 0, which
  *     is where "counts are non-negative" actually lives). Without that
  *     trigger, DECISION-118's allow-list property is lost.
+ *   - `statistical_returns_guard` (BEFORE INSERT, `drizzle/0046` section 4b,
+ *     F55/DECISION-141) refuses any INSERT unless the transaction-local GUC
+ *     `presby.publication_write_active` is set. The revoked INSERT grant
+ *     proves nothing on `getPlatformDb()` (F44) and the CHECK constraints
+ *     prove a row's SHAPE, never its PROVENANCE — a raw owner INSERT
+ *     satisfying `statistical_returns_provenance_shape` and the field spec is
+ *     otherwise indistinguishable from `presby_publish_sasr_snapshot()`'s own
+ *     write, i.e. a fabricated "the congregation attested and submitted this"
+ *     artifact no session ever minuted. ONE GUC covers the whole
+ *     return → publication → projection act, and covers `imported` too when
+ *     D13's import function ships. Armed today by
+ *     `presby_publish_sasr_snapshot()`, `drizzle/0047`'s backfill and
+ *     `scripts/seed-dev.sql`; test fixtures arm it themselves
+ *     (`publication.test.ts`'s `armPublicationWrite()`).
  *   - `statistical_returns_freeze` (BEFORE UPDATE OR DELETE) refuses both on
  *     EVERY connection. `presby_app` and `presby_platform` hold
  *     `select, insert` only, but a grant does not bind `neondb_owner` — the

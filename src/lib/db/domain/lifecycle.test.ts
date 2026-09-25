@@ -31,6 +31,7 @@
  * organizations — which matters more than usual here: a lifecycle event, once
  * inserted, can never be deleted by anyone.
  */
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
@@ -66,6 +67,8 @@ describe.skipIf(!hasDb)(
      * the cardinality probes have three distinct organizations to work with.
      */
     let congE = "";
+    /** A sixth body, used only as a third merge predecessor (F54). */
+    let congF = "";
     let userId = "";
 
     const TRANSFER_DATE = "1995-01-01";
@@ -119,6 +122,11 @@ describe.skipIf(!hasDb)(
       congC = await makeOrg("cong-c", "congregation");
       congD = await makeOrg("cong-d", "congregation");
       congE = await makeOrg("cong-e", "congregation");
+      // A sixth body, added 2026-09-24 for F54's "third predecessor after a
+      // valid merge" repro: that probe needs THREE distinct predecessors and
+      // a distinct successor, and organization_successions_not_self forbids
+      // reusing one of the other five for both ends.
+      congF = await makeOrg("cong-f", "congregation");
 
       // The redistricting shape, in the order the seed uses: the CLOSED
       // historical row first (unbounded below — F41), then the open one, so
@@ -225,6 +233,79 @@ describe.skipIf(!hasDb)(
       return message;
     }
 
+    /**
+     * The owner-connection transaction handle every probe below is handed.
+     * Spelled out once so the GUC helpers can take it by name instead of
+     * re-deriving the same four-deep `Parameters<…>` chain.
+     */
+    type LifecycleTx = Parameters<
+      Parameters<ReturnType<typeof getPlatformDb>["transaction"]>[0]
+    >[0];
+
+    /**
+     * Declare which lifecycle act this transaction is recording, standing in
+     * for the future `presby_record_lifecycle_event()` (F54 / DECISION-141,
+     * 2026-09-24; the marker became id-carrying 2026-09-25, QA-1).
+     *
+     * WHY EVERY FIXTURE BELOW NEEDS IT. `organization_lifecycle_events` and
+     * `organization_successions` are one immutable aggregate, and since the
+     * sixth Phase 3 loop-back BOTH tables refuse an unmarked `INSERT` on every
+     * connection — including this owner one, where no grant binds and only a
+     * trigger can. Nothing in the tree arms the flag yet, by design, so a
+     * fixture that writes either table directly has to make the same claim the
+     * sanctioned writer will. Without it, every probe below would fail on the
+     * guard instead of on the mechanism it names.
+     *
+     * WHY IT TAKES AN ID. The marker no longer carries the boolean `'true'`;
+     * it carries the `organization_lifecycle_events.id` this transaction is
+     * recording, and `presby_guard_lifecycle_write()` compares the row in
+     * front of it against that value — `new.id` on the events table,
+     * `new.event_id` on the successions table. So the claim is no longer
+     * "some sanctioned act is in progress" but "this specific row belongs to
+     * the act now being recorded". The practical consequence for every fixture
+     * here: the event id must be CLIENT-GENERATED (`newEventId()`) and armed
+     * BEFORE the insert, and the insert must supply it explicitly rather than
+     * leaning on the column default — there is no way to arm a value the
+     * database has not produced yet.
+     */
+    async function armLifecycleWrite(
+      tx: LifecycleTx,
+      eventId: string,
+    ): Promise<void> {
+      await tx.execute(
+        sql`select set_config('presby.lifecycle_write_active', ${eventId}, true)`,
+      );
+    }
+
+    /**
+     * A client-generated `organization_lifecycle_events.id`, minted before the
+     * insert so the marker can name it. `presby_record_lifecycle_event()` will
+     * do the same thing server-side with `gen_random_uuid()`.
+     */
+    function newEventId(): string {
+      return randomUUID();
+    }
+
+    /**
+     * Drop the marker again inside the same transaction. This is how a
+     * "later, separate, unsanctioned write" is expressed in a test that can
+     * never commit: a lifecycle event is permanent once committed (that is the
+     * property under test, and a committed one would also block the fixture
+     * organizations' teardown), so the reviewer's "after a valid merge is
+     * committed, insert a third predecessor" repro is reproduced by arming,
+     * writing the valid act, forcing its constraints, then disarming and
+     * writing the extra edge.
+     *
+     * The empty string, not `'false'`: the guard reads the marker through
+     * `nullif(…, '')`, so blank and unset take the same branch and this cannot
+     * be mistaken for "armed for an act literally named false".
+     */
+    async function disarmLifecycleWrite(tx: LifecycleTx): Promise<void> {
+      await tx.execute(
+        sql`select set_config('presby.lifecycle_write_active', '', true)`,
+      );
+    }
+
     const ROLLBACK = "__lifecycle_test_rollback__";
 
     /**
@@ -233,9 +314,7 @@ describe.skipIf(!hasDb)(
      * test), so every probe that inserts one has to unwind itself.
      */
     async function inRollback(
-      body: (tx: Parameters<
-        Parameters<ReturnType<typeof getPlatformDb>["transaction"]>[0]
-      >[0]) => Promise<void>,
+      body: (tx: LifecycleTx) => Promise<void>,
     ): Promise<void> {
       const platform = getPlatformDb();
       try {
@@ -255,9 +334,12 @@ describe.skipIf(!hasDb)(
     describe("presby_freeze_lifecycle_event (drizzle/0044, Ruling A5)", () => {
       it("refuses an UPDATE of a recorded lifecycle event on the owner connection — a grant cannot bind the owner, a trigger can", async () => {
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "organized",
@@ -280,9 +362,12 @@ describe.skipIf(!hasDb)(
 
       it("refuses a DELETE of a recorded lifecycle event on the owner connection", async () => {
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "organized",
@@ -377,9 +462,12 @@ describe.skipIf(!hasDb)(
 
       it("refuses a succession row naming a lifecycle event the current org does not own — the write QA reproduced, now rejected", async () => {
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "divided",
@@ -411,9 +499,12 @@ describe.skipIf(!hasDb)(
         let missing = "";
 
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "divided",
@@ -435,6 +526,14 @@ describe.skipIf(!hasDb)(
         });
 
         await inRollback(async (tx) => {
+          // Armed to NO_SUCH_EVENT itself, deliberately: the guard now binds
+          // to an id, so arming to anything else would make the GUARD refuse
+          // this row and the probe would no longer reach the event-scope
+          // trigger it exists to measure. Arming to the missing id makes the
+          // row's declared act match the transaction's, leaving
+          // presby_check_succession_event() as the only layer with an
+          // objection — which is the point of the byte-identity comparison.
+          await armLifecycleWrite(tx, NO_SUCH_EVENT);
           await tx.execute(
             sql`select set_config('app.current_org_id', ${presbyteryA}, true)`,
           );
@@ -458,9 +557,12 @@ describe.skipIf(!hasDb)(
 
       it("accepts succession rows from the council that owns the event, and the legal `divided` shape passes the deferred cardinality check", async () => {
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "divided",
@@ -497,9 +599,12 @@ describe.skipIf(!hasDb)(
 
       it("lets the FIRST predecessor of a `merged` event insert cleanly and fails only at constraint-check time — deferred, not immediate", async () => {
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "merged",
@@ -534,9 +639,12 @@ describe.skipIf(!hasDb)(
 
       it("refuses an UPDATE of a succession row on the owner connection — a grant cannot bind the owner, a trigger can", async () => {
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "divided",
@@ -567,9 +675,12 @@ describe.skipIf(!hasDb)(
 
       it("refuses a DELETE of a succession row on the owner connection — the integrity half of Finding 1", async () => {
         await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "divided",
@@ -629,12 +740,686 @@ describe.skipIf(!hasDb)(
     // standing, which is the whole claim.
     // -------------------------------------------------------------------
 
-    describe("organization_successions_edge_unique (F48 / DECISION-140)", () => {
-      it("refuses the same (event, predecessor, successor) edge twice — one fact written twice is not two facts", async () => {
+    // -------------------------------------------------------------------
+    // The 2026-09-24 round-two hardening (F54 / DECISION-141): creation
+    // guarded as strongly as mutation. Both tables' INSERT is now gated by
+    // one transaction-local GUC, and the aggregate's cardinality is checked
+    // from BOTH ends rather than only from the successions side.
+    //
+    // This connection is the whole point: `presby_app` holds no INSERT on
+    // `organization_successions` at all and its grant fires before any
+    // trigger, so scripts/test-rls.sql can only ever prove the grant there.
+    // `neondb_owner` holds every privilege by ownership (F44), so here the
+    // guard is the only thing standing — which is exactly the connection the
+    // external reviewer's repro assumed.
+    //
+    // WHAT THIS BLOCK DOES NOT PROVE, stated up front because the earlier
+    // version of it overclaimed and QA caught the overclaim (QA-1,
+    // 2026-09-25). `presby.lifecycle_write_active` carries the event id being
+    // recorded, so the guard binds every row to the act the transaction
+    // DECLARED — proven below, one test per table branch. It does NOT make a
+    // committed act's topology immutable: a later, separate transaction that
+    // deliberately re-arms the marker to a settled event's OWN id is accepted.
+    // That is a named, accepted residual (drizzle/0044 section 12a, F44 class,
+    // owner-connection-bounded) and there is deliberately no red/skipped test
+    // for it — this file cannot commit a lifecycle event at all, since a
+    // committed one is permanent and would block the fixture teardown, so any
+    // such test would be a stand-in that proves something else while reading
+    // as if it proved the residual. That is the exact mistake being corrected
+    // here; prose is the honest instrument.
+    // -------------------------------------------------------------------
+
+    describe("the lifecycle creation guard (F54 / DECISION-141)", () => {
+      it("refuses a raw INSERT into organization_lifecycle_events with presby.lifecycle_write_active unarmed — a grant never bound the owner, and a shape CHECK proves form, not provenance", async () => {
         await inRollback(async (tx) => {
+          await expectDbError(
+            () =>
+              tx.insert(organizationLifecycleEvents).values({
+                organizationId: presbyteryB,
+                subjectOrgId: congC,
+                event: "organized",
+                effectiveOn: "2026-03-01",
+                minuteReference: "Fabricated: no sanctioned writer",
+                recordedBy: userId,
+              }),
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+        });
+      });
+
+      it("refuses a raw INSERT into organization_successions with the GUC unarmed, even for an event that exists and is in scope", async () => {
+        await inRollback(async (tx) => {
+          // The event is written through the sanctioned path...
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
           const [event] = await tx
             .insert(organizationLifecycleEvents)
             .values({
+              id: eventId,
+              organizationId: presbyteryB,
+              subjectOrgId: congC,
+              event: "divided",
+              effectiveOn: "2026-03-02",
+              minuteReference: "Fixture: a real division",
+              recordedBy: userId,
+            })
+            .returning({ id: organizationLifecycleEvents.id });
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${presbyteryB}, true)`,
+          );
+
+          // ...and the edge is not. organization_successions_event_scope
+          // CANNOT catch this: the event exists and belongs to the acting
+          // council, which is precisely the case it is written to allow.
+          await disarmLifecycleWrite(tx);
+          await expectDbError(
+            () =>
+              tx.insert(organizationSuccessions).values({
+                eventId: event!.id,
+                predecessorOrgId: congC,
+                successorOrgId: congD,
+              }),
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+        });
+      });
+
+      it("refuses a THIRD predecessor added to an already-valid merge once the marker is dropped — the UNARMED half of the reviewer's repro, which cardinality cannot see", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          const [event] = await tx
+            .insert(organizationLifecycleEvents)
+            .values({
+              id: eventId,
+              organizationId: presbyteryB,
+              subjectOrgId: congE,
+              event: "merged",
+              effectiveOn: "2026-03-03",
+              minuteReference: "Fixture: A + B -> C, lawfully minuted",
+              recordedBy: userId,
+            })
+            .returning({ id: organizationLifecycleEvents.id });
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${presbyteryB}, true)`,
+          );
+          await tx.insert(organizationSuccessions).values({
+            eventId: event!.id,
+            predecessorOrgId: congC,
+            successorOrgId: congE,
+          });
+          await tx.insert(organizationSuccessions).values({
+            eventId: event!.id,
+            predecessorOrgId: congD,
+            successorOrgId: congE,
+          });
+          // The act as minuted is complete and VALID at this point: forcing
+          // the deferred checks proves it rather than assuming it.
+          await tx.execute(sql`set constraints all immediate`);
+
+          // An unsanctioned write, standing in for a second transaction —
+          // which this file cannot use: a committed lifecycle event is
+          // permanent and would block the fixture teardown.
+          //
+          // SAID PLAINLY, because the previous version of this test claimed
+          // more than it proved (QA-1, 2026-09-25): dropping the marker is
+          // NOT the reviewer's repro. It proves "unarmed is refused", which
+          // is true and worth pinning, and which the id-binding correction
+          // did not change. The reviewer's actual repro — a later transaction
+          // that RE-ARMS to this settled event's own id — is a named,
+          // accepted residual (drizzle/0044 section 12a) and is not refused
+          // by anything; see the describe-block comment above.
+          //
+          // congF, a body not already in this merge: a repeat of congC or
+          // congD would also trip organization_successions_edge_unique, and
+          // the probe has to be one only the guard can refuse.
+          await disarmLifecycleWrite(tx);
+          await expectDbError(
+            () =>
+              tx.insert(organizationSuccessions).values({
+                eventId: event!.id,
+                predecessorOrgId: congF,
+                successorOrgId: congE,
+              }),
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+
+        });
+      });
+
+      // -----------------------------------------------------------------
+      // THE ID BINDING (QA-1, 2026-09-25, eighth Phase 3 loop-back).
+      // presby.lifecycle_write_active carries the event id the transaction is
+      // recording, not the boolean 'true'. The two tests below are the whole
+      // difference between "some sanctioned act is in progress" and "this row
+      // belongs to the act now being recorded" — one per table, because the
+      // guard reads a different column on each (new.id vs new.event_id) and a
+      // single test would leave one branch unexercised.
+      // -----------------------------------------------------------------
+
+      it("refuses a succession row whose event_id names a DIFFERENT act than the one this transaction declared — the binding, not merely the arming", async () => {
+        await inRollback(async (tx) => {
+          // Act Y: a real, in-scope event, written through its own sanctioned
+          // arming. It has to EXIST and belong to the acting council, or
+          // organization_successions_event_scope (which sorts before the
+          // guard, `e` < `g`) would refuse first and the probe would prove
+          // that trigger instead of this one.
+          const otherEventId = newEventId();
+          await armLifecycleWrite(tx, otherEventId);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: otherEventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congD,
+            event: "organized",
+            effectiveOn: "2026-03-09",
+            minuteReference: "Fixture: act Y, a separate minuted act",
+            recordedBy: userId,
+          });
+
+          // Act X: the act this transaction now declares it is recording.
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: eventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "divided",
+            effectiveOn: "2026-03-10",
+            minuteReference: "Fixture: act X, the declared act",
+            recordedBy: userId,
+          });
+
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${presbyteryB}, true)`,
+          );
+
+          // An edge belonging to Y, written while the transaction says it is
+          // recording X. Armed, in scope, well-formed, cardinality-legal —
+          // and refused, because it is not part of the declared act.
+          await expectDbError(
+            () =>
+              tx.insert(organizationSuccessions).values({
+                eventId: otherEventId,
+                predecessorOrgId: congC,
+                successorOrgId: congE,
+              }),
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+        });
+
+        // The positive control, and it has to be its own transaction: a
+        // rejected statement aborts the enclosing one. The IDENTICAL edge
+        // shape against the DECLARED act is accepted — without this, the
+        // refusal above would also pass if the guard refused every succession
+        // row outright.
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: eventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "divided",
+            effectiveOn: "2026-03-10",
+            minuteReference: "Fixture: act X, the declared act",
+            recordedBy: userId,
+          });
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${presbyteryB}, true)`,
+          );
+          await tx.insert(organizationSuccessions).values({
+            eventId,
+            predecessorOrgId: congC,
+            successorOrgId: congE,
+          });
+          const rows = await tx.execute(
+            sql`select count(*)::int as n from organization_successions
+                 where event_id = ${eventId}`,
+          );
+          expect(Number((rows.rows[0] as { n: number | string }).n)).toBe(1);
+        });
+      });
+
+      it("refuses a lifecycle event whose OWN id is not the id the transaction armed — the events-table branch of the binding", async () => {
+        await inRollback(async (tx) => {
+          const declared = newEventId();
+          const impostor = newEventId();
+          await armLifecycleWrite(tx, declared);
+
+          // Authority sorts before the guard (`a` < `g`) and this row passes
+          // it — presbyteryB is one level above congC — so the guard is the
+          // only layer left to object, and it objects to the id.
+          await expectDbError(
+            () =>
+              tx.insert(organizationLifecycleEvents).values({
+                id: impostor,
+                organizationId: presbyteryB,
+                subjectOrgId: congC,
+                event: "organized",
+                effectiveOn: "2026-03-11",
+                minuteReference: "Fixture: an event the transaction never declared",
+                recordedBy: userId,
+              }),
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+        });
+      });
+
+      it("accepts the event whose id the transaction DID arm — the matching-id positive control for both branches", async () => {
+        await inRollback(async (tx) => {
+          const declared = newEventId();
+          await armLifecycleWrite(tx, declared);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: declared,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "organized",
+            effectiveOn: "2026-03-12",
+            minuteReference: "Fixture: the declared act, written",
+            recordedBy: userId,
+          });
+          const rows = await tx.execute(
+            sql`select count(*)::int as n from organization_lifecycle_events
+                 where id = ${declared}`,
+          );
+          expect(Number((rows.rows[0] as { n: number | string }).n)).toBe(1);
+        });
+      });
+
+      it("reads the marker through nullif, so a BLANK marker is unarmed rather than an act literally named empty", async () => {
+        await inRollback(async (tx) => {
+          await tx.execute(
+            sql`select set_config('presby.lifecycle_write_active', '', true)`,
+          );
+          await expectDbError(
+            () =>
+              tx.insert(organizationLifecycleEvents).values({
+                organizationId: presbyteryB,
+                subjectOrgId: congC,
+                event: "organized",
+                effectiveOn: "2026-03-13",
+                minuteReference: "Fabricated: blank marker",
+                recordedBy: userId,
+              }),
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+        });
+      });
+
+      it("binds the guard to new.id / new.event_id in the deployed function body — the structural half of QA-1, so a boolean-marker regression fails here too", async () => {
+        const platform = getPlatformDb();
+        const body = await platform.execute(sql`
+          select pg_get_functiondef(oid) as def
+            from pg_proc where proname = 'presby_guard_lifecycle_write'
+        `);
+        const def = String((body.rows[0] as { def: string }).def);
+        expect(def).toContain("new.id::text");
+        expect(def).toContain("new.event_id::text");
+        expect(def).toContain("tg_table_name");
+        // The old boolean sentinel, gone: the guard must not compare the
+        // marker against the literal 'true' anywhere.
+        expect(def).not.toMatch(/lifecycle_write_active', true\), ''\) <> 'true'/);
+      });
+
+      it("and it is the GUARD refusing that third predecessor, not cardinality — the identical edge is accepted while the marker is still set", async () => {
+        // The positive control for the repro above, and it has to be its own
+        // transaction: a rejected statement aborts the enclosing one, so the
+        // two halves cannot share a rollback block.
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          const [event] = await tx
+            .insert(organizationLifecycleEvents)
+            .values({
+              id: eventId,
+              organizationId: presbyteryB,
+              subjectOrgId: congE,
+              event: "merged",
+              effectiveOn: "2026-03-08",
+              minuteReference: "Fixture: A + B + D -> C, all in one act",
+              recordedBy: userId,
+            })
+            .returning({ id: organizationLifecycleEvents.id });
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${presbyteryB}, true)`,
+          );
+          for (const predecessor of [congC, congD, congF]) {
+            await tx.insert(organizationSuccessions).values({
+              eventId: event!.id,
+              predecessorOrgId: predecessor,
+              successorOrgId: congE,
+            });
+          }
+          // Three predecessors still satisfies "at least 2 predecessors and
+          // exactly 1 successor" — which is exactly why cardinality could
+          // never have caught the write above, and why the GUC had to.
+          await tx.execute(sql`set constraints all immediate`);
+          const rows = await tx.execute(
+            sql`select count(distinct predecessor_org_id)::int as n
+                  from organization_successions where event_id = ${event!.id}`,
+          );
+          expect(Number((rows.rows[0] as { n: number | string }).n)).toBe(3);
+        });
+      });
+
+      it("accepts a well-formed event AND its succession rows in one armed transaction — the plumbing presby_record_lifecycle_event() will use, proven before it exists", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          const [event] = await tx
+            .insert(organizationLifecycleEvents)
+            .values({
+              id: eventId,
+              organizationId: presbyteryB,
+              subjectOrgId: congC,
+              event: "divided",
+              effectiveOn: "2026-03-04",
+              minuteReference: "Fixture: one sanctioned transaction",
+              recordedBy: userId,
+            })
+            .returning({ id: organizationLifecycleEvents.id });
+          await tx.insert(organizationSuccessions).values({
+            eventId: event!.id,
+            predecessorOrgId: congC,
+            successorOrgId: congD,
+          });
+          await tx.insert(organizationSuccessions).values({
+            eventId: event!.id,
+            predecessorOrgId: congC,
+            successorOrgId: congE,
+          });
+          await tx.execute(sql`set constraints all immediate`);
+          const rows = await tx.execute(
+            sql`select count(*)::int as n from organization_successions
+                 where event_id = ${event!.id}`,
+          );
+          expect(Number((rows.rows[0] as { n: number | string }).n)).toBe(2);
+        });
+      });
+
+      it("rejects a merged event committed with ZERO succession rows, at commit — the hole the successions-side trigger structurally could not see", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: eventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "merged",
+            effectiveOn: "2026-03-05",
+            minuteReference: "Fixture: a merge that merges nothing",
+            recordedBy: userId,
+          });
+          // Nothing on organization_successions ever fires here — no row was
+          // written to it. Only the new event-side deferred trigger can object.
+          await expectDbError(
+            () => tx.execute(sql`set constraints all immediate`),
+            /a merged event needs at least 2 predecessors and exactly 1 successor \(found 0 \/ 0\)/,
+          );
+        });
+      });
+
+      it("rejects a divided event with zero succession rows too, and leaves the no-edge event types alone", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: eventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "divided",
+            effectiveOn: "2026-03-06",
+            minuteReference: "Fixture: a division that divides nothing",
+            recordedBy: userId,
+          });
+          await expectDbError(
+            () => tx.execute(sql`set constraints all immediate`),
+            /a divided event needs exactly 1 predecessor and at least 2 successors \(found 0 \/ 0\)/,
+          );
+        });
+
+        // `dissolved` carries no succession rows BY RULE: the same trigger
+        // must not object to it, or the refactor broke the per-event-type
+        // rules it was supposed to preserve.
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: eventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "dissolved",
+            effectiveOn: "2026-03-07",
+            minuteReference: "Fixture: a lawful dissolution",
+            recordedBy: userId,
+          });
+          await tx.execute(sql`set constraints all immediate`);
+        });
+      });
+
+      it("shares ONE guard function, ONE flag and ONE extracted cardinality body across both tables — the catalog shape", async () => {
+        const platform = getPlatformDb();
+        const triggers = await platform.execute(sql`
+          select c.relname::text as relname, t.tgname::text as tgname,
+                 p.proname::text as proname,
+                 (t.tgtype & 4) = 4 as on_insert,
+                 t.tgdeferrable as deferrable_,
+                 t.tgenabled::text as enabled
+            from pg_trigger t
+            join pg_class c on c.oid = t.tgrelid
+            join pg_proc p on p.oid = t.tgfoid
+           where c.relname in ('organization_lifecycle_events', 'organization_successions')
+             and t.tgname in ('organization_lifecycle_events_guard',
+                              'organization_successions_guard',
+                              'organization_lifecycle_events_cardinality')
+           order by 1, 2
+        `);
+        expect(
+          (
+            triggers.rows as Array<{
+              relname: string;
+              tgname: string;
+              proname: string;
+              on_insert: boolean;
+              deferrable_: boolean;
+              enabled: string;
+            }>
+          ).map(
+            (r) =>
+              `${r.tgname} -> ${r.proname} (insert=${r.on_insert}, deferred=${r.deferrable_}, enabled=${r.enabled})`,
+          ),
+        ).toEqual([
+          "organization_lifecycle_events_cardinality -> presby_check_lifecycle_event_cardinality (insert=true, deferred=true, enabled=O)",
+          "organization_lifecycle_events_guard -> presby_guard_lifecycle_write (insert=true, deferred=false, enabled=O)",
+          "organization_successions_guard -> presby_guard_lifecycle_write (insert=true, deferred=false, enabled=O)",
+        ]);
+
+        // The counting/raising body exists in exactly ONE place, and both
+        // cardinality triggers call it rather than carrying a copy.
+        const shared = await platform.execute(sql`
+          select count(*)::int as n from pg_proc p
+           join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.prokind = 'f'
+            and p.proname in ('presby_check_succession_cardinality',
+                              'presby_check_lifecycle_event_cardinality')
+            and pg_get_functiondef(p.oid) like '%presby_lifecycle_event_cardinality_check%'
+        `);
+        expect(Number((shared.rows[0] as { n: number | string }).n)).toBe(2);
+      });
+    });
+
+    // -------------------------------------------------------------------
+    // The lifecycle event's own rules (moved from test-rls.sql 32(k),
+    // 2026-09-25). presby_app held `select, insert` on
+    // organization_lifecycle_events until drizzle/0044 narrowed it to SELECT
+    // (Phase 2 Ruling 1's function-mediated shape, the one
+    // organization_successions has carried since Phase 5 Finding 1). The
+    // grant now refuses before any trigger or CHECK on this table can fire,
+    // so a tenant-connection probe of those mechanisms proves only the grant.
+    // They run here instead, on the connection where the grant is irrelevant
+    // and the trigger is the only thing standing.
+    // -------------------------------------------------------------------
+
+    describe("the lifecycle event's own rules (moved from test-rls.sql 32(k))", () => {
+      it("refuses a council recording a lifecycle event against ITSELF — a presbytery cannot constitutionally dissolve itself", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await expectDbError(
+            () =>
+              tx.insert(organizationLifecycleEvents).values({
+                id: eventId,
+                organizationId: presbyteryB,
+                subjectOrgId: presbyteryB,
+                event: "dissolved",
+                effectiveOn: "2026-04-01",
+                minuteReference: "Fixture: self-targeting",
+                recordedBy: userId,
+              }),
+            // insufficient_privilege from presby_assert_council_authority(),
+            // not check_violation from organization_lifecycle_events_not_self:
+            // a BEFORE INSERT trigger runs ahead of the table's own CHECK.
+            // The CHECK stays as defence in depth for a writer that reaches
+            // the table with the trigger disabled.
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+        });
+      });
+
+      it("refuses a presbytery acting on another PRESBYTERY — one level above only, G-3.0301(a)", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await expectDbError(
+            () =>
+              tx.insert(organizationLifecycleEvents).values({
+                id: eventId,
+                organizationId: presbyteryB,
+                subjectOrgId: presbyteryA,
+                event: "dissolved",
+                effectiveOn: "2026-04-02",
+                minuteReference: "Fixture: two levels off",
+                recordedBy: userId,
+              }),
+            /organization_lifecycle_events: this change is not permitted/,
+          );
+        });
+      });
+
+      it("refuses a received event with no external_body, and requires the counterparty only for received/dismissed", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await expectDbError(
+            () =>
+              tx.insert(organizationLifecycleEvents).values({
+                id: eventId,
+                organizationId: presbyteryB,
+                subjectOrgId: congC,
+                event: "received",
+                effectiveOn: "2026-04-03",
+                minuteReference: "Fixture: no counterparty",
+                recordedBy: userId,
+              }),
+            /organization_lifecycle_events_external_body_shape/,
+          );
+        });
+        // ...and the same event WITH the counterparty is accepted, so the
+        // CHECK is proven to be about the missing column and not about the
+        // event type.
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          await tx.insert(organizationLifecycleEvents).values({
+            id: eventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "received",
+            effectiveOn: "2026-04-04",
+            externalBody: "Fixture Presbytery of Elsewhere",
+            minuteReference: "Fixture: with counterparty",
+            recordedBy: userId,
+          });
+        });
+      });
+
+      it("runs the dissolution path end to end: the cache moves and is dated, the affiliation closes, parent_id follows it to null, and the ARCHIVE still resolves", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          // congC belongs to presbyteryB since 1995 (the fixture's
+          // redistricting shape), so B is the council that may dissolve it.
+          await tx.insert(organizationLifecycleEvents).values({
+            id: eventId,
+            organizationId: presbyteryB,
+            subjectOrgId: congC,
+            event: "dissolved",
+            effectiveOn: "2026-06-30",
+            minuteReference: "Fixture: dissolution path, item 3",
+            recordedBy: userId,
+          });
+
+          const cache = await tx.execute(sql`
+            select lifecycle_status::text as status,
+                   lifecycle_as_of::text as as_of,
+                   (parent_id is null) as parent_cleared
+              from organizations where id = ${congC}::uuid
+          `);
+          expect(cache.rows[0]).toMatchObject({
+            status: "dissolved",
+            as_of: "2026-06-30",
+            parent_cleared: true,
+          });
+
+          const open = await tx.execute(sql`
+            select count(*)::int as n from organization_affiliations
+             where subject_org_id = ${congC}::uuid and effective_to is null
+          `);
+          expect(Number((open.rows[0] as { n: number | string }).n)).toBe(0);
+
+          // The property that lets a dissolved congregation's 1990 return
+          // stay attributable: affiliation is answered AS OF a date, so
+          // closing it in 2026 cannot rewrite 2020.
+          const before = await tx.execute(sql`
+            select presby_org_affiliated(${congC}::uuid, ${presbyteryB}::uuid, date '2020-01-01') as v
+          `);
+          const after = await tx.execute(sql`
+            select presby_org_affiliated(${congC}::uuid, ${presbyteryB}::uuid, date '2026-12-31') as v
+          `);
+          expect((before.rows[0] as { v: boolean }).v).toBe(true);
+          expect((after.rows[0] as { v: boolean }).v).toBe(false);
+        });
+      });
+
+      it("grants presby_app SELECT and nothing else on BOTH lifecycle tables — the 2026-09-25 narrowing, asserted where the tables are", async () => {
+        const platform = getPlatformDb();
+        const result = await platform.execute(sql`
+          select c.relname::text as relname, a.privilege_type::text as privilege_type
+            from pg_class c, aclexplode(c.relacl) a
+           where c.relname in ('organization_lifecycle_events', 'organization_successions')
+             and a.grantee = 'presby_app'::regrole
+           order by 1, 2
+        `);
+        expect(
+          (
+            result.rows as Array<{ relname: string; privilege_type: string }>
+          ).map((r) => `${r.relname}.${r.privilege_type}`),
+        ).toEqual([
+          "organization_lifecycle_events.SELECT",
+          "organization_successions.SELECT",
+        ]);
+      });
+    });
+
+    describe("organization_successions_edge_unique (F48 / DECISION-140)", () => {
+      it("refuses the same (event, predecessor, successor) edge twice — one fact written twice is not two facts", async () => {
+        await inRollback(async (tx) => {
+          const eventId = newEventId();
+          await armLifecycleWrite(tx, eventId);
+          const [event] = await tx
+            .insert(organizationLifecycleEvents)
+            .values({
+              id: eventId,
               organizationId: presbyteryB,
               subjectOrgId: congC,
               event: "divided",

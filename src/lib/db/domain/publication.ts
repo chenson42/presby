@@ -34,11 +34,23 @@ import { users } from "../schema";
  * MUCH OF THE REAL ENFORCEMENT IS NOT EXPRESSIBLE IN DRIZZLE and lives only
  * in `0047`:
  *
+ *   - `publications_guard` (BEFORE INSERT, executing the shared
+ *     `presby_guard_publication_write()` defined in `drizzle/0046` section
+ *     4b, F55/DECISION-141) refuses any INSERT unless the transaction-local
+ *     GUC `presby.publication_write_active` is set. Creation guarded as
+ *     strongly as mutation: the freeze below made a publication immutable
+ *     once written, but nothing made WRITING one a sanctioned act, and the
+ *     revoked grant binds nobody on `getPlatformDb()` (F44). Armed inside
+ *     `presby_publish_sasr_snapshot()`, `drizzle/0047`'s own backfill and
+ *     `scripts/seed-dev.sql` — one GUC for the whole
+ *     return → publication → projection act.
  *   - `publications_freeze` (BEFORE UPDATE OR DELETE) refuses DELETE
  *     outright and permits EXACTLY ONE UPDATE transition: a row whose three
  *     withdrawal columns are all null may have them set together
  *     (`withdrawnAt` required), with nothing else on the row moving in that
- *     same statement. A withdrawal is not reversible, re-datable or
+ *     same statement, AND the transaction must be inside the sanctioned
+ *     withdrawal writer (`presby.withdrawal_write_active`, a SEPARATE GUC —
+ *     F56/DECISION-141). A withdrawal is not reversible, re-datable or
  *     re-minutable — correcting one means publishing again. It fires on EVERY
  *     connection, including the owner: `presby_app` and `presby_platform`
  *     hold `select, insert` only, but a grant does not bind `neondb_owner`,
@@ -59,13 +71,19 @@ import { users } from "../schema";
  *   - `presby_app` and `presby_platform` hold `SELECT` ONLY as of
  *     F51/DECISION-140 — INSERT was revoked too, since
  *     `presby_publish_sasr_snapshot()` (SECURITY DEFINER) is the only writer.
- *   - There is NO tenant-side withdrawal path in this pipeline: withdrawal is
- *     an owner-only act. The
- *     intended writer is a future `presby_withdraw_publication()` SECURITY
- *     DEFINER function in the publish-UI pipeline, in the same
- *     confused-deputy shape as `presby_transfer_affiliation()` — no
- *     caller-supplied council id, the actor is `presby_current_org()`. It is
- *     NOT built here.
+ *   - There is NO withdrawal path AT ALL today, on any connection
+ *     (F56/DECISION-141, 2026-09-24). Nothing sets
+ *     `presby.withdrawal_write_active`, so both halves of the pair — this
+ *     table's withdrawal triple and `congregationStatistics.withdrawnAt` —
+ *     are unreachable until the writer ships. That is deliberate: before the
+ *     conjunct, each table permitted its own half INDEPENDENTLY, so a raw
+ *     connection could withdraw the publication and leave the recipient's
+ *     projection silently disagreeing with it. The intended writer is a
+ *     future `presby_withdraw_publication()` SECURITY DEFINER function in the
+ *     publish-UI pipeline, in the same confused-deputy shape as
+ *     `presby_transfer_affiliation()` — no caller-supplied council id, the
+ *     actor is `presby_current_org()` — which arms the GUC once and performs
+ *     both UPDATEs in one transaction. It is NOT built here.
  *   - The RECIPIENT cannot read this table under the tenant policy —
  *     `organizationId` is the SOURCE council. That is the point: the
  *     recipient reads through `presby_list_published_returns_to_me()`

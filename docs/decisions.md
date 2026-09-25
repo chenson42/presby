@@ -4,6 +4,53 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-148: Every `SECURITY DEFINER` function pins `search_path = public, pg_temp` (`pg_temp` explicit and last); the tenant roles hold no `CREATE` on schema `public`.** (2026-09-25, tech-lead Phase 3, `docs/work-log/2026-09-24-lifecycle-affiliation-returns.md`, eleventh loop-back, ruling on F60.)
+
+`set search_path = public` alone is not the safe pattern it looks like: every role — including `presby_app` and `presby_platform`, neither of which has ever had its default `TEMP` privilege on the database revoked — can create objects in its own session-local `pg_temp` schema, and an unqualified `search_path` searches the *unnamed* temp schema ahead of any named schema in the list, `public` included. A concurrent security-pipeline probe demonstrated this is exploitable today, not theoretical: `create temp table people (id uuid)` from a `presby_app` session, followed by a call to a `SET search_path = public`-only `SECURITY DEFINER` function that reads `people` unqualified, resolves to the caller's own temp table instead of the real one — a forged answer from a function whose entire purpose is to be trusted across a privilege boundary. Appending `, pg_temp` — explicit and last — makes the named schema win the search regardless of what the caller has created in its own temp namespace. This is the standing rule going forward for **every** `SECURITY DEFINER` function in this schema, not just the ones a review happens to touch: the `database-admin` agent file should carry it as a checklist item for every new `SECURITY DEFINER` function, the same way `SET search_path` itself already is. The companion half of the rule — confirming `presby_app`, `presby_platform`, and `PUBLIC` hold no `CREATE` on schema `public` (which would let a role plant a *permanent* decoy object rather than merely a session-local temp one) — is a `pg_get_functiondef()`/`pg_namespace.nspacl`-shaped catalog assertion, tracked and built by the concurrent security pipeline (`0048`), not duplicated here.
+
+---
+
+**DECISION-147: A token-bearing submission grant is a *credential* — a
+third access mechanism alongside permissions and flags — and it authorizes
+exactly one write, inside one `SECURITY DEFINER` function, with no org
+context set by the caller.** The public submission page is its own
+un-brandable route group, `(statistics-submit)`, on the `(password-reset)`
+pattern: platform palette, no session, no `FEATURES.*` gate, exact paths in
+`src/proxy.ts`'s public allow-list, token in the query string, one uniform
+response for every credential-liveness failure (not found, expired,
+revoked, already submitted, stale affiliation, flag off, or a genuine DB
+failure) including identical round-trip shape when the flag is off. A
+credential is never mapped into `FEATURES.*`, a session claim, or the
+permission resolver; it names its own subject, so the function derives both
+organization ids from the grant row and the recipient is re-resolved fresh
+from the affiliation history at claim time — never from the grant's own
+stored `organization_id`, which is provenance of issuance, never authority
+to receive (D19 unchanged) — with the grant's stored value used only as a
+staleness check. The return → publication → projection chain keeps **one**
+writer and **one** `presby.publication_write_active` arming site:
+`drizzle/0049` extracts the three inserts, the report-year/form-version/
+recipient-type checks, and the year-endpoint affiliation collision check
+(F80) into a single internal, ungranted `presby_write_return_publication_
+chain()`, behind which both the re-created `presby_publish_sasr_snapshot()`
+(attestation null, as before) and the new `presby_submit_granted_return()`
+(attestation verified from the form — the first non-null values F57
+anticipated) become thin callers, sharing F80's fix by construction rather
+than by two independent patches. The grant row is claimed in two sanctioned
+steps inside one transaction — `submitted_at` first (the atomic,
+non-repeatable claim), `return_id` second (the stamp, once the chain has
+run) — guarded by a new, unshared GUC (`presby.grant_claim_active`) and a
+column-level grant restricting `presby_app` to `UPDATE (revoked_at)` alone,
+so a tenant connection cannot reach the claim or the stamp regardless of
+whether it arms the marker. `managed`-status exclusion is enforced by a
+database trigger at issuance, not the UI picker, and is not re-checked at
+claim time — a stale exclusion is a policy choice (relaxable later), not a
+structural dependency, because a concurrent self-file resolves through the
+existing supersession chain regardless. *(2026-09-25, tech-lead Phase 3,
+`docs/work-log/2026-09-25-submission-grants.md`, ruling on architect's
+Phase 2 draft and F80.)*
+
+---
+
 **DECISION-146: The NextAuth adapter and `recordAudit()` stay on `presby_app`; the platform shell gets a written least-privilege grant model instead of a third connection. (2026-09-25, architect, Phase 2 of `2026-09-25-security-schema-b`.)**
 
 The 2026-09-25 security review (B-H3 step 3) asked whether the NextAuth adapter should move to a third, auth-scoped role so the tenant connection never holds the credential tables. Deferred, for three measured reasons.
@@ -15,13 +62,6 @@ The 2026-09-25 security review (B-H3 step 3) asked whether the NextAuth adapter 
 **Three — `src/lib/db/index.ts` documents "two connections, deliberately" as the isolation boundary.** A third is a change to that architecture. It is worth making once the shell refactor exists, and not before.
 
 **What ships instead, in `drizzle/0048_presby_security_b.sql`:** the live `presby_app` grant shape written down table by table so the security posture is reproducible from `drizzle/` (B-H3(a) — today it is not, and a database built from the migration history fails at first sign-in), narrowed to least privilege in the same file. Revisit when the platform-shell accessor exists; tracked in `docs/TODO.md`.
-
----
-
-**DECISION-148: Every `SECURITY DEFINER` function pins `search_path = public, pg_temp` (`pg_temp` explicit and last); the tenant roles hold no `CREATE` on schema `public`.** (2026-09-25, tech-lead Phase 3, `docs/work-log/2026-09-24-lifecycle-affiliation-returns.md`, eleventh loop-back, ruling on F60.)
-
-`set search_path = public` alone is not the safe pattern it looks like: every role — including `presby_app` and `presby_platform`, neither of which has ever had its default `TEMP` privilege on the database revoked — can create objects in its own session-local `pg_temp` schema, and an unqualified `search_path` searches the *unnamed* temp schema ahead of any named schema in the list, `public` included. A concurrent security-pipeline probe demonstrated this is exploitable today, not theoretical: `create temp table people (id uuid)` from a `presby_app` session, followed by a call to a `SET search_path = public`-only `SECURITY DEFINER` function that reads `people` unqualified, resolves to the caller's own temp table instead of the real one — a forged answer from a function whose entire purpose is to be trusted across a privilege boundary. Appending `, pg_temp` — explicit and last — makes the named schema win the search regardless of what the caller has created in its own temp namespace. This is the standing rule going forward for **every** `SECURITY DEFINER` function in this schema, not just the ones a review happens to touch: the `database-admin` agent file should carry it as a checklist item for every new `SECURITY DEFINER` function, the same way `SET search_path` itself already is. The companion half of the rule — confirming `presby_app`, `presby_platform`, and `PUBLIC` hold no `CREATE` on schema `public` (which would let a role plant a *permanent* decoy object rather than merely a session-local temp one) — is a `pg_get_functiondef()`/`pg_namespace.nspacl`-shaped catalog assertion, tracked and built by the concurrent security pipeline (`0048`), not duplicated here.
-
 ---
 
 **DECISION-145: The platform corner radius is `--radius: 0.625rem`; DECISION-048's descriptive clause ("a no-op at today's 0.375rem") is superseded, its ruling is not.** (2026-09-25, orchestrator at Phase 6 integration, `docs/work-log/2026-09-25-platform-radius.md`.)

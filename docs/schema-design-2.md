@@ -1927,19 +1927,28 @@ Notes.
 Answers D16.
 
 ```
-statistics_submission_grants      (new — shape revised in round 3: the grant is a
-                                   CREDENTIAL; what it produces is a return)
-  id, organization_id,           -- the presbytery issuing it
+statistics_submission_grants      (revised again, Phase 3, 2026-09-25 —
+                                   drizzle/0049)
+  id, organization_id,           -- the ISSUING presbytery
   about_org_id,                  -- the congregation being asked
   report_year,
-  token_hash unique,             -- never the token itself
-  issued_to_name, issued_to_email,
-  issued_by, issued_at, expires_at,
-  submitted_at, return_id,       -- → statistical_returns; the attestation
-                                 -- columns live on the return, not here
+  token_hash unique,             -- sha256 hex; never the token itself
+  issued_to_name, issued_to_email, issued_by, issued_at, expires_at,
+  submitted_at,                  -- moves ALONE first (the atomic claim)
+  return_id,                     -- moves SECOND, once the chain has run —
+                                 -- see the freeze trigger; NOT the same
+                                 -- UPDATE as submitted_at
   revoked_at
   unique (organization_id, about_org_id, report_year)
     where revoked_at is null and submitted_at is null   -- one live grant
+  foreign key (return_id, about_org_id)
+    references statistical_returns (id, organization_id)  -- NOT
+    -- (return_id, organization_id) -> statistical_returns (id,
+    -- organization_id): the grant is owned by the presbytery
+    -- (organization_id) and the return it claims is owned by the
+    -- CONGREGATION (about_org_id) — the same correction drizzle/0047 made
+    -- for congregation_statistics.publication_id (F45's pattern, a third
+    -- occurrence).
 ```
 
 Notes.
@@ -1964,6 +1973,17 @@ Notes.
   review should look at hardest.
 - **This is architecturally novel for presby** — every other write path is
   auth-gated — so it wants its own security review pass, not a bolt-on.
+
+**F80 resolution, recorded here rather than re-litigated at the next
+external review:** the return→publication→projection chain's shared writer
+(`presby_write_return_publication_chain()`, extracted in `drizzle/0049`)
+carries a single year-endpoint affiliation collision check, run once before
+any insert, reached by both `presby_publish_sasr_snapshot()` and
+`presby_submit_granted_return()`. The grant path additionally re-verifies
+the recipient against the affiliation history at claim time (never against
+the grant's own stored `organization_id`, which is provenance of issuance
+only) — a stale grant is refused as a lapsed credential before the shared
+collision check is ever reached.
 
 ## 7. Section Q — Finance: ledger, budget, giving *(new, POST-CUTOVER)*
 

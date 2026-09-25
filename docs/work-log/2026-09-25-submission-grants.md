@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete — F80 ruled, affiliation instant ruled, `managed` exclusion ruled, full DDL, `check:audit` extension taken | Design complete, implementer named | 2026-09-25 |
 | 4 — Implementation | database-admin → api-developer → ux-developer | **Complete** — batch A (schema), batch B (server) and batch C (client) all landed: drizzle/0049 applied, test-rls.sql 456/456 as presby_app, `npm test` 3294/814/0, `npm run check`/`typecheck`/`build` clean, e2e smoke 7/7 twice; batch C's own review caught and fixed a page-level enumeration-safety gap (flag-off leak in `previewGrantedReturn`'s caller) before Phase 5 | — | 2026-09-25 — second passes closed QA FAIL-1 (org-keyed issuance rate limit, 30/hour) and Advisories 1–3, 6 |
 | 5 — Verification | qa | Complete — full independent pass (live catalog, six-cause enumeration byte-diff + timing, concurrent double-claim, chain + F39, 360×800 browser, e2e 7/7 on a real server); FAIL on one gap: issuance rate limit absent (Phase 1 + Phase 2 requirement dropped at Phase 3) | **re-verified PASS** — FAIL-1 closed and proven live (blocked on attempt #31); Advisories 1, 2, 3, 6 closed on live rows; test-rls 456, npm test 3308, e2e spec 7/7 twice | 2026-09-25 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-25 |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.26.0 | SHIP WITH NOTES | 2026-09-25 |
 
 ---
 
@@ -3165,34 +3165,132 @@ The three pre-existing e2e reds are not a merge precondition for this pipeline: 
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-25.*
+
+*Read-only review of `/Users/cshenso/git/presby-platform/presby-wt-grants/docs/work-log/2026-09-25-submission-grants.md` (all six phases), the shipped diff (`git show --stat 23db336`, `git log -1`), the three 360px/desktop screenshots, and direct reads of `src/proxy.ts`, `src/lib/audit.ts`, `src/lib/statistics-grants.ts`, `src/app/(org)/o/[slug]/admin/reports/actions.ts`, `src/app/(org)/o/[slug]/admin/reports/statistics-table.tsx`, and `docs/architecture.md`. Nothing edited.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A presbytery clerk can now email an unmanaged or invited congregation a one-time link that lets it file its annual statistical report with no account — the credential, the write path, and the enumeration-safety posture are the most thoroughly load-bearing-checked increment I've reviewed in this repo, one real Phase 2→3 gate (issuance rate limiting) was dropped and then caught and closed before shipping rather than after, and what remains is a handful of named, already-scoped follow-ups (a deferred read-only page, an email-bounce blind spot, a rate-limit ceiling worth revisiting, and a testing-posture gap wider than this feature) — none of which are reasons to hold the flag off any longer than planned.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The credential model does exactly what DECISION-147 says it does, and QA proved it under adversarial conditions rather than trusting the design doc.** Two genuinely racing `psql` connections against the same live token produced exactly one winner and one `ERROR: presby_submit_granted_return: grant not usable`; a spent-token reload renders the same generic notice with no form and no resubmit path.
+- **Enumeration safety is the real thing, not an assertion.** Six causes (nonexistent, expired, revoked, spent, malformed, and — the case the e2e spec itself doesn't cover — a *live* token with the flag off) returned byte-identical markup after normalizing only the token and Next's HMR id, with a 4.1 ms timing spread smaller than each cause's own noise band. `/file-statistics?token=…` and nothing else appears in the URL on either page.
+- **The empty state on the issuance section is genuinely helpful, not just present.** The desktop screenshot shows "No submission grants issued yet — Issue one below to let an unmanaged or invited congregation file its statistical report without an account," inside a dashed card directly above the form that does exactly that — this is the "suggest a next action" standard from the Working Voice section, not a bare "No grants."
+- **The failure microcopy on the public page is human.** "This link is no longer active … It may have expired, already been used, or been revoked. Nothing was saved. If you still need to file, ask your presbytery for a new link." — confirmed in the 360px screenshot, matches Phase 1's own "nothing was saved, try the link again" requirement verbatim.
+- **The presbytery-sees-arrival flow really was "already half-built" as Phase 1 predicted**, and QA confirmed the new write lands on it: `statistics-table.tsx:14` maps `published_by_congregation` → "Congregation reported," and e2e case 4 shows the badge appearing after a real submission through a real browser.
+- **The 60-field mobile form is a real UX pass, not a Phase 5 discovery this time** — Phase 2 named it as a binding Phase 3 deliverable, and it shows: `inputMode="numeric"` on 60/60 fields, single column at x=33 with zero horizontal overflow, a sticky submit bar visible without scrolling, and — verified with a DB check, not just a UI assertion — an out-of-range value leaves the DB at zero new rows and the grant unspent.
+- **The one real gate that slipped (issuance rate limiting) was caught by QA, not by a later incident, and closed with evidence rather than a checkbox.** The fix was proven live at attempt #31 against a real `RATE_LIMIT_DISABLED=false` server, with the correct audit row and per-org (not per-user) key — QA judged the org-only keying choice on its merits rather than accepting Phase 2's ruling as license to skip verification.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+| # | Phase 1 said | Shipped | Verdict |
+|---|---|---|---|
+| 1 | Presbytery admin issues a grant (congregation + year + recipient name/email) | `issueStatisticsGrantAction` → `statistics.manage` gate → `resolveMemberCongregation` re-check → mint/hash token → insert → enqueue email; partial-unique violation mapped to friendly copy | Matches |
+| 2 | Presbytery admin revokes a live grant | Shadcn `AlertDialog` (`["Cancel", "Yes, revoke"]`, no native dialog) → distinct pre-checks for not-found / already-submitted / already-revoked before the guarded UPDATE | Matches |
+| 3 | Presbytery admin re-issues after revoke/expiry | Partial unique index is scoped to live grants only (`where revoked_at is null and submitted_at is null`); a revoked/spent grant does not block re-issue | Matches |
+| 4 | Presbytery admin sees grant status (issued/expired/revoked/submitted) | `grants-table.tsx` status column, verified live via revoke and via the e2e submission run | Matches |
+| 5 | Anonymous visitor opens link → views form → fills → attests name+office → submits exactly once | Token resolved server-side only (`presby_preview_granted_return()`), form driven by the frozen `field_spec` with `sasr-fields.ts` labels, attestation is a closed `<select>` (clerk of session / moderator / other-with-text), atomic claim `UPDATE … RETURNING` inside one DEFINER function | Matches |
+| 6 | Presbytery sees the return arrive | "Congregation reported" badge fires off the same `congregation_statistics` projection the existing self-publish path produces, via the shared chain writer | Matches |
+| 7 | Congregation views its own filing history | **Deferred**, as the orchestrator's working assumption 4 and Phase 3's explicit non-goal recorded — `presby_list_own_congregation_publications()` still has zero UI callers (confirmed: only reference in the tree is `publication.test.ts`) | Acceptable drift — named up front in Phase 1, re-confirmed at Phase 3, carried to Phase 6's follow-up list, not a silent gap |
+| 8 | "Rate-limit issuance and submission" (Phase 1 header line) | Submission (public) limit shipped in Batch B; **issuance limit dropped at Phase 3, caught as QA FAIL-1, closed in the second pass** | Regression, then closed before ship — see (c) below |
+| 9 | Audit story for grant-issued/revoked/submitted, no session on the third | All three `AUDIT_ACTIONS` keys exist, exercised end to end, `{userId: null, email}` override on the submission row exactly as `requestPasswordReset` uses it; a full `audit_events` scan for the string `token` or a 64-hex value returned 0 rows | Matches |
+| 10 | Email bounce visibility for the issuing clerk | **Deferred**, named as a residual in Phase 1's Edge Cases and carried through every phase to the TODO candidates | Acceptable drift — never silently dropped |
+| 11 | Mobile usability of a 60-field form | Verified in a real 360×800 Chromium, not inferred from `next build` | Matches, and matches CLAUDE.md's "Verify in a Browser" standard specifically |
+
+### The five orchestrator working assumptions, as design inputs — status and any revisit needed
+
+1. **Presbytery staff only issue grants (`statistics.manage`).** Shipped exactly this; no self-service issuance path for a congregation's own clerk exists. No revisit needed.
+2. **Tech-lead rules the affiliation instant.** Done — claim-time re-verification against the affiliation history, never the grant's own stored `organization_id`. See (d) below for precision on what F80's fix actually changes.
+3. **Restrict grants to `unmanaged`/`invited` congregations.** Shipped as a database trigger at issuance (`presby_check_grant_about_org_unmanaged`), not the UI picker — the right enforcement point per CLAUDE.md's own "the check that matters is at write time" reasoning. Architect's Phase 3 observation stands and is worth restating for whoever revisits this: because a concurrent self-file resolves through the *existing* supersession chain rather than a special case, this is a **relaxable policy choice**, not a structural dependency — if a presbytery later asks to grant a `managed` congregation a link anyway (e.g., a congregation whose portal login is broken), that's a one-trigger change, not a redesign. No revisit needed now.
+4. **Filing-history page deferred.** Confirmed deferred at every phase, correctly not built in this pipeline, correctly on the TODO candidates list. No revisit needed — it just needs to actually land in `docs/TODO.md` at integration (see Follow-Ups).
+5. **No push notification, badge only.** Confirmed shipped as stated; no notification code exists in the diff. No revisit needed.
+
+None of the five assumptions need to be revisited before the flag is turned on. All five were treated as real design inputs, not rubber-stamped — assumption 3 in particular got an explicit "policy, not structural necessity" ruling from the architect that is worth keeping visible for the next person who touches this area.
+
+## The eleven Phase 2 BINDING gates — each checked against QA's evidence, not against the design doc's own claim
+
+| Gate (Phase 2) | Shipped / verified how |
+|---|---|
+| `(statistics-submit)` route group, no `layout.tsx`, structurally `(password-reset)` | Confirmed by QA: no `layout.tsx`/`loading.tsx` anywhere in the group; `<meta name="robots" content="noindex, nofollow">` present |
+| Token in query string, exact paths in `src/proxy.ts`'s `PUBLIC_PATHS` (no prefix bypass) | `src/proxy.ts:19-20` — two exact `Set` entries, confirmed by direct read; `proxy.test.ts` (18/18, 5 new) proves `/file-statistics/anything-else` falls through to `edgeAuth()` and a character-prefix match does not admit |
+| Server action at group root, `check:audit` walks it (but audit coverage is "by review," not the tripwire) | `src/app/(statistics-submit)/actions.ts` exists at group root; QA states explicitly "audit coverage here is by review, not by tripwire" and independently scanned `audit_events` for leaked hashes/tokens (0 rows) rather than trusting the tripwire |
+| `returns.ts` extended, no `grants.ts`, no `src/lib/db/domain/index.ts` touch | Confirmed by the diff stat (`src/lib/db/domain/returns.ts` modified, no new domain file) |
+| Public submission signature takes no `personId`/`organizationId` | `submitStatisticsGrant(rawToken, payload, attestedByName, attestedRole)` — confirmed by direct read; QA's Feature-Gate Audit table independently states "signature accepts no personId/organizationId" |
+| `sasr-fields.ts` with a key-set parity test | Shipped, 100% stmts/funcs per QA's coverage table, one uncovered branch named (line 192) |
+| Attestation: server + client zod bounds, closed select for role | Confirmed live in the 360px screenshot (a `<select>`, not free text) and in `statistics-submit-form.test.tsx` |
+| No org context set by the anonymous caller (the confused-deputy gate) | QA verified live: two racing `presby_app` connections with **no org context** on the claim, exactly one winner |
+| One extracted chain writer, one `publication_write_active` arming site | Verified against the live catalog, not the migration text: "exactly one function arms `presby.publication_write_active`" |
+| Claim first (atomic `UPDATE … RETURNING`), write second | Verified under genuine concurrency (above) |
+| F80 constraints (recipient resolved fresh from affiliation history at claim time; no stored id treated as standing; same instant re-verified) | Verified via `test-rls.sql` §36(f)(i)/(ii) and `grants.test.ts:410`; see (d) below for the precise scope of what changed |
+
+All eleven hold on the live system, not merely in the source. I did not find a BINDING gate that shipped as documentation only.
+
+## (c) FAIL-1 and the process lesson
+
+QA's FAIL-1 was exactly what it looked like: Phase 2 ruled, in a `[BINDING]` sentence, "Issuance is separately limited per issuing org" — and Phase 3's API Contract, Implementation Order, and Edge Cases table named only the *public* `stats_submit:${ip}` limit. The issuance half wasn't declined in writing, wasn't marked out of scope, wasn't deferred to a TODO line — it simply stopped appearing between Phase 2 and Phase 3. Phase 4 then built exactly what Phase 3 specified, which is the correct behavior for an implementer and the reason this is a Phase 3 defect, not a Phase 4 one.
+
+This is precisely the failure mode CLAUDE.md's own workflow rules exist to catch — "no silent skips," and the explicit instruction to every downstream phase not to "summarize away the architect's rulings." A `[BINDING]` gate is supposed to be non-negotiable at handoff; this one was dropped by omission rather than by a stated disagreement, and nothing in Phase 3's text flagged the drop. QA was right not to wave it through on the strength of everything else being excellent, and right to phrase the verdict as "narrow" rather than downgrading the rest of the pass.
+
+The good news is the closure: the fix is now in the code with an explicit comment naming the Phase 5 finding by work-log path (`reports/actions.ts:284-296` cites `docs/work-log/2026-09-25-submission-grants.md` and "Phase 5 FAIL-1" directly), it was proven live rather than by unit test alone (blocked on attempt #31 against a real `RATE_LIMIT_DISABLED=false` server, correct `rate_limit.blocked` audit row), and QA independently judged the org-only (not per-user) keying choice on its forensic merits rather than accepting Phase 2's ruling uncritically. This is a retrospective item, not a reopen: **recommend the tech-lead retrospective note this as a concrete example of a `[BINDING]` gate silently dropped at handoff**, for the next pipeline's Phase 3 checklist discipline, alongside the existing `npm run stats:escape` tracking.
+
+## (d) F80 — precisely
+
+F80 is not "the late filer can now file." A return for a report year before the congregation joined the receiving council is **still refused**, deliberately — that's the correct behavior and it didn't change. What changed is *where* and *how* the refusal happens: before this fix, `presby_publish_sasr_snapshot()` would write the `statistical_returns` row and the `publications` row (two inserts, two committed artifacts in the transaction so far) and only then hit `congregation_statistics_about_org`'s trigger on the third insert, which raised a generic, unnamed rejection — a half-written chain that then aborts. After the fix, the same year-endpoint affiliation check runs **once**, in `presby_write_return_publication_chain()`, **before the first insert**, with a named message identifying it as `presby_write_return_publication_chain: … was not affiliated with … during … — a return for a year before this congregation joined this council cannot be published to it.` QA verified this precisely: a 1990 grant for a congregation the presbytery didn't hold in 1990 is refused with byte-identical messages from both callers (the grant path and the self-publish path), and a before/after row count on `statistical_returns` proves nothing was written. The population most exposed to this — an account-less late filer, exactly D16's target user — now gets a clean, early, named refusal instead of an aborted transaction with orphaned-looking partial state; that is the entire scope of the fix, correctly scoped and correctly verified.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** pass — the issuance section's dashed-card empty state names the action to take, not just the absence of data (screenshot `03-issuance-section-desktop.png`).
+- **Failure microcopy:** pass — generic, humane copy on the public page ("Nothing was saved... ask your presbytery for a new link"), friendly rate-limit copy ("Try again in 60 minutes"), and a distinct "check the highlighted fields" message once token liveness is proven (never the raw SQL error).
+- **Permission gate:** pass — triple gate on issuance (`org_portal.reports` page flag AND `statistics.submission_grants` feature flag AND `statistics.manage` permission), verified by QA reading route/action bodies rather than inferring from green tests; the public path correctly carries no `FEATURES.*` gate by design, credentialed instead.
+- **Audit event:** pass — all three keys fire, the no-session actor-override shape is exactly `requestPasswordReset`'s precedent, and a full-table scan for leaked tokens/hashes in `audit_events` came back empty. One earlier gap (revoke's audit metadata thinner than Phase 3 specified) was caught as QA Advisory 2 and closed — live row now shows `{grantId, aboutOrgId, reportYear, organizationId}` exactly per spec.
+- **Mobile (360px):** pass — verified in a real Chromium at 360×800 with a DB-state check after a failed submit, not just a visual screenshot.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Everything below should land in `docs/TODO.md` at integration (Rule 10), most already drafted by earlier phases and simply not yet applied to the shared file per the Rule 16 discipline this branch operated under:
 
-## Red Flags (if NEEDS REWORK)
+1. **Congregation "view own filing history" page** — `presby_list_own_congregation_publications()` has been callable since `drizzle/0038` with zero UI consumers, deferred a second time by this pipeline. *TODO line:* `Congregation "view own filing history" page — presby_list_own_congregation_publications() built since drizzle/0038, still no UI caller; deferred by submission-grants (D16 increment 6).`
+2. **Bounce visibility for issued-grant emails** — the issuing clerk has no signal today if delivery to `issued_to_email` fails. *TODO line:* `Bounce visibility for statistics-grant emails — issuing clerk cannot see email_queue 'failed' status without going through (admin); named residual since Phase 1.`
+3. **`presby_withdraw_publication()` UI** — still unbuilt, withdrawal is owner-only. *TODO line:* `presby_withdraw_publication() UI — unbuilt; carried forward from the lifecycle-affiliation-returns pipeline and confirmed out of scope again here.`
+4. **30/hour issuance ceiling is a tunable, not a bug, but worth revisiting** — a presbytery with 50–100 member congregations doing a bulk pass at a new report year will hit the wall partway through and have to wait out the hour. *TODO line:* `Issuance rate limit (stats_grant_issue, 30/hour org-keyed) — fine for typical presbyteries, will bind for large ones doing a bulk pass; revisit ceiling or add a batched-issuance UX before turning the flag on for a presbytery with 50+ member congregations.`
+5. **`RATE_LIMIT_DISABLED` testing posture** — QA's sharpest new finding: `.env.local` sets `RATE_LIMIT_DISABLED=true` and the e2e `globalSetup` *requires* it, so every limiter in the tree (sign-in, password reset, TOTP, feedback, contact form, and now both grant limits) is exercised live only when someone deliberately overrides the variable, as QA did here twice. This is a platform-wide testing gap this feature happened to surface, not something this feature caused. *TODO line:* `RATE_LIMIT_DISABLED=true in .env.local silently disables every rate limiter under standard dev/e2e config, and e2e globalSetup requires it on — no routine test run exercises live limiter behavior; add a docs/testing.md line and a periodic live-limiter check (candidate: fold into the release-slot test-coverage review).`
+6. **The two pre-existing e2e reds (FAIL-2)** — not this pipeline's defect (byte-identical to `main`, the portal renders no `<h1>` at all since `7e4f21a`), but it is a merge precondition per the orchestrator's own note. Already tracked per the orchestrator note in this work-log; confirm the TODO lines exist rather than re-adding duplicates.
+7. **Minor test-hygiene items already closed but worth a durable note:** `normalizeRscNoise()` in `e2e/statistics-submit.spec.ts` is wider than its own comment (blanks the whole flight payload rather than just dev-mode reference IDs) — QA's own narrower diff reached the same conclusion, so no functional risk, but the spec's stated scope should be corrected. `rate-limit.test.ts` fails under `DATABASE_URL` (pre-existing, unrelated) — worth a `docs/testing.md` line so "run the whole lib suite with `dotenv -e .env.local`" isn't attempted as a supported command.
 
-- [Specific. What has to change before this ships.]
+None of these block the flag being off today. Items 1–3 were scoped out from the start and simply need their already-drafted lines applied to `docs/TODO.md`; items 4–5 are genuine new discoveries from this pass and are the ones that most need a durable home before this pipeline's context is lost.
+
+## Additional Phase 6 items
+
+**Release note (0.26.0 draft):** *"Presbytery clerks can now email an unmanaged or invited congregation a one-time link to file its annual statistical report — no account required."* This is a light improvement on the orchestrator's draft (adds "unmanaged or invited," which is the actual scope, so a reader doesn't wonder why their fully-onboarded congregation didn't get one) — bless with that one-word-category addition, or ship the orchestrator's original if brevity matters more; both are accurate.
+
+**What's-new:** correctly deferred. The flag ships off; publish a `whats_new_entries` row when it's first turned on for a real presbytery, not at merge — stated explicitly in both Phase 5 passes and worth restating here so it isn't lost once this work-log stops being anyone's active context.
+
+**Rule 14 (functionality map):** the existing bullet for "presby: presbytery oversight & statistics" (`docs/product/functionality-map.md:25`) already documents `presby_publish_sasr_snapshot()` and the chain it writes; it should gain one clause noting that `presby_write_return_publication_chain()` now backs *two* callers — the existing self-publish path and the new account-less grant path — and that the latter ships at `(statistics-submit)` behind `statistics.submission_grants`, seeded off. This is a real change to a documented surface (a second caller of a described mechanism), not a new bullet.
+
+**Rule 15 (architecture.md, the credential as a third mechanism):** **recommend no, not yet.** `docs/architecture.md:96` currently states the two-mechanism split ("permissions answers *may*, flags answer *is this on*") at the level a first-time reader needs. DECISION-147's "third access mechanism" framing is accurate and important, but today it describes exactly one flow in the entire platform — a single-use token authorizing one write inside one database function — not yet a recurring architectural pattern the way permissions and flags are (permissions and flags gate dozens of surfaces each; the credential mechanism gates exactly one). Password-reset tokens are structurally the same shape and architecture.md never needed a sentence for them either. Rule 15's own bar is "most feature work does not touch it" and "stays useful by staying stable" — I'd revisit this recommendation the moment a *second* feature adopts the credential pattern (at which point it's a real recurring subsystem, not a single flow), but adding a sentence now for one flow risks the same creeping-update problem Rule 15 warns against. If the orchestrator disagrees, the cheapest correct edit would be one clause appended to the existing permissions/flags sentence at line 96, not a new subsection.
+
+**Rule 12:** n/a — confirmed, this work did not originate from in-app member feedback (no `Source` block in the work-log header).
+
+## DECISION-147 final text
+
+**Bless Phase 3's version** (`docs/work-log/2026-09-25-submission-grants.md:1553-1592`), which explicitly supersedes Phase 2's draft. I compared both against what actually shipped and against QA's independent verification: Phase 3's text is the more precise of the two — it correctly states the recipient is "re-resolved fresh from the affiliation history at claim time... with the grant's stored value used only as a staleness check" (Phase 2's draft didn't yet have this resolved), names the F80 fix's actual mechanism (the collision check moved into the shared writer, not duplicated), and describes the claim as the two-step transition (`submitted_at` then `return_id`) that the shipped freeze trigger actually enforces (three sanctioned transitions, not the two the earlier draft implied). Every clause in Phase 3's text is independently confirmed by QA's live-catalog checks — the recipient resolution, the single arming site, the column-level `UPDATE (revoked_at)` grant, the two racing connections producing one winner. No amendment needed; adopt Phase 3's text verbatim into `docs/decisions.md` at integration.
+
+---
+
+## Per-Phase Status
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete | **SHIP WITH NOTES** | 2026-09-25 |
+
+
+
+### Orchestrator closure (2026-09-25)
+
+Shipped as v0.26.0 (`feat(statistics):`), integrated after the security §B merge per Rule 16 (merge of `main` incl. 0048 + round three, `test-rls.sql` re-run on the merged tree and again on `development` after `0049` applied there). DECISION-147 recorded; `docs/schema-design-2.md` §6 corrected with the F80 resolution; TODO reconciled; `(statistics-submit)` added to CLAUDE.md's un-brandable list and the architect agent's route-group rules; functionality map and release notes updated. What's-new: deferred until the flag is first turned on for a real presbytery.

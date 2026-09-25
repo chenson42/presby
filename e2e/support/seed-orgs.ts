@@ -390,11 +390,64 @@ export async function seedE2EOrgs(platformDbUrl: string): Promise<void> {
       updated_at          = now()
   `;
 
+  // ---------------------------------------------------------------------
+  // APPENDED BLOCK — statistics submission grants (increment 6, D16,
+  // DECISION-147). docs/work-log/2026-09-25-submission-grants.md, Phase 4
+  // batch C. Appended, not restructured, per that pipeline's own Rule 16
+  // discipline for this shared file.
+  //
+  // Grants `statistics.manage` to org-multi (Tobias Fennimore,
+  // FIXTURE_PEOPLE[1]) at the e2e-presbytery org he already holds a SECOND
+  // membership at (see the `app.person_claim_authorized` DO block above) —
+  // the presbytery-side "issue/revoke a submission grant" surface needs a
+  // real, storageState-cached, browser-reachable presbytery admin, and
+  // org-multi is the one fixture person who already has a relationship
+  // there with no role bound. `gamma` (unmanaged, already a member
+  // congregation of `presbytery`) is the about-org target — no new
+  // organization fixture needed, since `statistics_submission_grants_
+  // unmanaged` requires exactly that platform_status.
+  //
+  // A fresh, org-scoped `app_role` rather than reusing a template: this
+  // suite's fixtures are `e2e-*`-scoped and idempotent, and inventing a
+  // one-permission role here mirrors `scripts/seed-dev.sql`'s own
+  // "adopted copy" pattern (`f0000000-...-000e`, `presbytery_stated_
+  // clerk`) without needing that file's global-template machinery.
+  const GRANT_ROLE_ID = "e2e00000-0000-0000-0000-0000000000b1";
+  await sql`
+    INSERT INTO app_roles (id, organization_id, key, name, role_kind, is_protected)
+    VALUES (
+      ${GRANT_ROLE_ID}::uuid,
+      ${E2E_ORGS.presbytery.id}::uuid,
+      'e2e_statistics_manage',
+      'E2E Statistics Manager',
+      'custom',
+      false
+    )
+    ON CONFLICT (id) DO NOTHING
+  `;
+  await sql`
+    INSERT INTO app_role_permissions (role_id, permission_key)
+    VALUES (${GRANT_ROLE_ID}::uuid, 'statistics.manage')
+    ON CONFLICT DO NOTHING
+  `;
+  await sql`
+    INSERT INTO role_grants (organization_id, role_id, person_id, starts_on, granted_by)
+    SELECT ${E2E_ORGS.presbytery.id}::uuid, ${GRANT_ROLE_ID}::uuid,
+           ${FIXTURE_PEOPLE[1].id}::uuid, DATE '2020-01-01', ${adminUserId}::uuid
+     WHERE NOT EXISTS (
+       SELECT 1 FROM role_grants
+        WHERE person_id = ${FIXTURE_PEOPLE[1].id}::uuid
+          AND organization_id = ${E2E_ORGS.presbytery.id}::uuid
+          AND role_id = ${GRANT_ROLE_ID}::uuid
+     )
+  `;
+
   console.log(
     `[seed-orgs] provisioned ${Object.keys(E2E_ORGS).length} organizations ` +
       `(${Object.values(E2E_ORGS)
         .map((o) => o.slug)
-        .join(", ")}), ${FIXTURE_PEOPLE.length} relationships, and a brand ` +
-      `on ${E2E_BRANDED_ORG.slug}`,
+        .join(", ")}), ${FIXTURE_PEOPLE.length} relationships, a brand ` +
+      `on ${E2E_BRANDED_ORG.slug}, and org-multi's statistics.manage grant ` +
+      `at ${E2E_ORGS.presbytery.slug}`,
   );
 }

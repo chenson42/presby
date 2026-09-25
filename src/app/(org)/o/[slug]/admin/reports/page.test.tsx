@@ -48,11 +48,22 @@ vi.mock("@/lib/presbytery", () => ({
   getPerCapitaOverview: (...args: unknown[]) => getPerCapitaOverview(...args),
 }));
 
+// Increment 6 (D16/DECISION-147) — `@/lib/statistics-grants` is
+// `server-only`-marked (real `submitStatisticsGrant()` pulls the Neon pool
+// in); mocked here for the same reason `@/lib/presbytery` above is, so this
+// suite can render `page.tsx` in jsdom without a live database.
+const listStatisticsGrants = vi.fn();
+vi.mock("@/lib/statistics-grants", () => ({
+  listStatisticsGrants: (...args: unknown[]) => listStatisticsGrants(...args),
+}));
+
 vi.mock("./actions", () => ({
   setCongregationStatisticsAction: vi.fn(),
   setPerCapitaRateAction: vi.fn(),
   generatePerCapitaRecordsAction: vi.fn(),
   recordPerCapitaPaymentAction: vi.fn(),
+  issueStatisticsGrantAction: vi.fn(),
+  revokeStatisticsGrantAction: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -82,6 +93,13 @@ afterEach(() => {
   isFlagEnabled.mockReset();
   getCongregationStatisticsRollup.mockReset();
   getPerCapitaOverview.mockReset();
+  // Increment 6's third section (`renderSubmissionGrantsSection()`) only
+  // calls this when `statistics.submission_grants` resolves true — most
+  // tests below never touch that flag and don't care about this section's
+  // content, so a harmless default keeps them from throwing on an
+  // un-mocked call rather than requiring every pre-existing test to know
+  // about a section it isn't testing.
+  listStatisticsGrants.mockReset().mockResolvedValue({ kind: "ok", data: [] });
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });

@@ -292,6 +292,25 @@ export const AUDIT_ACTIONS = {
   // Metadata: { organizationId, publicListed }.
   GROUP_MEMBERSHIP_LISTED_PUBLICLY: "group_membership.listed_publicly",
   GROUP_MEMBERSHIP_UNLISTED_PUBLICLY: "group_membership.unlisted_publicly",
+  // Statistical-return submission grants (increment 6, D16 / DECISION-147,
+  // docs/work-log/2026-09-25-submission-grants.md) — the platform's first
+  // unauthenticated write path. ISSUED/REVOKED are written from
+  // src/app/(org)/o/[slug]/admin/reports/actions.ts, ordinary session actor,
+  // same "tenant.*" self-service axis as TENANT_ROLE_GRANTED/REVOKED.
+  // SUBMITTED is written from src/app/(statistics-submit)/actions.ts — the
+  // ONE deliberate divergence from this pipeline's own "lib does the SQL,
+  // actions.ts does the audit" convention, forced by the no-session shape:
+  // actor = { userId: null, email: issuedToEmail }, resourceId = the grant
+  // id, metadata = { organizationId, aboutOrgId, reportYear, returnId }.
+  // Never the raw token or its hash. `check:audit`'s MUTATION_RE now also
+  // matches `db.execute(...)`, but this remains a review-verified property,
+  // not a tripwire-proven one — see Phase 2's correction in the work-log.
+  STATISTICS_GRANT_ISSUED: "tenant.statistics_grant.issued",
+  // Metadata: { organizationId, aboutOrgId, reportYear }.
+  STATISTICS_GRANT_REVOKED: "tenant.statistics_grant.revoked",
+  // Metadata: { organizationId, aboutOrgId, reportYear, grantId }.
+  STATISTICS_GRANT_SUBMITTED: "tenant.statistics_grant.submitted",
+  // Metadata: { organizationId, aboutOrgId, reportYear, returnId }.
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

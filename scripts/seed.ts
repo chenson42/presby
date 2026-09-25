@@ -581,6 +581,29 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "statistics.submission_grants",
+      // ONE FLAG, TWO SURFACES (docs/work-log/2026-09-25-submission-grants.md,
+      // D16/DECISION-147): ON gates BOTH the "issue a submission grant"
+      // section of /o/<slug>/admin/reports (a third, independent gate there
+      // alongside org_portal.reports and statistics.manage) AND the public,
+      // session-less /file-statistics submission endpoint. Checked with the
+      // BARE isFlagEnabled() — fail-CLOSED is correct here, unlike
+      // src/lib/auth/'s DECISION-026 fail-open wrappers, because this gates a
+      // WRITE, not a sign-in path: a DB blip should refuse an anonymous
+      // submission, not admit one. OFF on the public page renders the SAME
+      // generic "this link is no longer active" copy as an invalid/expired/
+      // revoked token — never a distinguishable "not available yet" state,
+      // or flag state becomes an enumeration oracle (Phase 2's rule). Never
+      // substitutes for statistics.manage (DECISION-003: a flag never gates
+      // a permission), and never substitutes for the token itself, which is
+      // a third access mechanism (a credential) and is never mapped into
+      // this or any other flag. Seeded OFF, same "ships dark until the page
+      // lands" reasoning as its org_portal.* siblings.
+      description:
+        "Presbytery-issued, token-authenticated SASR submission grants (D16). OFF = the issuance section of /o/<slug>/admin/reports is hidden and /file-statistics renders the same generic 'link no longer active' copy as any dead token.",
+      enabled: false,
+    },
+    {
       key: "org_portal.insights",
       // ON: /o/<slug>/admin/insights (presbytery rollup dashboard) is
       // reachable at all. GRADUATED OUT of the placeholder block below —

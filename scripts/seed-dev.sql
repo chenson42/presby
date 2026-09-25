@@ -1526,4 +1526,72 @@ values
    'Part-Time Bookkeeper', 'part-time bookkeeper', 'Finance',
    '2024-01-15', null, 'e0000000-0000-0000-0000-0000000000f4');
 
+-- ===========================================================================
+-- APPENDED BLOCK — statistics submission grants (increment 6, D16,
+-- DECISION-147; drizzle/0049_presby_submission_grants.sql).
+-- docs/work-log/2026-09-25-submission-grants.md, Phase 4 batch A.
+-- Workflow Rule 16: one delimited block at the END of this file, so
+-- integration merges are mechanical.
+-- ===========================================================================
+--
+-- THE FIXTURE CONGREGATION IS QUILLHAVEN (444...), and that is not arbitrary:
+-- it is the seed's `unmanaged` congregation — a church with no account, no
+-- member user and no portal to file through, which is the entire population
+-- D16's grant mechanism exists for. Marrowbone (`invited`) would also be
+-- legal; Alder Creek (`managed`) would be REFUSED at INSERT by
+-- statistics_submission_grants_unmanaged, and proving that refusal is
+-- scripts/test-rls.sql section 36(e)'s job, not the seed's.
+--
+-- THE RAW TOKENS ARE DOCUMENTED, DEV-ONLY AND DELIBERATELY GUESSABLE. In
+-- production a token is 32 bytes of CSPRNG and exists only in the recipient's
+-- email; here the hash below is the sha256 of a known string so a developer
+-- can open the flow without reading the outbox. The tokens are:
+--
+--   live     'dev-grant-quillhaven-2026'
+--   expired  'dev-grant-quillhaven-2024-expired'
+--   revoked  'dev-grant-quillhaven-2023-revoked'
+--
+-- so /file-statistics?token=dev-grant-quillhaven-2026 is the working link on a
+-- freshly seeded development branch. This is the same class of fact as the
+-- seeded fixture passwords: never true of any deployed environment, and
+-- No-Real-Data clean (invented church, example.invalid recipient).
+--
+-- THREE ROWS, THREE STATES, one per report year so the partial unique
+-- (organization_id, about_org_id, report_year) where revoked_at is null and
+-- submitted_at is null is satisfied by construction. There is deliberately NO
+-- already-submitted fixture: spending a grant requires a real chain write, and
+-- test-rls.sql section 36(c) spends the LIVE one inside a rolled-back
+-- transaction rather than the seed freezing a half-claimed row nobody wrote.
+insert into statistics_submission_grants
+  (id, organization_id, about_org_id, report_year, token_hash,
+   issued_to_name, issued_to_email, issued_by, issued_at, expires_at,
+   submitted_at, return_id, revoked_at)
+values
+  -- LIVE. The northern reach asks Quillhaven for its 2026 return.
+  ('ab000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
+   2026, 'a7f3b4eeb465002f791d57e294ab7224a57a6fffdd6d2708dd307c5adf8f7e0c',
+   'Odalys Fenwick', 'clerk@quillhaven.example.invalid',
+   'e0000000-0000-0000-0000-0000000000f4',
+   now() - interval '3 days', now() + interval '42 days',
+   null, null, null),
+  -- EXPIRED. Same congregation, an earlier year, the window closed unused.
+  ('ab000000-0000-0000-0000-000000000002',
+   '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
+   2024, '66fe4afd3f4e7f8e78753707f799bc4b31934c40c83137471cff89f41196844d',
+   'Odalys Fenwick', 'clerk@quillhaven.example.invalid',
+   'e0000000-0000-0000-0000-0000000000f4',
+   now() - interval '400 days', now() - interval '355 days',
+   null, null, null),
+  -- REVOKED. The clerk mistyped the recipient and revoked before re-issuing.
+  ('ab000000-0000-0000-0000-000000000003',
+   '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444',
+   2023, '429cf4fc640910801810f1326833bfbeb6f478966782dcc4b9b48ef5d6f00444',
+   'Odalys Fenwick', 'clerk@quillhaven.example.invalid',
+   'e0000000-0000-0000-0000-0000000000f4',
+   now() - interval '700 days', now() - interval '655 days',
+   null, null, now() - interval '699 days')
+on conflict (id) do nothing;
+
+
 commit;

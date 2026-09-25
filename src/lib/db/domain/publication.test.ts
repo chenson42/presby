@@ -360,13 +360,23 @@ describe.skipIf(!hasDb)(
         // resolves the recipient as of TODAY. Quillhaven is the fixture where
         // those differ, but Alder Creek's own affiliation opened in 1962, so
         // 1950 is the same shape on the seeded congregation.
+        //
+        // THE MESSAGE MOVED, NOT THE BEHAVIOUR (F80 / drizzle/0049). The check
+        // now lives once, in the extracted
+        // presby_write_return_publication_chain(), reached by BOTH the
+        // self-publish path and the grant path, so its text names the shared
+        // writer rather than whichever caller reached it. The errcode
+        // (invalid_parameter_value) and the refusal-before-any-write property
+        // are unchanged; src/lib/db/domain/grants.test.ts asserts the two
+        // callers now see a byte-identical string, which is the observable
+        // form of "one shared code path".
         await inOrgRollback(CLERK_OF_SESSION, ALDER_CREEK, async (tx) => {
           await expectDbError(
             () =>
               tx.execute(sql`
                 select presby_publish_sasr_snapshot(1950, 'n/a', p_ending_active => 10)
               `),
-            /was not affiliated with its current council .* during 1950/,
+            /presby_write_return_publication_chain: .* was not affiliated with .* during 1950/,
           );
         });
       });
@@ -1203,7 +1213,7 @@ describe.skipIf(!hasDb)(
         });
       });
 
-      it("arms the marker inside presby_publish_sasr_snapshot() itself, and all three guards are live — the catalog shape", async () => {
+      it("arms the marker in exactly ONE place — the extracted chain writer — and all three guards are live (the catalog shape, after drizzle/0049)", async () => {
         const platform = getPlatformDb();
         const triggers = rowsOf(
           await platform.execute(sql`
@@ -1228,18 +1238,24 @@ describe.skipIf(!hasDb)(
           "statistical_returns.statistical_returns_guard scoped=false enabled=O",
         ]);
 
+        // THE ARMING SITE MOVED (drizzle/0049). It is no longer inside
+        // presby_publish_sasr_snapshot(): that function is now a thin caller
+        // of the extracted presby_write_return_publication_chain(), which is
+        // the SINGLE site in the database that arms the chain marker — the
+        // property F55 actually cares about, and now asserted as such rather
+        // than by naming whichever caller happened to hold it.
         const armed = rowsOf(
           await platform.execute(sql`
-            select count(*)::int as n from pg_proc p
+            select p.proname::text as proname from pg_proc p
              join pg_namespace n on n.oid = p.pronamespace
             where n.nspname = 'public' and p.prokind = 'f'
-              and p.proname = 'presby_publish_sasr_snapshot'
-              and p.prosecdef
               and pg_get_functiondef(p.oid)
                   like '%set_config(''presby.publication_write_active'', ''true'', true)%'
           `),
         );
-        expect(armed[0]!.n).toBe(1);
+        expect(armed.map((r) => String(r.proname))).toEqual([
+          "presby_write_return_publication_chain",
+        ]);
       });
     });
 

@@ -1,6 +1,6 @@
 {
   "name": "presby",
-  "version": "0.25.4",
+  "version": "0.25.5",
   "private": true,
   "description": "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods: rolls, officers, directory, and council operations. Pre-release.",
   "repository": {

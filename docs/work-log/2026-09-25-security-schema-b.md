@@ -21,7 +21,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete, implementer named | 2026-09-25 |
 | 4 — Implementation | database-admin | **Complete** (second pass — QA G1/G2 closed; leaked rows removed) | Built as designed, four named deviations; QA's two test-hygiene gaps fixed, no migration change | 2026-09-25 |
 | 5 — Verification | qa | **Pending re-verification** | FAIL (first pass) — returned for G1/G2 | 2026-09-25 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-25 |
+| 6 — Shipped vs intent | analyst | Complete — all ten scoped defects re-verified live; shipped as v0.25.5 | SHIP IT | 2026-09-25 |
 
 ---
 
@@ -1260,747 +1260,118 @@ To **`analyst` for Phase 6**. The Notes for Phase 6 in my first-pass section sta
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-25.*
+
+*Read-only. Every claim below marked "confirmed" or "re-measured" was checked directly against the pipeline's live Neon branch (`pipeline-security-schema-b`, `MIGRATE_DATABASE_URL` = `neondb_owner`, `APP_DATABASE_URL` = `presby_app`) and the worktree's files by me, in this session — not accepted from QA's or database-admin's write-up alone, though in every case I checked, it matched. Nothing was written; the working tree is clean (the pipeline's fix commit, `832a9ee`, already exists on `pipeline/security-schema-b` — not something this Phase 6 review created or needed to create).
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP IT**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+All ten scoped defects (nine items plus F70, plus the folded B-L3/B-L4/B-L6) are closed exactly as Phase 1 described and Phase 3 designed, the two Phase 5 FAIL gaps were fixed at the root cause rather than patched at the symptom, and the honest scope corrections made along the way (five FKs not six, three escapes not four, 14 functions not the whole catalog, one allow-list table not two, the TEMP revoke dropped, the third connection deferred, the `people` guard reclassified as the largest item) all survived independent re-measurement — this is a hardening pipeline that got harder on itself at every phase rather than softer.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **B-H2, re-verified myself:** `app_role_permissions` is `relrowsecurity=t, relforcerowsecurity=t` with exactly 4 policies. QA's cross-tenant write reproduction from Phase 1 (43 foreign rows, `INSERT 0 1` against an invisible `role_id`) is the exact mechanism this migration closes, and QA proved the closure with a failing-first pair (drop the INSERT policy → suite goes red at a named line; restore → green). The four `role-definitions.ts` write paths Phase 2 found and Phase 1 missed (`:524`, `:631` DELETE, `:640`, `:842`) all still work — `role-definitions.test.ts` DB-backed, 47/47 pass — and I confirmed the DELETE arm ships (`app_role_permissions_delete`) so `setRolePermissions()` still clears bindings rather than silently no-oping.
+- **The drift function and its live-called sibling, re-verified myself:** `proacl` on both `presby_roll_cache_drift()` and `presby_reconcile_current_roll()` is `{neondb_owner=X/neondb_owner}` and nothing else — `presby_app` and `PUBLIC` hold no EXECUTE. I read `src/app/api/cron/maintenance/route.ts` directly: the reconcile call is on `getPlatformDb()` (`:91-92`), the three token DELETEs stay on `db`. This is the more consequential of the two original findings (a live cross-org *writer*, not just a reader, per the architect's correction of the original review's framing) and it shipped as the architect ruled — revoke-and-relocate, not an org predicate that would have kept a cross-org DEFINER on the tenant surface for one test's sake.
+- **The auth-shell grant model:** the posture is now written down in `drizzle/0048` table-by-table rather than living only in undocumented live grants, and it is proven reproducible from empty — QA's and database-admin's independent from-scratch builds (filename-order replay, 49/49, exit 0) both produced a working first sign-in (`POST /api/auth/callback/credentials → 302 /launch → 307 /admin`). `role-definitions.ts` writes, `recordAudit()`'s append-only shape, and the `scripts/seed.ts` catalog writers all still work post-narrowing — I independently confirmed `presby_two_factor_required`'s `proconfig` and the `people_guard_delete` trigger's `tgenabled='O'` directly on the catalog.
+- **The `group_types` templates, re-verified myself:** 6 rows, 1 per key, `group_types_org_key` carries `indnullsnotdistinct=t`. `groups.ts` has zero remaining `getPlatformDb()` calls outside two now-historical comments (I grepped it myself) — the three escapes Phase 1 undercounted at "two" and Phase 2 corrected to "three" are gone, and the fourth site Phase 1 over-counted (`org-provisioning.ts:286`) was correctly left alone because it is the whole org-creation transaction's own connection, not a `group_types`-specific escape.
+- **The `people` delete guard:** trigger present and enabled, and I did not just read the catalog — the fixture-teardown story is the part of this pipeline most likely to have quietly broken something, and it didn't: QA and database-admin between them found and fixed the fixture-generator bug that was the *actual* source of the 1,557 duplicate `group_types` rows (a stale `onConflictDoNothing()` against a table with no unique constraint), and 32 fixture insert sites plus two production-created-person sites all still tear down cleanly. The cron reconcile and the daily reconcile behavior are unchanged in shape, only in which connection runs the one statement.
+- **The Phase 5 FAIL → PASS cycle is a genuine credit to this pipeline, not a footnote.** G1 (the vacuous `presby_app`-side count that could not fail) and G2 (`tickets.test.ts`'s block-local `outsidePerson` leak) were both root-caused, not patched: G1 became a real DB-backed canary that QA proved fails on a planted row before accepting it, and G2 became a tracked-array pattern that closes the *class* of hand-maintained-teardown-list bugs rather than adding one more name to the list that just went stale. I re-ran the isolation suite myself and got the identical **455 pass, 0 FAIL** QA's re-verification reported, and confirmed **0** stamped `people`/`organizations` rows outstanding on the owner connection right now.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+| # | Phase 1 said | Shipped | Verdict |
+|---|---|---|---|
+| B-H2 | Policy through `role_id → app_roles`, revoke what's not needed | Four-policy split exactly as designed; UPDATE revoked (no live caller); owner path explicitly documented as still open (F44) | matches |
+| C-4 | "Scope to `presby_current_org()` **or** revoke and move the caller" — read at Phase 1 as two equivalent options | Architect ruled these are not equivalent (an org predicate keeps a cross-org DEFINER on the attack surface for one test); shipped revoke-and-relocate, and the analyst's own Gap 1 (the wrong caller was named) is what surfaced the more serious sibling finding | acceptable drift — the correction is a strengthening, and the analyst's own Phase 1 gap is what triggered it |
+| B-H3 | Write down the grant model; defer the third-connection question if needed | Grant model written, narrowed, and — the harder part — *proven* reproducible from empty via a real sign-in, twice, by two different agents | matches, with the acceptance criterion (Gap 5 / orchestrator ruling 3) doing real work: it caught B-L4 |
+| B-M3 | "Six single-column tenant→tenant FKs" | Five composite, one (`groups.group_type_id`) correctly excluded as inexpressible under DECISION-110 — architect's correction, verified by me (`select count(*) from pg_constraint where conname in (...)` = 5) | acceptable drift, and correctly documented so a future F2 sweep doesn't reopen the sixth |
+| B-M4 | "Two production call sites" | Three (`groups.ts`), with a fourth (`org-provisioning.ts`) correctly identified and correctly left alone | acceptable drift |
+| B-L1 | De-dup + `unique (organization_id, key)` | De-dup + `unique nulls not distinct` (the plain form would have constrained nothing, since every row is global) — and the *generator* of the duplicates (a test fixture bug) was found and fixed, which Phase 1/3 did not scope for at all | acceptable drift, strictly an improvement |
+| N-6 | "Fully independent, smallest" item | Reclassified by the architect as the **largest** mechanical item (32 fixture call sites, not zero) — Phase 1's ranking was wrong and Phase 2 caught it before Phase 4 scheduled it as a closer | corrected in-flight, not a regression |
+| C-3 | Replace 13 hand-enumerated FORCE assertions with a catch-all | Catch-all added; the 13 old ones are **not removed** (a named, deliberate deviation from the literal instruction, for the Rule-16 shared-file reason) | acceptable drift, tracked as a TODO line |
+| F70 | `SET search_path = public, pg_temp` "as hardening" | Shipped as **closing a live gap**, not hardening — the architect's own live probe proved `SET search_path = public` alone (the existing convention) was fooled by a `pg_temp` shadow of `people` inside the 2FA-required predicate. I independently re-confirmed the shipped `proconfig` on `presby_two_factor_required` | matches in mechanism, correctly reframed in severity |
+| Housekeeping | Journal gap, wrong-role comments | Comments fixed; journal gap (idx 26/27/28) reclassified from cosmetic housekeeping to a **from-scratch blocker**, deferred to integration by design (Rule 16), not silently dropped | acceptable drift — see Notes below, this is not yet closed and correctly isn't supposed to be closed *by this branch* |
+
+No item regressed. No item shipped narrower than Phase 1's stated intent. Every drift from the literal Phase 1/Phase 3 text is a documented correction that survived independent re-measurement at a later phase — I did not find a case where a later phase's correction was itself wrong.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state (from-scratch database):** tested twice, by two different agents, with different tools (`drizzle-kit migrate` vs. filename-order `psql` replay). The honest result is not "it works" — it is "the migration content works from empty; the journal-driven runner does not, for a pre-existing reason this pipeline correctly surfaced rather than caused." **Pass, with a named unresolved blocker that both QA and database-admin agree is not this migration's defect and is scoped correctly as an integration co-requisite.**
+- **Failure microcopy:** `presby_guard_people_delete()`'s exception text — *"a person record is never hard-deleted; record a merge instead (merged_into_id)"* — is a human sentence naming the correct alternative, not a bare constraint-violation dump. This is the one place this pipeline has anything resembling user-facing (operator-facing) text, and it's right. The cron route's bearer-auth failure modes (503 unset secret, 401 mismatch) were read by QA and are unchanged by this diff.
+- **Permission gate:** N/A in the usual member-facing sense — verified instead as "does the RLS policy actually refuse the write it claims to refuse," and it does, on both the policy layer (B-H2 INSERT) and the grant layer (UPDATE, both roll functions). The owner-connection paths that stay open (`app_role_permissions` write, and originally `people` delete) are each explicitly named in the migration's own comments rather than left to be discovered by the next reader — this is the right way to ship a known, bounded residual.
+- **Audit event:** correctly not applicable. No `AUDIT_ACTIONS` key added or touched; `npm run check:audit` passes; no server action body changed. This is schema/grant hardening, not a user-facing mutation, and Workflow Rule 7 doesn't reach it.
+- **Mobile (360px):** not applicable — no UI surface.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Integration Facts Carried Forward (from QA and tech-lead, independently re-confirmed where cheap to do so)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+1. **The 21 unpinned 0043–0047 functions get `pg_temp` from `main`.** I did not re-verify this against `main` (out of scope for this worktree), but the mechanism is sound: this branch's dated allow-list is a measured, named exception with an explicit shrink-to-empty instruction, not a silent gap.
+2. **The journal back-fill (idx 26/27/28) is a blocker, not housekeeping, and must land with `drizzle/0048` in the same integration action.** I independently confirmed the *symptom* this fact rests on is real and current on this branch: `drizzle/meta/_journal.json`'s tail (checked above) shows idx 47 → 48 with no 26/27/28 — this branch correctly did not touch the mid-array insert, per Rule 16, but that means the fact QA and database-admin both surfaced is still true today and is not something this branch can close on its own. **This is the one item in the whole pipeline that is not yet actually shippable by this branch alone** — it's an orchestrator action at `/merge-pr` time, and I'm naming it as a gate on integration, not on this Phase 6 verdict (the work delivered by *this* pipeline is complete and correct; the database it will land into needs one more file touched at merge time, which was scoped as out-of-branch from Phase 2 onward).
+3. **The silent exit-1 of the migrate runner** (tech-lead's addition) is a real, independent hazard beyond the specific 26/27/28 gap and deserves its own tripwire, not just a fix to this instance.
 
-## Red Flags (if NEEDS REWORK)
+## Follow-Ups (SHIP WITH NOTES is not the verdict, but Rule 10 still applies — these are the tracked follow-ups for `docs/TODO.md`)
 
-- [Specific. What has to change before this ships.]
+Collected from Phases 2–5, for the orchestrator to apply at integration alongside this pipeline's own already-proposed lines:
+
+1. **Reclassify `group_types` as a global catalog table** (root cause of B-M4, B-L1, and the `groups.group_type_id` FK exclusion) — move it out of `0009`'s `tenant_tables` loop shape in a future migration.
+2. **Close the `app_role_permissions` owner-write path with a `BEFORE INSERT/UPDATE/DELETE` trigger** (F44 — a grant can never reach `neondb_owner`; B-H2's policy binds `presby_app` only, by design, today).
+3. **The platform-shell DML accessor refactor** DECISION-146 names as the prerequisite for ever adding a third (auth-scoped) database connection — moving ~13 modules' platform-shell writes behind one accessor before any new role is created.
+4. **Physically remove the 13 hand-enumerated per-table FORCE assertions** in `scripts/test-rls.sql`, now superseded by the C-3 catch-all — deferred because Rule 16 forbade scattering that edit across the shared file mid-pipeline.
+5. **Fix `docs/schema-design.md` §17's "two bespoke policies"** stale count (three live; `person_links` deleted) — needs a human read, not a mechanical replace; the literal phrase was not found by grep in either schema-design doc.
+6. **`revoke temporary on database … from public`** — deferred from 0048 (D1). Prerequisite: remove or replace `scripts/test-rls.sql:1292`'s `create temporary table t20_fresh_person`, itself a non-parallel housekeeping act.
+7. **Shrink the F70 dated allow-list to empty** once the lifecycle pipeline's eleventh loop-back lands `public, pg_temp` on the 21 functions from 0043–0047, and delete the explanatory paragraph in test-rls.sql §36.3.
+8. **`presby_platform` login-or-drop decision** — it is `rolcanlogin=false` and holds broad grants (including on `app_role_permissions`) that nothing has ever exercised; the DECISION-146 follow-up should decide whether to drop the role or give it a login rather than let it sit as a second undocumented artifact of the same class B-H3 just fixed.
+9. **The 20-minute staleness grace in `src/lib/db/fixture-deletable.ts` is a deliberate, documented blind spot** — if fixture leaks recur, the fix is a run id threaded through `fixtureDeletableUntil()`, not a smaller constant.
+10. **The `deletable_until` fixture-leak canary needs a CI cadence**, not just "runs when a human remembers to run the DB-backed serial suite" — worth naming in the already-deferred CI-wiring pipeline; a leak has a two-hour fuse and CI is the natural thing to notice it.
+11. **The migrate runner's silent exit-1** deserves its own tripwire independent of the specific 26/27/28 gap: a `check:*`-style assertion that `_journal.json`'s `idx` values are a complete, gapless, ascending sequence matching the `drizzle/00XX_*.sql` files present, plus a narrower note that `drizzle-kit migrate`'s silent-exit-1 behavior itself is worth a short wrapper or an upstream issue.
+12. **`role_grants_role_fk`'s `ON DELETE CASCADE`** — `drizzle/0032`'s own header already names `RESTRICT` as the eventual fix; not this pipeline, still open.
+13. **CI naming of the DB-backed canary** as a scheduled job (folds into #10 — listed separately at tech-lead's request so it isn't lost inside a differently-worded line).
+14. **DECISION-113 correction note** (tech-lead's finding, not a renumbered decision): `parent_event_id`'s "not expressible without circularity" premise was TypeScript-inference-shaped, not a real Drizzle limitation, and is now composite. Does not reopen `groupMemberships.officerTermId` (DECISION-060), a different and more severe gap (no FK at all) on a different table.
+15. **`docs/work-log/2026-09-25-security-schema-b.md`'s phase-ordering repair** (tech-lead's documentation-hygiene note): the real Phase 4 content landed after the Phase 5/6 placeholder headings instead of in its own reserved slot. Non-blocking on this verdict, but worth a housekeeping pass so the file reads as a clean handoff artifact.
+
+**Journal back-fill (idx 26/27/28) is not a TODO line — it is an integration-time action, already correctly scoped by Phase 2 as orchestrator-only, and Phase 5's escalation ("blocker, must land with 0048, not after") stands as a condition of the merge itself**, not a deferred improvement. I am naming it here so it does not get lost between this Phase 6 verdict and the `/merge-pr` step, not because it belongs in `docs/TODO.md` as ordinary backlog.
+
+## Release-note line (draft)
+
+> **Security.** We closed a database-level gap that could have let one congregation's data touch another's permission settings, tightened who can create or remove records at the database level, and corrected several places where our security controls were written down incorrectly or not at all. This is invisible, backend hardening — no page, button, or workflow changes for any user.
+
+Checked against the accepted-residual list: does not overclaim. It does not say "closed," it says "closed a gap" and "tightened" — accurate, since the owner-path write on `app_role_permissions` is explicitly still open (residual #2 above), `presby_platform`'s over-grant is still open (residual #8), the fixture-leak canary's 20-minute blind spot is a named, accepted residual (not user-facing, correctly omitted from a member-facing note), and the third connection is deferred (also correctly omitted — DECISION-146 is an internal architecture call, not something a congregation admin needs to read about). Written for a non-engineer: no table names, no acronyms, no mention of RLS/DEFINER/grants.
+
+**What's-new: No.** No member-visible behavior changed — Workflow Rule 13 does not apply to internal hardening with zero UI, page, or workflow surface. Confirmed independently: no `FEATURES.*` key, no route, no component, no `'use client'` file in the diff.
+
+**Rules 14/15:** `docs/product/functionality-map.md` — no line changes; no user-facing surface moved. `docs/architecture.md` — **one sentence is worth adding**, not because this pipeline is architectural in the "new subsystem" sense (it isn't — Rule 15's bar is deliberately high), but because DECISION-146 is a real, citable reversal-adjacent ruling on the document's own "two connections, deliberately" architecture: a proposed one-sentence addition near wherever `architecture.md` currently states the two-connection model, along the lines of *"The `presby_app` grant shape backing this boundary is now written down and enforced in `drizzle/0048_presby_security_b.sql` rather than living only in undocumented live grants (DECISION-146)."* This is the kind of fact Rule 15 exists to capture — a changed, now-durable property of the deployment/runtime shape — without turning the document into a running changelog. I'd rather flag this for the orchestrator's judgment than assert it unilaterally, since Rule 15's own text says to resist updating it for most feature work; my read is this crosses the bar because it changes what a first-time reader would be told about the isolation boundary's provenance, not just its existence.
+
+## Proposed DECISION-146 final text
+
+Adopt the architect's Phase 2 draft **verbatim**, as tech-lead's Phase 3 already ruled ("no edits needed"). I independently re-read it against what actually shipped and found nothing that needs correcting — the "what ships instead" paragraph correctly names `drizzle/0048_presby_security_b.sql`, and every one of its three numbered reasons (the adapter is not where the sensitive tables are written; `presby_platform` is the cautionary precedent; the two-connection architecture is a stated boundary) held up under the independent measurements Phase 4 and Phase 5 both re-ran. No changes proposed.
+
+## Feedback / Rule 12
+
+Not applicable — this pipeline originated from the 2026-09-25 security and test-coverage reviews and an external post-merge review round (F70), not from an in-app member feedback row. No `feedback` row to mark `done`.
 
 ---
 
-# Phase 4 — Implementation (database-admin)
-
-*Every number below was measured on this pipeline's own Neon branch
-(`pipeline-security-schema-b`, PostgreSQL 18.6) during this phase, not carried
-forward from Phase 2/3's prose. Where a Phase 3 instruction did not survive
-contact with the database, it is named as a deviation with the measurement that
-killed it rather than quietly worked around.*
-
-## Migration mode
-
-**Hand-written**, per `.claude/agents/database-admin.md`'s "Presby Domain
-Schema" and `docs/TODO.md`'s standing note that `npm run db:generate` has been
-broken repo-wide since the `0009`–`0012` snapshot-chain collision. Drizzle Kit
-emits none of what this migration is made of — RLS policies, `FORCE ROW LEVEL
-SECURITY`, `ALTER FUNCTION … SET search_path`, a `SECURITY DEFINER` trigger
-function, `UNIQUE … NULLS NOT DISTINCT`, and eleven `revoke` statements.
-
-- **File:** `drizzle/0048_presby_security_b.sql` (nine sections, in Phase 3's
-  stated order).
-- **Applied with:** `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f
-  drizzle/0048_presby_security_b.sql` against the `development`-forked Neon
-  branch `pipeline-security-schema-b`, on the direct (unpooled) `neondb_owner`
-  endpoint. Never against `$APP_DATABASE_URL`.
-- **`drizzle/meta/_journal.json`:** one appended entry,
-  `{ "idx": 48, "tag": "0048_presby_security_b" }` — a 7-line pure append at
-  the end of the array, no mid-file edit. The B-L4 back-fill of idx 26/27/28
-  is **not** in this diff; it stays the orchestrator's job at integration
-  (Phase 2 §4, binding). **Read the from-scratch result below before treating
-  that back-fill as cosmetic — it is not.**
-
-## Files modified
-
-**Schema / migration (2)**
-
-| File | Change |
-|---|---|
-| `drizzle/0048_presby_security_b.sql` | New. Nine sections; full DDL below. |
-| `drizzle/meta/_journal.json` | Appended idx 48. |
-
-**Drizzle declarations, mirroring the migration (7)**
-
-| File | Change |
-|---|---|
-| `src/lib/db/domain/events.ts` | `parentEventId` loses `.references()`; new `events_parent_fk` composite in the `(t) => [...]` array; `AnyPgColumn` import dropped, `foreignKey` added. |
-| `src/lib/db/domain/roll.ts` | Same shape for `voidsActionId` → `roll_actions_voids_fk`, plus `roll_actions_voids_idx`; `AnyPgColumn` dropped. |
-| `src/lib/db/domain/publication.ts` | Same for `supersedesId` → `publications_supersedes_fk`; `AnyPgColumn` dropped. |
-| `src/lib/db/domain/person-ext.ts` | Same for `rollActionId` → `person_milestones_roll_action_fk`, plus `person_milestones_roll_action_idx`. |
-| `src/lib/db/domain/authz.ts` | `appRoles` gains `unique("app_roles_id_org_key")`; `roleGrants.roleId` loses `.references()`; new `role_grants_role_fk` composite with `.onDelete("cascade")`, plus `role_grants_role_idx`. |
-| `src/lib/db/domain/groups.ts` | `index("group_types_org_idx")` replaced by `unique("group_types_org_key").nullsNotDistinct()`. |
-| `src/lib/db/domain/people.ts` | New `deletableUntil: timestamp("deletable_until", { withTimezone: true })`, with a comment pointing at the trigger Drizzle cannot express. |
-
-`src/lib/db/domain/index.ts` is **unchanged** — no new table, no new export.
-The architect's Phase 2 §4 prediction held, so this pipeline has one fewer
-shared-file collision with `pipeline/submission-grants` than feared.
-
-**Grant / seed (3)**
-
-| File | Change |
-|---|---|
-| `scripts/seed.ts` | Five catalog writers moved from `db` to `platformDb` as one unit with §2's revokes: `seedRoles`, `seedFeatures`, `seedFlags`, `bindAdminFeatures`, `bindSupportOperatorFeatures` (including the two `db.query.roles.findFirst` reads those last two lead with). The `:43` comment's "presby_platform role" corrected to `neondb_owner`, and the `PLATFORM_DATABASE_URL` guard message widened past `seedGroupTypes()`. |
-| `src/lib/db/index.ts` | Line 12's `platformDb  presby_platform.` corrected to `neondb_owner (via PLATFORM_DATABASE_URL)`, with the F44 consequence spelled out (DECISION-146). |
-| `scripts/test-rls.sql` | See "Shared-file discipline" below. |
-
-**Application follow-ons (3)**
-
-| File | Change |
-|---|---|
-| `src/lib/groups.ts` | Three `getPlatformDb()` reads → `tx`; `groupTypeNamesByIds` takes `tx: OrgTx`; the `getPlatformDb` import is gone entirely; the module-header paragraph and four inline call-site comments replaced with the B-M4 explanation. |
-| `src/app/api/cron/maintenance/route.ts` | Imports `getPlatformDb`; only the `presby_reconcile_current_roll()` statement moves; the three token DELETEs stay on `db`. |
-| `src/lib/db/fixture-deletable.ts` | Doc comment widened to cover both `organizations.deletableUntil` and `people.deletableUntil`, and to name the two legitimate teardown-stamp sites. |
-
-**Tests (24 files)** — see "Tests are mine" below.
-
-## Schema changes
-
-Nine sections, applied in Phase 3's order (B-H3 first, F70 second, C-3's
-catch-all in `test-rls.sql` rather than the migration).
-
-1. **B-H3 — the grant model, written down and narrowed.** 22 platform-shell
-   tables' grants restated so the posture is reproducible from `drizzle/`
-   alone, plus eleven revokes. Before this file, *nothing in `drizzle/`*
-   granted `presby_app` anything on `users`/`accounts`/`sessions`/the TOTP
-   tables, so a database rebuilt from the migration history failed at first
-   sign-in — and four table classes were also wider than any call site needs.
-2. **F70 — `SET search_path = public, pg_temp`** on the fourteen `SECURITY
-   DEFINER` functions defined in 0001–0042. Signatures read from `pg_proc`,
-   not from the migration files (`presby_published_site` and
-   `presby_public_staff_roster` are each defined in more than one). The 21
-   functions from 0043–0047 are excluded as the lifecycle pipeline's
-   concurrent work and carried as a dated allow-list in the suite.
-3. **B-H2 — `app_role_permissions`** gains `ENABLE` + `FORCE ROW LEVEL
-   SECURITY` and four policies reaching through `role_id → app_roles`;
-   `UPDATE` revoked from `presby_app`.
-4. **B-M4 + B-L1 — `group_types`.** `tenant_isolation` replaced by the
-   four-policy split (SELECT admits `organization_id is null`, I/U/D do not).
-   1,557 duplicate rows repointed-then-deleted, surviving names normalized to
-   the seed catalog, and `unique nulls not distinct (organization_id, key)`
-   added. `group_types_org_idx` dropped.
-5. **C-4 + B-L3 —** `revoke all on function` from `public, presby_app` on both
-   `presby_roll_cache_drift()` and `presby_reconcile_current_roll()`.
-6. **B-M3 + B-L6 — five composite FKs** (`events_parent_fk`,
-   `person_milestones_roll_action_fk`, `publications_supersedes_fk`,
-   `roll_actions_voids_fk`, `role_grants_role_fk`), the new
-   `app_roles_id_org_key` anchor they need, and three FK indexes
-   (`person_milestones_roll_action_idx`, `roll_actions_voids_idx`,
-   `role_grants_role_idx`). `groups.group_type_id` deliberately excluded, with
-   the reason in the migration so a future F2 sweep does not reopen it.
-7. **N-6 — `people.deletable_until`** plus `presby_guard_people_delete()` and
-   the `people_guard_delete` BEFORE DELETE trigger.
-
-**Audit events:** n/a. No `AUDIT_ACTIONS` key is added, removed, or referenced;
-no mutation in an `actions.ts` changes. `npm run check:audit` passes.
-
-## Deviations from the Phase 3 design (four, each with the measurement)
-
-**D1 — `revoke temporary on database … from public` is NOT in the migration.**
-Phase 3 §3 specified it as belt-and-braces on top of the `pg_temp`-last clause.
-Measured on this branch: it breaks the isolation suite itself.
-`scripts/test-rls.sql:1292` does `create temporary table t20_fresh_person as
-select gen_random_uuid() as id` **as `presby_app`**, and under the revoke that
-raises `ERROR: permission denied to create temporary tables in database
-"neondb"` — with `\set ON_ERROR_STOP on`, every assertion after line 1292 never
-runs. Proven live (revoke → probe → restore), and that is exactly the
-"part of the file ran, the corrected part did not" failure mode B-H1 was.
-Removing the suite's temp table is a mid-file edit to a shared file during a
-parallel pipeline (Rule 16), and the architect's own Phase 2 §3 ruling is that
-the `pg_temp`-last clause is the **primary** control and the revoke "secondary
-at best". Deferred; proposed TODO line below. The migration carries the
-measurement in a comment so the next reader does not re-add it blind.
-
-**D2 — Phase 3 §(b)'s `test-rls.sql` assertions 2 and 3 are mutually
-contradictory; assertion 3 is dropped.** Assertion 2 asserts
-`has_database_privilege('presby_app', …, 'TEMP') = true` and assertion 3
-asserts the identical expression `= false`. They cannot both pass. With D1,
-assertion 2 is the true one and is shipped as a documented known-true fact with
-a comment saying what would have to change for it to flip.
-
-**D3 — the F70 dated allow-list is 21 names, not Phase 3's 20.** Measured:
-`presby_affiliation_parent_as_of` is `prosecdef = t`, is defined in
-0044/0045/0047, and was absent from Phase 3 §(b).4's list. Phase 3 itself told
-the implementer to re-verify membership against the live catalog rather than
-copy the list; this is that re-verification. The 21 shipped names are exactly
-the list the file's own existing B-M2 assertion already uses, so the two agree.
-35 `prosecdef` functions total = 14 (F70's sweep) + 21 (allow-listed).
-
-**D4 — the self-referencing composite FKs reference `t`, not the table.**
-Phase 3's feasibility note said no lazy thunk is needed because the
-`(t) => [...]` array is not invoked until after module load. That is true **at
-runtime** and false **for TypeScript**: writing `foreignColumns: [events.id,
-events.organizationId]` inside `events`' own config array makes the table's
-inferred type depend on itself — `TS7022: 'events' implicitly has type 'any'
-because it … is referenced directly or indirectly in its own initializer`, plus
-a `TS7024` on the callback, on all three of `events`/`rollActions`/
-`publications` (measured, `npm run typecheck`). Using `t.id, t.organizationId`
-— the same columns, the same table reference — compiles clean and emits the
-identical constraint. Verified by reading the built table config back at
-runtime through `getTableConfig()`: all five FKs report two columns on each
-end, `role_grants_role_fk` reports `onDelete=cascade`, and
-`group_types_org_key` reports `nullsNotDistinct=true`.
-
-**Additions Phase 3 did not name (three, all measured, none optional):**
-
-- **A sixth seed blocker, in a test.** `src/app/api/sites/ingest/route.test.ts`
-  and four sites in `src/lib/sites.test.ts` upsert `feature_flags` on the
-  **tenant** `db` handle. `onConflictDoUpdate` needs `INSERT`, so §2's revoke
-  breaks them. All five moved to `getPlatformDb()`.
-- **Production-created people have no fixture insert to stamp.** Phase 3's
-  32-call-site count is right for fixture rows, but `src/lib/people.test.ts`
-  sweeps four surnames' worth of rows that `createPerson()` created, and
-  `src/app/(org)/o/[slug]/admin/staff/actions.test.ts` tracks a person
-  `createStaffPersonAction()` created. Production code must never stamp
-  `deletable_until`. Those two teardowns open the window explicitly, against
-  the same predicate the DELETE uses, with the reasoning inline. Every other
-  teardown call site is untouched, exactly as Ruling 7.3 requires.
-- **The `group_types` duplicate generator was a test fixture, and it is fixed.**
-  `src/lib/groups.test.ts`'s `findOrCreateGroupType()` led with
-  `insert(...).onConflictDoNothing()` against a table that had **no unique
-  constraint**, so the conflict clause never fired and every run of that file
-  inserted a fresh lowercase-named platform template. That is where the 118
-  `court` / 220 `roster` / 51 `committee` rows came from. It now reads first
-  and writes the catalog display name. Two assertions that expected the
-  casing-lottery value (`"court"`, `"roster"`) now expect `"Court"`/`"Roster"`.
-
-## Proofs
-
-**P1 — whole-file idempotency, and it is a whole-file proof, not a partial
-re-apply.** `psql -v ON_ERROR_STOP=1 -f drizzle/0048_presby_security_b.sql`
-twice in a row, both `exit=0`. A 2,900-line catalog + row-state dump
-(table ACLs, function ACLs, `pg_policies` with `qual`/`with_check`,
-`relrowsecurity`/`relforcerowsecurity`, `proconfig`, every constraint
-definition, every index definition, non-internal triggers, row counts, and
-every `group_types` row) taken after each run **diffs byte-identical**. DML
-row counts: first-ever application reported `DELETE 1557`, `UPDATE 14`,
-`UPDATE 2`; every subsequent run reports `DELETE 0`, `UPDATE 0`, `UPDATE 0`.
-
-> One idempotency bug was found this way and fixed: dropping
-> `app_roles_id_org_key` before dropping the dependent `role_grants_role_fk`
-> raises *"cannot drop constraint … because other objects depend on it"* on the
-> second run. Section 7 now drops the dependent FK first and says why.
-
-**P2 — no-op-or-narrowing, proved with a before/after `aclexplode` dump.**
-Baseline captured before the first application (1,269 grant rows across
-83 tables), re-captured after. `comm -13` (privileges **added**): **empty**.
-`comm -23` (privileges **removed**): **20**, and exactly the intended set —
-
-```
-app_role_permissions|presby_app|UPDATE      features|presby_app|{INSERT,UPDATE,DELETE}
-audit_events|presby_app|{UPDATE,DELETE}     migration_seeds|presby_app|{INSERT,UPDATE,DELETE}
-feature_flags|presby_app|{INSERT,DELETE}    permissions|presby_app|{INSERT,UPDATE,DELETE}
-                                            role_features|presby_app|{INSERT,UPDATE,DELETE}
-                                            roles|presby_app|{INSERT,UPDATE,DELETE}
-```
-
-Plus the two function ACLs, which now read `neondb_owner:EXECUTE` and nothing
-else for both `presby_roll_cache_drift()` and `presby_reconcile_current_roll()`.
-
-**P3 — `scripts/test-rls.sql`: 412 → 456 passing, exit 0, as `presby_app`.**
-`psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f scripts/test-rls.sql`,
-`exit=0`, 456 `pass` notices, zero `FAIL`. Arithmetic: 412 baseline − 1 deleted
-(`:414-418`'s drift call) + 45 new = 456.
-
-**P4 — the `presby_two_factor_required` temp-table shadowing probe, re-run as
-`presby_app` and now unaffected — with the failing-first half done explicitly.**
-Phase 2's probe errored on a shape-mismatched decoy, which proved shadowing but
-not the *answer flip*. Re-run with a **shape-correct** decoy
-(`create temp table people (id uuid, user_id uuid, merged_into_id uuid)`, zero
-rows) against a user who genuinely requires 2FA
-(`e0000000-…-f2`), entire transaction rolled back:
-
-```
--- with the PRE-F70 clause (alter function … set search_path = public):
-honest_answer=true
-UNDER_SHADOW_pre_F70=false        <-- the attacker-chosen answer: "no 2FA needed"
-
--- with the shipped clause (… = public, pg_temp):
-caller_resolves_people_to=pg_temp_453   <-- the caller still sees its decoy
-definer_answer_under_shadow=true        <-- the definer does not
-```
-
-The decoy is still resolved by the *caller*; the DEFINER body is not fooled.
-This also confirms B-M2's stated reason for rating F70 non-exploitable was
-wrong, exactly as Phase 2 §3 argued.
-
-**P5 — failing-first, per mechanism, run against the whole suite so the
-citation is a real assertion at a real line.** Each mechanism was dropped or
-disabled, the suite re-run as `presby_app`, the failure recorded, the mechanism
-restored, and the suite confirmed green again (456/0) at the end.
-
-| # | Mechanism removed | Suite result | Failure cited |
-|---|---|---|---|
-| FF-1 | `app_role_permissions` RLS disabled (`no force` + `disable`) | exit 3, 424 pass | `test-rls.sql:5103` — `FAIL C-3: every table in schema public carries FORCE ROW LEVEL SECURITY except the 25 named … — expected 0, got 1` (the inverted catch-all caught it before the B-H2 section even ran) |
-| FF-1b | only `app_role_permissions_insert` dropped | exit 3, 427 pass | `test-rls.sql:5149` — `FAIL B-H2: the four-policy split is in place, not a single tenant_isolation catch-all — expected 4, got 3` |
-| FF-1d | the B-H2 defect exactly as it shipped (no RLS at all), write probe only | — | `FAIL B-H2: cross-tenant INSERT into app_role_permissions SUCCEEDED` |
-| FF-2 | `grant execute on presby_roll_cache_drift() to presby_app` | exit 3, 439 pass | `test-rls.sql:5303` — `FAIL C-4/B-L3: neither presby_app nor PUBLIC holds EXECUTE … — expected 0, got 1` |
-| FF-3 | `grant execute on presby_reconcile_current_roll() to public` | exit 3, 439 pass | `test-rls.sql:5303` — same assertion, `expected 0, got 2` |
-| FF-4 | `roll_actions_voids_fk` reverted to the single-column FK | exit 3, 442 pass | `test-rls.sql:5346` — `FAIL B-M3: all five tenant->tenant FKs are COMPOSITE — expected 5, got 4` |
-| FF-5 | `people_guard_delete` trigger dropped | exit 3, 449 pass | `test-rls.sql:5426` — `FAIL N-6: people carries an ENABLED people_guard_delete trigger — expected 1, got 0` |
-| FF-6 | `presby_two_factor_required` re-pinned to `search_path = public` | exit 3, 413 pass | `test-rls.sql:4967` — `FAIL F70: every SECURITY DEFINER function … pins search_path = public, pg_temp — expected 0, got 1` |
-| FF-7 | `group_types_org_key` dropped | exit 3, 437 pass | `test-rls.sql:5263` — `FAIL B-L1: group_types_org_key is UNIQUE NULLS NOT DISTINCT — expected 1, got 0` |
-| FF-8 | `grant insert on roles to presby_app` | exit 3, 422 pass | `test-rls.sql:5055` — `FAIL B-H3: presby_app cannot write ANY global catalog — expected 0, got 1` |
-| — | everything restored | **exit 0, 456 pass, 0 FAIL** | — |
-
-**P6 — the mechanisms proven directly as well, on the owner connection**
-(because some of them are owner-path controls the suite cannot exercise):
-the composite `events_parent_fk` refuses a cross-org parent and the
-single-column form accepts it; `role_grants_role_fk` refuses a direct grant of
-the global `committee_chair` template; `presby_guard_people_delete()` refuses
-an unstamped DELETE and an expired-stamp DELETE and permits a live-stamped one;
-`presby_app` is refused `EXECUTE` on both roll functions at the call site while
-`neondb_owner` still runs both.
-
-## From-scratch build (acceptance criterion 3) — run, and it found something
-
-Run exactly as Phase 3 specified: a **new, empty database** on this pipeline's
-own Neon branch (`scratch0048` / `scratch0048b`), a scratch env file pointing
-all five connection strings at it, `drizzle-kit migrate`, `db:seed` with
-`example.invalid` placeholder credentials, and a real first sign-in against a
-dev server on port 3200. Both scratch databases and the scratch env file were
-dropped afterwards; `neondb` (the pipeline branch) is untouched, 15 fixture
-orgs intact.
-
-**Result — honestly, as instructed: `npm run db:migrate` DOES NOT produce a
-working database from empty, and the cause is B-L4, this pipeline's own
-"housekeeping" item.**
-
-`drizzle-kit migrate` applied 45 of the journal's 46 entries, then exited `1`
-**with no error message on either stream** (the known-broken runner
-`docs/TODO.md` already describes). Applying the 46th by hand gave the real
-error:
-
-```
-psql:drizzle/0048_presby_security_b.sql:139:
-  ERROR:  function presby_person_unclaimed_or_own_org(uuid) does not exist
-```
-
-That function is created in `drizzle/0028_presby_people_write_rls_fix.sql` —
-one of the **three migrations missing from `_journal.json`** (idx 26/27/28,
-B-L4). `drizzle-kit migrate` reads the journal, so it never applied 0026, 0027
-or 0028 at all. The scratch database ended with **1** policy on `people` where
-the pipeline branch has **4**: the entire people-write RLS fix, the org
-feature toggles and the member-management layer were silently absent, and
-0048's F70 section was simply the first statement to notice.
-
-**This reclassifies B-L4.** Phase 1 and Phase 3 both list the missing journal
-entries under "housekeeping". They are not housekeeping: they are the reason
-the migration history cannot rebuild the database, and B-H3's whole premise —
-"the security posture must be reproducible from `drizzle/`" — is not satisfied
-until the back-fill lands. The back-fill remains the orchestrator's edit at
-integration (Phase 2 §4 is binding and this branch did not touch the middle of
-that shared file), but it should land **with** this migration, not after it.
-
-**Second attempt, and the one that passes:** a fresh empty database with every
-`drizzle/*.sql` replayed in **filename order** via
-`psql -v ON_ERROR_STOP=1 -f` — the documented apply path for this repo —
-**all 49 files applied cleanly, exit 0, including 0048.** So the migration
-*content* replays from empty correctly; only the journal-driven runner does not.
-
-From-scratch posture, measured on that database and identical to the pipeline
-branch: 83 tables / 58 FORCE; 15 `prosecdef` functions pinned to
-`search_path = public, pg_temp`; 56 of 56 full-CRUD grants present on the
-fourteen platform-shell tables; **0** of 15 catalog-write grants present;
-`people_guard_delete` installed.
-
-- `db:seed` against it: clean, including `created local admin` and
-  `bound local admin to admin role` — both of which write `users` and
-  `user_roles` **on the `presby_app` connection**, which is the direct test of
-  the B-H3 grant model plus the `scripts/seed.ts` swap together.
-- First sign-in: `POST /api/auth/callback/credentials` → `302` to `/launch`;
-  `/api/auth/session` returns the seeded admin with 11 features; `GET /launch`
-  → **`307` to `/admin`**; `GET /admin` → `200`; `GET /admin/users` → `200`.
-  That is the Post-Login Landing matrix's "0 enterable / `canAccessAdmin` yes /
-  `isPlatformAdmin` no → `/admin`" row, and it is the literal "first sign-in"
-  B-H3's scope language names. Before this migration that path did not exist in
-  `drizzle/` at all.
-
-## Tests are mine (QA runs them)
-
-**`scripts/test-rls.sql` — section 39**, one delimited block appended at the
-end (614 lines), plus the one pre-authorized mid-file edit. `git diff -U0`
-reports exactly two hunks: `@@ -415,4 +415,4 @@` and `@@ -4871,0 +4872,614 @@`.
-The `:414-418` `presby_roll_cache_drift()` assertion is replaced in place by a
-4-line comment of the same length saying where the claim went — the diff is
-line-for-line mechanical for the integration merge. Subsections:
-
-| § | Covers |
-|---|---|
-| 39.1 | no `CREATE` on schema `public` or the database for `presby_app`, `presby_platform`, `PUBLIC` |
-| 39.2 | `TEMP` asserted as a known-true fact, with the D1 reasoning |
-| 39.3 | `proconfig` = `public, pg_temp` on every `prosecdef` outside the dated allow-list; **and** that the fourteen altered functions still carry it (a bare "0 non-compliant" would also pass if they had all been dropped — this is the assertion that catches 0048's own drift-remediation trap); `presby_current_org()` stays INVOKER |
-| 39.4 | B-H3, one assertion per table class: full-CRUD 14×4, `audit_events` append-only both ways, `feature_flags` update-but-not-create, catalogs SELECT-only both ways, org tree SELECT-only |
-| 39.5 | C-3's **inverted** FORCE catch-all with the literal 25-name allow-list, plus a second assertion that the allow-list itself has not gone stale |
-| 39.6 | B-H2: enabled+forced, four policies, grant shape, no foreign binding visible, the template arm still readable, and the cross-tenant INSERT refused |
-| 39.7 | B-M4 four-policy split, `tenant_isolation` gone, six templates visible, one row per key, `indnullsnotdistinct`, and a tenant refused when minting a platform template |
-| 39.8 | C-4/B-L3 both functions, both roles, asserted at the catalog **and** at the call |
-| 39.9 | B-M3 five composites, five originals gone, the `app_roles_id_org_key` anchor, `confdeltype='c'`, B-L6's three indexes, and the `groups.group_type_id` exclusion asserted so a future sweep does not "fix" it |
-| 39.10 | N-6 trigger present/enabled/`BEFORE DELETE FOR EACH ROW`, the guard function's own `pg_temp` pin, the column's type, no production row carrying a window, and `presby_app` still holding no `DELETE` |
-
-**Vitest.** New regression tests, each named for what it protects:
-
-- `src/lib/people.test.ts` — *"refuses to hard-delete an unstamped person on
-  the platform connection — regression for N-6 people delete guard"*, plus the
-  live/expired-window pair and the grant-layer assertion.
-- `src/lib/role-definitions.test.ts` — *"— regression for B-H2 cross-tenant
-  app_role_permissions read"*, *"— regression for B-H2 cross-tenant
-  app_role_permissions write"*, the load-bearing template-arm test, and
-  *"— regression for B-M3 role_grants.role_id composite FK"*.
-- `src/lib/roll.test.ts` — *"— regression for B-M3
-  roll_actions.voids_action_id"*, plus the same-org positive case.
-- `src/lib/groups.test.ts` — *"— regression for B-L1 group_types duplicates"*,
-  *"— regression for B-M4"* (the form-options read now goes through `tx`), and
-  the tenant-cannot-mint-a-template test.
-- `src/app/api/cron/maintenance/route.test.ts` — *"— regression for C-4
-  presby_reconcile_current_roll grant"*: the mock is now **two** handles, and
-  the test asserts three statements on `db`, one on `getPlatformDb()`, and
-  which statement is on which.
-
-> A shared `rejectionChain()` helper appears in two suites because Drizzle
-> wraps every driver error in `Failed query: …`; matching the outer message
-> would assert nothing more than "something went wrong", so the assertions walk
-> the `cause` chain for the constraint name or `row-level security policy`.
-
-**Fixture stamping.** 32 `platform.insert(people).values({...})` call sites
-across 23 files gained `deletableUntil: fixtureDeletableUntil()` **at insert**,
-reusing the existing helper. Not one existing `platform.delete(people)`
-teardown line was wrapped in a disable/enable pair. The two exceptions (rows
-production code created) are described under Deviations.
-
-**Results, all on this branch:**
-
-| Check | Result |
-|---|---|
-| `scripts/test-rls.sql` as `presby_app` | **exit 0, 456 pass, 0 FAIL** (from 412) |
-| DB-backed serial — `role-definitions`, `groups`, `people`, `roll`, `presbytery`, `org-provisioning` | **6 files, 182 tests, all pass** |
-| DB-backed serial — the other 19 files touching `people`/`feature_flags` (staff actions, sites ingest, read-org-brand, children, credentials, directory, events, officers, org-feature-categories, org-features, find-person, home-data, people-update, person-sensitive, role-grants, sites, staff, tenant-branding, tickets) | **19 files, 490 tests, all pass** |
-| `npm test` | **246 files passed, 29 skipped; 3,241 tests passed, 777 skipped, 0 failed** |
-| `npm run typecheck` | **clean** |
-| `npm run check` | **all five tripwires pass** |
-| `npm run lint` | 7 errors / 190 warnings, **all pre-existing and none in a file this pipeline touched** (`portal-nav-links.tsx`, `branding-form.tsx`, `children/page.tsx`, `children-roster-list.test.tsx`) |
-| `npm run db:seed` on the pipeline branch, post-revoke | clean |
-
-## Shared-file discipline (Rule 16)
-
-| File | Shape of this branch's edit |
-|---|---|
-| `scripts/test-rls.sql` | One delimited block at EOF (`BEGIN/END APPENDED SECTION` banners) + the one pre-authorized 4-line in-place replacement at `:415`. Two hunks total. |
-| `drizzle/meta/_journal.json` | Pure 7-line append. **No idx 26/27/28 insert.** |
-| `src/lib/db/domain/index.ts` | **Untouched.** |
-| `scripts/seed-dev.sql` | **Untouched** — no fixture shape changed. |
-| `e2e/support/seed-orgs.ts` | **Untouched.** |
-| `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md`, `CLAUDE.md` | **Untouched**, as instructed. Proposed lines below. |
-
-## Proposed lines for the orchestrator to apply at integration
-
-`docs/decisions.md` — DECISION-146 exactly as the architect drafted it in
-Phase 2 §1; no edits needed.
-
-`docs/TODO.md` — in addition to Phase 2 §4's four and Phase 1's agreed
-deferrals (B-M1, B-M2 residual, B-L2, B-L5, B-I1–I6):
-
-- **`_journal.json` idx 26/27/28 back-fill is a from-scratch BLOCKER, not
-  housekeeping** — apply it in the same integration as `drizzle/0048`. Without
-  it `drizzle-kit migrate` silently skips 0026/0027/0028 and the resulting
-  database has one `people` policy instead of four. Measured this phase.
-- **`revoke temporary on database … from public`** — deferred from 0048 (D1).
-  Prerequisite: remove or replace `scripts/test-rls.sql:1292`'s
-  `create temporary table t20_fresh_person`, which only a non-parallel
-  housekeeping pass should touch.
-- **Delete the 13 hand-enumerated per-table FORCE assertions** now superseded
-  by §39.5's catch-all — deferred for the same shared-file reason (Phase 3
-  named this deviation; it stands).
-- ~~**Shrink the F70 dated allow-list to empty** once the lifecycle pipeline's
-  eleventh loop-back lands `public, pg_temp` on the 21 functions from
-  0043–0047, and delete the paragraph in §39.3 that explains it.~~ **DONE at
-  integration (2026-09-25)** — `main`'s `afc2afb` pinned all 23 (the 21 plus
-  the two cardinality wrappers F62 converted), so the merge emptied the
-  allow-list, dropped the `p.proname not in (…)` clause and replaced the
-  paragraph. §39.3's proconfig assertion is now catalog-wide with no
-  exceptions.
-- **`scripts/test-rls.sql` still runs `db:migrate`-unverified assertions about
-  `presby_platform`** — that role is `rolcanlogin = false` and nothing connects
-  as it; the DECISION-146 follow-up (a platform-shell DML accessor, then
-  possibly a third connection) should decide whether to drop the role or give
-  it a login.
-
-**Cross-pipeline heads-up, restated because it now has teeth:**
-`pipeline/submission-grants` (`drizzle/0049`) adds new `SECURITY DEFINER`
-functions. Once §39.3 is on `development`, any new DEFINER function without
-`SET search_path = public, pg_temp` fails that assertion at integration. It is
-a one-line clause per function, but it has to be written before the merge, not
-after.
+## Per-Phase Status
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — all ten scoped defects independently re-verified live against the pipeline branch's catalog; both Phase 5 gaps confirmed closed at the class level; the one open integration co-requisite (journal back-fill) named as a merge-time gate, not a ship blocker for this branch's own work | **SHIP IT** | 2026-09-25 |
 
 ## Handoff
 
-**To `qa` for Phase 5.**
+**To the orchestrator, for `/merge-pr` integration of `pipeline/security-schema-b` (`drizzle/0048_presby_security_b.sql`).** Three things must happen in the same integration action, per Phase 2's binding ruling and Phase 5's escalation, neither of which this branch could do itself under Rule 16:
 
-**New tables:** none. **New columns:** `people.deletable_until timestamptz`
-(nullable; test fixtures only).
+1. Apply the `drizzle/meta/_journal.json` idx 26/27/28 back-fill **together with** landing this branch's own idx-48 entry — not before, not after.
+2. Apply this work-log's proposed `docs/decisions.md` (DECISION-146, verbatim) and `docs/TODO.md` lines (the fifteen numbered above).
+3. Re-run `scripts/test-rls.sql` against the merged `development` branch before the next parallel pipeline (`pipeline/submission-grants`, `drizzle/0049`) lands, per Rule 16 — and flag to that pipeline now, before it reaches its own Phase 4, that any new `SECURITY DEFINER` function it adds must ship with `SET search_path = public, pg_temp` or its own `test-rls.sql` run will fail against the merged suite's §36.3 assertion.
 
-**New/changed relationships available to the next implementer:**
+No further pipeline phase is open. This closes `2026-09-25-security-schema-b`.
 
-- `events.(parent_event_id, organization_id) → events(id, organization_id)`
-- `person_milestones.(roll_action_id, organization_id) → roll_actions(id, organization_id)`
-- `publications.(supersedes_id, organization_id) → publications(id, organization_id)`
-- `roll_actions.(voids_action_id, organization_id) → roll_actions(id, organization_id)`
-- `role_grants.(role_id, organization_id) → app_roles(id, organization_id) ON DELETE CASCADE`
-  — **behavioural change worth knowing: a global template role can no longer be
-  granted directly; adoption must clone.**
-- `app_roles` now has `unique (id, organization_id)`; `group_types` now has
-  `unique nulls not distinct (organization_id, key)` and exactly six rows.
-- `app_role_permissions` is now RLS-filtered on the tenant connection — a read
-  of a template's bindings works, a write against another org's role does not.
-- `group_types` platform templates are now readable through `withOrgContext()`;
-  **do not add a new `getPlatformDb()` escape to read them.**
-- `presby_roll_cache_drift()` and `presby_reconcile_current_roll()` are
-  **owner-only**. Any future caller must be on `getPlatformDb()`.
 
-**Local apply command** (against your own Neon branch, owner/direct endpoint):
 
-```bash
-psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0048_presby_security_b.sql
-npm run db:seed          # required: the catalog writers moved connections
-```
+### Orchestrator closure (2026-09-25)
 
-`npm run db:migrate` is **not** a working substitute on an empty database until
-the `_journal.json` 26/27/28 back-fill lands — see the from-scratch section.
-`scripts/seed-dev.sql` did not change and does not need re-running.
-
-**`test-rls.sql` sections touched:** section 39 added (new); section 10's
-`:414-418` replaced.
-
-**Run the suite with:**
-
-```bash
-psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f scripts/test-rls.sql
-# expect: exit 0, 476 "pass" notices, zero FAIL
-```
-
-**Integration measurement (2026-09-25, after `git merge main`).** Numbers
-above this line are the pre-merge branch figures; these are the shipped ones.
-Measured on the `pipeline-security-schema-b` Neon branch as `presby_app`:
-**exit 0, 476 `pass` notices, zero FAIL** — 432 from sections 1–38 (`main`'s
-433 minus the one `:414-418` assertion this pipeline deletes) plus **44** from
-section 39. The "45 new / 456 total" figure quoted earlier in this log is one
-stale: it predates the second-pass replacement of §39.10's vacuous `assert_eq`
-with an explanatory comment (recorded further down this file), which the
-`832a9ee` commit message already captured as 412 → 455. 433 − 1 + 44 = 476.
-
-**Next agent after QA:** `analyst` for Phase 6. No `api-developer` handoff is
-needed — the two application follow-ons this pipeline owed are already in the
-diff.
-
----
-
-# Phase 4, second pass (QA G1/G2)
-
-*2026-09-25, database-admin. QA's FAIL is accepted in full and both gaps were
-real. **No change to `drizzle/0048_presby_security_b.sql`** — every mechanism
-stood up to QA's independent audit, and nothing in this pass touches the
-migration, `_journal.json`, or any `src/lib/db/domain/*.ts` file.*
-
-## 0. Leaked-row cleanup (done first, before any edit)
-
-The three leaked stamped `people` rows QA identified were removed on the owner
-connection with roughly 80 minutes of window left on the earliest of them.
-Inventory taken immediately before the delete, `now() = 2026-09-25 19:30:18 UTC`:
-
-| id | name | `deletable_until` | still deletable? |
-|---|---|---|---|
-| `b1d633de-a899-4a16-9826-b8a67a9b8efc` | Marisol Enweazu | `2026-09-25 20:51:57.489+00` | yes |
-| `77ed97de-4781-4320-91f7-4ffffd088c5b` | Marisol Enweazu | `2026-09-25 21:12:32.972+00` | yes |
-| `d9a3cac9-4c34-4084-a960-21adc38ba95e` | Marisol Enweazu | `2026-09-25 21:22:54.477+00` | yes |
-
-```
-delete from people where deletable_until is not null and deletable_until > now();
--- DELETE 3
-```
-
-**Count: 3 deleted. `select count(*) from people where deletable_until is not
-null` is now 0**, on the owner connection, and stayed 0 through every run
-below. All three were `Marisol Enweazu` — `src/lib/tickets.test.ts`'s
-`outsidePerson`, exactly as QA diagnosed, one per run across three runs.
-`organizations` had no leaked stamped rows (measured: 0).
-
-## 1. G1 — the canary that could not fail
-
-QA is right, and the assertion I shipped is the precise failure class this
-project's own F1 exists to name: it ran as `presby_app`, set no org context,
-and counted rows in a `FORCE ROW LEVEL SECURITY` table, so it was pinned to 0
-and reported `pass` in a green 456-assertion run with three leaked rows in the
-table. I wrote a self-agreeing check while writing a section whose whole
-subject is self-agreeing checks.
-
-**`scripts/test-rls.sql`** — the three-line `assert_eq` is deleted and replaced
-in place by a comment that reproduces the broken assertion verbatim, states why
-it cannot fail, and points at its new home. It is a comment rather than a
-silent deletion because the next person to write an N-6 assertion will reach
-for exactly that shape.
-
-The claim cannot be made from `presby_app` at all, with or without an org
-context: a leak can sit in any org, or — for a person with no membership row —
-in none, and `people`'s SELECT policy hides it either way. It is an owner-path
-claim.
-
-**New: `src/lib/db/fixture-deletable.test.ts`**, DB-backed, reading through
-`getPlatformDb()`. Five specs:
-
-| Spec | What it does |
-|---|---|
-| "the canary itself can fail: a stamped people row that has outlived its suite is detected" | Plants a row one minute past the staleness cutoff, asserts the detector finds it; then plants a **fresh** stamp and asserts the detector does **not** flag it (otherwise the canary would fail every run on its own in-flight fixtures). |
-| "no leaked stamped people row is outstanding — regression for the tickets.test.ts fixture leak (G2)" | The real canary. Failure message names each row and prints the owner-connection `delete` that recovers it. |
-| "no stamped people row has an EXPIRED window" | Exact, no heuristic. Strictly worse than a leak: past saving without dropping the trigger. |
-| "the canary covers organizations too, and can fail there as well" | Same plant-and-detect, for `organizations.deletable_until` (D10 / `drizzle/0044`). |
-| "no leaked stamped organization row is outstanding" | The `organizations` canary. |
-
-**The staleness predicate, and its honest limitation.**
-`src/lib/db/fixture-deletable.ts` gains `STALE_FIXTURE_STAMP_GRACE_MS`
-(20 minutes) and `staleFixtureStampCutoff()`: a row is leaked when its
-`deletable_until` is at or before `now() + 2h − 20min`, i.e. it was stamped
-more than twenty minutes ago and has outlived whatever suite created it. The
-longest measured full DB-backed serial run is about six minutes (QA measured
-354 s for all files; my 26-file run was 242 s), so a live fixture cannot trip
-it and there is no false-positive window. **The limitation, stated rather than
-buried: a leak is invisible to a re-run started within twenty minutes of the
-run that caused it.** That is the price of not threading a run id through
-`fixtureDeletableUntil()`'s bare `Date` return and its 30-odd call sites, and
-it is acceptable only because the failure being guarded takes *two hours* to
-become irreversible — every later run in the session catches it. The constant
-and its reasoning are in the helper, not in the test.
-
-**Failing-first for G1** — a row shaped exactly like the three real leaks
-(`now() + 95 minutes`) planted by hand outside the test's own tracking:
-
-```
-FAIL  src/lib/db/fixture-deletable.test.ts > … > no leaked stamped people row is outstanding
-AssertionError:
-1 leaked fixture person row(s) are outstanding. Once the window closes they are PERMANENT
-on every connection (presby_app has no DELETE grant; the owner path hits
-presby_guard_people_delete()). Remove them NOW, on the owner connection:
-  delete from people where deletable_until is not null and deletable_until > now();
-Then find the suite whose afterAll does not tear its fixture down.
-  11110000-0000-0000-0000-0000000000aa Marisol EnweazuLeakProbe (window closes in 95m, …)
-  ❯ src/lib/db/fixture-deletable.test.ts:199:9
-```
-
-Planted row removed; suite green again (5/5). This is the property the SQL
-version never had: it is demonstrated to fail on the exact condition it claims
-to detect, and the demonstration is a permanent spec rather than a one-off
-manual check.
-
-## 2. G2 — `src/lib/tickets.test.ts` leaked one person per run
-
-Fixed, and fixed one level up from QA's minimum. QA asked for `outsidePerson`
-to be added to the `afterAll` list. I converted the file to the tracked-array
-pattern its siblings already use instead: `person()` pushes every id into
-`trackedPeopleIds` at insert, and the teardown iterates that array rather than
-a hand-written list of the four ids the file happens to hold in `let`s.
-
-The reason is the failure mode itself. `outsidePerson` was missed because it is
-a block-local `const` inside `beforeAll` and therefore invisible to a list
-written in the describe scope — a hand-maintained list is exactly the thing
-that went stale, and re-writing it with one more name leaves the next fixture
-free to do the same. Tracking at insert closes the class. Both the array
-declaration and the teardown carry a comment saying what went wrong and why the
-shape changed.
-
-**Failing-first for G2** — the old hand-written list restored, one run, then
-the fix restored:
-
-| Teardown | stamped rows before | after |
-|---|---|---|
-| old hand-written list of four ids | 0 | **1** (`985e01a1-…`, Marisol Enweazu) |
-| `trackedPeopleIds` (shipped) | 0 | **0** |
-
-The leaked probe row was removed while its window was open.
-
-## 3. Re-run results
-
-| Check | Result |
-|---|---|
-| `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f scripts/test-rls.sql` | **exit 0, 455 `pass`, 0 `FAIL`** |
-| `vitest run --no-file-parallelism src/lib/tickets.test.ts`, run 1 | 21/21 pass — stamped count **0 → 0** |
-| `vitest run --no-file-parallelism src/lib/tickets.test.ts`, run 2 | 21/21 pass — stamped count **0 → 0** |
-| `vitest run --no-file-parallelism src/lib/db/fixture-deletable.test.ts` | **5/5 pass** (the new canary) |
-| Full DB-backed serial set, **26 files** (the 25 from the first pass plus the new canary) | **677/677 pass**; stamped count **0 before, 0 after** |
-| `npm test` | 246 files passed, 30 skipped; **3,241 passed, 782 skipped, 0 failed** |
-| `npm run typecheck` | clean |
-| `npm run check` | all five tripwires pass |
-| `npx eslint` on the three touched/new files | clean (exit 0) |
-
-**The pass count is 455, not 456, and that is the point.** 412 baseline − 1
-deleted (`:414-418`'s drift call) − 1 deleted (G1's vacuous count) + 45 new =
-455. The suite got one assertion smaller and strictly more truthful: the
-removed one could not fail, and its replacement is proven to.
-
-**Stamped-row count across the whole DB-backed suite is 0 after a full serial
-run** — so `tickets.test.ts` was the only leaker, now established by
-measurement rather than by reading teardowns.
-
-## 4. Files changed in this pass (4)
-
-| File | Change |
-|---|---|
-| `scripts/test-rls.sql` | The vacuous `assert_eq` at §39.10 replaced in place by an explanatory comment. Still one appended block at EOF plus the pre-authorized `:415` edit — this is a third hunk, inside the appended block, so the integration merge is unaffected. |
-| `src/lib/db/fixture-deletable.test.ts` | **New.** The canary, on `getPlatformDb()`, with its own can-it-fail proof. |
-| `src/lib/db/fixture-deletable.ts` | Exports `FIXTURE_TEARDOWN_WINDOW_MS`; adds `STALE_FIXTURE_STAMP_GRACE_MS` and `staleFixtureStampCutoff()` with the reasoning and the stated blind spot. No behaviour change to `fixtureDeletableUntil()`. |
-| `src/lib/tickets.test.ts` | `trackedPeopleIds` array; `person()` tracks at insert; teardown iterates it. |
-
-Nothing else in the diff moved. `drizzle/0048_presby_security_b.sql`,
-`drizzle/meta/_journal.json`, the seven `src/lib/db/domain/*.ts` files,
-`scripts/seed.ts`, `src/lib/groups.ts`, `src/lib/db/index.ts` and
-`src/app/api/cron/maintenance/route.ts` are byte-identical to what QA audited.
-
-## 5. One addition to the integration TODO proposal
-
-- **The `deletable_until` fixture-leak canary is only as good as its cadence.**
-  `src/lib/db/fixture-deletable.test.ts` is a DB-backed spec, so it is skipped
-  by a plain `npm test` and only runs in the `--no-file-parallelism` mode with
-  `.env.local` present. Worth naming in the CI-wiring pipeline (already
-  deferred) so it runs on a schedule rather than only when someone remembers —
-  a leak has a two-hour fuse and CI is the natural thing to notice it. Until
-  then, `docs/testing.md`'s "Running the DB-backed suites" is where a human
-  finds it.
-
-## 6. Handoff
-
-**Back to `qa` for Phase 5 re-verification**, scoped to the two gaps. Nothing
-outside the four files above changed, and QA's own note says the rest does not
-need re-running.
-
-```bash
-psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f scripts/test-rls.sql
-# expect: exit 0, 455 pass (was 456; the vacuous N-6 count is gone), 0 FAIL
-
-npx dotenv -e .env.local -- npx vitest run --no-file-parallelism \
-  src/lib/db/fixture-deletable.test.ts src/lib/tickets.test.ts
-# expect: 26 tests pass; and on the owner connection, before and after,
-#   select count(*) from people where deletable_until is not null;  -- 0
-```
-
-To reproduce the G1 canary's failing-first without editing anything:
-
-```sql
--- owner connection
-insert into people (id, first_name, last_name, deletable_until)
-values ('11110000-0000-0000-0000-0000000000aa','Canary','LeakProbe', now() + interval '95 minutes');
--- run the canary: it fails, naming that id
-delete from people where id = '11110000-0000-0000-0000-0000000000aa';
-```
-
-No commits were made in this pass.
+Shipped as v0.25.5 (`fix(schema):` 832a9ee + merge of `main` + the journal back-fill commit), integrated one PR at a time per Rule 16 with `test-rls.sql` re-run on the merged `development` branch. DECISION-146 recorded verbatim; the fifteen follow-ups added to `docs/TODO.md`; `docs/architecture.md` gains one sentence on the grant model's provenance (Rule 15). No what's-new entry.

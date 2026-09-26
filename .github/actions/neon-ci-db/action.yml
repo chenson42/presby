@@ -1,0 +1,125 @@
+name: "Neon CI database"
+description: >
+  Creates an ephemeral Neon branch off an explicitly pinned parent, creates a
+  fresh database inside it, applies every hand-written migration, runs the
+  standing schema-parity check, seeds it, applies the synthetic fixture, and
+  installs the test-only SQL helper functions scripts/test-rls.sql depends on
+  — then hands back the four connection URLs this codebase uses. db.yml and
+  e2e.yml both consume this action so their database-provisioning recipe can
+  never drift from each other the way e2e.yml's hand-maintained recipe already
+  had (test-coverage review 2026-09-25, C-5).
+#
+# IMPORTANT — this action WRITES .env.local in the caller's workspace and
+# exports NOTHING into $GITHUB_ENV. `npm run db:migrate` / `check:schema-parity`
+# / `db:seed` all go through `dotenv -e .env.local`, and `dotenv -e` does NOT
+# override an already-exported environment variable (verified empirically,
+# Batch A, docs/work-log/2026-09-26-ci-db-tests.md). If a caller step ever also
+# sets DATABASE_URL/APP_DATABASE_URL/PLATFORM_DATABASE_URL/MIGRATE_DATABASE_URL
+# as a step-level or job-level `env:` on top of this action's outputs, that
+# variable silently wins and .env.local is ignored while the job stays green.
+# The four `psql` invocations below are the one legitimate exception — psql
+# reads a URL passed as an argument or `env:`, never a dotenv file, so setting
+# `env:` on THOSE specific steps is correct and required.
+#
+inputs:
+  api_key:
+    description: "Neon API key (secrets.NEON_API_KEY)."
+    required: true
+  project_id:
+    description: "Neon project id (secrets.NEON_PROJECT_ID)."
+    required: true
+  parent:
+    description: >
+      Literal Neon branch name to fork from. Never leave empty — the implicit
+      default is the project's PRIMARY branch, which is `production` (holds
+      two real congregations' data and is also un-migrated). DECISION-150
+      pins this to `development` in every caller.
+    required: true
+  branch_name:
+    description: "Unique per-run branch name, e.g. db-tests-${{ github.run_id }}-${{ github.run_attempt }}."
+    required: true
+  database_name:
+    description: >
+      Name of the fresh database created inside the ephemeral branch. Never
+      `neondb` — the whole point is that no connection ever opens the parent's
+      own database, so no row that predates this run can appear in a log, an
+      error string, or an uploaded trace.
+    required: false
+    default: "ci_run"
+outputs:
+  branch_id:
+    description: "Neon branch id, for the matching delete-branch-action call."
+    value: ${{ steps.create-branch.outputs.branch_id }}
+  database_url:
+    description: "presby_app on the direct endpoint, database_name. Same as app_database_url."
+    value: ${{ steps.urls.outputs.database_url }}
+  app_database_url:
+    description: "presby_app on the direct endpoint, database_name."
+    value: ${{ steps.urls.outputs.app_database_url }}
+  platform_database_url:
+    description: "neondb_owner on the direct endpoint, database_name. getPlatformDb() authenticates as neondb_owner (DECISION-136)."
+    value: ${{ steps.urls.outputs.platform_database_url }}
+  migrate_database_url:
+    description: "neondb_owner on the direct endpoint, database_name. Owner connection for DDL/migrations."
+    value: ${{ steps.urls.outputs.migrate_database_url }}
+runs:
+  using: composite
+  steps:
+    - name: Assert tooling present
+      shell: bash
+      run: |
+        set -euo pipefail
+        psql --version
+        node -v
+
+    - name: Create ephemeral Neon branch
+      id: create-branch
+      uses: neondatabase/create-branch-action@v5
+      with:
+        project_id: ${{ inputs.project_id }}
+        api_key: ${{ inputs.api_key }}
+        parent: ${{ inputs.parent }}
+        branch_name: ${{ inputs.branch_name }}
+        # Only the owner connection is requested from the action itself.
+        # presby_app is cluster-wide and already exists on every branch
+        # forked from an already-migrated parent (development) — this action
+        # sets its own password below rather than taking a second call or a
+        # third operator secret (Phase 2 ruling, DECISION-150).
+        username: neondb_owner
+
+    - name: Create the fresh database and set presby_app's password
+      id: urls
+      shell: bash
+      run: |
+        set -euo pipefail
+        HOST="${{ steps.create-branch.outputs.host }}"
+        OWNER_PW="${{ steps.create-branch.outputs.password }}"
+        DB_NAME="${{ inputs.database_name }}"
+        OWNER_NEONDB_URL="postgresql://neondb_owner:${OWNER_PW}@${HOST}/neondb?sslmode=require"
+
+        # ci_run is cloned from template1 — its entire schema arrives only by
+        # `npm run db:migrate` later in the caller. This is the
+        # reproducibility proof DECISION-150 is about, not a convenience.
+        psql "$OWNER_NEONDB_URL" -v ON_ERROR_STOP=1 -c "create database \"${DB_NAME}\""
+
+        OWNER_DB_URL="postgresql://neondb_owner:${OWNER_PW}@${HOST}/${DB_NAME}?sslmode=require"
+
+        APP_PW="$(openssl rand -hex 32)"
+        echo "::add-mask::$APP_PW"
+
+        # presby_app is a Postgres role (`create role ... nobypassrls`, no
+        # LOGIN clause) — roles are cluster-wide and survive the fork, and
+        # migration 0009 is `if not exists`-guarded, so setting the password
+        # here (before any migration has run against the fresh database) is
+        # safe: the role itself already exists on the parent's lineage.
+        psql "$OWNER_DB_URL" -v ON_ERROR_STOP=1 -c \
+          "alter role presby_app with login password '${APP_PW}'"
+
+        APP_DB_URL="postgresql://presby_app:${APP_PW}@${HOST}/${DB_NAME}?sslmode=require"
+
+        {
+          echo "database_url=$APP_DB_URL"
+          echo "app_database_url=$APP_DB_URL"
+          echo "platform_database_url=$OWNER_DB_URL"
+          echo "migrate_database_url=$OWNER_DB_URL"
+        } >> "$GITHUB_OUTPUT"

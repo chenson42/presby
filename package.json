@@ -22,6 +22,7 @@
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:seed": "dotenv -e .env.local -- tsx scripts/seed.ts",
     "test": "vitest run",
+    "test:db": "dotenv -e .env.local -- vitest run --no-file-parallelism",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "visual:baseline": "PW_VISUAL=1 playwright test --project=visual --update-snapshots",

@@ -1,0 +1,150 @@
+# Database-backed tests on an ephemeral Neon branch.
+#
+# Why this exists: CI ran `npm test` with no DATABASE_URL, so the 765+
+# `describe.skipIf(!hasDb)` tests in ~30 files and the 520-assertion
+# scripts/test-rls.sql isolation suite ran nowhere in CI — every RLS proof,
+# every freeze trigger, withOrgContext()'s ordering, and the permission
+# resolver (test-coverage review 2026-09-25, C-1). This job closes that gap
+# using a fresh database inside a per-run ephemeral Neon branch: the entire
+# schema arrives only via `npm run db:migrate`, which is itself the proof
+# that the posture is reproducible from drizzle/ alone (DECISION-150).
+#
+# Required repository secrets (skips cleanly when absent, so forks and PRs
+# from contributors without them work out of the box):
+#   NEON_API_KEY      — console.neon.tech -> Account settings -> API keys
+#   NEON_PROJECT_ID   — Neon project -> Settings -> General
+#
+# No Real Data, for CI specifically: the ephemeral branch forks the pinned
+# `development` branch, but the job immediately creates a fresh database
+# inside it and never opens the parent's own `neondb` database again — no
+# connection string, log line, or artifact this job produces can carry a row
+# that predates the run. See docs/testing.md's "Continuous integration"
+# section and DECISION-150.
+name: Database-backed tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: db-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-secrets:
+    name: neon secrets present?
+    runs-on: ubuntu-latest
+    outputs:
+      has-neon: ${{ steps.check.outputs.has-neon }}
+    steps:
+      - id: check
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$NEON_API_KEY" ]; then
+            echo "has-neon=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-neon=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NEON_API_KEY not configured — db-tests skipped. See workflow header for setup."
+          fi
+
+  db-tests:
+    name: vitest + test-rls.sql on an ephemeral Neon branch
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-neon == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Provision ephemeral database
+        id: db
+        uses: ./.github/actions/neon-ci-db
+        with:
+          api_key: ${{ secrets.NEON_API_KEY }}
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          parent: development
+          branch_name: db-tests-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # Deliberately does NOT also set the four URLs as step-level `env:` on
+      # any `npm run` step below — dotenv -e .env.local does not override an
+      # already-exported variable, and a stray env: here would silently
+      # migrate/seed/test against something other than what was just written
+      # while the job stayed green (Batch A finding, docs/work-log/
+      # 2026-09-26-ci-db-tests.md). The three `psql` steps below are the
+      # legitimate exception: psql reads a URL passed via `env:`/argument, it
+      # has no dotenv integration at all.
+      - name: Write .env.local
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "DATABASE_URL=${{ steps.db.outputs.database_url }}"
+            echo "APP_DATABASE_URL=${{ steps.db.outputs.app_database_url }}"
+            echo "PLATFORM_DATABASE_URL=${{ steps.db.outputs.platform_database_url }}"
+            echo "MIGRATE_DATABASE_URL=${{ steps.db.outputs.migrate_database_url }}"
+          } >> .env.local
+
+      - run: npm run db:migrate
+      - run: npm run check:schema-parity
+      - run: npm run db:seed
+
+      - name: Apply the synthetic fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/seed-dev.sql
+        env:
+          MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
+
+      # scripts/test-rls.sql has always called assert_eq(), installed on every
+      # live branch by hand and tracked in no migration until Batch A added
+      # this file (docs/work-log/2026-09-26-ci-db-tests.md, Phase 4 Finding
+      # 5). Without this step the isolation suite dies at its first assertion
+      # on a from-scratch database. Owner connection, before the suite.
+      - name: Install test-only SQL helpers (assert_eq)
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/install-test-helpers.sql
+        env:
+          MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
+
+      - run: npm run test:db
+
+      - name: Assert presby_app before the isolation suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc \
+            "select current_user, (select rolbypassrls from pg_roles where rolname = current_user)")
+          echo "$RESULT"
+          [ "$RESULT" = "presby_app|f" ] || { echo "::error::guard failed: not presby_app or bypassrls is set"; exit 1; }
+        env:
+          APP_DATABASE_URL: ${{ steps.db.outputs.app_database_url }}
+
+      - name: Isolation suite (must run as presby_app, never the owner)
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql
+        env:
+          APP_DATABASE_URL: ${{ steps.db.outputs.app_database_url }}
+
+      - name: Delete ephemeral Neon branch
+        if: always()
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch: db-tests-${{ github.run_id }}-${{ github.run_attempt }}

@@ -4945,12 +4945,28 @@ begin;
   -- prokind/pronamespace are not decoration: pg_get_functiondef() raises on an
   -- aggregate, so an unrestricted scan of pg_proc errors out before it can
   -- answer anything (measured, 2026-09-24).
+  -- F90 (2026-09-26-withdraw-publication): corrected in place.
+  --
+  -- This assertion USED TO READ `0, 'F56: and NOTHING in the database arms it
+  -- yet — deliberate: the transition is unreachable on every connection until
+  -- presby_withdraw_publication() ships'`. Its passing result was a statement
+  -- about the database's INCOMPLETENESS, not a permanent invariant, and
+  -- drizzle/0052's presby_withdraw_publication() makes it false by
+  -- construction — so the pipeline that shipped the writer corrects the claim
+  -- in place rather than appending new coverage alongside a now-false one.
+  -- (The category, not just this instance, is F90: any "schema ships ahead of
+  -- its writer" GUC pair reproduces it.)
+  --
+  -- What survives the writer's arrival is the claim that was always the point:
+  -- exactly ONE function arms the marker. Same shape section 40 already pins
+  -- for presby.grant_claim_active; section 41 pins that the one function is
+  -- presby_withdraw_publication() BY NAME, which a bare count cannot.
   select assert_eq(
     (select count(*) from pg_proc p
       join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.prokind = 'f'
        and pg_get_functiondef(p.oid) like '%set_config(''presby.withdrawal_write_active''%'),
-    0, 'F56: and NOTHING in the database arms it yet — deliberate: the transition is unreachable on every connection until presby_withdraw_publication() ships');
+    1, 'F56/F90: exactly ONE function in the database arms presby.withdrawal_write_active — the sanctioned pair writer presby_withdraw_publication() (drizzle/0052), and nothing else');
 commit;
 -- ---------------------------------------------------------------------------
 -- 36. F60 — every SECURITY DEFINER function in drizzle/0043-0047 pins
@@ -6586,4 +6602,507 @@ commit;
 
 -- ===========================================================================
 -- END APPENDED SECTION — pipeline/submission-grants.
+-- ===========================================================================
+
+-- ===========================================================================
+-- APPENDED SECTION — pipeline/withdraw (docs/work-log/2026-09-26-withdraw-
+-- publication.md). One new section, at the END of the file, per Workflow
+-- Rule 16's shared-file discipline. The ONE edit this pipeline made
+-- elsewhere in this file is the in-place correction to section 35's
+-- arming-count assertion, marked there with `F90 (2026-09-26-withdraw-
+-- publication): corrected in place`.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 41. Withdrawing a published statistical return — presby_withdraw_
+--     publication(), the sanctioned pair writer (DECISION-152;
+--     drizzle/0052_presby_withdraw_publication.sql; F52/F56/DECISION-141)
+-- ---------------------------------------------------------------------------
+--     A WITHDRAWAL IS A MINUTED COUNCIL ACT, NOT AN EDIT. The publication
+--     stays (Option A, F52): the recipient keeps what it received, marked.
+--     What this section proves is that the act has exactly one door, that the
+--     door checks the right things in the right order, and that the two rows
+--     it writes — the congregation's publication and the presbytery's
+--     projection of it — move together or not at all.
+--
+--     WHAT THIS SUITE CAN AND CANNOT PROVE, in section 34/35/40's idiom, and
+--     it is a LONGER "can" list than those three. presby_app holds EXECUTE on
+--     presby_withdraw_publication() (that grant IS the mechanism — the
+--     function is SECURITY DEFINER and runs as neondb_owner, where the column
+--     revokes that close the raw path do not bind), so almost everything here
+--     is proven BEHAVIOURALLY on the tenant connection, from a real
+--     congregation's context, through the real publish path. Two things are
+--     out of reach from here and live in src/lib/db/domain/publication.test.ts
+--     on PLATFORM_DATABASE_URL instead:
+--       * WITHDRAWAL AFTER A REDISTRICTING (Phase 2 item 9). Moving a
+--         congregation between presbyteries means writing organization_
+--         affiliations, and presby_app holds SELECT only on it — the fixture
+--         itself is unreachable here, not the assertion. (h) below pins the
+--         catalog half: the about-org trigger's UPDATE early-return, which is
+--         WHY a withdrawal after a redistricting is not refused.
+--       * THE ROW-COUNT ARM (`% projection row(s) matched`). Reaching it needs
+--         a publication with no projection, which means INSERTing a
+--         publication — revoked on this connection since drizzle/0047.
+--
+--     NOTHING DURABLE IS WRITTEN. Every block below is begin;…rollback;, and
+--     that matters more here than usual: a publication is frozen by trigger on
+--     every connection, so a row committed by accident could not be cleaned up
+--     without disabling a global trigger.
+
+-- (a) THE FUNCTION'S SHAPE, in the catalog. A dropped or re-created-without-
+--     the-clause function fails here even if no probe below happens to reach
+--     it.
+begin;
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'presby_withdraw_publication'
+        and p.prosecdef
+        and 'search_path=public, pg_temp' = any(coalesce(p.proconfig, array['']::text[]))),
+    1, 'F56/DECISION-152: presby_withdraw_publication() exists, is SECURITY DEFINER, and pins search_path = public, pg_temp with pg_temp LAST (DECISION-148)');
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'presby_deny_publication_withdrawal'
+        and not p.prosecdef),
+    1, 'DECISION-121: the uniform-literal helper stays SECURITY INVOKER — it reads no relation and holds no privilege, so DEFINER would be cargo cult');
+
+  -- THE ONLY ARMING SITE, BY NAME. Section 35's corrected count says "exactly
+  -- one function arms it" (F90); a count cannot say WHICH, and a second
+  -- function arming the marker while the first was dropped would satisfy the
+  -- count and break the invariant.
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prokind = 'f'
+        and p.proname = 'presby_withdraw_publication'
+        and pg_get_functiondef(p.oid) like '%set_config(''presby.withdrawal_write_active''%'),
+    1, 'F56/F90: presby_withdraw_publication() is the function that arms presby.withdrawal_write_active — named, not merely counted');
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prokind = 'f'
+        and p.proname <> 'presby_withdraw_publication'
+        and pg_get_functiondef(p.oid) like '%set_config(''presby.withdrawal_write_active''%'),
+    0, 'F56/F90: and NO OTHER function in the database arms it — one act, one door');
+  -- It disarms as well as arms (drizzle/0052 step 7). Transaction-local GUCs
+  -- revert on their own, so this is belt-and-braces by design — but it is an
+  -- explicit structural requirement, so a silent deletion should fail a test.
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_withdraw_publication'
+        and pg_get_functiondef(oid) like '%set_config(''presby.withdrawal_write_active'', ''false'', true)%'),
+    1, 'DECISION-152: the writer DISARMS the marker explicitly after the pair, narrowing its window to the two statements that need it');
+
+  -- The grant shape, the presby_publish_sasr_snapshot() precedent.
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'presby_withdraw_publication'
+        and has_function_privilege('presby_app', p.oid, 'execute')),
+    1, 'DECISION-152: presby_app CAN execute the withdrawal writer — a DEFINER function is the tenant connection''s only path to a column it holds no privilege on');
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'presby_withdraw_publication'
+        and (has_function_privilege('presby_platform', p.oid, 'execute')
+          or has_function_privilege('public', p.oid, 'execute'))),
+    0, 'DECISION-152: neither presby_platform nor PUBLIC may execute it — a platform-shell connection reading across every tenant never performs a council''s act');
+commit;
+
+-- (b) THE GRANT THIS MIGRATION MUST NOT HAVE TOUCHED (DECISION-141).
+--     drizzle/0052 adds a function and a template role and NOTHING else; the
+--     specific failure mode Phase 2 named is a grant on the withdrawal
+--     columns appearing in the diff, which would replace "the only path is
+--     the function" with "the function is one of two paths". Asserted three
+--     ways — column privilege, table ACL, column ACL — because F38's
+--     additive-grant drift is how a narrow grant silently re-widens.
+begin;
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'withdrawn_at', 'UPDATE')
+                 then 1 else 0 end)::bigint,
+    0, 'DECISION-141: presby_app STILL holds no UPDATE on congregation_statistics.withdrawn_at after drizzle/0052 — the writer is DEFINER, so it needed no grant and got none');
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'publication_id', 'UPDATE')
+                 then 1 else 0 end)::bigint,
+    0, 'DECISION-141: and none on congregation_statistics.publication_id');
+  -- The positive control, not optional: a blanket revoke would satisfy both
+  -- assertions above while breaking setCongregationStatistics().
+  select assert_eq(
+    (select case when has_column_privilege('presby_app', 'congregation_statistics', 'minute_reference', 'UPDATE')
+                 then 1 else 0 end)::bigint,
+    1, 'DECISION-141: presby_app DOES still hold UPDATE on congregation_statistics.minute_reference — the narrowing is two columns wide, not a table-wide revoke');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'publications' and a.grantee = 'presby_app'::regrole
+        and a.privilege_type <> 'SELECT'),
+    0, 'DECISION-141: presby_app holds SELECT and nothing else on publications — no UPDATE appeared for the withdrawal triple');
+  select assert_eq(
+    (select count(*) from pg_class c
+       join pg_attribute at on at.attrelid = c.oid, aclexplode(at.attacl) b
+      where c.relname in ('publications', 'congregation_statistics')
+        and at.attname in ('withdrawn_at', 'withdrawn_by',
+                           'withdrawn_minute_reference', 'publication_id')),
+    0, 'DECISION-141: there is NO column-level grant of any kind, to any role, on any of the four withdrawal columns — the attacl half of the same fact');
+commit;
+
+-- (c) ONE UNIFORM LITERAL, FOUR WAYS, BYTE-IDENTICAL (F40 / DECISION-152).
+--     No context, an id that does not exist, an id that belongs to another
+--     council, and a p_withdrawn_by who is not a member here must be
+--     indistinguishable — each of them alone is an existence oracle. Compared
+--     to EACH OTHER, not merely matched individually against a pattern: three
+--     near-identical strings would pass a per-probe regex and still leak.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  declare
+    v_pub      uuid;
+    v_by       uuid := 'e0000000-0000-0000-0000-0000000000f3'; -- Tobias Renwick's user, an ACTIVE Alder Creek member
+    v_stranger uuid := 'e0000000-0000-0000-0000-0000000000a1'; -- :U_NONE, a real user with no organization at all
+    v_none text; v_absent text; v_wrong_org text; v_non_member text;
+    v_state_none text; v_state_absent text; v_state_wrong text; v_state_member text;
+  begin
+    -- Id-agnostic, deliberately (section 35's own lesson): on a freshly
+    -- seeded database this is scripts/seed-dev.sql's a9000000-…-0001 and on a
+    -- migrated one it is drizzle/0047's backfilled equivalent.
+    --
+    -- STATE-AGNOSTIC TOO, since 2026-09-26 (Phase 4 loop-back). This pick
+    -- carried `and withdrawn_at is null`, which made the whole suite abort
+    -- on any database where the feature had actually been exercised and
+    -- committed — including the browser rehearsal CLAUDE.md requires, and
+    -- including `development` after this ships. A WITHDRAWN row serves all
+    -- four probes below exactly as well: every one of them refuses in the
+    -- IDENTITY class, which drizzle/0052 checks strictly before it looks at
+    -- any state, so none of them can reach "already withdrawn" — probe (iv)
+    -- deliberately proves that ordering on whatever row it is handed.
+    select id into v_pub from publications
+     where organization_id = '22222222-2222-2222-2222-222222222222'
+       and record_class = 'statistical_return'
+     order by published_at limit 1;
+    if v_pub is null then
+      raise exception 'FAIL — fixture: Alder Creek has no publication to probe with';
+    end if;
+
+    -- (i) NO CONTEXT. The anonymous grant-submission path sets no org GUC:
+    --     a token authorizes one write of one return, never a retraction.
+    begin
+      perform set_config('app.current_org_id', '', true);
+      perform presby_withdraw_publication(v_pub, v_by, 'Session stated meeting, 2027-03-01, item 2');
+      raise exception 'FAIL — a withdrawal was performed with no organization context at all';
+    exception when insufficient_privilege then
+      v_none := sqlerrm; v_state_none := sqlstate;
+    end;
+
+    -- (ii) AN ID THAT DOES NOT EXIST.
+    begin
+      perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+      perform presby_withdraw_publication('00000000-0000-0000-0000-000000000000', v_by, 'Session stated meeting, 2027-03-01, item 2');
+      raise exception 'FAIL — a withdrawal of a nonexistent publication was not refused';
+    exception when insufficient_privilege then
+      v_absent := sqlerrm; v_state_absent := sqlstate;
+    end;
+
+    -- (iii) ANOTHER COUNCIL'S PUBLICATION — and not an abstract one: this is
+    --       the RECIPIENT PRESBYTERY attempting to withdraw the return
+    --       addressed to it, which is precisely the act Phase 1's Flow 3 and
+    --       Two Hierarchies forbid. The presbytery's remedy is a
+    --       presbytery_entered correction under its own minute, never a
+    --       mutation of the congregation's artifact.
+    begin
+      perform set_config('app.current_org_id', '11111111-1111-1111-1111-111111111111', true);
+      perform presby_withdraw_publication(v_pub, v_by, 'Presbytery stated meeting, 2027-03-01, item 2');
+      raise exception 'FAIL — the RECIPIENT withdrew the congregation''s own publication; access flows up by publication, never down by inheritance';
+    exception when insufficient_privilege then
+      v_wrong_org := sqlerrm; v_state_wrong := sqlstate;
+    end;
+
+    -- (iv) A p_withdrawn_by WHO IS NOT AN ACTIVE MEMBER HERE. The application
+    --      binds this from the session and never from client input; this is
+    --      the database's own half of that bound (DECISION-141: the boundary
+    --      is a database property, not a wrapper convention).
+    begin
+      perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+      perform presby_withdraw_publication(v_pub, v_stranger, 'Session stated meeting, 2027-03-01, item 2');
+      raise exception 'FAIL — a withdrawal was attributed to a user who is not an active member of the withdrawing council';
+    exception when insufficient_privilege then
+      v_non_member := sqlerrm; v_state_member := sqlstate;
+    end;
+
+    if v_none is distinct from 'publications: this withdrawal is not permitted'
+       or v_absent is distinct from v_none
+       or v_wrong_org is distinct from v_none
+       or v_non_member is distinct from v_none
+    then
+      raise exception 'FAIL — the four identity-class refusals are not byte-identical: [%] [%] [%] [%]',
+        v_none, v_absent, v_wrong_org, v_non_member;
+    end if;
+    if v_state_none <> '42501' or v_state_absent <> '42501'
+       or v_state_wrong <> '42501' or v_state_member <> '42501' then
+      raise exception 'FAIL — an identity-class refusal did not raise insufficient_privilege (42501): % % % %',
+        v_state_none, v_state_absent, v_state_wrong, v_state_member;
+    end if;
+    raise notice 'pass  F40/DECISION-152: no context, absent id, another council''s publication and a non-member withdrawer all raise ONE byte-identical literal at 42501 — none of the four is distinguishable from the others';
+  end $$;
+rollback;
+
+-- (d) + (e) THE TWO STATE ARMS, AND THE PAIR — one transaction, the real
+--     publish path, rolled back. Distinct, honest messages are safe HERE and
+--     nowhere above: by the time either fires the caller has proven it owns
+--     the row and can already SELECT both facts under tenant_isolation, so
+--     the message discloses nothing (DECISION-152's operative test).
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  declare
+    v_by        uuid := 'e0000000-0000-0000-0000-0000000000f3';
+    v_ret1      uuid; v_ret2 uuid; v_pub1 uuid; v_pub2 uuid; v_returned uuid;
+    v_superseded text; v_already text; v_identity_on_withdrawn text;
+    v_stranger  uuid := 'e0000000-0000-0000-0000-0000000000a1'; -- :U_NONE, a real user belonging to no organization
+    v_pub_at    timestamptz; v_proj_at timestamptz;
+    v_n         integer;
+    v_marker    text;
+  begin
+    -- A chain of two, through the only writer that can make one.
+    v_ret1 := presby_publish_sasr_snapshot(
+      2091, 'Session stated meeting, 2092-01-10, item 3', p_ending_active => 212);
+    select id into v_pub1 from publications where artifact_id = v_ret1;
+    v_ret2 := presby_publish_sasr_snapshot(
+      2091, 'Session stated meeting, 2092-02-14, item 5 (corrected)', p_ending_active => 214);
+    select id into v_pub2 from publications where artifact_id = v_ret2;
+    if (select supersedes_id from publications where id = v_pub2) is distinct from v_pub1 then
+      raise exception 'FAIL — fixture: the corrected publication did not supersede the first, so the superseded arm below would prove nothing';
+    end if;
+
+    -- (d1) THE SUPERSEDED ARM. Only the current head may be withdrawn
+    --      (orchestrator ruling 4): withdrawing a corrected-away filing
+    --      would leave "corrected, and also separately withdrawn", a state
+    --      no reader can interpret.
+    begin
+      perform presby_withdraw_publication(v_pub1, v_by, 'Session stated meeting, 2092-03-01, item 2 (withdrawal)');
+      raise exception 'FAIL — a SUPERSEDED publication was withdrawn';
+    exception when check_violation then
+      v_superseded := sqlerrm;
+    end;
+    if v_superseded not like '%a later filing supersedes this one%' then
+      raise exception 'FAIL — the superseded refusal did not name its cause: %', v_superseded;
+    end if;
+    raise notice 'pass  DECISION-152: a superseded publication is refused with its own honest message — only the current filing may be withdrawn';
+
+    -- (e) THE PAIR. The head withdraws, and the function returns the
+    --     publication id it withdrew.
+    v_returned := presby_withdraw_publication(
+      v_pub2, v_by, 'Session stated meeting, 2092-03-01, item 2 (withdrawal)');
+    if v_returned is distinct from v_pub2 then
+      raise exception 'FAIL — presby_withdraw_publication() returned % rather than the publication id it withdrew (%)', v_returned, v_pub2;
+    end if;
+    raise notice 'pass  DECISION-152: the writer returns the publication id it withdrew, so the caller needs no second read to know what it acted on';
+
+    -- The marker is DISARMED on the way out, inside the same transaction.
+    v_marker := coalesce(current_setting('presby.withdrawal_write_active', true), '');
+    if v_marker = 'true' then
+      raise exception 'FAIL — presby.withdrawal_write_active is still armed after the writer returned; the window did not close';
+    end if;
+    raise notice 'pass  DECISION-152: the marker is disarmed when the writer returns — the armed window is the two UPDATEs and nothing more';
+
+    -- BOTH HALVES, ONE INSTANT. The projection belongs to the RECIPIENT
+    -- presbytery, so it is unreadable from this context by ordinary SELECT —
+    -- it comes back through presby_list_own_congregation_publications(), the
+    -- congregation's own DEFINER confirmation read, which is exactly how the
+    -- source council learns what its recipient now holds.
+    select withdrawn_at into v_pub_at from publications where id = v_pub2;
+    select count(*), max(withdrawn_at) into v_n, v_proj_at
+      from presby_list_own_congregation_publications(2091)
+     where publication_id = v_pub2;
+    if v_n <> 1 then
+      raise exception 'FAIL — the withdrawn publication has % projection row(s), not exactly 1', v_n;
+    end if;
+    if v_pub_at is null or v_proj_at is null then
+      raise exception 'FAIL — half of the withdrawal pair is unwritten (publication %, projection %)', v_pub_at, v_proj_at;
+    end if;
+    if v_pub_at is distinct from v_proj_at then
+      raise exception 'FAIL — the pair''s timestamps differ (% vs %); one v_now must be written to both halves (F39-exactness)', v_pub_at, v_proj_at;
+    end if;
+    raise notice 'pass  F39/F52: the publication and its projection are BOTH withdrawn, at exactly the same instant — one v_now, not two now() calls';
+
+    -- The triple is complete and attributed: the shape CHECK requires all
+    -- three columns, which is why p_withdrawn_by is bounded rather than
+    -- refused outright the way presby_transfer_affiliation() refuses one.
+    select count(*) into v_n from publications
+     where id = v_pub2 and withdrawn_by = v_by
+       and withdrawn_minute_reference = 'Session stated meeting, 2092-03-01, item 2 (withdrawal)';
+    if v_n <> 1 then
+      raise exception 'FAIL — the withdrawal triple is not attributed to its withdrawer and its minute';
+    end if;
+    raise notice 'pass  DECISION-152: the withdrawal triple is complete — instant, withdrawer and minute reference, recorded together';
+
+    -- The recipient KEEPS it, marked (Option A, F52) — the projection row is
+    -- still there, still published_by_congregation, now carrying withdrawn_at.
+    select count(*) into v_n from presby_list_own_congregation_publications(2091)
+     where publication_id = v_pub2 and provenance = 'published_by_congregation';
+    if v_n <> 1 then
+      raise exception 'FAIL — the projection row vanished on withdrawal; Option A retains the artifact and marks it';
+    end if;
+    raise notice 'pass  F52: the withdrawn return is RETAINED and marked, never deleted — the recipient keeps what it received';
+
+    -- (d2) THE ALREADY-WITHDRAWN ARM. A withdrawal is itself an act: it is
+    --      corrected by publishing again, never by editing the act away.
+    begin
+      perform presby_withdraw_publication(v_pub2, v_by, 'Session stated meeting, 2092-04-01, item 1 (second withdrawal)');
+      raise exception 'FAIL — a second withdrawal was accepted';
+    exception when check_violation then
+      v_already := sqlerrm;
+    end;
+    if v_already not like '%already withdrawn at%' then
+      raise exception 'FAIL — the already-withdrawn refusal did not name its cause: %', v_already;
+    end if;
+    raise notice 'pass  DECISION-152: a second withdrawal is refused with its own honest message — a withdrawal is neither reversed, re-dated nor re-minuted';
+
+    -- THE TWO STATE ARMS ARE DISTINCT FROM EACH OTHER AND FROM THE UNIFORM
+    -- LITERAL. The split is the decision's substance: collapsing all five
+    -- refusals into one string would make a legitimate clerk's UI lie, and
+    -- splitting the identity ones would build the oracle F40 closes.
+    if v_superseded = v_already
+       or v_superseded = 'publications: this withdrawal is not permitted'
+       or v_already = 'publications: this withdrawal is not permitted'
+    then
+      raise exception 'FAIL — the state-class refusals are not distinct from each other and from the identity literal: [%] [%]', v_superseded, v_already;
+    end if;
+    raise notice 'pass  DECISION-152: the two STATE refusals are distinct from each other and from the identity literal — honest where the caller already holds the row, uniform where it does not';
+
+    -- IDENTITY IS CHECKED BEFORE STATE, ON A ROW THAT IS ALREADY WITHDRAWN.
+    -- Added 2026-09-26 (Phase 4 loop-back). Two things ride on this ordering
+    -- and neither was pinned: F40's non-oracle property (a stranger must not
+    -- learn from the message that the row exists AND has already been
+    -- withdrawn), and (c)'s fixture pick above, which is only sound because
+    -- its four identity-class probes never reach a state check. v_pub2 is
+    -- withdrawn by this point in the transaction, so this is the exact
+    -- collision, asserted rather than assumed.
+    begin
+      perform presby_withdraw_publication(v_pub2, v_stranger, 'Session stated meeting, 2092-05-01, item 9');
+      raise exception 'FAIL — a non-member was accepted as the withdrawer of an already-withdrawn publication';
+    exception when insufficient_privilege then
+      v_identity_on_withdrawn := sqlerrm;
+    when check_violation then
+      raise exception 'FAIL — an already-withdrawn row answered a NON-MEMBER with its state ("%"), which tells a stranger the row exists and what has happened to it', sqlerrm;
+    end;
+    if v_identity_on_withdrawn is distinct from 'publications: this withdrawal is not permitted' then
+      raise exception 'FAIL — the identity refusal on an already-withdrawn row is not the uniform literal: [%]', v_identity_on_withdrawn;
+    end if;
+    raise notice 'pass  F40/DECISION-152: on an ALREADY-WITHDRAWN publication a non-member still gets the uniform identity literal — identity is checked strictly before state, which is what lets section 41(c) probe whichever publication the fixture database happens to hold';
+  end $$;
+rollback;
+
+-- (f) THE TENANT PATH IS STILL CLOSED AT THE GRANT, MARKER ARMED — section
+--     35(d)'s claim, re-asserted on the day the marker finally has an armer,
+--     because that is the day the temptation to reach for it appears. A GUC
+--     is a marker any role can set; only a privilege is a privilege
+--     (DECISION-141, QA-2).
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select set_config('presby.withdrawal_write_active', 'true', true);
+  do $$
+  declare v_pub uuid;
+  begin
+    -- State-agnostic for the same reason (c)'s pick is (Phase 4 loop-back,
+    -- 2026-09-26): the claim is that presby_app holds NO UPDATE on
+    -- publications at all, and a privilege is checked before any row is
+    -- matched, so the row's withdrawal state is irrelevant to it.
+    select id into v_pub from publications
+     where organization_id = '22222222-2222-2222-2222-222222222222'
+       and record_class = 'statistical_return'
+     order by published_at limit 1;
+    if v_pub is null then
+      raise exception 'FAIL — fixture: Alder Creek has no publication to probe with';
+    end if;
+    begin
+      update publications
+         set withdrawn_at = now(), withdrawn_by = 'e0000000-0000-0000-0000-0000000000f3',
+             withdrawn_minute_reference = 'Session stated meeting, forged'
+       where id = v_pub;
+      raise exception 'FAIL — presby_app armed the marker and wrote the withdrawal triple directly, around presby_withdraw_publication()';
+    exception when insufficient_privilege then
+      raise notice 'pass  DECISION-141: ARMED changes nothing for the raw path — presby_app holds no UPDATE on publications at all, so the grant refuses before any trigger is consulted';
+    when check_violation then
+      raise exception 'FAIL — the grant did not refuse; the trigger did. publications'' UPDATE revoke has been reverted';
+    end;
+  end $$;
+rollback;
+
+-- (g) THE CONGREGATION `stated_clerk` TEMPLATE, AND THE BACKFILL THAT DID NOT
+--     HAPPEN. drizzle/0052 creates the template (it did not exist — verified
+--     in the live catalog at Phase 2) and binds statistics.publish to it. It
+--     writes nothing into any tenant's own app_role_permissions: a migration
+--     granting tenant authority the tenant's own roles.manage act never
+--     granted is the Two Hierarchies line, and drizzle/0037 set the precedent
+--     by backfilling nothing for presbyteries that had already adopted.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from app_roles
+      where id = '00000000-0000-0000-0000-000000000004'
+        and organization_id is null
+        and organization_type_scope = 'congregation'
+        and key = 'congregation_stated_clerk'
+        and role_kind = 'constitutional'
+        and is_protected),
+    1, 'DECISION-152: the congregation stated_clerk TEMPLATE exists — organization_id null, scope congregation, constitutional, protected (drizzle/0037''s shape, one axis over)');
+  -- Readable BY A TENANT, which is the only reason a template is useful: the
+  -- adoption UI lists it under the widened app_roles SELECT policy
+  -- (drizzle/0032). This whole block runs as presby_app under Alder Creek's
+  -- context, so a passing assertion IS the visibility proof.
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = '00000000-0000-0000-0000-000000000004'),
+    1, 'DECISION-152: the template carries EXACTLY ONE permission — statistics.publish. No role carries a wildcard, template roles least of all');
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = '00000000-0000-0000-0000-000000000004'
+        and permission_key = 'statistics.publish'),
+    1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
+  select assert_eq(
+    (select count(*) from app_roles where organization_id is null),
+    4, 'DECISION-152: there are now FOUR template roles — committee_chair, presbytery_stated_clerk, personnel_admin and congregation_stated_clerk; 0052 added exactly one');
+  select assert_eq(
+    (select count(*) from app_role_permissions rp
+       join app_roles r on r.id = rp.role_id
+      where rp.permission_key = 'statistics.publish' and r.organization_id is null
+        and r.id <> '00000000-0000-0000-0000-000000000004'),
+    0, 'DECISION-152: no OTHER template carries statistics.publish');
+  -- The no-backfill half, stated as the only count that can state it: the
+  -- single org-owned holder is scripts/seed-dev.sql's own Alder Creek fixture
+  -- role, direct-granted there long before this migration. 0052 minted no
+  -- org-owned binding, which is what "no backfill" means concretely.
+  select assert_eq(
+    (select count(*) from app_role_permissions rp
+       join app_roles r on r.id = rp.role_id
+      where rp.permission_key = 'statistics.publish' and r.organization_id is not null),
+    1, 'DECISION-152 / Two Hierarchies: exactly ONE org-owned role holds statistics.publish — seed-dev''s Alder Creek stated_clerk fixture. drizzle/0052 backfilled nothing into any tenant''s roles');
+commit;
+
+-- (h) WITHDRAWAL AFTER A REDISTRICTING (Phase 2 item 9), the half reachable
+--     from here. congregation_statistics_about_org fires BEFORE UPDATE on the
+--     projection row, and if it re-checked affiliation it would refuse every
+--     withdrawal of a return filed before a boundary change — the congregation
+--     is no longer that presbytery's, but the historical projection is still
+--     the presbytery's to hold (Option A again). It does not, because the
+--     trigger function early-returns when neither the about-org nor the year
+--     moves, and a withdrawal moves only withdrawn_at. That early return is
+--     what makes the withdrawal safe, so it is pinned here; the behavioural
+--     proof needs an affiliation WRITE (presby_app holds SELECT only) and
+--     lives in src/lib/db/domain/publication.test.ts on the owner connection.
+begin;
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_check_about_org_affiliated'
+        and pg_get_functiondef(oid) like '%(v_new -> v_about_col) is not distinct from (v_old -> v_about_col)%'),
+    1, 'Phase 2 item 9: the about-org trigger still early-returns on an UPDATE that moves neither the about-org nor the year — which is why a withdrawal after a redistricting is not refused');
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname = 'congregation_statistics'
+        and t.tgname in ('congregation_statistics_about_org', 'congregation_statistics_freeze')
+        and t.tgenabled = 'O'),
+    2, 'Phase 2 item 9: both BEFORE UPDATE triggers on the projection are still ENABLED — the withdrawal passes through them, it does not go around them');
+commit;
+
+\echo ''
+\echo '======================================================'
+\echo ' Section 41 (withdraw a published return) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION — pipeline/withdraw.
 -- ===========================================================================

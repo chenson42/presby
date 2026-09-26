@@ -652,6 +652,22 @@ async function seedFlags() {
       enabled: false,
     },
     {
+      key: "org_portal.filings",
+      // ON: /o/<slug>/admin/filings (the CONGREGATION's own filing-history +
+      // withdraw-a-published-return page, DECISION-152,
+      // docs/work-log/2026-09-26-withdraw-publication.md) is reachable at
+      // all. Distinct from org_portal.statistical_publication above — that
+      // one gates the not-yet-built self-service PUBLISH form (Increment
+      // 4a); this one gates the WITHDRAW surface, built in this pipeline,
+      // whose own empty state says plainly that filing a new return isn't
+      // built yet on this page. Never substitutes for statistics.publish.
+      // Seeded OFF, same "ships dark until the page lands" reasoning as
+      // every other real org_portal.* flag.
+      description:
+        "Congregation statistical-filing-history + withdraw page in (org). OFF = /o/<slug>/admin/filings renders 'isn't turned on yet' regardless of the viewer's statistics.publish grant.",
+      enabled: false,
+    },
+    {
       key: "org_portal.feature_categories",
       // DUAL PURPOSE (docs/work-log/2026-08-27-feature-categories.md, Phase
       // 3; DECISION-130) — not merely a page-visibility toggle:

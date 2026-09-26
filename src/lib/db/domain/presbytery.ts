@@ -191,10 +191,17 @@ export const congregationStatistics = pgTable(
      *
      * AND the transaction must be the sanctioned withdrawal writer
      * (F56/DECISION-141, 2026-09-24): the transition additionally requires
-     * the transaction-local GUC `presby.withdrawal_write_active`, which
-     * NOTHING sets today. Before that conjunct each table permitted its half
-     * independently, which is how a projection could end up disagreeing with
-     * the publication it projects.
+     * the transaction-local GUC `presby.withdrawal_write_active`. Before
+     * that conjunct each table permitted its half independently, which is
+     * how a projection could end up disagreeing with the publication it
+     * projects. As of 2026-09-26 exactly one function in the database arms
+     * it — `presby_withdraw_publication()`
+     * (`drizzle/0052_presby_withdraw_publication.sql`, DECISION-152), which
+     * scopes its UPDATE of this column by `publication_id` AND
+     * `about_org_id = presby_current_org()` and asserts that exactly one row
+     * matched. `scripts/test-rls.sql` section 41 pins the single-armer
+     * property by name; section 35's older "nothing arms it yet" assertion
+     * was corrected in place at the same time (F90).
      *
      * THAT GUC IS NOT WHAT CLOSES THE TENANT CONNECTION, corrected 2026-09-25
      * (QA-2). A GUC is a marker any role can `set_config()`; `presby_app`
@@ -204,10 +211,12 @@ export const congregationStatistics = pgTable(
      * (`drizzle/0047` section 10): `presby_app` holds UPDATE on every column
      * of this table EXCEPT `withdrawn_at` and `publication_id`. The GUC
      * conjunct still binds the one connection a grant cannot — `neondb_owner`
-     * (F44) — which is the connection the future
-     * `presby_withdraw_publication()` will run on as a DEFINER function,
-     * setting this and the publication's own three withdrawal columns in one
-     * transaction.
+     * (F44) — which is the connection `presby_withdraw_publication()` runs
+     * on as a DEFINER function, setting this and the publication's own three
+     * withdrawal columns in one transaction with ONE shared timestamp.
+     * `drizzle/0052` added NO grant on either narrowed column: the writer
+     * needed none, and section 41 asserts the absence three ways
+     * (`has_column_privilege`, `relacl`, `attacl`).
      */
     withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
     /**

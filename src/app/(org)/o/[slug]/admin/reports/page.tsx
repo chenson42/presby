@@ -211,7 +211,7 @@ async function renderStatisticsSection({
         <ReportsSectionLoadError slug={slug} />
       ) : (
         <>
-          <StatisticsTable entries={result.data} />
+          <StatisticsTable entries={result.data} slug={slug} />
           <div className="max-w-2xl space-y-4">
             <h3 className="text-lg font-semibold">Record statistics</h3>
             <StatisticsForm

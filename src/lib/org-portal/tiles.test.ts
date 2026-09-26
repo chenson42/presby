@@ -85,6 +85,9 @@ const KNOWN_SEEDED_ORG_PORTAL_FLAG_KEYS = new Set([
   "org_portal.committees",
   "org_portal.oversight",
   "org_portal.reports",
+  // DECISION-152, docs/work-log/2026-09-26-withdraw-publication.md: new,
+  // seeded off — the congregation's own withdraw-a-filing surface.
+  "org_portal.filings",
   "org_portal.insights",
   "org_portal.communications",
   // docs/work-log/2026-08-27-staff-and-personnel.md, Phase 4 (api-developer
@@ -125,15 +128,15 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("PORTAL_TILES has exactly 18 entries (10 existing + 7 product-IA placeholders + 1 staff)", () => {
-    expect(PORTAL_TILES.length).toBe(18);
+  it("PORTAL_TILES has exactly 19 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings)", () => {
+    expect(PORTAL_TILES.length).toBe(19);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 18-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel)", () => {
+  it("mirrors the full 19-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
@@ -143,6 +146,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
         "directory",
         "events",
         "features",
+        "filings",
         "giving",
         "groups",
         "insights",
@@ -223,6 +227,11 @@ describe("PORTAL_TILES — flag-key shape", () => {
       category: "administer",
       orgTypeScope: ["presbytery"],
     },
+    filings: {
+      domain: "reports",
+      category: "administer",
+      orgTypeScope: ["congregation"],
+    },
     insights: { domain: "reports", category: "operate" },
     communications: { domain: "communications", category: "operate" },
   };
@@ -254,16 +263,19 @@ describe("PORTAL_TILES — flag-key shape", () => {
     );
   });
 
-  it("presbytery-only tiles (committees, oversight, reports) each declare the presbytery allow-list; credentials does too; every other tile declares none", () => {
+  it("presbytery-only tiles (committees, oversight, reports) each declare the presbytery allow-list; credentials does too; filings declares the congregation allow-list (DECISION-152); every other tile declares none", () => {
     const presbyteryOnly = new Set([
       "credentials",
       "committees",
       "oversight",
       "reports",
     ]);
+    const congregationOnly = new Set(["filings"]);
     for (const tile of PORTAL_TILES) {
       if (presbyteryOnly.has(tile.key)) {
         expect(tile.orgTypeScope).toEqual(["presbytery"]);
+      } else if (congregationOnly.has(tile.key)) {
+        expect(tile.orgTypeScope).toEqual(["congregation"]);
       } else {
         expect(tile.orgTypeScope).toBeUndefined();
       }
@@ -296,13 +308,32 @@ describe("visiblePortalTiles(category, organizationType) — category, then org-
     }
   });
 
-  it("returns every administer tile when every flag is on, and no operate tile leaks in", async () => {
+  it("returns every administer tile IN SCOPE FOR PRESBYTERY when every flag is on, and no operate tile leaks in — filings (congregation-only, DECISION-152) is correctly excluded here, not a bug", async () => {
     isFlagEnabled.mockResolvedValue(true);
     const tiles = await visiblePortalTiles("administer", "presbytery");
     const expectedKeys = PORTAL_TILES.filter(
-      (t) => t.category === "administer",
+      (t) =>
+        t.category === "administer" &&
+        (!t.orgTypeScope || t.orgTypeScope.includes("presbytery")),
     ).map((t) => t.key);
     expect(tiles.map((t) => t.key).sort()).toEqual(expectedKeys.sort());
+    expect(tiles.map((t) => t.key)).not.toContain("filings");
+    for (const tile of tiles) {
+      expect(tile.category).toBe("administer");
+    }
+  });
+
+  it("returns every administer tile IN SCOPE FOR CONGREGATION when every flag is on, including filings — reports (presbytery-only) is correctly excluded here", async () => {
+    isFlagEnabled.mockResolvedValue(true);
+    const tiles = await visiblePortalTiles("administer", "congregation");
+    const expectedKeys = PORTAL_TILES.filter(
+      (t) =>
+        t.category === "administer" &&
+        (!t.orgTypeScope || t.orgTypeScope.includes("congregation")),
+    ).map((t) => t.key);
+    expect(tiles.map((t) => t.key).sort()).toEqual(expectedKeys.sort());
+    expect(tiles.map((t) => t.key)).toContain("filings");
+    expect(tiles.map((t) => t.key)).not.toContain("reports");
     for (const tile of tiles) {
       expect(tile.category).toBe("administer");
     }
@@ -436,9 +467,11 @@ describe("visiblePortalTiles(category, organizationType) — category, then org-
     isFlagEnabled.mockResolvedValue(true);
     const tiles = await visiblePortalTiles("administer", "presbytery");
     expect(tiles.map((t) => t.key)).toEqual(
-      PORTAL_TILES.filter((t) => t.category === "administer").map(
-        (t) => t.key,
-      ),
+      PORTAL_TILES.filter(
+        (t) =>
+          t.category === "administer" &&
+          (!t.orgTypeScope || t.orgTypeScope.includes("presbytery")),
+      ).map((t) => t.key),
     );
   });
 
@@ -446,13 +479,19 @@ describe("visiblePortalTiles(category, organizationType) — category, then org-
     // Every isFlagEnabled call this module makes is one of the tile
     // flagKeys — asserting the exact call set proves visiblePortalTiles()
     // consults nothing else (no permission resolver, no second gate).
+    // filings is congregation-only (DECISION-152), so at organizationType
+    // "presbytery" it is filtered out BEFORE isFlagEnabled is ever called —
+    // excluded from the expected set here for that reason, not overlooked.
     isFlagEnabled.mockResolvedValue(true);
     await visiblePortalTiles("administer", "presbytery");
     const administerFlagKeys = PORTAL_TILES.filter(
-      (t) => t.category === "administer",
+      (t) =>
+        t.category === "administer" &&
+        (!t.orgTypeScope || t.orgTypeScope.includes("presbytery")),
     ).map((t) => t.flagKey);
     const calledKeys = isFlagEnabled.mock.calls.map((call) => call[0]);
     expect(new Set(calledKeys)).toEqual(new Set(administerFlagKeys));
+    expect(calledKeys).not.toContain("org_portal.filings");
   });
 
   describe("orgTypeScope — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", () => {

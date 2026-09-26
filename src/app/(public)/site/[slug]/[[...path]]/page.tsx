@@ -82,6 +82,13 @@ const PORTAL_NAV_ORDER = 23;
  * (confirmed: `page.test.tsx` mocks `@/lib/sites` and `presby-site-kit`
  * but never had reason to mock `@/lib/db` before this page had no direct
  * dependency on it). Deferred to exactly the one call site that needs it.
+ *
+ * This function's OWN body is deliberately not wrapped in try/catch — both
+ * call sites wrap it instead (`.catch(() => null)`, logging the slug only)
+ * per docs/work-log/2026-09-26-public-render-blip.md Phase 3 "Component /
+ * Page Plan": it is a short, local, already-narrow function with exactly
+ * two callers, both of which already need their own catch to attach a
+ * distinct log line.
  */
 async function resolveLogoUrl(organizationId: string, slug: string): Promise<string | null> {
   const { getPlatformDb } = await import("@/lib/db");
@@ -181,7 +188,20 @@ export async function generateMetadata({
   const { site } = result;
   const pageUrl = (bundlePath: string): string =>
     bundlePath === "/" ? `/site/${slug}` : `/site/${slug}${bundlePath}`;
-  const logoUrl = await resolveLogoUrl(site.organizationId, slug);
+  const logoUrl = await resolveLogoUrl(site.organizationId, slug).catch(
+    () => {
+      // A mid-request DB blip here must not take metadata generation down —
+      // OrgMark/buildPageMetadata already treat `null` as "no logo" (same
+      // discipline every other optional field on this page uses). Never
+      // log the caught error itself — same discipline as every other read
+      // on this surface (docs/work-log/2026-09-26-public-render-blip.md).
+      console.error(
+        "[site-page] resolveLogoUrl read failed; rendering without a logo",
+        { slug },
+      );
+      return null;
+    },
+  );
 
   const meta = buildPageMetadata({
     pages: site.pages,
@@ -221,7 +241,17 @@ export default async function PublicSitePage({
     // slug" (publicOrgSummary() cannot see platformStatus at all, so this
     // adds no new leak surface beyond org type, which the public org tree
     // already discloses).
-    const summary = await publicOrgSummary(slug);
+    //
+    // Skipped entirely when `reason === "read_failed"` (docs/work-log/
+    // 2026-09-26-public-render-blip.md Phase 3 "Data Model"): there is
+    // nothing to summarize against a database that just failed the FIRST
+    // read, and firing a second doomed query only adds latency — never a
+    // response-shape difference, since publicOrgSummary() itself now also
+    // fails closed to `null`, the same value this skip substitutes. This is
+    // the ONLY legal reference to `result.reason` in this file; see the
+    // type's own doc comment before adding a second one.
+    const summary =
+      result.reason === "read_failed" ? null : await publicOrgSummary(slug);
     if (summary && FALLBACK_ORG_TYPES.has(summary.organizationType)) {
       return <PresbyteryFallback name={summary.name} slug={slug} />;
     }
@@ -236,7 +266,18 @@ export default async function PublicSitePage({
   const pageUrl = (bundlePath: string): string =>
     bundlePath === "/" ? `/site/${slug}` : `/site/${slug}${bundlePath}`;
 
-  const logoUrl = await resolveLogoUrl(site.organizationId, slug);
+  const logoUrl = await resolveLogoUrl(site.organizationId, slug).catch(
+    () => {
+      // Same degrade-to-no-logo discipline as generateMetadata()'s own call
+      // site above — never let a mid-request DB blip take the whole page
+      // down over an optional brand mark.
+      console.error(
+        "[site-page] resolveLogoUrl read failed; rendering without a logo",
+        { slug },
+      );
+      return null;
+    },
+  );
 
   // The contact form is no longer bolted onto every page below the
   // rendered bundle (the original shape here — it appeared after the

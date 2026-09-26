@@ -786,15 +786,26 @@ async function seedFlags() {
  * db:seed` once against a target database before the first
  * createOrganization() call there, not on every deploy.
  *
- * NOT `.onConflictDoNothing()` (the design doc's literal suggestion, matching
- * the `roles`/`features` pattern elsewhere in this file) — `group_types` has
- * NO unique constraint on `(organization_id, key)`, only a non-unique index
- * (`group_types_org_idx`). `id` is the sole unique column and is always a
- * fresh `defaultRandom()` UUID, so `ON CONFLICT DO NOTHING` would never
- * actually fire and re-running this script would insert a second `court`/
- * `roster` row every time. Explicit find-or-create instead, confirmed
- * idempotent by running twice against the dev database (see work-log Phase 4
- * Implementer Notes).
+ * NOT `.onConflictDoNothing()`, and the original reason for that is now
+ * STALE: this docstring used to assert that `group_types` has "NO unique
+ * constraint on `(organization_id, key)`, only a non-unique index." That
+ * stopped being true at drizzle/0048, which added `group_types_org_key
+ * unique nulls not distinct (organization_id, key)` to close a 1,557-row
+ * duplicate-accumulation bug (B-L1). `onConflictDoNothing()` would now be
+ * viable here — but this function's explicit find-or-create shape was
+ * already idempotent before that constraint existed, is unaffected by it,
+ * and needs no change. Confirmed idempotent by running twice against the dev
+ * database (see the 2026-08-24 work-log's Phase 4 Implementer Notes).
+ *
+ * What DOES depend on that constraint, and is new: `scripts/seed-dev.sql`'s
+ * own `group_types` insert uses `on conflict (organization_id, key) do
+ * nothing` against this exact constraint, and resolves every downstream
+ * `groups.group_type_id` by KEY rather than by a fixed literal UUID — so the
+ * documented recipe (db:migrate -> db:seed -> seed-dev.sql) is idempotent
+ * whichever of the two scripts creates `court`/`committee`/`roster` first.
+ * Before that fix, this function winning the race made seed-dev.sql abort its
+ * single transaction and land ZERO fixture rows on a from-scratch database
+ * (docs/work-log/2026-09-26-ci-db-tests.md, Phase 1).
  */
 async function seedGroupTypes() {
   const defs = [

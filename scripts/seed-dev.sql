@@ -150,23 +150,39 @@ insert into organization_settings (organization_id, require_two_factor, settings
 -- F16: derived groups must exist before any officer term is recorded, or the
 -- sync trigger raises. Seeding them at org creation is the real fix.
 -- ---------------------------------------------------------------------------
+-- `db:seed`'s seedGroupTypes() runs BEFORE this file in every documented
+-- recipe (docs/testing.md) and, on a from-scratch database, creates these same
+-- three platform-wide keys with defaultRandom() ids. drizzle/0048 then added
+-- `group_types_org_key unique nulls not distinct (organization_id, key)`
+-- (B-L1, closing a 1,557-row duplicate-accumulation bug) — NULLS NOT
+-- DISTINCT is why two `organization_id is null` rows sharing a key collide at
+-- all. Without the `on conflict` below this insert raises, and because the
+-- whole file is one transaction that is not partial fixture loss but TOTAL
+-- fixture loss: zero rows land. Measured 2026-09-26 (Phase 1,
+-- docs/work-log/2026-09-26-ci-db-tests.md).
+--
+-- The fixed ids below are therefore a FALLBACK, never a guarantee: they win
+-- only when seed-dev.sql runs against a database that skipped db:seed. Every
+-- downstream reference in this file resolves the type by KEY, not by literal,
+-- so it works whichever side seeded first.
 insert into group_types (id, organization_id, key, name) values
   ('a0000000-0000-0000-0000-000000000001', null, 'court', 'Court'),
   ('a0000000-0000-0000-0000-000000000002', null, 'committee', 'Committee'),
   -- P1 / DECISION-060: the active_membership derived group's type, parallel
   -- to court/committee — a platform-wide template, not owned by any one org.
-  ('a0000000-0000-0000-0000-000000000004', null, 'roster', 'Roster');
+  ('a0000000-0000-0000-0000-000000000004', null, 'roster', 'Roster')
+on conflict (organization_id, key) do nothing;
 
 insert into groups (id, organization_id, group_type_id, name, membership_source, derived_from, is_protected) values
   ('b0000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222',
-   'a0000000-0000-0000-0000-000000000001', 'Session', 'derived', 'session', true),
+   (select id from group_types where organization_id is null and key = 'court'), 'Session', 'derived', 'session', true),
   ('b0000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222',
-   'a0000000-0000-0000-0000-000000000001', 'Board of Deacons', 'derived', 'diaconate', true),
+   (select id from group_types where organization_id is null and key = 'court'), 'Board of Deacons', 'derived', 'diaconate', true),
   ('b0000000-0000-0000-0000-000000000003', '33333333-3333-3333-3333-333333333333',
-   'a0000000-0000-0000-0000-000000000001', 'Session', 'derived', 'session', true),
+   (select id from group_types where organization_id is null and key = 'court'), 'Session', 'derived', 'session', true),
   -- A managed group, for contrast: staff edit this roster freely.
   ('b0000000-0000-0000-0000-000000000004', '22222222-2222-2222-2222-222222222222',
-   'a0000000-0000-0000-0000-000000000002', 'Property Committee', 'managed', null, false),
+   (select id from group_types where organization_id is null and key = 'committee'), 'Property Committee', 'managed', null, false),
   -- P1 / DECISION-060/063: drizzle/0017's memberships_sync_derived_group
   -- trigger fails loudly on ANY memberships insert at an org with no
   -- active_membership group yet — so this has to exist at every fixture org
@@ -175,13 +191,13 @@ insert into groups (id, organization_id, group_type_id, name, membership_source,
   -- group arm surfaces this as source_name, and scripts/test-rls.sql section
   -- 9 asserts on that exact string.
   ('b0000000-0000-0000-0000-000000000006', '11111111-1111-1111-1111-111111111111',
-   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+   (select id from group_types where organization_id is null and key = 'roster'), 'Active Membership', 'derived', 'active_membership', true),
   ('b0000000-0000-0000-0000-000000000007', '22222222-2222-2222-2222-222222222222',
-   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+   (select id from group_types where organization_id is null and key = 'roster'), 'Active Membership', 'derived', 'active_membership', true),
   ('b0000000-0000-0000-0000-000000000008', '33333333-3333-3333-3333-333333333333',
-   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+   (select id from group_types where organization_id is null and key = 'roster'), 'Active Membership', 'derived', 'active_membership', true),
   ('b0000000-0000-0000-0000-000000000009', '44444444-4444-4444-4444-444444444444',
-   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true);
+   (select id from group_types where organization_id is null and key = 'roster'), 'Active Membership', 'derived', 'active_membership', true);
 
 -- ---------------------------------------------------------------------------
 -- People (global) - invented names
@@ -644,11 +660,13 @@ insert into role_grants (organization_id, role_id, person_id, starts_on) values
 -- (no tenant-extensible custom fields/types) argues against a real per-org
 -- custom-group-types feature. Every groups.group_type_id write now resolves
 -- against the platform template row directly, matching how court/roster
--- already worked — so this group references a0000000-...-0002, not a
--- second, org-scoped row.
+-- already worked — so this group references the platform-wide 'committee'
+-- template, not a second, org-scoped row. (Resolved by KEY since
+-- 2026-09-26, not by the a0000000-...-0002 literal: on a from-scratch
+-- database db:seed creates that template with a random id.)
 insert into groups (id, organization_id, group_type_id, name, membership_source) values
   ('b0000000-0000-0000-0000-000000000005','11111111-1111-1111-1111-111111111111',
-   'a0000000-0000-0000-0000-000000000002','Commission on Alder Creek','managed');
+   (select id from group_types where organization_id is null and key = 'committee'),'Commission on Alder Creek','managed');
 insert into group_memberships (organization_id, group_id, person_id, starts_on) values
   ('11111111-1111-1111-1111-111111111111','b0000000-0000-0000-0000-000000000005',
    'c0000000-0000-0000-0000-000000000006','2026-01-01');
@@ -777,9 +795,9 @@ values
 -- targets them, or drizzle/0017's sync trigger raises on the first row.
 insert into groups (id, organization_id, group_type_id, name, membership_source, derived_from, is_protected) values
   ('b0000000-0000-0000-0000-00000000000a', '55555555-5555-5555-5555-555555555555',
-   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true),
+   (select id from group_types where organization_id is null and key = 'roster'), 'Active Membership', 'derived', 'active_membership', true),
   ('b0000000-0000-0000-0000-00000000000b', '66666666-6666-6666-6666-666666666666',
-   'a0000000-0000-0000-0000-000000000004', 'Active Membership', 'derived', 'active_membership', true);
+   (select id from group_types where organization_id is null and key = 'roster'), 'Active Membership', 'derived', 'active_membership', true);
 
 -- Six users, one per row of the destination matrix that the existing fixture
 -- cannot reach. All password-less (elder.fixture itself was upgraded to

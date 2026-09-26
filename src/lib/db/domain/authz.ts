@@ -195,7 +195,14 @@ export const administrativeCommissions = pgTable(
     // F27: a commission is a BODY of people, not just a role. Its members are a
     // group at the parent org; without this the resolver has a role to grant and
     // nobody to grant it to.
-    groupId: uuid("group_id").references(() => groups.id),
+    //
+    // F2 / Composite Tenant Keys: the FK is COMPOSITE — (group_id,
+    // parent_org_id) -> groups(id, organization_id), declared in the
+    // extra-config array below, not here. Enforced by
+    // drizzle/0050_presby_schema_parity.sql section 2. A plain
+    // references(groups.id) would let a commission cite a group owned by an
+    // unrelated third council.
+    groupId: uuid("group_id"),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on"),
     minuteReference: text("minute_reference"),
@@ -209,6 +216,13 @@ export const administrativeCommissions = pgTable(
       t.startsOn,
       t.endsOn,
     ),
+    // F2: the commission's member group must belong to the PARENT council.
+    // DDL: drizzle/0050_presby_schema_parity.sql section 2.
+    foreignKey({
+      columns: [t.groupId, t.parentOrgId],
+      foreignColumns: [groups.id, groups.organizationId],
+      name: "administrative_commissions_group_id_parent_org_fkey",
+    }),
   ],
 );
 
@@ -235,7 +249,12 @@ export const orgDelegations = pgTable(
     // F27: which people at the grantee council actually hold the delegation.
     // "The presbytery administers our portal" means a specific staff group, not
     // everyone at the presbytery.
-    groupId: uuid("group_id").references(() => groups.id),
+    //
+    // F2 / Composite Tenant Keys: the FK is COMPOSITE — (group_id,
+    // grantee_org_id) -> groups(id, organization_id), declared in the
+    // extra-config array below, not here. Enforced by
+    // drizzle/0050_presby_schema_parity.sql section 3.
+    groupId: uuid("group_id"),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on"),
     minuteReference: text("minute_reference"),
@@ -244,5 +263,12 @@ export const orgDelegations = pgTable(
   (t) => [
     index("org_delegations_grantor_idx").on(t.grantorOrgId, t.startsOn),
     index("org_delegations_grantee_idx").on(t.granteeOrgId, t.startsOn),
+    // F2: the delegation's holder group must belong to the GRANTEE council.
+    // DDL: drizzle/0050_presby_schema_parity.sql section 3.
+    foreignKey({
+      columns: [t.groupId, t.granteeOrgId],
+      foreignColumns: [groups.id, groups.organizationId],
+      name: "org_delegations_group_id_grantee_org_fkey",
+    }),
   ],
 );

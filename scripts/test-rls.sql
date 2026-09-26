@@ -610,9 +610,40 @@ rollback;
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   insert into groups (organization_id, group_type_id, name, membership_source, derived_from)
-  values (:ALDER, 'a0000000-0000-0000-0000-000000000002', -- global 'committee' template
+  -- Resolved by key, not by the a0000000-...-0002 literal this line used to
+  -- carry: on a from-scratch database db:seed's seedGroupTypes() creates the
+  -- platform-wide 'committee' template with a defaultRandom() id, and
+  -- scripts/seed-dev.sql's own insert now yields to it (`on conflict
+  -- (organization_id, key) do nothing`). With -v ON_ERROR_STOP=1 the stale
+  -- literal would abort the ENTIRE suite on a foreign-key violation before
+  -- the `rollback;` two statements below ever ran — not just this assertion.
+  -- The group_types_select policy admits `organization_id is null`
+  -- (drizzle/0048:269), so presby_app can read the template.
+  values (:ALDER,
+          (select id from group_types
+            where organization_id is null and key = 'committee'),
           'Active Membership (scratch)', 'derived', 'active_membership')
   on conflict (organization_id, derived_from) do nothing;
+  -- Establish this block's OWN premise instead of borrowing it from the
+  -- fixture. "No open position" used to be a property :OTHERPART (Desmond
+  -- Okonkwo) simply happened to have, asserted in a comment in a different
+  -- file — scripts/seed-dev.sql picked him for other fixtures precisely
+  -- because he had "zero role_grants". The staff/personnel pipeline later
+  -- granted him `personnel_admin` at Alder Creek in that same file, and this
+  -- assertion became unreachable: presby_guard_membership_end() rejects the
+  -- UPDATE below with "a role grant beginning 2026-08-27 is still open," and
+  -- under ON_ERROR_STOP that abandons every one of the ~470 assertions after
+  -- it. Nothing caught it, because no live branch has ever re-run
+  -- seed-dev.sql from empty — measured 2026-09-26 on the first from-scratch
+  -- rehearsal (docs/work-log/2026-09-26-ci-db-tests.md, Phase 4 Batch A).
+  --
+  -- Closing the subject's own open grants here first is also exactly the
+  -- remedy the guard's HINT prescribes, so the positive control now proves
+  -- the full documented flow rather than depending on a fixture accident
+  -- that any future pipeline can take away again. Rolled back with the rest.
+  update role_grants set ends_on = current_date
+   where person_id = :OTHERPART and organization_id = :ALDER
+     and (ends_on is null or ends_on > current_date);
   update memberships set ended_on = current_date, ended_reason = 'moved away'
    where person_id = :OTHERPART and organization_id = :ALDER;
   select assert_eq(

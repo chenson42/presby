@@ -17,7 +17,7 @@
  * scripts/seed-dev.sql's fixture ids) — same discipline as sites.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, isNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
@@ -93,8 +93,7 @@ describe.skipIf(!hasDb)(
       const platform = getPlatformDb();
       const templates = await platform
         .select({ key: groupTypes.key })
-        .from(groupTypes)
-        .where(isNull(groupTypes.organizationId));
+        .from(groupTypes);
       const keys = new Set(templates.map((t) => t.key));
       if (!keys.has("court") || !keys.has("roster")) {
         throw new Error(

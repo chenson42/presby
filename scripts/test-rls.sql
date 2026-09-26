@@ -613,15 +613,15 @@ begin;
   -- Resolved by key, not by the a0000000-...-0002 literal this line used to
   -- carry: on a from-scratch database db:seed's seedGroupTypes() creates the
   -- platform-wide 'committee' template with a defaultRandom() id, and
-  -- scripts/seed-dev.sql's own insert now yields to it (`on conflict
-  -- (organization_id, key) do nothing`). With -v ON_ERROR_STOP=1 the stale
-  -- literal would abort the ENTIRE suite on a foreign-key violation before
-  -- the `rollback;` two statements below ever ran — not just this assertion.
-  -- The group_types_select policy admits `organization_id is null`
-  -- (drizzle/0048:269), so presby_app can read the template.
+  -- scripts/seed-dev.sql's own insert now yields to it (`on conflict (key)
+  -- do nothing`). With -v ON_ERROR_STOP=1 the stale literal would abort the
+  -- ENTIRE suite on a foreign-key violation before the `rollback;` two
+  -- statements below ever ran — not just this assertion.
+  -- group_types is a global catalog with no organization_id and no RLS at
+  -- all (drizzle/0051, DECISION-151), so presby_app reads the row by key on
+  -- its plain SELECT grant — there is no policy arm left to admit anything.
   values (:ALDER,
-          (select id from group_types
-            where organization_id is null and key = 'committee'),
+          (select id from group_types where key = 'committee'),
           'Active Membership (scratch)', 'derived', 'active_membership')
   on conflict (organization_id, derived_from) do nothing;
   -- Establish this block's OWN premise instead of borrowing it from the
@@ -5538,15 +5538,17 @@ begin;
      ) as t(v) where v),
     0, 'B-H3: presby_app can neither create nor drop a feature flag');
 
-  -- (d) The global catalogs are SELECT-only. scripts/seed.ts's five catalog
+  -- (d) The global catalogs are SELECT-only. scripts/seed.ts's six catalog
   --     writers moved to the owner connection in the same commit as this
   --     revoke; landing one without the other breaks `npm run db:seed`.
+  --     group_types joined the list in drizzle/0051 (DECISION-151) when it
+  --     was reclassified out of drizzle/0009's tenant_tables loop.
   select assert_eq(
-    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds']) tbl
+    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds','group_types']) tbl
      where has_table_privilege('presby_app', tbl, 'SELECT')),
-    5, 'B-H3: presby_app reads every global catalog');
+    6, 'B-H3: presby_app reads every global catalog');
   select assert_eq(
-    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds']) tbl
+    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds','group_types']) tbl
      cross join unnest(array['INSERT','UPDATE','DELETE']) priv
      where has_table_privilege('presby_app', tbl, priv)),
     0, 'B-H3: presby_app cannot write ANY global catalog — a tenant request can no longer invent a permission key or a platform role');
@@ -5571,10 +5573,12 @@ begin;
   -- administrative_commissions, org_delegations, transfer_certificates) carry
   -- no organization_id at all.
   --
-  -- So: EVERY table in schema public carries FORCE, except the named 25.
-  -- The 51st table fails closed whether or not it has an organization_id.
-  -- This list is the same 25 names as the B-H3 grant model in
-  -- drizzle/0048 section 2; keep the two in sync.
+  -- So: EVERY table in schema public carries FORCE, except the named 26.
+  -- The next table fails closed whether or not it has an organization_id.
+  -- This list was the same 25 names as the B-H3 grant model in
+  -- drizzle/0048 section 2. It is 26 since drizzle/0051 (DECISION-151)
+  -- reclassified group_types to a global catalog; 0048's copy is shipped
+  -- text and is now historical — 0051's header records the supersession.
   select assert_eq(
     (select count(*) from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
@@ -5589,7 +5593,9 @@ begin;
           -- Append-only platform log, and the platform rollout switch.
           'audit_events','feature_flags',
           -- Global catalogs: code- or migration-seeded, no tenant axis.
-          'permissions','features','role_features','roles','migration_seeds',
+          -- group_types joined this group in drizzle/0051 (DECISION-151):
+          -- a fixed six-key taxonomy, no organization_id, no RLS, SELECT-only.
+          'permissions','features','role_features','roles','migration_seeds','group_types',
           -- The org tree is PUBLIC information by design (the four-way miss
           -- response in CLAUDE.md depends on it), so it is SELECT-only rather
           -- than RLS-filtered. organization_identifiers is the one
@@ -5597,7 +5603,7 @@ begin;
           -- comment; sasr_form_versions has no organization_id at all.
           'organizations','organization_successions','organization_identifiers','sasr_form_versions'
         )),
-    0, 'C-3: every table in schema public carries FORCE ROW LEVEL SECURITY except the 25 named platform-shell / global-catalog / org-tree tables');
+    0, 'C-3: every table in schema public carries FORCE ROW LEVEL SECURITY except the 26 named platform-shell / global-catalog / org-tree tables');
 
   -- The list is not allowed to rot in the other direction either: if a table
   -- on it GAINS force (or is dropped), this count moves and the reader is
@@ -5609,13 +5615,13 @@ begin;
        'password_reset_tokens','email_verification_tokens',
        'user_roles','whats_new_entries','email_queue','feedback','feedback_prompt_state',
        'audit_events','feature_flags',
-       'permissions','features','role_features','roles','migration_seeds',
+       'permissions','features','role_features','roles','migration_seeds','group_types',
        'organizations','organization_successions','organization_identifiers','sasr_form_versions'
      ]) tbl
      join pg_class c on c.relname = tbl
      join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
      where not c.relforcerowsecurity),
-    25, 'C-3: every one of the 25 allow-listed names still exists and still lacks FORCE — the allow-list has not gone stale');
+    26, 'C-3: every one of the 26 allow-listed names still exists and still lacks FORCE — the allow-list has not gone stale');
 
 commit;
 
@@ -5715,62 +5721,27 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 39.7 B-M4 + B-L1 — group_types. Its tenant_isolation policy was
---      `organization_id = presby_current_org()` with no NULL arm, and 1563 of
---      1563 rows are global (DECISION-110 ruling 1), so the entire catalog
---      was invisible to presby_app and three reads in src/lib/groups.ts
---      escaped to getPlatformDb() to see it. Those three are back on `tx`.
+-- 39.7 B-M4 + B-L1 — group_types. SUPERSEDED BY SECTION 43; kept as a stub so
+--      the section numbering stays stable and the history stays legible.
+--
+--      B-M4: group_types' drizzle/0009 tenant_isolation policy was
+--      `organization_id = presby_current_org()` with no NULL arm, and every
+--      row is global (DECISION-110 ruling 1), so the entire catalog was
+--      invisible to presby_app and three reads in src/lib/groups.ts escaped
+--      to getPlatformDb() to see it. B-L1: there was no real unique key, so
+--      1,557 duplicate rows accumulated behind an index that looked like it
+--      covered the case.
+--
+--      drizzle/0048 treated both as symptoms — a four-policy split plus
+--      `unique nulls not distinct (organization_id, key)`. drizzle/0051
+--      (DECISION-151) fixed the root cause instead: group_types was never a
+--      tenant table. Its organization_id column, its RLS and its four
+--      policies are gone, and presby_app is SELECT-only. Every assertion
+--      this section used to make is therefore either impossible to write
+--      (it named a dropped column) or restated more broadly in section 43,
+--      which also closes F84 — the live write hole the four-policy split
+--      left open. Nothing was dropped, only relocated and widened.
 -- ---------------------------------------------------------------------------
-begin;
-  select set_config('app.current_org_id', :ALDER, true);
-
-  select assert_eq(
-    (select count(*) from pg_policies
-      where schemaname = 'public' and tablename = 'group_types'
-        and policyname in ('group_types_select','group_types_insert',
-                           'group_types_update','group_types_delete')),
-    4, 'B-M4: group_types carries the four-policy split (drizzle/0032''s app_roles_select model), not tenant_isolation');
-  select assert_eq(
-    (select count(*) from pg_policies
-      where schemaname = 'public' and tablename = 'group_types' and policyname = 'tenant_isolation'),
-    0, 'B-M4: the old NULL-false tenant_isolation policy is gone');
-
-  -- The six platform templates are now readable from the tenant connection.
-  select assert_eq(
-    (select count(*) from group_types where organization_id is null),
-    6, 'B-M4: all six platform-wide group_types templates are visible to presby_app (they were invisible, hence the getPlatformDb() escapes in src/lib/groups.ts)');
-
-  -- B-L1: exactly one row per key. 1557 duplicates were removed by
-  -- drizzle/0048 section 5, and the constraint is what keeps it that way.
-  select assert_eq(
-    (select count(*) from group_types where organization_id is null),
-    (select count(distinct key) from group_types where organization_id is null),
-    'B-L1: one platform-wide group_types row per key — 1557 duplicates removed and the constraint prevents their return');
-
-  -- NULLS NOT DISTINCT is the whole point. A plain unique (organization_id,
-  -- key) constrains NOTHING here, because every row's organization_id is
-  -- NULL and NULLs are distinct by default — which is how the duplicates
-  -- accumulated under an index that looked like it covered this.
-  select assert_eq(
-    (select count(*) from pg_constraint c
-       join pg_index i on i.indexrelid = c.conindid
-      where c.conname = 'group_types_org_key'
-        and c.contype = 'u'
-        and i.indnullsnotdistinct),
-    1, 'B-L1: group_types_org_key is UNIQUE NULLS NOT DISTINCT — the default NULLS DISTINCT form would constrain nothing on a table whose every row is global');
-rollback;
-
--- The INSERT arm stays own-org-only: a tenant may not mint a platform
--- template. This is what keeps DECISION-110 ruling 1 true at the database.
-do $$ begin
-  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
-  begin
-    insert into group_types (organization_id, key, name) values (null, 'smuggled', 'Smuggled');
-    raise exception 'FAIL B-M4: a tenant minted a PLATFORM-WIDE group_type';
-  exception when insufficient_privilege then
-    raise notice 'pass  B-M4: the SELECT arm admits globals but the INSERT arm does not — a tenant cannot mint a platform template';
-  end;
-end $$;
 
 -- ---------------------------------------------------------------------------
 -- 39.8 C-4 + B-L3 — the two cross-org roll functions leave the tenant role's
@@ -5825,11 +5796,17 @@ end $$;
 --      by granting it directly" (src/lib/role-definitions.ts:771-850) a
 --      DATABASE property instead of a code convention.
 --
---      groups.group_type_id is DELIBERATELY EXCLUDED and must stay so. Every
---      group_types row is global (organization_id IS NULL), so under MATCH
---      SIMPLE a composite FK from a NOT NULL groups.organization_id would
---      reject every row in the table; and the F2 hazard it would close cannot
---      arise, because no org-owned group type exists by design.
+--      groups.group_type_id is DELIBERATELY EXCLUDED and must stay so. The
+--      reason used to be a MATCH SIMPLE argument (every group_types row was
+--      global, so a composite FK from a NOT NULL groups.organization_id
+--      would reject every row). Since drizzle/0051 (DECISION-151) the reason
+--      is simpler and stronger: THE PARENT HAS NO ORG AXIS AT ALL.
+--      group_types is a global catalog with no organization_id column, so
+--      there is nothing for a composite key to reference — the same footing
+--      as app_role_permissions.permission_key -> permissions.key. F2 is not
+--      an accepted exception here; it is inapplicable. The assertion below
+--      stays exactly as it was, as the guard against a future composite-FK
+--      sweep "fixing" this one.
 -- ---------------------------------------------------------------------------
 begin;
   select assert_eq(
@@ -6586,4 +6563,115 @@ commit;
 
 -- ===========================================================================
 -- END APPENDED SECTION — pipeline/submission-grants.
+-- ===========================================================================
+
+-- ===========================================================================
+-- BEGIN APPENDED SECTION — pipeline/group-types.
+-- docs/work-log/2026-09-26-group-types-catalog.md
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 43. DECISION-151 / F84-F86 — group_types reclassified to a global catalog.
+--     Supersedes the RLS-shape half of what old section 39.7 asserted (now a
+--     stub pointing here); this section is the one that actually checks the
+--     post-drizzle/0051 shape.
+-- ---------------------------------------------------------------------------
+begin;
+  -- No RLS at all — both flags, matching permissions/features/roles/
+  -- sasr_form_versions exactly, not a half-state.
+  select assert_eq(
+    (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relname = 'group_types'
+        and not c.relrowsecurity and not c.relforcerowsecurity),
+    1, 'DECISION-151: group_types has RLS disabled AND not forced');
+
+  -- Zero policies of any name.
+  select assert_eq(
+    (select count(*) from pg_policies where schemaname = 'public' and tablename = 'group_types'),
+    0, 'DECISION-151: group_types carries no RLS policy at all');
+
+  -- presby_app: SELECT yes, INSERT/UPDATE/DELETE all no.
+  select assert_eq(
+    (select count(*) from unnest(array['SELECT']) priv
+      where has_table_privilege('presby_app', 'group_types', priv)),
+    1, 'DECISION-151: presby_app can read group_types');
+  select assert_eq(
+    (select count(*) from unnest(array['INSERT','UPDATE','DELETE']) priv
+      where has_table_privilege('presby_app', 'group_types', priv)),
+    0, 'DECISION-151: presby_app cannot write group_types at all — closes F84');
+
+  -- unique (key), single column, plain (no NULLS NOT DISTINCT clause needed
+  -- or present — key is NOT NULL).
+  select assert_eq(
+    (select count(*) from pg_constraint c
+       join pg_class t on t.oid = c.conrelid
+      where t.relname = 'group_types' and c.conname = 'group_types_key_key'
+        and c.contype = 'u' and array_length(c.conkey, 1) = 1),
+    1, 'DECISION-151: group_types_key_key is a single-column UNIQUE on key');
+
+  -- organization_id is genuinely gone, not just hidden by a view or filter.
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_schema = 'public' and table_name = 'group_types'
+        and column_name = 'organization_id'),
+    0, 'DECISION-151: group_types.organization_id column is dropped');
+
+  -- One row per key (fixture-count-agnostic — six today, but this asserts
+  -- the invariant, not a specific count that would drift under Rule 16).
+  select assert_eq(
+    (select count(*) from group_types),
+    (select count(distinct key) from group_types),
+    'DECISION-151: exactly one group_types row per key');
+
+  -- B-M4's own guarantee, restated on the new shape: the whole catalog is
+  -- readable from the tenant connection, which is what let src/lib/groups.ts
+  -- drop its three getPlatformDb() escapes. Under drizzle/0009's NULL-false
+  -- tenant_isolation policy this count was 0.
+  select assert_eq(
+    (select count(*) from group_types),
+    6, 'DECISION-151/B-M4: all six catalog rows are visible to presby_app (they were invisible under the 0009 policy, hence the getPlatformDb() escapes)');
+
+  -- groups.group_type_id stays a PLAIN, single-column FK — see section 39.9.
+  -- Restated here because 0051 is what makes the exclusion inapplicable
+  -- rather than merely accepted: the parent has no org axis to reference.
+  select assert_eq(
+    (select count(*) from pg_constraint c
+       join pg_class t on t.oid = c.conrelid
+       join pg_class r on r.oid = c.confrelid
+      where t.relname = 'groups' and r.relname = 'group_types'
+        and c.contype = 'f' and array_length(c.conkey, 1) = 1),
+    1, 'DECISION-151: groups.group_type_id -> group_types.id stays a single-column FK — the parent has no organization_id for a composite key to reference');
+commit;
+
+-- The revoke binds unconditionally — no policy engine in play, so this
+-- proves the write is closed regardless of app.current_org_id.
+do $$ begin
+  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+  begin
+    insert into group_types (key, name) values ('smuggled', 'Smuggled');
+    raise exception 'FAIL DECISION-151: a tenant inserted into group_types';
+  exception when insufficient_privilege then
+    raise notice 'pass  DECISION-151: presby_app cannot INSERT group_types (F84 closed)';
+  end;
+  begin
+    update group_types set name = 'x' where key = 'court';
+    raise exception 'FAIL DECISION-151: a tenant updated group_types';
+  exception when insufficient_privilege then
+    raise notice 'pass  DECISION-151: presby_app cannot UPDATE group_types';
+  end;
+  begin
+    delete from group_types where key = 'court';
+    raise exception 'FAIL DECISION-151: a tenant deleted from group_types';
+  exception when insufficient_privilege then
+    raise notice 'pass  DECISION-151: presby_app cannot DELETE from group_types';
+  end;
+end $$;
+
+\echo ''
+\echo '======================================================'
+\echo ' Section 43 (group_types global catalog) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION — pipeline/group-types.
 -- ===========================================================================

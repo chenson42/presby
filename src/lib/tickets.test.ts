@@ -142,7 +142,7 @@ describe.skipIf(!hasDb)("tickets.ts (Postgres-backed, real dev database)", () =>
     // memberships insert at either org.
     const [gt] = await platform
       .insert(groupTypes)
-      .values({ organizationId: null, key: "roster", name: "Roster" })
+      .values({ key: "roster", name: "Roster" })
       .onConflictDoNothing()
       .returning({ id: groupTypes.id });
     let groupTypeId = gt?.id;

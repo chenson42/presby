@@ -134,7 +134,7 @@ describe.skipIf(!hasDb)(
       // directory.test.ts uses.
       const [gt] = await platform
         .insert(groupTypes)
-        .values({ organizationId: null, key: "roster", name: "Roster" })
+        .values({ key: "roster", name: "Roster" })
         .onConflictDoNothing()
         .returning({ id: groupTypes.id });
       let groupTypeId = gt?.id;

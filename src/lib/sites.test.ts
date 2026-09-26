@@ -239,7 +239,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
     // memberships insert (tickets.test.ts's own established precedent).
     const [gt] = await platform
       .insert(groupTypes)
-      .values({ organizationId: null, key: "roster", name: "Roster" })
+      .values({ key: "roster", name: "Roster" })
       .onConflictDoNothing()
       .returning({ id: groupTypes.id });
     let groupTypeId = gt?.id;
@@ -1425,7 +1425,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       // describes).
       const [gt] = await platform
         .insert(groupTypes)
-        .values({ organizationId: null, key: "roster", name: "Roster" })
+        .values({ key: "roster", name: "Roster" })
         .onConflictDoNothing()
         .returning({ id: groupTypes.id });
       let groupTypeId = gt?.id;
@@ -1930,7 +1930,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
 
       const [ct] = await platform
         .insert(groupTypes)
-        .values({ organizationId: null, key: "committee", name: "Committee" })
+        .values({ key: "committee", name: "Committee" })
         .onConflictDoNothing()
         .returning({ id: groupTypes.id });
       committeeTypeId = ct?.id ?? "";

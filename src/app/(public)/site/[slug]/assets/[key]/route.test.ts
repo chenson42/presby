@@ -62,6 +62,28 @@ describe("GET /site/<slug>/assets/[key] — blob resolution", () => {
     expect(res.status).toBe(404);
   });
 
+  it("404s (never crashes) when getBlobStore().resolve() throws — a DB blip on the blob_assets table, docs/work-log/2026-09-26-public-render-blip.md", async () => {
+    resolvePublishedOrganization.mockResolvedValue({ organizationId: "org-1" });
+    resolveBlob.mockRejectedValue(new Error("simulated DB blip"));
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const res = await GET(
+      new Request("http://x/site/alder-creek/assets/k1"),
+      makeParams("alder-creek", "k1"),
+    );
+
+    expect(res.status).toBe(404);
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const serialized = JSON.stringify(consoleErrorSpy.mock.calls[0]);
+    expect(serialized).not.toMatch(/select|Failed query|params:/i);
+    expect(serialized).toContain("alder-creek");
+    expect(serialized).toContain("k1");
+
+    consoleErrorSpy.mockRestore();
+  });
+
   it("serves the bytes with the stored content-type and an immutable, long-lived Cache-Control", async () => {
     resolvePublishedOrganization.mockResolvedValue({ organizationId: "org-1" });
     resolveBlob.mockResolvedValue({

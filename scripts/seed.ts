@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "../src/lib/db/schema";
 import { groupTypes } from "../src/lib/db/domain/groups";
@@ -49,23 +49,24 @@ const db = drizzle(sql, { schema });
 // owns every table, so it holds every privilege by ownership and bypasses RLS
 // (F44). See src/lib/db/index.ts for the same correction.
 //
-// EVERY GLOBAL-CATALOG WRITE IN THIS FILE RUNS HERE, for two distinct
-// reasons:
+// EVERY GLOBAL-CATALOG WRITE IN THIS FILE RUNS HERE, for one reason:
+// `presby_app` is SELECT-only on every global catalog.
 //
-//   1. group_types (seedGroupTypes) — a FORCE-RLS tenant table
-//      (drizzle/0009) whose SELECT policy now admits `organization_id is
-//      null` (drizzle/0048 section 5) but whose INSERT arm still does not.
-//      A platform-wide template row has `organization_id IS NULL`, so `db`
-//      can never insert one.
+//   roles, features, role_features, feature_flags (seedRoles, seedFeatures,
+//   seedFlags, bindAdminFeatures, bindSupportOperatorFeatures) and
+//   group_types (seedGroupTypes) — drizzle/0048 section 2 (B-H3) revokes
+//   INSERT/UPDATE/DELETE on the global catalogs from `presby_app` and leaves
+//   it SELECT-only; drizzle/0051 (DECISION-151) adds group_types to that
+//   list when it reclassifies the table from a drizzle/0009 tenant table to
+//   a global catalog. These functions ran on `db` until the respective
+//   revoke; a fresh `npm run db:seed` would now fail with `permission
+//   denied` on the very first statement. Each revoke and its connection swap
+//   are ONE ATOMIC UNIT — neither half ships without the other.
 //
-//   2. roles, features, role_features, feature_flags (seedRoles,
-//      seedFeatures, seedFlags, bindAdminFeatures,
-//      bindSupportOperatorFeatures) — drizzle/0048 section 2 (B-H3) revokes
-//      INSERT/UPDATE/DELETE on the global catalogs from `presby_app` and
-//      leaves it SELECT-only. These five functions ran on `db` until then; a
-//      fresh `npm run db:seed` would now fail with `permission denied` on
-//      the very first statement. The revoke and this connection swap are ONE
-//      ATOMIC UNIT — neither half ships without the other.
+//   (This block said something different about group_types until
+//   drizzle/0051: that it was a FORCE-RLS tenant table whose INSERT arm
+//   rejected a null organization_id. That was true, and was the bug —
+//   the table had no business being a tenant table at all.)
 //
 // Everything that is genuinely tenant/user data (seedLocalAdmin,
 // seedMemberUser, seedMfaAdminUser and their user_roles rows) deliberately
@@ -785,9 +786,9 @@ async function seedFlags() {
 }
 
 /**
- * Platform-wide `group_types` templates (`organization_id IS NULL`) — the two
- * this codebase's own F16 group-seeding needs: `court` (Session, Board of
- * Deacons) and `roster` (Active Membership), plus the four manageable types
+ * The platform-wide `group_types` catalog — the two this codebase's own F16
+ * group-seeding needs: `court` (Session, Board of Deacons) and `roster`
+ * (Active Membership), plus the four manageable types
  * `/o/<slug>/admin/groups` lets an admin create (`committee`/`small_group`/
  * `choir`/`team` — docs/work-log/2026-08-26-groups-admin.md, DECISION-110
  * ruling 1). The latter four were deliberately NOT seeded before that
@@ -802,25 +803,23 @@ async function seedFlags() {
  * db:seed` once against a target database before the first
  * createOrganization() call there, not on every deploy.
  *
- * NOT `.onConflictDoNothing()`, and the original reason for that is now
- * STALE: this docstring used to assert that `group_types` has "NO unique
- * constraint on `(organization_id, key)`, only a non-unique index." That
- * stopped being true at drizzle/0048, which added `group_types_org_key
- * unique nulls not distinct (organization_id, key)` to close a 1,557-row
- * duplicate-accumulation bug (B-L1). `onConflictDoNothing()` would now be
- * viable here — but this function's explicit find-or-create shape was
- * already idempotent before that constraint existed, is unaffected by it,
- * and needs no change. Confirmed idempotent by running twice against the dev
- * database (see the 2026-08-24 work-log's Phase 4 Implementer Notes).
+ * Since drizzle/0051 (DECISION-151, docs/work-log/2026-09-26-group-types-
+ * catalog.md) `group_types` is a GLOBAL CATALOG in the `permissions`/
+ * `features`/`roles` shape: no `organization_id` column, no RLS, exactly one
+ * row per `key` (`group_types_key_key unique (key)`), and `presby_app` holds
+ * SELECT only — so this function, which runs on the owner connection, is the
+ * only production-reachable writer. The explicit find-or-create shape below
+ * was idempotent before any unique constraint existed and needs no change;
+ * `onConflictDoNothing()` would also be viable now but is not used.
  *
- * What DOES depend on that constraint, and is new: `scripts/seed-dev.sql`'s
- * own `group_types` insert uses `on conflict (organization_id, key) do
- * nothing` against this exact constraint, and resolves every downstream
- * `groups.group_type_id` by KEY rather than by a fixed literal UUID — so the
- * documented recipe (db:migrate -> db:seed -> seed-dev.sql) is idempotent
- * whichever of the two scripts creates `court`/`committee`/`roster` first.
- * Before that fix, this function winning the race made seed-dev.sql abort its
- * single transaction and land ZERO fixture rows on a from-scratch database
+ * What DOES depend on that constraint: `scripts/seed-dev.sql`'s own
+ * `group_types` insert uses `on conflict (key) do nothing` against it, and
+ * resolves every downstream `groups.group_type_id` by KEY rather than by a
+ * fixed literal UUID — so the documented recipe (db:migrate -> db:seed ->
+ * seed-dev.sql) is idempotent whichever of the two scripts creates
+ * `court`/`committee`/`roster` first. Before that fix, this function winning
+ * the race made seed-dev.sql abort its single transaction and land ZERO
+ * fixture rows on a from-scratch database
  * (docs/work-log/2026-09-26-ci-db-tests.md, Phase 1).
  */
 async function seedGroupTypes() {
@@ -839,20 +838,18 @@ async function seedGroupTypes() {
     { key: "team", name: "Team" },
   ];
   for (const g of defs) {
-    // Both the read and the write use platformDb, not db — group_types is a
-    // FORCE-RLS tenant table (see this function's own header comment). db
-    // (presby_app, no org context) would see ZERO rows for a null-org-id
-    // template even if one already exists, fail-closed by construction, and
-    // would then fail the INSERT with a real RLS violation.
+    // The write uses platformDb, not db, for the same reason every other
+    // global-catalog write in this file does: `presby_app` is SELECT-only on
+    // group_types (drizzle/0051, DECISION-151), exactly as it is on roles /
+    // features / role_features. The read rides along on the same connection
+    // rather than splitting the function across two pools for no gain.
     const [existing] = await platformDb
       .select({ id: groupTypes.id })
       .from(groupTypes)
-      .where(and(isNull(groupTypes.organizationId), eq(groupTypes.key, g.key)))
+      .where(eq(groupTypes.key, g.key))
       .limit(1);
     if (!existing) {
-      await platformDb
-        .insert(groupTypes)
-        .values({ organizationId: null, key: g.key, name: g.name });
+      await platformDb.insert(groupTypes).values({ key: g.key, name: g.name });
     }
   }
   console.log(`seeded ${defs.length} platform-wide group_types`);

@@ -208,12 +208,40 @@ export const statisticalReturns = pgTable(
     attestedByName: text("attested_by_name"),
     attestedRole: text("attested_role"),
     attestedAt: timestamp("attested_at", { withTimezone: true }),
-    /** D13 import provenance. */
+    /**
+     * A FREE-TEXT PROVENANCE NOTE, and NOT a D13-only column — this
+     * docstring used to say "D13 import provenance," which is what made
+     * increment 7 nearly ship a CHECK that no shipped database could accept.
+     * `drizzle/0047:683-691`'s backfill writes it on a **submitted** row
+     * (`'backfill: reconstructed from congregation_statistics <id>
+     * (drizzle/0047)'`) and `drizzle/0047:789-799` then matches on that exact
+     * value to repair the row idempotently. So a submitted return may
+     * legitimately carry a `sourceRef`; only `stagingRowId` below is
+     * constrained to imported rows.
+     */
     sourceRef: text("source_ref"),
     /**
-     * Plain uuid today; the FK to `import_rows(id)` is added in increment 7
-     * when that table exists. A forward-reference FK is not expressible and a
-     * placeholder table would be worse.
+     * D13 import provenance: the `importRows` row this ARTIFACT was created
+     * from.
+     *
+     * COMPOSITE FK to `import_rows (id, organization_id)`, enforced DDL-ONLY
+     * in `drizzle/0053_presby_name_history_import_staging.sql` — declaring it
+     * here would create a second `returns.ts` <-> `imports.ts` module cycle
+     * (`imports.ts` already imports this file for `statisticalReturns`; the
+     * `blobAssets` shape, `assets.ts:63-78`), so it carries an
+     * `architectural` row in `scripts/check-schema-parity.ts` instead.
+     * Composite rather than plain because an imported return's
+     * `organizationId` IS the presbytery and the import row's is too — the
+     * two sides always share one tenant — and because RI checks bypass row
+     * security by design, so a plain FK into a FORCE-RLS table would be a
+     * cross-tenant existence oracle in F40's family.
+     *
+     * `statistical_returns_import_provenance_shape` (same migration) requires
+     * this column to be null on every non-`imported` row. It constrains THIS
+     * column only, not `sourceRef` — see above.
+     *
+     * Distinct from `importRows.resultingReturnId`, which is the staging
+     * row's DISPOSITION and may point at a return it did not create (F102).
      */
     stagingRowId: uuid("staging_row_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -222,6 +250,30 @@ export const statisticalReturns = pgTable(
   },
   (t) => [
     unique("statistical_returns_id_org_key").on(t.id, t.organizationId),
+    /**
+     * The ABOUT-ORG unique, added additively in `drizzle/0053` section 6a as
+     * the target side of `import_rows_resulting_return_fk` (F104, Phase 2
+     * addendum). An import row's disposition pointer cannot be composite on
+     * `organizationId` in either direction — the referent's owning org varies
+     * by disposition — so it keys on `about_org_id`, "the column that
+     * matches," the same idiom `statisticsSubmissionGrants` below and
+     * `congregationStatistics -> publications` already use.
+     *
+     * Declared here even though `check:schema-parity` ignores uniques: an
+     * undeclared constraint on a table Drizzle DOES model is a drop candidate
+     * the first time someone runs the dev-only `db:push`. No cross-module
+     * reference is involved, so this file still imports nothing from
+     * `imports.ts`.
+     *
+     * Not an oracle under F103's test: `id` is the primary key, so any
+     * collision here implies an `id` collision the PK already reports, and
+     * `presby_app` holds no INSERT on this table at all.
+     */
+    unique("statistical_returns_id_about_year_key").on(
+      t.id,
+      t.aboutOrgId,
+      t.reportYear,
+    ),
     index("statistical_returns_org_about_year_idx").on(
       t.organizationId,
       t.aboutOrgId,

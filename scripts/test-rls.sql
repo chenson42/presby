@@ -613,15 +613,15 @@ begin;
   -- Resolved by key, not by the a0000000-...-0002 literal this line used to
   -- carry: on a from-scratch database db:seed's seedGroupTypes() creates the
   -- platform-wide 'committee' template with a defaultRandom() id, and
-  -- scripts/seed-dev.sql's own insert now yields to it (`on conflict
-  -- (organization_id, key) do nothing`). With -v ON_ERROR_STOP=1 the stale
-  -- literal would abort the ENTIRE suite on a foreign-key violation before
-  -- the `rollback;` two statements below ever ran — not just this assertion.
-  -- The group_types_select policy admits `organization_id is null`
-  -- (drizzle/0048:269), so presby_app can read the template.
+  -- scripts/seed-dev.sql's own insert now yields to it (`on conflict (key)
+  -- do nothing`). With -v ON_ERROR_STOP=1 the stale literal would abort the
+  -- ENTIRE suite on a foreign-key violation before the `rollback;` two
+  -- statements below ever ran — not just this assertion.
+  -- group_types is a global catalog with no organization_id and no RLS at
+  -- all (drizzle/0051, DECISION-151), so presby_app reads the row by key on
+  -- its plain SELECT grant — there is no policy arm left to admit anything.
   values (:ALDER,
-          (select id from group_types
-            where organization_id is null and key = 'committee'),
+          (select id from group_types where key = 'committee'),
           'Active Membership (scratch)', 'derived', 'active_membership')
   on conflict (organization_id, derived_from) do nothing;
   -- Establish this block's OWN premise instead of borrowing it from the
@@ -5554,15 +5554,17 @@ begin;
      ) as t(v) where v),
     0, 'B-H3: presby_app can neither create nor drop a feature flag');
 
-  -- (d) The global catalogs are SELECT-only. scripts/seed.ts's five catalog
+  -- (d) The global catalogs are SELECT-only. scripts/seed.ts's six catalog
   --     writers moved to the owner connection in the same commit as this
   --     revoke; landing one without the other breaks `npm run db:seed`.
+  --     group_types joined the list in drizzle/0051 (DECISION-151) when it
+  --     was reclassified out of drizzle/0009's tenant_tables loop.
   select assert_eq(
-    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds']) tbl
+    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds','group_types']) tbl
      where has_table_privilege('presby_app', tbl, 'SELECT')),
-    5, 'B-H3: presby_app reads every global catalog');
+    6, 'B-H3: presby_app reads every global catalog');
   select assert_eq(
-    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds']) tbl
+    (select count(*) from unnest(array['permissions','features','role_features','roles','migration_seeds','group_types']) tbl
      cross join unnest(array['INSERT','UPDATE','DELETE']) priv
      where has_table_privilege('presby_app', tbl, priv)),
     0, 'B-H3: presby_app cannot write ANY global catalog — a tenant request can no longer invent a permission key or a platform role');
@@ -5587,10 +5589,12 @@ begin;
   -- administrative_commissions, org_delegations, transfer_certificates) carry
   -- no organization_id at all.
   --
-  -- So: EVERY table in schema public carries FORCE, except the named 25.
-  -- The 51st table fails closed whether or not it has an organization_id.
-  -- This list is the same 25 names as the B-H3 grant model in
-  -- drizzle/0048 section 2; keep the two in sync.
+  -- So: EVERY table in schema public carries FORCE, except the named 26.
+  -- The next table fails closed whether or not it has an organization_id.
+  -- This list was the same 25 names as the B-H3 grant model in
+  -- drizzle/0048 section 2. It is 26 since drizzle/0051 (DECISION-151)
+  -- reclassified group_types to a global catalog; 0048's copy is shipped
+  -- text and is now historical — 0051's header records the supersession.
   select assert_eq(
     (select count(*) from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
@@ -5605,7 +5609,9 @@ begin;
           -- Append-only platform log, and the platform rollout switch.
           'audit_events','feature_flags',
           -- Global catalogs: code- or migration-seeded, no tenant axis.
-          'permissions','features','role_features','roles','migration_seeds',
+          -- group_types joined this group in drizzle/0051 (DECISION-151):
+          -- a fixed six-key taxonomy, no organization_id, no RLS, SELECT-only.
+          'permissions','features','role_features','roles','migration_seeds','group_types',
           -- The org tree is PUBLIC information by design (the four-way miss
           -- response in CLAUDE.md depends on it), so it is SELECT-only rather
           -- than RLS-filtered. organization_identifiers is the one
@@ -5613,7 +5619,7 @@ begin;
           -- comment; sasr_form_versions has no organization_id at all.
           'organizations','organization_successions','organization_identifiers','sasr_form_versions'
         )),
-    0, 'C-3: every table in schema public carries FORCE ROW LEVEL SECURITY except the 25 named platform-shell / global-catalog / org-tree tables');
+    0, 'C-3: every table in schema public carries FORCE ROW LEVEL SECURITY except the 26 named platform-shell / global-catalog / org-tree tables');
 
   -- The list is not allowed to rot in the other direction either: if a table
   -- on it GAINS force (or is dropped), this count moves and the reader is
@@ -5625,13 +5631,13 @@ begin;
        'password_reset_tokens','email_verification_tokens',
        'user_roles','whats_new_entries','email_queue','feedback','feedback_prompt_state',
        'audit_events','feature_flags',
-       'permissions','features','role_features','roles','migration_seeds',
+       'permissions','features','role_features','roles','migration_seeds','group_types',
        'organizations','organization_successions','organization_identifiers','sasr_form_versions'
      ]) tbl
      join pg_class c on c.relname = tbl
      join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
      where not c.relforcerowsecurity),
-    25, 'C-3: every one of the 25 allow-listed names still exists and still lacks FORCE — the allow-list has not gone stale');
+    26, 'C-3: every one of the 26 allow-listed names still exists and still lacks FORCE — the allow-list has not gone stale');
 
 commit;
 
@@ -5731,62 +5737,27 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 39.7 B-M4 + B-L1 — group_types. Its tenant_isolation policy was
---      `organization_id = presby_current_org()` with no NULL arm, and 1563 of
---      1563 rows are global (DECISION-110 ruling 1), so the entire catalog
---      was invisible to presby_app and three reads in src/lib/groups.ts
---      escaped to getPlatformDb() to see it. Those three are back on `tx`.
+-- 39.7 B-M4 + B-L1 — group_types. SUPERSEDED BY SECTION 43; kept as a stub so
+--      the section numbering stays stable and the history stays legible.
+--
+--      B-M4: group_types' drizzle/0009 tenant_isolation policy was
+--      `organization_id = presby_current_org()` with no NULL arm, and every
+--      row is global (DECISION-110 ruling 1), so the entire catalog was
+--      invisible to presby_app and three reads in src/lib/groups.ts escaped
+--      to getPlatformDb() to see it. B-L1: there was no real unique key, so
+--      1,557 duplicate rows accumulated behind an index that looked like it
+--      covered the case.
+--
+--      drizzle/0048 treated both as symptoms — a four-policy split plus
+--      `unique nulls not distinct (organization_id, key)`. drizzle/0051
+--      (DECISION-151) fixed the root cause instead: group_types was never a
+--      tenant table. Its organization_id column, its RLS and its four
+--      policies are gone, and presby_app is SELECT-only. Every assertion
+--      this section used to make is therefore either impossible to write
+--      (it named a dropped column) or restated more broadly in section 43,
+--      which also closes F84 — the live write hole the four-policy split
+--      left open. Nothing was dropped, only relocated and widened.
 -- ---------------------------------------------------------------------------
-begin;
-  select set_config('app.current_org_id', :ALDER, true);
-
-  select assert_eq(
-    (select count(*) from pg_policies
-      where schemaname = 'public' and tablename = 'group_types'
-        and policyname in ('group_types_select','group_types_insert',
-                           'group_types_update','group_types_delete')),
-    4, 'B-M4: group_types carries the four-policy split (drizzle/0032''s app_roles_select model), not tenant_isolation');
-  select assert_eq(
-    (select count(*) from pg_policies
-      where schemaname = 'public' and tablename = 'group_types' and policyname = 'tenant_isolation'),
-    0, 'B-M4: the old NULL-false tenant_isolation policy is gone');
-
-  -- The six platform templates are now readable from the tenant connection.
-  select assert_eq(
-    (select count(*) from group_types where organization_id is null),
-    6, 'B-M4: all six platform-wide group_types templates are visible to presby_app (they were invisible, hence the getPlatformDb() escapes in src/lib/groups.ts)');
-
-  -- B-L1: exactly one row per key. 1557 duplicates were removed by
-  -- drizzle/0048 section 5, and the constraint is what keeps it that way.
-  select assert_eq(
-    (select count(*) from group_types where organization_id is null),
-    (select count(distinct key) from group_types where organization_id is null),
-    'B-L1: one platform-wide group_types row per key — 1557 duplicates removed and the constraint prevents their return');
-
-  -- NULLS NOT DISTINCT is the whole point. A plain unique (organization_id,
-  -- key) constrains NOTHING here, because every row's organization_id is
-  -- NULL and NULLs are distinct by default — which is how the duplicates
-  -- accumulated under an index that looked like it covered this.
-  select assert_eq(
-    (select count(*) from pg_constraint c
-       join pg_index i on i.indexrelid = c.conindid
-      where c.conname = 'group_types_org_key'
-        and c.contype = 'u'
-        and i.indnullsnotdistinct),
-    1, 'B-L1: group_types_org_key is UNIQUE NULLS NOT DISTINCT — the default NULLS DISTINCT form would constrain nothing on a table whose every row is global');
-rollback;
-
--- The INSERT arm stays own-org-only: a tenant may not mint a platform
--- template. This is what keeps DECISION-110 ruling 1 true at the database.
-do $$ begin
-  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
-  begin
-    insert into group_types (organization_id, key, name) values (null, 'smuggled', 'Smuggled');
-    raise exception 'FAIL B-M4: a tenant minted a PLATFORM-WIDE group_type';
-  exception when insufficient_privilege then
-    raise notice 'pass  B-M4: the SELECT arm admits globals but the INSERT arm does not — a tenant cannot mint a platform template';
-  end;
-end $$;
 
 -- ---------------------------------------------------------------------------
 -- 39.8 C-4 + B-L3 — the two cross-org roll functions leave the tenant role's
@@ -5841,11 +5812,17 @@ end $$;
 --      by granting it directly" (src/lib/role-definitions.ts:771-850) a
 --      DATABASE property instead of a code convention.
 --
---      groups.group_type_id is DELIBERATELY EXCLUDED and must stay so. Every
---      group_types row is global (organization_id IS NULL), so under MATCH
---      SIMPLE a composite FK from a NOT NULL groups.organization_id would
---      reject every row in the table; and the F2 hazard it would close cannot
---      arise, because no org-owned group type exists by design.
+--      groups.group_type_id is DELIBERATELY EXCLUDED and must stay so. The
+--      reason used to be a MATCH SIMPLE argument (every group_types row was
+--      global, so a composite FK from a NOT NULL groups.organization_id
+--      would reject every row). Since drizzle/0051 (DECISION-151) the reason
+--      is simpler and stronger: THE PARENT HAS NO ORG AXIS AT ALL.
+--      group_types is a global catalog with no organization_id column, so
+--      there is nothing for a composite key to reference — the same footing
+--      as app_role_permissions.permission_key -> permissions.key. F2 is not
+--      an accepted exception here; it is inapplicable. The assertion below
+--      stays exactly as it was, as the guard against a future composite-FK
+--      sweep "fixing" this one.
 -- ---------------------------------------------------------------------------
 begin;
   select assert_eq(
@@ -6605,6 +6582,820 @@ commit;
 -- ===========================================================================
 
 -- ===========================================================================
+-- BEGIN APPENDED SECTION — pipeline/group-types.
+-- docs/work-log/2026-09-26-group-types-catalog.md
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 43. DECISION-151 / F84-F86 — group_types reclassified to a global catalog.
+--     Supersedes the RLS-shape half of what old section 39.7 asserted (now a
+--     stub pointing here); this section is the one that actually checks the
+--     post-drizzle/0051 shape.
+-- ---------------------------------------------------------------------------
+begin;
+  -- No RLS at all — both flags, matching permissions/features/roles/
+  -- sasr_form_versions exactly, not a half-state.
+  select assert_eq(
+    (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relname = 'group_types'
+        and not c.relrowsecurity and not c.relforcerowsecurity),
+    1, 'DECISION-151: group_types has RLS disabled AND not forced');
+
+  -- Zero policies of any name.
+  select assert_eq(
+    (select count(*) from pg_policies where schemaname = 'public' and tablename = 'group_types'),
+    0, 'DECISION-151: group_types carries no RLS policy at all');
+
+  -- presby_app: SELECT yes, INSERT/UPDATE/DELETE all no.
+  select assert_eq(
+    (select count(*) from unnest(array['SELECT']) priv
+      where has_table_privilege('presby_app', 'group_types', priv)),
+    1, 'DECISION-151: presby_app can read group_types');
+  select assert_eq(
+    (select count(*) from unnest(array['INSERT','UPDATE','DELETE']) priv
+      where has_table_privilege('presby_app', 'group_types', priv)),
+    0, 'DECISION-151: presby_app cannot write group_types at all — closes F84');
+
+  -- unique (key), single column, plain (no NULLS NOT DISTINCT clause needed
+  -- or present — key is NOT NULL).
+  select assert_eq(
+    (select count(*) from pg_constraint c
+       join pg_class t on t.oid = c.conrelid
+      where t.relname = 'group_types' and c.conname = 'group_types_key_key'
+        and c.contype = 'u' and array_length(c.conkey, 1) = 1),
+    1, 'DECISION-151: group_types_key_key is a single-column UNIQUE on key');
+
+  -- organization_id is genuinely gone, not just hidden by a view or filter.
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_schema = 'public' and table_name = 'group_types'
+        and column_name = 'organization_id'),
+    0, 'DECISION-151: group_types.organization_id column is dropped');
+
+  -- One row per key (fixture-count-agnostic — six today, but this asserts
+  -- the invariant, not a specific count that would drift under Rule 16).
+  select assert_eq(
+    (select count(*) from group_types),
+    (select count(distinct key) from group_types),
+    'DECISION-151: exactly one group_types row per key');
+
+  -- B-M4's own guarantee, restated on the new shape: the whole catalog is
+  -- readable from the tenant connection, which is what let src/lib/groups.ts
+  -- drop its three getPlatformDb() escapes. Under drizzle/0009's NULL-false
+  -- tenant_isolation policy this count was 0.
+  select assert_eq(
+    (select count(*) from group_types),
+    6, 'DECISION-151/B-M4: all six catalog rows are visible to presby_app (they were invisible under the 0009 policy, hence the getPlatformDb() escapes)');
+
+  -- groups.group_type_id stays a PLAIN, single-column FK — see section 39.9.
+  -- Restated here because 0051 is what makes the exclusion inapplicable
+  -- rather than merely accepted: the parent has no org axis to reference.
+  select assert_eq(
+    (select count(*) from pg_constraint c
+       join pg_class t on t.oid = c.conrelid
+       join pg_class r on r.oid = c.confrelid
+      where t.relname = 'groups' and r.relname = 'group_types'
+        and c.contype = 'f' and array_length(c.conkey, 1) = 1),
+    1, 'DECISION-151: groups.group_type_id -> group_types.id stays a single-column FK — the parent has no organization_id for a composite key to reference');
+commit;
+
+-- The revoke binds unconditionally — no policy engine in play, so this
+-- proves the write is closed regardless of app.current_org_id.
+do $$ begin
+  perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+  begin
+    insert into group_types (key, name) values ('smuggled', 'Smuggled');
+    raise exception 'FAIL DECISION-151: a tenant inserted into group_types';
+  exception when insufficient_privilege then
+    raise notice 'pass  DECISION-151: presby_app cannot INSERT group_types (F84 closed)';
+  end;
+  begin
+    update group_types set name = 'x' where key = 'court';
+    raise exception 'FAIL DECISION-151: a tenant updated group_types';
+  exception when insufficient_privilege then
+    raise notice 'pass  DECISION-151: presby_app cannot UPDATE group_types';
+  end;
+  begin
+    delete from group_types where key = 'court';
+    raise exception 'FAIL DECISION-151: a tenant deleted from group_types';
+  exception when insufficient_privilege then
+    raise notice 'pass  DECISION-151: presby_app cannot DELETE from group_types';
+  end;
+end $$;
+
+\echo ''
+\echo '======================================================'
+\echo ' Section 43 (group_types global catalog) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION — pipeline/group-types.
+
+-- APPENDED SECTION — pipeline/name-history (increment 7).
+-- Workflow Rule 16: one delimited block at the END of this file.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 42. Organization name history + the D13 import quarantine — increment 7
+--     (docs/work-log/2026-09-26-name-history-import-staging.md;
+--     drizzle/0053_presby_name_history_import_staging.sql; DECISION-153;
+--     F100-F104)
+-- ---------------------------------------------------------------------------
+-- THE RULE THIS SECTION EXISTS TO PROVE, in one sentence: *a unique or EXCLUDE
+-- constraint on a FORCE-RLS table is an enumeration oracle exactly when its key
+-- is learnable from public data* (F103) — and the two table families shipped in
+-- one migration take OPPOSITE DML treatment because of it, not because of what
+-- they are about. organization_name_history keys its EXCLUDE on the PUBLIC
+-- subject_org_id, so presby_app holds SELECT only. import_rows keys on a random
+-- batch uuid, so it keeps ordinary tenant DML minus DELETE.
+--
+-- WHAT THIS SUITE CAN AND CANNOT PROVE, in section 34/35's own idiom:
+--   * organization_name_history — presby_app holds no INSERT, so the EXCLUDE,
+--     the minute-shape CHECK and the backfill's per-row shape are refused here
+--     by the PERMISSION CHECK before any constraint is consulted. (c) proves
+--     the grant, which is the layer a tenant actually meets; the constraints
+--     themselves are proven on the owner connection in
+--     src/lib/db/domain/imports.test.ts, which is where the only writer that
+--     can reach them lives.
+--   * import_batches / import_rows — presby_app holds select, insert, UPDATE,
+--     so the freeze trigger's UPDATE arms ARE reachable and ARE behaviourally
+--     proven here, in (i). Only the DELETE arm is not: the missing grant fires
+--     first, so (d) proves the grant and imports.test.ts proves the trigger on
+--     the owner path, which is the path that matters (F44).
+--   * statistical_returns — presby_app holds SELECT only, so the new composite
+--     FK and the new provenance CHECK are owner-only; (l) pins their catalog
+--     shape here and imports.test.ts carries the behaviour.
+--   * The one thing NO unit test against a base table can prove, and which
+--     (g) proves here and only here: the view's owner-privilege visibility
+--     genuinely crosses the tenant boundary the base table's RLS enforces.
+
+-- (a) THE GRANT SHAPE — the half of the security model that IS the ruling.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_name_history' and grantee = 'presby_app'),
+    1, 'F103/Ruling 1: presby_app holds exactly ONE privilege on organization_name_history');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name = 'organization_name_history' and grantee = 'presby_app'
+        and privilege_type = 'SELECT'),
+    1, 'F103/Ruling 1: that one privilege is SELECT — the EXCLUDE keys on the PUBLIC subject_org_id, so tenant DML would be a cross-council existence oracle (F40)');
+  -- presby_platform's half is read from pg_class.relacl, not
+  -- information_schema, which only shows grants involving the CURRENT role.
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'organization_name_history'
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type in ('SELECT', 'INSERT')),
+    2, 'organization_name_history: presby_platform is narrowed to select + insert (the 0044 narrowing, Ruling A5)');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname = 'organization_name_history'
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type in ('UPDATE', 'DELETE')),
+    0, 'organization_name_history: and presby_platform has NO update and NO delete');
+
+  -- The staging tables get the OPPOSITE call, from the same test.
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name in ('import_batches', 'import_rows') and grantee = 'presby_app'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE')),
+    6, 'Ruling 5: presby_app holds select + insert + update on BOTH staging tables — a quarantine worktable is not a minuted council record, and its constraint keys are unguessable uuids');
+  select assert_eq(
+    (select count(*) from information_schema.role_table_grants
+      where table_name in ('import_batches', 'import_rows') and grantee = 'presby_app'
+        and privilege_type = 'DELETE'),
+    0, 'Ruling 5: and NO DELETE on either — D13''s durable quarantine is a GRANT fact, not a convention');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('import_batches', 'import_rows')
+        and a.grantee = 'presby_platform'::regrole),
+    2, 'staging tables: presby_platform holds exactly one privilege on each');
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('import_batches', 'import_rows')
+        and a.grantee = 'presby_platform'::regrole
+        and a.privilege_type = 'SELECT'),
+    2, 'staging tables: and it is SELECT — the platform-shell connection reads a presbytery''s import for debugging and never writes it');
+commit;
+
+-- (b) FORCE RLS and the policy, on all three new tables. Without FORCE the
+--     owner bypasses every policy and RLS is silently inert while every naive
+--     test still passes (F1).
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('organization_name_history', 'import_batches', 'import_rows')
+        and relrowsecurity and relforcerowsecurity),
+    3, 'F1: all three new tables carry FORCE row level security');
+  select assert_eq(
+    (select count(*) from pg_policies
+      where tablename in ('organization_name_history', 'import_batches', 'import_rows')),
+    3, 'exactly ONE policy per new table — no second named policy');
+  select assert_eq(
+    (select count(*) from pg_policies
+      where tablename in ('organization_name_history', 'import_batches', 'import_rows')
+        and policyname = 'tenant_isolation'
+        and qual like '%presby_current_org()%'
+        and with_check like '%presby_current_org()%'),
+    3, 'tenant_isolation scopes BOTH read and write to presby_current_org() on all three');
+commit;
+
+-- (c) The name-history grant is not theoretical: the tenant connection is
+--     refused the INSERT. LAYER 1 — this says nothing about a constraint; the
+--     message is Postgres'' own `permission denied`, and it arrives BEFORE the
+--     EXCLUDE or the minute CHECK can be reached. That ordering is the whole
+--     reason the constraint proofs live in imports.test.ts.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    insert into organization_name_history
+      (organization_id, subject_org_id, name_type, name, authority, minute_reference)
+    values ('11111111-1111-1111-1111-111111111111',
+            '22222222-2222-2222-2222-222222222222',
+            'former_name', 'Probe Presbyterian Church', 'recorded', 'probe');
+    raise exception 'FAIL — presby_app inserted into organization_name_history; the F40 oracle is open';
+  exception when insufficient_privilege then
+    raise notice 'pass  F40/F103: presby_app cannot INSERT into organization_name_history at all — the future presby_record_org_name() DEFINER function is the only tenant-side writer';
+  end $$;
+rollback;
+
+-- (d) The staging tables' one refused verb, from the tenant connection.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  do $$
+  begin
+    delete from import_rows where id = 'ae000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL — presby_app deleted a quarantined import row';
+  exception when insufficient_privilege then
+    raise notice 'pass  D13: presby_app cannot DELETE an import_rows row — the quarantine is durable by grant on this connection and by trigger on the owner''s';
+  end $$;
+  do $$
+  begin
+    delete from import_batches where id = 'ad000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL — presby_app deleted an import batch';
+  exception when insufficient_privilege then
+    raise notice 'pass  D13: presby_app cannot DELETE an import_batches row either';
+  end $$;
+rollback;
+
+-- (e) THE VIEW'S COLUMN LIST IS THE POLICY (Ruling 2). Widening it is a policy
+--     change, not a convenience, so it is pinned from both directions.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'organization_name_history_public'
+        and column_name in ('organization_id', 'minute_reference', 'notes',
+                            'authority', 'recorded_by')),
+    0, 'Ruling 2: the public projection contains NO organization_id (the recording council), minute_reference, notes, authority or recorded_by');
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'organization_name_history_public'),
+    9, 'Ruling 2: and exactly the nine columns it is supposed to — a tenth is a policy change');
+  -- The view must NOT be security_invoker: a plain view runs with its owner's
+  -- privileges, and that is the whole mechanism (g) below depends on.
+  select assert_eq(
+    (select count(*) from pg_class c
+      where c.relname = 'organization_name_history_public'
+        and coalesce(array_to_string(c.reloptions, ','), '') not like '%security_invoker%'),
+    1, 'Ruling 2: the view is NOT security_invoker — it runs with its owner''s privileges, which is how it sees past the base table''s tenant policy (and is F26''s failure mode if ownership ever moves to a non-bypassing role)');
+commit;
+
+-- (f) THE MATCHER'S RETURN COLUMN LIST IS THE REVIEW ARTIFACT (Ruling 4, the
+--     adversarial pass). Read off pg_proc rather than by calling it, so the
+--     assertion holds even when the candidate set is empty.
+--
+--     F100 is the reason this is worded as a SURFACE rule: platform_status is
+--     ALREADY readable on the tenant connection (organizations has no RLS and
+--     presby_app holds table-level SELECT). This assertion stops a
+--     cross-council candidate list from RENDERING D9's tenant axis to a clerk;
+--     it is not, and must not be mistaken for, a closure of that grant.
+begin;
+  select assert_eq(
+    (select count(*) from pg_proc p, unnest(p.proargnames) n
+      where p.proname = 'presby_match_organization'
+        and n in ('platform_status', 'slug', 'status', 'deletable_until')),
+    0, 'Ruling 4/DECISION-047: presby_match_organization() never returns platform_status, slug, status or deletable_until');
+  select assert_eq(
+    (select count(*) from pg_proc p, unnest(p.proargnames) n
+      where p.proname = 'presby_match_organization'
+        and n in ('lifecycle_status', 'current_parent_id', 'current_parent_name')),
+    3, 'Ruling 4: it DOES return lifecycle_status and the current parent — the labels that stop a clerk choosing blind between two same-named churches, and already public-tree facts');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_match_organization'
+        and provolatile = 's' and not prosecdef),
+    1, 'Ruling 2 (the override): the matcher is STABLE and SECURITY INVOKER — minimal disclosure is structural, via the view''s projection, not a reviewed column list on a privileged function');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_match_organization'
+        and pg_get_functiondef(oid) like '%limit 20%'),
+    1, 'Ruling 4: bounded at 20 rows — no offset, so no enumeration crawl');
+  -- DECISION-148 is INAPPLICABLE BY ABSENCE in drizzle/0053, and that is worth
+  -- pinning: if a future edit makes something here SECURITY DEFINER, this
+  -- assertion fails and forces the search_path question to be asked.
+  select assert_eq(
+    (select count(*) from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+      where ns.nspname = 'public' and p.prosecdef
+        and p.proname in ('presby_match_organization', 'presby_normalize_org_match_text',
+                          'presby_freeze_import_batch', 'presby_freeze_import_row',
+                          'presby_deny_import_batch_change', 'presby_deny_import_row_change')),
+    0, 'DECISION-121/148: NOTHING drizzle/0053 defines is SECURITY DEFINER — the matcher is an invoker over a view, the helper touches no table, and the freeze triggers only compare OLD/NEW of their own row');
+  -- F101: one expression, in one place. The generated columns and the matcher
+  -- must call the SAME function, or the index and the comparison diverge again.
+  select assert_eq(
+    (select count(*) from pg_attrdef d
+      join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+      join pg_class c on c.oid = d.adrelid
+      where c.relname = 'organization_name_history'
+        and a.attgenerated = 's'
+        and pg_get_expr(d.adbin, d.adrelid) like '%presby_normalize_org_match_text%'),
+    2, 'F101: name_normalized and city_normalized are STORED GENERATED columns computed by presby_normalize_org_match_text() — the same expression the matcher applies to its inputs');
+  select assert_eq(
+    (select count(*) from pg_proc
+      where proname = 'presby_normalize_org_match_text' and provolatile = 'i'),
+    1, 'F101: and that function is IMMUTABLE — which a generated column requires, and which is why unaccent() is excluded rather than merely unused');
+commit;
+
+-- (g) CROSS-TENANT MATCHING WORKS, and this is the one assertion no unit test
+--     against the base table can make. As ALDER CREEK, the matcher finds a
+--     name-history row the Northern Reach recorded and Alder Creek's own
+--     tenant policy hides — because the view runs with its owner's privileges.
+--     A legacy name must be searchable across the WHOLE org tree, since a
+--     congregation may have changed presbyteries since the year in question
+--     (D19); that is the point of Ruling 2's view shape.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from organization_name_history),
+    1, 'baseline: from Alder Creek''s context the BASE table shows exactly ONE row — its own backfilled canonical, whose recording council is itself (Ruling 7''s self-attribution)');
+  select assert_eq(
+    (select count(*) from organization_name_history
+      where subject_org_id = '33333333-3333-3333-3333-333333333333'),
+    0, 'baseline: and NOTHING about Bramblewood — those rows were recorded by the Northern Reach and tenant_isolation hides them');
+  select assert_eq(
+    (select count(*) from presby_match_organization('Mill Creek Presbyterian Church')),
+    1, 'Ruling 2: and yet the matcher finds Bramblewood''s former canonical name from Alder Creek''s context — the projection''s owner privileges cross the tenant boundary the base table enforces');
+  select assert_eq(
+    (select count(*) from presby_match_organization('Mill Creek Presbyterian Church')
+      where organization_id = '33333333-3333-3333-3333-333333333333'),
+    1, 'Ruling 2: and the candidate names the right body (Bramblewood), not merely some row');
+commit;
+
+-- (h) THE MATCHER'S CONTRACT: empty input, normalization, and the four ranking
+--     bands. The year RANKS and never FILTERS (Ruling 4 / Open Question 3):
+--     F30's lesson is that half a 41-year archive failed on reference
+--     resolution, and a matcher that HIDES the right candidate because someone
+--     mis-recorded an effective_to reproduces that failure with a clean
+--     conscience.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select assert_eq(
+    (select count(*) from presby_match_organization('')), 0,
+    'Ruling 4: an empty name returns ZERO ROWS and does not raise — the caller is a loop over a spreadsheet, and a raise would kill the whole batch');
+  select assert_eq(
+    (select count(*) from presby_match_organization(null)), 0,
+    'Ruling 4: a null name returns zero rows and does not raise');
+  select assert_eq(
+    (select count(*) from presby_match_organization('   ')), 0,
+    'Ruling 4: a whitespace-only name returns zero rows and does not raise');
+  select assert_eq(
+    (select count(*) from presby_match_organization('  Mill  Creek Presbyterian Church. ',
+                                                    'Cranesport', 1987)
+      where rank = 1 and confidence = 'exact'),
+    1, 'F101: leading/trailing space, a doubled internal space and a trailing period all normalize away — name, city and year all corroborate, so rank 1 / exact');
+  select assert_eq(
+    (select count(*) from presby_match_organization('Mill Creek Presbyterian Church',
+                                                    'Cranesport', 2010)
+      where rank = 2 and confidence = 'high'),
+    1, 'Ruling 4: the year DOWNRANKS and never filters — 2010 is outside Mill Creek''s canonical interval and the candidate is still returned, at rank 2');
+  select assert_eq(
+    (select count(*) from presby_match_organization('Mill Creek Presbyterian Church',
+                                                    'Nowhere Junction', 1987)
+      where rank = 3 and confidence = 'medium'),
+    1, 'F33: a KNOWN city disagreement downranks to 3 and is never dropped — "right church, historically misrecorded city" must stay recognizable to a clerk');
+  select assert_eq(
+    (select count(*) from presby_match_organization('Mill Creek Presbyterian Church',
+                                                    'Nowhere Junction', 2010)
+      where rank = 4 and confidence = 'low'),
+    1, 'Ruling 4: city and year both disagree — rank 4 / low, the fourth band, still returned');
+  select assert_eq(
+    (select count(*) from presby_match_organization('Alder Creek Presbyterian Church',
+                                                    'Anywhere At All', 1987)
+      where rank = 1),
+    1, 'Phase 1 Gap 1: an UNKNOWN city on the stored side (every backfilled canonical row has city null) must not exclude a real match — it ranks as corroborated');
+  select assert_eq(
+    (select count(*) from presby_match_organization('Mount Amity Chapel', 'Unincorporated', 1987)),
+    0, 'D13: the seeded quarantine row genuinely matches nothing — zero candidates is a legitimate `unresolved` outcome, not an error');
+commit;
+
+-- (i) THE FREEZE TRIGGER'S TWO PATHS, behaviourally, from the TENANT
+--     connection — reachable here precisely because Ruling 5 kept ordinary
+--     tenant DML on this table. (The DELETE arm is not reachable: (d) above
+--     shows the grant fires first. imports.test.ts carries the owner path.)
+--
+--     PATH A resolves; PATH B stamps resulting_return_id alone on an
+--     already-resolved row; nothing else is ever legal. Path B exists because
+--     resulting_return_id and statistical_returns.staging_row_id are an FK
+--     CYCLE, and the one legal write order in a future writer's transaction is
+--     insert import_rows (pointer null) -> insert statistical_returns ->
+--     update the pointer (Ruling 6.1).
+--
+--     EVERY REFUSAL BELOW PINS THE MESSAGE, not just the SQLSTATE (Phase 5
+--     FAIL-2, docs/work-log/2026-09-26-name-history-import-staging.md).
+--     presby_freeze_import_row() is SECURITY INVOKER and factors its raise
+--     into presby_deny_import_row_change(); if that helper ever loses its
+--     EXECUTE grant again, the tenant path gets `permission denied for
+--     function ...` — also 42501 — and a bare `when insufficient_privilege`
+--     handler would report `pass` against a gutted, no-op guard body. Matching
+--     on `import_rows: %` is what makes these assertions capable of failing.
+--     (Contrast (d) above, which is a GRANT-layer refusal by design and
+--     deliberately does NOT match on a literal.)
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+
+  -- A row of our own to drive, so the seeded quarantine fixture stays
+  -- unresolved for everyone else.
+  insert into import_rows
+    (id, batch_id, organization_id, row_index, raw_payload,
+     original_name, original_city, report_year)
+  values ('ae000000-0000-0000-0000-0000000000f1',
+          'ad000000-0000-0000-0000-000000000001',
+          '11111111-1111-1111-1111-111111111111',
+          900, '{"Congregation Name": "Probe Chapel"}'::jsonb,
+          'Probe Chapel', 'Nowhere', 1987);
+
+  do $$
+  begin
+    update import_rows set raw_payload = '{"rewritten": true}'::jsonb
+     where id = 'ae000000-0000-0000-0000-0000000000f1';
+    raise exception 'FAIL — a frozen column was rewritten from the tenant connection';
+  exception when insufficient_privilege then
+    -- FAIL-2 guard: insufficient_privilege ALONE does not identify the
+    -- refusing layer — a missing EXECUTE grant on the deny helper raises the
+    -- same SQLSTATE. Pin the literal, or a no-op guard body passes.
+    if sqlerrm not like 'import_rows: %' then
+      raise exception 'FAIL — refused, but NOT by presby_freeze_import_row''s own literal (got: %). presby_deny_import_row_change() has lost its EXECUTE grant — see drizzle/0053_presby_name_history_import_staging.sql B-M1.', sqlerrm;
+    end if;
+    raise notice 'pass  Ruling 5c: import_rows_freeze refuses an UPDATE of raw_payload — the raw row is the record, not a draft';
+  end $$;
+
+  do $$
+  begin
+    update import_rows set candidates = '[{"forged": true}]'::jsonb
+     where id = 'ae000000-0000-0000-0000-0000000000f1';
+    raise exception 'FAIL — the candidates snapshot was rewritten';
+  exception when insufficient_privilege then
+    -- FAIL-2 guard: insufficient_privilege ALONE does not identify the
+    -- refusing layer — a missing EXECUTE grant on the deny helper raises the
+    -- same SQLSTATE. Pin the literal, or a no-op guard body passes.
+    if sqlerrm not like 'import_rows: %' then
+      raise exception 'FAIL — refused, but NOT by presby_freeze_import_row''s own literal (got: %). presby_deny_import_row_change() has lost its EXECUTE grant — see drizzle/0053_presby_name_history_import_staging.sql B-M1.', sqlerrm;
+    end if;
+    raise notice 'pass  Ruling 5c: candidates is frozen too — it is the record of what the clerk SAW, and a later, better matcher must not improve the audit trail';
+  end $$;
+
+  do $$
+  begin
+    update import_rows
+       set resulting_return_id = gen_random_uuid()
+     where id = 'ae000000-0000-0000-0000-0000000000f1';
+    raise exception 'FAIL — a Path-B stamp landed on a row that is still unresolved';
+  exception when insufficient_privilege then
+    -- FAIL-2 guard: insufficient_privilege ALONE does not identify the
+    -- refusing layer — a missing EXECUTE grant on the deny helper raises the
+    -- same SQLSTATE. Pin the literal, or a no-op guard body passes.
+    if sqlerrm not like 'import_rows: %' then
+      raise exception 'FAIL — refused, but NOT by presby_freeze_import_row''s own literal (got: %). presby_deny_import_row_change() has lost its EXECUTE grant — see drizzle/0053_presby_name_history_import_staging.sql B-M1.', sqlerrm;
+    end if;
+    raise notice 'pass  Ruling 6.1: a Path-B-shaped update on a STILL-UNRESOLVED row is refused — the stamp follows the resolve, never replaces it';
+  end $$;
+
+  -- PATH A — the resolve, all five columns together.
+  update import_rows
+     set resolution_kind = 'matched_existing',
+         resolved_org_id = '22222222-2222-2222-2222-222222222222',
+         resolved_by     = 'e0000000-0000-0000-0000-0000000000f4',
+         resolved_at     = now()
+   where id = 'ae000000-0000-0000-0000-0000000000f1';
+  select assert_eq(
+    (select count(*) from import_rows
+      where id = 'ae000000-0000-0000-0000-0000000000f1'
+        and resolution_kind = 'matched_existing' and resulting_return_id is null),
+    1, 'Ruling 5c PATH A: an unresolved row resolves, and resulting_return_id stays null — Path A may never touch it');
+
+  -- PATH B — the stamp, alone. The target is Alder Creek's own 2025 submitted
+  -- return: about_org_id and report_year must match this row's
+  -- resolved_org_id and report_year (F104), so the row is re-pointed at 2025
+  -- first. That UPDATE is itself refused, which is the set-once rule working.
+  do $$
+  begin
+    update import_rows set report_year = 2025
+     where id = 'ae000000-0000-0000-0000-0000000000f1';
+    raise exception 'FAIL — report_year was changed after insert';
+  exception when insufficient_privilege then
+    -- FAIL-2 guard: insufficient_privilege ALONE does not identify the
+    -- refusing layer — a missing EXECUTE grant on the deny helper raises the
+    -- same SQLSTATE. Pin the literal, or a no-op guard body passes.
+    if sqlerrm not like 'import_rows: %' then
+      raise exception 'FAIL — refused, but NOT by presby_freeze_import_row''s own literal (got: %). presby_deny_import_row_change() has lost its EXECUTE grant — see drizzle/0053_presby_name_history_import_staging.sql B-M1.', sqlerrm;
+    end if;
+    raise notice 'pass  Ruling 5c: report_year is in the frozen set — an already-resolved row cannot be re-aimed at a different year to make a pointer fit';
+  end $$;
+rollback;
+
+-- (i2) PATH B properly, on a row inserted at the right year from the start.
+--      The two refusals here pin the literal for the same FAIL-2 reason as (i).
+--
+--     THE TARGET RETURN'S UUID IS RESOLVED, NEVER HARD-CODED — the §35(c)
+--     lesson. On a freshly seeded database it is scripts/seed-dev.sql's
+--     a8000000-...-0001; on a database that was MIGRATED instead it is
+--     whatever drizzle/0047's backfill minted. (Measured: a hard-coded id
+--     made this probe fail on the FK instead of on the mechanism under test,
+--     on the from-empty rehearsal DECISION-150 requires.) Resolving it
+--     through presby_list_published_returns_to_me() is also the honest
+--     reachability story — that function is how a presbytery legitimately
+--     comes to hold a congregation-owned return's id at all.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select set_config('presby_test.return_id',
+    (select return_id::text from presby_list_published_returns_to_me(
+       '22222222-2222-2222-2222-222222222222', 2025) limit 1), true);
+  select assert_eq(
+    (select count(*) from (select 1) s
+      where nullif(current_setting('presby_test.return_id', true), '') is not null),
+    1, 'fixture: the Alder Creek 2025 return published to the Northern Reach resolves — the rest of (i2) and (j) depend on it and must not silently skip');
+  insert into import_rows
+    (id, batch_id, organization_id, row_index, raw_payload,
+     original_name, original_city, report_year)
+  values ('ae000000-0000-0000-0000-0000000000f2',
+          'ad000000-0000-0000-0000-000000000001',
+          '11111111-1111-1111-1111-111111111111',
+          901, '{"Congregation Name": "Probe Chapel Two"}'::jsonb,
+          'Probe Chapel Two', 'Nowhere', 2025);
+  update import_rows
+     set resolution_kind = 'matched_existing',
+         resolved_org_id = '22222222-2222-2222-2222-222222222222',
+         resolved_by     = 'e0000000-0000-0000-0000-0000000000f4',
+         resolved_at     = now()
+   where id = 'ae000000-0000-0000-0000-0000000000f2';
+
+  update import_rows
+     set resulting_return_id = current_setting('presby_test.return_id')::uuid
+   where id = 'ae000000-0000-0000-0000-0000000000f2';
+  select assert_eq(
+    (select count(*) from import_rows
+      where id = 'ae000000-0000-0000-0000-0000000000f2'
+        and resulting_return_id = current_setting('presby_test.return_id')::uuid),
+    1, 'Ruling 6.1 PATH B: resulting_return_id is stamped ALONE on an already-resolved row — the one update the FK cycle requires');
+
+  do $$
+  begin
+    update import_rows
+       set resulting_return_id = '00000000-0000-0000-0000-000000000000'
+     where id = 'ae000000-0000-0000-0000-0000000000f2';
+    raise exception 'FAIL — resulting_return_id was changed a second time';
+  exception when insufficient_privilege then
+    -- FAIL-2 guard: insufficient_privilege ALONE does not identify the
+    -- refusing layer — a missing EXECUTE grant on the deny helper raises the
+    -- same SQLSTATE. Pin the literal, or a no-op guard body passes.
+    if sqlerrm not like 'import_rows: %' then
+      raise exception 'FAIL — refused, but NOT by presby_freeze_import_row''s own literal (got: %). presby_deny_import_row_change() has lost its EXECUTE grant — see drizzle/0053_presby_name_history_import_staging.sql B-M1.', sqlerrm;
+    end if;
+    raise notice 'pass  Ruling 5c: a SECOND stamp is refused — resolution is set-once, and that has no correction path by choice (the revision mechanism is the executor pipeline''s to design)';
+  end $$;
+
+  do $$
+  begin
+    update import_rows set rationale = 'changed my mind'
+     where id = 'ae000000-0000-0000-0000-0000000000f2';
+    raise exception 'FAIL — a resolved row''s rationale was edited';
+  exception when insufficient_privilege then
+    -- FAIL-2 guard: insufficient_privilege ALONE does not identify the
+    -- refusing layer — a missing EXECUTE grant on the deny helper raises the
+    -- same SQLSTATE. Pin the literal, or a no-op guard body passes.
+    if sqlerrm not like 'import_rows: %' then
+      raise exception 'FAIL — refused, but NOT by presby_freeze_import_row''s own literal (got: %). presby_deny_import_row_change() has lost its EXECUTE grant — see drizzle/0053_presby_name_history_import_staging.sql B-M1.', sqlerrm;
+    end if;
+    raise notice 'pass  Ruling 5c: nothing else on an already-resolved row may change either';
+  end $$;
+rollback;
+
+-- (j) F104 (as revised by the Phase 2 addendum) — THE ABOUT-ORG COMPOSITE FK.
+--
+--     The `duplicate` disposition's target may be a return the importing
+--     presbytery does not own: a congregation's own `submitted` filing, whose
+--     uuid the presbytery legitimately holds because
+--     presby_list_published_returns_to_me() hands it over. A composite FK on
+--     organization_id would refuse exactly that row; a composite on
+--     resolved_org_id -> organization_id would refuse the minted-import cases
+--     instead. The disposition-INDEPENDENT invariant is about_org_id =
+--     resolved_org_id, and the year is pinned alongside it.
+--
+--     Alder Creek's 2025 return is the fixture: owned by Alder Creek, about
+--     Alder Creek, published to the Northern Reach.
+begin;
+  select set_config('app.current_org_id', :PRESBY, true);
+  select set_config('presby_test.return_id',
+    (select return_id::text from presby_list_published_returns_to_me(
+       '22222222-2222-2222-2222-222222222222', 2025) limit 1), true);
+
+  -- The premise, proven rather than assumed: the presbytery cannot SELECT the
+  -- congregation's return (tenant_isolation), but CAN obtain its id through
+  -- the authorized reader. That is what makes case (b) reachable at all —
+  -- and it is also where the id below comes from, rather than a literal.
+  select assert_eq(
+    (select count(*) from presby_list_published_returns_to_me(
+       '22222222-2222-2222-2222-222222222222', 2025)),
+    1, 'F104 premise: presby_list_published_returns_to_me() hands the presbytery the congregation''s return id — the publication event grants the read, not the tenant policy');
+  select assert_eq(
+    (select count(*) from statistical_returns
+      where id = current_setting('presby_test.return_id')::uuid),
+    0, 'F104 premise: and yet that very return is INVISIBLE to the presbytery in a direct SELECT — tenant_isolation, which is why the executor pipeline must resolve this pointer through the reader and never a join');
+
+  -- ACCEPTED: about_org_id and report_year both match.
+  insert into import_rows
+    (id, batch_id, organization_id, row_index, raw_payload,
+     original_name, original_city, report_year,
+     resolution_kind, resolved_org_id, resolved_by, resolved_at, rationale,
+     resulting_return_id)
+  values ('ae000000-0000-0000-0000-0000000000f3',
+          'ad000000-0000-0000-0000-000000000001',
+          '11111111-1111-1111-1111-111111111111',
+          902, '{"Congregation Name": "Alder Creek Presbyterian Church"}'::jsonb,
+          'Alder Creek Presbyterian Church', 'Alder Creek', 2025,
+          'duplicate', '22222222-2222-2222-2222-222222222222',
+          'e0000000-0000-0000-0000-0000000000f4', now(),
+          'Already filed by the congregation through its own portal.',
+          current_setting('presby_test.return_id')::uuid);
+  select assert_eq(
+    (select count(*) from import_rows where id = 'ae000000-0000-0000-0000-0000000000f3'),
+    1, 'F104: a `duplicate` row pointing at a CONGREGATION-OWNED submitted return is ACCEPTED — the FK matches on about_org_id and report_year, which a composite on organization_id would have refused');
+
+  -- REFUSED: the about-org disagrees.
+  do $$
+  begin
+    insert into import_rows
+      (batch_id, organization_id, row_index, raw_payload, report_year,
+       resolution_kind, resolved_org_id, resolved_by, resolved_at, rationale,
+       resulting_return_id)
+    values ('ad000000-0000-0000-0000-000000000001',
+            '11111111-1111-1111-1111-111111111111',
+            903, '{}'::jsonb, 2025,
+            'duplicate', '33333333-3333-3333-3333-333333333333',
+            'e0000000-0000-0000-0000-0000000000f4', now(), 'wrong church',
+            current_setting('presby_test.return_id')::uuid);
+    raise exception 'FAIL — a duplicate pointer named a return about a DIFFERENT congregation';
+  exception when foreign_key_violation then
+    raise notice 'pass  F104: a pointer whose resolved_org_id does not equal the return''s about_org_id is refused by import_rows_resulting_return_fk';
+  end $$;
+
+  -- REFUSED: the year disagrees.
+  do $$
+  begin
+    insert into import_rows
+      (batch_id, organization_id, row_index, raw_payload, report_year,
+       resolution_kind, resolved_org_id, resolved_by, resolved_at, rationale,
+       resulting_return_id)
+    values ('ad000000-0000-0000-0000-000000000001',
+            '11111111-1111-1111-1111-111111111111',
+            904, '{}'::jsonb, 2024,
+            'duplicate', '22222222-2222-2222-2222-222222222222',
+            'e0000000-0000-0000-0000-0000000000f4', now(), 'wrong year',
+            current_setting('presby_test.return_id')::uuid);
+    raise exception 'FAIL — a duplicate pointer named a return for a DIFFERENT report year';
+  exception when foreign_key_violation then
+    raise notice 'pass  F104: the year is pinned too — a frozen, set-once pointer can never be corrected for it, so the FK carries it rather than a trigger';
+  end $$;
+
+  -- The MATCH SIMPLE / shape-CHECK interaction, from the other end: `duplicate`
+  -- with a permanently NULL pointer is legal and meaningful ("known duplicate,
+  -- target not readable by us" — the unpublished-submitted case, whose uuid is
+  -- unobtainable). The FK is skipped exactly there, and only there.
+  insert into import_rows
+    (batch_id, organization_id, row_index, raw_payload, report_year,
+     resolution_kind, resolved_org_id, resolved_by, resolved_at, rationale)
+  values ('ad000000-0000-0000-0000-000000000001',
+          '11111111-1111-1111-1111-111111111111',
+          905, '{}'::jsonb, 1987,
+          'duplicate', '22222222-2222-2222-2222-222222222222',
+          'e0000000-0000-0000-0000-0000000000f4', now(),
+          'Known duplicate; the target filing is not readable by this council.');
+  select assert_eq(
+    (select count(*) from import_rows where row_index = 905), 1,
+    'F104: `duplicate` with a NULL pointer is legal — MATCH SIMPLE skips the FK exactly where import_rows_resolution_shape permits a null, and case (c) is not stranded');
+
+  -- And the shape CHECK closes MATCH SIMPLE's hole in the other direction: no
+  -- branch permits a non-null pointer without a non-null resolved_org_id.
+  do $$
+  begin
+    insert into import_rows
+      (batch_id, organization_id, row_index, raw_payload, report_year,
+       resolution_kind, resulting_return_id)
+    values ('ad000000-0000-0000-0000-000000000001',
+            '11111111-1111-1111-1111-111111111111',
+            906, '{}'::jsonb, 2025,
+            'unresolved', current_setting('presby_test.return_id')::uuid);
+    raise exception 'FAIL — an unresolved row carried a resulting_return_id, which would skip the FK on a null resolved_org_id';
+  exception when check_violation then
+    raise notice 'pass  F104: import_rows_resolution_shape forbids a pointer without a resolved_org_id — which is what makes the FK enforced EXACTLY when the pointer exists';
+  end $$;
+rollback;
+
+-- (k) THE BACKFILL, from the tenant connection — readable only through the
+--     projection, since the base table is tenant-isolated to the recording
+--     council and every backfill row names its own subject as that council.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  -- ALWAYS TRUE, at any moment in the database's life: the matcher's
+  -- name-in-force-today path is single-valued. The partial EXCLUDE is what
+  -- makes a second open canonical row unwritable, so if this ever fires the
+  -- EXCLUDE is gone.
+  select assert_eq(
+    (select count(*) from (
+       select subject_org_id from organization_name_history_public
+        where name_type = 'canonical' and effective_to is null
+        group by subject_org_id having count(*) > 1) d),
+    0, 'Ruling 3/7: NO organization carries more than one OPEN canonical row — "the name in force today" is single-valued, and this holds at every moment, not only just after the migration');
+  -- COVERAGE, which is a weaker claim and deliberately worded as one. The
+  -- migration's backfill covers every organization that existed WHEN 0053
+  -- RAN, and scripts/seed-dev.sql section (0) covers the ones this fixture
+  -- creates afterwards. An organization created later still by
+  -- createOrganization() or a test fixture has NO canonical row, because this
+  -- increment ships no writer (Phase 2 Ruling 1) — so this assertion is a
+  -- statement about a freshly seeded database, not an invariant of the
+  -- schema, and the gap is a named follow-up rather than a closure.
+  select assert_eq(
+    (select count(*) from organization_name_history_public
+      where name_type = 'canonical' and effective_to is null),
+    (select count(*) from organizations),
+    'Ruling 7 (coverage, on a freshly seeded database): one OPEN canonical row per organization — the migration backfilled those that predated it, seed-dev.sql section (0) covers its own');
+  select assert_eq(
+    (select count(*) from organization_name_history_public
+      where subject_org_id = '33333333-3333-3333-3333-333333333333'
+        and name_type = 'canonical'),
+    2, 'Ruling 3 in the fixture: Bramblewood carries TWO canonical rows — one closed at the 1988 rename, one open since — and the old name is NOT additionally duplicated as a former_name');
+  select assert_eq(
+    (select count(*) from organization_name_history_public
+      where subject_org_id = '33333333-3333-3333-3333-333333333333'
+        and name_type = 'former_name'),
+    0, 'Ruling 3: ...so "what was this body called in 1987?" has exactly ONE answer, of one type');
+commit;
+
+-- (l) CATALOG PINS for the mechanisms only imports.test.ts can exercise. A
+--     dropped trigger, a lost constraint or a re-widened grant fails this suite
+--     rather than surfacing months later.
+begin;
+  select assert_eq(
+    (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname in ('import_batches', 'import_rows')
+        and t.tgenabled = 'O'
+        and t.tgname in ('import_batches_freeze', 'import_rows_freeze')
+        -- tgtype bits: 1 = FOR EACH ROW, 2 = BEFORE, 8 = DELETE, 16 = UPDATE.
+        and (t.tgtype & 1) = 1 and (t.tgtype & 2) = 2
+        and (t.tgtype & 8) = 8 and (t.tgtype & 16) = 16),
+    2, 'both freeze triggers exist, are ENABLED, and are row-level BEFORE UPDATE OR DELETE — they fire on the OWNER path too, which is the only thing guarding it (F44)');
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'organization_name_history_canonical_no_overlap'
+        and contype = 'x'),
+    1, 'Ruling 3: the partial GiST EXCLUDE exists — Drizzle cannot express it, so this pin is the only thing that notices if it is dropped');
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'organization_name_history_canonical_no_overlap'
+        and pg_get_constraintdef(oid) like '%WHERE%name_type = ''canonical''::text%'),
+    1, 'Ruling 3: and it is PARTIAL on canonical — the other four types are assertions ABOUT the body and may overlap freely');
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname in ('statistical_returns_staging_row_fk',
+                        'statistical_returns_id_about_year_key',
+                        'statistical_returns_import_provenance_shape',
+                        'import_rows_resulting_return_fk',
+                        'import_rows_resolution_shape',
+                        'import_rows_batch_fk')),
+    6, 'drizzle/0053''s six cross-table constraints are all present');
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'statistical_returns_staging_row_fk'
+        and pg_get_constraintdef(oid) like '%(staging_row_id, organization_id) REFERENCES import_rows(id, organization_id)%'),
+    1, 'Ruling 6: staging_row_id''s FK is COMPOSITE on organization_id — both sides of THAT relationship always share one tenant, and RI checks bypass row security, so a plain FK would be an oracle in F40''s family');
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'import_rows_resulting_return_fk'
+        and pg_get_constraintdef(oid) like '%(resulting_return_id, resolved_org_id, report_year) REFERENCES statistical_returns(id, about_org_id, report_year)%'),
+    1, 'F104: and the reverse pointer is composite on the ABOUT-ORG axis instead — a composite FK that is semantically false is not a security improvement but a correctness bug');
+  -- The narrowed provenance CHECK. It constrains staging_row_id ONLY:
+  -- drizzle/0047:683-691's backfill legitimately writes source_ref on a
+  -- SUBMITTED row and then matches on that exact value to repair it, so a
+  -- CHECK covering source_ref could not be applied to any database with
+  -- history.
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'statistical_returns_import_provenance_shape'
+        and pg_get_constraintdef(oid) not like '%source_ref%'),
+    1, 'the additive provenance CHECK constrains staging_row_id only — source_ref is a general provenance note drizzle/0047''s backfill writes on a submitted row');
+
 -- APPENDED SECTION — pipeline/withdraw (docs/work-log/2026-09-26-withdraw-
 -- publication.md). One new section, at the END of the file, per Workflow
 -- Rule 16's shared-file discipline. The ONE edit this pipeline made
@@ -7100,6 +7891,12 @@ commit;
 
 \echo ''
 \echo '======================================================'
+\echo ' Section 42 (name history + import quarantine) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION — pipeline/name-history.
+
 \echo ' Section 41 (withdraw a published return) complete.'
 \echo '======================================================'
 

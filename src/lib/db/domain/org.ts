@@ -144,6 +144,15 @@ export const organizationSettings = pgTable("organization_settings", {
  * External identifiers for an organization — OGA church PIN, psvonline
  * congregation id, church360, legacy import keys (D24, drizzle/0043).
  *
+ * `kind = 'legacy_import'` IS NOT `organizationNameHistory.nameType =
+ * 'legacy_import_name'` (D14, drizzle/0053, forty lines below). This column
+ * maps an external IDENTIFIER — psvonline's internal congregation id, say.
+ * That one records a dirty NAME STRING seen in a source document, kept only
+ * so an importer has somewhere to put a matching string without implying it
+ * was ever official. The names are confusingly similar and the mechanisms are
+ * unrelated; do not "helpfully" merge them (Phase 1 Gap 5 of
+ * `docs/work-log/2026-09-26-name-history-import-staging.md`).
+ *
  * Deliberately NOT tenant-isolated, and that is the whole reason it exists:
  * `pcusaPin` used to live on `organizationSettings`, which carries the
  * standard tenant policy, so a presbytery running an import could not read a
@@ -215,6 +224,194 @@ export const organizationIdentifiers = pgTable(
     index("organization_identifiers_org_idx").on(t.organizationId),
   ],
 );
+
+/**
+ * DATED, TYPED, CITY-QUALIFIED NAMES for an organization (D14/F37, increment
+ * 7, `drizzle/0053_presby_name_history_import_staging.sql`). "A name AT A
+ * PLACE is the matching unit" (F33): this is what lets a future import ask
+ * "who was called this, where, in what year," and what lets a historical
+ * report render a congregation under the name it actually held that year.
+ *
+ * Here beside `organizationIdentifiers` rather than in `lifecycle.ts`, on a
+ * reason rather than by default (Phase 2 placement ruling): identifiers and
+ * names are both ALTERNATE KEYS for the same body, both council-written, and
+ * both exist for import matching. `lifecycle.ts` stays the home of the
+ * three-axis EVENT tables. Co-location is also what keeps the
+ * `legacy_import` / `legacy_import_name` cross-reference forty lines away
+ * instead of in another file — see `organizationIdentifiers`' header.
+ *
+ * THE D26 ABOUT-ORG SHAPE: `organizationId` is the ACTING council and the
+ * tenant scope; `subjectOrgId` is the body the name describes, a PLAIN FK by
+ * `docs/schema-design.md` sec 17's structural exception (organization ids are
+ * public). Unlike `organizationLifecycleEvents`, THE TWO MAY BE EQUAL and
+ * there is deliberately no `not_self` CHECK: `organizationId =
+ * subjectOrgId` is the canonical-self case (every backfilled row), `<>` is
+ * the about-org case.
+ *
+ * ALMOST NONE OF THE ENFORCEMENT IS EXPRESSIBLE HERE. `drizzle/0053` is the
+ * ground truth; stated so a reader does not mistake absence for permission:
+ *
+ *   - `FORCE ROW LEVEL SECURITY` + `tenant_isolation` on
+ *     `presby_current_org()`. Without FORCE the owner bypasses every policy
+ *     and RLS is silently inert (F1).
+ *   - THE GRANT SHAPE IS HALF THE MODEL, and it is the opposite of the two
+ *     staging tables in `./imports`: `presby_app` holds **SELECT only**.
+ *     `organization_name_history_canonical_no_overlap` — a partial GiST
+ *     EXCLUDE over `(subject_org_id, daterange(effective_from, effective_to,
+ *     '[)')) where name_type = 'canonical'` — is keyed on the PUBLIC
+ *     `subject_org_id`, and a unique/EXCLUDE constraint is enforced against
+ *     ALL rows, not the RLS-visible subset (F40). So with ordinary tenant DML
+ *     any presbytery could probe an insert naming any org id and learn from
+ *     the constraint-violation error whether a council it cannot see has
+ *     recorded a canonical name for that body in that window. Writes are
+ *     therefore FUNCTION-MEDIATED (F103/DECISION-153). `presby_platform` is
+ *     narrowed to `select, insert` — the 0044 narrowing.
+ *   - Drizzle has no EXCLUDE builder, so the constraint above exists only in
+ *     the migration. What it MEANS: a rename CLOSES the canonical row and
+ *     OPENS a new one; the old name is never additionally duplicated as a
+ *     `former_name`, so "what was this body called in 1987?" has exactly one
+ *     answer. The other four types are assertions ABOUT the body and may
+ *     overlap each other and the canonical succession freely.
+ *   - `nameNormalized` / `cityNormalized` are GENERATED columns computed by
+ *     `presby_normalize_org_match_text()`, the same expression
+ *     `presby_match_organization()` applies to its inputs (F101). Never
+ *     hand-set.
+ *   - THE SOLE WRITER THIS INCREMENT IS THE MIGRATION'S OWN BACKFILL, which
+ *     mints one open `canonical` row per organization with `authority =
+ *     'backfill'`, `organizationId = subjectOrgId` and `city = null` (no
+ *     address text-parsing: a wrongly parsed city is worse than a missing one
+ *     when city is the disambiguator). `presby_record_org_name()` — SECURITY
+ *     DEFINER, standing tested by affiliation-AS-OF and never by
+ *     current-parent — is deferred to the lifecycle-UI pipeline alongside
+ *     `presby_organize_congregation()`.
+ */
+export const organizationNameHistory = pgTable(
+  "organization_name_history",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** The ACTING council, and the tenant scope. MAY equal `subjectOrgId`. */
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** The body the name describes. Plain FK, sec 17's structural exception. */
+    subjectOrgId: uuid("subject_org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /**
+     * canonical | former_name | historical_name | abbreviation |
+     * legacy_import_name. See `NameType` below for what each one means.
+     */
+    nameType: text("name_type").notNull(),
+    name: text("name").notNull(),
+    /**
+     * Null on every backfilled row, permanently and on purpose:
+     * `organizationProfiles.address` is one free-text line with no structured
+     * city, and city is exactly the disambiguator F33 relies on. There is
+     * deliberately no "canonical requires city" CHECK.
+     */
+    city: text("city"),
+    /** NOT a validated code set — historical and non-US forms exist. */
+    state: text("state"),
+    /** GENERATED. `presby_normalize_org_match_text(name)` — never hand-set. */
+    nameNormalized: text("name_normalized").generatedAlwaysAs(
+      sql`presby_normalize_org_match_text(name)`,
+    ),
+    /** GENERATED. `presby_normalize_org_match_text(city)` — never hand-set. */
+    cityNormalized: text("city_normalized").generatedAlwaysAs(
+      sql`presby_normalize_org_match_text(city)`,
+    ),
+    /** Null = unbounded below ("predates our records"), the F41 convention. */
+    effectiveFrom: date("effective_from"),
+    /** Null = still in force. */
+    effectiveTo: date("effective_to"),
+    /** recorded | backfill. A minute-less row can only ever be an inferred one. */
+    authority: text("authority").notNull().default("recorded"),
+    minuteReference: text("minute_reference"),
+    notes: text("notes"),
+    recordedBy: uuid("recorded_by").references(() => users.id),
+    recordedAt: timestamp("recorded_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("organization_name_history_id_org_key").on(t.id, t.organizationId),
+    index("organization_name_history_normalized_idx").on(
+      t.nameNormalized,
+      t.cityNormalized,
+    ),
+    index("organization_name_history_subject_type_idx").on(
+      t.subjectOrgId,
+      t.nameType,
+      t.effectiveFrom,
+    ),
+    index("organization_name_history_org_idx").on(t.organizationId),
+    check(
+      "organization_name_history_name_type_allowed",
+      sql`${t.nameType} in ('canonical','former_name','historical_name','abbreviation','legacy_import_name')`,
+    ),
+    check(
+      "organization_name_history_authority_allowed",
+      sql`${t.authority} in ('recorded','backfill')`,
+    ),
+    /**
+     * A CLAIM OF OFFICIALITY requires a minute unless the row is honestly
+     * marked as an inference. The three matching aids require nothing —
+     * demanding a minute for them would either block the import this table
+     * exists to enable, or produce invented minute strings. This is what
+     * gives the type vocabulary teeth: if you cannot cite a minute, the type
+     * you want is `historical_name` or `legacy_import_name`, not
+     * `former_name`.
+     */
+    check(
+      "organization_name_history_minute_shape",
+      sql`${t.nameType} not in ('canonical','former_name')
+          or ${t.authority} = 'backfill'
+          or ${t.minuteReference} is not null`,
+    ),
+    /** The empty-range loophole (F49), closed the same way one table over. */
+    check(
+      "organization_name_history_range_order",
+      sql`${t.effectiveTo} is null or ${t.effectiveFrom} is null or ${t.effectiveTo} > ${t.effectiveFrom}`,
+    ),
+    check(
+      "organization_name_history_name_shape",
+      sql`char_length(btrim(${t.name})) between 1 and 255`,
+    ),
+    check(
+      "organization_name_history_city_shape",
+      sql`${t.city} is null or char_length(btrim(${t.city})) between 1 and 120`,
+    ),
+    check(
+      "organization_name_history_state_shape",
+      sql`${t.state} is null or char_length(btrim(${t.state})) <= 64`,
+    ),
+    // organization_name_history_canonical_no_overlap (the partial GiST
+    // EXCLUDE) is in drizzle/0053 ONLY — Drizzle has no EXCLUDE builder. It
+    // is the constraint that makes "the name in force in year Y" a
+    // single-valued question, and the one that puts this whole table under
+    // the function-mediation rule (F40/F103). See this table's header.
+  ],
+);
+
+/**
+ * The five `name_type` values, as a TypeScript union, and what each one
+ * CLAIMS — the vocabulary is load-bearing, not decorative:
+ *
+ *   `canonical`          the name officially borne, for this interval.
+ *                        Exactly one per instant, by EXCLUDE.
+ *   `former_name`        asserted to have been official, but the canonical
+ *                        interval cannot be reconstructed.
+ *   `historical_name`    known by; never official.
+ *   `abbreviation`       a short form.
+ *   `legacy_import_name` a dirty matching string from a source document,
+ *                        CARRYING NO CLAIM that it was ever used.
+ */
+export type NameType =
+  | "canonical"
+  | "former_name"
+  | "historical_name"
+  | "abbreviation"
+  | "legacy_import_name";
 
 /**
  * Optional subdivision inside a congregation. fpcw calls these parishes;

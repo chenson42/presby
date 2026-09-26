@@ -1414,6 +1414,143 @@ left the suite failing on a fresh database. **Closed:** `on conflict do nothing`
 keyed sub-queries in the seed; one line in the suite (a ruled Rule-16 exception). The
 `docs/testing.md` from-scratch recipe now actually works — the first time ever.
 
+## 2j. `group_types` reclassified to a global catalog — findings from a table-classification fix (F84–F86)
+
+*(2026-09-26, `docs/work-log/2026-09-26-group-types-catalog.md` Phases 1–5; DECISION-151;
+`drizzle/0051_presby_group_types_catalog.sql`. Recorded by the orchestrator.)*
+
+### F84 — a tenant could mint a `group_types` row, and the four-policy split is what let it
+
+Reproduced live on `pipeline-group-types` (rolled back): under `drizzle/0048` §5, `group_types_insert WITH CHECK (organization_id = presby_current_org())` accepts an org-scoped row from `presby_app`. Inert by luck rather than by design — `createGroup()` only resolves against `organization_id IS NULL` rows in four manageable keys — but un-audited, uncapped, admin-invisible junk-data insertion on a table ruled to have no per-org row. The general lesson: **when a symptom fix copies a shape from a sibling table, it copies that sibling's capabilities too `app_roles`' template-arm split is right for `app_roles` because custom roles are a shipped feature; the same four policies on `group_types` grant a capability no feature wants. Closed by `drizzle/0051` with a revoke, which binds unconditionally where a policy binds only while it exists.
+
+### F85 — a dropped column has readers that no compiler sees
+
+`scripts/seed-dev.sql:174`'s `on conflict (organization_id, key)` inference clause and `scripts/test-rls.sql:5583-5613`'s C-3 catch-all arrays both reference `group_types.organization_id` from SQL text. The first is a parse error inside a single-transaction fixture file — total fixture loss, the same failure mode F83 recorded for this same statement; the second is a live-computed assertion that flips from pass to fail the instant `FORCE` is dropped. Neither is visible to `tsc`, and the TypeScript fixture sweep (30 sites, 24 files) that *is* `tsc`-visible is the harmless half. **A column drop's real blast radius is the SQL that names it as a string.**
+
+### F86 — an append-only shared-file discipline does not compose with an executable shared file
+
+Workflow Rule 16's convention (append a delimited block at the end) works for `test-rls.sql` when a pipeline *adds* assertions. It cannot work when a pipeline *invalidates* existing ones: an appended correction does not stop `ON_ERROR_STOP=1` from aborting at the stale site. The workable rule, and the one this pipeline used: **in-place edits are confined to the sites that would break, each enumerated by line in the Phase 2/3 sections so integration can see them; everything new still appends.**
+
+## 2l. Increment 7 — name history, import staging and the matcher (F100–F106)
+
+*(2026-09-26, `docs/work-log/2026-09-26-name-history-import-staging.md` Phases 2–4 and the Phase 2
+addendum; DECISION-153; `drizzle/0053_presby_name_history_import_staging.sql`. Recorded by the orchestrator.)*
+
+### F100 — `organizations.platform_status` is readable on the tenant connection — the matcher's exclusion is a surface rule, not a leak closure
+
+**F100** — `organizations.platform_status` is already readable on the
+tenant connection (`relrowsecurity = f`, `presby_app` holds table-level
+`SELECT`, no column-level ACL)
+
+`organizations.platform_status` is already readable on the
+tenant connection (`relrowsecurity = f`, `presby_app` holds table-level
+`SELECT`, no column-level ACL). `presby_match_organization()`'s "never
+return `platform_status`" rule is a surface rule, not a leak closure. Do
+not widen; do not attempt to close it here.
+
+### F101 — F37's literal index cannot serve a matcher that normalizes whitespace and punctuation — superseded by generated normalized columns
+
+**F101** — F37's literal index `(lower(name), lower(city))` cannot serve a
+matcher that normalizes whitespace and punctuation; superseded by generated
+`name_normalized`/`city_normalized` stored columns computed 
+
+F37's literal index `(lower(name), lower(city))` cannot serve a
+matcher that normalizes whitespace and punctuation; superseded by generated
+`name_normalized`/`city_normalized` stored columns computed by one shared
+immutable helper, `presby_normalize_org_match_text()`.
+
+### F102 — `import_rows.resulting_return_id` and `statistical_returns.staging_row_id` are two different facts, not a redundant pair
+
+**F102** — `import_rows.resulting_return_id` and
+`statistical_returns.staging_row_id` are two different facts, not a
+redundant pair; `duplicate` is what distinguishes them
+
+`import_rows.resulting_return_id` and
+`statistical_returns.staging_row_id` are two different facts, not a
+redundant pair; `duplicate` is what distinguishes them. Keep both, comment
+both, never assert agreement.
+
+### F103 — a unique or EXCLUDE constraint on a FORCE-RLS table is an enumeration oracle exactly when its key is learnable from public data
+
+**F103** — a unique/EXCLUDE constraint on a FORCE-RLS table is an
+enumeration oracle exactly when its key is learnable from public data.
+`organization_name_history` keys on public `subject_org_id` (function-
+med
+
+a unique/EXCLUDE constraint on a FORCE-RLS table is an
+enumeration oracle exactly when its key is learnable from public data.
+`organization_name_history` keys on public `subject_org_id` (function-
+mediated); `import_rows` keys on a random batch uuid (ordinary tenant DML).
+Neither ruling generalizes to "all new tenant tables."
+
+### F104 — `import_rows.resulting_return_id` takes the about-org three-column composite — neither an `organization_id` composite nor a plain FK
+
+**F104** — `import_rows.resulting_return_id` cannot take a composite FK on `organization_id` in **either** direction: `(id, organization_id)` refuses the `duplicate` disposition (F102 — the target is a congregat
+
+`import_rows.resulting_return_id` cannot take a composite FK on `organization_id` in **either** direction: `(id, organization_id)` refuses the `duplicate` disposition (F102 — the target is a congregation-owned `submitted` return, reachable because `presby_list_published_returns_to_me()` returns `return_id`), and `(resolved_org_id) -> organization_id` refuses `matched_*`/`created_dissolved` (the minted return is presbytery-owned). The referent's owning org varies by disposition; the disposition-independent invariant is `about_org_id = resolved_org_id`, guaranteed by construction for imported returns and by `statistical_returns_submitted_is_self` for submitted ones. The constraint is therefore `(resulting_return_id, resolved_org_id, report_year) -> statistical_returns (id, about_org_id, report_year)` against a new PK-implied unique — the `statistics_submission_grants` (`0049:161-162`) and `congregation_statistics → publications` idiom, "`about_org_id` is the column that matches." This is **not** a §17 structural exception; §17 covers plain references to the non-RLS `organizations` table only. General rule: *a composite FK that is semantically false is not a security improvement but a correctness bug*; where the sides do not share a tenant, ask which pair actually matches, not composite-versus-plain. `MATCH SIMPLE`'s null skip is closed by `import_rows_resolution_shape`, which forces `resolved_org_id not null` on every branch permitting a non-null pointer. No validating trigger: an invoker-rights read of FORCE-RLS `statistical_returns` from `presby_freeze_import_row()` would return zero rows for exactly the cross-tenant `duplicate` case (F26). Accepted residual: the FK constrains which congregation and year may be named, not whether the presbytery was authorized to learn the return exists — the control is the executor pipeline's *read*, which must go through `presby_list_published_returns_to_me()`.
+
+### F105 — a provenance CHECK that would pass from empty aborted against a database with history
+
+Ruling 6.3 specified `check (provenance = 'imported' or (staging_row_id is null and source_ref is
+null))`. The first apply of `0053` **aborted** on it:
+
+```
+ERROR:  check constraint "statistical_returns_import_provenance_shape" of relation
+        "statistical_returns" is violated by some row
+```
+
+The offending row is `drizzle/0047:683-691`'s backfill product: a **`submitted`** return carrying
+`source_ref = 'backfill: reconstructed from congregation_statistics <id> (drizzle/0047)'`. That value
+is not incidental — `drizzle/0047:789-799` **matches on it** to repair the row idempotently. And the
+row cannot be corrected even in principle: `statistical_returns_freeze` refuses UPDATE and DELETE on
+every connection, owner included.
+
+So `source_ref` is a **general free-text provenance note**, not a D13-only column. What made it look
+like one is `returns.ts:210`'s one-line docstring, `/** D13 import provenance. */`, which I have
+corrected in place with the 0047 evidence. The CHECK ships narrowed to
+`check (provenance = 'imported' or staging_row_id is null)` — `staging_row_id` *is* D13-only, is the
+column the composite FK pins, and has never been written on a submitted row.
+
+Two things worth carrying forward from this:
+
+1. **It would have passed on a genuinely from-empty database.** `0047`'s backfill has no
+   `congregation_statistics` rows to reconstruct there, so the violating row never exists. The
+   from-empty rehearsal DECISION-150 requires is necessary and **not sufficient**; this one was caught
+   only because the first apply ran against a database with history.
+2. `imports.test.ts` carries a named regression for it — *"still permits a submitted return carrying
+   a source_ref — drizzle/0047's backfill writes one, and that row can never be edited"* — so a future
+   tightening has to argue with a test rather than with a comment.
+
+### F106 — the canonical-name backfill is a point-in-time act; organizations created afterwards have no canonical row
+
+`0053`'s backfill covers every organization that exists **when the migration runs**. On the from-empty
+recipe that is **zero** organizations: `db:migrate` → `0053` → `db:seed` → `seed-dev.sql`, and every
+seeded congregation is created *after* the backfill. The measured first run produced a fixture
+database in which `presby_match_organization()` could not find a single seeded church, Bramblewood
+had a closed canonical row with no open successor, and §42's own coverage assertion failed.
+
+The general form is not closable in this increment and must not be read as closed: **any organization
+created after `0053` — by `createOrganization()`, by a test fixture, by a future
+`presby_organize_congregation()` — arrives with no canonical row**, because Phase 2 Ruling 1
+deliberately ships no writer. What I did, and deliberately did not do:
+
+- **Did:** `scripts/seed-dev.sql` section (0) mints the canonical baseline for the organizations
+  *that file* creates, byte-for-byte the migration's own backfill shape (self-attributed,
+  `authority = 'backfill'`, `city` null, `where not exists`). The block says out loud that it covers
+  the seed's own organizations and nothing else.
+- **Did:** split the invariant into the two claims it actually is, in both `test-rls.sql` §42(k) and
+  `imports.test.ts`. **Always true:** no organization carries more than one open canonical row — the
+  EXCLUDE makes a second one unwritable, so a failure there means the EXCLUDE is gone. **Coverage,
+  weaker and worded as weaker:** one open canonical row per organization *on a freshly seeded
+  database*. The migration's own section-9 assertion is unchanged and stays the strong one, because
+  at migration time the strong claim is true and is exactly what should block a commit.
+- **Did NOT:** add an `AFTER INSERT` trigger on `organizations` minting the canonical row. It would
+  keep the invariant true forever and is a faithful extension of the backfill's semantics — but it is
+  a new write path on a table Phase 2 Ruling 1 explicitly reserved to a future
+  `presby_record_org_name()`, and it interacts with `organizations_guard_insert`. That is a Phase 2/3
+  call, not a Phase 4 one. **Recommended for the lifecycle-UI pipeline's scope**, alongside the
+  writer it belongs with.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getPlatformDb } from "@/lib/db";
 import { organizations } from "@/lib/db/domain/org";
 import {
@@ -288,10 +288,12 @@ export async function createOrganization(
   // Step 1: the platform-wide group_types rows must already exist —
   // find, never create inline (Phase 2's explicit rejection of that
   // shortcut: it duplicates seed semantics into a hot mutation path).
+  // Since drizzle/0051 group_types is a global catalog with no
+  // organization_id column (DECISION-151), so every row is platform-wide
+  // and there is no filter left to apply.
   const templateRows = await platformDb
     .select({ id: groupTypes.id, key: groupTypes.key })
-    .from(groupTypes)
-    .where(isNull(groupTypes.organizationId));
+    .from(groupTypes);
   const courtTypeId = templateRows.find((r) => r.key === "court")?.id;
   const rosterTypeId = templateRows.find((r) => r.key === "roster")?.id;
   if (!courtTypeId || !rosterTypeId) {

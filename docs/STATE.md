@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-26 afternoon (waves 2 and 3 complete; CI green; nothing in flight)
+## RESUME HERE — updated 2026-09-26 night (wave 4: render #17, group_types #18, name-history #19 merged; withdraw in its Phase 5 loop-back)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -65,12 +65,34 @@ jobs **skip with a `::notice::` until the operator adds `NEON_API_KEY`/`NEON_PRO
 open; three Neon branches (`pipeline-security-schema-b`, `pipeline-submission-grants`,
 `pipeline-ci-db-tests`) await the operator's OK to delete.
 
-**Next, in order (all shipped through wave 3; the remaining candidates):** the operator's
+**Wave 4 (2026-09-26 evening), four pipelines under Rule 16, each in its own worktree + Neon branch:**
+`pipeline/render-path` **merged** as PR #17 (`79399e9`, v0.26.3, DECISION-154; no schema change) — six
+uncaught reads on the public-site path (not the three the flags pipeline named) now fail closed to the
+same generic `not_found`, QA reproduced failing-first per spec file and re-ran the production-build probe
+against an unreachable database; two SHIP-WITH-NOTES follow-ups in TODO (the contact-form insert; the
+never-produced `reason: "absent"`). Each open pipeline's work-log is the source of truth:
+`pipeline/group-types` **merged** as PR #18 (`91e3e61`, v0.26.4, `drizzle/0051`, DECISION-151, §2j F84–F86;
+`group_types` is a pure global catalog — no `organization_id`, no RLS, `unique (key)`, `presby_app` SELECT-only;
+`development` migrated through 0051 and `test-rls.sql` re-run there, 526). `pipeline/name-history` **merged** as
+PR #19 (`1b25278`, v0.27.0, `drizzle/0053`, DECISION-153 + the F104 addendum amendment, §2l F100–F106; QA first pass
+FAIL on two missing `grant execute` lines — the 0046 B-M1 hazard — fixed with failing-first both ways, second pass PASS;
+Phase 6 SHIP WITH NOTES; `development` migrated through 0053, the new seed block applied there, suite 590). Still open:
+`../presby-wt-withdraw` / `pipeline/withdraw` (`drizzle/0052`, DECISION-152, F90–F91; `presby_withdraw_publication()` +
+`/o/<slug>/admin/filings` + the presbytery sub-view; template role id `…0004`; all three Phase 4 batches complete; QA
+first pass FAIL on **test fixtures only** — §41(c) and `publication.test.ts`'s `withdrawalFixture()` consumed the single
+seeded publication the mandatory browser rehearsal irreversibly withdrew; product code verified correct; database-admin
+loop-back running, then QA re-runs the two red checks, then Phase 6). Its journal entry is idx 52, to be **inserted before
+idx 53** with a `when` between 0051's and 0053's (the two migrations are independent); it ships as v0.28.0. The pipeline
+branch DB `pipeline-withdraw` is unrecoverable for the suites (the withdrawal cannot be undone) — verify on scratch databases.
+Remaining integration: withdraw only — journal idx 52 inserted before 53, `test-rls.sql` §41 appended after §42 (file order
+is now 43, 42, 41 — numbers are pre-assigned per Rule 16; withdraw carries F90's §35 correction in place). Neon branches `pipeline-group-types`,
+`pipeline-withdraw`, `pipeline-name-history` join the delete-with-OK list.
+
+**Next, in order (the remaining candidates after wave 4):** the operator's
 three decisions (Neon secrets → CI jobs run; branch protection; delete the three Neon
 branches); then wave 4 under Rule 16 — code-review C-1/C-2/C-3, the test-coverage punch
-items 7 and 10–17, increment 7 name history + D13 staging, D22/D23 design phases,
-Track A/C/R, the `presby_withdraw_publication()` pipeline, the public render path's
-three uncaught reads, the `group_types` reclassification — each in its own worktree +
+items 7 and 10–17, D22/D23 design phases,
+Track A/C/R — each in its own worktree +
 Neon branch, integrated one PR at a time. The shared `development` branch is a proven hazard for concurrent DB-backed
 suites (QA measured `organizations` moving 17 → 15 mid-run); use per-pipeline
 branches.

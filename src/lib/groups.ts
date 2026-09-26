@@ -31,11 +31,15 @@ import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
  * 3) — this module's own checks are defense in depth, not the only gate.
  *
  * `groups.group_type_id` ALWAYS RESOLVES TO THE PLATFORM-WIDE TEMPLATE ROW
- * (DECISION-110 ruling 1) — no per-org custom group types. `createGroup`
- * validates the chosen `groupTypeId` is a platform-template row
- * (`organization_id is null`) whose `key` is in `MANAGEABLE_GROUP_TYPE_KEYS`
- * — never trusting the client `<select>`'s own filtering alone (Phase 3's
- * Edge Cases & Risks, named load-bearing).
+ * (DECISION-110 ruling 1) — no per-org custom group types. As of
+ * `drizzle/0051` that sentence is LITERALLY TRUE rather than aspirational:
+ * `group_types` is a global catalog with no `organization_id` column at all,
+ * no RLS, and `presby_app` narrowed to `SELECT` (DECISION-151), so every row
+ * this module reads is platform-wide by construction and the reads below no
+ * longer filter `organization_id is null` by hand. `createGroup` still
+ * validates the chosen `groupTypeId` resolves to a row whose `key` is in
+ * `MANAGEABLE_GROUP_TYPE_KEYS` — never trusting the client `<select>`'s own
+ * filtering alone (Phase 3's Edge Cases & Risks, named load-bearing).
  *
  * OVERLAP CHECK IS APP-LEVEL, NOT A GIST EXCLUSION (DECISION-110 ruling 4) —
  * `addGroupMember` checks for an existing OPEN (`ends_on is null`) row for
@@ -491,12 +495,7 @@ export async function getGroupFormOptions(
     const groupTypeRows = await tx
       .select({ id: groupTypes.id, key: groupTypes.key, name: groupTypes.name })
       .from(groupTypes)
-      .where(
-        and(
-          isNull(groupTypes.organizationId),
-          inArray(groupTypes.key, MANAGEABLE_GROUP_TYPE_KEYS),
-        ),
-      )
+      .where(inArray(groupTypes.key, MANAGEABLE_GROUP_TYPE_KEYS))
       .orderBy(groupTypes.name);
 
     const peopleRows = await tx
@@ -575,12 +574,7 @@ export async function createGroup(
     const [groupType] = await tx
       .select({ id: groupTypes.id, key: groupTypes.key })
       .from(groupTypes)
-      .where(
-        and(
-          eq(groupTypes.id, input.groupTypeId),
-          isNull(groupTypes.organizationId),
-        ),
-      )
+      .where(eq(groupTypes.id, input.groupTypeId))
       .limit(1);
     if (
       !groupType ||

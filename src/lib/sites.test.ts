@@ -239,7 +239,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
     // memberships insert (tickets.test.ts's own established precedent).
     const [gt] = await platform
       .insert(groupTypes)
-      .values({ organizationId: null, key: "roster", name: "Roster" })
+      .values({ key: "roster", name: "Roster" })
       .onConflictDoNothing()
       .returning({ id: groupTypes.id });
     let groupTypeId = gt?.id;
@@ -514,6 +514,42 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
           .where(eq(featureFlags.key, "sites.public_render"));
       }
     });
+
+    it("a transient DB error degrades to { kind: \"not_found\", reason: \"read_failed\" } rather than throwing — docs/work-log/2026-09-26-public-render-blip.md", async () => {
+      const spy = vi
+        .spyOn(db, "execute")
+        .mockRejectedValueOnce(new Error("simulated transient DB error"));
+      try {
+        const result = await getPublishedSite(orgLiveSlug);
+        expect(result).toEqual({ kind: "not_found", reason: "read_failed" });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("logs the slug on a DB error, never the caught error or its message", async () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const spy = vi
+        .spyOn(db, "execute")
+        .mockRejectedValueOnce(
+          new Error(
+            'Failed query: select * from presby_published_site($1)\nparams: ' +
+              orgLiveSlug,
+          ),
+        );
+      try {
+        await getPublishedSite(orgLiveSlug);
+        expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+        const serialized = JSON.stringify(consoleErrorSpy.mock.calls[0]);
+        expect(serialized).not.toMatch(/select|Failed query|params:/i);
+        expect(serialized).toContain(orgLiveSlug);
+      } finally {
+        spy.mockRestore();
+        consoleErrorSpy.mockRestore();
+      }
+    });
   });
 
   describe("resolvePublishedOrganization — the cheaper sibling", () => {
@@ -530,6 +566,18 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
     it("nonexistent slug: null", async () => {
       const result = await resolvePublishedOrganization(NONEXISTENT_SLUG);
       expect(result).toBeNull();
+    });
+
+    it("a transient DB error degrades to null rather than throwing — same fail-closed wrapper as getPublishedSite", async () => {
+      const spy = vi
+        .spyOn(db, "execute")
+        .mockRejectedValueOnce(new Error("simulated transient DB error"));
+      try {
+        const result = await resolvePublishedOrganization(orgLiveSlug);
+        expect(result).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
@@ -1425,7 +1473,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       // describes).
       const [gt] = await platform
         .insert(groupTypes)
-        .values({ organizationId: null, key: "roster", name: "Roster" })
+        .values({ key: "roster", name: "Roster" })
         .onConflictDoNothing()
         .returning({ id: groupTypes.id });
       let groupTypeId = gt?.id;
@@ -1930,7 +1978,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
 
       const [ct] = await platform
         .insert(groupTypes)
-        .values({ organizationId: null, key: "committee", name: "Committee" })
+        .values({ key: "committee", name: "Committee" })
         .onConflictDoNothing()
         .returning({ id: groupTypes.id });
       committeeTypeId = ct?.id ?? "";

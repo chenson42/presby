@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   Table,
   TableBody,
@@ -24,7 +25,17 @@ const PROVENANCE_LABELS: Record<string, string> = {
  * attribution-integrity is adversarial territory the design names
  * explicitly.
  */
-export function StatisticsTable({ entries }: { entries: StatisticsRollupRow[] }) {
+export function StatisticsTable({
+  entries,
+  slug,
+}: {
+  entries: StatisticsRollupRow[];
+  /** Threaded so each row can link to that congregation's full filing
+   *  history (`/o/<slug>/admin/reports/<aboutOrgId>`, architect Phase 2
+   *  ruling 1d) — withdrawn/superseded history this "current" rollup never
+   *  shows. */
+  slug: string;
+}) {
   if (entries.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border py-16 text-center">
@@ -58,7 +69,12 @@ export function StatisticsTable({ entries }: { entries: StatisticsRollupRow[] })
           return (
             <TableRow key={entry.organizationId}>
               <TableCell className="max-w-[8rem] whitespace-normal font-medium sm:max-w-none sm:whitespace-nowrap">
-                {entry.name}
+                <Link
+                  href={`/o/${slug}/admin/reports/${entry.organizationId}`}
+                  className="text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  {entry.name}
+                </Link>
               </TableCell>
               <TableCell>
                 {entry.provenance ? (

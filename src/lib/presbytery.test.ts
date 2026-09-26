@@ -73,6 +73,7 @@ describe.skipIf(!hasDb)(
     let getCongregationOversightDetail: typeof import("./presbytery").getCongregationOversightDetail;
     let setCongregationOversight: typeof import("./presbytery").setCongregationOversight;
     let getCongregationStatisticsRollup: typeof import("./presbytery").getCongregationStatisticsRollup;
+    let getCongregationFilingHistory: typeof import("./presbytery").getCongregationFilingHistory;
     let setCongregationStatistics: typeof import("./presbytery").setCongregationStatistics;
     let getPerCapitaOverview: typeof import("./presbytery").getPerCapitaOverview;
     let setPerCapitaRate: typeof import("./presbytery").setPerCapitaRate;
@@ -119,6 +120,7 @@ describe.skipIf(!hasDb)(
         getCongregationOversightDetail,
         setCongregationOversight,
         getCongregationStatisticsRollup,
+        getCongregationFilingHistory,
         setCongregationStatistics,
         getPerCapitaOverview,
         setPerCapitaRate,
@@ -381,6 +383,61 @@ describe.skipIf(!hasDb)(
         })
         .returning({ id: publications.id });
       return publication!.id;
+    }
+
+    /**
+     * Simulates ONLY the PROJECTION half of a withdrawal
+     * (`congregation_statistics.withdrawnAt`) — the property
+     * `fetchStatisticsForYear()`'s WHERE filter must react to, not the full
+     * pair `presby_withdraw_publication()` writes. That function's
+     * atomicity, refusal literals, and the `publications`-side triple are
+     * exhaustively covered in `src/lib/db/domain/publication.test.ts` and
+     * `scripts/test-rls.sql` section 41 (Batch A); this file only needs "a
+     * row whose `withdrawn_at` is set" to prove the READ side, so it arms the
+     * same GUC (`presby.withdrawal_write_active`, F56/DECISION-141) the real
+     * function arms and performs the ONE permitted transition by hand — same
+     * style as `armedPublicationWrite()` above.
+     */
+    async function withdrawProjectionRow(congregationStatisticsId: string): Promise<void> {
+      const platform = getPlatformDb();
+      await platform.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('presby.withdrawal_write_active', 'true', true)`,
+        );
+        await tx
+          .update(congregationStatistics)
+          .set({ withdrawnAt: new Date() })
+          .where(eq(congregationStatistics.id, congregationStatisticsId));
+      });
+    }
+
+    /**
+     * Simulates the PUBLICATION half of a withdrawal (the whole triple) for
+     * `getCongregationFilingHistory()`'s own tests — this file's read-only
+     * consumer of `presby_list_published_returns_to_me()`, which reads
+     * `publications` directly and does not care how `withdrawnAt` got set.
+     * Bypasses `presby_withdraw_publication()`'s own membership/permission
+     * checks on purpose: those are exhaustively proven elsewhere (see above),
+     * and this helper only needs a row shaped like a withdrawn one.
+     */
+    async function withdrawPublicationRow(
+      publicationId: string,
+      withdrawnByUserId: string,
+    ): Promise<void> {
+      const platform = getPlatformDb();
+      await platform.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('presby.withdrawal_write_active', 'true', true)`,
+        );
+        await tx
+          .update(publications)
+          .set({
+            withdrawnAt: new Date(),
+            withdrawnBy: withdrawnByUserId,
+            withdrawnMinuteReference: "Fixture withdrawal for presbytery.test.ts",
+          })
+          .where(eq(publications.id, publicationId));
+      });
     }
 
     afterAll(async () => {
@@ -889,6 +946,195 @@ describe.skipIf(!hasDb)(
         expect(row?.hasData).toBe(false);
         expect(row?.provenance).toBeNull();
       });
+
+      // DECISION-152 — withdrawal is excluded from the coalesce entirely
+      // (fetchStatisticsForYear()'s WHERE filter), not merely out-ranked.
+      it("a withdrawn published_by_congregation row is excluded from the coalesce; the rollup falls through to a presbytery_entered row", async () => {
+        await setCongregationStatistics(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congA,
+          2061,
+          { endingActive: 61 },
+        );
+
+        const publishedAt = new Date("2061-02-01T00:00:00Z");
+        let statsRowId = "";
+        await armedPublicationWrite(async (tx) => {
+          const [row] = await tx
+            .insert(congregationStatistics)
+            .values({
+              organizationId: presbyteryA,
+              aboutOrgId: congA,
+              year: 2061,
+              provenance: "published_by_congregation",
+              publicationId: await makePublication(
+                tx,
+                congA,
+                presbyteryA,
+                2061,
+                publishedAt,
+                261,
+              ),
+              publishedAt,
+              endingActive: 261,
+            })
+            .returning({ id: congregationStatistics.id });
+          statsRowId = row!.id;
+        });
+
+        const beforeWithdrawal = await getCongregationStatisticsRollup(
+          clerkPerson,
+          presbyteryA,
+          2061,
+        );
+        if (beforeWithdrawal.kind !== "ok") throw new Error("expected ok");
+        expect(
+          beforeWithdrawal.data.find((r) => r.organizationId === congA)?.provenance,
+        ).toBe("published_by_congregation");
+
+        await withdrawProjectionRow(statsRowId);
+
+        const afterWithdrawal = await getCongregationStatisticsRollup(
+          clerkPerson,
+          presbyteryA,
+          2061,
+        );
+        if (afterWithdrawal.kind !== "ok") throw new Error("expected ok");
+        const row = afterWithdrawal.data.find((r) => r.organizationId === congA);
+        expect(row?.provenance).toBe("presbytery_entered");
+        expect(row?.endingActive).toBe(61);
+      });
+
+      it("a withdrawn published_by_congregation row with no other data on file yields hasData: false, provenance: null — not the withdrawn row itself", async () => {
+        const publishedAt = new Date("2062-02-01T00:00:00Z");
+        let statsRowId = "";
+        await armedPublicationWrite(async (tx) => {
+          const [row] = await tx
+            .insert(congregationStatistics)
+            .values({
+              organizationId: presbyteryA,
+              aboutOrgId: congB,
+              year: 2062,
+              provenance: "published_by_congregation",
+              publicationId: await makePublication(
+                tx,
+                congB,
+                presbyteryA,
+                2062,
+                publishedAt,
+                62,
+              ),
+              publishedAt,
+              endingActive: 62,
+            })
+            .returning({ id: congregationStatistics.id });
+          statsRowId = row!.id;
+        });
+
+        await withdrawProjectionRow(statsRowId);
+
+        const rollup = await getCongregationStatisticsRollup(clerkPerson, presbyteryA, 2062);
+        if (rollup.kind !== "ok") throw new Error("expected ok");
+        const row = rollup.data.find((r) => r.organizationId === congB);
+        expect(row?.hasData).toBe(false);
+        expect(row?.provenance).toBeNull();
+      });
+    });
+
+    // -----------------------------------------------------------------
+    // getCongregationFilingHistory — the presbytery's own read of what it
+    // received (DECISION-152, Phase 2 ruling 1d's nested sub-view)
+    // -----------------------------------------------------------------
+
+    describe("getCongregationFilingHistory", () => {
+      let historyPublicationId = "";
+
+      beforeAll(async () => {
+        const publishedAt = new Date("2070-03-01T00:00:00Z");
+        await armedPublicationWrite(async (tx) => {
+          historyPublicationId = await makePublication(
+            tx,
+            congA,
+            presbyteryA,
+            2070,
+            publishedAt,
+            70,
+          );
+        });
+      });
+
+      it("forbidden without statistics.manage", async () => {
+        const result = await getCongregationFilingHistory(
+          narrowPerson,
+          presbyteryA,
+          congA,
+          2070,
+        );
+        expect(result.kind).toBe("forbidden");
+      });
+
+      it("invalid_target for a congregation belonging to a different presbytery — the same parent-path check every aboutOrgId goes through", async () => {
+        const result = await getCongregationFilingHistory(
+          clerkPerson,
+          presbyteryA,
+          congOutsideB,
+          2070,
+        );
+        expect(result.kind).toBe("invalid_target");
+      });
+
+      it("invalid_target for a non-congregation child org (org-type half of the parent-path check)", async () => {
+        const result = await getCongregationFilingHistory(clerkPerson, presbyteryA, nwcA, 2070);
+        expect(result.kind).toBe("invalid_target");
+      });
+
+      it("returns the publication addressed to this presbytery, not yet withdrawn", async () => {
+        const result = await getCongregationFilingHistory(
+          clerkPerson,
+          presbyteryA,
+          congA,
+          2070,
+        );
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.data.congregationName).toContain("CongA");
+        const row = result.data.rows.find((r) => r.publicationId === historyPublicationId);
+        expect(row).toBeDefined();
+        expect(row?.reportYear).toBe(2070);
+        expect(row?.withdrawnAt).toBeNull();
+        expect(row?.withdrawnBy).toBeNull();
+      });
+
+      it("still returns a withdrawn publication, marked with its withdrawal facts — Option A (F52/DECISION-140), never filtered the way fetchStatisticsForYear() filters", async () => {
+        await withdrawPublicationRow(historyPublicationId, grantingUserId);
+
+        const result = await getCongregationFilingHistory(
+          clerkPerson,
+          presbyteryA,
+          congA,
+          2070,
+        );
+        if (result.kind !== "ok") throw new Error("expected ok");
+        const row = result.data.rows.find((r) => r.publicationId === historyPublicationId);
+        expect(row).toBeDefined();
+        expect(row?.withdrawnAt).not.toBeNull();
+        expect(row?.withdrawnBy).toBe(grantingUserId);
+        expect(row?.withdrawnMinuteReference).toBe(
+          "Fixture withdrawal for presbytery.test.ts",
+        );
+      });
+
+      it("a year with no filings for this congregation returns an empty ok list, not invalid_target", async () => {
+        const result = await getCongregationFilingHistory(
+          clerkPerson,
+          presbyteryA,
+          congA,
+          1902,
+        );
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.data.rows).toEqual([]);
+      });
     });
 
     // -----------------------------------------------------------------
@@ -973,6 +1219,91 @@ describe.skipIf(!hasDb)(
         if (result.kind !== "ok") return;
         expect(result.data.created).toBe(0);
         expect(result.data.skipped.some((s) => s.includes("already has a"))).toBe(true);
+      });
+
+      // DECISION-152 — the same fetchStatisticsForYear() filter
+      // generatePerCapitaRecords() shares: a withdrawn basis-year return
+      // stops being a basis for a NEW bill, while a bill already issued off
+      // it before the withdrawal is untouched (this file's own
+      // "regenerating never overwrites" rule, unrelated to withdrawal).
+      it("generatePerCapitaRecords skips a congregation whose basis-year return has been withdrawn (treated as no data on file); a bill already issued off it survives untouched", async () => {
+        const publishedAt = new Date("2050-02-01T00:00:00Z");
+        let statsRowId = "";
+        await armedPublicationWrite(async (tx) => {
+          const [row] = await tx
+            .insert(congregationStatistics)
+            .values({
+              organizationId: presbyteryA,
+              aboutOrgId: congA,
+              year: 2050,
+              provenance: "published_by_congregation",
+              publicationId: await makePublication(
+                tx,
+                congA,
+                presbyteryA,
+                2050,
+                publishedAt,
+                350,
+              ),
+              publishedAt,
+              endingActive: 350,
+            })
+            .returning({ id: congregationStatistics.id });
+          statsRowId = row!.id;
+        });
+
+        await setPerCapitaRate(clerkPerson, presbyteryA, grantingUserId, 2052, {
+          basisYear: 2050,
+          ratePerMember: "12.00",
+        });
+
+        const before = await generatePerCapitaRecords(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          2052,
+        );
+        expect(before.kind).toBe("ok");
+        if (before.kind !== "ok") return;
+        expect(before.data.created).toBe(1);
+
+        const overviewBefore = await getPerCapitaOverview(clerkPerson, presbyteryA, 2052);
+        if (overviewBefore.kind !== "ok") throw new Error("expected ok");
+        const billBefore = overviewBefore.data.records.find(
+          (r) => r.organizationId === congA,
+        );
+        expect(billBefore?.endingActiveBasis).toBe(350);
+
+        // Withdraw the basis-year return AFTER the 2052 bill was already issued.
+        await withdrawProjectionRow(statsRowId);
+
+        // The already-issued 2052 bill is UNTOUCHED by the withdrawal.
+        const overviewAfter = await getPerCapitaOverview(clerkPerson, presbyteryA, 2052);
+        if (overviewAfter.kind !== "ok") throw new Error("expected ok");
+        const billAfter = overviewAfter.data.records.find((r) => r.organizationId === congA);
+        expect(billAfter?.endingActiveBasis).toBe(350);
+
+        // A NEW billing year drawing on the same (now withdrawn) basis year
+        // treats congA as having no statistics on file for 2050.
+        await setPerCapitaRate(clerkPerson, presbyteryA, grantingUserId, 2053, {
+          basisYear: 2050,
+          ratePerMember: "12.00",
+        });
+        const afterWithdrawal = await generatePerCapitaRecords(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          2053,
+        );
+        expect(afterWithdrawal.kind).toBe("ok");
+        if (afterWithdrawal.kind !== "ok") return;
+        expect(
+          afterWithdrawal.data.skipped.some((s) => s.includes("no statistics on file")),
+        ).toBe(true);
+
+        const overviewNew = await getPerCapitaOverview(clerkPerson, presbyteryA, 2053);
+        if (overviewNew.kind !== "ok") throw new Error("expected ok");
+        expect(overviewNew.data.records.find((r) => r.organizationId === congA)).toBeUndefined();
       });
 
       it("recordPerCapitaPayment: invalid_target for a nonexistent record", async () => {

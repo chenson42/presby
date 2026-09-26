@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { withOrgContext, type OrgTx } from "@/lib/authz";
 import { organizations } from "@/lib/db/domain/org";
 import {
@@ -48,9 +48,9 @@ import {
  * asks to track an NWC's viability or statistics the same way.
  *
  * STATISTICS PROVENANCE COALESCE (`fetchStatisticsForYear`): for a given
- * (aboutOrgId, year), a `published_by_congregation` row — if one exists —
- * always wins the display, even though the presbytery's own
- * `presbytery_entered`/`imported` row (if any) is never deleted (Phase 1
+ * (aboutOrgId, year), a `published_by_congregation` row — if one exists AND
+ * IS NOT WITHDRAWN — always wins the display, even though the presbytery's
+ * own `presbytery_entered`/`imported` row (if any) is never deleted (Phase 1
  * §3). Multiple `published_by_congregation` rows can exist for the same
  * year (a republish is a new frozen row whose PUBLICATION chains to the one
  * it corrects via `publications.supersedesId` — drizzle/0047 — rather than
@@ -58,6 +58,27 @@ import {
  * is the current one; this module never needs to walk the chain itself, only
  * pick its head, which is why the chain moving off this table changed
  * nothing here.
+ *
+ * WITHDRAWAL (DECISION-152, `drizzle/0052_presby_withdraw_publication.sql`,
+ * 2026-09-26): `fetchStatisticsForYear`'s WHERE clause filters
+ * `withdrawnAt is null` directly, not the coalesce branch above — a withdrawn
+ * published row is excluded from the candidate set entirely, so it can never
+ * win the coalesce even as the sole row on file. The practical effect: a
+ * withdrawn return is treated as ABSENT for the "current" pick, and the
+ * coalesce falls through to a live `presbytery_entered`/`imported` row for
+ * that congregation/year if one exists, or to `hasData: false` if none does
+ * — never to the withdrawn row itself. This propagates automatically to
+ * `generatePerCapitaRecords()` (same helper): a withdrawn return stops being
+ * a basis for a NEW bill, while a bill already issued off it before the
+ * withdrawal is untouched (per-capita generation never overwrites an
+ * existing record, this file's own rule below). The withdrawn row itself is
+ * never deleted and stays fully readable — Option A (F52/DECISION-140) — via
+ * `src/lib/filings.ts`'s own tenant-policy read (the congregation's own
+ * history) and `presby_list_published_returns_to_me()` (the presbytery's
+ * archival read of everything addressed to it); this function's contract is
+ * narrowly "the current pick only," and teaching it to ALSO carry "a
+ * withdrawn return exists for this congregation/year" would be the
+ * one-column-two-facts error (F39) this design refuses everywhere else.
  *
  * CORE SASR FIELDS ONLY (LEAN CALL, same discipline the schema file itself
  * uses for race/officer breakdowns): `SasrAggregateInput`/
@@ -506,8 +527,13 @@ export interface StatisticsRollupRow extends SasrAggregateInput {
 }
 
 /** The provenance-coalesce read shared by 3b's own list and (per Phase 3's
- *  Sequencing) a future dashboard rollup. See this file's header for the
- *  precedence rule. */
+ *  Sequencing) a future dashboard rollup — and, since DECISION-152, by
+ *  `generatePerCapitaRecords()`'s basis-year lookup as well. See this file's
+ *  header for the precedence rule. `withdrawnAt is null` is filtered HERE, in
+ *  the WHERE, not in the coalesce branch below: a withdrawn
+ *  `published_by_congregation` row must never be a CANDIDATE for "current,"
+ *  not merely lose a tie-break it could otherwise still win as the only row
+ *  on file. */
 async function fetchStatisticsForYear(
   tx: OrgTx,
   organizationId: string,
@@ -520,6 +546,7 @@ async function fetchStatisticsForYear(
       and(
         eq(congregationStatistics.organizationId, organizationId),
         eq(congregationStatistics.year, year),
+        isNull(congregationStatistics.withdrawnAt),
       ),
     )
     .orderBy(desc(congregationStatistics.publishedAt));
@@ -607,6 +634,118 @@ export async function getCongregationStatisticsRollup(
     );
 
     return { kind: "ok", data };
+  });
+}
+
+export interface PublishedFilingRow {
+  publicationId: string;
+  reportYear: number;
+  /** ISO. */
+  publishedAt: string;
+  minuteReference: string | null;
+  attestedByName: string | null;
+  attestedRole: string | null;
+  /** ISO, or null if not withdrawn. */
+  withdrawnAt: string | null;
+  withdrawnBy: string | null;
+  withdrawnMinuteReference: string | null;
+}
+
+/**
+ * The RECIPIENT'S own read of what it received — one congregation's full
+ * publication history, withdrawn rows INCLUDED and marked (Option A, F52/
+ * DECISION-140), never filtered the way `fetchStatisticsForYear()` filters
+ * for "current." Backs the nested `/o/<slug>/admin/reports/<aboutOrgId>`
+ * sub-view (architect's Phase 2 ruling 1d) — the presbytery reading the
+ * congregation's OWN act, the other axis of Two Hierarchies from
+ * `src/lib/filings.ts`'s "the congregation acting on its own act."
+ *
+ * DELIBERATELY IN THIS FILE, not `filings.ts`, even though Phase 3's own API
+ * Contract said `presbytery.ts` would be touched "only for the
+ * `fetchStatisticsForYear()` WHERE-filter edit": `resolveMemberCongregation()`
+ * and `listMemberCongregations()` — the parent-path check every `aboutOrgId`
+ * must go through — are module-private helpers here, never exported (this
+ * file's own header, "the parent-path check… never trusted as a bare id"),
+ * and this is a PRESBYTERY capability (reading what its OWN member
+ * congregation published to it), not a congregation one — `getCongregation
+ * OversightDetail()`'s exact precedent for a per-congregation nested-route
+ * read, same permission (`statistics.manage`, matching
+ * `getCongregationStatisticsRollup`'s sibling read), same parent-path gate.
+ *
+ * NO NEW DEFINER FUNCTION: calls the EXISTING
+ * `presby_list_published_returns_to_me(p_about_org_id, p_year)`
+ * (`drizzle/0047`, unchanged by this pipeline) via `tx.execute()` — Drizzle
+ * has no typed call form for a set-returning SQL function, same shape
+ * `hasPermission()`'s own `presby_has_permission()` call uses. Raw
+ * `tx.execute()` results carry NO column-OID type information (measured,
+ * `docs/work-log/2026-07-01-sql-date-tripwire.md`'s own finding): every
+ * timestamptz column comes back as a Postgres-text STRING
+ * ("2026-01-12 20:00:00+00"), not a JS Date, so `toIsoOrNull()` below
+ * re-parses it — unlike `toRollupRow()` above, which reads a real
+ * Drizzle-typed `.select()` and gets Date objects for free.
+ */
+function toIsoOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  return new Date(value as string).toISOString();
+}
+
+export async function getCongregationFilingHistory(
+  viewerPersonId: string,
+  organizationId: string,
+  aboutOrgId: string,
+  year?: number,
+): Promise<PresbyteryResult<{ congregationName: string; rows: PublishedFilingRow[] }>> {
+  if (
+    year !== undefined &&
+    (!Number.isInteger(year) || year < YEAR_MIN || year > YEAR_MAX)
+  ) {
+    return { kind: "invalid_input", message: "Enter a valid statistical year." };
+  }
+
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasPermission(tx, viewerPersonId, organizationId, STATISTICS_MANAGE))) {
+      return { kind: "forbidden" };
+    }
+
+    const cong = await resolveMemberCongregation(tx, organizationId, aboutOrgId);
+    if (!cong) return { kind: "invalid_target" };
+
+    const result = await tx.execute(sql`
+      select publication_id, published_at, minute_reference, report_year,
+             attested_by_name, attested_role,
+             withdrawn_at, withdrawn_by, withdrawn_minute_reference
+        from presby_list_published_returns_to_me(${aboutOrgId}::uuid, ${year ?? null}::integer)
+    `);
+    const rows =
+      (
+        result as unknown as {
+          rows?: Array<{
+            publication_id: string;
+            published_at: string;
+            minute_reference: string | null;
+            report_year: number;
+            attested_by_name: string | null;
+            attested_role: string | null;
+            withdrawn_at: string | null;
+            withdrawn_by: string | null;
+            withdrawn_minute_reference: string | null;
+          }>;
+        }
+      ).rows ?? [];
+
+    const data: PublishedFilingRow[] = rows.map((r) => ({
+      publicationId: r.publication_id,
+      reportYear: r.report_year,
+      publishedAt: toIsoOrNull(r.published_at) ?? "",
+      minuteReference: r.minute_reference,
+      attestedByName: r.attested_by_name,
+      attestedRole: r.attested_role,
+      withdrawnAt: toIsoOrNull(r.withdrawn_at),
+      withdrawnBy: r.withdrawn_by,
+      withdrawnMinuteReference: r.withdrawn_minute_reference,
+    }));
+
+    return { kind: "ok", data: { congregationName: cong.name, rows: data } };
   });
 }
 

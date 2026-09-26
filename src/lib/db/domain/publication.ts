@@ -70,19 +70,27 @@ import { users } from "../schema";
  *   - `presby_app` and `presby_platform` hold `SELECT` ONLY as of
  *     F51/DECISION-140 — INSERT was revoked too, since
  *     `presby_publish_sasr_snapshot()` (SECURITY DEFINER) is the only writer.
- *   - There is NO withdrawal path AT ALL today, on any connection
- *     (F56/DECISION-141, 2026-09-24). Nothing sets
- *     `presby.withdrawal_write_active`, so both halves of the pair — this
+ *   - THE WITHDRAWAL PATH IS `presby_withdraw_publication()`, AND IT IS THE
+ *     ONLY ONE (DECISION-152,
+ *     `drizzle/0052_presby_withdraw_publication.sql`, 2026-09-26). Until
+ *     that migration nothing in the database armed
+ *     `presby.withdrawal_write_active` and both halves of the pair — this
  *     table's withdrawal triple and `congregationStatistics.withdrawnAt` —
- *     are unreachable until the writer ships. That is deliberate: before the
- *     conjunct, each table permitted its own half INDEPENDENTLY, so a raw
- *     connection could withdraw the publication and leave the recipient's
- *     projection silently disagreeing with it. The intended writer is a
- *     future `presby_withdraw_publication()` SECURITY DEFINER function in the
- *     publish-UI pipeline, in the same confused-deputy shape as
- *     `presby_transfer_affiliation()` — no caller-supplied council id, the
- *     actor is `presby_current_org()` — which arms the GUC once and performs
- *     both UPDATEs in one transaction. It is NOT built here.
+ *     were unreachable, deliberately: before the conjunct each table
+ *     permitted its own half INDEPENDENTLY, so a raw connection could
+ *     withdraw the publication and leave the recipient's projection silently
+ *     disagreeing with it. The shipped writer is SECURITY DEFINER in the same
+ *     confused-deputy shape as `presby_transfer_affiliation()` — no
+ *     caller-supplied council id, the actor is `presby_current_org()` — and
+ *     it arms the GUC once, writes BOTH rows with ONE timestamp, asserts
+ *     exactly one projection row matched, and disarms. `EXECUTE` is granted
+ *     to `presby_app` alone; neither role gained any privilege on the
+ *     withdrawal columns, so the function is the only path by PRIVILEGE and
+ *     not merely by convention (DECISION-141 unchanged). Refusals: one
+ *     uniform literal for identity (`insufficient_privilege`), two distinct
+ *     honest ones for state (`check_violation`) — see the migration's header
+ *     note (1). Proven in `scripts/test-rls.sql` section 41 and in this
+ *     module's own `publication.test.ts`.
  *   - The RECIPIENT cannot read this table under the tenant policy —
  *     `organizationId` is the SOURCE council. That is the point: the
  *     recipient reads through `presby_list_published_returns_to_me()`
@@ -167,10 +175,21 @@ export const publications = pgTable(
      */
     withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
     /**
-     * Null on every row today: `presby_app` holds no UPDATE grant, so
-     * withdrawal is an owner-only act until `presby_withdraw_publication()`
-     * ships — and there is still no acting-USER context in this platform
-     * (Ruling A4: only `app.current_org_id` exists as a GUC).
+     * The acting USER, and the one place this platform accepts a user id as
+     * a parameter rather than deriving it. There is still no
+     * `app.current_user_id` GUC (Ruling A4: only `app.current_org_id`
+     * exists), and `presby_transfer_affiliation()`'s answer to that —
+     * writing `closedBy = null` — is not available here, because
+     * `publications_withdrawal_shape` requires all THREE withdrawal columns
+     * or none. So `presby_withdraw_publication(p_publication_id,
+     * p_withdrawn_by, p_minute_reference)` accepts the claim and BOUNDS it:
+     * `p_withdrawn_by` must be an active member of the withdrawing council
+     * or the call is refused with the uniform literal
+     * (`drizzle/0052_presby_withdraw_publication.sql` step 3, header note
+     * (3)). The application binds it server-side from the session
+     * (`setCongregationStatistics()`'s `actingUserId` precedent) and never
+     * from client input; misattribution to a colleague of the same
+     * congregation is the named, bounded residual.
      */
     withdrawnBy: uuid("withdrawn_by").references(() => users.id),
     /**

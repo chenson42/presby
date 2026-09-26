@@ -311,6 +311,22 @@ export const AUDIT_ACTIONS = {
   // Metadata: { organizationId, aboutOrgId, reportYear, grantId }.
   STATISTICS_GRANT_SUBMITTED: "tenant.statistics_grant.submitted",
   // Metadata: { organizationId, aboutOrgId, reportYear, returnId }.
+  // Withdrawing a published statistical return (DECISION-152,
+  // `drizzle/0052_presby_withdraw_publication.sql`,
+  // docs/work-log/2026-09-26-withdraw-publication.md). Written from
+  // src/app/(org)/o/[slug]/admin/filings/actions.ts's withdrawFilingAction()
+  // — the CONGREGATION's own act on its own publication, ordinary session
+  // actor, same "tenant.*" self-service axis as TENANT_ROLE_GRANTED/REVOKED
+  // and STATISTICS_GRANT_ISSUED/REVOKED. No separate presbytery-side event:
+  // audit_events records ACTS, and the recipient performed none (Phase 2's
+  // own reasoning) — the recipient's changed rollup view is a CONSEQUENCE of
+  // this one act, not a second one. `check:audit`'s MUTATION_RE scans
+  // `src/app/**/actions.ts` for `db.`-receiver mutations; the actual write is
+  // a `tx.execute(...)` inside `src/lib/filings.ts`'s `withdrawFiling()`, so
+  // — same note as STATISTICS_GRANT_ISSUED/SUBMITTED above — this audit
+  // write is review-verified, not tripwire-proven.
+  STATISTICS_RETURN_WITHDRAWN: "tenant.statistics_return.withdrawn",
+  // Metadata: { organizationId, recipientOrgId, aboutOrgId, reportYear, publicationId }.
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

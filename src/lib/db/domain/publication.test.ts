@@ -56,12 +56,32 @@ const SOUTHERN_FIELDS = "f6000000-0000-0000-0000-000000000001";
 const QUILLHAVEN = "44444444-4444-4444-4444-444444444444";
 /** The presbytery under the Coastal Plain synod — never affiliated with the above. */
 const TIDEWATER = "f8000000-0000-0000-0000-000000000002";
+/** The synod. A transfer BETWEEN presbyteries is its act, never either presbytery's. */
+const COASTAL_PLAIN = "f8000000-0000-0000-0000-000000000001";
 /** Tobias Renwick — Alder Creek's stated clerk, the `statistics.publish` holder. */
 const CLERK_OF_SESSION = "c0000000-0000-0000-0000-000000000002";
 /** Idris Calloway — the northern reach's stated clerk, `statistics.manage`. */
 const PRESBYTERY_CLERK = "c0000000-0000-0000-0000-00000000000a";
 /** The year scripts/seed-dev.sql publishes for. */
 const SEEDED_YEAR = 2025;
+/**
+ * The year every probe below publishes for when it needs a LIVE publication
+ * of its own. Deliberately far from `SEEDED_YEAR`: a second publication for
+ * the same year would chain through `publications.supersedes_id` and the
+ * probes would be exercising supersession rather than what they name.
+ *
+ * WHY A FRESH CHAIN AT ALL (Phase 4 loop-back, 2026-09-26). Every withdrawal
+ * probe here used to consume the ONE publication `scripts/seed-dev.sql`
+ * provides and to require it un-withdrawn. Withdrawal is irreversible by
+ * design, `scripts/test-rls.sql` pins the seeded publication count at exactly
+ * one so it cannot be replenished, and the act that consumes it is the
+ * MANDATORY browser rehearsal (CLAUDE.md -> Verify in a Browser) — so
+ * following the documented process made this suite permanently unrunnable on
+ * that database. Nothing below reads the seeded publication's WITHDRAWAL
+ * STATE any more; every withdrawal probe mints its own chain inside its own
+ * rollback, through the only writer that can make one.
+ */
+const FIXTURE_YEAR = 2087;
 
 type Rows = { rows?: Array<Record<string, unknown>> };
 const rowsOf = (r: unknown): Array<Record<string, unknown>> =>
@@ -177,6 +197,118 @@ describe.skipIf(!hasDb)(
     }): Promise<void> {
       await tx.execute(
         sql`select set_config('presby.withdrawal_write_active', 'true', true)`,
+      );
+    }
+
+    /**
+     * A user `presby_withdraw_publication()` will ACCEPT as `p_withdrawn_by`:
+     * `drizzle/0052` bounds the claim to an active member of the withdrawing
+     * council, so `select id from users limit 1` — what these tests used
+     * while the withdrawal was a hand-rolled UPDATE — is now refused with the
+     * uniform literal, correctly. Read from the database rather than
+     * hard-coded, the same id-agnostic discipline `scripts/test-rls.sql`
+     * section 35 learned the hard way.
+     */
+    async function withdrawerUserId(tx: {
+      execute: (q: unknown) => Promise<unknown>;
+    }): Promise<string> {
+      const [user] = rowsOf(
+        await tx.execute(sql`
+          select pe.user_id as id from people pe
+           where pe.user_id is not null
+             and presby_membership_is_active(pe.id, ${ALDER_CREEK}::uuid)
+           limit 1
+        `),
+      );
+      return user!.id as string;
+    }
+
+    /**
+     * THE TWO INPUTS EVERY WITHDRAWAL PROBE NEEDS — and the publication is
+     * this transaction's OWN, not the seeded one.
+     *
+     * RE-POINTED 2026-09-26 (Phase 4 loop-back of
+     * `docs/work-log/2026-09-26-withdraw-publication.md`). This used to pick
+     * `scripts/seed-dev.sql`'s single Alder Creek publication and require
+     * `withdrawn_at is null`; see FIXTURE_YEAR above for why that could not
+     * survive the feature's own mandatory rehearsal. It now mints a whole
+     * chain — artifact, event and the recipient's projection — through
+     * `presby_publish_sasr_snapshot()`, the only writer that can make one,
+     * inside the caller's own always-rolled-back transaction. Nothing durable
+     * is written, and no probe below depends on committed withdrawal state.
+     * This is the shape `scripts/test-rls.sql` section 41(d)/(e) already uses.
+     *
+     * The organization context is saved and restored around the publish: the
+     * publish is the SOURCE council's act (the function derives its actor
+     * from `presby_current_org()`), while callers on the owner connection may
+     * legitimately be in no context at all, or — section 41(d)'s round trip —
+     * in the recipient's.
+     */
+    async function withdrawalFixture(tx: {
+      execute: (q: unknown) => Promise<unknown>;
+    }): Promise<{ publicationId: string; userId: string; reportYear: number }> {
+      const [before] = rowsOf(
+        await tx.execute(
+          sql`select coalesce(current_setting('app.current_org_id', true), '') as org`,
+        ),
+      );
+      await tx.execute(
+        sql`select set_config('app.current_org_id', ${ALDER_CREEK}, true)`,
+      );
+      const [artifact] = rowsOf(
+        await tx.execute(sql`
+          select presby_publish_sasr_snapshot(
+                   ${FIXTURE_YEAR},
+                   'Session stated meeting, fixture, item 1',
+                   p_ending_active => 212) as id
+        `),
+      );
+      const [pub] = rowsOf(
+        await tx.execute(sql`
+          select id from publications where artifact_id = ${artifact!.id as string}::uuid
+        `),
+      );
+      const userId = await withdrawerUserId(tx);
+      await tx.execute(
+        sql`select set_config('app.current_org_id', ${(before!.org as string) ?? ""}, true)`,
+      );
+      return {
+        publicationId: pub!.id as string,
+        userId,
+        reportYear: FIXTURE_YEAR,
+      };
+    }
+
+    /**
+     * Perform the withdrawal THROUGH THE SHIPPED WRITER
+     * (`drizzle/0052_presby_withdraw_publication.sql`), from the source
+     * council's own context — the function takes no organization id and
+     * derives the actor from `presby_current_org()` (DECISION-152).
+     *
+     * RE-POINTED 2026-09-26 (Phase 4 Batch A of
+     * `docs/work-log/2026-09-26-withdraw-publication.md`). Everything below
+     * that withdraws used to arm `presby.withdrawal_write_active` by hand and
+     * write the triple with a raw UPDATE, standing in for a function that did
+     * not exist yet. The CLAIMS those tests make are unchanged; what performs
+     * the write is now the real thing, so a reviewer diffing this file should
+     * read it as "same claim, real writer" rather than as new coverage.
+     *
+     * Still the OWNER connection: `presby_app` could reach the function's
+     * grant (that is section 41's job), but it could never have performed the
+     * manual sequence these tests replace, and the trigger branches they pin
+     * are owner-path branches (F44 — no grant binds `neondb_owner`).
+     */
+    async function withdrawAsSourceCouncil(
+      tx: { execute: (q: unknown) => Promise<unknown> },
+      publicationId: string,
+      userId: string,
+      minuteReference: string,
+    ): Promise<void> {
+      await tx.execute(
+        sql`select set_config('app.current_org_id', ${ALDER_CREEK}, true)`,
+      );
+      await tx.execute(
+        sql`select presby_withdraw_publication(${publicationId}::uuid, ${userId}::uuid, ${minuteReference})`,
       );
     }
 
@@ -400,9 +532,16 @@ describe.skipIf(!hasDb)(
 
     describe("presby_list_published_returns_to_me() through withOrgContext()", () => {
       it("gives the recipient presbytery the as-reported artifact it cannot read any other way", async () => {
-        await withOrgContext(PRESBYTERY_CLERK, NORTHERN_REACH, async (tx) => {
+        // ROLLED BACK rather than read-only since 2026-09-26: the row this
+        // asserts an UN-withdrawn triple on is now one the transaction
+        // publishes for itself (FIXTURE_YEAR), never the seeded publication,
+        // whose withdrawal state is committed and irreversible.
+        await inOrgRollback(PRESBYTERY_CLERK, NORTHERN_REACH, async (tx) => {
+          const { reportYear } = await withdrawalFixture(tx);
+
           // The direct read the tenant policy refuses — the artifact lives in
-          // the congregation's tenant space.
+          // the congregation's tenant space. Stronger now than it was: the
+          // artifact it cannot see was written inside this very transaction.
           const direct = rowsOf(
             await tx.execute(sql`select count(*)::int as n from statistical_returns`),
           )[0];
@@ -413,16 +552,16 @@ describe.skipIf(!hasDb)(
               select publication_id, about_org_id, report_year, form_version_key,
                      payload, withdrawn_at, withdrawn_by, withdrawn_minute_reference,
                      return_id, minute_reference, published_at
-                from presby_list_published_returns_to_me(${ALDER_CREEK}::uuid, ${SEEDED_YEAR})
+                from presby_list_published_returns_to_me(${ALDER_CREEK}::uuid, ${reportYear})
             `),
           );
           expect(inbox).toHaveLength(1);
           expect(inbox[0]).toMatchObject({
             about_org_id: ALDER_CREEK,
-            report_year: SEEDED_YEAR,
+            report_year: reportYear,
             form_version_key: "2024",
-            // The whole withdrawal triple is in the signature; under the base
-            // filter (withdrawn_at is null) all three are always null.
+            // The whole withdrawal triple is in the signature; on a
+            // publication that has not been withdrawn all three are null.
             withdrawn_at: null,
             withdrawn_by: null,
             withdrawn_minute_reference: null,
@@ -457,6 +596,56 @@ describe.skipIf(!hasDb)(
         // published_at and coalesces provenance with it, and it reads
         // congregation_statistics directly — no DEFINER join, which is the
         // whole reason those two columns stayed on the projection.
+        //
+        // THE ONE PROBE IN THIS FILE THAT CANNOT MINT ITS OWN FIXTURE (Phase
+        // 4 loop-back, 2026-09-26). Every other withdrawal probe here builds
+        // a chain inside its own rollback; this one calls a shipped reader
+        // that opens its OWN transaction on the pooled connection
+        // (`withOrgContext()` -> `db.transaction()`), so it can only see
+        // COMMITTED rows — which means `scripts/seed-dev.sql`'s single Alder
+        // Creek projection, whose withdrawal state is a legitimate,
+        // irreversible product act and therefore not a constant. Writing a
+        // durable publication of our own is not an option either: the file
+        // writes nothing durable (see the header), a published row cannot be
+        // deleted afterwards on any connection, and `scripts/test-rls.sql`
+        // pins the Alder Creek publication count at exactly one.
+        //
+        // So the claim is asserted in two parts rather than made to depend on
+        // that state:
+        //   * F39 ITSELF — the projection keeps its own published_at and
+        //     minute_reference, equal to the publication's, so a non-DEFINER
+        //     reader can order and display them — is state-independent, and
+        //     is asserted unconditionally first.
+        //   * The rollup's own documented behaviour FOR THE STATE THE FIXTURE
+        //     IS IN: a live row is the current one; a withdrawn one is
+        //     excluded from the coalesce outright (Option A — retained and
+        //     marked, never a candidate for "current"; src/lib/presbytery.ts
+        //     filters `withdrawnAt is null` in the WHERE).
+        // Both of those branches are ALSO proven unconditionally, on
+        // self-provisioned fixtures that never touch the seed, in
+        // `src/lib/presbytery.test.ts` ("a withdrawn published_by_congregation
+        // row is excluded from the coalesce…" and the hasData:false case
+        // below it); what this test adds is the shipped reader's view of the
+        // SEEDED chain.
+        const [seeded] = rowsOf(
+          await getPlatformDb().execute(sql`
+            select cs.withdrawn_at, cs.published_at, cs.minute_reference,
+                   p.published_at as pub_published_at,
+                   p.minute_reference as pub_minute_reference
+              from congregation_statistics cs
+              join publications p on p.id = cs.publication_id
+             where cs.organization_id = ${NORTHERN_REACH}::uuid
+               and cs.about_org_id = ${ALDER_CREEK}::uuid
+               and cs.year = ${SEEDED_YEAR}
+               and cs.provenance = 'published_by_congregation'
+          `),
+        );
+        expect(seeded).toBeDefined();
+        expect(seeded!.published_at).not.toBeNull();
+        expect(seeded!.minute_reference).not.toBeNull();
+        expect(seeded!.published_at).toEqual(seeded!.pub_published_at);
+        expect(seeded!.minute_reference).toEqual(seeded!.pub_minute_reference);
+
         const result = await getCongregationStatisticsRollup(
           PRESBYTERY_CLERK,
           NORTHERN_REACH,
@@ -467,10 +656,16 @@ describe.skipIf(!hasDb)(
 
         const alder = result.data.find((r) => r.organizationId === ALDER_CREEK);
         expect(alder).toBeDefined();
-        expect(alder!.provenance).toBe("published_by_congregation");
-        expect(alder!.hasData).toBe(true);
-        expect(alder!.publishedAt).toBeTruthy();
-        expect(alder!.minuteReference).toBeTruthy();
+        if (seeded!.withdrawn_at === null) {
+          expect(alder!.provenance).toBe("published_by_congregation");
+          expect(alder!.hasData).toBe(true);
+          expect(alder!.publishedAt).toBeTruthy();
+          expect(alder!.minuteReference).toBeTruthy();
+        } else {
+          expect(alder!.hasData).toBe(false);
+          expect(alder!.provenance).toBeNull();
+          expect(alder!.publishedAt).toBeNull();
+        }
 
         // A congregation with no filing for the year still appears, with no
         // data — the empty state the rollup is built around.
@@ -526,17 +721,20 @@ describe.skipIf(!hasDb)(
 
       it("refuses withdrawal attribution with no withdrawal — withdrawn_by and withdrawn_minute_reference alone are not an act", async () => {
         await inOwnerRollback(null, async (tx) => {
+          // Targets THIS transaction's own un-withdrawn publication by id
+          // rather than every row addressed to the recipient: a seeded row
+          // already withdrawn would be refused by an earlier branch of the
+          // same trigger and this probe would stop proving what it names
+          // (Phase 4 loop-back, 2026-09-26).
+          const { publicationId, userId } = await withdrawalFixture(tx);
           await armWithdrawalWrite(tx);
-          const [userRow] = rowsOf(
-            await tx.execute(sql`select id from users limit 1`),
-          );
           await expectDbError(
             () =>
               tx.execute(sql`
                 update publications
-                   set withdrawn_by = ${userRow!.id as string}::uuid,
+                   set withdrawn_by = ${userId}::uuid,
                        withdrawn_minute_reference = 'Presbytery 2027-03-01, item 2'
-                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+                 where id = ${publicationId}::uuid
               `),
             /a withdrawal must set withdrawn_at/,
           );
@@ -548,28 +746,21 @@ describe.skipIf(!hasDb)(
         // for, on the connection that can actually perform it: set once,
         // then any further UPDATE raises, then DELETE raises.
         await inOwnerRollback(null, async (tx) => {
-          await armWithdrawalWrite(tx);
-          // Stands in for the future presby_withdraw_publication() (F56 /
-          // DECISION-141): the transition is well-shaped AND sanctioned, and
-          // since 2026-09-24 the trigger requires both.
-          await armWithdrawalWrite(tx);
-          const [userRow] = rowsOf(
-            await tx.execute(sql`select id from users limit 1`),
+          // THE REAL WRITER, not a hand-rolled stand-in for it any more
+          // (drizzle/0052 / DECISION-152): it arms the marker itself, writes
+          // the triple and the projection with one timestamp, and disarms.
+          const { publicationId, userId } = await withdrawalFixture(tx);
+          await withdrawAsSourceCouncil(
+            tx,
+            publicationId,
+            userId,
+            "Session stated meeting, 2027-03-01, item 2 (withdrawal)",
           );
-          const userId = userRow!.id as string;
-
-          await tx.execute(sql`
-            update publications
-               set withdrawn_at = now(),
-                   withdrawn_by = ${userId}::uuid,
-                   withdrawn_minute_reference = 'Session stated meeting, 2027-03-01, item 2 (withdrawal)'
-             where recipient_org_id = ${NORTHERN_REACH}::uuid
-          `);
           const withdrawn = rowsOf(
             await tx.execute(sql`
               select withdrawn_by, withdrawn_minute_reference
                 from publications
-               where recipient_org_id = ${NORTHERN_REACH}::uuid and withdrawn_at is not null
+               where id = ${publicationId}::uuid and withdrawn_at is not null
             `),
           );
           expect(withdrawn).toHaveLength(1);
@@ -583,7 +774,7 @@ describe.skipIf(!hasDb)(
             () =>
               tx.execute(sql`
                 update publications set minute_reference = 'tampered'
-                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+                 where id = ${publicationId}::uuid
               `),
             /the only permitted UPDATE is a single withdrawal/,
           );
@@ -594,7 +785,7 @@ describe.skipIf(!hasDb)(
               tx.execute(sql`
                 update publications set withdrawn_at = null, withdrawn_by = null,
                                         withdrawn_minute_reference = null
-                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+                 where id = ${publicationId}::uuid
               `),
             /neither reversed, re-dated nor re-minuted/,
           );
@@ -604,7 +795,7 @@ describe.skipIf(!hasDb)(
               tx.execute(sql`
                 update publications
                    set withdrawn_minute_reference = 'a different minute'
-                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+                 where id = ${publicationId}::uuid
               `),
             /neither reversed, re-dated nor re-minuted/,
           );
@@ -613,7 +804,7 @@ describe.skipIf(!hasDb)(
             tx,
             () =>
               tx.execute(sql`
-                delete from publications where recipient_org_id = ${NORTHERN_REACH}::uuid
+                delete from publications where id = ${publicationId}::uuid
               `),
             /a publication is an event and is never deleted/,
           );
@@ -639,18 +830,20 @@ describe.skipIf(!hasDb)(
         // roll action rather than deleting it, and G-3.0107's "a ceased
         // council's records become the property of the next higher council".
         await inOwnerRollback(null, async (tx) => {
-          await armWithdrawalWrite(tx);
-          const before = rowsOf(
-            await tx.execute(sql`
-              select set_config('app.current_org_id', ${NORTHERN_REACH}, true) as _;
-            `),
+          // The chain is this transaction's own, and every count below is
+          // narrowed to it: the seeded publication may already carry a
+          // committed withdrawal, which is exactly the state Option A says a
+          // recipient keeps holding (Phase 4 loop-back, 2026-09-26).
+          const { publicationId, userId, reportYear } = await withdrawalFixture(tx);
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${NORTHERN_REACH}, true)`,
           );
-          expect(before).toBeDefined();
 
           const visibleBefore = rowsOf(
-            await tx.execute(
-              sql`select count(*)::int as n from presby_list_published_returns_to_me()`,
-            ),
+            await tx.execute(sql`
+              select count(*)::int as n
+                from presby_list_published_returns_to_me(${ALDER_CREEK}::uuid, ${reportYear})
+            `),
           )[0];
           expect(visibleBefore!.n).toBe(1);
 
@@ -660,28 +853,30 @@ describe.skipIf(!hasDb)(
                where organization_id = ${NORTHERN_REACH}::uuid
                  and about_org_id = ${ALDER_CREEK}::uuid
                  and provenance = 'published_by_congregation'
+                 and publication_id = ${publicationId}::uuid
             `),
           )[0];
           expect(projectionBefore!.n).toBe(1);
 
-          const [userRow] = rowsOf(
-            await tx.execute(sql`select id from users limit 1`),
+          // THE ACT ITSELF IS THE SOURCE COUNCIL'S, and the function refuses
+          // any other (DECISION-152) — so the context moves to Alder Creek
+          // for the withdrawal and back to the recipient for the read-back.
+          // That round trip IS Option A in miniature: the congregation
+          // retracts, and the presbytery still holds what it received.
+          await withdrawAsSourceCouncil(
+            tx,
+            publicationId,
+            userId,
+            "Session stated meeting, 2027-03-01, item 2 (withdrawal)",
           );
-          // The sanctioned-writer marker the future presby_withdraw_
-          // publication() sets (F56 / DECISION-141).
-          await armWithdrawalWrite(tx);
-          await tx.execute(sql`
-            update publications
-               set withdrawn_at = now(),
-                   withdrawn_by = ${userRow!.id as string}::uuid,
-                   withdrawn_minute_reference = 'Session stated meeting, 2027-03-01, item 2 (withdrawal)'
-             where recipient_org_id = ${NORTHERN_REACH}::uuid
-          `);
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${NORTHERN_REACH}, true)`,
+          );
 
           const after = rowsOf(
             await tx.execute(sql`
               select withdrawn_at, withdrawn_by, withdrawn_minute_reference
-                from presby_list_published_returns_to_me()
+                from presby_list_published_returns_to_me(${ALDER_CREEK}::uuid, ${reportYear})
             `),
           );
           expect(after).toHaveLength(1);
@@ -697,7 +892,7 @@ describe.skipIf(!hasDb)(
                where organization_id = ${NORTHERN_REACH}::uuid
                  and about_org_id = ${ALDER_CREEK}::uuid
                  and provenance = 'published_by_congregation'
-                 and publication_id is not null
+                 and publication_id = ${publicationId}::uuid
             `),
           )[0];
           expect(projectionAfter!.n).toBe(1);
@@ -712,17 +907,18 @@ describe.skipIf(!hasDb)(
         // that pair of transitions and nothing else, which is why they are
         // written before the writer exists.
         await inOwnerRollback(null, async (tx) => {
-          await armWithdrawalWrite(tx);
-          // Both halves of the pair are gated on the same marker (F56 /
-          // DECISION-141), so the projection's half arms it here too.
+          const { publicationId, userId } = await withdrawalFixture(tx);
+          // The negative probes below arm the marker BY HAND on purpose: the
+          // claim they make is that even an armed transaction may perform
+          // nothing but the one transition. Only the transition itself goes
+          // through presby_withdraw_publication() (drizzle/0052), which arms
+          // and disarms for itself.
           await armWithdrawalWrite(tx);
           const [row] = rowsOf(
             await tx.execute(sql`
               select id from congregation_statistics
-               where organization_id = ${NORTHERN_REACH}::uuid
+               where publication_id = ${publicationId}::uuid
                  and about_org_id = ${ALDER_CREEK}::uuid
-                 and provenance = 'published_by_congregation'
-               limit 1
             `),
           );
           const csId = row!.id as string;
@@ -750,10 +946,15 @@ describe.skipIf(!hasDb)(
             /published rows are immutable/,
           );
 
-          // The one permitted transition.
-          await tx.execute(sql`
-            update congregation_statistics set withdrawn_at = now() where id = ${csId}::uuid
-          `);
+          // The one permitted transition — performed by the one writer
+          // permitted to perform it, which also writes the publication's
+          // half in the same statement pair (DECISION-152).
+          await withdrawAsSourceCouncil(
+            tx,
+            publicationId,
+            userId,
+            "Session stated meeting, 2027-03-01, item 2 (withdrawal)",
+          );
           const marked = rowsOf(
             await tx.execute(sql`
               select withdrawn_at from congregation_statistics where id = ${csId}::uuid
@@ -780,6 +981,146 @@ describe.skipIf(!hasDb)(
               ),
             /published rows are immutable/,
           );
+        });
+      });
+    });
+
+    /**
+     * The two claims about `presby_withdraw_publication()` that
+     * `scripts/test-rls.sql` section 41 structurally cannot make, for the
+     * reason section 41's own preamble states: reaching either needs a write
+     * `presby_app` holds no grant for (an `organization_affiliations` row,
+     * a `publications` row), so on the tenant connection the probe would be
+     * refused one layer earlier and would prove the grant rather than the
+     * function. Here, on `neondb_owner`, no grant binds (F44).
+     */
+    describe("presby_withdraw_publication() — the arms only the owner connection can reach (drizzle/0052 / DECISION-152)", () => {
+      it("refuses, and half-applies nothing, when the publication has no projection row — the pair aborts rather than writing one side", async () => {
+        // THE INJECTED-FAILURE CASE, in the only honest form available: the
+        // function itself fails AFTER `update publications` and BEFORE the
+        // row-count assertion can pass, which is exactly the "a failure after
+        // the first UPDATE leaves neither" shape Phase 3 asks for. There is
+        // no transaction control inside the function, so the raise unwinds
+        // the first UPDATE with it.
+        await inOwnerRollback(null, async (tx) => {
+          await armPublicationWrite(tx);
+          const [ret] = rowsOf(
+            await tx.execute(sql`
+              insert into statistical_returns
+                (organization_id, about_org_id, report_year, form_version_key,
+                 provenance, payload, reconciled, attested_at)
+              values (${ALDER_CREEK}::uuid, ${ALDER_CREEK}::uuid, 2093, '2024',
+                      'submitted', '{"ending_active": 210}'::jsonb, true, now())
+              returning id
+            `),
+          );
+          const [pub] = rowsOf(
+            await tx.execute(sql`
+              insert into publications
+                (organization_id, recipient_org_id, record_class, artifact_id,
+                 published_at, minute_reference)
+              values (${ALDER_CREEK}::uuid, ${NORTHERN_REACH}::uuid,
+                      'statistical_return', ${ret!.id as string}::uuid, now(),
+                      'Session stated meeting, fixture, item 7')
+              returning id
+            `),
+          );
+          const publicationId = pub!.id as string;
+          // Only the WITHDRAWER is wanted here: this probe builds its own
+          // projection-less publication above, and minting a second full
+          // chain would disarm the publication-write marker it is holding.
+          const userId = await withdrawerUserId(tx);
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${ALDER_CREEK}, true)`,
+          );
+
+          await expectDbErrorInTx(
+            tx,
+            () =>
+              tx.execute(
+                sql`select presby_withdraw_publication(${publicationId}::uuid, ${userId}::uuid, 'Session stated meeting, 2094-03-01, item 2')`,
+              ),
+            /the withdrawal pair could not be applied consistently/,
+          );
+
+          const after = rowsOf(
+            await tx.execute(
+              sql`select withdrawn_at from publications where id = ${publicationId}::uuid`,
+            ),
+          )[0];
+          expect(after!.withdrawn_at).toBeNull();
+        });
+      });
+
+      it("is NOT refused after a redistricting — the projection's about-org trigger early-returns when neither the about-org nor the year moves", async () => {
+        // Phase 2 item 9, pinned rather than assumed. congregation_statistics
+        // _about_org fires BEFORE UPDATE on the projection; if it re-checked
+        // affiliation, every withdrawal of a return filed before a boundary
+        // change would be refused — and the presbytery that RECEIVED the
+        // return is still the council holding it (Option A), so refusing
+        // would be wrong as well as surprising.
+        await inOwnerRollback(null, async (tx) => {
+          const { publicationId, userId } = await withdrawalFixture(tx);
+
+          // THE MISSING RUNG OF THE FIXTURE'S COUNCIL TREE, built inside the
+          // rollback. A true transfer of a congregation between two
+          // presbyteries is the SYNOD's act — presby_transfer_affiliation()
+          // requires the actor to be the common superior of BOTH parents as
+          // of the date (G-3.0403(c), drizzle/0044) — and
+          // scripts/seed-dev.sql leaves both presbyteries as roots with no
+          // affiliation row of their own, so without these two rows the
+          // transfer is refused with the uniform literal and this test would
+          // "pass" by proving nothing. Armed with
+          // presby.affiliation_trigger_active for exactly the reason the seed
+          // arms presby.publication_write_active: a fixture standing in for
+          // the sanctioned path has to make the same claim that path makes.
+          await tx.execute(
+            sql`select set_config('presby.affiliation_trigger_active', 'true', true)`,
+          );
+          await tx.execute(sql`
+            insert into organization_affiliations
+              (organization_id, subject_org_id, parent_org_id, relationship_type,
+               effective_from, authority, minute_reference)
+            values
+              (${COASTAL_PLAIN}::uuid, ${NORTHERN_REACH}::uuid, ${COASTAL_PLAIN}::uuid,
+               'member_presbytery', date '1960-01-01', 'recorded',
+               'Synod of the Coastal Plain, roll of presbyteries (fixture)'),
+              (${COASTAL_PLAIN}::uuid, ${WESTERN_BASIN}::uuid, ${COASTAL_PLAIN}::uuid,
+               'member_presbytery', date '1960-01-01', 'recorded',
+               'Synod of the Coastal Plain, roll of presbyteries (fixture)')
+          `);
+
+          // The boundary change: Alder Creek moves to the Western Basin
+          // AFTER its 2025 return was published to the Northern Reach.
+          await tx.execute(
+            sql`select set_config('app.current_org_id', ${COASTAL_PLAIN}, true)`,
+          );
+          await tx.execute(sql`
+            select presby_transfer_affiliation(
+              ${ALDER_CREEK}::uuid, ${WESTERN_BASIN}::uuid, 'member_congregation',
+              current_date,
+              'Synod of the Coastal Plain, 2027-05-02, item 4 (boundary change)')
+          `);
+
+          await withdrawAsSourceCouncil(
+            tx,
+            publicationId,
+            userId,
+            "Session stated meeting, 2027-06-01, item 3 (withdrawal)",
+          );
+
+          const after = rowsOf(
+            await tx.execute(sql`
+              select (select withdrawn_at from publications
+                       where id = ${publicationId}::uuid) as pub_at,
+                     (select withdrawn_at from congregation_statistics
+                       where publication_id = ${publicationId}::uuid) as proj_at
+            `),
+          )[0];
+          expect(after!.pub_at).not.toBeNull();
+          expect(after!.proj_at).not.toBeNull();
+          // One v_now, both halves — still exact after the redistricting.
+          expect(after!.pub_at).toEqual(after!.proj_at);
         });
       });
     });
@@ -1276,12 +1617,17 @@ describe.skipIf(!hasDb)(
         // the marker, which is the only way the shape CHECK is still the
         // thing under test, and the half below proves the guard on its own.
         await inOwnerRollback(null, async (tx) => {
+          // This transaction's own un-withdrawn publication, by id: an
+          // already-withdrawn seeded row would be refused by the freeze's
+          // earlier branch and never reach the CHECK under test (Phase 4
+          // loop-back, 2026-09-26).
+          const { publicationId } = await withdrawalFixture(tx);
           await armWithdrawalWrite(tx);
           await expectDbError(
             () =>
               tx.execute(sql`
                 update publications set withdrawn_at = now()
-                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+                 where id = ${publicationId}::uuid
               `),
             /publications_withdrawal_shape/,
           );
@@ -1290,22 +1636,21 @@ describe.skipIf(!hasDb)(
 
       it("refuses the SAME withdrawal with no sanctioned withdrawal writer, one layer earlier and with a different message (F56)", async () => {
         await inOwnerRollback(null, async (tx) => {
-          const [userRow] = rowsOf(
-            await tx.execute(sql`select id from users limit 1`),
-          );
+          const { publicationId, userId } = await withdrawalFixture(tx);
           // A perfectly well-shaped withdrawal triple — nothing here trips
           // publications_withdrawal_shape, the freeze's column comparison, or
-          // the already-withdrawn check. The only thing wrong with it is that
-          // no sanctioned withdrawal function performed it, and until
-          // presby_withdraw_publication() exists, none can.
+          // the already-withdrawn check (the row is one this transaction just
+          // published, so "already withdrawn" cannot be what refuses it). The
+          // only thing wrong with it is that no sanctioned withdrawal
+          // function performed it.
           await expectDbError(
             () =>
               tx.execute(sql`
                 update publications
                    set withdrawn_at = now(),
-                       withdrawn_by = ${userRow!.id as string}::uuid,
+                       withdrawn_by = ${userId}::uuid,
                        withdrawn_minute_reference = 'Fabricated withdrawal minute'
-                 where recipient_org_id = ${NORTHERN_REACH}::uuid
+                 where id = ${publicationId}::uuid
               `),
             /a withdrawal is an authorized act and may only be recorded by the sanctioned withdrawal function/,
           );

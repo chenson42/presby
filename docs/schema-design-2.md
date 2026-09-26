@@ -1431,6 +1431,19 @@ Reproduced live on `pipeline-group-types` (rolled back): under `drizzle/0048` §
 
 Workflow Rule 16's convention (append a delimited block at the end) works for `test-rls.sql` when a pipeline *adds* assertions. It cannot work when a pipeline *invalidates* existing ones: an appended correction does not stop `ON_ERROR_STOP=1` from aborting at the stale site. The workable rule, and the one this pipeline used: **in-place edits are confined to the sites that would break, each enumerated by line in the Phase 2/3 sections so integration can see them; everything new still appends.**
 
+## 2k. Withdrawing a publication — findings from shipping the anticipated writer (F90–F91)
+
+*(2026-09-26, `docs/work-log/2026-09-26-withdraw-publication.md` Phases 3–4; DECISION-152;
+`drizzle/0052_presby_withdraw_publication.sql`. Recorded by the orchestrator.)*
+
+### F90 — a placeholder assertion goes false the day the anticipated writer ships
+
+**F90 — a `test-rls.sql` assertion whose passing result is a documented placeholder ("nothing arms this GUC yet, deliberately") goes false the instant the anticipated writer ships, and the shipping pipeline must correct it in place, not merely add coverage alongside a now-false claim.** Concretely: section 35's `count(*) ... like '%set_config(''presby.withdrawal_write_active''%' = 0` assertion (drizzle/0047-era) is a statement about the database's *current* incompleteness, not a permanent invariant — `presby_withdraw_publication()` (`drizzle/0052`) makes it false by construction. Recorded as a category, not just a one-off fix, because any future "schema ships ahead of its writer" pattern (this codebase's own stated style for GUC-gated pairs) will reproduce it. See Implementation Order → Batch A step 3 for the specific correction.
+
+### F91 — plpgsql defers column resolution, so a reviewed design can name a column that does not exist
+
+**F91 — a design reviewed against `drizzle/`'s text can specify a column that does not exist, because plpgsql defers name resolution to first call.** Phase 2 and Phase 3 both spelled `presby_withdraw_publication()`'s membership check as `pe.organization_id = v_actor`; `people` has no `organization_id` column (a person is scoped by `memberships`, which is what the table's own RLS policy tests). The spelling would have compiled cleanly, passed every catalog assertion, and failed at the first real withdrawal — on the single branch the check exists to close. Shipped as `presby_membership_is_active(pe.id, v_actor)` alone, semantics unchanged. Rule: verify every predicate's columns against `information_schema`, not against the sibling function you are modelling on. (Batch A, database-admin; the correction and its reasoning are a comment block in `drizzle/0052` at the membership check.)
+
 ## 2l. Increment 7 — name history, import staging and the matcher (F100–F106)
 
 *(2026-09-26, `docs/work-log/2026-09-26-name-history-import-staging.md` Phases 2–4 and the Phase 2

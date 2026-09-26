@@ -398,6 +398,28 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     orgTypeScope: ["presbytery"],
   },
   {
+    key: "filings",
+    label: "Statistical Filings",
+    description:
+      "View your congregation's filed statistical returns and withdraw one if needed.",
+    href: (slug) => `/o/${slug}/admin/filings`,
+    flagKey: "org_portal.filings",
+    // DECISION-152, docs/work-log/2026-09-26-withdraw-publication.md,
+    // architect's Phase 2 ruling 1a/1c: the CONGREGATION's own act on its own
+    // publication, the other axis of Two Hierarchies from `reports` above
+    // (the presbytery reading what it received) — a separate route, a
+    // separate flag, deliberately NOT a mode of `reports`. `administer`, not
+    // `operate`, matching `reports`' own reasoning: this is back-office
+    // filing/compliance housekeeping, not day-to-day ministry.
+    category: "administer",
+    domain: "reports",
+    // Congregation-only, deliberately NOT new_worshiping_community
+    // (architect's Phase 2 ruling 1c): the DB's about-org/affiliation checks
+    // and statistics.publish's own template-role scope are congregation-only.
+    // Revisit if a future pipeline extends self-service SASR filing to NWCs.
+    orgTypeScope: ["congregation"],
+  },
+  {
     key: "insights",
     label: "Insights & Analytics",
     description: "Dashboards, trends, and per-capita/membership insights.",

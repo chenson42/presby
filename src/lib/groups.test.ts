@@ -28,7 +28,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
@@ -171,13 +171,12 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       const [existing] = await platform
         .select({ id: groupTypes.id })
         .from(groupTypes)
-        .where(and(isNull(groupTypes.organizationId), eq(groupTypes.key, key)))
+        .where(eq(groupTypes.key, key))
         .limit(1);
       if (existing?.id) return existing.id;
       const [gt] = await platform
         .insert(groupTypes)
         .values({
-          organizationId: null,
           key,
           name: GROUP_TYPE_CATALOG_NAMES[key] ?? key,
         })
@@ -1254,28 +1253,33 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       return chain.join(" | ");
     }
 
-    it("a second platform-wide row for an existing key is rejected — regression for B-L1 group_types duplicates", async () => {
+    it("a second row for an existing key is rejected — regression for B-L1 group_types duplicates", async () => {
       const platform = getPlatformDb();
       // The default NULLS DISTINCT form of unique (organization_id, key)
-      // would ACCEPT this, because every row here has a NULL
+      // would ACCEPT this, because every row then had a NULL
       // organization_id and NULLs are distinct — which is exactly how 1,557
       // duplicate rows accumulated behind an index that looked like it
-      // covered the case. drizzle/0048 uses NULLS NOT DISTINCT.
+      // covered the case. drizzle/0048 patched that with NULLS NOT DISTINCT;
+      // drizzle/0051 removed the nullable column entirely, so the constraint
+      // is now a plain single-column `unique (key)` (DECISION-151) and the
+      // NULLS question no longer arises.
       const chain = await rejectionChain(
-        platform
-          .insert(groupTypes)
-          .values({ organizationId: null, key: "court", name: "Court" }),
+        platform.insert(groupTypes).values({ key: "court", name: "Court" }),
       );
-      expect(chain).toMatch(/group_types_org_key|duplicate key/);
+      expect(chain).toMatch(/group_types_key_key|duplicate key/);
     });
 
     it("reads platform-template group types through the RLS-enforced connection, not getPlatformDb() — regression for B-M4", async () => {
       // Before the policy split, group_types' tenant_isolation policy was
       // `organization_id = presby_current_org()` with no NULL arm, so a
       // platform-template row was invisible to presby_app and three reads in
-      // src/lib/groups.ts escaped to getPlatformDb() to see it. This asserts
-      // the escape is genuinely unnecessary now: getGroupFormOptions() reads
-      // group_types on `tx` and must still return the four manageable types.
+      // src/lib/groups.ts escaped to getPlatformDb() to see it. drizzle/0048
+      // fixed that with a SELECT arm that admitted NULL; drizzle/0051 went
+      // further — there is no policy, and no RLS at all, to admit anything,
+      // so every row is simply visible to the SELECT grant (DECISION-151).
+      // This asserts the escape is genuinely unnecessary now:
+      // getGroupFormOptions() reads group_types on `tx` and must still
+      // return the four manageable types.
       const result = await getGroupFormOptions(clerkPerson, orgA);
       if (result.kind !== "ok") throw new Error("expected ok");
       expect(
@@ -1283,19 +1287,49 @@ describe.skipIf(!hasDb)("groups.ts (Postgres-backed, real dev database)", () => 
       ).toEqual(["choir", "committee", "small_group", "team"]);
     });
 
-    it("a tenant cannot mint a platform-wide group type — the INSERT arm stays own-org-only", async () => {
-      // DECISION-110 ruling 1 as a database property: the SELECT arm admits
-      // organization_id IS NULL, the INSERT arm does not.
-      const chain = await rejectionChain(
+    it("a tenant cannot write group_types at all — INSERT, UPDATE, DELETE each rejected (DECISION-151, regression for F84)", async () => {
+      // Under the old four-policy split (drizzle/0048), group_types_insert's
+      // WITH CHECK (organization_id = presby_current_org()) let any tenant
+      // mint a real org-scoped row — reproduced live in Phase 1, F84. That
+      // capability is correct for app_roles (a shipped custom-role feature)
+      // and wrong for group_types (no per-org row exists, by DECISION-110
+      // ruling 1). The fix is a revoke, not a policy, so the guarantee got
+      // STRONGER: a revoke binds unconditionally, where a policy binds only
+      // while the policy exists. Hence /permission denied/, not
+      // /row-level security/ — and hence all three DML verbs, not just the
+      // one shape of INSERT the old test happened to try.
+      const insertChain = await rejectionChain(
         withOrgContext(clerkPerson, orgA, async (tx) =>
           tx.insert(groupTypes).values({
-            organizationId: null,
             key: `smuggled-${Date.now()}`,
             name: "Smuggled",
           }),
         ),
       );
-      expect(chain).toMatch(/row-level security/);
+      expect(insertChain).toMatch(/permission denied/);
+
+      const [anyType] = await getPlatformDb()
+        .select({ id: groupTypes.id })
+        .from(groupTypes)
+        .limit(1);
+      expect(anyType?.id).toBeTruthy();
+
+      const updateChain = await rejectionChain(
+        withOrgContext(clerkPerson, orgA, async (tx) =>
+          tx
+            .update(groupTypes)
+            .set({ name: "Hijacked" })
+            .where(eq(groupTypes.id, anyType!.id)),
+        ),
+      );
+      expect(updateChain).toMatch(/permission denied/);
+
+      const deleteChain = await rejectionChain(
+        withOrgContext(clerkPerson, orgA, async (tx) =>
+          tx.delete(groupTypes).where(eq(groupTypes.id, anyType!.id)),
+        ),
+      );
+      expect(deleteChain).toMatch(/permission denied/);
     });
   });
 });

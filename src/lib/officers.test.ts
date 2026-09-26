@@ -150,7 +150,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
     async function findOrCreateGroupType(key: string) {
       const [gt] = await platform
         .insert(groupTypes)
-        .values({ organizationId: null, key, name: key })
+        .values({ key, name: key })
         .onConflictDoNothing()
         .returning({ id: groupTypes.id });
       if (gt?.id) return gt.id;

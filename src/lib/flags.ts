@@ -17,8 +17,22 @@ import { featureFlags } from "@/lib/db/schema";
  *     no effect there and does not change behavior.
  */
 export const isFlagEnabled = cache(async (key: string): Promise<boolean> => {
-  const row = await db.query.featureFlags.findFirst({
-    where: eq(featureFlags.key, key),
-  });
-  return row?.enabled ?? false;
+  try {
+    const row = await db.query.featureFlags.findFirst({
+      where: eq(featureFlags.key, key),
+    });
+    return row?.enabled ?? false;
+  } catch {
+    // Fails CLOSED, platform-wide, and goes dark silently — every flag this
+    // helper gates collapses to "disabled" for the duration of a DB blip.
+    // That is what makes the log below load-bearing, not decorative. Never
+    // log the error object itself: Neon/Drizzle's message embeds the failed
+    // SQL text (and, on some paths, bound params) — the flag key is the only
+    // safe thing to emit here. See docs/decisions.md DECISION-026 correction.
+    console.error(
+      "[flags] isFlagEnabled read failed; treating as disabled",
+      { key },
+    );
+    return false;
+  }
 });

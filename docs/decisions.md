@@ -4,6 +4,29 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-154: every anonymous read on the public-site render path
+(`(public)/site/[slug]`) fails closed to the identical generic `not_found`
+response — no exceptions, no per-read judgment call.** `getPublishedSite()`,
+`resolvePublishedOrganization()`, `publicOrgSummary()`, the asset route's
+blob resolve, and `resolveLogoUrl()` each independently learned this the
+hard way (`2026-09-26-public-render-blip`) after the flags-fail-closed fix
+(`2026-09-26-flags-fail-closed`) proved the pattern for one read and
+incidentally created a new crash path into a second. Any NEW read added
+to this surface in the future — a further sibling function, a future
+caller-shape-1 addition — inherits this as a hard requirement, not a
+style preference: wrap the entire body in one `try/catch`, log
+`[module] functionName read failed; treating as not found"` with only
+non-secret identifiers (never the caught error or its `.message`), and
+return the same shape a confirmed-absent case returns. This extends
+DECISION-040's enumeration-safety rule (byte-identical/timing-
+indistinguishable across "not a tenant," "not published," "flag off") to
+cover "database unreachable" as a fifth indistinguishable case rather than
+leaving each future contributor to rediscover it by causing an outage.
+
+(2026-09-26, tech-lead Phase 3, adopted at Phase 6; `docs/work-log/2026-09-26-public-render-blip.md`.)
+
+---
+
 **DECISION-150: CI's database is an ephemeral Neon branch off an explicitly
 pinned parent, containing a database CI created from empty — migrate-from-
 empty is the reproducibility proof, not a convenience.** (2026-09-26,

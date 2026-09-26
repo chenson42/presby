@@ -9,7 +9,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { featureFlags } from "@/lib/db/schema";
-import { isFlagEnabled } from "@/lib/flags";
 
 const LOCAL_LOGIN_FLAG = "auth.local_login";
 const REQUIRE_2FA_FLAG = "auth.require_2fa";
@@ -82,6 +81,13 @@ async function organizationRequiresTwoFactor(userId: string): Promise<boolean> {
  *
  * This is NOT fail-open: a missing flag row → false → no enforcement. That is
  * the safe default for a flag whose job is to _add_ gating, not to gate sign-in.
+ *
+ * The `auth.require_2fa` read below is inline, not a call to the shared
+ * `isFlagEnabled()` helper — once that helper collapses a DB error into
+ * `false` (DECISION-026 correction), `false` is ambiguous, and this is the
+ * one caller in the tree whose documented behavior depends on telling
+ * "flag off" and "DB error" apart at the point of decision. See
+ * `organizationRequiresTwoFactor()` immediately above for the same pattern.
  */
 export async function computeEffectiveTwoFactor(
   rawRequired: boolean,
@@ -94,10 +100,25 @@ export async function computeEffectiveTwoFactor(
     (userId ? await organizationRequiresTwoFactor(userId) : false);
 
   if (!required) return false;
+
+  // row missing or found → the flag's boolean; DB error → `required` (the
+  // already-resolved value, not a flag read) — collapsing these into one
+  // boolean is safe here only because the caller's two outcomes are produced
+  // by two different code paths (try vs catch), not by two different values
+  // of one path. Do NOT "simplify" this to mirror
+  // organizationRequiresTwoFactor()'s `catch { return false; }` — that would
+  // silently drop 2FA enforcement for an already-required user during a DB
+  // blip, the exact regression this shape exists to prevent.
   try {
-    return await isFlagEnabled(REQUIRE_2FA_FLAG);
-  } catch {
-    // DB blip: reproduce pre-feature behavior (the resolved requirement)
+    const row = await db.query.featureFlags.findFirst({
+      where: eq(featureFlags.key, REQUIRE_2FA_FLAG),
+    });
+    return row?.enabled ?? false;
+  } catch (err) {
+    console.error(
+      "[local-login] auth.require_2fa read failed; preserving resolved requirement",
+      { key: REQUIRE_2FA_FLAG, errorName: err instanceof Error ? err.name : undefined },
+    );
     return required;
   }
 }

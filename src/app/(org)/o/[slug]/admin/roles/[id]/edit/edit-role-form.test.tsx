@@ -16,6 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import Link from "next/link";
 
 const mockSetRolePermissionsAction = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
@@ -187,7 +188,7 @@ describe("EditRoleForm — unsaved-changes guard (H3)", () => {
   it("intercepts a same-origin link click (standing in for page.tsx's 'Back to roles' link) once a permission is toggled", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <Link href="/o/alder-creek/admin/roles">Back to roles</Link>
         <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
       </div>,
     );
@@ -204,7 +205,7 @@ describe("EditRoleForm — unsaved-changes guard (H3)", () => {
   it("does not intercept the link when the checklist is untouched", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <Link href="/o/alder-creek/admin/roles">Back to roles</Link>
         <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
       </div>,
     );
@@ -215,7 +216,7 @@ describe("EditRoleForm — unsaved-changes guard (H3)", () => {
   it("re-checking the box back to its original state clears the guard again", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <Link href="/o/alder-creek/admin/roles">Back to roles</Link>
         <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
       </div>,
     );
@@ -233,7 +234,7 @@ describe("EditRoleForm — unsaved-changes guard (H3)", () => {
     });
     render(
       <div>
-        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <Link href="/o/alder-creek/admin/roles">Back to roles</Link>
         <EditRoleForm slug="alder-creek" role={ROLE} catalog={CATALOG} />
       </div>,
     );

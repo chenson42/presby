@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getPublishedSite } from "@/lib/sites";
 import { buildSitemapEntries } from "presby-site-kit";
 
+export const dynamic = "force-dynamic"; // stops Next's build-time placeholder-param prerender trial (params.slug = "-") from reaching a live flag/DB read here at all — docs/work-log/2026-09-26-flags-fail-closed.md Phase 2 Ruling 3
+
 /**
  * `GET /site/<slug>/sitemap.xml` — one sitemap per public congregation site,
  * not a single platform-wide sitemap, since each organization's pages only

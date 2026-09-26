@@ -3,6 +3,8 @@ import { getPublishedSite } from "@/lib/sites";
 import { cn } from "@/lib/utils";
 import "presby-site-kit/styles.css";
 
+export const dynamic = "force-dynamic"; // stops Next's build-time placeholder-param prerender trial (params.slug = "-") from reaching a live flag/DB read here at all — docs/work-log/2026-09-26-flags-fail-closed.md Phase 2 Ruling 3
+
 /**
  * `/site/<slug>` — the second (previously dormant) `<BrandTokens>` emitter
  * (DECISION-047/052, `scripts/check-brand-scope.mjs`'s `EMITTERS[1]`, flipped

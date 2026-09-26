@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-25 night (rounds two and three shipped; security §B and submission grants merged)
+## RESUME HERE — updated 2026-09-26 (CI green again; wave 3 CI pipeline at Phase 4)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -47,8 +47,20 @@ SHIP WITH NOTES) **merged** as PR #14, v0.26.0; `development` re-migrated throug
 and `test-rls.sql` re-run there (520). Flag `statistics.submission_grants` seeded OFF —
 what's-new owed at first enablement. The lifecycle pipeline's **third** external round (F60–F64)
 shipped as v0.25.4 (`afc2afb`) — F59 closed, pg_temp pinned, DECISION-148.
-**CI on `main` has been red since 2026-08-30 on 7 lint errors** (TODO, top of Next Up) —
-PR checks are not a signal until that is fixed.
+**CI on `main` is green again as of PR #15 (`338b1bb`, v0.26.1, 2026-09-26)** — red since
+2026-08-26 on eight lint errors behind a Lint-first job that skipped Build/Tripwires/Audit/
+Tests; fixed on their merits (DECISION-149: lint in `/pre-push` Step 3a and LAST in `ci.yml`),
+plus a second regression it had hidden: `isFlagEnabled()` never failed closed and the naive
+fix would have dropped 2FA enforcement on a DB blip (DECISION-026 corrected; the sign-in
+flags read inline). `main` still has **no branch protection** (operator decision, TODO).
+Wave 3's other pipeline, `pipeline/ci-db-tests` (worktree `../presby-wt-ci`, Neon
+`pipeline-ci-db-tests`, `drizzle/0050_presby_schema_parity.sql`, DECISION-150), is in
+Phase 4 Batch B: Batch A found and fixed that the committed migrations did not reproduce
+the live schema (four columns; a from-empty database had a broken permission resolver) and
+that the isolation suite's `assert_eq()` helper existed in no committed file — a database
+built from empty now migrates, seeds and passes 520 assertions for the first time; Batch B
+is the `db.yml` job + composite action + the `e2e.yml` repair, which skip until the
+operator adds `NEON_API_KEY`/`NEON_PROJECT_ID`.
 
 **Next, in order:** close the radius pipeline (Phase 6, `style(ui):` commit,
 release-note line, TODO lines for the visual-harness comparator caveat and the

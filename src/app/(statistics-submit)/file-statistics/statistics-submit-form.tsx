@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -138,14 +138,19 @@ export function StatisticsSubmitForm({
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues,
   });
 
-  const attestedRole = watch("attestedRole");
+  // useWatch(), not the destructured watch() — react-hook-form's watch()
+  // returns a function that can't be memoized (manually or by the React
+  // Compiler): calling it inline during render is exactly the pattern
+  // react-hooks/incompatible-library flags. useWatch() subscribes to just
+  // this field's value instead, which is memoization-safe.
+  const attestedRole = useWatch({ control, name: "attestedRole" });
 
   function onSubmit(values: FormValues) {
     setError(null);

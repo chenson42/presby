@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, Menu, X, type LucideIcon } from "lucide-react";
@@ -52,6 +52,95 @@ const ICON_BY_KEY: Record<"home" | PortalDomain, LucideIcon> = {
   ...NAV_DOMAIN_ICONS,
 };
 
+/** A `PortalNavEntry` with its active/inactive state already resolved by
+ * `PortalNavLinks` — `PortalNavMenu` needs no `usePathname()`/`pathname` prop
+ * of its own; it only renders. */
+type ResolvedNavEntry = PortalNavEntry & { isActive: boolean };
+
+// FILLED, ROUNDED PILL (docs/work-log/2026-08-28-directory-visual-refresh.md,
+// Phase 4, item 3) replaces the PRIOR `border-b-2` underline accent
+// (docs/work-log/2026-08-26-portal-visual-modernization.md Phase 3): the
+// active entry now gets a `bg-primary text-primary-foreground` fill rather
+// than a bottom border. `bg-primary`/`text-primary-foreground` is the SAME
+// brandable pair `Button`'s own `default` variant uses — `--primary-
+// foreground` is derived (`src/lib/brand/generate.ts`) to clear D2's
+// 4.5:1 text-contrast floor against `--primary` for ANY per-org brand
+// seed, so this reads correctly on both the platform default palette and a
+// custom-branded organization (verified live against `/o/fpcw`, Phase 4
+// notes). Unlike the border accent, the pill's own background/padding is
+// IDENTICAL between states (only the fill colour and font-weight change),
+// so the "apply unconditionally to avoid a layout shift" concern the prior
+// comment named no longer applies — there is no border to add or remove.
+const linkClassName = (isActive: boolean) =>
+  cn(
+    "flex min-h-11 items-center gap-1.5 rounded-full px-3 py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:min-h-9 sm:px-3 sm:py-1.5",
+    isActive
+      ? "bg-primary font-semibold text-primary-foreground"
+      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+  );
+
+/**
+ * The mobile-toggle + link-list leaf, keyed by `pathname` at its call site in
+ * `PortalNavLinks` below. Owns ONLY the `open` boolean — no effect closes it
+ * on navigation; a route change gives this component a new `key`, so React
+ * unmounts the old instance (whatever `open` value it had) and mounts a
+ * fresh one, whose `useState(false)` starts closed. This replaces a
+ * `useEffect(() => setOpen(false), [pathname])`, the exact `setState`-
+ * synchronized-to-a-prop-change shape `react-hooks/set-state-in-effect`
+ * flags — a keyed remount needs no effect at all, matching the fix family
+ * `branding-form.tsx` also uses for the same rule.
+ */
+function PortalNavMenu({ entries }: { entries: ResolvedNavEntry[] }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <div className="flex items-center justify-between px-4 py-2 sm:hidden">
+        <span className="text-sm font-semibold text-foreground">Menu</span>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls="portal-nav-menu"
+          aria-label={open ? "Close menu" : "Open menu"}
+          onClick={() => setOpen((value) => !value)}
+          className="flex size-11 items-center justify-center rounded-md text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          {open ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+        </button>
+      </div>
+
+      {/* One link list in the DOM, styled two ways by breakpoint — never
+       * two copies. A duplicated list would double every accessible link
+       * (screen readers, `getByRole`) even while only one copy is visually
+       * shown; `hidden` vs `sm:flex` on the SAME element is what lets CSS
+       * alone decide which layout renders, at each breakpoint, from one
+       * source of truth. */}
+      <div
+        id="portal-nav-menu"
+        className={cn(
+          "absolute inset-x-0 top-full z-20 flex-col gap-1 border border-border bg-background px-4 pt-3 pb-3 text-sm shadow-lg sm:static sm:flex sm:flex-row sm:flex-wrap sm:gap-4 sm:border-0 sm:bg-transparent sm:px-6 sm:py-2 sm:shadow-none",
+          open ? "flex" : "hidden",
+        )}
+      >
+        {entries.map((entry) => {
+          const Icon = entry.icon ? ICON_BY_KEY[entry.icon] : undefined;
+          return (
+            <Link
+              key={entry.href}
+              href={entry.href}
+              aria-current={entry.isActive ? "page" : undefined}
+              className={linkClassName(entry.isActive)}
+            >
+              {Icon ? <Icon className="size-4 shrink-0" aria-hidden /> : null}
+              {entry.label}
+            </Link>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 /**
  * The active-state client leaf for `PortalNav` — the one piece of this row
  * that needs `usePathname()` (a client-only hook), following the same
@@ -82,11 +171,6 @@ const ICON_BY_KEY: Record<"home" | PortalDomain, LucideIcon> = {
  */
 export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
 
   // HASH-STRIPPING (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md
   // Phase 3 §5, DECISION-117). `usePathname()` NEVER includes a `#fragment`
@@ -147,75 +231,22 @@ export function PortalNavLinks({ entries }: { entries: PortalNavEntry[] }) {
   }
   const isEntryActive = (entry: PortalNavEntry) => entry === activeEntry;
 
-  // FILLED, ROUNDED PILL (docs/work-log/2026-08-28-directory-visual-refresh.md,
-  // Phase 4, item 3) replaces the PRIOR `border-b-2` underline accent
-  // (docs/work-log/2026-08-26-portal-visual-modernization.md Phase 3): the
-  // active entry now gets a `bg-primary text-primary-foreground` fill rather
-  // than a bottom border. `bg-primary`/`text-primary-foreground` is the SAME
-  // brandable pair `Button`'s own `default` variant uses — `--primary-
-  // foreground` is derived (`src/lib/brand/generate.ts`) to clear D2's
-  // 4.5:1 text-contrast floor against `--primary` for ANY per-org brand
-  // seed, so this reads correctly on both the platform default palette and a
-  // custom-branded organization (verified live against `/o/fpcw`, Phase 4
-  // notes). Unlike the border accent, the pill's own background/padding is
-  // IDENTICAL between states (only the fill colour and font-weight change),
-  // so the "apply unconditionally to avoid a layout shift" concern the prior
-  // comment named no longer applies — there is no border to add or remove.
-  const linkClassName = (isActive: boolean) =>
-    cn(
-      "flex min-h-11 items-center gap-1.5 rounded-full px-3 py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:min-h-9 sm:px-3 sm:py-1.5",
-      isActive
-        ? "bg-primary font-semibold text-primary-foreground"
-        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-    );
+  const decoratedEntries: ResolvedNavEntry[] = entries.map((entry) => ({
+    ...entry,
+    isActive: isEntryActive(entry),
+  }));
 
   return (
     <nav
       aria-label="Portal"
       className="relative border-b border-border sm:px-6"
     >
-      <div className="flex items-center justify-between px-4 py-2 sm:hidden">
-        <span className="text-sm font-semibold text-foreground">Menu</span>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls="portal-nav-menu"
-          aria-label={open ? "Close menu" : "Open menu"}
-          onClick={() => setOpen((value) => !value)}
-          className="flex size-11 items-center justify-center rounded-md text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        >
-          {open ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-        </button>
-      </div>
-
-      {/* One link list in the DOM, styled two ways by breakpoint — never
-       * two copies. A duplicated list would double every accessible link
-       * (screen readers, `getByRole`) even while only one copy is visually
-       * shown; `hidden` vs `sm:flex` on the SAME element is what lets CSS
-       * alone decide which layout renders, at each breakpoint, from one
-       * source of truth. */}
-      <div
-        id="portal-nav-menu"
-        className={cn(
-          "absolute inset-x-0 top-full z-20 flex-col gap-1 border border-border bg-background px-4 pt-3 pb-3 text-sm shadow-lg sm:static sm:flex sm:flex-row sm:flex-wrap sm:gap-4 sm:border-0 sm:bg-transparent sm:px-6 sm:py-2 sm:shadow-none",
-          open ? "flex" : "hidden",
-        )}
-      >
-        {entries.map((entry) => {
-          const Icon = entry.icon ? ICON_BY_KEY[entry.icon] : undefined;
-          return (
-            <Link
-              key={entry.href}
-              href={entry.href}
-              aria-current={isEntryActive(entry) ? "page" : undefined}
-              className={linkClassName(isEntryActive(entry))}
-            >
-              {Icon ? <Icon className="size-4 shrink-0" aria-hidden /> : null}
-              {entry.label}
-            </Link>
-          );
-        })}
-      </div>
+      {/* Keyed by `pathname`: a route change remounts `PortalNavMenu`, so its
+       * own `useState(false)` for the mobile-menu `open` boolean resets with
+       * no effect required (see that component's own header). The `<nav>`
+       * landmark itself stays un-keyed — it has no state to reset, so it
+       * should not churn on every navigation. */}
+      <PortalNavMenu key={pathname} entries={decoratedEntries} />
     </nav>
   );
 }

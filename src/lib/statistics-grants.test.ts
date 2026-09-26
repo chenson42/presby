@@ -41,6 +41,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID, createHash } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { formatDateUTC } from "@/lib/format-date";
 
 vi.mock("server-only", () => ({}));
 // `./statistics-grants` -> `@/lib/email` -> `@/lib/email/queue.ts` ->
@@ -91,6 +92,7 @@ describe.skipIf(!hasDb)(
     // 2023/2024/2026 Quillhaven fixtures.
     const ISSUE_YEAR = 2090;
     const MANAGED_REJECT_YEAR = 2091;
+    const USED_YEAR = 2092;
     const REVOKE_YEAR = 2093;
 
     const LIVE_YEAR = 2094;
@@ -100,10 +102,15 @@ describe.skipIf(!hasDb)(
     const LIVE_TOKEN = "test-grant-marrowbone-live-2094";
     const EXPIRED_TOKEN = "test-grant-marrowbone-expired-2095";
     const REVOKED_TOKEN = "test-grant-marrowbone-revoked-2096";
+    const USED_TOKEN = "test-grant-marrowbone-used-2092";
 
     const LIVE_GRANT_ID = "ab100000-0000-0000-0000-000000000001";
     const EXPIRED_GRANT_ID = "ab100000-0000-0000-0000-000000000002";
     const REVOKED_GRANT_ID = "ab100000-0000-0000-0000-000000000003";
+    const USED_GRANT_ID = "ab100000-0000-0000-0000-000000000004";
+
+    /** Fixed, deterministic — asserted verbatim against `formatDateUTC()`'s output. */
+    const USED_SUBMITTED_AT = new Date("2026-03-14T12:00:00Z");
 
     let flagWasEnabled: boolean | null = null;
 
@@ -136,6 +143,7 @@ describe.skipIf(!hasDb)(
             inArray(statisticsSubmissionGrants.reportYear, [
               ISSUE_YEAR,
               MANAGED_REJECT_YEAR,
+              USED_YEAR,
               REVOKE_YEAR,
               LIVE_YEAR,
               EXPIRED_YEAR,
@@ -154,7 +162,14 @@ describe.skipIf(!hasDb)(
         );
 
       // Group B's three throwaway fixtures — the exact pattern
-      // scripts/seed-dev.sql documents for its own dev-only tokens.
+      // scripts/seed-dev.sql documents for its own dev-only tokens. A fourth,
+      // USED_GRANT_ID, exists for revokeStatisticsGrant's own "already used"
+      // branch — inserted with `submittedAt` already set (the mid-claim state
+      // is legal per the `statistics_submission_grants_claim_shape` CHECK;
+      // only an UPDATE transition is guarded by
+      // `presby_freeze_statistics_submission_grant()`, not an INSERT, per
+      // REVOKED_GRANT_ID's own precedent of inserting `revokedAt` directly
+      // below).
       await platform.insert(statisticsSubmissionGrants).values([
         {
           id: LIVE_GRANT_ID,
@@ -166,6 +181,18 @@ describe.skipIf(!hasDb)(
           issuedToEmail: "clerk@marrowbone.example.invalid",
           issuedBy: CLERK_USER,
           expiresAt: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
+        },
+        {
+          id: USED_GRANT_ID,
+          organizationId: NORTHERN_REACH,
+          aboutOrgId: MARROWBONE,
+          reportYear: USED_YEAR,
+          tokenHash: sha256Hex(USED_TOKEN),
+          issuedToName: "Test Fixture Clerk",
+          issuedToEmail: "clerk@marrowbone.example.invalid",
+          issuedBy: CLERK_USER,
+          expiresAt: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
+          submittedAt: USED_SUBMITTED_AT,
         },
         {
           id: EXPIRED_GRANT_ID,
@@ -258,6 +285,7 @@ describe.skipIf(!hasDb)(
             eq(statisticsSubmissionGrants.aboutOrgId, MARROWBONE),
             inArray(statisticsSubmissionGrants.reportYear, [
               ISSUE_YEAR,
+              USED_YEAR,
               REVOKE_YEAR,
               LIVE_YEAR,
               EXPIRED_YEAR,
@@ -505,6 +533,20 @@ describe.skipIf(!hasDb)(
         if (result.kind === "ok") {
           expect(result.data.aboutOrgId).toBe(MARROWBONE);
           expect(result.data.reportYear).toBe(REVOKE_YEAR);
+        }
+      });
+
+      it("invalid_input — revoking a grant already used to file a return states the filing date via formatDateUTC(), not a bare toLocaleDateString() string — regression for statistics-grants.ts:362 SSR-timezone lint violation", async () => {
+        const result = await revokeStatisticsGrant(
+          CLERK_PERSON,
+          NORTHERN_REACH,
+          USED_GRANT_ID,
+        );
+        expect(result.kind).toBe("invalid_input");
+        if (result.kind === "invalid_input") {
+          expect(result.message).toBe(
+            `This grant was already used to file a return on ${formatDateUTC(USED_SUBMITTED_AT)}.`,
+          );
         }
       });
 

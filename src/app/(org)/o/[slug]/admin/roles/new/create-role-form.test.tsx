@@ -22,6 +22,7 @@
  *     `toast.error` with the server's own message, verbatim.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import Link from "next/link";
 import {
   act,
   cleanup,
@@ -245,7 +246,7 @@ describe("CreateRoleForm — unsaved-changes guard (H3)", () => {
   it("intercepts a same-origin link click (standing in for page.tsx's 'Back to roles' link) once a key is typed", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <Link href="/o/alder-creek/admin/roles">Back to roles</Link>
         <CreateRoleForm slug="alder-creek" catalog={CATALOG} templates={[]} />
       </div>,
     );
@@ -264,7 +265,7 @@ describe("CreateRoleForm — unsaved-changes guard (H3)", () => {
   it("does not intercept the link on an untouched form", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <Link href="/o/alder-creek/admin/roles">Back to roles</Link>
         <CreateRoleForm slug="alder-creek" catalog={CATALOG} templates={[]} />
       </div>,
     );
@@ -275,7 +276,7 @@ describe("CreateRoleForm — unsaved-changes guard (H3)", () => {
   it("toggling a permission checkbox alone also counts as dirty", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/roles">Back to roles</a>
+        <Link href="/o/alder-creek/admin/roles">Back to roles</Link>
         <CreateRoleForm slug="alder-creek" catalog={CATALOG} templates={[]} />
       </div>,
     );

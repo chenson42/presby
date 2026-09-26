@@ -8,7 +8,7 @@
  * `/o/acme/directory/<personId>` still shows "Directory" as current.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const usePathname = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -286,5 +286,43 @@ describe("PortalNavLinks — domain-anchor hash-stripping (commit 2, docs/work-l
         .getByRole("link", { name: "Worship & Events" })
         .getAttribute("href"),
     ).toBe("/o/acme#domain-worship");
+  });
+});
+
+describe("PortalNavLinks — mobile menu closes on navigation (react-hooks/set-state-in-effect fix, keyed remount not an effect)", () => {
+  it("closes the open mobile menu when pathname changes — regression for the removed useEffect(() => setOpen(false), [pathname])", () => {
+    usePathname.mockReturnValue("/o/acme");
+    const { rerender } = render(<PortalNavLinks entries={ENTRIES} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open menu/i }));
+    expect(screen.getByRole("button", { name: /close menu/i })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /close menu/i }).getAttribute("aria-expanded"),
+    ).toBe("true");
+
+    // A route change: usePathname()'s return value changes, and the parent
+    // re-renders — `PortalNavMenu`'s `key={pathname}` changes with it, so
+    // React unmounts the open instance and mounts a fresh, closed one.
+    usePathname.mockReturnValue("/o/acme/directory");
+    rerender(<PortalNavLinks entries={ENTRIES} />);
+
+    expect(screen.getByRole("button", { name: /open menu/i })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /open menu/i }).getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
+
+  it("stays open across a re-render that does NOT change pathname (same key, same instance, user's toggle survives)", () => {
+    usePathname.mockReturnValue("/o/acme");
+    const { rerender } = render(<PortalNavLinks entries={ENTRIES} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open menu/i }));
+    expect(screen.getByRole("button", { name: /close menu/i })).toBeTruthy();
+
+    // Same pathname, a re-render with the identical entries — no key change,
+    // so the SAME PortalNavMenu instance survives with its open state intact.
+    rerender(<PortalNavLinks entries={ENTRIES} />);
+
+    expect(screen.getByRole("button", { name: /close menu/i })).toBeTruthy();
   });
 });

@@ -26,6 +26,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import Link from "next/link";
 
 const mockStartOfficerTermAction = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
@@ -294,7 +295,7 @@ describe("AddOfficerTermForm — unsaved-changes guard (H3)", () => {
   it("intercepts a same-origin link click while the draft is dirty and shows the discard dialog", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/officers">Back to officers</a>
+        <Link href="/o/alder-creek/admin/officers">Back to officers</Link>
         <AddOfficerTermForm slug="alder-creek" options={OPTIONS} />
       </div>,
     );
@@ -313,7 +314,7 @@ describe("AddOfficerTermForm — unsaved-changes guard (H3)", () => {
   it("does not intercept a link click when the form is untouched", () => {
     render(
       <div>
-        <a href="/o/alder-creek/admin/officers">Back to officers</a>
+        <Link href="/o/alder-creek/admin/officers">Back to officers</Link>
         <AddOfficerTermForm slug="alder-creek" options={OPTIONS} />
       </div>,
     );

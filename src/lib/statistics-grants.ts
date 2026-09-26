@@ -7,6 +7,7 @@ import { organizations } from "@/lib/db/domain/org";
 import { statisticsSubmissionGrants } from "@/lib/db/domain/returns";
 import { enqueueEmail, escapeHtml } from "@/lib/email";
 import { isFlagEnabled } from "@/lib/flags";
+import { formatDateUTC } from "@/lib/format-date";
 
 /**
  * Statistical-return submission grants — increment 6 (D16, Section P:
@@ -359,7 +360,7 @@ export async function revokeStatisticsGrant(
     if (existing.submittedAt) {
       return {
         kind: "invalid_input",
-        message: `This grant was already used to file a return on ${existing.submittedAt.toLocaleDateString()}.`,
+        message: `This grant was already used to file a return on ${formatDateUTC(existing.submittedAt)}.`,
       };
     }
     if (existing.revokedAt) {

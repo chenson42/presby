@@ -60,6 +60,23 @@ npm run typecheck
 
 **Do not proceed if typecheck fails.**
 
+## Step 3a: Lint
+
+```bash
+npm run lint
+```
+
+`eslint.config.mjs`'s flat config (Next's bundled React/React-hooks rule
+set, plus the project's own `no-restricted-syntax` ban on `toLocale*()`)
+had no local equivalent before this step existed — nothing caught a lint
+regression before it reached CI, where it sat mid-job and silently hid
+Build/Tripwires/`npm audit`/Unit tests behind `skipped` for four weeks
+(2026-08-26–2026-09-25). Runs here, right after typecheck and before
+every DB-touching check, because it is fast, static, and needs no
+database.
+
+**Do not proceed if lint fails.**
+
 ## Step 3b: Audit-Coverage Tripwire
 
 ```bash

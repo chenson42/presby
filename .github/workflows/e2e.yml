@@ -61,7 +61,7 @@ jobs:
 
       - name: Create ephemeral Neon branch
         id: neon-branch
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}

@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-26 (CI green again; wave 3 CI pipeline at Phase 4)
+## RESUME HERE — updated 2026-09-26 afternoon (waves 2 and 3 complete; CI green; nothing in flight)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -53,22 +53,25 @@ Tests; fixed on their merits (DECISION-149: lint in `/pre-push` Step 3a and LAST
 plus a second regression it had hidden: `isFlagEnabled()` never failed closed and the naive
 fix would have dropped 2FA enforcement on a DB blip (DECISION-026 corrected; the sign-in
 flags read inline). `main` still has **no branch protection** (operator decision, TODO).
-Wave 3's other pipeline, `pipeline/ci-db-tests` (worktree `../presby-wt-ci`, Neon
-`pipeline-ci-db-tests`, `drizzle/0050_presby_schema_parity.sql`, DECISION-150), is in
-Phase 4 Batch B: Batch A found and fixed that the committed migrations did not reproduce
+Wave 3's other pipeline, `pipeline/ci-db-tests`, **merged** as PR #16 (`f8c5dc0`, v0.26.2,
+`drizzle/0050_presby_schema_parity.sql`, DECISION-150, F81–F83; `development` re-migrated
+through 0050 with `install-test-helpers.sql` and `test-rls.sql` 520 there): Batch A found and fixed that the committed migrations did not reproduce
 the live schema (four columns; a from-empty database had a broken permission resolver) and
 that the isolation suite's `assert_eq()` helper existed in no committed file — a database
 built from empty now migrates, seeds and passes 520 assertions for the first time; Batch B
-is the `db.yml` job + composite action + the `e2e.yml` repair, which skip until the
-operator adds `NEON_API_KEY`/`NEON_PROJECT_ID`.
+shipped the `db.yml` job + the repo's first composite action + the `e2e.yml` repair; both
+jobs **skip with a `::notice::` until the operator adds `NEON_API_KEY`/`NEON_PROJECT_ID`**
+(`docs/deployment.md` has the two-step instruction). No worktrees or pipeline branches are
+open; three Neon branches (`pipeline-security-schema-b`, `pipeline-submission-grants`,
+`pipeline-ci-db-tests`) await the operator's OK to delete.
 
-**Next, in order:** close the radius pipeline (Phase 6, `style(ui):` commit,
-release-note line, TODO lines for the visual-harness comparator caveat and the
-`/admin/2fa` unstable sort); log the release-slot reviews; then wave 2 under
-Workflow Rule 16 — security §B fixes (`app_role_permissions` RLS first), code-review
-C-1/C-2/C-3, increment 6 submission grants, increment 7 name history + D13 staging,
-D22/D23, Track A/C/R — each in its own worktree + Neon branch, integrated one PR at
-a time. The shared `development` branch is a proven hazard for concurrent DB-backed
+**Next, in order (all shipped through wave 3; the remaining candidates):** the operator's
+three decisions (Neon secrets → CI jobs run; branch protection; delete the three Neon
+branches); then wave 4 under Rule 16 — code-review C-1/C-2/C-3, the test-coverage punch
+items 7 and 10–17, increment 7 name history + D13 staging, D22/D23 design phases,
+Track A/C/R, the `presby_withdraw_publication()` pipeline, the public render path's
+three uncaught reads, the `group_types` reclassification — each in its own worktree +
+Neon branch, integrated one PR at a time. The shared `development` branch is a proven hazard for concurrent DB-backed
 suites (QA measured `organizations` moving 17 → 15 mid-run); use per-pipeline
 branches.
 

@@ -4,6 +4,32 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-150: CI's database is an ephemeral Neon branch off an explicitly
+pinned parent, containing a database CI created from empty — migrate-from-
+empty is the reproducibility proof, not a convenience.** (2026-09-26,
+architect Phase 2 / tech-lead Phase 3, `docs/work-log/2026-09-26-ci-db-tests.md`.)
+
+Every database-backed check runs against a branch created per run by
+`neondatabase/create-branch-action@v5` with `parent:` written explicitly in
+the workflow (`development`) — never the implicit default, which is the
+project's primary branch, `production`, holding two real congregations and a
+real-PII `organization_profiles` row. Inside that branch the job immediately
+issues `CREATE DATABASE ci_run` as owner and never opens `neondb` again; all
+four connection URLs address `ci_run`, all on the direct (unpooled) endpoint.
+`ci_run` is cloned from `template1`, so its entire schema arrives by `npm run
+db:migrate` — a green run is direct evidence that the posture is reproducible
+from `drizzle/` alone, which is the point, not a side effect: that premise
+was already false when `DECISION-146` asserted it (`drizzle/0050` and its
+Phase 3 design, above, is the fix). Roles are cluster-wide and survive the
+fork; the job sets `presby_app`'s password itself (per-run random, masked,
+`ALTER ROLE` on the owner connection) rather than taking a third operator
+secret. A skip must be a skip (`check-secrets` gate, `::notice::`, never a
+green no-op inside the real job); every `psql` runs with `-v
+ON_ERROR_STOP=1`. Each Neon-dependent job gets its own branch, deleted in
+`if: always()`.
+
+---
+
 **DECISION-149: Lint is part of the push/merge gate, not an advisory step.** `npm run lint` runs in `/pre-push` (Step 3a, immediately after
 typecheck) and in CI's `ci` job — but **last** in that job, after Build,
 Tripwire checks, Dependency audit, and Unit tests, so a lint failure can
@@ -73,6 +99,24 @@ The 2026-09-25 security review (B-H3 step 3) asked whether the NextAuth adapter 
 **Three — `src/lib/db/index.ts` documents "two connections, deliberately" as the isolation boundary.** A third is a change to that architecture. It is worth making once the shell refactor exists, and not before.
 
 **What ships instead, in `drizzle/0048_presby_security_b.sql`:** the live `presby_app` grant shape written down table by table so the security posture is reproducible from `drizzle/` (B-H3(a) — today it is not, and a database built from the migration history fails at first sign-in), narrowed to least privilege in the same file. Revisit when the platform-shell accessor exists; tracked in `docs/TODO.md`.
+
+**Correction to DECISION-146 (2026-09-26, tech-lead, Phase 3 of
+`docs/work-log/2026-09-26-ci-db-tests.md`).** DECISION-146's own text
+states its shipped migration makes "the live `presby_app` grant shape
+written down table by table so the security posture is reproducible from
+`drizzle/` alone." That premise was already false on the date DECISION-146
+was recorded (2026-09-25) and had been false since 2026-08-17:
+`officer_terms.recorded_by`, `roll_actions.proposed_by`,
+`administrative_commissions.group_id` and `org_delegations.group_id` had
+already drifted from every `drizzle/*.sql` file via an untracked
+`db:push`/`ALTER TABLE`, and `drizzle/0010`'s `plpgsql` resolver body hid the
+consequence behind Postgres's late name resolution — 50/50 migrations apply
+cleanly and `presby_effective_permissions()` then raises on its first call.
+`drizzle/0050_presby_schema_parity.sql` (this pipeline) closes the drift, and
+`npm run check:schema-parity` (run in the new `db.yml` job, per DECISION-150)
+keeps it closed going forward. DECISION-146's own ruling — the NextAuth
+adapter and `recordAudit()` stay on `presby_app`, no third connection — is
+unaffected; only its stated premise needed correcting.
 ---
 
 **DECISION-145: The platform corner radius is `--radius: 0.625rem`; DECISION-048's descriptive clause ("a no-op at today's 0.375rem") is superseded, its ruling is not.** (2026-09-25, orchestrator at Phase 6 integration, `docs/work-log/2026-09-25-platform-radius.md`.)

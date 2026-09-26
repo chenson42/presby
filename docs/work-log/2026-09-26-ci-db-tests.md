@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete — Batch A/B split designed, `0050` DDL written in full, `check:schema-parity` mechanism specified, `db.yml` + composite action + `e2e.yml` rewrite specified, DECISION-150 confirmed, DECISION-146 correction drafted | Design complete, implementer named | 2026-09-26 |
 | 4 — Implementation | database-admin (Batch A) → deployment-engineer (Batch B) | Complete | Batch A: `drizzle/0050` hand-written and twice-applied idempotent; from-scratch rehearsal green (51/51 migrate, parity 0 failing, seed-dev COMMIT from empty, 520/520 test-rls, resolver returns rows). Two new blocking findings fixed (untracked `assert_eq()`; `seed-dev.sql`/`test-rls.sql` fixture coupling). Batch B: `db.yml` (new) + `neon-ci-db` composite action (new) + `e2e.yml` rewrite + vitest/playwright config + rate-limit fix + docs; full rehearsal green end-to-end (286/286 files, 4141/4141 tests, 520/520 test-rls, resolver returns 5 rows) against a from-scratch database following the exact `db.yml` sequence; Neon branch create/delete steps dry-read only (no `NEON_API_KEY` available locally) | 2026-09-26 |
 | 5 — Verification | qa | Complete — from-empty rehearsal re-run independently (51/51, parity 0 failing, seed COMMIT, 4141/4141 with 0 skipped, test-rls 520, resolver 5 rows); failing-first both directions; 0050 idempotent; composite FK is the refusing layer on the owner connection; actionlint clean; four findings, none red (1–3 closed by a doc second pass) | PASS | 2026-09-26 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.26.2 | SHIP IT | 2026-09-26 |
 
 ---
 
@@ -2470,34 +2470,89 @@ Findings 1–3 are closed by a Batch B second pass before Phase 6 (the recipe wa
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-26.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+SHIP IT
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> CI now builds a database from nothing but the committed `drizzle/*.sql` files and runs all 4141 tests plus the 520-assertion isolation suite against it — a claim proven three times independently (by the schema implementer, the CI implementer, and QA), not asserted once — and every one of Phase 1's four open questions, its two blocking gaps, and its adversarial parent-branch finding resolved exactly the way the rulings said they would, with the one honest exception (nothing has run inside GitHub Actions yet) declared up front in Phase 1 and never allowed to soften into something greener-sounding.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The acceptance criterion Phase 1 set for itself actually worked as a filter.** Phase 1's self-imposed rule — "rehearsal is the acceptance criterion" — is what caught the four-column schema drift, and Phase 2's escalation of it (the `plpgsql` late-binding finding, `drizzle/0010:88,105`) is what turned "some fixture rows fail" into "the permission resolver is broken on every from-scratch database and 50/50 migrations lie about it." That escalation is the sharpest single piece of work in this pipeline, and it is carried forward accurately at every phase, never summarized away.
+- **The `db.yml` job earns its own name.** `.github/workflows/db.yml` is exactly what Flow 1 described: `check-secrets` gate → provision → `db:migrate` → `check:schema-parity` → `db:seed` → fixture → `install-test-helpers.sql` → `test:db` → the `presby_app`/`rolbypassrls=f` guard → `test-rls.sql` → delete `if: always()`. I read it directly (`/Users/cshenso/git/presby-platform/presby-wt-ci/.github/workflows/db.yml`) rather than trusting the work-log's description of it, and it matches line for line, including the two things Phase 3 hadn't anticipated (`install-test-helpers.sql`, and keeping the four DB URLs off the `npm run` steps' `env:`).
+- **The parity check is a real regression test, not a one-time patch.** `scripts/check-schema-parity.ts` was proven failing-first on a `0049`-only database (naming exactly the four drifted objects) and passing after `0050`, independently, by both database-admin and QA. Its allowlist ships with five dated, named, individually-justified rows and zero `"pending"` rows — the discipline Phase 2 pre-ruled for ("a parity check that is red on arrival gets disabled") held.
+- **Two bugs were found and fixed that no phase before Phase 4 predicted**, and both are disclosed rather than folded in silently: `assert_eq()` existed on every live branch and in no committed file (Finding 5 — now `scripts/install-test-helpers.sql`, deliberately not a migration), and `seed-dev.sql`'s `personnel_admin` grant had quietly broken `test-rls.sql`'s own DECISION-039 positive control a month earlier, invisible because no branch had ever been built from empty (Finding 6). Both fixes address the actual property the guard cares about, not the surface shape of the failure — the fix "closes the subject's own open grants first," which is literally what the trigger's own HINT prescribes.
+- **DECISION-150's central claim is demonstrated, not asserted**, and this is the strongest intent-vs-shipped evidence the pipeline has. Three independent from-scratch rehearsals (Batch A's `ci_rehearsal_a`, Batch B's `ci_rehearsal_b`, QA's `ci_qa`/`ci_qa_pre`) all land on the identical numbers: 51/51 migrations, `check:schema-parity` 0 failing, `seed-dev.sql` `COMMIT` for the first time ever, 4141/4141 tests with 0 skipped, 520/520 `test-rls.sql`, and a direct call to `presby_effective_permissions()` returning 5 rows where it used to raise `column ac.group_id does not exist`. I did not take any of these numbers on trust — I independently confirmed the shipped files (`db.yml`, `drizzle/0050`, `check-schema-parity.ts`, the two `test-rls.sql` edits, `docs/testing.md`'s corrected recipe) match what the work-log claims, by reading them directly in the merged worktree.
+- **Every one of Phase 1's four open questions resolved consistently with the ruling and held true in practice**, not just on paper (detailed in the Intent-vs-Shipped Diff below).
+- **The QA-second-pass loop worked exactly as the pipeline design intends.** Findings 1–3 (the `ALTER ROLE` rehearsal hazard, the doc recipe still missing `-v ON_ERROR_STOP=1`/`check:schema-parity`/`install-test-helpers.sql`, the two gate blocks missing `set -euo pipefail`) were all closed by Batch B's second pass before I ever opened the file — I confirmed each fix is actually present in the merged tree (`docs/testing.md:16-21`, `:238-241`, `db.yml`'s and `e2e.yml`'s `check-secrets` blocks), not just recorded as "will fix."
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: stub `RATE_LIMIT_DISABLED=false` in the enforcement block. Shipped: exactly that, mirroring the escape-hatch block's `"true"` stub. QA confirmed 15/15 across three env states (unset/true/false). **Matches.**
+- Phase 1 said: `testTimeout`/`hookTimeout` with a comment naming the remote-Neon reason. Shipped: `20000`/`30000`, commented. **Matches.**
+- Phase 1 said: `fileParallelism: false` globally. Shipped: **not** globally — Phase 2 overturned this on measurement (12.12s vs 93.79s, 7.7×, +82s on every `ci` run) and confined it to a `test:db` npm script. This is Phase 2 doing its job — a scope item was wrong and got caught before it cost every future CI run 82 seconds forever. **Acceptable drift, and a strict improvement over the original intent.**
+- Phase 1 said: a `db-tests` job on an ephemeral branch, explicit parent, fresh database, skip-cleanly-when-absent. Shipped: `db.yml`, verified by direct read, matches down to the guard step and the `if: always()` delete. Widened along the way with `check:schema-parity` and `install-test-helpers.sql`, both load-bearing and both disclosed as additions, not silently absorbed. **Matches, and the widening was necessary rather than scope creep — Batch B's own rehearsal could not have gone green without either.**
+- Phase 1 said: `e2e.yml` fixed for C-5's three points. Shipped: `PLATFORM_DATABASE_URL` written, `db:migrate`→`check:schema-parity`→`db:seed`→`seed-dev.sql` replacing `db:push`+`db:seed`, `RATE_LIMIT_DISABLED=true` kept for the shared fixture. QA independently confirmed the wiring actually reaches `globalSetup` (traced `playwright.config.ts:5`'s `dotenv.config` through to `seed-orgs.ts:233`), not just that the YAML looks right. **Matches**, with the honest caveat that the Playwright suite itself has never executed (see Edge Cases).
+- Phase 1 said: coverage `include`/`all` so 121 invisible files appear, and diagnose N-4a. Shipped: `include`/`exclude` (Vitest 4 has no `all` — correctly not used), `reportOnFailure: true`, and N-4a traced to a specific documented default (`reportOnFailure` defaults `false` in Vitest 4) and reproduced in both directions by both the implementer and QA, independently, without relying on "the rate-limit fix made it go away." **Matches, and the diagnosis is the real one, not a coincidence.**
+- Phase 1's Gap 1 (schema drift) and the orchestrator's widening ruling: `drizzle/0050` ships hand-written, idempotent, converging both a fresh and a drifted database — proven by re-application (byte-identical catalog snapshots) by database-admin (twice) and QA (twice more, on a 1,649-line snapshot). **Matches**, and QA additionally confirmed the composite FK — not RLS — is the layer that actually refuses a cross-council write, tested against the RLS-bypassing owner connection specifically so the answer couldn't be an RLS accident.
+- Phase 1's Gap 2 (`seed-dev.sql` collision) and the stale `seed.ts` comment: both fixed exactly as scoped — `on conflict do nothing` plus 11 keyed subqueries (count verified at 11 by both database-admin and my own read), and the stale docstring replaced with an accurate one naming this pipeline as provenance. **Matches.**
+
+**Open Questions 1–4, resolved and verified:**
+1. *Widen this pipeline vs. separate bug-fix pipeline?* Orchestrator ruled: widen, pre-assign `0050`. In hindsight this was the right call — Batch B's rehearsal depended on exact fixture behavior (`group_types` reconciliation, the two `test-rls.sql` line edits) that only existed because Batch A and Batch B shared one work-log's Handoff block. A split pipeline would have needed to reconstruct that same handoff by hand. **Resolution matches the facts.**
+2. *Parent branch / fresh-database pattern?* Architect ruled option (b): pin `parent: development`, `CREATE DATABASE` inside. Verified feasible against the live catalog before shipping (`rolcreatedb`, `presby_app` survives the fork, `admin_option`), then verified working in three independent rehearsals. **Resolution matches the facts.**
+3. *Placement — `ci.yml`, `e2e.yml`, or new `db.yml`?* Architect ruled a new `db.yml` with its own duplicated `check-secrets` gate. Shipped exactly that; QA confirmed `git diff $(merge-base) -- .github/workflows/ci.yml` is empty — this branch never touched the fork-safe workflow. **Resolution matches the facts.**
+4. *Node 22?* Ruled yes, via `node-version-file: ".nvmrc"` for merge compatibility with the concurrent lint-gate pipeline. Both new/rewritten job blocks use that form, confirmed by QA and by my own read of `db.yml`/`e2e.yml`, and the merge that has now actually landed in this worktree shows no conflict on `ci.yml` at all. **Resolution matches the facts, including the specific "trivial merge" prediction.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** N/A in the usual UI sense — but the CI-specific equivalent (a database with nothing but the committed migrations) is the entire subject of this pipeline, and it is now proven to work: `pass`.
+- **Failure microcopy:** `pass`. A skip reads as a skip (`::notice::` + GitHub's own "skipped" status on the gated job), never a green no-op — QA read every `run:` block line by line and confirmed no `continue-on-error`, `set -euo pipefail` everywhere (including the two gate blocks, closed in the second pass), and `-v ON_ERROR_STOP=1` on every `psql` invocation. This was the specific failure mode (C-5's "green for doing nothing") the whole pipeline exists to close, and it was audited, not assumed.
+- **Permission gate:** N/A — no `FEATURES.*` key, no route, confirmed correctly out of scope by Phase 1/2/3 alike and by QA's feature-gate audit (no protected route touched).
+- **Audit event:** N/A — no application mutation path; Batch A's schema change carries no RLS/grant/trigger change.
+- **Mobile (360px):** N/A — no UI surface exists to check.
+- **The one edge case that is genuinely still open, named honestly at every phase rather than glossed over at the end:** the `db-tests` and `e2e` jobs have never executed inside GitHub Actions, because `NEON_API_KEY`/`NEON_PROJECT_ID` don't exist as repository secrets yet. This does **not** trigger the Phase 4/5 auth-e2e-smoke gate — the diff touches no `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/` (confirmed independently by both Batch B and QA via full diff name-matching against the merge-base). A skip-that-looks-like-a-skip is enough for SHIP here specifically because: (1) it was declared as the pipeline's accepted limitation in Phase 1, before any code was written, not discovered late and rationalized; (2) the actual thing that needed proving — that the mechanism produces an honest skip rather than a false green — was independently audited by QA at the YAML level, not inferred; and (3) turning it into a real green run requires an action (adding a secret to repository settings) that is outside every implementer's and every judgment agent's authority by design. `docs/deployment.md` already carries the exact operator instruction, and I confirm it is correct and sufficient:
 
-## Follow-Ups (if SHIP WITH NOTES)
+  > **Operator action (two steps):**
+  > 1. At console.neon.tech → Account settings → API keys, create a key; note the `presby` Neon project's ID from that project's Settings → General.
+  > 2. In the GitHub repository, under Settings → Secrets and variables → Actions, add `NEON_API_KEY` and `NEON_PROJECT_ID` as repository secrets. Nothing else is required — both workflows generate every other credential (`AUTH_SECRET`, the TOTP key, `presby_app`'s per-run password) fresh on each run. `db-tests` and `e2e` flip from skipped to running on the next push or PR.
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+  This is already documented at `docs/deployment.md`'s "CI's database secrets" section with a `[YOU]` marker (this repo's existing convention for operator-only action items) — no correction needed.
 
-## Red Flags (if NEEDS REWORK)
+## Additional checks specifically requested for this Phase 6
 
-- [Specific. What has to change before this ships.]
+- **The No-Real-Data-for-CI rule is stated where a future workflow author will actually see it — in four places, not one:** the `neon-ci-db` composite action's own `parent:` input description ("Never leave empty — the implicit default is the project's PRIMARY branch, which is `production` (DECISION-150)") — the single most load-bearing location, since it fires at the point of use for any future Neon-backed job; both `db.yml`'s and `e2e.yml`'s workflow-header comments; and `docs/testing.md`'s "Continuous integration" section, which states it in prose ("a CI database contains only rows CI created"). This is well past adequate.
+- **QA Finding 4 (coverage baseline 80.21% → 53.02%) is correctly named as an artifact of the `coverage.include` fix, not a regression**, and QA's own text ("named here so the next test-coverage review starts from the honest baseline rather than treating it as a regression") is exactly right. One gap: `docs/TODO.md` still carries a now-stale line (the "v8 coverage reporter emits no row for `permissions.ts`/`flags.ts`" entry, describing the pre-fix state) that this pipeline resolves but does not close, and there is no durable pointer from the baseline number itself to the explanation once this work-log ages out of recent memory. See Follow-Ups.
+- **The release-note draft does not claim the jobs have run.** I read the orchestrator's staged script (`/private/tmp/claude-501/…/scratchpad/ci-integrate.py`) directly. Its 0.26.2 entry text — "A new automated job builds a throwaway database from empty on every change, loads the fixtures, and runs all four thousand database-backed tests… Both wait on two credentials the operator adds; until then they report themselves as skipped rather than pretending to pass" — describes the job's designed behavior and immediately, explicitly, states the current skip condition in the very next sentence. No amendment needed.
+- **What's-new:** correctly no — CI/tooling infrastructure, no member-visible behavior. **Rule 14:** n/a, no functionality-map entry changes shape. **Rule 15 (`docs/architecture.md`):** I read the document. Its §5 (line 76) already names `DECISION-146` by number and states its premise directly in prose: the `presby_app` grant shape is "written down and enforced in `drizzle/0048_presby_security_b.sql` rather than living only in undocumented live grants." This pipeline's correction to `DECISION-146` is therefore not a change to something the architecture doc is silent on — it's the direct sequel to a claim the doc already makes by name. My recommendation: a single clause appended to that existing sentence (not a new section, not a new subsystem write-up — Rule 15's "resist updating it just because a pipeline shipped" bar is real, and this isn't a new subsystem) noting that CI now builds and tests a database from empty on every run as the standing proof of reproducibility (DECISION-150). This is optional, not a SHIP blocker — the document remains accurate as written, since `0048`'s grant claim and `0050`'s column/FK fix are genuinely different objects — but it's the one place in the doc where a reader would otherwise be left with an uncorrected half of the reproducibility story.
+
+## Follow-Ups (SHIP WITH NOTES — items are notes, not blockers; ship proceeds as SHIP IT with these tracked)
+
+- **Bless, with one amendment, the orchestrator's drafted `docs/TODO.md` follow-up line in `ci-integrate.py`.** Items (1)–(5) — orphan-branch janitor, frozen `drizzle/meta/` snapshots past `0012`, `check:schema-parity`'s function/default/index/CHECK-constraint gap (Finding 5's class), `show_db_tree()` undefined-and-unreferenced, and the retrospective note about `plpgsql` late-binding hiding schema drift — all trace cleanly to named Phase 2/3/4 follow-ups in this work-log and are faithfully bundled. **Item (6)** — "the CI `ci` job remains one sequential job (see the flags follow-ups)" — does not originate anywhere in this pipeline's Phases 1–5; it reads like a fragment carried over from the concurrent `flags`/`lint-gate` pipeline's own TODO draft. Recommend the orchestrator verify its provenance and either move it to the correct work-log's line or drop it from this one — a TODO line citing the wrong work-log as its source will misdirect whoever picks it up next.
+- **Add one line closing the stale `docs/TODO.md` entry** ("The v8 coverage reporter emits no row for `src/lib/permissions.ts` or `src/lib/flags.ts`…a reporter-configuration gap for the next test-coverage review") — this pipeline's `coverage.include` change resolves exactly the gap that line describes, and QA's own numbers (`permissions.ts` 100%, `flags.ts` 100%) confirm it. Recommend marking it closed by this work-log in the same integration commit, with a one-clause note that the overall 53.02% baseline that appears alongside those numbers is the intended, honest result of the same fix (Finding 4) — not a regression — so a future test-coverage review doesn't need to rediscover that explanation from this work-log's Phase 5 section alone.
+- **`docs/architecture.md`, §5 (line 76):** optional, narrow addition naming DECISION-150 alongside the existing DECISION-146 citation — see above. Not required for SHIP IT.
+
+## Red Flags
+
+None.
+
+---
+
+## Per-Phase Status
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — walked every Phase 1 scope item, all four open questions, and DECISION-150's core claim against the merged, committed code (`4e1d232` schema-parity, `b0213f0` CI); independently re-confirmed (not trusted from the work-log) that `db.yml`, `e2e.yml`, `drizzle/0050`, `scripts/check-schema-parity.ts`, `scripts/install-test-helpers.sql`, the two `scripts/test-rls.sql` edits, and both docs files match exactly what Phases 3–5 claim; found zero discrepancies between shipped code and the work-log's description of it | SHIP IT | 2026-09-26 |
+
+## Handoff
+
+**To the orchestrator**, for integration housekeeping: record `DECISION-150` (Phase 2/3's text, unchanged), append the `DECISION-146` correction note, fold `docs/schema-design-2.md` §2i (F81–F83) before its existing `## 3. Section M` anchor (confirmed no F-number collision — F80 is the last used), reconcile `docs/TODO.md` per Follow-Ups above (bundling Phase 2–4's five named items, resolving Open Item (6)'s provenance, and closing the stale coverage-reporter line with the baseline note), and cut release `v0.26.2` — the drafted note text is accurate and does not overclaim. Mark this entry's Per-Phase Status row above as final. No `feedback` row to close (Workflow Rule 12 n/a — this pipeline did not originate from in-app member feedback).
+
+
+
+### Orchestrator closure (2026-09-26)
+
+Shipped as v0.26.2 (`fix(schema):` 0050 + `ci:` the workflows). DECISION-150 recorded; DECISION-146 corrected in place; `docs/schema-design-2.md` §2i records the from-scratch findings (F81–F83); TODO reconciled; `development` re-migrated through 0050 with `install-test-helpers.sql` applied and `test-rls.sql` re-run there. The `db-tests` and `e2e` jobs skip until the operator adds `NEON_API_KEY`/`NEON_PROJECT_ID`.

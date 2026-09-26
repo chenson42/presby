@@ -21,7 +21,7 @@
 | 3 — Technical design | tech-lead | Complete — full DDL plan for `drizzle/0053`, matcher signature, TS model, parity allowlist, proposed `test-rls.sql` §42 / `seed-dev.sql` fixtures, F104 added | Design complete — implementer named | 2026-09-26 |
 | 4 — Implementation | database-admin | **Complete (after one Phase 5 loop-back, 2026-09-26)** — first pass: `drizzle/0053` hand-written and applied; three tables, one view, two functions, two freeze triggers, three additive `statistical_returns` constraints; F104 addendum honoured; two new findings raised. Loop-back pass: FAIL-1 fixed in place (`0053:452`, `:750` — the two `grant execute` lines with the 0046 B-M1 rationale), FAIL-2 fixed (six §42 handlers now match the rejection literal, proved failing-first both ways), plus one `imports.test.ts` grant regression closing the batch-side residual. Whole-file re-apply idempotent ×2 (exit 0, no row-count change); suite 584/exit 0; `test:db` 4178; from-empty rehearsal re-run and dropped | Complete | 2026-09-26 |
 | 5 — Verification | qa | **Second pass: PASS** — both first-pass findings closed; failing-first reproduced by QA under a revoked grant and a gutted guard body; 584 / 4178; from-empty clean. First pass: first pass: FAIL — two deny helpers missing `grant execute` (tenant path emitted `permission denied for function …` instead of the designed literal, the 0046 B-M1 hazard reintroduced); six §42 handlers passed against a no-op guard. Everything else verified clean incl. from-empty 584. Looped back to Phase 4; both defects fixed 2026-09-26 (see Phase 4 loop-back). Expect **584** suite assertions and **4178** `test:db` tests on re-run. | PASS | 2026-09-26 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-26 |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.27.0 | SHIP WITH NOTES | 2026-09-26 |
 
 ---
 
@@ -2491,37 +2491,93 @@ The orchestrator's integration items are unchanged and still outstanding: the `i
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-26.*
+
+*For `/Users/cshenso/git/presby-platform/presby-wt-nh/docs/work-log/2026-09-26-name-history-import-staging.md`. Read Phases 1–5 in full (2,646 lines), including the Phase 2 addendum (F104) and both Phase 5 passes. Spot-checked the live catalog directly on Neon branch `br-shiny-cherry-ax6egkta` (confirmed via `pg_settings.neon.branch_id` on the owner connection, matching the worktree's assignment) rather than trusting the write-up alone.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> This increment promised the schema and matcher for a future import pipeline — no writer, no UI — and that is exactly, precisely what shipped: I re-derived every load-bearing claim (FORCE RLS, grants, the view's column list, the matcher's return columns, both freeze triggers, the F104 composite FK, the narrowed provenance CHECK) against the live catalog myself and every one matched the write-up to the letter; the only reason this isn't a bare SHIP IT is a handful of correctly-named-but-not-yet-tracked follow-ups, one of which (a Phase 2 ruling's own TODO instruction) fell out of Phase 4's compiled integration list and needs to be put back before this closes.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The staging promise, not an import experience, is the right yardstick, and it's met.** Phase 1's Flow 1 table (migration → backfill → seed fixtures → `check:schema-parity` passes) is the only user-facing "flow" this increment has, and it ran clean twice on the branch DB and twice more on independent from-empty scratch databases (Phase 4's rehearsal, QA's first-pass rehearsal, QA's second-pass rehearsal) — DECISION-150's bar, met three separate times by three different operators.
+- **Gap 1 (no structured city → `canonical.city = null`) honoured, and I checked it isn't just true by construction.** Live query: 0 open canonical rows have a non-null city; the one canonical row that does (Bramblewood, `Cranesport`) is a *closed* predecessor row from the seed fixture's deliberate rename scenario (`authority = 'recorded'`, `effective_to = 1988-06-01`), not a backfill artifact — the automated backfill's 15 open rows are all `authority = 'backfill'`, `city = null`, matching Ruling 7 exactly.
+- **Gap 2 (chain writer cannot serve imports) honoured and not re-introduced.** `presby_import_return()` is specified as a contract only (Ruling 9) and nothing in the diff calls `presby_write_return_publication_chain()`; the additive `statistical_returns` constraints (staging FK, id/about/year unique, narrowed provenance CHECK) exist purely to make room for the future sibling, and I confirmed the narrowed CHECK live: `CHECK ((provenance = 'imported' OR staging_row_id IS NULL))` — exactly Finding 1/F105's text, not Ruling 6.3's original (unappliable) form.
+- **Gap 3 (no `presby_app` INSERT on name history) honoured.** Live `aclexplode`: `organization_name_history` grants `presby_app` **SELECT only**; `presby_platform` gets INSERT+SELECT (the 0044 narrowing). No DML path exists for the table this increment ships besides the migration's own backfill.
+- **The three open questions are closed and the closures are live, not just documented:** Ruling 3 (rename closes-and-opens, never duplicates) — the `organization_name_history_canonical_no_overlap` partial GiST EXCLUDE is present verbatim on the live catalog; Ruling 4 (year ranks, never filters) — the matcher's 13-column return signature matches Ruling 4's list exactly, in order, live; Ruling 8 (minute-vs-authority) — `organization_name_history_minute_shape`'s live definition matches the design.
+- **F105 (narrowed CHECK) still expresses Ruling 6.3's intent, not just its letter.** The point of 6.3 was "an imported artifact's staging pointer is exclusive to imported provenance"; `source_ref` turning out to be a general free-text column (proven against `drizzle/0047`'s live, permanently-frozen backfill row) doesn't weaken that — `staging_row_id` still carries the exclusivity, and `imports.test.ts` pins the `drizzle/0047` row as a named regression so a future tightening has to argue with a test, not a comment.
+- **F106's honest invariant split is real, not just claimed.** The migration's own section-9 assertion (strong: every org has exactly one open canonical row, asserted at migration time) is unchanged; `seed-dev.sql`'s section (0) is explicitly the weaker, seed-scoped claim; `test-rls.sql` §42(k) and `imports.test.ts` assert the two separately. This is the right way to admit a decaying invariant rather than pretend it still holds everywhere.
+- **The QA second-pass B-M1 grant fix is closed and independently reproduced, not just re-asserted.** I didn't just read QA's claim — I ran the ACL query myself: both `presby_deny_import_batch_change()` and `presby_deny_import_row_change()` show `presby_app=X`, `presby_platform=X` in `proacl` on the live branch DB right now.
+- **The adversarial pass's sharpest finding (the matcher as a cross-council enumeration oracle) is honoured with margin.** Live `pg_get_function_result` on `presby_match_organization` shows exactly the 13 ruled columns — no `platform_status`, `slug`, `deletable_until`, `status` — and the view's column list (`information_schema.columns`) shows exactly the 9 ruled columns, with `organization_id`, `minute_reference`, `notes`, `authority`, `recorded_by` structurally absent (not filtered, absent), which is the stronger of the two designs the architect considered.
+- **F103's generalized test holds on inspection of every constraint on the three tables**, not just the two it was invented for — QA's own table (work-log:2193-2204) is right, and I did not find a constraint QA missed.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: no UI, no route, no server action, no `actions.ts` — "if a reviewer goes looking for a page ... that is not a gap." Shipped: `git diff 82d6b54 --stat` touches exactly `docs/schema-design.md`, `scripts/check-schema-parity.ts`, `scripts/seed-dev.sql`, `scripts/test-rls.sql`, `src/lib/db/domain/{org,returns}.ts`, `src/lib/dev-docs.ts`, plus new `drizzle/0053_…sql`, `src/lib/db/domain/imports.{ts,test.ts}`, and the work-log. Zero `src/app/**`. **Verdict: matches, exactly.**
+- Phase 1 said: name-history writes are council acts, recommend no live INSERT grant this increment (a recommendation, explicitly not binding by default). Phase 2 **strengthened** this to a structural rule (F40/F103) rather than accepting it as contingent. Shipped: matches Phase 2's stronger version, live-verified. **Verdict: matches (and correctly hardened between Phase 1 and Phase 2, which is the pipeline working as intended, not drift).**
+- Phase 1 said (Gap 4): the overlap rule needs a mechanism. Phase 2/3 supplied the partial GiST EXCLUDE. Shipped: present, live, and QA proved it fires with a positive control (a `former_name` over the identical interval is accepted — the partial `WHERE` is doing the work). **Verdict: matches.**
+- Phase 1's kickoff said "an import will be the chain writer's third caller." Phase 1's own Gap 2 corrected this before Phase 2 even started, and every subsequent phase carried the correction forward without regression — I checked `presby_write_return_publication_chain()` is untouched by this diff. **Verdict: matches the corrected intent, not the stale kickoff text — the right outcome.**
+- Phase 2 Ruling 6 proposed a plain FK for `resulting_return_id`; the Phase 2 addendum (F104) overrode it mid-Phase-4 to the about-org composite. Shipped: the live FK is `(resulting_return_id, resolved_org_id, report_year) -> statistical_returns(id, about_org_id, report_year)` — I ran `pg_get_constraintdef` and it matches the addendum's binding text character-for-character, not the superseded Phase 3 text. **Verdict: matches the corrected ruling.**
+- Phase 5 (first pass) found two real defects (FAIL-1 grants, FAIL-2 unfalsifiable assertions) against Phase 3's own design (the B-M1 idiom `drizzle/0046` already established). Shipped, after loop-back: both closed, and QA's second pass independently reproduced the closure with its own failing-first probes rather than trusting the implementer's log. **Verdict: matches, after one correctly-executed loop-back — the pipeline mechanism worked as designed.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** pass. The from-empty rehearsal is this increment's actual "empty state" test (there is no page to render an empty state on), and it ran clean three independent times across two implementers and one QA pass, on three different scratch databases, all subsequently dropped.
+- **Failure microcopy:** pass, in the only form applicable — the tenant-connection refusal literal (`import_rows: this change is not permitted` / `import_batches: this change is not permitted`) is the "microcopy" a future UI's error handling will surface, and I reproduced both live on the tenant connection myself. No route exists yet to render it to an end user, so the full UI-failure-microcopy question (Phase 1's Flow 2 failure note — bad worksheet name, no header row) is correctly still open for the executor pipeline, not silently dropped.
+- **Permission gate:** not applicable — no enforcement point exists in this increment (Phase 1/2/3 concur, and I found no code path that should have one and doesn't). The one live gate that does exist — the RLS/grant boundary — I verified directly rather than trusting the write-up.
+- **Audit event:** not applicable, correctly deferred with the writers (Ruling 9), and `check:audit` is vacuously green for the right reason (no `actions.ts` file exists), not because a mutation slipped past the tripwire.
+- **Mobile (360px):** not applicable — no rendered surface.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+The orchestrator's three drafted lines (F100 hardening, the executor-pipeline resolution note, `presby_organize_congregation()`/F106) correctly cover Phase 4's own two named integration items plus F100. **They do not cover everything a binding ruling in this work-log asked to be tracked** — Ruling 5c (Phase 2) explicitly says of the `import_rows` revision mechanism: *"an explicit open item owned by the executor pipeline's Phase 1 — name it in `docs/TODO.md` at integration; do not guess it here."* That line is absent from Phase 4's "For the orchestrator, at integration" list (work-log:1920-1927) and from both QA passes' scope. It should not be lost between here and the merge. Four lines total, ready to paste:
 
-## Red Flags (if NEEDS REWORK)
+- `- [ ] F100 — organizations.platform_status is already readable on the tenant connection via a raw table-level grant (relrowsecurity = f, presby_app holds SELECT); presby_match_organization()'s exclusion of it is a surface rule, not a leak closure. Scope a column-level revoke + projection view as its own hardening pipeline. Do not widen the raw grant meanwhile. — docs/work-log/2026-09-26-name-history-import-staging.md`
+- `- [ ] Executor pipeline: import_rows.resulting_return_id may name a statistical_returns row the importing presbytery cannot SELECT directly (the duplicate disposition, F104's accepted residual). Resolve it only through presby_list_published_returns_to_me() — never a direct join, never a DEFINER fetch by uuid. — docs/work-log/2026-09-26-name-history-import-staging.md`
+- `- [ ] F106 — an organization created after drizzle/0053 (createOrganization(), a test fixture, or a future presby_organize_congregation()) gets no canonical name-history row; the backfill is a point-in-time act and this increment ships no writer. Decide in the lifecycle-UI pipeline whether presby_record_org_name() ships with an AFTER INSERT trigger on organizations. — docs/work-log/2026-09-26-name-history-import-staging.md`
+- `- [ ] Import-executor pipeline's Phase 1 must name the import_rows revision mechanism (an append-only import_row_revisions child, or a presby_revise_import_row() DEFINER function) — resolution is set-once by design (Ruling 5c) with no correction path once resulting_return_id is stamped, and Phase 2 explicitly deferred naming the fix-up mechanism to that pipeline's own Phase 1. — docs/work-log/2026-09-26-name-history-import-staging.md`
 
-- [Specific. What has to change before this ships.]
+The `dev-docs.ts` `statistics_submission_grants` gap-fill is **already closed within this diff** (Phase 4 registered it as a one-line, disclosed, harmless bonus fix) — it needs no TODO line, it needs nothing further.
+
+**Workflow Rule 12 (feedback row):** not applicable — this pipeline has no `Source:` block and did not originate from an in-app feedback row.
+
+**Workflow Rule 13 (what's-new advisory):** No. No member-visible behavior shipped — no UI exists to advertise.
+
+**Workflow Rule 14 (functionality map):** Yes, required at integration, and I checked the current text — `docs/product/functionality-map.md:15`'s "presby: schema" bullet (63 domain tables) does not yet mention name history, import staging, or the matcher. Suggested addition, appended to the existing bullet before its migration citation: *"; dated, typed, city-qualified organization name history (D14/F37, function-mediated — no live `presby_app` INSERT) with a cross-council matching function (`presby_match_organization()`); a presbytery-owned import quarantine (`import_batches`/`import_rows`, D13) staged for a future spreadsheet importer, ordinary tenant DML minus DELETE, no writer yet."* — then extend the migration citation to `drizzle/0043`–`0047`, `0053` and add this work-log's link.
+
+**Workflow Rule 15 (architecture.md):** No, and I looked for a reason to disagree before agreeing. The candidate case would be "D13's staging model is a new subsystem shape," but it isn't one at the architecture-document's level of abstraction: section 4/5 already state the isolation-vs-authorization split and the function-mediation pattern this increment is a straightforward *instance* of (F103's test is a sharpened restatement of an already-documented invariant, not a new one), and the document's own section 3 ("the domain model in five ideas") doesn't itemize individual table families at this grain — it didn't get an entry for `organization_lifecycle_events`/`organization_affiliations` either. No writer, no route, no changed data flow, no changed runtime shape. Resisting the update is the correct call here, consistent with Rule 15's own instruction not to move the document with every pipeline.
+
+## Release Note Draft (v0.28.0, schema-only, for a non-engineer)
+
+> ### The database can now remember a congregation's past names, and hold an unmatched spreadsheet row for review instead of dropping it
+>
+> **Background:** A presbytery's historical records use whatever name a congregation was known by at the time — churches merge, rename, and are recorded under handwritten variants in decades-old paper reports. Matching those old records to today's congregations by name alone is unreliable, and past attempts to import that kind of data have simply thrown away anything that didn't match cleanly. This release lays the groundwork to do both properly, but changes nothing anyone will see yet.
+>
+> **Changes:**
+> - The database can now store more than one name for a congregation over time — its current name, any former official names, and looser historical or handwritten variants — each dated and optionally tied to a city, so a name from 1965 can be told apart from a same-named church founded later elsewhere.
+> - A new lookup can search across all of a presbytery's history — not just the current name list — to suggest which congregation an old record probably refers to, ranked by how confident the match is.
+> - The database gained a place to hold a spreadsheet row that can't be matched automatically: the original data, what was tried, and why it's unresolved, kept permanently rather than silently skipped.
+> - Nothing is reachable from any screen yet — no upload page, no review screen, and no way for a presbytery or congregation to record a name change themselves. This release is the storage and the matching logic only; the page that uses them ships in a later release.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — Phase 1's staging promise (schema + matcher, no writer, no UI) verified against the shipped diff and against the live catalog directly (FORCE RLS, grants, view columns, matcher return columns, the F104 FK, the narrowed provenance CHECK, the canonical backfill's null-city discipline, all independently re-queried, not read from the write-up); all eight Phase 1 gaps and three open questions confirmed closed and live; one Phase 2 ruling's TODO instruction (Ruling 5c's revision-mechanism line) found missing from Phase 4's compiled integration list and added here | **SHIP WITH NOTES** | 2026-09-26 |
+
+**Handoff:** to the **orchestrator**, for integration. Ready-to-apply items, none blocking: (1) the four `docs/TODO.md` lines above (three as drafted, one added — the Ruling 5c revision-mechanism line); (2) `docs/schema-design-2.md` gets F100–F106 (F104's text superseded per the addendum, not Phase 3's original); (3) `docs/decisions.md` DECISION-153 carries the addendum's ruling 2 language ("about-org composite"), not "plain FK"; (4) `src/lib/db/domain/index.ts` gains the one export line; (5) `drizzle/meta/_journal.json` gains the `0053` entry at whatever index it lands; (6) `docs/product/functionality-map.md`'s "presby: schema" bullet, per the suggested text above. No further pipeline phase is owed — this closes as SHIP WITH NOTES pending the user's commit approval."}],"container":null,"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":2265,"cache_read_input_tokens":133649,"output_tokens":8317,"output_tokens_details":{"thinking_tokens":1877},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":2265},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":8317,"cache_read_input_tokens":133649,"cache_creation_input_tokens":2265,"cache_creation":{"ephemeral_5m_input_tokens":2265,"ephemeral_1h_input_tokens":0},"type":"message"}],"speed":"standard"},"diagnostics":null,"context_management":null},"apiBlockIndex":1,"requestId":"req_011CfSnJUUAtrd5SjX6E4mip","attributionAgent":"analyst","type":"assistant","uuid":"55a4b60e-a89a-4c73-8321-eb700cf57343","timestamp":"2026-09-26T21:45:56.396Z","effort":"high","perTurnEffort":null,"userType":"external","entrypoint":"cli","cwd":"/Users/cshenso/git/presby-platform/presby","sessionId":"b08e6db7-b5b1-4a1b-b94f-75e0928bed80","version":"2.1.273","gitBranch":"main","slug":"warm-honking-hartmanis"}
+
+### Orchestrator closure (2026-09-26)
+
+Shipped as v0.27.0 (`feat(schema):` `drizzle/0053`). DECISION-153 recorded with the F104 addendum amendment; F100–F106 folded into `docs/schema-design-2.md` §2l; `_journal.json` idx 53 and the `imports` export in `src/lib/db/domain/index.ts` appended; TODO reconciled; `development` migrated through 0053 and `test-rls.sql` re-run there.
+
+
+---
 
 ## Phase 2 addendum — F104 (architect, 2026-09-26)
 

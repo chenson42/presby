@@ -101,7 +101,7 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
     // identical reason (see this file's own header).
     const [gt] = await platform
       .insert(groupTypes)
-      .values({ organizationId: null, key: "roster", name: "Roster" })
+      .values({ key: "roster", name: "Roster" })
       .onConflictDoNothing()
       .returning({ id: groupTypes.id });
     let rosterTypeId = gt?.id;

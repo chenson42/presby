@@ -514,20 +514,37 @@ export async function resolveOrgContext(
  * `organizations` carries a bare `grant select ... to presby_app` and no policy
  * (`drizzle/0009_presby_rls.sql`), because the org tree is public information.
  * `getPlatformDb()` is forbidden here, as everywhere on a user-facing path.
+ *
+ * The ENTIRE BODY is one `try { … } catch { return null; }` — a DB read
+ * failure collapses to the same `null` every genuine miss already returns,
+ * never a 500 (docs/work-log/2026-09-26-public-render-blip.md; this was the
+ * crash Phase 1 reproduced live, since this function's only anonymous
+ * caller reaches it from a `not_found` branch that a DB blip now always
+ * routes into).
  */
 export async function publicOrgSummary(
   slug: string,
 ): Promise<{ name: string; organizationType: OrganizationType } | null> {
-  const [row] = await db
-    .select({
-      name: organizations.name,
-      organizationType: organizations.organizationType,
-    })
-    .from(organizations)
-    .where(eq(organizations.slug, slug))
-    .limit(1);
-  if (!row) return null;
-  return { name: row.name, organizationType: row.organizationType };
+  try {
+    const [row] = await db
+      .select({
+        name: organizations.name,
+        organizationType: organizations.organizationType,
+      })
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+      .limit(1);
+    if (!row) return null;
+    return { name: row.name, organizationType: row.organizationType };
+  } catch {
+    // Never the caught error or its `.message` — same discipline as
+    // isFlagEnabled()'s own log line (src/lib/flags.ts).
+    console.error(
+      "[authz] publicOrgSummary read failed; treating as not found",
+      { slug },
+    );
+    return null;
+  }
 }
 
 /**

@@ -257,9 +257,15 @@ export interface OrgServiceTimeEntry {
 export type GetPublishedSiteResult =
   | { kind: "ok"; site: PublishedSite }
   // Collapses: never provisioned, suspended, nonexistent slug, org inactive,
-  // flag off, AND a corrupt/unparseable bundle — all render the same 404
-  // (Phase 1 Gap 5's enumeration-safety requirement, extended defensively).
-  | { kind: "not_found" };
+  // flag off, a corrupt/unparseable bundle, AND a DB read failure — all
+  // render the same 404 (Phase 1 Gap 5's enumeration-safety requirement).
+  // `reason` is a hint for the CALLER's own follow-up query cost (skip a
+  // second doomed read against a database that's already down), never a
+  // value read to vary output — see page.tsx's not_found branch, the one
+  // legal reference to it (docs/work-log/2026-09-26-public-render-blip.md
+  // Phase 3 "Data Model"). A future `not_found` cause must not grow a
+  // second reference to `reason` outside that one branch.
+  | { kind: "not_found"; reason?: "absent" | "read_failed" };
 
 interface PublishedSiteRow {
   organization_id: string;
@@ -338,118 +344,151 @@ function isStoredSiteBundle(value: unknown): value is StoredSiteBundle {
  * connection with NO org context set — `presby_published_site()` is
  * SECURITY DEFINER precisely so this works (see the migration's own
  * comment). Never provisioned, suspended, nonexistent slug, org not active,
- * or the render flag off all collapse to the same `{ kind: "not_found" }`,
- * never a 500 and never a distinguishable error (Phase 1 Gap 5) — this is
- * true of the flag read (`isFlagEnabled`, fail-closed on a DB error per
- * DECISION-026) as of docs/work-log/2026-09-26-flags-fail-closed.md. It is
- * NOT yet true of the two reads below: `db.execute` and the blob resolve
- * still throw uncaught on a DB blip, which is a 500, not a 404 — tracked in
- * docs/TODO.md, not covered by this docstring's guarantee.
+ * the render flag off, or a DB read failure — ALL collapse to the same
+ * `{ kind: "not_found" }`, never a 500 and never a distinguishable error
+ * (Phase 1 Gap 5). The ENTIRE BODY is one `try { … } catch { … }`, matching
+ * `getPublicStaffRoster()`'s own documented convention (its comment names
+ * the earlier incident where this exact class of bug shipped unmade once
+ * already — this function is the second: docs/work-log/
+ * 2026-09-26-public-render-blip.md). Every internal `return
+ * { kind: "not_found" }` below is a confirmed-absent outcome reached
+ * without throwing (a missing row, a missing content-bundle key, a missing
+ * blob, an unparseable bundle) — only the outer `catch` sets
+ * `reason: "read_failed"`.
  */
 export const getPublishedSite = cache(async function getPublishedSite(
   slug: string,
 ): Promise<GetPublishedSiteResult> {
-  if (!(await isFlagEnabled("sites.public_render"))) {
-    return { kind: "not_found" };
-  }
-
-  const result = await db.execute(
-    sql`select * from presby_published_site(${slug})`,
-  );
-  const row = (result as unknown as { rows?: PublishedSiteRow[] }).rows?.[0];
-  if (!row || !row.content_bundle_key) return { kind: "not_found" };
-
-  const blob = await getBlobStore().resolve({
-    organizationId: row.organization_id,
-    key: row.content_bundle_key,
-  });
-  if (!blob) return { kind: "not_found" };
-
-  let bundle: unknown;
   try {
-    bundle = JSON.parse(blob.bytes.toString("utf-8"));
-  } catch {
-    return { kind: "not_found" };
-  }
-  if (!isStoredSiteBundle(bundle)) return { kind: "not_found" };
-
-  let brand: PublishedSite["brand"] = null;
-  if (row.brand_seed_hex && (await isFlagEnabled("ui.brand_theming"))) {
-    try {
-      const { tokens } = generateBrandTokens(row.brand_seed_hex);
-      const pairingKey = isTypePairingKey(row.brand_type_pairing ?? "")
-        ? (row.brand_type_pairing as TypePairingKey)
-        : "classic";
-      // Dynamically imported, deliberately not a static top-level import:
-      // src/lib/brand/fonts.ts calls next/font/google at MODULE SCOPE, which
-      // only resolves correctly under Next's own compiler (webpack/SWC) —
-      // under plain Node (vitest, this module's own integration test) a
-      // static import crashes at MODULE LOAD time with "Lora is not a
-      // function", before any test body runs, regardless of whether the
-      // brand branch is ever exercised. A static import here would also
-      // force every OTHER consumer of this file (provisionSiteAction,
-      // setSiteStatusAction, markSiteContactMessageReadAction — none of
-      // which touch brand at all) to either mock `@/lib/sites` wholesale or
-      // pull in next/font/google transitively. Deferred to exactly the one
-      // call site that needs it; in the real Next.js server process this
-      // resolves through the same compiled module graph either way.
-      const { resolveTypePairing } = await import("@/lib/brand/fonts");
-      brand = {
-        tokens,
-        fontPairing: resolveTypePairing(pairingKey),
-        lightOnly: row.brand_light_only ?? false,
-      };
-    } catch {
-      // A stored seed that no longer parses degrades to the platform
-      // default rather than taking the page down — same posture as
-      // read-org-brand.ts's own Reason 3 fallback.
-      brand = null;
+    if (!(await isFlagEnabled("sites.public_render"))) {
+      return { kind: "not_found" };
     }
-  }
 
-  return {
-    kind: "ok",
-    site: {
+    const result = await db.execute(
+      sql`select * from presby_published_site(${slug})`,
+    );
+    const row = (result as unknown as { rows?: PublishedSiteRow[] }).rows?.[0];
+    if (!row || !row.content_bundle_key) return { kind: "not_found" };
+
+    const blob = await getBlobStore().resolve({
       organizationId: row.organization_id,
-      organizationName: row.organization_name,
-      organizationType: row.organization_type,
-      brand,
-      pages: bundle.pages,
-      imageKeys: bundle.imageKeys ?? {},
-      profile: {
-        address: row.profile_address,
-        phone: row.profile_phone,
-        social: {
-          facebook: row.profile_facebook_url,
-          instagram: row.profile_instagram_url,
-          xTwitter: row.profile_x_twitter_url,
-          youtube: row.profile_youtube_url,
-          other: row.profile_other_url,
+      key: row.content_bundle_key,
+    });
+    if (!blob) return { kind: "not_found" };
+
+    let bundle: unknown;
+    try {
+      bundle = JSON.parse(blob.bytes.toString("utf-8"));
+    } catch {
+      return { kind: "not_found" };
+    }
+    if (!isStoredSiteBundle(bundle)) return { kind: "not_found" };
+
+    let brand: PublishedSite["brand"] = null;
+    if (row.brand_seed_hex && (await isFlagEnabled("ui.brand_theming"))) {
+      try {
+        const { tokens } = generateBrandTokens(row.brand_seed_hex);
+        const pairingKey = isTypePairingKey(row.brand_type_pairing ?? "")
+          ? (row.brand_type_pairing as TypePairingKey)
+          : "classic";
+        // Dynamically imported, deliberately not a static top-level import:
+        // src/lib/brand/fonts.ts calls next/font/google at MODULE SCOPE, which
+        // only resolves correctly under Next's own compiler (webpack/SWC) —
+        // under plain Node (vitest, this module's own integration test) a
+        // static import crashes at MODULE LOAD time with "Lora is not a
+        // function", before any test body runs, regardless of whether the
+        // brand branch is ever exercised. A static import here would also
+        // force every OTHER consumer of this file (provisionSiteAction,
+        // setSiteStatusAction, markSiteContactMessageReadAction — none of
+        // which touch brand at all) to either mock `@/lib/sites` wholesale or
+        // pull in next/font/google transitively. Deferred to exactly the one
+        // call site that needs it; in the real Next.js server process this
+        // resolves through the same compiled module graph either way.
+        const { resolveTypePairing } = await import("@/lib/brand/fonts");
+        brand = {
+          tokens,
+          fontPairing: resolveTypePairing(pairingKey),
+          lightOnly: row.brand_light_only ?? false,
+        };
+      } catch {
+        // A stored seed that no longer parses degrades to the platform
+        // default rather than taking the page down — same posture as
+        // read-org-brand.ts's own Reason 3 fallback.
+        brand = null;
+      }
+    }
+
+    return {
+      kind: "ok",
+      site: {
+        organizationId: row.organization_id,
+        organizationName: row.organization_name,
+        organizationType: row.organization_type,
+        brand,
+        pages: bundle.pages,
+        imageKeys: bundle.imageKeys ?? {},
+        profile: {
+          address: row.profile_address,
+          phone: row.profile_phone,
+          social: {
+            facebook: row.profile_facebook_url,
+            instagram: row.profile_instagram_url,
+            xTwitter: row.profile_x_twitter_url,
+            youtube: row.profile_youtube_url,
+            other: row.profile_other_url,
+          },
         },
+        serviceTimes: parseServiceTimeEntries(row.service_times),
+        officeHours: parseServiceTimeEntries(row.office_hours),
       },
-      serviceTimes: parseServiceTimeEntries(row.service_times),
-      officeHours: parseServiceTimeEntries(row.office_hours),
-    },
-  };
+    };
+  } catch {
+    // A DB blip (or anything else unforeseen) must collapse to the same
+    // generic not-found the caller already treats every other miss as —
+    // never a 500. Never log the caught error or its `.message`: Neon/
+    // Drizzle's message embeds the failed SQL text and bound params
+    // (confirmed live, Phase 1: `params: fpcw,1`) — the slug is the only
+    // safe thing to emit here, same discipline as `isFlagEnabled`'s own
+    // log line.
+    console.error(
+      "[sites] getPublishedSite read failed; treating as not found",
+      { slug },
+    );
+    return { kind: "not_found", reason: "read_failed" };
+  }
 });
 
 /**
  * Cheaper sibling for the asset route — skips the blob fetch + JSON.parse.
- * Same enumeration-safe collapse as `getPublishedSite`: any non-live reason
- * (or the flag being off) returns `null`.
+ * Same enumeration-safe collapse as `getPublishedSite`: any non-live reason,
+ * the flag being off, or a DB read failure all return `null`. The ENTIRE
+ * BODY is one `try { … } catch { return null; }`, same house style
+ * (docs/work-log/2026-09-26-public-render-blip.md) — this function has no
+ * `not_found`-style downstream follow-up to skip, so it needs no internal
+ * `reason` signal of its own.
  */
 export async function resolvePublishedOrganization(
   slug: string,
 ): Promise<{ organizationId: string } | null> {
-  if (!(await isFlagEnabled("sites.public_render"))) return null;
+  try {
+    if (!(await isFlagEnabled("sites.public_render"))) return null;
 
-  const result = await db.execute(
-    sql`select organization_id from presby_published_site(${slug})`,
-  );
-  const row = (
-    result as unknown as { rows?: Array<{ organization_id: string }> }
-  ).rows?.[0];
-  return row ? { organizationId: row.organization_id } : null;
+    const result = await db.execute(
+      sql`select organization_id from presby_published_site(${slug})`,
+    );
+    const row = (
+      result as unknown as { rows?: Array<{ organization_id: string }> }
+    ).rows?.[0];
+    return row ? { organizationId: row.organization_id } : null;
+  } catch {
+    // Never the caught error or its `.message` — same discipline as
+    // getPublishedSite()'s own catch, immediately above.
+    console.error(
+      "[sites] resolvePublishedOrganization read failed; treating as not found",
+      { slug },
+    );
+    return null;
+  }
 }
 
 export interface PublishedSiteBrandLite {

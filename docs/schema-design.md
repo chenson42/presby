@@ -192,7 +192,6 @@ erDiagram
   groups ||--o{ group_memberships : "group_id"
   memberships ||--o{ group_memberships : "person_id"
   memberships |o--o{ group_memberships : "membership_id"
-  organizations |o--o{ group_types : "organization_id"
   organizations ||--o{ groups : "organization_id"
   group_types ||--o{ groups : "group_type_id"
 ```
@@ -962,9 +961,9 @@ already matched).
 ```sql
 create table group_types (
   id               uuid primary key default gen_random_uuid(),
-  organization_id  uuid references organizations(id),   -- null = platform template
-  key              text not null,          -- committee | small_group | choir | team | court
-  name             text not null
+  key              text not null,          -- committee | small_group | choir | team | court | roster
+  name             text not null,
+  unique (key)
 );
 
 create table groups (
@@ -993,6 +992,21 @@ create table group_memberships (
 create index on group_memberships (organization_id, group_id, starts_on, ends_on);
 create index on group_memberships (organization_id, person_id);
 ```
+
+**`group_types` is a global catalog, not a tenant table.** It carries no `organization_id`, no RLS,
+and `presby_app` holds `SELECT` only — the same shape as `permissions`, `features`, `roles` and
+`sasr_form_versions`. DECISION-110 ruling 1 settled that `groups.group_type_id` always resolves to a
+platform-wide row and that per-org custom group types are the tenant-extensibility door D8 exists to
+keep closed; DECISION-151 made that a property of the database rather than a convention the
+application upheld by filtering `organization_id IS NULL` at every call site. The table spent
+0009–0050 misclassified into 0009's `tenant_tables` loop, which is the common root of B-M4 (the whole
+catalog invisible to the tenant connection under a NULL-false policy, forcing three `getPlatformDb()`
+escapes), B-L1 (1,557 accumulated duplicates behind a unique index that constrained nothing), and
+0048 §7's standing exclusion of `groups.group_type_id` from the composite-FK sweep. That FK stays
+plain and single-column — not as an accepted F2 exception, but because there is no longer an org axis
+on the parent for a composite key to reference, exactly like
+`app_role_permissions.permission_key -> permissions.key`. Writes are seed-only, on the owner
+connection (`scripts/seed.ts`'s `seedGroupTypes()`).
 
 **Derived groups** (`session`, `diaconate`) reject direct writes by trigger. Their rosters are
 **materialized into `group_memberships`** by a trigger on `officer_terms`, not exposed as a separate

@@ -136,7 +136,7 @@ describe.skipIf(!hasDb)("staff.ts (Postgres-backed, real dev database)", () => {
     // group to already exist for the org.
     const [gt] = await platform
       .insert(groupTypes)
-      .values({ organizationId: null, key: "roster", name: "Roster" })
+      .values({ key: "roster", name: "Roster" })
       .onConflictDoNothing()
       .returning({ id: groupTypes.id });
     let rosterTypeId = gt?.id;

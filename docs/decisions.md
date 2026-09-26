@@ -4,6 +4,35 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-154: every anonymous read on the public-site render path
+(`(public)/site/[slug]`) fails closed to the identical generic `not_found`
+response — no exceptions, no per-read judgment call.** `getPublishedSite()`,
+`resolvePublishedOrganization()`, `publicOrgSummary()`, the asset route's
+blob resolve, and `resolveLogoUrl()` each independently learned this the
+hard way (`2026-09-26-public-render-blip`) after the flags-fail-closed fix
+(`2026-09-26-flags-fail-closed`) proved the pattern for one read and
+incidentally created a new crash path into a second. Any NEW read added
+to this surface in the future — a further sibling function, a future
+caller-shape-1 addition — inherits this as a hard requirement, not a
+style preference: wrap the entire body in one `try/catch`, log
+`[module] functionName read failed; treating as not found"` with only
+non-secret identifiers (never the caught error or its `.message`), and
+return the same shape a confirmed-absent case returns. This extends
+DECISION-040's enumeration-safety rule (byte-identical/timing-
+indistinguishable across "not a tenant," "not published," "flag off") to
+cover "database unreachable" as a fifth indistinguishable case rather than
+leaving each future contributor to rediscover it by causing an outage.
+
+(2026-09-26, tech-lead Phase 3, adopted at Phase 6; `docs/work-log/2026-09-26-public-render-blip.md`.)
+
+---
+
+**DECISION-151: `group_types` is reclassified from tenant table to global catalog — `organization_id` and its FK dropped, RLS removed entirely, `presby_app` narrowed to `SELECT`, `unique (key)` replacing `unique nulls not distinct (organization_id, key)`; `groups.group_type_id` stays a plain FK because there is no longer an org axis to be composite against. (2026-09-26, architect, Phase 2 of `docs/work-log/2026-09-26-group-types-catalog.md`.)**
+
+Shape (a) over shape (b), ruled against the live catalog on `pipeline-group-types` rather than off `drizzle/`'s text. `group_types` has sat in `drizzle/0009`'s `tenant_tables` loop since the first schema commit — `FORCE ROW LEVEL SECURITY`, a nullable `organization_id`, full CRUD to `presby_app` — while DECISION-110 ruling 1 declared it a platform-wide taxonomy and D8 declared per-org extensibility closed. Six of six live rows are global; every application read already filtered `organization_id IS NULL` by hand at three call sites (`src/lib/groups.ts:496`, `:581`, `src/lib/org-provisioning.ts:294`); the only writer is `seedGroupTypes()` on the owner connection. That single misclassification is the demonstrated common cause of B-M4, B-L1, `drizzle/0048` §5's four-policy split, and §7's standing exclusion of `groups.group_type_id` from the F2 composite sweep — four symptoms, one root. **The decisive argument against keeping 0048's template-arm shape is that it is not neutral:** its `INSERT ... WITH CHECK (organization_id = presby_current_org())` arm lets any tenant mint a real org-scoped group type today (reproduced and rolled back, F84) — the exact write DECISION-110 forbids. That capability is *correct* for `app_roles`, which has a shipped custom-role feature, and *wrong* for `group_types`, which has been affirmatively ruled never to get one; the two tables share a symptom, not a shape. **The target is not a described shape but a tuple four tables already hold on this database** (`permissions`, `features`, `roles`, `sasr_form_versions`): `relrowsecurity = f`, `relforcerowsecurity = f`, zero policies, `presby_app` `SELECT`-only, `presby_platform` unchanged, owner by ownership. `drizzle/0051` fixes forward in 0048's idempotent single-table-override style and **does not edit 0009's shared `tenant_tables` array** — a from-scratch replay passes through the tenant shape and out the other side to the same terminal state, which the DECISION-150 from-empty rehearsal verifies. It opens with a guard that **raises** if any non-NULL `organization_id` row exists, rather than silently promoting a smuggled row to global. The `groups.group_type_id` plain FK is retained and its guarding assertion in `scripts/test-rls.sql` §39.9 is kept, but its justification is replaced: not "a composite FK would reject every row under MATCH SIMPLE," simply "the parent has no org axis" — the same footing as `app_role_permissions.permission_key -> permissions.key`. Two consequences are recorded as first-class costs rather than incidentals: the C-3 inverted-FORCE allow-list in `scripts/test-rls.sql` §39.5 and its paired list in `drizzle/0048` §2 go from 25 names to 26 (the suite's copy edited in place because it is an executable assertion, 0048's left as shipped text and superseded by 0051's header), and `scripts/seed-dev.sql`'s `ON CONFLICT (organization_id, key)` inference clause must be corrected in the same commit or the whole single-transaction fixture file fails to parse (F85). The revoke and the seed edits are one atomic unit, the same pairing DECISION-146's catalog revokes required.
+
+---
+
 **DECISION-150: CI's database is an ephemeral Neon branch off an explicitly
 pinned parent, containing a database CI created from empty — migrate-from-
 empty is the reproducibility proof, not a convenience.** (2026-09-26,

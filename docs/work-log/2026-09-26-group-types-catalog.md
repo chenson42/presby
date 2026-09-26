@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete — `drizzle/0051` statement list, TS model edit, all in-place fixture/suite sites enumerated, new §43, F84-F86/DECISION-151 adopted, one feasibility-check correction (`org-provisioning.test.ts:97`, a 25th sweep file Phase 1/2 missed) | Design complete, implementer named | 2026-09-26 |
 | 4 — Implementation | database-admin | Complete — `drizzle/0051` hand-applied and proven whole-file idempotent; three failing-first proofs recorded; from-empty recipe green; 526 RLS assertions, 4149 unit tests, 5 e2e | Phase 4 complete | 2026-09-26 |
 | 5 — Verification | qa | Complete — live-catalog audit; all three failing-first proofs reproduced on a scratch DB; from-empty rehearsal 526; shared-file hunks all authorized; two doc-only findings (fixed by the orchestrator before Phase 6); four pre-existing e2e failures diagnosed | PASS | 2026-09-26 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-26 |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.26.4; two tracked follow-ups (seed log count; e2e rot) | SHIP IT | 2026-09-26 |
 
 ---
 
@@ -1274,34 +1274,98 @@ QA Findings 1 and 2 (comment-only) fixed by the orchestrator before Phase 6, Tri
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-26.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP IT**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> `group_types` now lives in the database as what it always was on paper — a six-row, platform-wide catalog — and the live write hole Phase 1 demonstrated (any tenant could mint its own `group_types` row) is closed by a `presby_app` grant revocation I independently reproduced as `insufficient_privilege`/`permission denied`, not by a policy that a future symptom-fix could quietly widen again.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The bug is closed, verified against the live catalog, not against migration text.** On `pipeline-group-types` (`br-wispy-pond-axchf1oz` / `ep-dark-fire-ax9ysu8z`, confirmed via `pg_settings` before touching anything): `group_types` shows `relrowsecurity=f`, `relforcerowsecurity=f`, zero rows in `pg_policies`, columns exactly `id, key, name`, `group_types_key_key UNIQUE (key)`, 6 rows / 6 distinct keys, `presby_app` holding `SELECT` only (`aclexplode(relacl)`), `presby_platform` retaining its unchanged 0009 blanket CRUD. I then opened a transaction as `presby_app`, set `app.current_org_id` to a real org, and tried `insert into group_types (key, name) values ('probe-analyst', 'Probe')` — it failed with `permission denied for table group_types`. This is the exact scenario Phase 1's adversarial finding (F84) demonstrated succeeding under the old four-policy shape.
+- **`groups.group_type_id` is a plain FK for the right reason now, not an accepted exception.** `groups_group_type_id_group_types_id_fk` is a plain, single-column FK — confirmed live — and there is no longer an org axis on the parent for it to be composite against, matching `app_role_permissions.permission_key -> permissions.key`'s existing precedent exactly. §39.9's guarding assertion in `scripts/test-rls.sql` stays in place, unchanged in body.
+- **B-M4 is closed the way Phase 1 wanted, not just patched.** `src/lib/groups.ts:496`/`:581` and `src/lib/org-provisioning.ts:292-294` no longer filter `isNull(groupTypes.organizationId)` — they can't, the column is gone — and all three readers stay on the RLS-enforced connection (`tx`/`platformDb` respectively, unchanged connection choice where Phase 2 said to leave it). `createGroup()`'s real authorization boundary, `inArray(groupTypes.key, MANAGEABLE_GROUP_TYPE_KEYS)`, is untouched and still the thing actually preventing a client from smuggling a `court`/`roster` id — I read this by hand rather than trusting the green test suite, per Phase 5's own discipline.
+- **The regression artifact this whole pipeline exists to produce is real and load-bearing.** `src/lib/groups.test.ts`'s rewritten test asserts `/permission denied/` on INSERT, UPDATE, *and* DELETE (the old test only tried INSERT with a value that happened to fail the old policy's `WITH CHECK` for an unrelated reason). Phase 4 and Phase 5 each independently reproduced it failing-then-passing against a re-granted/revoked scratch database. This is a stronger regression than "the bug doesn't reproduce" — it proves the *mechanism* (grant, not policy) is what's under test.
+- **Documentation now tells the truth about the schema, and I checked it against the live catalog, not the other way around.** `docs/schema-design.md` §9's DDL snippet (`create table group_types (id, key, name, unique(key))`) and its added paragraph match what's actually on the branch, ordinal-for-ordinal. The `organizations |o--o{ group_types` mermaid edge is gone (regenerated via `docs:erd`, not hand-edited, as Phase 2 required); `group_types ||--o{ groups` correctly remains. DECISION-151 as drafted in Phase 2/adopted in Phase 3 accurately describes the shipped shape — I did not find a claim in it that the live catalog contradicts.
+- **The orchestrator's pre-Phase-6 comment fixes read true.** `scripts/seed.ts:772-810`'s docstring no longer claims `on conflict (organization_id, key)` — it now correctly says `on conflict (key)`, matching the actual `scripts/seed-dev.sql:174` clause. `scripts/test-rls.sql`'s §39.5 prose is now consistently "26 named" throughout (both the lead-in sentence and the assertion message).
+- **The shared-file discipline held.** `git diff 82d6b54 --stat` against every forbidden file (`drizzle/meta/_journal.json`, `src/lib/db/domain/index.ts`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md`, `docs/schema-design-2.md`, `CLAUDE.md`) is empty — confirmed independently, not taken from QA's transcript. The changed-file list (31 modified + `drizzle/0051` + the work-log, both untracked) matches Phase 4/5's own accounting exactly.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: a tenant can mint a real `group_types` row today and that write must be closed. Shipped: closed by revoking `INSERT/UPDATE/DELETE` from `presby_app` and granting `SELECT` only — verdict: **matches**, and verified more strongly than promised (a grant denial binds unconditionally; Phase 1 only demonstrated the hole, Phase 4/5/my own probe demonstrated the close).
+- Phase 1 said (candidate shape a): drop `organization_id` entirely, pure catalog, `permissions`'s shape. Shipped: exactly that — confirmed the live tuple is bit-for-bit identical to `permissions`/`features`/`roles`/`sasr_form_versions` on `(relrowsecurity, relforcerowsecurity, policy count, grants)`. Verdict: **matches**.
+- Phase 1 flagged: `scripts/seed.ts`'s stale rationale comment for running `seedGroupTypes()` on `platformDb`. Shipped: rewritten by the implementer (header block + inline comment), with two remaining stale sentences (the docstring's `organization_id IS NULL` framing and the `on conflict (organization_id, key)` reference) caught by QA as Finding 1 and corrected by the orchestrator before Phase 6, per the work-log's own Rule 8/16 discipline (a Trivial-class comment fix doesn't need its own pipeline). Verdict: **matches**, closed one step later than ideal but closed before ship, which is the right place for a Trivial fix to land.
+- Phase 1 flagged: `docs/schema-design.md` should gain a correct classification paragraph for `group_types`, distinct from the pre-existing unrelated §17 `person_links` drift. Shipped: the paragraph landed in §9 (not §17), and I confirmed by grep that no `group_types` text was added to or touched in §17. Verdict: **matches**.
+- Phase 1 flagged: the Drizzle table's own stale `// null = platform-wide template seeded per organization type` comment should not be carried forward. Shipped: deleted, confirmed by reading `src/lib/db/domain/groups.ts`. Verdict: **matches**.
+- Phase 2 required a pre-flight `raise` guard rather than a silent promotion or an opaque unique-violation. Shipped: present, and both Phase 4 and Phase 5 independently reproduced it refusing (planted row → `EXIT=3`, named remediation message, **nothing after it ran** — RLS/policies left intact) before proceeding. Verdict: **matches**, and it is the single edge case (a smuggled row on a shared/shipped branch) Phase 3 called "the highest-value edge case in the whole design" — closed, not just designed for.
+- Phase 2 ruled the append-only shared-file discipline could not survive an executable file that would abort mid-suite (F86), and named exactly which sites needed in-place edits. Shipped: I independently audited every named site in `scripts/test-rls.sql` (five) and `scripts/seed-dev.sql` (Phase 3 said six/ten subselects; Implementer Note 2 corrected to eleven, a genuine and disclosed miss caught before it could cause silent fixture loss) — all present, all correctly scoped, nothing beyond the authorized list. Verdict: **matches**, with the correction itself being evidence the discipline worked as designed rather than a gap.
+- QA Finding 3 (four pre-existing e2e failures: two stale `post-login-routing` specs, one blocked-on-main `public-sites.spec.ts:334` + 5 serial dependents, one flaky `header-controls.spec.ts:110`) — none attributable to this diff, each diagnosed rather than assumed. Not a Phase 1 gap; a pre-existing rot this pipeline's full-suite run happened to surface. Verdict: **acceptable drift**, tracked below as a follow-up (not this pipeline's to fix).
+- QA Finding 5 (`seedGroupTypes()` logs `seeded N` unconditionally, from array length rather than rows inserted) — a real, small, pre-existing defect Phase 1 did not anticipate because it predates this pipeline's own scope; correctly deferred rather than fixed here. Verdict: **acceptable drift**, tracked below.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: **not applicable** — no route, page, or component changed. The "brand-new install" case is exactly what the from-empty rehearsal exercises at the schema layer, and it passed twice independently (Phase 4, Phase 5) with matching fixture counts (`orgs=10 people=16 groups=11 group_types=6`).
+- Failure microcopy: **pass, in the one place this bug-fix has a "user"** — the pre-flight guard's `raise exception` message names the exact remediation steps (inspect, repoint, delete) rather than surfacing a bare constraint-violation to whoever runs the migration. I independently reproduced this message and confirmed nothing downstream ran.
+- Permission gate: **pass** — verified against the live grant table on the connection that matters (`presby_app`), not against `information_schema` or the Drizzle file. `presby_platform` and `neondb_owner` are correctly untouched (confirmed via `aclexplode` on the owner connection).
+- Audit event: **not applicable** — no mutation path changed; `npm run check:audit` passes; this is DDL/seed/fixture/test only, correctly reasoned as such in Phase 3/4/5 and confirmed by the empty `route.ts`/`actions.ts`/`"use server"` diff.
+- Mobile (360px): **not applicable** — no UI surface in the diff.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES material carried as tracked TODOs, not gating this SHIP IT)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Both of the below are real, already confirmed independently by QA and by me, and neither is this pipeline's to fix (Finding 5 predates this pipeline's scope; Finding 3 is pre-existing rot this pipeline's full-suite run happened to surface). Ready-to-paste `docs/TODO.md` lines:
+
+- `- [ ] scripts/seed.ts's seedGroupTypes() (and its catalog-seed siblings) logs "seeded ${defs.length}" unconditionally from the array's own length, not from rows actually inserted — a seed run against the wrong database (e.g. a stray DATABASE_URL left in the shell) prints a healthy count while writing zero rows, exactly the trap that made a misdirected from-empty rehearsal hard to detect during this pipeline. Make it report actual insert count. — docs/work-log/2026-09-26-group-types-catalog.md Phase 4 Implementer Note 5 / Phase 5 Finding 5.`
+- `- [ ] Four e2e specs are rotten or blocked, surfaced by a full-suite run during the group_types catalog pipeline (none attributable to that diff): e2e/post-login-routing.spec.ts:110 and :166 assert the pre-home_v2 org-portal copy ("you're in", an org-name <h1>) against a DB where org_portal.home_v2 is on — update to the v2 greeting copy or retire the specs; e2e/public-sites.spec.ts:334 and its 5 test.describe.serial dependents fail on any branch predating PR #17's 07801a2 (every anonymous public-site read now fails closed) — resolves on merging past that commit; e2e/header-controls.spec.ts:110 is flaky (32 passed / 2 failed on immediate re-run). These rotted unnoticed because the e2e CI job has been skipping pending Neon secrets. — docs/work-log/2026-09-26-group-types-catalog.md Phase 5 Finding 3.`
+
+Also, at integration (already proposed by Phase 3/4/5, re-confirmed correct by me, not a new note): `docs/TODO.md` line 112's Security §B combined bullet drops item (1) and gains a `[x]` Done line citing DECISION-151/F84-F86/this work-log; `drizzle/meta/_journal.json` gains idx 51; DECISION-151 and F84-F86 land as drafted.
+
+One additional observation, not a follow-up requiring its own line: `docs/TODO.md:32`'s Track-0 hygiene bullet still names "add the `group_types` unique constraint on `(organization_id, key)`" as open work — that phrasing is now doubly stale (0048 already added a version of it, and 0051 replaced it with `unique (key)`). This is pre-existing drift this pipeline's own reconciliation doesn't touch (it's bundled with an unrelated DECISION-060/cascade-delete item); flagging for the orchestrator's awareness rather than proposing a fix, since it's outside this pipeline's Out-of-Scope boundary and touching Track 0 wasn't asked for.
+
+### Rule-by-rule housekeeping check
+
+- **Rule 13 (what's-new):** No advisory needed — schema-only, no member-visible behavior change. Confirmed by the empty route/action/`"use server"` diff.
+- **Rule 14 (functionality map):** `docs/product/functionality-map.md:15`'s "presby: schema" bullet ("...groups (derived session/diaconate)...") makes no claim this change contradicts — it never described `group_types`'s tenant/global classification, and nothing about the *feature* (groups administration) changed. No edit needed.
+- **Rule 15 (architecture.md):** No — this is a table reclassification fixing a schema property to match a decision (DECISION-110) already settled; it is not a new subsystem, changed data flow shape, or a reversal of something `docs/architecture.md` currently states as settled.
+- **Rule 12 (feedback row):** Not applicable — this pipeline's Source is a Security §B follow-up from a prior work-log, not in-app member feedback.
+
+### Draft 0.26.4 release-note paragraph (fix class, house style)
+
+> ## 0.26.4 — 2026-09-26
+>
+> ### `group_types` is now correctly a shared catalog, not per-congregation data
+>
+> **Background:** The list of group categories a congregation can use — committee, choir, session, and so on — was stored in a database table shaped for per-congregation data, even though it has only ever held one shared, platform-wide list. That shape meant a congregation's own database connection could, in principle, insert its own custom category row that no screen would ever show or use. Nothing in the product ever did this, but the database itself did not prevent it.
+>
+> **Changes:**
+> - The group-category table is now a genuine shared catalog: no congregation identifier on it, and a congregation's connection can only read it, never write to it.
+> - No screen, form, or workflow changes. Group creation and editing at `/o/<slug>/admin/groups` work exactly as before.
 
 ## Red Flags (if NEEDS REWORK)
 
-- [Specific. What has to change before this ships.]
+None.
+
+---
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — live-catalog re-audit (RLS flags, policies, columns, unique constraint, grants via `aclexplode`, tenant-context INSERT probe), diff against merge-base `82d6b54` confirmed shared/forbidden files untouched, doc fixes (seed.ts, test-rls.sql §39.5, schema-design.md §9) confirmed to read true against live state, DECISION-151 confirmed accurate, two QA findings converted to ready-to-paste TODO lines, release-note paragraph drafted | SHIP IT | 2026-09-26 |
+
+## Handoff
+
+**Next agent: orchestrator**, for integration per Rule 16 (serialized, one PR at a time):
+
+- Merge `main` into `pipeline/group-types` first (QA Finding 4 — the branch is four commits behind, PR #17), then re-run `scripts/test-rls.sql` as `presby_app` on the merged result before opening the PR.
+- Apply at integration, as already proposed and re-confirmed accurate by this review: `drizzle/meta/_journal.json` idx 51 (`0051_presby_group_types_catalog`); `DECISION-151` verbatim as drafted in Phase 2; `F84`–`F86` into `docs/schema-design-2.md`'s next lettered review-round subsection; `docs/TODO.md` line 112's item (1) moved to a `[x]` Done line; the two new TODO lines above (Finding 5, Finding 3).
+- Publish the 0.26.4 release-note paragraph drafted above (or the orchestrator's own phrasing of it) as part of the `/release-notes` skill's normal integration cluster.
+- No feedback row to mark `done` (Rule 12 not applicable — this pipeline's origin is an internal Security §B follow-up, not member feedback).
+- No what's-new entry, no `architecture.md` edit, no `functionality-map.md` edit (Rules 13/15/14 all confirmed not applicable above).
+
+### Orchestrator closure (2026-09-26)
+
+Shipped as v0.26.4 (`fix(schema):` `drizzle/0051`). DECISION-151 recorded; F84–F86 folded into `docs/schema-design-2.md` §2j; `_journal.json` idx 51 appended; TODO reconciled (Security §B item 1 closed; the two 2026-08-24 `group_types` unique-constraint lines closed by `unique (key)`); `development` migrated through 0051 and `test-rls.sql` re-run there.

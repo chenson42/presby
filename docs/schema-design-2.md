@@ -1414,6 +1414,23 @@ left the suite failing on a fresh database. **Closed:** `on conflict do nothing`
 keyed sub-queries in the seed; one line in the suite (a ruled Rule-16 exception). The
 `docs/testing.md` from-scratch recipe now actually works — the first time ever.
 
+## 2j. `group_types` reclassified to a global catalog — findings from a table-classification fix (F84–F86)
+
+*(2026-09-26, `docs/work-log/2026-09-26-group-types-catalog.md` Phases 1–5; DECISION-151;
+`drizzle/0051_presby_group_types_catalog.sql`. Recorded by the orchestrator.)*
+
+### F84 — a tenant could mint a `group_types` row, and the four-policy split is what let it
+
+Reproduced live on `pipeline-group-types` (rolled back): under `drizzle/0048` §5, `group_types_insert WITH CHECK (organization_id = presby_current_org())` accepts an org-scoped row from `presby_app`. Inert by luck rather than by design — `createGroup()` only resolves against `organization_id IS NULL` rows in four manageable keys — but un-audited, uncapped, admin-invisible junk-data insertion on a table ruled to have no per-org row. The general lesson: **when a symptom fix copies a shape from a sibling table, it copies that sibling's capabilities too `app_roles`' template-arm split is right for `app_roles` because custom roles are a shipped feature; the same four policies on `group_types` grant a capability no feature wants. Closed by `drizzle/0051` with a revoke, which binds unconditionally where a policy binds only while it exists.
+
+### F85 — a dropped column has readers that no compiler sees
+
+`scripts/seed-dev.sql:174`'s `on conflict (organization_id, key)` inference clause and `scripts/test-rls.sql:5583-5613`'s C-3 catch-all arrays both reference `group_types.organization_id` from SQL text. The first is a parse error inside a single-transaction fixture file — total fixture loss, the same failure mode F83 recorded for this same statement; the second is a live-computed assertion that flips from pass to fail the instant `FORCE` is dropped. Neither is visible to `tsc`, and the TypeScript fixture sweep (30 sites, 24 files) that *is* `tsc`-visible is the harmless half. **A column drop's real blast radius is the SQL that names it as a string.**
+
+### F86 — an append-only shared-file discipline does not compose with an executable shared file
+
+Workflow Rule 16's convention (append a delimited block at the end) works for `test-rls.sql` when a pipeline *adds* assertions. It cannot work when a pipeline *invalidates* existing ones: an appended correction does not stop `ON_ERROR_STOP=1` from aborting at the stale site. The workable rule, and the one this pipeline used: **in-place edits are confined to the sites that would break, each enumerated by line in the Phase 2/3 sections so integration can see them; everything new still appends.**
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

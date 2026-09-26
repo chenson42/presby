@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-26 evening (wave 4 in flight: render blip merged as PR #17; group_types, withdraw, name-history mid-pipeline)
+## RESUME HERE — updated 2026-09-26 evening (wave 4 in flight: render PR #17 and group_types PR #18 merged; withdraw and name-history mid-pipeline)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -70,16 +70,15 @@ open; three Neon branches (`pipeline-security-schema-b`, `pipeline-submission-gr
 uncaught reads on the public-site path (not the three the flags pipeline named) now fail closed to the
 same generic `not_found`, QA reproduced failing-first per spec file and re-ran the production-build probe
 against an unreachable database; two SHIP-WITH-NOTES follow-ups in TODO (the contact-form insert; the
-never-produced `reason: "absent"`). Still open, each with its work-log as the source of truth:
-`../presby-wt-gt` / `pipeline/group-types` (`drizzle/0051`, DECISION-151, F84–F86 — `group_types` to a pure
-global catalog; Phase 4 complete with three failing-first proofs and a clean from-empty rehearsal, 526
-assertions; QA running); `../presby-wt-withdraw` / `pipeline/withdraw` (`drizzle/0052`, DECISION-152,
+never-produced `reason: "absent"`). Each open pipeline's work-log is the source of truth:
+`pipeline/group-types` **merged** as PR #18 (`91e3e61`, v0.26.4, `drizzle/0051`, DECISION-151, §2j F84–F86;
+`group_types` is a pure global catalog — no `organization_id`, no RLS, `unique (key)`, `presby_app` SELECT-only;
+`development` migrated through 0051 and `test-rls.sql` re-run there, 526). Still open: `../presby-wt-withdraw` / `pipeline/withdraw` (`drizzle/0052`, DECISION-152,
 F90; `presby_withdraw_publication()` + `/o/<slug>/admin/filings` + the presbytery sub-view; template role
 id `…0004` pre-assigned; Batch A database-admin running); `../presby-wt-nh` / `pipeline/name-history`
 (`drizzle/0053`, DECISION-153, F100–F104 — F104 revised by an architect addendum to the about-org
-three-column composite; database-admin running). Integration order after render: group_types → withdraw →
-name-history, journal idx 51–53, `test-rls.sql` §41–§43 appended (the group_types pipeline carries a ruled
-in-place exception, F86; withdraw carries F90's §35 correction). Neon branches `pipeline-group-types`,
+three-column composite; database-admin running). Integration order: withdraw → name-history, journal idx 52–53, `test-rls.sql` §41–§42 appended (withdraw
+carries F90's §35 correction in place; group_types's F86 in-place exception already landed). Neon branches `pipeline-group-types`,
 `pipeline-withdraw`, `pipeline-name-history` join the delete-with-OK list.
 
 **Next, in order (the remaining candidates after wave 4):** the operator's

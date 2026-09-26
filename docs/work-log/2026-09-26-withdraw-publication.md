@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete — full DDL for `drizzle/0052` (helper + `presby_withdraw_publication()` + template role), all four Phase 2 handoff items answered (bootstrap = standing gap, deferred; route = `reports/[aboutOrgId]`; refusal copy table; length CHECK declined), new `src/lib/filings.ts` module, three-batch implementation order, F90 named (an existing `test-rls.sql` assertion's literal goes false the day this ships and must be corrected in place, not just appended around) | Design complete, implementers named | 2026-09-26 |
 | 4 — Implementation | database-admin (Batch A) → api-developer (Batch B) → ux-developer (Batch C) | **Complete (after one Phase 5 loop-back, 2026-09-26 — two test fixtures, no product-code change).** Loop-back: `scripts/test-rls.sql` §41(c) and §41(f) fixture picks made state-agnostic and one new §41(e) assertion added (suite is now 551, was 550); `publication.test.ts`'s `withdrawalFixture()` now mints its own publication chain per probe instead of consuming the single seeded one. Proven on two scratch databases inside `pipeline-withdraw` — failing-first reproduced (532/550 and 9 failed/36 passed on a committed-withdrawal fixture), green after (551 and 45/45), green on a pristine fixture too, and green on the pipeline branch DB QA had declared unrunnable. `typecheck`/`lint`/`check`/`test:db` (4214/0 on both scratch DBs). Batch A: hand-written `drizzle/0052`, applied twice idempotently to `pipeline-withdraw` and rehearsed from empty; `test-rls.sql` §41 added, §35 corrected in place for F90; `publication.test.ts` re-pointed at the real writer; one design defect corrected — `people` has no `organization_id`, proposed F91. Batch B: `src/lib/filings.ts` new; `fetchStatisticsForYear()` withdrawal filter; new `getCongregationFilingHistory()`; `withdrawFilingAction()`; `STATISTICS_RETURN_WITHDRAWN` audit key; `filings` tile + `org_portal.filings` flag seeded off; 45 new tests. Batch C: `admin/filings/{page.tsx, filings-states.tsx, withdraw-dialog.tsx, page.test.tsx}` (new), `admin/reports/[aboutOrgId]/{page.tsx, page.test.tsx}` (new), `statistics-table.tsx` `<Link>` + `slug` threading; 18 new tests; one real bug found and fixed via the mandatory browser rehearsal (a `server-only`-marked module imported from a client component); both flows walked end to end at 360px with screenshots and DB-level verification. `npm run test:db` — 291 files/4214 tests passing, 0 failed. | — | 2026-09-26 |
 | 5 — Verification | qa | **Second pass: PASS** — both red checks cleared on the branch DB as-is (551 / 45) and on a pristine scratch DB before and after a QA-committed withdrawal; full DB suite 4214/0; new §41 assertion failing-first by hoisting the state check (541/551). First pass: **Re-verification pending** (Phase 4 loop-back delivered 2026-09-26; re-run the two previously-red checks — `scripts/test-rls.sql` now expects **551** assertions, `npm run test:db` 4214/0). First pass: FAIL (first pass) — product code verified correct on the live catalog, by behavioural probe, from-empty (550) and a real 360px browser walk; two required checks red on the delivered branch because §41(c) and `publication.test.ts`'s `withdrawalFixture()` consume the single seeded publication the browser rehearsal irreversibly withdrew. Looped back to Phase 4. | PASS | 2026-09-26 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-26 |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.28.0 | SHIP WITH NOTES | 2026-09-26 |
 
 ---
 
@@ -1722,34 +1722,113 @@ Still open, unchanged and non-blocking (Phase 6 / integration, not gates): `driz
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-26.*
+
+**Scope of this review:** worktree `/Users/cshenso/git/presby-platform/presby-wt-withdraw`, branch `pipeline/withdraw`, Neon branch `pipeline-withdraw` (`br-snowy-recipe-axcqdbx4`, confirmed live via `current_setting('neon.branch_id')`). Read-only throughout; no file written, no `ALTER ROLE`, no `db:push`/`db:generate`. Dev server started on port 3600 for a spot render, stopped by PID (9163) afterward — no lingering process.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A congregation's stated clerk can now see its own filing history and permanently withdraw a published statistical return with a minute reference — the row survives as history, the presbytery's current-year totals correctly stop counting it and fall back to any live entered/imported row, and the presbytery can read the full withdrawn history per congregation — all exactly as Phase 1 asked, verified independently on the live catalog and in a real 360px browser twice; what ships alongside it is a short list of already-named, low-severity residuals (two cosmetic UI notes, one pre-existing bootstrap gap, one pre-existing billing gap, and one stale doc comment I found in this pass) that belong in `docs/TODO.md`, not in a loop-back.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Flow 1 (congregation withdraws its own return) is correct end to end.** `q1-filings-list.png`/`q2`/`q3` (QA's own screenshots, still on disk) show the `AlertDialog` (no native `confirm()`), the permanence copy verbatim, and the confirm button correctly disabled on an empty or whitespace-only minute reference. Verified at the database (both the branch DB and my own catalog read): `withdrawn_at`/`withdrawn_by`/`withdrawn_minute_reference` written on `publications`, `congregation_statistics.withdrawn_at` set on the same instant, `withdrawn_by = e0000000-…-00f3` — the **session** user, never a form field.
+- **Flow 2 (presbytery sees the withdrawal) is correct end to end.** `q6-subview.png` shows the nested `/admin/reports/[aboutOrgId]` page rendering the 2025 filing "Withdrawn" with date and minute reference (Option A — included, marked, never filtered), and the rollup page independently confirmed to read "No data on file" for the same congregation/year once the return is withdrawn.
+- **The database design is exactly what DECISION-152 describes, verified against the live catalog by me, not inferred from the work-log:**
+  - `presby_withdraw_publication`: `prosecdef = t`, `proconfig = {"search_path=public, pg_temp"}`, `proacl = {neondb_owner=X/…, presby_app=X/…}` — no `presby_platform`, no `PUBLIC`.
+  - `pg_attribute.attacl` is **NULL** on all five withdrawal-adjacent columns on both tables; `has_column_privilege('presby_app', …, 'UPDATE')` is **false** on both. `presby_app` has no privilege path to the pair outside the DEFINER function — DECISION-141 holds.
+  - Template role `00000000-…-0004` exists, `organization_type_scope = congregation`, `role_kind = constitutional`, `is_protected = t`, bound to exactly `statistics.publish` — no other row touched, confirming "no backfill."
+- **The uniform-literal / honest-state split holds up as a security property, not just a passing test.** QA's own probe (reproduced structurally by me reading the DDL and test-rls §41(c)/(e)) shows a non-member `p_withdrawn_by` gets the identity literal even against an *already-withdrawn* row — the membership check runs strictly before the state checks, which is the actual invariant DECISION-152 exists to name.
+- **Fixture independence, the thing the Phase 4 loop-back was about, is real.** I did not need to re-litigate it: QA's second pass proved it three ways (branch DB as-withdrawn, a pristine scratch DB, and a scratch DB QA withdrew itself through the real function), and the mechanism (§41(c)/(f) state-agnostic picks, `withdrawalFixture()` minting its own chain) is sound on inspection.
+- **The empty state matches Phase 1's required copy exactly**, not paraphrased: `page.tsx`'s `FilingsTable()` renders *"Filing a new statistical return isn't built on this page yet — this page shows the history of returns your presbytery has already received and lets you withdraw one if it was filed in error."* — this was Phase 1's Gap 1 / Out-of-Scope requirement, and it shipped verbatim rather than as a bare "no data" placeholder.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+| Phase 1 / orchestrator ruling | Shipped | Verdict |
+|---|---|---|
+| A congregation stated clerk sees filing history and withdraws with a minute reference | `/o/<slug>/admin/filings`, `statistics.publish` gated, minute reference required/trimmed/max 500 | matches |
+| The row stays as history, never deleted | `publications`/`congregation_statistics` retain the row; `publications_freeze`/`congregation_statistics_freeze` refuse any other mutation on every connection, verified live | matches |
+| Presbytery's rollup treats the withdrawn return as absent and falls back | `fetchStatisticsForYear()` gained `isNull(congregationStatistics.withdrawnAt)` in its WHERE; `getCongregationStatisticsRollup()` and `generatePerCapitaRecords()` both consume it (confirmed by reading call sites, not assumed) | matches |
+| Presbytery sees withdrawn history per congregation | `/o/<slug>/admin/reports/[aboutOrgId]`, Option A, rows never filtered | matches |
+| A presbytery cannot withdraw a return addressed to it (uniform literal) | `presby_current_org() <> organization_id` folds into the same `42501` literal as not-found/wrong-record-class/non-member-withdrawer; test-rls §41(c) proves byte-identity across all four | matches |
+| `withdrawnBy` is the session user | bound server-side in `actions.ts` from `identity.userId`, never a client field; DB-bounded to an active member of the acting org | matches |
+| Audit event carries both org ids | `STATISTICS_RETURN_WITHDRAWN`, metadata `{organizationId, recipientOrgId, aboutOrgId, reportYear, publicationId}` — confirmed in QA's browser walk, row observed live | matches |
+| Flag seeded off | `scripts/seed.ts` seeds `org_portal.filings = false`; branch DB currently reads `true` only because it was deliberately left on for QA/rehearsal use, and a fresh `db:seed` resets it | matches (verified: `select key, enabled … → org_portal.filings | t` on this branch, explained and expected) |
+| Superseded publications cannot be withdrawn | distinct `check_violation` refusal, tested at both the DB and library layer | matches |
+| An `unmanaged`/`invited` congregation's return cannot be withdrawn by anyone (Flow 3) | closed by construction — `presby_current_org()` never resolves to a session-less org — no code path exists to test, correctly | matches |
+
+No regression and no acceptable-drift item rises to the level of a red flag. The one item worth naming as **acceptable drift, not matching verbatim**: Phase 3's Component Plan proposed a fifth file (`filings-table.tsx`); the orchestrator's own Batch C directive narrowed the file set and the table ships as an inline helper instead. This was disclosed as a deviation in the work-log, matches an existing precedent (`admin/reports/page.tsx`'s `renderStatisticsSection()`), and changes no user-visible behavior — acceptable.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** pass — plain, honest copy naming the missing publish form (matches Phase 1's required copy verbatim, confirmed by reading `page.tsx`).
+- **Failure microcopy:** pass — the five-arm `ActionResult` copy table is human language ("This filing has already been withdrawn," "A newer filing supersedes this one — only the current filing can be withdrawn"), no raw Postgres text reaches the client; confirmed by reading `actions.ts`'s copy mapping and QA's feature-gate read.
+- **Permission gate:** pass — `statistics.publish` enforced inside `withdrawFiling()`/`listOwnFilings()`, `statistics.manage` inside `getCongregationFilingHistory()`, both confirmed live and by direct code read, not inferred from a green test. The standing residual (permission is app-layer, not DB-layer) is the same shape every one of the 17 other tenant-mutation modules carries — named, not novel to this feature.
+- **Audit event:** pass — fires only on `ok`, carries both org ids, confirmed written live during the browser walk (not merely asserted by a mock).
+- **Mobile (360px):** pass, with a note. The page itself does not scroll sideways at 360px (confirmed: `scrollWidth == innerWidth` per QA, and visually in `q1-filings-list.png`). But that same screenshot shows the **only action on the page** — the Withdraw button — cut off at the right edge, requiring a swipe inside the table's inner scroll container to discover. This is a shipped convention elsewhere (`GrantsTable`/`StatisticsTable`), so it is not a regression this feature introduced, but on *this specific page* the withdraw action is the page's entire reason for existing, which makes the friction more consequential here than on a page where the hidden column is supplementary. I'm siding with the user on this one: it's real friction, not a gate failure — see Follow-Ups.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Rulings on carried notes
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+1. **`withdraw-dialog.tsx:33`'s duplicated `MINUTE_REFERENCE_MAX`.** Confirmed real and correctly reasoned (`filings.ts` is `server-only`-marked; any import poisons the client bundle — the Batch C bug that broke `/signin` proves this isn't theoretical). The duplication is a value, not a security boundary — the server's zod check is authoritative regardless of client drift. **TODO-worthy, not a blocker.**
+2. **360px inner-scroller placement of Withdraw.** Real, as above. Same shipped pattern elsewhere, so this is a systemic small-viewport table-affordance question, not unique to this feature — I'd scope the follow-up to *all* three tables (`GrantsTable`, `StatisticsTable`, this one) rather than a one-off fix here, since fixing only this page while leaving the pattern elsewhere would just relocate the inconsistency Phase 2/3 already accepted.
+3. **`publication.test.ts:594` accepted residual.** I concur with QA's ruling. The branch discriminator reads ground truth (`congregation_statistics.withdrawn_at` on the platform connection), not the reader under test, so neither branch can self-agree; the state-independent half (F39 exactness) is now asserted unconditionally and is *stronger* than what it replaced; and both conditional branches are proven unconditionally elsewhere (`presbytery.test.ts:952`/`:1010`). This is a genuine structural constraint (the rollup only sees committed rows; the seed fixture is un-replenishable by design), not a shortcut. **Accept as recorded, no further action.**
+4. **Per-capita stale bill (Phase 1 Gap 5).** Correctly named, correctly not solved here — a bill is a financial artifact and `generatePerCapitaRecords()`'s own contract is to never retroactively move an issued bill. Confirmed by reading the call chain: `fetchStatisticsForYear()`'s withdrawal filter reaches `generatePerCapitaRecords()` at `presbytery.ts:1077`, so *new* generation correctly excludes a withdrawn basis year while an already-issued bill is untouched. **TODO-worthy, correctly deferred.**
+5. **Template-adoption bootstrap (Phase 3 (a)).** Same standing DECISION-100/101/106 gap, not created by this pipeline, correctly bought time by shipping `org_portal.filings` off. **TODO-worthy, correctly deferred to the P2 backbone/onboarding pipeline per `docs/STATE.md`.**
 
-## Red Flags (if NEEDS REWORK)
+**On the orchestrator's drafted TODO lines:** I was not able to locate a draft for these four items anywhere in this worktree (`docs/TODO.md` is on the do-not-edit list for this branch, and no draft appears in the work-log), so I can't confirm coverage directly — I'm providing ready-to-paste text instead so nothing is lost at integration:
 
-- [Specific. What has to change before this ships.]
+- **Close** `docs/TODO.md:114` item (3) — `presby_withdraw_publication()` UI is no longer a follow-up, it shipped. Move to Done: *"presby_withdraw_publication() UI shipped (v0.28.0, `docs/work-log/2026-09-26-withdraw-publication.md`) — congregation filing history + withdraw at `/o/<slug>/admin/filings` (flag `org_portal.filings`, seeded off), presbytery per-congregation history at `/o/<slug>/admin/reports/[aboutOrgId]`, `fetchStatisticsForYear()` now filters `withdrawn_at is null`."*
+- **Close** `docs/TODO.md:127` — the `getCongregationStatisticsRollup()` filter obligation is fulfilled (confirmed: it calls `fetchStatisticsForYear()` directly at `presbytery.ts:631`).
+- **New line — per-capita stale bill:** *"`generatePerCapitaRecords()` never retracts an already-issued bill when its basis-year return is later withdrawn — a stale bill can survive a withdrawal untouched. Named at Phase 1 Gap 5 and Phase 3 of the withdraw-publication pipeline, not solved there; needs its own Phase 1 if a presbytery actually hits it. — `docs/work-log/2026-09-26-withdraw-publication.md` Phase 6."*
+- **New line — template-adoption bootstrap:** *"Congregation `stated_clerk` template (`congregation_stated_clerk`, `00000000-…-0004`, carrying `statistics.publish`) has no founding-administrator bootstrap — same standing gap as `stated_clerk`/`brand_admin`/`role_admin` (DECISION-100/101/106); no real congregation can adopt it until someone there already holds the permission. `org_portal.filings` shipping off buys the same time it always has. Belongs to the queued P2 backbone/onboarding pipeline. — `docs/work-log/2026-09-26-withdraw-publication.md` Phase 3(a)/Phase 6."*
+- **New line — two small UI residuals:** *"`withdraw-dialog.tsx:33` duplicates `MINUTE_REFERENCE_MAX` by value (the constant's source, `src/lib/filings.ts`, is `server-only` and can't be imported into a client component) — can silently drift from the exported 500 with nothing catching it. Separately, at 360px the sole row action on `/admin/filings` (and the equivalent columns on `GrantsTable`/`StatisticsTable`) sits inside the table's own scroll-cued container, off-screen until a horizontal swipe — worth a small mobile-affordance pass across all three tables together, not a one-off fix. — `docs/work-log/2026-09-26-withdraw-publication.md` Phase 5/6."*
+- **New line — my own finding, `src/lib/dev-docs.ts:155`:** the `BESPOKE_POLICIES["publications"]` comment shown on `/admin/developer` still reads *"presby_app has no UPDATE grant, so there is no tenant-side withdrawal path yet"* — the grant claim is still true, but the conclusion is now false: `presby_withdraw_publication()` is exactly a tenant-side withdrawal path (a SECURITY DEFINER function granted to `presby_app`), the DECISION-141 marker-vs-privilege pattern this same file documents elsewhere. Phase 3 explicitly flagged this file as a candidate for an entry ("if the withdrawal mechanism warrants one") and it was missed. This is a one-sentence, doc-only, Trivial-class correction — recommend fixing it directly rather than carrying it as a TODO line, since it's user-facing (to any engineer reading `/developer`) and misleading in its current form.
+
+## DECISION-152 check
+
+Confirmed still describes what shipped. Batch A's Deviation 1 (F91) removed a non-existent `pe.organization_id = v_actor` predicate from the membership check because `people` has no such column — the semantics are unchanged (`presby_membership_is_active(person, org)` already carries the org-scoping), and I verified this live: the shipped function's membership check is exactly `presby_membership_is_active(pe.id, v_actor)` with no `organization_id` reference, and it still refuses a non-member with the uniform literal (verified: `has_column_privilege` probes and the byte-identical §41(c) literals). This is a corrected column reference, not a changed decision — DECISION-152's text needs no amendment.
+
+## Rule 13 — what's-new advisory
+
+The flag ships off (`org_portal.filings = false` in `scripts/seed.ts`), so no member sees this feature at merge time. Per Rule 13, no `whats_new_entries` row is owed **now** — advise: **owed at first enablement**, i.e. whichever future work turns `org_portal.filings` on for a real congregation/presbytery pair should be the one to publish the entry, not this ship.
+
+## Rule 14 — functionality map
+
+I could not find the orchestrator's draft sentence anywhere in this worktree (`docs/product/functionality-map.md` is presumably edited at integration only). Proposed addition to the existing **"presby: presbytery oversight & statistics"** bullet (`docs/product/functionality-map.md:25`), appended after the "Submission grants" sentence:
+
+> **Withdraw a filing (0.28.0, DECISION-152):** a congregation's stated clerk (`statistics.publish`) views its own filing history and withdraws a published return with a minute reference at `/o/<slug>/admin/filings` (flag `org_portal.filings`, seeded off) — the row is retained, marked, never deleted, via the sanctioned `presby_withdraw_publication()` writer; a withdrawn return drops out of the presbytery's "current" rollup and new per-capita generation, falling back to any live `presbytery_entered`/`imported` row; the presbytery reads the full history, withdrawals included, at the nested `/o/<slug>/admin/reports/[aboutOrgId]`.
+
+I'd confirm this against whatever the orchestrator drafted rather than paste both — happy to defer to theirs if materially similar.
+
+## Rule 15 — architecture.md
+
+Confirmed: **no change**. This is feature work on the existing statistics/publications subsystem (no new subsystem, no changed data flow shape, no changed deployment/runtime shape, no reversal of a settled architecture statement) — agrees with the orchestrator's "no" and with Phase 3 Note 4's own statement.
+
+## Draft release note (v0.28.0, non-engineer audience)
+
+> **Withdraw a filed statistical return.** A congregation's stated clerk can now see the history of the annual statistical reports it has filed with its presbytery, and — if a report was submitted before the session finished reviewing it, or contains an error the session has since caught — withdraw it, citing the session minute that authorized the withdrawal. The original filing is never deleted; it stays on record, clearly marked as withdrawn along with the date and the minute reference. Presbyteries will see a withdrawn report excluded from that congregation's current-year totals, and can review the complete filing history — including any withdrawals — for every member congregation. This feature is rolling out gradually and is not yet turned on for most congregations.
+
+## Follow-Ups (SHIP WITH NOTES)
+
+- Correct the stale `/admin/developer` comment at `src/lib/dev-docs.ts:155` ("no tenant-side withdrawal path yet") — Trivial-class, one sentence, recommend fixing directly rather than deferring.
+- Reconcile `docs/TODO.md:114` item (3) and `docs/TODO.md:127` to Done, per the exact lines drafted above.
+- Add the three new TODO lines drafted above (per-capita stale bill, template-adoption bootstrap, the two UI residuals).
+- Publish a `whats_new_entries` row at first real enablement of `org_portal.filings`, not now.
+
+## Per-Phase Status
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — all Phase 1 verbs/flows confirmed shipped against the live catalog and two independent browser walks; DECISION-152 confirmed unchanged in substance (F91 was a column-reference fix only); one new finding (`src/lib/dev-docs.ts:155` stale doc comment) added to the note set; TODO-line text drafted for all five follow-ups since no visible draft existed in this worktree to bless | SHIP WITH NOTES | 2026-09-26 |
+
+## Handoff
+
+→ **Orchestrator**, to close the pipeline: apply the `docs/TODO.md` reconciliation (two closes, three new lines) and the functionality-map sentence at integration, per Workflow Rules 10/14; fix `src/lib/dev-docs.ts:155` as a Trivial doc correction (in this branch before merge, or as a same-day follow-up commit — either is fine, it's one sentence); no `whats_new_entries` row now (Rule 13 — owed at first enablement); `docs/architecture.md` unchanged (Rule 15). Nothing returns to an implementer — this closes the pipeline."}],"container":null,"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":2222,"cache_read_input_tokens":151095,"output_tokens":11503,"output_tokens_details":{"thinking_tokens":3941},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":2222},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":11503,"cache_read_input_tokens":151095,"cache_creation_input_tokens":2222,"cache_creation":{"ephemeral_5m_input_tokens":2222,"ephemeral_1h_input_tokens":0},"type":"message"}],"speed":"standard"},"diagnostics":null,"context_management":null},"apiBlockIndex":1,"requestId":"req_011CfSr7jBNB1qGgC5fJj1cq","attributionAgent":"analyst","type":"assistant","uuid":"43d8406f-ce8a-4c30-9ad0-b723e3198b7c","timestamp":"2026-09-26T22:36:29.196Z","effort":"high","perTurnEffort":null,"userType":"external","entrypoint":"cli","cwd":"/Users/cshenso/git/presby-platform/presby","sessionId":"b08e6db7-b5b1-4a1b-b94f-75e0928bed80","version":"2.1.273","gitBranch":"main","slug":"warm-honking-hartmanis"}
+
+### Orchestrator closure (2026-09-26)
+
+Shipped as v0.28.0 (`feat(statistics):` `drizzle/0052`). DECISION-152 recorded; F90–F91 folded into `docs/schema-design-2.md` §2k; `_journal.json` idx 52 appended; TODO reconciled (submission-grants follow-ups items 1 and 3 closed; per-capita stale bill and the template-adoption bootstrap tracked); functionality map updated; flag `org_portal.filings` seeded OFF — what's-new owed at first enablement (Rule 13); `development` migrated through 0052 and `test-rls.sql` re-run there. `test-rls.sql` section order in the file is now 43, 41 (appended blocks land in merge order; numbers are pre-assigned per Rule 16).

@@ -31,7 +31,7 @@ const CHILD_NO_GUARDIAN: ChildRosterEntry = {
 
 describe("ChildrenRosterList — empty state", () => {
   it("renders 'No children recorded yet' when the list is empty", () => {
-    render(<ChildrenRosterList slug="alder-creek" children={[]} />);
+    render(<ChildrenRosterList slug="alder-creek" roster={[]} />);
     expect(screen.getByText(/no children recorded yet/i)).toBeTruthy();
   });
 });
@@ -39,7 +39,7 @@ describe("ChildrenRosterList — empty state", () => {
 describe("ChildrenRosterList — rows", () => {
   it("renders name, age, and household for each child", () => {
     render(
-      <ChildrenRosterList slug="alder-creek" children={[CHILD_WITH_GUARDIAN]} />,
+      <ChildrenRosterList slug="alder-creek" roster={[CHILD_WITH_GUARDIAN]} />,
     );
     expect(screen.getByText(/Hallie Vandermeer/)).toBeTruthy();
     expect(screen.getByText(/Age 15/)).toBeTruthy();
@@ -50,7 +50,7 @@ describe("ChildrenRosterList — rows", () => {
     render(
       <ChildrenRosterList
         slug="alder-creek"
-        children={[CHILD_WITH_GUARDIAN, CHILD_NO_GUARDIAN]}
+        roster={[CHILD_WITH_GUARDIAN, CHILD_NO_GUARDIAN]}
       />,
     );
     expect(screen.getByText(/no guardian on file/i)).toBeTruthy();
@@ -59,7 +59,7 @@ describe("ChildrenRosterList — rows", () => {
 
   it("links each row into its own edit/guardians sub-page", () => {
     render(
-      <ChildrenRosterList slug="alder-creek" children={[CHILD_WITH_GUARDIAN]} />,
+      <ChildrenRosterList slug="alder-creek" roster={[CHILD_WITH_GUARDIAN]} />,
     );
     const link = screen.getByRole("link", { name: /guardians/i });
     expect(link.getAttribute("href")).toBe(

@@ -34,22 +34,48 @@ import { setOrgBrandAction, type PolicyResult } from "./actions";
  *    membership set via `resolveOrgContext(session.user.id, slug)`, never
  *    from form data (see `./actions.ts`'s own header).
  *
- * 2. THE STALENESS BUG IS FIXED HERE, NOT REPRODUCED. `docs/TODO.md` names a
- *    live defect in the platform `BrandForm`: its `useState(initial...)`
- *    fields don't reactively reflect a just-saved value after
- *    `revalidatePath` re-fetches the server tree — the `useState` initializer
- *    only runs once, so a successful save that changes what the server sends
- *    down as `initialSeedHex`/`initialTypePairing`/`initialLightOnly` never
- *    reaches the already-mounted client state; only a real navigation
- *    (unmount/remount) would show it. `ExistingTenantBrand` (this pipeline's
- *    own read shape, `src/lib/tenant-branding.ts`) carries no `updatedAt`
- *    to key a remount off, so this component takes the OTHER fix Phase 3
- *    named: a `useEffect` that re-seeds local state whenever the incoming
- *    `initial*` props change value. A successful `setOrgBrandAction()` call
- *    triggers `revalidatePath()` server-side, which re-renders this page's
- *    Server Component tree with fresh props — WITHOUT a full navigation —
- *    and that prop change is exactly what this effect's dependency array
- *    picks up, syncing local state to what was actually just persisted.
+ * 2. THE STALENESS BUG IS FIXED BY ADJUSTING STATE DURING RENDER, NOT BY AN
+ *    EFFECT AND NOT BY A REMOUNT (THIRD REVISION OF THIS COMMENT — READ THIS
+ *    ONE, THE PRIOR TWO WERE BOTH WRONG). `docs/TODO.md` names a live defect
+ *    in the platform `BrandForm`: its `useState(initial...)` fields don't
+ *    reactively reflect a just-saved value after `revalidatePath` re-fetches
+ *    the server tree — the `useState` initializer only runs once, so a
+ *    successful save that changes what the server sends down as
+ *    `initialSeedHex`/`initialTypePairing`/`initialLightOnly` never reaches
+ *    the already-mounted client state; only a real navigation (unmount/
+ *    remount) would show it.
+ *
+ *    REVISION 1 (original pipeline) used a `useEffect` re-seeding local state
+ *    whenever the `initial*` props changed — exactly the `setState`-
+ *    synchronized-to-a-prop-change shape `react-hooks/set-state-in-effect`
+ *    flags.
+ *
+ *    REVISION 2 replaced the effect with a page-level `key={brandKey}` on
+ *    `<BrandingForm>`, keyed off `organization_brands.updated_at`. THIS WAS
+ *    WRONG AND WAS REVERTED (Phase 5 Finding 1, 2026-09-26-lint-gate): a
+ *    successful OR partial save triggers the exact `revalidatePath()` that
+ *    bumps `updatedAt`, so the remount fired on every write path and
+ *    unmounted this component mid-save — destroying the `useActionState`
+ *    `result` below and, with it, the "Brand saved." / partial-save banner
+ *    E-c1/E-c2 require to persist. Nothing in the repo caught this at the
+ *    time because a `rerender()`-with-a-different-`key` test only exercises
+ *    React's ordinary remount semantics, which is true of any component and
+ *    proves nothing about whether the remount itself was safe.
+ *
+ *    REVISION 3 (current): adjust the three fields' state DURING RENDER —
+ *    the "Adjusting some state when a prop changes" pattern React's own docs
+ *    describe for exactly this shape — instead of inside an effect or via a
+ *    remount. See the `if (initialSeedHex !== prevInitialSeedHex) {...}`
+ *    blocks below. `react-hooks/set-state-in-effect` matches `setState`
+ *    calls inside an effect hook, not calls in the render body, so this is
+ *    compliant; the same component instance survives every save, so `result`
+ *    and the banner it drives are never destroyed.
+ *
+ *    DO NOT KEY THIS COMPONENT OFF BRAND DATA AT ITS CALL SITE. A `key` here
+ *    forces a remount on every save (see Revision 2 above) and destroys the
+ *    save banner. If a future edit needs to reset state for a different
+ *    reason, reach for the render-time-adjust pattern this file already
+ *    uses, not a `key`.
  */
 
 const SEED_HEX_RE = /^#[0-9a-fA-F]{6}$/;
@@ -86,21 +112,40 @@ export function BrandingForm({
     initialTypePairing,
   );
   const [lightOnly, setLightOnly] = useState(initialLightOnly);
+
+  // Adjusting derived state during render (react.dev, "You Might Not Need an
+  // Effect" -> "Adjusting some state when a prop changes"), NOT inside a
+  // useEffect -- this is what react-hooks/set-state-in-effect actually
+  // objects to. Each block only fires the render in which its own prop
+  // genuinely changed, corrects the matching field, and the condition is
+  // false on the very next render, so this terminates and never remounts the
+  // component -- the useActionState `result` below (and the save banner it
+  // drives) survives every prop update this produces, unlike a key-forced
+  // remount. See the module header for why a key-based remount was tried and
+  // reverted (docs/work-log/2026-09-26-lint-gate.md, Phase 5 Finding 1).
+  const [prevInitialSeedHex, setPrevInitialSeedHex] = useState(initialSeedHex);
+  const [prevInitialTypePairing, setPrevInitialTypePairing] =
+    useState(initialTypePairing);
+  const [prevInitialLightOnly, setPrevInitialLightOnly] =
+    useState(initialLightOnly);
+  if (initialSeedHex !== prevInitialSeedHex) {
+    setPrevInitialSeedHex(initialSeedHex);
+    setSeedHex(initialSeedHex ?? DEFAULT_SEED_HEX);
+  }
+  if (initialTypePairing !== prevInitialTypePairing) {
+    setPrevInitialTypePairing(initialTypePairing);
+    setTypePairing(initialTypePairing);
+  }
+  if (initialLightOnly !== prevInitialLightOnly) {
+    setPrevInitialLightOnly(initialLightOnly);
+    setLightOnly(initialLightOnly);
+  }
+
   // Tracks the (uncontrolled) file input separately — a `type="file"` input
   // can't be a controlled component, so "did the user pick a new logo" is
   // its own boolean rather than a comparable value.
   const [logoSelected, setLogoSelected] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
-
-  // THE FIX: re-seed local state whenever the server's own answer changes —
-  // this is what makes a just-saved value show up without a real navigation.
-  // See the module header for why this reads the props directly rather than
-  // keying off a version number `ExistingTenantBrand` doesn't carry.
-  useEffect(() => {
-    setSeedHex(initialSeedHex ?? DEFAULT_SEED_HEX);
-    setTypePairing(initialTypePairing);
-    setLightOnly(initialLightOnly);
-  }, [initialSeedHex, initialTypePairing, initialLightOnly]);
 
   // H3 (docs/reviews/2026-08-26-portal-ux.md) — the review's OTHER confirmed
   // data-loss repro (alongside edit-person): dirtying a field here and

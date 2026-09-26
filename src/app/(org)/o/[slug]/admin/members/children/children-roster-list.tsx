@@ -11,12 +11,12 @@ import type { ChildRosterEntry } from "@/lib/children";
  */
 export function ChildrenRosterList({
   slug,
-  children,
+  roster,
 }: {
   slug: string;
-  children: ChildRosterEntry[];
+  roster: ChildRosterEntry[];
 }) {
-  if (children.length === 0) {
+  if (roster.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border py-16 text-center">
         <p className="text-sm font-medium">No children recorded yet</p>
@@ -31,11 +31,11 @@ export function ChildrenRosterList({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground" aria-live="polite">
-        Showing {children.length}{" "}
-        {children.length === 1 ? "child" : "children"}
+        Showing {roster.length}{" "}
+        {roster.length === 1 ? "child" : "children"}
       </p>
       <ul className="space-y-3">
-        {children.map((child) => (
+        {roster.map((child) => (
           <li key={child.personId}>
             <ChildCard slug={slug} child={child} />
           </li>

@@ -128,6 +128,13 @@ export default async function BrandingPage({
         </p>
       </div>
 
+      {/* Do NOT add a `key` here derived from brand data (e.g. `updatedAt`).
+          A save triggers the exact `revalidatePath()` that would bump such a
+          key, remounting <BrandingForm> mid-save and destroying its
+          useActionState result — and with it the "Brand saved."/partial-save
+          banner. See branding-form.tsx's header, Phase 5 Finding 1,
+          docs/work-log/2026-09-26-lint-gate.md. The staleness fix lives
+          entirely inside BrandingForm now (render-time state adjustment). */}
       <BrandingForm
         slug={slug}
         organizationName={resolved.org.name}

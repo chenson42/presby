@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { resolvePublishedOrganization } from "@/lib/sites";
 import { getBlobStore } from "@/lib/storage/blob-store";
 
+export const dynamic = "force-dynamic"; // stops Next's build-time placeholder-param prerender trial (params.slug = "-") from reaching a live flag/DB read here at all — docs/work-log/2026-09-26-flags-fail-closed.md Phase 2 Ruling 3
+
 /**
  * `GET /site/<slug>/assets/[key]` — content-image serving for the public
  * render path. See docs/work-log/2026-08-20-public-sites.md Phase 3,

@@ -513,9 +513,7 @@ permission never stages a rollout. A gated feature asks both questions.
 
 `isFlagEnabled()` returns `false` on a missing row or a DB error — right for a
 toggle, wrong for a flag that gates an auth path, where `false` means "deny
-every sign-in during a DB blip." Auth-critical flags (`auth.local_login`,
-`auth.require_2fa`) go through named fail-open wrappers in `src/lib/auth/`
-(DECISION-026), never through the bare helper.
+every sign-in during a DB blip." Auth-critical flags (`auth.local_login`, `auth.require_2fa`) go through named helpers in `src/lib/auth/` that do their own read and their own `catch`, never through the bare helper — `auth.local_login` fails **open** (a DB blip must not lock everyone out of sign-in), `auth.require_2fa` fails to **the already-resolved requirement** (a DB blip must not silently drop enforcement, and must not impose a challenge on someone who never enrolled). Neither behaviour is expressible once the shared helper has collapsed a DB error into `false` (DECISION-026).
 
 ### The Edge Gate Cannot Reach the Database
 

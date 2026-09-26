@@ -83,14 +83,39 @@ describe("isFlagEnabled", () => {
     expect(result).toBe(false);
   });
 
-  it("propagates a DB error thrown by findFirst", async () => {
+  it("resolves to false (never rejects) when findFirst throws — fail-closed contract, DECISION-026", async () => {
     // Arrange
     findFirst.mockRejectedValue(new Error("DB connection refused"));
 
-    // Act + Assert
-    await expect(isFlagEnabled("error-flag")).rejects.toThrow(
-      "DB connection refused",
+    // Act + Assert — toBe, not toBeFalsy: distinguishes a real `false` from
+    // undefined or another falsy-adjacent value that would silently pass a
+    // looser assertion. See CLAUDE.md → Permissions vs Flags.
+    await expect(isFlagEnabled("error-flag")).resolves.toBe(false);
+  });
+
+  it("logs the flag key on a DB error, never the error object", async () => {
+    // Arrange
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    findFirst.mockRejectedValue(
+      new Error(
+        'Failed query: select * from "feature_flags" where "key" = $1',
+      ),
     );
+
+    // Act
+    await isFlagEnabled("error-flag");
+
+    // Assert — the logged args must never contain the query text the driver
+    // embeds in its error message (Ruling 4: never log err or err.message).
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const loggedArgs = consoleErrorSpy.mock.calls[0];
+    const serialized = JSON.stringify(loggedArgs);
+    expect(serialized).not.toMatch(/select|Failed query/i);
+    expect(serialized).toContain("error-flag");
+
+    consoleErrorSpy.mockRestore();
   });
 
   it("is exported as a const (cache()-wrapped) rather than a named function declaration", () => {

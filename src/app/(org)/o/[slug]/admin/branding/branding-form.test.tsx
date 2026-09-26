@@ -17,15 +17,21 @@
  *   - Every `PolicyResult` kind this pipeline's commit 2 defined surfaces
  *     the right user-facing copy: success, each validation-error string,
  *     forbidden, and the partial-save (E-c2) case.
- *   - THE STALENESS-BUG FIX: when the component re-renders with NEW
- *     `initial*` props (simulating a post-save `revalidatePath` re-fetch of
- *     the server tree, without a remount), the form's fields pick up the new
- *     values — the platform form's own known defect, named in
- *     `docs/TODO.md`, does not carry forward into this adaptation.
+ *   - THE STALENESS-BUG FIX: when this SAME component instance (no `key`,
+ *     no remount) re-renders with NEW `initial*` props (simulating a
+ *     post-save `revalidatePath` re-fetch of the server tree), the form's
+ *     fields pick up the new values by adjusting state during render — the
+ *     platform form's own known defect, named in `docs/TODO.md`, does not
+ *     carry forward into this adaptation. A `key`-forced remount was tried
+ *     and reverted (Phase 5 Finding 1, docs/work-log/2026-09-26-lint-gate.md)
+ *     because it destroyed the save banner on every write path — see this
+ *     file's own "save banner survives a post-save prop refresh" describe
+ *     block below for the regression test that guards against it.
  */
 
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import Link from "next/link";
 import type { PolicyResult } from "./actions";
 
 const mockRouterPush = vi.hoisted(() => vi.fn());
@@ -261,7 +267,7 @@ describe("BrandingForm — light mode only", () => {
   });
 });
 
-describe("BrandingForm — staleness-bug fix (docs/TODO.md, carried forward as fixed, not reproduced)", () => {
+describe("BrandingForm — staleness-bug fix (docs/TODO.md, fixed by adjusting state during render, not a remount)", () => {
   it("re-seeds the hex/pairing/lightOnly fields when the initial* props change value, without a remount", () => {
     const { rerender } = renderForm({
       initialSeedHex: "#2563eb",
@@ -278,8 +284,12 @@ describe("BrandingForm — staleness-bug fix (docs/TODO.md, carried forward as f
 
     // Simulate the server tree re-rendering this component with fresh props
     // after a successful save's revalidatePath() — the SAME component
-    // instance (no key change, no unmount), which is exactly the case the
-    // platform form's known bug fails on.
+    // instance (no key, no unmount). This is what actually exercises the
+    // `if (initial* !== prevInitial*) {...}` render-time-adjust blocks in
+    // branding-form.tsx: delete them and this assertion fails, because the
+    // fields would never pick up the new props without either that
+    // mechanism or a remount (which this fix deliberately does not use —
+    // see Phase 5 Finding 1, docs/work-log/2026-09-26-lint-gate.md).
     rerender(
       <BrandingForm
         slug="alder-creek"
@@ -299,17 +309,107 @@ describe("BrandingForm — staleness-bug fix (docs/TODO.md, carried forward as f
     expect(lightOnlyCheckbox.checked).toBe(true);
   });
 
-  it("does not clobber a user's in-progress edit on the SAME render the props were already reflecting (no infinite re-seed loop)", () => {
-    renderForm({ initialSeedHex: "#2563eb" });
+  it("does not clobber a user's in-progress edit when the initial* props are re-rendered unchanged (no infinite re-seed loop)", () => {
+    const { rerender } = renderForm({ initialSeedHex: "#2563eb" });
     const hexInput = screen.getByLabelText(/brand colour/i) as HTMLInputElement;
 
     fireEvent.change(hexInput, { target: { value: "#123abc" } });
     expect(hexInput.value).toBe("#123abc");
 
-    // No re-render with new props happened — the user's own edit must
-    // survive, proving the effect only re-seeds on an actual prop change,
-    // not on every render.
+    // Re-render with the SAME initial* props the component already has —
+    // `prevInitialSeedHex === initialSeedHex` on this render, so the
+    // render-time-adjust `if` guard does not fire and setSeedHex is never
+    // called. The user's in-progress edit must survive this re-render;
+    // if the guard were unconditional (or keyed on the wrong condition),
+    // this would clobber the dirty value back to "#2563eb".
+    rerender(
+      <BrandingForm
+        slug="alder-creek"
+        organizationName="Invented Fixture Congregation"
+        initialSeedHex="#2563eb"
+        initialTypePairing="classic"
+        initialMarkSrc={null}
+        initialLightOnly={false}
+      />,
+    );
+
     expect(hexInput.value).toBe("#123abc");
+  });
+});
+
+describe("BrandingForm — the save banner survives a post-save prop refresh (Phase 5 Finding 1 regression, docs/work-log/2026-09-26-lint-gate.md)", () => {
+  it("keeps the green 'Brand saved.' banner visible after the component re-renders with new initial* props following a successful save", async () => {
+    setOrgBrandAction.mockResolvedValue({ ok: true });
+    const { rerender } = render(
+      <BrandingForm
+        slug="alder-creek"
+        organizationName="Invented Fixture Congregation"
+        initialSeedHex="#2563eb"
+        initialTypePairing="classic"
+        initialMarkSrc={null}
+        initialLightOnly={false}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save brand/i }));
+    });
+
+    expect(screen.getByText("Brand saved.")).toBeTruthy();
+
+    // The real page re-renders this SAME component with fresh initial*
+    // props once revalidatePath() resolves. A key-forced remount here would
+    // reset useActionState's `result` to null and silently drop the banner
+    // — this is the exact failure a browser-only check would have missed
+    // and a rerender()-with-a-different-key test could not catch (it would
+    // pass "successfully" against the very defect it should have caught).
+    rerender(
+      <BrandingForm
+        slug="alder-creek"
+        organizationName="Invented Fixture Congregation"
+        initialSeedHex="#2563eb"
+        initialTypePairing="classic"
+        initialMarkSrc={null}
+        initialLightOnly={false}
+      />,
+    );
+
+    expect(screen.getByText("Brand saved.")).toBeTruthy();
+  });
+
+  it("keeps the amber partial-save banner visible after the same post-save prop refresh (E-c2)", async () => {
+    const partialError =
+      "Colour and type pairing saved. The logo could not be saved.";
+    setOrgBrandAction.mockResolvedValue({ ok: false, error: partialError });
+    const { rerender } = render(
+      <BrandingForm
+        slug="alder-creek"
+        organizationName="Invented Fixture Congregation"
+        initialSeedHex="#2563eb"
+        initialTypePairing="classic"
+        initialMarkSrc={null}
+        initialLightOnly={false}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save brand/i }));
+    });
+
+    expect(screen.getByText(partialError)).toBeTruthy();
+
+    rerender(
+      <BrandingForm
+        slug="alder-creek"
+        organizationName="Invented Fixture Congregation"
+        initialSeedHex="#2563eb"
+        initialTypePairing="classic"
+        initialMarkSrc={null}
+        initialLightOnly={false}
+      />,
+    );
+
+    expect(screen.getByText(partialError)).toBeTruthy();
   });
 });
 
@@ -317,7 +417,7 @@ describe("BrandingForm — unsaved-changes guard (H3)", () => {
   it("intercepts a same-origin link click (standing in for the admin shell's 'Back to portal') once the colour is dirtied", () => {
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <BrandingForm
           slug="alder-creek"
           organizationName="Invented Fixture Congregation"
@@ -343,7 +443,7 @@ describe("BrandingForm — unsaved-changes guard (H3)", () => {
   it("does not intercept the link when nothing has changed from the initial brand", () => {
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <BrandingForm
           slug="alder-creek"
           organizationName="Invented Fixture Congregation"
@@ -362,7 +462,7 @@ describe("BrandingForm — unsaved-changes guard (H3)", () => {
   it("selecting a logo file also dirties the form", () => {
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <BrandingForm
           slug="alder-creek"
           organizationName="Invented Fixture Congregation"
@@ -383,11 +483,11 @@ describe("BrandingForm — unsaved-changes guard (H3)", () => {
     expect(screen.getByText(/discard unsaved changes\?/i)).toBeTruthy();
   });
 
-  it("becomes clean again once the post-save prop re-sync lands (the same automatic Server-Action re-render the staleness-bug-fix test above simulates)", async () => {
+  it("becomes clean again once the post-save prop re-sync lands (the same render-time-adjust mechanism the staleness-bug-fix test above simulates)", async () => {
     setOrgBrandAction.mockResolvedValue({ ok: true });
     const { rerender } = render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <BrandingForm
           slug="alder-creek"
           organizationName="Invented Fixture Congregation"
@@ -408,12 +508,14 @@ describe("BrandingForm — unsaved-changes guard (H3)", () => {
     });
 
     // Next re-renders this component with fresh `initial*` props once the
-    // Server Action's own `revalidatePath()` resolves — the SAME mechanism
-    // the staleness-bug-fix tests above pin, simulated here explicitly since
-    // this unit test has no real Server Component tree to re-fetch from.
+    // Server Action's own `revalidatePath()` resolves — the SAME component
+    // instance (no key, no remount), simulated here explicitly since this
+    // unit test has no real Server Component tree to re-fetch from. The
+    // render-time-adjust blocks in branding-form.tsx pick this up and reset
+    // `seedHex` to the new "clean" value, so the form is no longer dirty.
     rerender(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <BrandingForm
           slug="alder-creek"
           organizationName="Invented Fixture Congregation"

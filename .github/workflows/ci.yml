@@ -15,7 +15,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version-file: ".nvmrc"
           cache: "npm"
 
       - name: Install dependencies
@@ -23,9 +23,6 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
 
       - name: Build
         run: npm run build
@@ -45,6 +42,16 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # Runs LAST, not third: a lint failure must never again hide Build/
+      # Tripwires/Dependency audit/Unit tests behind a `skipped` status, which
+      # is exactly what happened on every push to main from 2026-08-26 to
+      # 2026-09-25 while Lint sat third with the job's default
+      # continue-on-error: false. Every step above still reports its own true
+      # pass/fail independent of Lint's outcome; the job's overall conclusion
+      # still correctly goes red on a real lint failure.
+      - name: Lint
+        run: npm run lint
+
   # The commit-msg hook only runs where `npm install` has installed it — GitHub
   # web edits and fresh clones bypass it silently. This job re-validates every
   # PR commit with the same exported validator the hook uses.
@@ -59,7 +66,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version-file: ".nvmrc"
 
       - name: Validate commit messages
         run: node scripts/validate-commit-range.mjs "origin/${{ github.base_ref }}..HEAD"

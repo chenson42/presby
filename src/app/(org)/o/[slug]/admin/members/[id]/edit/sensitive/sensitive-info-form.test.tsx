@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import Link from "next/link";
 
 const mockRefresh = vi.hoisted(() => vi.fn());
 const mockPush = vi.hoisted(() => vi.fn());
@@ -393,7 +394,7 @@ describe("SensitiveInfoForm — unsaved-changes guard (H3)", () => {
   it("intercepts a same-origin link click (standing in for the shared 'Back to portal' link) once ANY section is dirtied", () => {
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
       </div>,
     );
@@ -412,7 +413,7 @@ describe("SensitiveInfoForm — unsaved-changes guard (H3)", () => {
   it("does not intercept the link when nothing has been touched", () => {
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
       </div>,
     );
@@ -424,7 +425,7 @@ describe("SensitiveInfoForm — unsaved-changes guard (H3)", () => {
   it("a dirty demographics field alone (no note typed) still triggers the guard", () => {
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
       </div>,
     );
@@ -444,7 +445,7 @@ describe("SensitiveInfoForm — unsaved-changes guard (H3)", () => {
     });
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
       </div>,
     );
@@ -469,7 +470,7 @@ describe("SensitiveInfoForm — unsaved-changes guard (H3)", () => {
   it("Stay keeps the draft note intact", () => {
     render(
       <div>
-        <a href="/o/alder-creek">Back to portal</a>
+        <Link href="/o/alder-creek">Back to portal</Link>
         <SensitiveInfoForm slug="alder-creek" personId="p-1" data={DATA} />
       </div>,
     );

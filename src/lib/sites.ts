@@ -337,10 +337,14 @@ function isStoredSiteBundle(value: unknown): value is StoredSiteBundle {
  * The anonymous public render path's one read. Reads through the plain `db`
  * connection with NO org context set — `presby_published_site()` is
  * SECURITY DEFINER precisely so this works (see the migration's own
- * comment). Every non-`ok` reason — never provisioned, suspended,
- * nonexistent slug, org not active, the render flag off, or a corrupt/
- * dangling bundle — collapses to the same `{ kind: "not_found" }`, never a
- * 500 and never a distinguishable error (Phase 1 Gap 5).
+ * comment). Never provisioned, suspended, nonexistent slug, org not active,
+ * or the render flag off all collapse to the same `{ kind: "not_found" }`,
+ * never a 500 and never a distinguishable error (Phase 1 Gap 5) — this is
+ * true of the flag read (`isFlagEnabled`, fail-closed on a DB error per
+ * DECISION-026) as of docs/work-log/2026-09-26-flags-fail-closed.md. It is
+ * NOT yet true of the two reads below: `db.execute` and the blob resolve
+ * still throw uncaught on a DB blip, which is a 500, not a 404 — tracked in
+ * docs/TODO.md, not covered by this docstring's guarantee.
  */
 export const getPublishedSite = cache(async function getPublishedSite(
   slug: string,

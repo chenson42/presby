@@ -6,10 +6,13 @@
  *   computeEffectiveTwoFactor() — short-circuiting require_2fa gate
  *
  * Mocking strategy:
- *   isLocalLoginEnabled queries the DB directly (same pattern as sign-in-gate.ts)
- *   → mock @/lib/db
- *   computeEffectiveTwoFactor delegates to isFlagEnabled
- *   → mock @/lib/flags
+ *   Both helpers query the DB directly — neither imports @/lib/flags at all
+ *   (Ruling 2: no auth-critical flag read goes through the bare helper, made
+ *   grep-verifiable by removing the import from the module under test). Both
+ *   are driven off the same @/lib/db mock: findFirst() serves both
+ *   isLocalLoginEnabled's auth.local_login read and
+ *   computeEffectiveTwoFactor's auth.require_2fa read; execute() serves
+ *   computeEffectiveTwoFactor's per-church presby_two_factor_required() arm.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -29,14 +32,8 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-// Mock @/lib/flags for computeEffectiveTwoFactor tests.
-vi.mock("@/lib/flags", () => ({
-  isFlagEnabled: vi.fn(),
-}));
-
 import { isLocalLoginEnabled, computeEffectiveTwoFactor } from "./local-login";
 import { db } from "@/lib/db";
-import { isFlagEnabled } from "@/lib/flags";
 
 const findFirst = db.query.featureFlags.findFirst as ReturnType<typeof vi.fn>;
 const mockExecute = db.execute as unknown as ReturnType<typeof vi.fn>;
@@ -45,7 +42,11 @@ const mockExecute = db.execute as unknown as ReturnType<typeof vi.fn>;
 function orgRequires(required: boolean) {
   return { rows: [{ required }] };
 }
-const mockIsFlagEnabled = isFlagEnabled as ReturnType<typeof vi.fn>;
+
+/** featureFlags row shape for the auth.require_2fa read. */
+function requireTwoFactorFlagRow(enabled: boolean) {
+  return { key: "auth.require_2fa", enabled };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -107,29 +108,38 @@ describe("computeEffectiveTwoFactor", () => {
     const result = await computeEffectiveTwoFactor(false);
 
     expect(result).toBe(false);
-    expect(mockIsFlagEnabled).not.toHaveBeenCalled();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   it("rawRequired = true, flag ON → true — org-level gate is active", async () => {
-    mockIsFlagEnabled.mockResolvedValue(true);
+    findFirst.mockResolvedValue(requireTwoFactorFlagRow(true));
 
     const result = await computeEffectiveTwoFactor(true);
 
     expect(result).toBe(true);
-    expect(mockIsFlagEnabled).toHaveBeenCalledWith("auth.require_2fa");
+    expect(findFirst).toHaveBeenCalledTimes(1);
   });
 
   it("rawRequired = true, flag OFF → false — master switch disables enforcement", async () => {
-    mockIsFlagEnabled.mockResolvedValue(false);
+    findFirst.mockResolvedValue(requireTwoFactorFlagRow(false));
 
     const result = await computeEffectiveTwoFactor(true);
 
     expect(result).toBe(false);
-    expect(mockIsFlagEnabled).toHaveBeenCalledWith("auth.require_2fa");
+    expect(findFirst).toHaveBeenCalledTimes(1);
   });
 
-  it("rawRequired = true, isFlagEnabled throws → rawRequired (pre-feature fallback)", async () => {
-    mockIsFlagEnabled.mockRejectedValue(new Error("DB connection refused"));
+  it("rawRequired = true, auth.require_2fa read throws → rawRequired (regression for isFlagEnabled fail-closed change)", async () => {
+    // This is the load-bearing regression test (Phase 1/2/3): before this
+    // fix, computeEffectiveTwoFactor only reached this "preserve the
+    // resolved requirement" branch because the shared isFlagEnabled() threw.
+    // Once isFlagEnabled() started resolving `false` on a DB error
+    // (DECISION-026 correction), a bare delegation to it would have taken
+    // the "master switch disabled" branch instead, silently dropping 2FA
+    // enforcement for an already-required user during a DB blip. Driving
+    // this off @/lib/db's findFirst — not a mocked @/lib/flags seam — is
+    // what makes this test able to catch that regression at all.
+    findFirst.mockRejectedValue(new Error("DB connection refused"));
 
     const result = await computeEffectiveTwoFactor(true);
 
@@ -139,10 +149,9 @@ describe("computeEffectiveTwoFactor", () => {
     expect(result).toBe(true);
   });
 
-  it("rawRequired = true, flag missing (isFlagEnabled returns false) → false", async () => {
-    // Standard isFlagEnabled returns false on missing row.
-    // For require_2fa this is safe: missing flag = no enforcement.
-    mockIsFlagEnabled.mockResolvedValue(false);
+  it("rawRequired = true, flag missing (no row) → false", async () => {
+    // A missing row is safe here: missing flag = no enforcement.
+    findFirst.mockResolvedValue(undefined);
 
     const result = await computeEffectiveTwoFactor(true);
 
@@ -162,7 +171,7 @@ describe("computeEffectiveTwoFactor", () => {
 describe("computeEffectiveTwoFactor — per-congregation policy", () => {
   it("requires 2FA when the user's own column is false but their church requires it", async () => {
     mockExecute.mockResolvedValue(orgRequires(true));
-    mockIsFlagEnabled.mockResolvedValue(true);
+    findFirst.mockResolvedValue(requireTwoFactorFlagRow(true));
 
     const result = await computeEffectiveTwoFactor(false, "user-1");
 
@@ -176,11 +185,11 @@ describe("computeEffectiveTwoFactor — per-congregation policy", () => {
 
     expect(result).toBe(false);
     // Master switch is irrelevant when nothing requires 2FA — don't read it.
-    expect(mockIsFlagEnabled).not.toHaveBeenCalled();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   it("skips the church lookup entirely when the user's own column already requires it", async () => {
-    mockIsFlagEnabled.mockResolvedValue(true);
+    findFirst.mockResolvedValue(requireTwoFactorFlagRow(true));
 
     const result = await computeEffectiveTwoFactor(true, "user-1");
 
@@ -190,7 +199,7 @@ describe("computeEffectiveTwoFactor — per-congregation policy", () => {
 
   it("the master switch still turns off a church-imposed requirement", async () => {
     mockExecute.mockResolvedValue(orgRequires(true));
-    mockIsFlagEnabled.mockResolvedValue(false);
+    findFirst.mockResolvedValue(requireTwoFactorFlagRow(false));
 
     const result = await computeEffectiveTwoFactor(false, "user-1");
 
@@ -206,7 +215,7 @@ describe("computeEffectiveTwoFactor — per-congregation policy", () => {
   });
 
   it("without a userId, behaves exactly as before the per-church feature", async () => {
-    mockIsFlagEnabled.mockResolvedValue(true);
+    findFirst.mockResolvedValue(requireTwoFactorFlagRow(true));
 
     const result = await computeEffectiveTwoFactor(true);
 

@@ -107,7 +107,7 @@ export default async function ChildrenRosterPage({
           {resolved.org.name}
         </p>
       </div>
-      <ChildrenRosterList slug={slug} children={result.children} />
+      <ChildrenRosterList slug={slug} roster={result.children} />
     </section>
   );
 }

@@ -478,6 +478,37 @@ describe("publicOrgSummary", () => {
 
     await expect(publicOrgSummary("no-such-church")).resolves.toBeNull();
   });
+
+  it("resolves to null (never rejects) when the underlying read throws — fail-closed contract, docs/work-log/2026-09-26-public-render-blip.md", async () => {
+    select.mockImplementationOnce(() => {
+      throw new Error(
+        'Failed query: select "name", "organization_type" from "organizations" where "organizations"."slug" = $1 limit $2\nparams: fpcw,1',
+      );
+    });
+
+    await expect(publicOrgSummary("fpcw")).resolves.toBeNull();
+  });
+
+  it("logs the slug on a DB error, never the caught error or its message", async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    select.mockImplementationOnce(() => {
+      throw new Error(
+        'Failed query: select "name", "organization_type" from "organizations" where "organizations"."slug" = $1 limit $2\nparams: fpcw,1',
+      );
+    });
+
+    await publicOrgSummary("fpcw");
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const loggedArgs = consoleErrorSpy.mock.calls[0];
+    const serialized = JSON.stringify(loggedArgs);
+    expect(serialized).not.toMatch(/select|Failed query|params:/i);
+    expect(serialized).toContain("fpcw");
+
+    consoleErrorSpy.mockRestore();
+  });
 });
 
 describe("withOrgContext / assertOrgAccess", () => {

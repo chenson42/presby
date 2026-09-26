@@ -1373,6 +1373,47 @@ comments sit in files this pass already touches.
 Implementer: **database-admin**, one pass, covering F60/F61/F62/F64
 (F63's doc half is applied here). Full brief in the work-log.
 
+## 2i. From-scratch rehearsal — the committed migrations did not reproduce the live schema (F81–F83)
+
+*(2026-09-26, `docs/work-log/2026-09-26-ci-db-tests.md` Phases 1–4; found by the
+first rehearsal of a CI database built from EMPTY, which is what `drizzle/0050`
+and the `db.yml` job now keep true. Recorded by the orchestrator.)*
+
+### F81 — four columns drifted between `drizzle/*.sql` and every live branch; a from-empty database had a broken permission resolver
+
+`officer_terms.recorded_by` and `roll_actions.proposed_by` were `NOT NULL` in
+`drizzle/0008` but nullable on every live branch and in the TS model (F24: null is
+legitimate provenance for imported history); `administrative_commissions.group_id`
+and `org_delegations.group_id` existed live and in `src/lib/db/domain/authz.ts`
+but in no migration (a hand-written `ALTER TABLE` on 2026-08-17). Because
+`drizzle/0010`'s resolver body is `language plpgsql`, Postgres never resolved
+`ac.group_id`/`od.group_id` at `CREATE FUNCTION`: all 50 migrations applied and
+`presby_effective_permissions()` raised `column ac.group_id does not exist` on its
+first call — every arm, since the four arms are one `UNION`. DECISION-146's premise
+("the posture is reproducible from `drizzle/`") was false when written. **Closed:**
+`drizzle/0050_presby_schema_parity.sql` (fix-forward; relaxes the two NOT NULLs,
+adds the two columns with COMPOSITE FKs to `groups(id, organization_id)` keyed on
+`parent_org_id`/`grantee_org_id` — F2; converges a fresh and a drifted database
+idempotently), and `npm run check:schema-parity` (a catalog-vs-TS-model diff, run in
+`db.yml` after `db:migrate`, deliberately not part of the offline `npm run check`).
+
+### F82 — the isolation suite's `assert_eq()` helper existed on every live branch and in no committed file
+
+`scripts/test-rls.sql`'s own comment named `scripts/install-test-helpers.sql`, which
+did not exist; from empty the suite died at assertion 1. **Closed:** the file is
+committed and applied as owner before the suite in `db.yml` and in the documented
+recipe. `check:schema-parity` compares columns, nullability and FK shape only —
+functions are the next class (TODO).
+
+### F83 — `scripts/seed-dev.sql` collided with `db:seed`'s `group_types` templates and `test-rls.sql` hard-coded the same UUID
+
+After `drizzle/0048`'s `unique nulls not distinct (organization_id, key)`, the dev
+seed's fixed-UUID `court`/`committee`/`roster` rows collided with the platform seed;
+`test-rls.sql:613` hard-coded the same literal, so fixing the seed alone would have
+left the suite failing on a fresh database. **Closed:** `on conflict do nothing` plus
+keyed sub-queries in the seed; one line in the suite (a ruled Rule-16 exception). The
+`docs/testing.md` from-scratch recipe now actually works — the first time ever.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

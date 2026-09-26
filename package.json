@@ -1,6 +1,6 @@
 {
   "name": "presby",
-  "version": "0.26.1",
+  "version": "0.26.2",
   "private": true,
   "description": "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods: rolls, officers, directory, and council operations. Pre-release.",
   "repository": {
@@ -22,6 +22,7 @@
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:seed": "dotenv -e .env.local -- tsx scripts/seed.ts",
     "test": "vitest run",
+    "test:db": "dotenv -e .env.local -- vitest run --no-file-parallelism",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "visual:baseline": "PW_VISUAL=1 playwright test --project=visual --update-snapshots",
@@ -34,6 +35,7 @@
     "check:deps-drift": "node scripts/check-deps-drift.mjs",
     "check:brand-scope": "node scripts/check-brand-scope.mjs",
     "check:secrets": "node scripts/check-secrets-pii.mjs",
+    "check:schema-parity": "dotenv -e .env.local -- tsx scripts/check-schema-parity.ts",
     "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope && npm run check:secrets",
     "docs:erd": "tsx scripts/generate-erd.ts"
   },

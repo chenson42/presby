@@ -5,17 +5,28 @@
 # defects invisible to unit tests) — yet it never ran in CI. This job closes
 # that gap using the stack's own advertised capability: Neon branching.
 #
+# Until 2026-09-26 this job could not actually have passed even with the two
+# secrets configured (test-coverage review 2026-09-25, C-5): it never wrote
+# PLATFORM_DATABASE_URL (globalSetup throws), it ran `db:push` + `db:seed`
+# only (Drizzle Kit emits none of the hand-written RLS/trigger migrations, so
+# the branch would have no isolation model), and it never applied
+# scripts/seed-dev.sql (specs reference fixture orgs like alder-creek that
+# only exist after that file runs). This rewrite shares the same
+# database-provisioning recipe as db.yml via the neon-ci-db composite action
+# — one recipe, not two hand-maintained copies that drift from each other,
+# which is exactly how C-5 happened in the first place.
+#
 # Required repository secrets (skips cleanly when absent, so forks work out of
 # the box before wiring Neon):
-#   NEON_API_KEY      — console.neon.tech → Account settings → API keys
-#   NEON_PROJECT_ID   — Neon project → Settings → General
-# Optional:
-#   NEON_DB_USERNAME  — DB role name if not the default "neondb_owner"
+#   NEON_API_KEY      — console.neon.tech -> Account settings -> API keys
+#   NEON_PROJECT_ID   — Neon project -> Settings -> General
 #
 # Everything else (AUTH_SECRET, TOTP key, seeded-user credentials) is generated
 # per-run — the branch is created fresh and deleted afterward, so no live
 # credentials are involved. Free-tier friendly: one branch per run, deleted in
-# an always() step.
+# an always() step. No Real Data: see db.yml's header and DECISION-150 — the
+# ephemeral branch forks the pinned `development` branch, but the job creates
+# a fresh database inside it and never opens the parent's own `neondb`.
 name: E2E
 
 on:
@@ -23,6 +34,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check-secrets:
@@ -35,6 +50,7 @@ jobs:
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: |
+          set -euo pipefail
           if [ -n "$NEON_API_KEY" ]; then
             echo "has-neon=true" >> "$GITHUB_OUTPUT"
           else
@@ -59,34 +75,53 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create ephemeral Neon branch
-        id: neon-branch
-        uses: neondatabase/create-branch-action@v5
+      - name: Provision ephemeral database
+        id: db
+        uses: ./.github/actions/neon-ci-db
         with:
-          project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          parent: development
           branch_name: e2e-${{ github.run_id }}-${{ github.run_attempt }}
-          username: ${{ secrets.NEON_DB_USERNAME || 'neondb_owner' }}
 
+      # Deliberately does NOT also set the four DB URLs as step-level `env:`
+      # on any `npm run` step below — dotenv -e .env.local does not override
+      # an already-exported variable (Batch A finding, docs/work-log/
+      # 2026-09-26-ci-db-tests.md). The `psql` steps are the legitimate
+      # exception: psql has no dotenv integration and reads env: directly.
       - name: Write .env.local (per-run credentials, ephemeral DB)
         run: |
+          set -euo pipefail
           {
-            echo "DATABASE_URL=${{ steps.neon-branch.outputs.db_url_with_pooler }}"
-            echo "E2E_DATABASE_URL=${{ steps.neon-branch.outputs.db_url_with_pooler }}"
+            echo "DATABASE_URL=${{ steps.db.outputs.database_url }}"
+            echo "APP_DATABASE_URL=${{ steps.db.outputs.app_database_url }}"
+            echo "PLATFORM_DATABASE_URL=${{ steps.db.outputs.platform_database_url }}"
+            echo "MIGRATE_DATABASE_URL=${{ steps.db.outputs.migrate_database_url }}"
             echo "AUTH_SECRET=$(openssl rand -base64 32)"
             echo "AUTH_URL=http://localhost:3000"
             echo "AUTH_TRUST_HOST=true"
             echo "AUTH_TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+            # This is the ONE place RATE_LIMIT_DISABLED=true belongs in CI:
+            # the shared e2e fixture signs in far more than 5/min. db-tests
+            # deliberately does NOT set this — it is where the limiter is
+            # exercised for real.
             echo "RATE_LIMIT_DISABLED=true"
             # No SEED_* users here: the e2e suite provisions its own fixture
             # users from e2e/support/users.ts. Generating them per-run was how
             # a missing variable turned into 42 silently skipped specs.
           } >> .env.local
 
-      - name: Push schema + seed
+      - run: npm run db:migrate
+      - run: npm run check:schema-parity
+      - run: npm run db:seed
+
+      - name: Apply the synthetic fixture
+        shell: bash
         run: |
-          npm run db:push
-          npm run db:seed
+          set -euo pipefail
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/seed-dev.sql
+        env:
+          MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
 
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium

@@ -30,6 +30,11 @@ const isVisualRun = process.env.PW_VISUAL === "1";
 export default defineConfig({
   globalSetup: "./e2e/support/global-setup.ts",
   testDir: "./e2e",
+  // Unset in CI and by default locally — "test-results" (the literal
+  // e2e.yml's trace-upload step and .gitignore already expect). Only a
+  // parallel worktree running the suite alongside another one sets this, so
+  // its output doesn't collide with a sibling worktree's own test-results/.
+  outputDir: process.env.PW_OUTPUT_DIR ?? "test-results",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

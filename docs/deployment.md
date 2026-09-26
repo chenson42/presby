@@ -109,13 +109,45 @@ after a deploy, never assume it happened as part of one. As of this writing,
 
 ---
 
+## CI's database secrets
+
+Two GitHub Actions workflows (`.github/workflows/db.yml`,
+`.github/workflows/e2e.yml`) run the database-backed test suites — the 765+
+`describe.skipIf(!hasDb)` tests, the 520-assertion `scripts/test-rls.sql`
+isolation suite, and the Playwright e2e suite — against a per-run ephemeral
+Neon branch. Both skip cleanly (a `::notice::`, reported as a skipped check,
+never a green no-op) until two repository secrets exist:
+
+| Secret | Where to find it |
+|---|---|
+| `NEON_API_KEY` | console.neon.tech → Account settings → API keys |
+| `NEON_PROJECT_ID` | the `presby` Neon project → Settings → General |
+
+**[YOU]** Add both under Settings → Secrets and variables → Actions on this
+repository. Nothing else is required — both workflows generate every other
+credential (AUTH_SECRET, the TOTP key, `presby_app`'s per-run password) fresh
+on each run. Once both secrets exist, `db-tests` and `e2e` flip from skipped
+to running on the next push or PR.
+
+**The ephemeral branch always forks the pinned `development` branch, never
+the implicit default.** An unpinned `parent:` on `create-branch-action` forks
+the project's primary branch, which is `production` — the two real
+congregations' data above, and (per "Migrations" below) not even migrated to
+the current schema. Each workflow's `neon-ci-db` composite-action call writes
+`parent: development` literally; see DECISION-150 and `docs/testing.md`'s
+"Continuous integration" section for the full reasoning. The job creates a
+fresh database inside that branch and never opens the parent's own `neondb`,
+so no row that predates the CI run can appear in a log or an uploaded trace.
+
+---
+
 ## Environment variables
 
 | Variable | Source |
 |---|---|
 | `DATABASE_URL` | `production` branch, `presby_app`, pooled |
 | `APP_DATABASE_URL` | same as `DATABASE_URL` (used by the RLS test script) |
-| `PLATFORM_DATABASE_URL` | `production` branch, `presby_platform`, pooled |
+| `PLATFORM_DATABASE_URL` | `production` branch, `neondb_owner`, pooled — corrected 2026-09-26; stale since DECISION-136 (2026-09-24) fixed `getPlatformDb()`'s actual role everywhere else. `presby_platform` is `rolcanlogin = false` and has never authenticated anywhere. |
 | `MIGRATE_DATABASE_URL` | `production` branch, owner, direct |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_TOTP_ENCRYPTION_KEY` | `openssl rand -base64 32` |

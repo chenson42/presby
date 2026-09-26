@@ -14,11 +14,20 @@ the shared password below safe to keep in the repository.
 ## Getting a database with fixtures in it
 
 ```bash
-npm run db:migrate     # or apply drizzle/00XX_presby_*.sql by hand — see the note below
-npm run db:seed        # roles, features, flags — application catalog data
-psql "$MIGRATE_DATABASE_URL" -f scripts/seed-dev.sql   # the synthetic congregation fixture
+npm run db:migrate                    # or apply drizzle/00XX_presby_*.sql by hand — see the note below
+npm run check:schema-parity           # confirms the migrated catalog matches the TS domain model
+npm run db:seed                       # roles, features, flags — application catalog data
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/seed-dev.sql   # the synthetic congregation fixture
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/install-test-helpers.sql   # assert_eq(), needed only if you'll run scripts/test-rls.sql
 npm run dev
 ```
+
+**`-v ON_ERROR_STOP=1` on the `seed-dev.sql` line is not optional.** Plain
+`psql -f` exits **0** even when a statement inside fails — the file is one
+`begin;…commit;` transaction, so a failure anywhere rolls the whole thing back
+and you get an empty fixture with a green exit code and no error on screen
+(Phase 2 MUST ruling, `docs/work-log/2026-09-26-ci-db-tests.md`). The flag is
+what turns that into a visible, non-zero failure.
 
 The **e2e fixtures** (the accounts in the table below) are provisioned by the
 Playwright suite's `globalSetup`, not by `db:seed` — the suite owns its users
@@ -26,9 +35,19 @@ Playwright suite's `globalSetup`, not by `db:seed` — the suite owns its users
 separate command, deliberately: a second provisioning path is a second thing to
 drift.
 
-> **Local note.** `drizzle.__drizzle_migrations` on the dev database records only
-> the first ten migrations; 0010–0015 were applied with `psql`. So `db:migrate`
-> is not the local apply command on this branch — it would try to re-run 0010.
+> **Local note.** `drizzle.__drizzle_migrations` on **this dev database** (the
+> one `.env.local` in this worktree points at, shared across sessions) records
+> only the first ten migrations; 0010–0015 were applied with `psql`. So
+> `npm run db:migrate` is not the local apply command **against that specific,
+> already-migrated-by-hand database** — it would try to re-run 0010. This does
+> **not** describe every database: a genuinely from-empty database (a fresh
+> `CREATE DATABASE`, or an ephemeral CI branch's `ci_run`) migrates cleanly with
+> `npm run db:migrate` — 51/51 applied, no hand intervention — which is exactly
+> what `db.yml`/`e2e.yml` rely on and what makes DECISION-150's reproducibility
+> claim true. If you're building a fixture database from scratch, use
+> `db:migrate`; only reach for hand-applying individual `drizzle/00XX_*.sql`
+> files if you're specifically working against this worktree's pre-existing,
+> partially-hand-migrated dev database.
 
 ---
 
@@ -151,20 +170,87 @@ menu is P1.
 Most Vitest suites are pure unit tests and `npm run test` covers them. A
 subset (~30 files) talks to the real `development` database and needs
 `.env.local` loaded and `--no-file-parallelism`, or teardown races between
-suites produce spurious failures:
+suites produce spurious failures. This is `npm run test:db` — a real script
+now, not just prose here, so CI and a human run the byte-identical command:
 
 ```bash
-npx dotenv -e .env.local -- npx vitest run --no-file-parallelism
+npm run test:db
 ```
+
+(Equivalent to `dotenv -e .env.local -- vitest run --no-file-parallelism`, if
+you need the raw form for some reason.) Note `fileParallelism: false` is
+**not** the global Vitest default — it costs 7.7x on the full suite (12s vs
+94s, measured 2026-09-26) for a requirement only these ~30 files have, so it
+lives in this one script instead of `vitest.config.ts`.
 
 Separately, `scripts/test-rls.sql` is the isolation suite — it **must** run as
 `presby_app` (`$APP_DATABASE_URL`), never as the owner (`$MIGRATE_DATABASE_URL`):
 `neondb_owner` has `rolbypassrls = t`, so running it as the owner proves
-nothing, no matter how many assertions pass.
+nothing, no matter how many assertions pass. It also depends on
+`assert_eq()`, a test-only helper function that is **not** part of any
+migration (production has no business carrying a test assertion helper) —
+install it once per database with `scripts/install-test-helpers.sql` before
+the first run against a fresh database:
 
 ```bash
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/install-test-helpers.sql
 psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql
 ```
+
+---
+
+## Continuous integration
+
+Two workflows run the database-backed suites on an ephemeral Neon branch:
+`.github/workflows/db.yml` (`npm run test:db` + `scripts/test-rls.sql`) and
+`.github/workflows/e2e.yml` (Playwright, running-server). Both consume the
+same `.github/actions/neon-ci-db` composite action so they can never drift
+from each other's database-provisioning recipe — a hand-maintained duplicate
+recipe is exactly how `e2e.yml` went a month without ever having run
+successfully (test-coverage review 2026-09-25, C-5). Each gets its **own**
+branch and deletes it in an `if: always()` step; they never share one, because
+`scripts/test-rls.sql`'s exact-count assertions and Playwright's fixture
+users would otherwise invalidate each other.
+
+**No Real Data, for CI specifically: a CI database contains only rows CI
+created.** Each ephemeral branch is forked from an explicitly pinned parent
+(`development`) — never the implicit default, which is the project's primary
+branch, `production`, holding two real congregations — and the job
+immediately creates a fresh database inside the branch and never opens the
+parent's own `neondb` again. No connection string, log line, or uploaded
+Playwright trace can therefore carry a row that predates the run. See
+DECISION-150.
+
+Both workflows carry a `check-secrets` gate job that reports `::notice::` and
+skips cleanly (not a green no-op) when `NEON_API_KEY`/`NEON_PROJECT_ID` are
+absent — see `docs/deployment.md` for what adding them turns on.
+
+`db-tests` deliberately does **not** set `RATE_LIMIT_DISABLED` — it is the
+one place in this repo's test suites where the sign-in limiter is exercised
+live, for real, under the standard config. `e2e` keeps `RATE_LIMIT_DISABLED=
+true`, because its shared fixture user signs in far more than 5/min.
+
+The retrospective's `deletable_until` fixture-exemption fuse (a 2-hour window
+before a scratch-org fixture becomes permanently undeletable, Rule-16 finding
+5) does not apply to CI's ephemeral branches — the whole branch is deleted
+wholesale in `if: always()` regardless of any row's `deletable_until`.
+
+**Rehearsing this recipe by hand — never against a shared branch's own
+database.** The composite action's provisioning step runs `ALTER ROLE
+presby_app WITH LOGIN PASSWORD '<random>'` on whichever database it's pointed
+at. That statement is **cluster-wide within the branch it runs on** — it
+changes the role's actual password, not something scoped to a database or
+undoable by restoring a file. If you rehearse this recipe against a shared,
+persistent branch (e.g. this repo's own dev/pipeline branches) instead of a
+throwaway branch or a freshly `CREATE DATABASE`d database on one, you will
+leave `presby_app`'s password different from whatever `.env.local` still
+documents when you're done — restoring `.env.local` cannot undo it (this
+happened once, QA repaired it, 2026-09-26). Either (a) rehearse against a
+`CREATE DATABASE`'d fresh database and drop it when done — the password
+change is harmless because nothing else authenticates against that database
+— or, if you must run the statement against a shared branch's existing
+database for some reason, (b) set the password back to the exact value
+`.env.local` already documents before you finish.
 
 ---
 

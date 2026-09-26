@@ -198,9 +198,16 @@ describe("checkRateLimit (in-memory)", () => {
     // Start at a known timestamp so window boundaries are predictable.
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     _inMemoryStore.clear();
+    // This is the ENFORCEMENT block — it must run with the escape hatch off
+    // regardless of what .env.local or CI sets, so neither a developer's
+    // machine (.env.local sets RATE_LIMIT_DISABLED=true) nor db-tests'
+    // deliberate lack of RATE_LIMIT_DISABLED can flip these assertions (its
+    // sibling block above stubs "true" for the mirror reason).
+    vi.stubEnv("RATE_LIMIT_DISABLED", "false");
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.useRealTimers();
     _inMemoryStore.clear();
   });

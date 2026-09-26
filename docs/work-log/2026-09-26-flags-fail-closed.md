@@ -21,7 +21,7 @@
 | 3 — Technical design | tech-lead | Complete — brief bug-fix design, both fixes as one `fix(flags):` change, `force-dynamic` file list corrected per Ruling 3, e2e gate scoped | Design complete, implementer named | 2026-09-26 |
 | 4 — Implementation | api-developer | Complete | — | 2026-09-26 |
 | 5 — Verification | qa | Complete — both regressions reproduced failing-first in isolation (incl. the Ruling-2 hazard); CI-placeholder build green against a control that reproduces the crash; auth e2e 16/16 on a real server with the MFA fixture, zero skips; five non-blocking findings | PASS | 2026-09-26 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-26 |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.26.1 | see section | 2026-09-26 |
 
 ---
 
@@ -953,34 +953,69 @@ Three things Phase 6 should carry:
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Bug-fix variant; recorded verbatim by the orchestrator, 2026-09-26.*
+
+*Bug-fix variant. Worked read-only inside `/Users/cshenso/git/presby-platform/presby-wt-lint`, branch `pipeline/lint-gate`. Both this pipeline's commit (`6f06f41`) and the sibling lint-gate commit (`df7bd42`) are already committed to the shared branch; the shared-file integration (`docs/decisions.md`, `CLAUDE.md`, `docs/TODO.md`, release notes) is still a draft script (`lint-integrate.py`) and has not run yet. I verified every claim below by reading the committed code and running read-only `git` commands — not by trusting the work-log's prose.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> The fix does exactly what Phase 1–3 required — `isFlagEnabled()` fails closed and logs only the key, both sign-in-path flags read the database themselves so neither DECISION-026 direction is compromised, and no build opens a database for the public site — verified in the actual committed diff, not just cited from the work-log; the one thing Phase 6 must say loudly is that the public `/site/<slug>` render path is *still* not DB-blip-safe, and — a detail worth stating precisely — the fixed flag read's own fail-closed branch now walks straight into the next unguarded read (`publicOrgSummary`), so the residual isn't three independent leftover reads, it's a chain the fix newly exercises.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The core fix is exactly as designed, verified by reading the shipped code, not the prose describing it.** `src/lib/flags.ts:19-38`: the `try` is inside the `cache()`-wrapped body, `catch {` has **no error binding at all** — leaking `err.message` is structurally impossible, stronger than Ruling 4 required. `console.error("[flags] isFlagEnabled read failed; treating as disabled", { key })` — key only.
+- **`computeEffectiveTwoFactor()` no longer depends on the bare helper's throw.** `src/lib/auth/local-login.ts:94-123`: inline `findFirst` read, its own `try/catch`; `try` returns `row?.enabled ?? false`, `catch` returns `required` (the already-resolved value) and logs `err.name` only, never `err.message`. The required "do NOT simplify this to `catch { return false }`" comment is present verbatim. `grep -rn "lib/flags" src/lib/auth/` returns zero source-file imports — Ruling 2's "grep-verifiable" property actually holds.
+- **The regression that mattered most was reproduced empirically, twice, independently.** The implementer's own stash-based repro and QA's independently-built isolated copy both hit `expected false to be true` at exactly the predicted line when `flags.ts` is fixed but `local-login.ts` isn't — the Ruling-2 hazard is not a theoretical concern, it's a demonstrated one, and the shipped code closes it.
+- **`force-dynamic` landed on the corrected file list, not the original three-leaf list.** `layout.tsx:6`, `sitemap.xml/route.ts:5`, `assets/[key]/route.ts:5` all carry the export and the required naming comment. QA's build control run (revert `flags.ts` + strip the three exports → exit 1, reproducing the original crash verbatim) is real evidence the green build means something, not a coincidence of read order.
+- **The auth e2e gate was honored on its own terms**, not deferred: 16/16 on a real dev server with the MFA-enrolled fixture, full password → TOTP-reject → TOTP-success path exercised twice on two surfaces. This satisfies CLAUDE.md's stricter Phase 4/5 requirement for any change touching `src/lib/auth/`.
+- **The release-note draft respects the claim boundary Phase 2/3 set.** I read `lint-integrate.py`'s `entry` string directly: it says a feature-flag read that fails "now resolves to 'off'", that "the two sign-in flags read the database themselves," and that public-site pages "never open a database connection **at build**." It does not say — and correctly does not say — that `/site/*` is now DB-blip-safe at runtime. That is the exact line the architect's Note 3 and QA's Finding 1 required Phase 6 to hold, and the draft holds it.
+- **Rule 12 is correctly n/a** — no `feedback` reference anywhere in the work-log (I grepped for it). **Rule 13 what's-new is correctly n/a** — this is an internal reliability fix with no new member-visible behavior; nothing here belongs on `/whats-new`.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: *restore the catch, or ship a silent 2FA-enforcement regression via `computeEffectiveTwoFactor()`.* Shipped: both landed in one commit (`6f06f41`), verified independently failing-first by QA. **Matches.**
+- Phase 1/2 said: *the commit body must correct the kickoff's "a commit dropped the catch" narrative and name `7129fdf` as the exposing commit.* Shipped: `git show -s --format='%B' 6f06f41` names `7129fdf` and the correct causal chain ("isFlagEnabled() never had the catch DECISION-026 promised... 7129fdf's sitemap route exposed it on 2026-08-25... hidden for four weeks behind the Lint-first CI job"). **Matches**, and reads better than the design doc's own draft text.
+- Phase 3 said: `Discovered-In: post-merge`. Shipped: `Discovered-In: Phase-4`. **Acceptable drift, not a defect** — the work-log's own kickoff block literally says "found by the lint pipeline's Phase 4," so `Phase-4` is at least as defensible as `post-merge`; both values are on the allowed list and neither misrepresents how the bug surfaced. Not worth reopening a commit for. Noted so it isn't silently unremarked.
+- Phase 2 Ruling 3 said: *catch the build crash by defense-in-depth (`force-dynamic`), because the catch alone leaves the build green "by coincidence" — the flag read happens to be the first DB touch.* Shipped: confirmed by direct read of `src/lib/sites.ts:349-366` — `db.execute` at `:356` and the blob resolve at `:362` are still bare, uncaught. **Matches the design's own stated limitation exactly** — this was never promised as fixed.
+- Phase 5 Finding 1 said: *a third uncaught read, `publicOrgSummary` at `src/lib/authz.ts:521`, means `/site/<slug>` still 500s.* I traced the call graph myself: `publicOrgSummary()` (`src/lib/authz.ts:516-527`, no try/catch, a bare `db.select`) is called from `page.tsx:224` **only inside the `result.kind === "not_found"` branch** — i.e., exactly the branch the now-fixed, fail-closed flag read routes into during a DB blip. **This is a sharper finding than "three separate residual gaps":** the fix correctly makes the flag read fail closed to `not_found`, and that branch's very next statement is an unguarded second database read against the same unreachable database. QA's live probe (`GET /site/e2e-presbytery` → 500) is the direct, reproducible consequence of that chain, not an unrelated pre-existing gap. Phase 6 should say this precisely rather than let it read as "three unrelated leftover TODOs."
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** not applicable — no new UI surface, no list, no first-run screen.
+- **Failure microcopy:** pass for the flag read and for `isLocalLoginEnabled()` (fails open, sign-in still works during a blip); pass for `computeEffectiveTwoFactor()` (an already-required user stays challenged during a blip, verified by the composed regression test, not just argued); **fail, tracked** for `/site/<slug>` itself — a real visitor hitting a DB blip gets a framework error page (HTTP 500), not the "not found" the page's own docstring promises for every non-`ok` outcome. This was explicitly out of scope for this fix (Phase 2 Note 3, Phase 3 Out of Scope), correctly narrowed in the `sites.ts` docstring rather than left overclaiming, and correctly not claimed as fixed in the release note. Still a real user-facing gap that needs its own scoped pipeline.
+- **Permission gate:** not applicable — this is a read-path reliability fix; no `hasFeature()`/`FEATURES.*` check was added, removed, or altered. QA's feature-gate audit (all three touched files are public-by-design, `auth()` and `hasFeature()` correctly absent) checks out on direct read.
+- **Audit event:** not applicable — no security-sensitive mutation; this is a read path, correctly documented as such in Phase 4.
+- **Mobile (360px):** not applicable — no UI surface changed.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Read the orchestrator's consolidated draft line (`lint-integrate.py:62`, the `docs/TODO.md` "Flags follow-ups (2026-09-26-flags-fail-closed)" bullet). **I bless it with one amendment and one addition:**
 
-## Red Flags (if NEEDS REWORK)
+- **Bless as-is:** the three uncaught reads (`sites.ts:356`, `sites.ts:362`, `authz.ts:521`) with correct, verified line numbers; the `RATE_LIMIT_DISABLED` / documented DB-backed test-invocation coupling; the `isLocalLoginEnabled()` missing log line and the missing `err.message`-leak guard on the `[local-login]` log; the `org_features.category_axis` direction flag for the next security health-check; the starter-contribution candidate; the sequential-CI-job note. All independently verified against the code — nothing in that bullet is aspirational.
+- **Amendment requested:** reword the `authz.ts:521` clause to state the causal chain, not just list it as a third parallel item — e.g. "…and `src/lib/authz.ts:521` (`publicOrgSummary`, called only from the `not_found` branch that the now-fixed flag read itself routes a DB blip into — QA probed a live server…)". This changes nothing about scope or priority, only makes clear to whoever picks up the follow-up that fixing the flag read didn't just leave two unrelated gaps standing, it created a new path into a third one.
+- **New, small addition:** `docs/decisions.md`'s DECISION-026 entry has **two** stale claims about `auth.require_2fa`, not one. The architect's correction paragraph (accurate, verified against `fw` and against the shipped code) explicitly re-reads the "Standard `isFlagEnabled()` semantics (unchanged)" section — but the entry's separate **"What is NOT changed"** bullet ("`auth.require_2fa` uses standard `isFlagEnabled()` — its fail-closed-on-missing behavior is correct") is now flatly false and is not addressed by the correction text at all (verified by reading both the correction paragraph and the DECISION-026 entry directly, `docs/decisions.md:1367-1370`). Recommend the integration script either strike that bullet or append a one-clause pointer to the correction, in the same edit — cheap to do now, confusing to leave for a future reader who stops at "What is NOT changed" and never reaches the correction paragraph below it.
+- **Not a follow-up, an observation only:** the `Discovered-In: Phase-4` vs. designed `post-merge` trailer choice on `6f06f41` — defensible as shipped, not worth amending a committed message over.
 
-- [Specific. What has to change before this ships.]
+None of the above blocks shipping; all are already headed into `docs/TODO.md` at the same integration point per Workflow Rule 10, which is exactly the mechanism this verdict exists to invoke.
+
+---
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — verified against the committed diff (`6f06f41`) directly, not the work-log's description of it; core fix and both DECISION-026 directions confirmed correct by code read; residual public-render-path gap confirmed as a causal chain (fixed flag read → unguarded `publicOrgSummary`), not three independent items; release note and DECISION-026 correction text blessed with one amendment + one addition | SHIP WITH NOTES | 2026-09-26 |
+
+## Handoff
+
+Next: **orchestrator**, to run `lint-integrate.py` with the one amendment (TODO bullet's `authz.ts:521` clause reworded to name the causal chain) and the one addition (touch DECISION-026's "What is NOT changed" bullet, not just its "Standard semantics" section, in the same edit). Rule 12 not applicable (no feedback row). Rule 13 not applicable (no what's-new entry warranted). No further loop-back — Phase 4/5 evidence and my own independent code reads agree; this closes at SHIP WITH NOTES, not SHIP IT, solely because the public-render-path DB-blip gap is real, user-facing, and not yet scheduled as its own pipeline — it is tracked, not fixed.
+
+
+
+### Orchestrator closure (2026-09-26)
+
+Shipped as v0.26.1 (`fix(flags):`) in the same PR as the lint gate. DECISION-026 corrected in place; CLAUDE.md's auth-flag sentence replaced; TODO lines for `sites.ts:352/:358`, `org_features.category_axis`, and the starter-contribution candidate.

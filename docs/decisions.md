@@ -4,6 +4,17 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-149: Lint is part of the push/merge gate, not an advisory step.** `npm run lint` runs in `/pre-push` (Step 3a, immediately after
+typecheck) and in CI's `ci` job — but **last** in that job, after Build,
+Tripwire checks, Dependency audit, and Unit tests, so a lint failure can
+never again hide a build, security, or regression signal behind a
+`skipped` status the way it did 2026-08-26–2026-09-25. Rationale: lint
+violations are common and usually orthogonal to substantive breakage;
+ordering it last preserves every other check's independent signal while
+still failing the job's overall conclusion on a real lint error. *(2026-09-26, tech-lead Phase 3, `docs/work-log/2026-09-26-lint-gate.md`.)*
+
+---
+
 **DECISION-148: Every `SECURITY DEFINER` function pins `search_path = public, pg_temp` (`pg_temp` explicit and last); the tenant roles hold no `CREATE` on schema `public`.** (2026-09-25, tech-lead Phase 3, `docs/work-log/2026-09-24-lifecycle-affiliation-returns.md`, eleventh loop-back, ruling on F60.)
 
 `set search_path = public` alone is not the safe pattern it looks like: every role — including `presby_app` and `presby_platform`, neither of which has ever had its default `TEMP` privilege on the database revoked — can create objects in its own session-local `pg_temp` schema, and an unqualified `search_path` searches the *unnamed* temp schema ahead of any named schema in the list, `public` included. A concurrent security-pipeline probe demonstrated this is exploitable today, not theoretical: `create temp table people (id uuid)` from a `presby_app` session, followed by a call to a `SET search_path = public`-only `SECURITY DEFINER` function that reads `people` unqualified, resolves to the caller's own temp table instead of the real one — a forged answer from a function whose entire purpose is to be trusted across a privilege boundary. Appending `, pg_temp` — explicit and last — makes the named schema win the search regardless of what the caller has created in its own temp namespace. This is the standing rule going forward for **every** `SECURITY DEFINER` function in this schema, not just the ones a review happens to touch: the `database-admin` agent file should carry it as a checklist item for every new `SECURITY DEFINER` function, the same way `SET search_path` itself already is. The companion half of the rule — confirming `presby_app`, `presby_platform`, and `PUBLIC` hold no `CREATE` on schema `public` (which would let a role plant a *permanent* decoy object rather than merely a session-local temp one) — is a `pg_get_functiondef()`/`pg_namespace.nspacl`-shaped catalog assertion, tracked and built by the concurrent security pipeline (`0048`), not duplicated here.
@@ -1369,7 +1380,7 @@ Any future flag whose `false` value blocks a sign-in or sign-up path must use an
 ### What is NOT changed
 
 - `isFlagEnabled()` semantics are unchanged.
-- `auth.require_2fa` uses standard `isFlagEnabled()` — its fail-closed-on-missing behavior is correct.
+- `auth.require_2fa` uses standard `isFlagEnabled()` — its fail-closed-on-missing behavior is correct — **superseded 2026-09-26: see the correction below; the read is now inline in `src/lib/auth/local-login.ts` with its own catch**.
 - No new npm dependencies.
 
 ### Impact
@@ -1378,6 +1389,8 @@ Any future flag whose `false` value blocks a sign-in or sign-up path must use an
 - `src/auth.ts` `authorize()`: replaces any direct `isFlagEnabled("auth.local_login")` call with `isLocalLoginEnabled()`.
 - `scripts/seed.ts`: registers `auth.local_login` with `enabled: true` and `auth.require_2fa` with `enabled: true`.
 
+
+**Correction (2026-09-26, architect Phase 2, `docs/work-log/2026-09-26-flags-fail-closed.md`):** this decision's premise sentence — that `isFlagEnabled()` "returns `false` on a missing row **or DB error**" — was never true of the code. `src/lib/flags.ts` has had no `try/catch` since it was written (starter `090a88d`, presby `54f3935`), and `src/lib/flags.test.ts`'s "propagates a DB error thrown by findFirst" case canonized the gap as if it were a contract. **The documentation is authoritative and the code is the defect:** the catch is restored in the shared helper — ~95 call sites, none of which catch, one of which (`src/app/(auth)/signin/page.tsx:54`) documents its reliance on the stated behaviour — and the characterization test is inverted rather than supplemented. Read the "Standard `isFlagEnabled()` semantics (unchanged)" section above as "missing row **or DB error** → `false`," and the catch now logs the key (never the error object, whose message embeds the failed query text). Two consequences. **(1)** `auth.require_2fa` can no longer read through the bare helper. This decision's classification is still right that the flag is not *fail-open* — a blip must not impose a challenge on someone who never enrolled — but once a DB error is indistinguishable from `false`, `computeEffectiveTwoFactor()`'s documented "DB error → the resolved requirement" branch becomes unreachable and a blip would silently *drop* enforcement for a user who already required it. The read moves to an inline query + `catch` in `src/lib/auth/local-login.ts`, beside `organizationRequiresTwoFactor()`, and the file stops importing `@/lib/flags` so the rule is grep-verifiable. The classification rule is amended accordingly: **an auth flag needs its own read and its own catch whenever its DB-error outcome differs from its `false` outcome** — which covers both flags, for different reasons (`auth.local_login`: error → `true`; `auth.require_2fa`: error → the already-resolved requirement). **(2)** The same gap is still present upstream in `chenson42/claudecode-nextjs-starter` (`src/lib/flags.ts`, unchanged since `090a88d`); a `docs/starter-contributions/` candidate at the next `/downstream-sync`.
 ---
 
 ## DECISION-025: Per-account lockout state — two columns on `users`; logic in `src/lib/auth/lockout.ts`

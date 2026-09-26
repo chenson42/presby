@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolvePublishedOrganization } from "@/lib/sites";
-import { getBlobStore } from "@/lib/storage/blob-store";
+import { getBlobStore, type ResolvedBlob } from "@/lib/storage/blob-store";
 
 export const dynamic = "force-dynamic"; // stops Next's build-time placeholder-param prerender trial (params.slug = "-") from reaching a live flag/DB read here at all — docs/work-log/2026-09-26-flags-fail-closed.md Phase 2 Ruling 3
 
@@ -14,8 +14,12 @@ export const dynamic = "force-dynamic"; // stops Next's build-time placeholder-p
  * `resolvePublishedOrganization(slug)` is the cheaper sibling of
  * `getPublishedSite()` (skips the blob fetch + JSON.parse the page itself
  * already did) and applies the identical enumeration-safe collapse: a
- * never-provisioned, suspended, nonexistent, or flag-off slug all 404
- * identically, same as the page route.
+ * never-provisioned, suspended, nonexistent, flag-off, or DB-read-failure
+ * slug all 404 identically, same as the page route (both functions fail
+ * closed internally as of docs/work-log/2026-09-26-public-render-blip.md).
+ * This route's own `getBlobStore().resolve()` call below gets the same
+ * treatment at THIS call site — a second, independent read from the one
+ * already fixed inside `getPublishedSite()`.
  *
  * `Cache-Control: public, max-age=31536000, immutable` — content-addressed
  * (the `[key]` IS the row's own uuid `blobAssets.id`, per `blob-store.ts`'s
@@ -34,10 +38,26 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const blob = await getBlobStore().resolve({
-    organizationId: org.organizationId,
-    key,
-  });
+  // getBlobStore().resolve() has no try/catch of its own by design
+  // (blob-store.ts's own header: "does not re-authorize; it trusts" — no
+  // stated failure-handling contract) — every caller owns its own wrap.
+  // This is a SECOND, independent uncaught call from the one already fixed
+  // inside getPublishedSite() itself (docs/work-log/
+  // 2026-09-26-public-render-blip.md Phase 1 Gap 2). `key` is an opaque
+  // blob-row uuid, not a secret and not SQL — safe to log alongside `slug`.
+  let blob: ResolvedBlob | null;
+  try {
+    blob = await getBlobStore().resolve({
+      organizationId: org.organizationId,
+      key,
+    });
+  } catch {
+    console.error(
+      "[site-assets] blob resolve failed; treating as not found",
+      { slug, key },
+    );
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   if (!blob) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

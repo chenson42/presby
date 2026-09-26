@@ -156,6 +156,62 @@ describe("PublicSitePage — the enumeration-safe not_found collapse", () => {
   });
 });
 
+describe("PublicSitePage — reason: \"read_failed\" skips the publicOrgSummary follow-up read (docs/work-log/2026-09-26-public-render-blip.md)", () => {
+  it("does not call publicOrgSummary() when getPublishedSite() reports a DB read failure, and still 404s", async () => {
+    getPublishedSite.mockResolvedValue({
+      kind: "not_found",
+      reason: "read_failed",
+    });
+
+    await expect(
+      PublicSitePage({ params: makeParams() }),
+    ).rejects.toThrow("NOT_FOUND");
+
+    expect(publicOrgSummary).not.toHaveBeenCalled();
+  });
+
+  it("still calls publicOrgSummary() when the not_found reason is absent (a confirmed miss, not a DB failure)", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    publicOrgSummary.mockResolvedValue(null);
+
+    await expect(
+      PublicSitePage({ params: makeParams() }),
+    ).rejects.toThrow("NOT_FOUND");
+
+    expect(publicOrgSummary).toHaveBeenCalledWith("alder-creek");
+  });
+
+  it("still calls publicOrgSummary() when reason is explicitly \"absent\"", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "not_found", reason: "absent" });
+    publicOrgSummary.mockResolvedValue(null);
+
+    await expect(
+      PublicSitePage({ params: makeParams() }),
+    ).rejects.toThrow("NOT_FOUND");
+
+    expect(publicOrgSummary).toHaveBeenCalledWith("alder-creek");
+  });
+
+  it("renders the byte-identical notFound() collapse whether the miss is a DB failure or a confirmed absence — the response never varies on `reason`", async () => {
+    getPublishedSite.mockResolvedValue({
+      kind: "not_found",
+      reason: "read_failed",
+    });
+    const readFailedOutcome = await PublicSitePage({
+      params: makeParams(),
+    }).catch((err: Error) => err.message);
+
+    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    publicOrgSummary.mockResolvedValue(null);
+    const absentOutcome = await PublicSitePage({
+      params: makeParams(),
+    }).catch((err: Error) => err.message);
+
+    expect(readFailedOutcome).toBe(absentOutcome);
+    expect(readFailedOutcome).toBe("NOT_FOUND");
+  });
+});
+
 describe("PublicSitePage — DECISION-121, the presbytery/synod/GA fallback", () => {
   it("renders PresbyteryFallback (org name + sign-in link) when the not_found slug resolves to a presbytery", async () => {
     getPublishedSite.mockResolvedValue({ kind: "not_found" });
@@ -325,6 +381,26 @@ describe("PublicSitePage — the ok path", () => {
 
     const call = renderSiteBundle.mock.calls[0][0] as { logoUrl: string | null };
     expect(call.logoUrl).toBeNull();
+  });
+
+  it("degrades to logoUrl: null (never throws) when resolveLogoUrl's own read fails mid-request — docs/work-log/2026-09-26-public-render-blip.md", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+    orgBrandsSelectMock.mockRejectedValue(new Error("simulated DB blip"));
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as { logoUrl: string | null };
+    expect(call.logoUrl).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const serialized = JSON.stringify(consoleErrorSpy.mock.calls[0]);
+    expect(serialized).not.toMatch(/select|Failed query|params:/i);
+    expect(serialized).toContain("alder-creek");
+
+    consoleErrorSpy.mockRestore();
   });
 
   it("translates PublishedSite.profile.social's keyed object into site-kit's socialLinks array, omitting unset platforms", async () => {
@@ -522,6 +598,30 @@ describe("generateMetadata", () => {
         logoUrl: "/site/alder-creek/assets/mark-blob-key",
       }),
     );
+  });
+
+  it("degrades to logoUrl: null (never throws) when resolveLogoUrl's own read fails mid-request — its own call site, distinct from the page body's", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    buildPageMetadata.mockReturnValue({
+      title: "Welcome",
+      description: undefined,
+      canonicalUrl: "http://localhost:3000/site/alder-creek",
+      openGraph: { type: "website", title: "Welcome", url: "x", siteName: "x", images: [] },
+      twitter: { card: "summary", title: "Welcome", description: undefined },
+      robots: { index: true, follow: true },
+    });
+    orgBrandsSelectMock.mockRejectedValue(new Error("simulated DB blip"));
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await generateMetadata({ params: makeParams("alder-creek") });
+
+    expect(buildPageMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ logoUrl: null }),
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    consoleErrorSpy.mockRestore();
   });
 
   it("translates buildPageMetadata()'s result into Next's Metadata shape, with an absolute title that bypasses the root layout's own template", async () => {

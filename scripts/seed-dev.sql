@@ -1619,4 +1619,148 @@ values
 on conflict (id) do nothing;
 
 
+-- ===========================================================================
+-- APPENDED BLOCK — organization name history + the D13 import quarantine
+-- (increment 7, D13/D14/F33/F37, DECISION-153;
+-- drizzle/0053_presby_name_history_import_staging.sql).
+-- docs/work-log/2026-09-26-name-history-import-staging.md, Phase 4.
+-- Workflow Rule 16: one delimited block at the END of this file, so
+-- integration merges are mechanical.
+-- ===========================================================================
+--
+-- NO REAL DATA, and this block is the one in the seed where a tripwire will
+-- not save anybody (Phase 2 Ruling 10). `npm run check:secrets` hard-fails on
+-- credential SHAPES; a real congregation's name, a real 1987 membership count
+-- and — the one most easily overlooked — a real presbytery's spreadsheet
+-- COLUMN HEADERS are all invisible to it. Every name, city, header and figure
+-- below is invented, in this file's existing Alder-Creek/Bramblewood house
+-- style. Do not lightly edit a real worksheet in here "for realism."
+--
+-- The migration's backfill has already given every organization exactly one
+-- OPEN `canonical` row (authority = 'backfill', city null). This block layers
+-- three fixtures on top of that baseline.
+
+-- (0) THE CANONICAL BASELINE FOR THE ORGANIZATIONS *THIS FILE* CREATES.
+--
+--     drizzle/0053's backfill mints one open `canonical` row per organization
+--     that exists WHEN THE MIGRATION RUNS. On the from-empty recipe
+--     (docs/testing.md; DECISION-150) that is ZERO organizations — every org
+--     below is inserted afterwards, by this very file — so without this block
+--     a freshly built fixture database has congregations with no name at all
+--     in organization_name_history, and presby_match_organization() cannot
+--     find a single seeded church. Measured, not theorised: the first
+--     from-empty rehearsal of increment 7 produced exactly that (Phase 4
+--     Finding 2 in this block's work-log).
+--
+--     THE GENERAL FORM OF THAT GAP IS NOT CLOSED HERE and must not be read as
+--     closed: any organization created after 0053 — by createOrganization(),
+--     by a test fixture, by a future presby_organize_congregation() — still
+--     arrives with no canonical row, because this increment deliberately ships
+--     no writer (Phase 2 Ruling 1: writes are function-mediated and
+--     presby_record_org_name() is deferred to the lifecycle-UI pipeline). This
+--     block covers the seed's own organizations and nothing else.
+--
+--     Byte-for-byte the migration's own backfill shape: self-attributed
+--     (organization_id = subject_org_id), authority = 'backfill', city null,
+--     both endpoints unbounded, `where not exists` so re-running converges.
+insert into organization_name_history
+  (organization_id, subject_org_id, name_type, name, city, state,
+   effective_from, effective_to, authority, minute_reference, recorded_at)
+select o.id, o.id, 'canonical', o.name, null, null,
+       null, null, 'backfill', null, now()
+  from organizations o
+ where not exists (
+   select 1
+     from organization_name_history h
+    where h.subject_org_id = o.id
+      and h.name_type = 'canonical'
+      and h.effective_to is null
+ );
+
+-- (1) A RENAMED CONGREGATION, demonstrating Ruling 3 correctly: a rename
+--     CLOSES the canonical row and OPENS a new one. The old name is NOT
+--     additionally duplicated as a `former_name` — that would give "what was
+--     this body called in 1987?" two answers of different types and force a
+--     preference order into every caller.
+--
+--     Order matters and is the whole fixture: the backfilled row currently
+--     spans (null, null), i.e. all of time, so it must be NARROWED first or
+--     organization_name_history_canonical_no_overlap refuses the predecessor.
+--     Re-running is a no-op — the second pass finds no row matching
+--     `effective_from is null`.
+update organization_name_history
+   set effective_from = '1988-06-01'
+ where subject_org_id = '33333333-3333-3333-3333-333333333333'
+   and name_type = 'canonical'
+   and effective_to is null
+   and effective_from is null;
+
+insert into organization_name_history
+  (id, organization_id, subject_org_id, name_type, name, city, state,
+   effective_from, effective_to, authority, minute_reference, notes)
+values
+  -- Bramblewood was Mill Creek until the 1988 rename. `effective_from` null =
+  -- predates our records (the F41 convention), `effective_to` = the rename
+  -- date, so the two rows are ADJACENT and non-overlapping — which is exactly
+  -- what the partial EXCLUDE permits and what a second OPEN row would not be.
+  ('ac000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111',
+   '33333333-3333-3333-3333-333333333333',
+   'canonical', 'Mill Creek Presbyterian Church', 'Cranesport', 'Ohio',
+   null, '1988-06-01', 'recorded',
+   'Northern Reach stated meeting, 1988-06-01, item 3',
+   'Renamed on the merger of the Mill Creek and Bramblewood chapels.'),
+  -- (2) A `former_name`, demonstrating the type DISTINCTLY from `canonical`:
+  --     unbounded at both ends, because the interval is genuinely
+  --     unreconstructable, and exempt from the EXCLUDE (which is partial on
+  --     name_type = 'canonical'), so it overlaps Quillhaven's own open
+  --     canonical row without objection. The minute is Quillhaven's own
+  --     origin minute from the affiliation fixture above — continuity, not
+  --     coincidence.
+  ('ac000000-0000-0000-0000-000000000002',
+   '11111111-1111-1111-1111-111111111111',
+   '44444444-4444-4444-4444-444444444444',
+   'former_name', 'Quill Run Presbyterian Church', 'Quillhaven', 'Ohio',
+   null, null, 'recorded',
+   'Southern Fields stated meeting, 1901-04-02, item 1',
+   'Asserted official; the canonical interval cannot be reconstructed.')
+on conflict (id) do nothing;
+
+-- (3) ONE STAGED BATCH WITH ONE GENUINELY UNRESOLVED ROW — zero candidates,
+--     which is the legitimate empty-match outcome Ruling 4 names, not an
+--     error. presby_match_organization('Mount Amity Chapel', 'Unincorporated',
+--     1987) really does return zero rows against this fixture set: no seeded
+--     organization has ever been called anything like it. A row with no
+--     candidates is a quarantined row, never a dropped one (D13).
+insert into import_batches
+  (id, organization_id, source, worksheet, form_version_key, column_map,
+   row_count, created_by)
+values
+  ('ad000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111',
+   'synthetic legacy binder scan', 'Statistical Summary', '1984',
+   -- INVENTED column headers. A real presbytery's header set is itself
+   -- identifying; see this block's No-Real-Data note above.
+   '{"Congregation Name": "original_name",
+     "City": "original_city",
+     "Active Members": "ending_active"}'::jsonb,
+   1, null)
+on conflict (id) do nothing;
+
+insert into import_rows
+  (id, batch_id, organization_id, row_index, raw_payload,
+   original_name, original_city, report_year, candidates, resolution_kind)
+values
+  ('ae000000-0000-0000-0000-000000000001',
+   'ad000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111111',
+   0,
+   '{"Congregation Name": "Mount Amity Chapel",
+     "City": "Unincorporated",
+     "Active Members": "41"}'::jsonb,
+   'Mount Amity Chapel', 'Unincorporated', 1987,
+   '[]'::jsonb, 'unresolved')
+on conflict (id) do nothing;
+
+
 commit;

@@ -92,6 +92,7 @@ const MODULES: Record<string, string> = {
   organizations: "A. Organizations",
   organization_settings: "A. Organizations",
   organization_identifiers: "A. Organizations",
+  organization_name_history: "A. Organizations",
   org_units: "A. Organizations",
   organization_lifecycle_events: "K. Lifecycle and affiliation",
   organization_successions: "K. Lifecycle and affiliation",
@@ -132,6 +133,9 @@ const MODULES: Record<string, string> = {
   sasr_form_versions: "J. Reporting",
   statistical_returns: "J. Reporting",
   publications: "J. Reporting",
+  statistics_submission_grants: "J. Reporting",
+  import_batches: "L. Import staging",
+  import_rows: "L. Import staging",
 };
 
 /**
@@ -147,6 +151,12 @@ const BESPOKE_POLICIES: Record<string, string> = {
     "Not tenant-isolated, by the same reasoning as organizations: external identifiers (OGA church PIN, psvonline id, legacy import keys) are identity data about a public org-tree entry. pcusa_pin lived on the tenant-isolated organization_settings until drizzle/0043, where a presbytery running an import could not read a member congregation's own PIN.",
   organization_affiliations:
     "Standard tenant policy, but presby_app holds SELECT only: presby_transfer_affiliation() is the only write path. A UNIQUE/EXCLUDE constraint is enforced against ALL rows and not the RLS-visible subset, so ordinary tenant DML here would let one presbytery probe whether an organization it cannot see has an open affiliation (F40). Every rejection raises one byte-identical string.",
+  organization_name_history:
+    "Standard tenant policy, but presby_app holds SELECT only, and for the same reason organization_affiliations does (F40/F103, DECISION-153): organization_name_history_canonical_no_overlap is a partial GiST EXCLUDE keyed on subject_org_id, which is PUBLIC, and a unique/EXCLUDE constraint is enforced against ALL rows rather than the RLS-visible subset — so ordinary tenant DML would let one presbytery probe whether a council it cannot see has recorded a canonical name for any body in any window. Writes are function-mediated; this increment's only writer is drizzle/0053's own backfill. The name-in-force question is answered across councils through the organization_name_history_public projection instead, which omits the recording council, the minute, the notes and the authority.",
+  import_rows:
+    "Standard tenant policy AND ordinary tenant DML — deliberately the OPPOSITE call from organization_name_history, on the same test (F103): this table's constraint keys are random uuids a non-owner cannot guess, so no enumeration oracle arises and a quarantine worktable is not a minuted council record. What it does NOT have is DELETE, on any connection: the grant is revoked from both roles and import_rows_freeze refuses the verb on the owner path too, because D13's durable quarantine is meaningless if the quarantine can be dropped. Resolution is set-once.",
+  import_batches:
+    "Standard tenant policy, ordinary tenant DML minus DELETE (see import_rows). Provenance columns are immutable after insert. No cached resolved/unresolved counts — they are derivable and would drift (F29).",
   sasr_form_versions:
     "Not tenant-isolated and carries no organization_id: a SASR form revision is platform-wide reference data in the class of `permissions` and `feature_flags`, not any council's property. Written only by migration; SELECT to both roles. Its field_spec is what presby_enforce_sasr_field_spec() validates every statistical_returns payload against, which is the only thing making `payload jsonb` an allow-list rather than the custom fields D8 refuses.",
   statistical_returns:

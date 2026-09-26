@@ -155,6 +155,27 @@ const ALLOWLIST: Array<{
       "DDL-only composite FK, declared 0049-only by design (returns.ts:364; drizzle/0049:161-162) — the grant is owned by the presbytery and the return by the congregation.",
     since: "2026-09-26",
   },
+  // --- The import-staging provenance FK (1 row) ------------------------------
+  // src/lib/db/domain/returns.ts says so in stagingRowId's own docstring, and
+  // src/lib/db/domain/imports.ts's header says it from the other side.
+  // imports.ts already imports returns.ts for `statisticalReturns`, so
+  // declaring the REVERSE FK in returns.ts would make the two files import
+  // each other — the domain graph's second module cycle, the blob_assets shape
+  // again. Enforced at drizzle/0053_presby_name_history_import_staging.sql
+  // section 7.
+  //
+  // ONE ROW, not two: import_rows.resulting_return_id points the other way and
+  // IS declared in imports.ts (the permitted direction), so the comparator
+  // sees it on both sides and needs no exemption for it.
+  {
+    table: "statistical_returns",
+    kind: "extra_fk",
+    fk: "(organization_id,staging_row_id) -> import_rows(organization_id,id)",
+    category: "architectural",
+    reason:
+      "DDL-only composite FK (drizzle/0053_presby_name_history_import_staging.sql section 7); declaring it in returns.ts would create a returns.ts <-> imports.ts module cycle — imports.ts already imports returns.ts for statisticalReturns. See returns.ts's stagingRowId docstring.",
+    since: "2026-09-26",
+  },
 ];
 
 type Diff = {

@@ -62,8 +62,7 @@ built from empty now migrates, seeds and passes 520 assertions for the first tim
 shipped the `db.yml` job + the repo's first composite action + the `e2e.yml` repair; both
 jobs **skip with a `::notice::` until the operator adds `NEON_API_KEY`/`NEON_PROJECT_ID`**
 (`docs/deployment.md` has the two-step instruction). No worktrees or pipeline branches are
-open; three Neon branches (`pipeline-security-schema-b`, `pipeline-submission-grants`,
-`pipeline-ci-db-tests`) await the operator's OK to delete.
+open; the three wave-2/3 Neon branches were deleted on 2026-09-27 with the wave-4 ones.
 
 **Wave 4 (2026-09-26 evening), four pipelines under Rule 16, each in its own worktree + Neon branch:**
 `pipeline/render-path` **merged** as PR #17 (`79399e9`, v0.26.3, DECISION-154; no schema change) — six
@@ -85,8 +84,8 @@ tests now mint their own chains), second pass PASS, Phase 6 SHIP WITH NOTES. `de
 after 0053 — the two are independent; the journal carries 51, 52, 53 in order and a from-empty `db:migrate` applies all 54),
 `db:seed` re-run there so the flag row exists (off), suite **621 / exit 0**. **No worktrees or pipeline branches are open.**
 `test-rls.sql`'s appended sections sit in merge order (43, 42, 41) — numbers are pre-assigned per Rule 16, file order is not.
-Neon branches `pipeline-group-types`,
-`pipeline-withdraw`, `pipeline-name-history` join the delete-with-OK list.
+Every finished pipeline's Neon branch is deleted at cleanup (operator standing rule, 2026-09-27): only `production` and
+`development` remain in the project.
 
 **Next, in order (the remaining candidates after wave 4):** the operator's
 three decisions (Neon secrets → CI jobs run; branch protection; delete the three Neon

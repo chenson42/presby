@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-26 night (wave 4 complete: PRs #17–#20 merged, v0.28.0; nothing in flight)
+## RESUME HERE — updated 2026-09-28 (wave 4 complete at v0.28.0; wave 5 "finish the presbytery portal" in flight)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -86,6 +86,20 @@ after 0053 — the two are independent; the journal carries 51, 52, 53 in order 
 `test-rls.sql`'s appended sections sit in merge order (43, 42, 41) — numbers are pre-assigned per Rule 16, file order is not.
 Every finished pipeline's Neon branch is deleted at cleanup (operator standing rule, 2026-09-27): only `production` and
 `development` remain in the project.
+
+**Wave 5 (2026-09-28), goal: a real presbytery (PSV) can be onboarded, tested and deployed.** The 2026-09-27
+audit found every presbytery feature shipped behind an off flag but inert for a real org — a freshly created
+organization has nobody who can grant its own first role (DECISION-100/101/106). Three Rule 16 pipelines started in
+parallel, each with its own worktree, Neon branch and work-log (the work-log is the source of truth):
+`../presby-wt-boot` / `pipeline/founding-admin` (`docs/work-log/2026-09-28-founding-administrator.md`; migration
+`0054` reserved, DECISION-155, F107+; port 3400) — the deploy blocker; `../presby-wt-errmap` /
+`pipeline/statistics-error-mapping` (bug-fix: the reports form's pre-affiliation year guard + the publish function's
+five rejection branches mapped to English; DECISION-156 if any, F110+; port 3500); `../presby-wt-e2e` /
+`pipeline/presbytery-e2e` (Playwright coverage of oversight/reports/credentials/filings/grants + the four rotten specs;
+DECISION-157 if any, F113+; port 3600). Queued behind #1 (shares `org-provisioning.ts`): the
+`/admin/organizations/new` parent-org/relationship-type picker. Closing the wave: the go-live flag sweep (placeholder
+tiles off, real presbytery flags on for PSV), a production migration runbook (production is still pre-0043 —
+operator step), and the what's-new entries owed at first enablement.
 
 **Next, in order (the remaining candidates after wave 4):** the operator's
 three decisions (Neon secrets → CI jobs run; branch protection; delete the three Neon

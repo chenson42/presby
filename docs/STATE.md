@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-28 (wave 4 complete at v0.28.0; wave 5 "finish the presbytery portal" in flight)
+## RESUME HERE — updated 2026-09-28 evening (wave 5 in flight: error mapping merged as PR #21, v0.28.1; founding admin and e2e mid-pipeline)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -92,11 +92,13 @@ audit found every presbytery feature shipped behind an off flag but inert for a 
 organization has nobody who can grant its own first role (DECISION-100/101/106). Three Rule 16 pipelines started in
 parallel, each with its own worktree, Neon branch and work-log (the work-log is the source of truth):
 `../presby-wt-boot` / `pipeline/founding-admin` (`docs/work-log/2026-09-28-founding-administrator.md`; migration
-`0054` reserved, DECISION-155, F107+; port 3400) — the deploy blocker; `../presby-wt-errmap` /
-`pipeline/statistics-error-mapping` (bug-fix: the reports form's pre-affiliation year guard + the publish function's
-five rejection branches mapped to English; DECISION-156 if any, F110+; port 3500); `../presby-wt-e2e` /
+`0054` reserved, DECISION-155, F107+; port 3400) — the deploy blocker; `pipeline/statistics-error-mapping` **merged** as PR #21 (`f2823ad`, v0.28.1; the reports form's year picker is
+constrained per congregation and the trigger's refusal mapped to English; bug 2 rescoped to the two live callers — the
+self-publish surface, Increment 4a, is its own future pipeline; no schema; suite 621 on `development`; Neon branch deleted); `../presby-wt-e2e` /
 `pipeline/presbytery-e2e` (Playwright coverage of oversight/reports/credentials/filings/grants + the four rotten specs;
-DECISION-157 if any, F113+; port 3600). Queued behind #1 (shares `org-provisioning.ts`): the
+DECISION-157, F113–F116 — F116 is a product finding: a pre-hydration `<select>` revert on the statistics form; port 3600;
+QA second pass running). Founding admin: no migration after all (the `people.user_id` index was stopped by its pre-flight
+probe — a committed fixture duplicates a `user_id`, F112); Batch C running; F107–F112 + F117. Queued behind #1 (shares `org-provisioning.ts`): the
 `/admin/organizations/new` parent-org/relationship-type picker. Closing the wave: the go-live flag sweep (placeholder
 tiles off, real presbytery flags on for PSV), a production migration runbook (production is still pre-0043 —
 operator step), and the what's-new entries owed at first enablement.

@@ -122,10 +122,16 @@ its own pipeline's files, so nothing is lost, but their returns must be RECORDED
    Per-Phase Status: if Phase 4 reads Complete (fix pass noted) → spawn **qa** Phase 5 (full audit incl. the seven step-6
    observations, `test-rls.sql` 640, the four+four unchanged-files check, fixture reset). If not Complete, resume from
    the addendum's items (1)/(3)/(5).
-2. `../presby-wt-select` — analyst Phase 1 for F116 (must reproduce on a production build under throttling or return NOT
-   YET). Returns TEXT only; if the session died before it was recorded, its transcript is at the scratchpad path below
-   (`tasks/ab4442308d17321a0.output`) — record with `record-phase.py`, then rule: READY → tech-lead (Phase 2 skip
-   likely); NOT YET → correct the F116 TODO line at the next integration and delete the worktree/branch/Neon branch.
+2. `../presby-wt-select` — analyst Phase 1 for F116 **returned and is recorded: READY WITH NOTES, and the bug is REAL
+   in production** — 10/10 silent reversions on `next build && next start` under CPU ×4 + slow-3G, and the wrong
+   congregation's statistics were PERSISTED with a "Statistics saved." toast and a consistent audit row. Mechanism: RHF
+   uncontrolled `register()` on a native `<select>` reconciles `defaultValues` onto the DOM at hydration; the same shape
+   is in 9+ other forms (person/org/household pickers in credentials, officers, groups, members, staff, per-capita
+   payments). **Treat as a PSV go-live blocker for the statistics form.** Next: spawn **architect** Phase 2 to rule the
+   fix scope (one form vs a shared `Controller`-based hydration-safe select) and where a production-build Playwright
+   regression lives (`playwright.config.ts` only knows `npm run dev`; CDP throttling helpers do not exist yet).
+   Also noted: `next build` in a worktree is flaky (`@vercel/turbopack-next … font` module-not-found) — use the
+   documented external hardlinked scratch copy.
 3. `../presby-wt-picker` — tech-lead Phase 3 **returned and is written into the work-log** (native `<select>`; eligible parents fetched server-side, type-only; `[id]` stacking: founding-admin → affiliation → brand). Phase 4 must NOT start until
    `pipeline/founding-admin` merges (shared `admin/organizations/new` + `[id]/page.tsx`); then merge main into the
    branch, spawn full-stack-developer.

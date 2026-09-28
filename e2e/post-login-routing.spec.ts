@@ -129,9 +129,14 @@ test("4 — a deep link to an organization survives the sign-in round trip", asy
   );
 
   expect(new URL(page.url()).pathname).toBe(`/o/${E2E_ORGS.alpha.slug}`);
-  await expect(
-    page.getByRole("heading", { name: E2E_ORGS.alpha.name }),
-  ).toBeVisible();
+  // ROT FIX (2026-09-28-presbytery-e2e): `org_portal.home_v2` is ON on this
+  // branch (and generally, per its own work-log), so `/o/<slug>` no longer
+  // renders an `<h1>` naming the organization at all -- the v2 portal home
+  // (src/app/(org)/o/[slug]/page.tsx) replaced that with `GreetingBand`, a
+  // personalized greeting with no org name in it. The stable, version-
+  // independent signal that this is the real portal (not an error page) is
+  // `GreetingBand`'s own `data-testid`.
+  await expect(page.getByTestId("greeting-band")).toBeVisible();
 });
 
 test.describe("5 — /launch never leaves the origin", () => {
@@ -191,9 +196,13 @@ test("7 — two organizations get the chooser, with no membership language", asy
   expect(body).not.toMatch(/\broll\b/i);
 
   // Both links resolve to a real portal rather than an error page.
+  // ROT FIX (2026-09-28-presbytery-e2e): "you're in" was the pre-home_v2
+  // `OrgPortalStub` copy. `org_portal.home_v2` is ON on this branch, so
+  // `/o/<slug>` renders the real portal home instead -- see case 4's own
+  // fix note for why `GreetingBand`'s `data-testid` is the stable signal.
   for (const slug of [E2E_ORGS.alpha.slug, E2E_ORGS.presbytery.slug]) {
     await page.goto(`/o/${slug}`);
-    await expect(page.getByText(/you're in/i)).toBeVisible();
+    await expect(page.getByTestId("greeting-band")).toBeVisible();
   }
 });
 

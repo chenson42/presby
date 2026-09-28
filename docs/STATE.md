@@ -117,11 +117,16 @@ operator step), and the what's-new entries owed at first enablement.
 
 **Session-restart handoff (2026-09-28 night).** Three agents were running when the operator paused; each writes only to
 its own pipeline's files, so nothing is lost, but their returns must be RECORDED by the next session before advancing:
-1. `../presby-wt-boot` — full-stack-developer "Phase 4 fix pass — F118" (adds `staff.manage` to the bundle, §44a edits
-   A–E, rehearsal step 6 on the staff-hire path). It writes its section into the work-log itself. Check the work-log's
-   Per-Phase Status: if Phase 4 reads Complete (fix pass noted) → spawn **qa** Phase 5 (full audit incl. the seven step-6
-   observations, `test-rls.sql` 640, the four+four unchanged-files check, fixture reset). If not Complete, resume from
-   the addendum's items (1)/(3)/(5).
+1. `../presby-wt-boot` — the full-stack-developer "Phase 4 fix pass — F118" was **STOPPED by the orchestrator at
+   shutdown** mid-way through a `test-rls.sql` run. What landed on disk: `staff.manage` in `foundingAdministratorPlan()`'s
+   base array + the F118 doc comment (`src/lib/founding-administrator.ts`), `"staff.manage": "staff"` in
+   `PERMISSION_LABELS`, and §44a edits A–E incl. the new `44a (F118)` assertion in `scripts/test-rls.sql`. What did NOT
+   land: the test updates (plan shape 7→8 / 8→9, audit `permissionKeys`, dialog copy), the unchanged-files test
+   extension, the rehearsal step-6 re-run on the staff-hire path, and the work-log subsection (Phase 4 status row still
+   reads "Batch A complete…"; Phase 5 "Waiting"). Fixture `founding.fixture@example.invalid` has 0 `people` rows; no
+   rehearsal orgs, no stamped rows, no scratch DBs on `br-empty-frost-ax4mo8q5`. **Resume by re-spawning a
+   full-stack-developer fix pass with the addendum's items (1)/(3)/(5), telling it the code edits already exist** — it
+   verifies them, adds the tests, runs failing-first where still possible, does the rehearsal, writes the subsection.
 2. `../presby-wt-select` — analyst Phase 1 for F116 **returned and is recorded: READY WITH NOTES, and the bug is REAL
    in production** — 10/10 silent reversions on `next build && next start` under CPU ×4 + slow-3G, and the wrong
    congregation's statistics were PERSISTED with a "Statistics saved." toast and a consistent audit row. Mechanism: RHF

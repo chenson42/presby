@@ -31,6 +31,8 @@
 
 import { neon } from "@neondatabase/serverless";
 import { E2E_USERS } from "./users";
+import { platformSql } from "./db";
+import { RESERVED_YEAR_MIN, RESERVED_YEAR_MAX } from "./sasr-fixture";
 
 /**
  * Throws if `admin@presby.invalid` carries any organization membership.
@@ -71,6 +73,93 @@ export async function assertAdminFixtureHasNoOrgs(): Promise<void> {
         "database drift, not a routing regression — see " +
         "docs/work-log/2026-09-25-e2e-red-on-main.md and docs/TODO.md's " +
         "shared-dev-database-hygiene entry.",
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// presbytery-portal e2e coverage (2026-09-28-presbytery-e2e, DECISION-157)
+// ---------------------------------------------------------------------------
+//
+// Both guards below are the mechanical enforcement of "leave the DB exactly
+// as found," called from filings-round-trip.spec.ts's own beforeAll AND
+// afterAll (architect Phase 2 Notes §8) — not folded into globalSetup, same
+// reasoning assertAdminFixtureHasNoOrgs() above already documents: this is a
+// scoped, per-spec check, not a suite-wide invariant.
+
+/**
+ * Throws if any `statistical_returns` row exists in the reserved
+ * 2090-2099 SASR report-year band. Called in `beforeAll` (a prior crashed
+ * run left rows behind) AND `afterAll` (this run leaked) — the direct
+ * mechanical descendant of the withdraw pipeline's QA FAIL
+ * (docs/work-log/2026-09-26-withdraw-publication.md): "don't leave stray
+ * fixture rows" becomes a check that names the damage the moment it
+ * happens, rather than a comment trusted to be followed.
+ */
+export async function assertNoStrayFixtureReturns(): Promise<void> {
+  const sql = platformSql("assert-fixture-invariants");
+
+  const rows = (await sql`
+    SELECT o.slug, sr.report_year, sr.id
+      FROM statistical_returns sr
+      JOIN organizations o ON o.id = sr.organization_id
+     WHERE sr.report_year BETWEEN ${RESERVED_YEAR_MIN} AND ${RESERVED_YEAR_MAX}
+  `) as { slug: string; report_year: number; id: string }[];
+
+  if (rows.length > 0) {
+    const described = rows
+      .map((r) => `${r.slug}/${r.report_year} (${r.id})`)
+      .join(", ");
+    throw new Error(
+      `[assert-fixture-invariants] ${rows.length} stray statistical_returns ` +
+        `row(s) found in the reserved ${RESERVED_YEAR_MIN}-${RESERVED_YEAR_MAX} ` +
+        `SASR band: ${described}. Either a prior e2e run crashed before its ` +
+        "own teardown ran, or this run is leaking fixture rows — see " +
+        "e2e/support/sasr-fixture.ts's removePublishedReturn().",
+    );
+  }
+}
+
+/**
+ * Throws unless Alder Creek's SINGLE seeded SASR publication (report year
+ * 2025) is present and un-withdrawn. This is the direct mechanical
+ * descendant of the withdraw pipeline's own QA FAIL: it turns "never
+ * withdraw the seed row" (DECISION-157) from a comment into a check that
+ * names the damage the moment it happens, on whichever spec did it.
+ * `scripts/test-rls.sql` asserts against this exact row by id
+ * (`presby_list_own_congregation_publications()` returning count 1) — a
+ * spec that withdraws it breaks the isolation suite, not merely itself.
+ */
+export async function assertSeedPublicationsIntact(): Promise<void> {
+  const sql = platformSql("assert-fixture-invariants");
+
+  const rows = (await sql`
+    SELECT p.id, p.withdrawn_at
+      FROM publications p
+      JOIN statistical_returns sr
+        ON sr.id = p.artifact_id AND sr.organization_id = p.organization_id
+      JOIN organizations o ON o.id = p.organization_id
+     WHERE o.slug = 'alder-creek'
+       AND p.record_class = 'statistical_return'
+       AND sr.report_year = 2025
+  `) as { id: string; withdrawn_at: string | null }[];
+
+  if (rows.length === 0) {
+    throw new Error(
+      "[assert-fixture-invariants] Alder Creek's seeded 2025 SASR publication " +
+        "is MISSING. scripts/test-rls.sql asserts against this row by id — " +
+        "the isolation suite is now broken, not just this spec. See DECISION-157 " +
+        "and docs/work-log/2026-09-26-withdraw-publication.md's QA FAIL.",
+    );
+  }
+  const withdrawn = rows.find((r) => r.withdrawn_at !== null);
+  if (withdrawn) {
+    throw new Error(
+      `[assert-fixture-invariants] Alder Creek's seeded 2025 SASR publication ` +
+        `(${withdrawn.id}) has been WITHDRAWN. DECISION-157 forbids any spec or ` +
+        "manual rehearsal from withdrawing this row — scripts/test-rls.sql " +
+        "asserts against it as live and un-withdrawn. See " +
+        "docs/work-log/2026-09-26-withdraw-publication.md's QA FAIL.",
     );
   }
 }

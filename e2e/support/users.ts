@@ -35,7 +35,15 @@ export type E2ERole =
   | "org-single"
   | "org-multi"
   | "org-unmanaged"
-  | "org-ended";
+  | "org-ended"
+  /**
+   * Presbytery-portal e2e coverage (2026-09-28-presbytery-e2e, DECISION-157).
+   * All three live at the existing e2e-presbytery/e2e-alpha org fixtures —
+   * see seed-orgs.ts's appended block for their grants.
+   */
+  | "presbytery-clerk"
+  | "presbytery-nogrant"
+  | "congregation-clerk";
 
 export interface E2EUser {
   /** Fixture key — also the storageState filename. */
@@ -135,6 +143,38 @@ export const E2E_USERS: Record<E2ERole, E2EUser> = {
     email: "org2-ended@presby.invalid",
     password: FIXTURE_PASSWORD,
     name: "E2E Ended Relationship",
+    roleName: null,
+    twoFactorRequired: false,
+  },
+  // Holds e2e_presbytery_clerk (congregation_oversight.manage,
+  // per_capita.manage, credentials.manage, statistics.manage) at
+  // e2e-presbytery — the positive path on all three presbytery-only surfaces.
+  "presbytery-clerk": {
+    role: "presbytery-clerk",
+    email: "presbytery-clerk@presby.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E Presbytery Clerk",
+    roleName: null,
+    twoFactorRequired: false,
+  },
+  // An active relationship at e2e-presbytery with NO role grant at all — the
+  // "state 3" denial (a relationship exists, but no matching permission) for
+  // oversight, reports, AND credentials at once.
+  "presbytery-nogrant": {
+    role: "presbytery-nogrant",
+    email: "presbytery-nogrant@presby.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E Presbytery No Grant",
+    roleName: null,
+    twoFactorRequired: false,
+  },
+  // Holds e2e_statistics_publish (statistics.publish) at e2e-alpha — the
+  // filings positive path and the withdraw act.
+  "congregation-clerk": {
+    role: "congregation-clerk",
+    email: "congregation-clerk@presby.invalid",
+    password: FIXTURE_PASSWORD,
+    name: "E2E Congregation Clerk",
     roleName: null,
     twoFactorRequired: false,
   },

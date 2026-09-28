@@ -97,6 +97,17 @@ jobs:
             echo "APP_DATABASE_URL=${{ steps.db.outputs.app_database_url }}"
             echo "PLATFORM_DATABASE_URL=${{ steps.db.outputs.platform_database_url }}"
             echo "MIGRATE_DATABASE_URL=${{ steps.db.outputs.migrate_database_url }}"
+            # F113 (2026-09-28-presbytery-e2e): without this, globalSetup's
+            # runDbIsolationGuard() (e2e/support/global-setup.ts) parses
+            # DATABASE_URL, sees a *.neon.tech host, sees CI=true, and hard-
+            # throws — on a branch that was created fresh for THIS run and is
+            # deleted in the always() step below. The job has never actually
+            # run (NEON_API_KEY has been absent), so this was never observed.
+            # This is the guard's own Option A ("a dedicated Neon branch
+            # connection string") — preferred over E2E_ALLOW_SHARED_DB=true,
+            # which would acknowledge a risk that does not exist here and
+            # would suppress the guard for a genuinely shared URL later.
+            echo "E2E_DATABASE_URL=${{ steps.db.outputs.app_database_url }}"
             echo "AUTH_SECRET=$(openssl rand -base64 32)"
             echo "AUTH_URL=http://localhost:3000"
             echo "AUTH_TRUST_HOST=true"

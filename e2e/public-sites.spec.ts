@@ -167,9 +167,56 @@ async function restoreSiteRow(sql: Sql, original: OrganizationSitesRow): Promise
  * `imageKeys: {}` — none of this spec's assertions need one.
  */
 async function stageLiveBundle(sql: Sql): Promise<{ blobId: string }> {
+  // F114 (2026-09-28-presbytery-e2e): the ORIGINAL bundle here staged a
+  // v0.0.1-stub shape (`mdxAst: null`) against `presby-site-kit@4.0.0`
+  // (package.json pins `github:chenson42/presby-site-kit#v4.0.0`).
+  // v4's `extractBlocks()` (node_modules/presby-site-kit/dist/index.js)
+  // collapses anything that isn't `{ blocks: [...] }` to an empty array —
+  // "including every legacy v0.0.1-stub `{ raw: string }` page still sitting
+  // in an unmigrated content repo" — so the page body rendered as nothing,
+  // `frontMatter.title` was NEVER read into the document body, and "Content
+  // coming soon." no longer exists anywhere in the installed package (grep
+  // confirmed). This is what actually rotted: not a product regression.
+  //
+  // Fixed to the real v4 block shape, VERIFIED against
+  // node_modules/presby-site-kit/dist/blocks.js directly (not assumed — that
+  // assumption is what rotted this spec the first time): `BLOCK_REGISTRY`
+  // keys are lowercase (`hero`, `prose`, `contactForm`), `renderHeroBlock()`
+  // requires a non-empty `heading` and renders it into a real `<h1>`,
+  // `renderProseBlock()` requires a non-empty `body` string.
+  //
+  // SECOND, PREVIOUSLY-UNDISCOVERED LAYER OF ROT, found while fixing F114:
+  // the page (`src/app/(public)/site/[slug]/[[...path]]/page.tsx`)'s own
+  // header comment states the ContactForm is "no longer bolted onto every
+  // page below the rendered bundle" — it now rides a `{"type":
+  // "contactForm"}` block, content-author-placed. The OLD stub bundle staged
+  // here had NO such block, yet cases 6/7 (`page.getByLabel("Name")` etc.
+  // directly on `/site/alder-creek`) assumed the form was unconditionally
+  // present. This was invisible in every prior run because `describe.serial`
+  // aborts remaining cases the instant case 2 fails — cases 6/7 were never
+  // actually exercised against the current ContactForm-block-gated behavior
+  // until this fix let the whole file run to completion. A `contactForm`
+  // block is added below so cases 2, 6, and 7 all resolve the SAME way a
+  // real content author would place the form.
+  //
+  // Pinned-version note: this spec is now coupled to presby-site-kit@4.0.0's
+  // bundle schema and will need the same re-verification the next time that
+  // dependency's major version bumps.
   const bundle = {
     schemaVersion: 1,
-    pages: [{ path: "/", frontMatter: { title: TEST_TITLE }, mdxAst: null }],
+    pages: [
+      {
+        path: "/",
+        frontMatter: { title: TEST_TITLE },
+        mdxAst: {
+          blocks: [
+            { type: "hero", props: { heading: TEST_TITLE } },
+            { type: "prose", props: { body: "Real staged prose content for the e2e spec." } },
+            { type: "contactForm", props: { heading: `Contact ${ALDER_CREEK_NAME}` } },
+          ],
+        },
+      },
+    ],
     imageKeys: {},
   };
   const bytes = Buffer.from(JSON.stringify(bundle), "utf-8");
@@ -339,12 +386,16 @@ test.describe.serial("Public organization websites — /site/[slug]", () => {
     const response = await page.goto(`/site/${ALDER_CREEK_SLUG}`);
     expect(response?.status()).toBe(200);
 
-    // presby-site-kit's v0.0.1-stub renders frontMatter.title as an <h1> —
-    // this is the real, staged bundle's own content, not a placeholder.
+    // F114 fix: presby-site-kit@4.0.0's Hero block renders `props.heading`
+    // as a real <h1> — frontMatter.title is metadata only in v4, never read
+    // into the document body. This is the real, staged bundle's own content
+    // (the hero block), not a placeholder.
     await expect(
       page.getByRole("heading", { level: 1, name: TEST_TITLE }),
     ).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Content coming soon.")).toBeVisible();
+    await expect(
+      page.getByText("Real staged prose content for the e2e spec."),
+    ).toBeVisible();
 
     // The Contact section page.tsx renders below site-kit's own output,
     // naming the organization.

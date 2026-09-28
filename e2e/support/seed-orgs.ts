@@ -144,7 +144,13 @@ const FIXTURE_PEOPLE: Array<{
   id: string;
   role: Extract<
     E2ERole,
-    "org-single" | "org-multi" | "org-unmanaged" | "org-ended"
+    | "org-single"
+    | "org-multi"
+    | "org-unmanaged"
+    | "org-ended"
+    | "presbytery-clerk"
+    | "presbytery-nogrant"
+    | "congregation-clerk"
   >;
   firstName: string;
   lastName: string;
@@ -172,6 +178,29 @@ const FIXTURE_PEOPLE: Array<{
     role: "org-ended",
     firstName: "Aurelio",
     lastName: "Standish",
+  },
+  // -------------------------------------------------------------------
+  // APPENDED — presbytery-portal e2e coverage (2026-09-28-presbytery-e2e,
+  // DECISION-157). Appended to the existing array, not a parallel one —
+  // assertFixtureShape() only validates what is in THIS array.
+  // -------------------------------------------------------------------
+  {
+    id: "e2e00000-0000-0000-0000-0000000000a5",
+    role: "presbytery-clerk",
+    firstName: "Perpetua",
+    lastName: "Winlock",
+  },
+  {
+    id: "e2e00000-0000-0000-0000-0000000000a6",
+    role: "presbytery-nogrant",
+    firstName: "Cassius",
+    lastName: "Brightwell",
+  },
+  {
+    id: "e2e00000-0000-0000-0000-0000000000a7",
+    role: "congregation-clerk",
+    firstName: "Ottoline",
+    lastName: "Fairweather",
   },
 ];
 
@@ -294,6 +323,37 @@ export async function seedE2EOrgs(platformDbUrl: string): Promise<void> {
     `;
   }
 
+  // Each org's `active_membership` DERIVED GROUP (drizzle/0017, DECISION-060/
+  // 063) — discovered mid-implementation (2026-09-28-presbytery-e2e), not
+  // anticipated by Phase 3's design. `memberships_sync_derived_group` fires
+  // unconditionally on ANY insert into `memberships` and raises if the
+  // target org has no `active_membership` group yet. Every existing e2e-*
+  // membership row predates migration 0017 (created 2026-08-18) and this
+  // seeder's own `WHERE NOT EXISTS` guard has silently skipped re-inserting
+  // them ever since — so the gap was invisible until THIS pipeline's new
+  // fixture actors became the first genuinely NEW membership insert at these
+  // orgs since 0017 landed (presbytery-clerk/presbytery-nogrant, first-ever
+  // memberships at e2e-presbytery; congregation-clerk, a first-ever new
+  // person at e2e-alpha). Same remediation `scripts/seed-dev.sql` already
+  // applies for its own fixture orgs (DECISION-063): `roster` group_type
+  // (a platform-wide, code-seeded template — `db:seed`'s `seedGroupTypes()`),
+  // named 'Active Membership' verbatim (`presby_effective_permissions()`'s
+  // group arm surfaces this as `source_name`). Written BEFORE any membership
+  // insert below, for every org, not only the ones this pipeline's own new
+  // actors target — the next pipeline to add a membership at e2e-beta/
+  // e2e-gamma should not have to rediscover this.
+  for (const org of Object.values(E2E_ORGS)) {
+    await sql`
+      INSERT INTO groups (organization_id, group_type_id, name, membership_source, derived_from, is_protected)
+      SELECT ${org.id}::uuid, (SELECT id FROM group_types WHERE key = 'roster'),
+             'Active Membership', 'derived', 'active_membership', true
+       WHERE NOT EXISTS (
+         SELECT 1 FROM groups
+          WHERE organization_id = ${org.id}::uuid AND derived_from = 'active_membership'
+       )
+    `;
+  }
+
   for (const person of FIXTURE_PEOPLE) {
     const userId = await userIdByEmail(sql, E2E_USERS[person.role].email);
     // The user id is not stable across databases (seed-users upserts on email
@@ -324,6 +384,14 @@ export async function seedE2EOrgs(platformDbUrl: string): Promise<void> {
     // guard fires on UPDATE OF ended_on, and a fixture has no business
     // exercising a trigger it is not testing.
     [FIXTURE_PEOPLE[3].id, E2E_ORGS.beta.id, E2E_ENDED_ON],
+    // APPENDED — presbytery-portal e2e coverage (2026-09-28-presbytery-e2e).
+    // Each of these three is a FIRST and only relationship, so the plain
+    // INSERT ... WHERE NOT EXISTS shape applies — no
+    // app.person_claim_authorized DO block needed (that mechanic is only
+    // for org-multi's SECOND membership, below).
+    [FIXTURE_PEOPLE[4].id, E2E_ORGS.presbytery.id, null], // presbytery-clerk
+    [FIXTURE_PEOPLE[5].id, E2E_ORGS.presbytery.id, null], // presbytery-nogrant
+    [FIXTURE_PEOPLE[6].id, E2E_ORGS.alpha.id, null], // congregation-clerk
   ];
   for (const [personId, orgId, endedOn] of firstMemberships) {
     // WHERE NOT EXISTS, not ON CONFLICT DO NOTHING. `on conflict` resolves
@@ -442,12 +510,81 @@ export async function seedE2EOrgs(platformDbUrl: string): Promise<void> {
      )
   `;
 
+  // ---------------------------------------------------------------------
+  // APPENDED BLOCK — presbytery-portal e2e coverage (2026-09-28-presbytery-e2e,
+  // DECISION-157). Two fresh, org-scoped app_roles, mirroring the existing
+  // e2e_statistics_manage precedent immediately above — never a template
+  // adoption (assertPermissionSubset() blocks adopting congregation_stated_
+  // clerk for statistics.publish, docs/TODO.md:120).
+  //
+  // FIXTURE_PEOPLE[4]/[5]/[6] are presbytery-clerk/presbytery-nogrant/
+  // congregation-clerk respectively (see the appended FIXTURE_PEOPLE block
+  // above). presbytery-nogrant (FIXTURE_PEOPLE[5]) gets NO app_roles/
+  // role_grants row at all — the membership alone is the fixture (the
+  // "state 3" denial for oversight, reports, and credentials at once).
+  // ---------------------------------------------------------------------
+  const PRESBYTERY_CLERK_ROLE_ID = "e2e00000-0000-0000-0000-0000000000b2";
+  await sql`
+    INSERT INTO app_roles (id, organization_id, key, name, role_kind, is_protected)
+    VALUES (${PRESBYTERY_CLERK_ROLE_ID}::uuid, ${E2E_ORGS.presbytery.id}::uuid,
+            'e2e_presbytery_clerk', 'E2E Presbytery Clerk', 'custom', false)
+    ON CONFLICT (id) DO NOTHING
+  `;
+  for (const key of [
+    "congregation_oversight.manage",
+    "per_capita.manage",
+    "credentials.manage",
+    "statistics.manage",
+  ]) {
+    await sql`
+      INSERT INTO app_role_permissions (role_id, permission_key)
+      VALUES (${PRESBYTERY_CLERK_ROLE_ID}::uuid, ${key})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+  await sql`
+    INSERT INTO role_grants (organization_id, role_id, person_id, starts_on, granted_by)
+    SELECT ${E2E_ORGS.presbytery.id}::uuid, ${PRESBYTERY_CLERK_ROLE_ID}::uuid,
+           ${FIXTURE_PEOPLE[4].id}::uuid, DATE '2020-01-01', ${adminUserId}::uuid
+     WHERE NOT EXISTS (
+       SELECT 1 FROM role_grants
+        WHERE person_id = ${FIXTURE_PEOPLE[4].id}::uuid
+          AND organization_id = ${E2E_ORGS.presbytery.id}::uuid
+          AND role_id = ${PRESBYTERY_CLERK_ROLE_ID}::uuid
+     )
+  `;
+
+  const STATISTICS_PUBLISH_ROLE_ID = "e2e00000-0000-0000-0000-0000000000b3";
+  await sql`
+    INSERT INTO app_roles (id, organization_id, key, name, role_kind, is_protected)
+    VALUES (${STATISTICS_PUBLISH_ROLE_ID}::uuid, ${E2E_ORGS.alpha.id}::uuid,
+            'e2e_statistics_publish', 'E2E Statistics Publisher', 'custom', false)
+    ON CONFLICT (id) DO NOTHING
+  `;
+  await sql`
+    INSERT INTO app_role_permissions (role_id, permission_key)
+    VALUES (${STATISTICS_PUBLISH_ROLE_ID}::uuid, 'statistics.publish')
+    ON CONFLICT DO NOTHING
+  `;
+  await sql`
+    INSERT INTO role_grants (organization_id, role_id, person_id, starts_on, granted_by)
+    SELECT ${E2E_ORGS.alpha.id}::uuid, ${STATISTICS_PUBLISH_ROLE_ID}::uuid,
+           ${FIXTURE_PEOPLE[6].id}::uuid, DATE '2020-01-01', ${adminUserId}::uuid
+     WHERE NOT EXISTS (
+       SELECT 1 FROM role_grants
+        WHERE person_id = ${FIXTURE_PEOPLE[6].id}::uuid
+          AND organization_id = ${E2E_ORGS.alpha.id}::uuid
+          AND role_id = ${STATISTICS_PUBLISH_ROLE_ID}::uuid
+     )
+  `;
+
   console.log(
     `[seed-orgs] provisioned ${Object.keys(E2E_ORGS).length} organizations ` +
       `(${Object.values(E2E_ORGS)
         .map((o) => o.slug)
         .join(", ")}), ${FIXTURE_PEOPLE.length} relationships, a brand ` +
-      `on ${E2E_BRANDED_ORG.slug}, and org-multi's statistics.manage grant ` +
-      `at ${E2E_ORGS.presbytery.slug}`,
+      `on ${E2E_BRANDED_ORG.slug}, org-multi's statistics.manage grant ` +
+      `at ${E2E_ORGS.presbytery.slug}, presbytery-clerk's e2e_presbytery_clerk ` +
+      `grant, and congregation-clerk's e2e_statistics_publish grant`,
   );
 }

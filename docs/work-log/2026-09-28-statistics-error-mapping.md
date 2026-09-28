@@ -23,7 +23,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete, implementer named | 2026-09-28 |
 | 4 — Implementation | full-stack-developer | **Complete** — second loop-back closed (see "Phase 4 loop-back (2026-09-28)" subsection at the end of Phase 4): named coverage gap 1 closed via an exported `fetchAffiliationWindows()` + two new fixtures (`congDeparted`, `congRejoined`); teardown made leak-proof via `try/finally` (a literal people-before-organizations reorder was investigated and rejected — it would trip a different, non-cascading FK, DECISION-060); two cosmetic staleness fixes in `statistics-grants.test.ts` | Failing-first proven for all 3 Phase-4 test files AND this loop-back's arithmetic (RED: `expected 2020 to be 2019`; GREEN restored); typecheck/lint/check/`test:db`(4275/4275)/`test`(3378 passed, 897 skipped) all pass; `fixture-deletable.test.ts` re-run standalone at the very end, 5/5; zero stamped `people` rows at every checkpoint | 2026-09-28 |
 | 5 — Verification | qa | **Second pass: PASS** — `test:db` 4275/0, canary clean after the suite, gap 1 closed with failing-first reproduced (`expected 2020 to be 2019`), live-trigger boundary re-probed both sides. First pass FAIL (diff sound: failing-first reproduced ×3, trigger literal/SQLSTATE and boundary math verified live on both sides, view posture confirmed, anonymous path byte-identical, both divergences ruled correct, 360px rehearsal passed; `test:db` red on three leaked fixture rows from the crashed RED run, cleared by the orchestrator within the window, + one named coverage gap). Looped back to Phase 4; awaiting re-verification of the loop-back above. | PASS | 2026-09-28 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-28 |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.28.1 | SHIP WITH NOTES | 2026-09-28 |
 
 ---
 
@@ -869,35 +869,104 @@ QA note 2 applied as a Trivial edit: the dead duplicate cleanup block after the 
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-28.*
+
+**Date:** 2026-09-28
+**Reviewed by:** analyst (read-only; no files edited)
+**Worktree:** `/Users/cshenso/git/presby-platform/presby-wt-errmap`, branch `pipeline/statistics-error-mapping`
+**Inputs read:** Phase 1 (analyst), orchestrator rulings, Phase 3 (tech-lead), Phase 4 + loop-back (full-stack-developer), Phase 5 first and second passes (qa), `git diff 4461a46 --stat`, `git status --porcelain`, and direct reads of `src/app/(org)/o/[slug]/admin/reports/statistics-form.tsx`, `src/lib/presbytery.test.ts` (`afterAll`), and `src/app/(org)/o/[slug]/admin/reports/actions.ts`.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A presbytery clerk who picks a year outside a congregation's affiliation window now gets a per-congregation constrained picker, an inline plain-English hint/error, and — if they bypass the client entirely — a server-mapped sentence instead of a raw `42501`, and the anonymous grant-submission path's one live redistricting-branch refusal is folded into a broadened uniform message without opening a new enumeration oracle; the only debt is one dead-in-practice code path (the picker's upper bound) that is honestly unreachable today and correctly untested, not silently unaddressed.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Bug 1, end to end.** `statistics-form.tsx:190-260` — the pre-submit guard (`affiliationWindowError`) blocks an out-of-window year and calls `form.setError` without ever invoking the server action (confirmed live in QA's browser run: zero POSTs for the 1990/Quillhaven click); a bypass of that guard is caught server-side in `setCongregationStatistics` (Phase 3 design (c)), which now returns `{ kind: "invalid_input", message: "<Congregation> wasn't affiliated with this presbytery in <year>…" }` instead of throwing — QA reproduced the RED (`42501` uncaught) and GREEN independently against the live trigger, and re-probed the boundary math on both sides of a real closed span (`1994` accepted / `1995` refused for Southern Fields; `1995` accepted / `1994` refused for Northern Reach). The stuck-"Saving…" button is fixed by the `try/catch/finally` in `onSubmit` — `finally` always clears `submitting` regardless of cause.
+- **The `noValidate` divergence is not just defensible, it's necessary, and QA proved it independently** (reproduced native-constraint-validation cancelling the submit event in a minimal chromium page, not taken on the implementer's word) rather than accepted on argument.
+- **Bug 2's rescope is honored and the anonymous path is genuinely uniform.** `GENERIC_FIELDS_ERROR` is one exported constant, broadened in wording, returned unconditionally from the single `22023 || 23514` catch arm for every cause it already covered (bad SASR field, F80 collision guard, and now the redistricting branch) — no new branch was added. QA's byte-identity assertion (`toBe`, not `toContain`) at `statistics-grants.test.ts:743` is the right test for this claim, and QA independently confirmed by reading that only two catch arms exist and grepping every reachable `message:` literal. I re-confirmed `actions.ts` needed zero changes — its `invalid_input` arm already forwards `result.message` verbatim (six `case "invalid_input"` sites, none touched).
+- **Server-side enforcement is the actual authority, client constraint is UX only** — exactly the adversarial-pass requirement Phase 1 flagged ("the fix must be server-side"). Confirmed by design and independently re-derived by QA from `presbytery.test.ts:1072` (direct call, bypassing the client).
+- **No new permission, flag, route, or audit event needed, and none was added** — `check:audit` clean, `CONGREGATION_STATISTICS_ENTERED` still fires only on `kind: "ok"` (confirmed live: one `audit_events` row for the 2093 success, none for the 1990 guard-blocked click).
+- **Shared-file discipline held throughout both loop-backs** — `git diff --name-only 4461a46` returns exactly the six files named in Phase 3's plan, nothing in the reserved list touched, `0054` still free.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: a clerk picking a pre-affiliation year sees a raw Postgres exception and a stuck Save button. Shipped: constrained picker + inline hint/error + server-mapped sentence + un-stuck button. **Matches**, and exceeds the minimum bar (Phase 1 only demanded "constrain AND map"; the implementer also added a client-side `catch` for the genuinely-unexpected case, which Phase 3's own design under-specified — see Phase 5's ruling that this divergence is correct).
+- Phase 1 named a scope mismatch in the kickoff (bug 2's callers don't exist as described). Orchestrator ruling 1 rescoped to the two live callers. Shipped: exactly that rescope — `setCongregationStatistics` (bug 1's own surface) and `submitStatisticsGrant` (the one live caller reachable through the shared chain writer). **Matches.** `presby_publish_sasr_snapshot()`'s other four branches remain unmapped because Increment 4a still has no caller — correctly left out of scope, not silently dropped (the TODO.md line 60 replacement text names this explicitly).
+- Orchestrator ruling 2 (anonymous path stays uniform). Shipped: one broadened literal, no new branch, byte-identity test. **Matches**, and independently re-verified by QA reading the catch arms rather than trusting the test alone.
+- Orchestrator ruling 3 (constrain AND map; no-window congregation degrades to unconstrained). Shipped: `min`/`max` on the `<Input>` derived from `fetchAffiliationWindows()`, `null` bound → no attribute, no hint copy. **Matches** — confirmed in QA's live browser run (Quillhaven: `min="1995"`, `max` absent).
+- Phase 1 Gap 3's "both" and Phase 3's window-math design (day-before-`effective_to`, envelope over disjoint spans) — a genuine architectural finding surfaced mid-Phase-4: the rollup can never emit a bounded `affiliationMaxYear` for anything it lists, because `listMemberCongregations()` only lists open-span (current) members. **Acceptable drift, not a regression**: the loop-back correctly moved the arithmetic's test seam to the exported `fetchAffiliationWindows()` rather than writing an unsatisfiable assertion against the rollup, and QA verified this three independent ways (trigger source read, live rollup behavior, and a live-catalog probe) before ruling it correct. The consequence — the form's `max`/upper-bound branches are dead code today — is a known, named, non-blocking gap (see Follow-Ups).
+- Phase 1 Gap 4 (no polity claim in bug-1's copy, since no import UI exists for a clerk to use). Shipped copy: `"<Congregation> wasn't affiliated with this presbytery in <year> — check the year and try again."` **Matches** — no "use the import path" language, correctly, since D13's executor is still unbuilt.
+- Phase 1 Gap 5 (failure-state copy should match `reports-states.tsx`'s voice). Shipped: the inline hint/error copy and the `onSubmit` catch's toast (`"We couldn't save this right now. Try again in a moment."`) both match that file's existing cadence almost verbatim (QA confirmed by direct comparison to `reports-states.tsx:36`). **Matches.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: **not applicable** — `StatisticsForm` already had a `congregations.length === 0` guard ("No member congregations are on record for this presbytery yet.") predating this diff; untouched and unaffected by the fix.
+- Failure microcopy: **pass** — no raw SQL, no SQLSTATE, no stack trace reaches the client on any path (bug 1's mapped sentence, bug 2's broadened uniform sentence, and the new client-side catch's generic toast are all plain English; QA confirmed the toast's literal carries no interpolation of `err`).
+- Permission gate: **pass** — `STATISTICS_MANAGE` check inside `setCongregationStatistics` is unchanged and sits above the new try/catch; `statistics.submission_grants` flag + token possession unchanged for the grant path. No new gate was owed and none was skipped.
+- Audit event: **pass (unaffected, as intended)** — `CONGREGATION_STATISTICS_ENTERED` fires only on success, confirmed live; the new `invalid_input` path is a refusal, not a mutation, and correctly writes nothing.
+- Mobile (360px): **pass** — both QA passes rehearsed this live at 360×800; the two-line hint/error stacks cleanly under the Year field with no overflow or clipping.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES — each becomes a `docs/TODO.md` line, Rule 10)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+1. **The form's upper-bound (`max`) path is dead-in-practice and untested — leave it, tracked.** `statistics-form.tsx:89-91` ("from X through Y"), `:95-97` ("through Y — enter that year or earlier"), `:111-113` (the `year > max` guard), and `:319` (`max={...affiliationMaxYear...}`) can never fire today because `listMemberCongregations()` only lists congregations with an *open* affiliation span, and an open span forces `affiliationMaxYear: null` by `fetchAffiliationWindows()`'s own reduction rule — verified independently by QA three ways including a live-catalog probe. This is honest dead code, not a silently-unaddressed gap, and a synthetic-prop test would guard a path no real user can reach — not worth writing today. I am ruling **leave it, with a one-line comment**, deferring the test until the picker is genuinely fed from a surface with a bounded window. Ready-to-paste TODO line:
+
+   ```
+   - [ ] 2026-09-28 — **Statistics form's affiliation-window upper bound (`max`) is unreachable through today's rollup.** `listMemberCongregations()` only lists congregations with an OPEN affiliation span to the presbytery, and `fetchAffiliationWindows()`'s reduction forces `affiliationMaxYear: null` whenever any span is open — so `statistics-form.tsx:89-91,95-97,111-113,319`'s upper-bound copy/guard/HTML-attribute can never fire on this surface. Verified independently (three ways, incl. a live-catalog probe) in `docs/work-log/2026-09-28-statistics-error-mapping.md` Phase 5 second pass. Add a one-line comment at `statistics-form.tsx:319` recording why, and a synthetic-`affiliationMaxYear`-prop test in `statistics-form.test.tsx` if/when the picker (or a reused version of it) is ever fed from a surface with transitive membership — `fetchAffiliationWindows()` reads DIRECT affiliation spans only (`parent_org_id = organizationId`), while `presby_org_affiliated()` is transitive (recursive ancestry, depth 8); a future reuse on an indirect-membership surface would need to re-derive the window differently, not just relax this rollup's filter. — docs/work-log/2026-09-28-statistics-error-mapping.md
+   ```
+
+2. **`docs/ui-standards.md` (or wherever this codebase's client-form pattern lives) should document the `onSubmit` `try/catch/finally` shape** (`statistics-form.tsx:216-260`) as the house pattern for a Server-Action-calling form — Phase 3's design doc only specified `finally`; the implementer found (and QA independently reproduced) that a bare `finally` leaves a genuinely-unexpected rejection as a silent unhandled-promise-rejection with zero user feedback, worse than the stuck button it replaces. At least one sibling form (`add-officer-term-form.tsx`) shares the old, weaker pattern and would benefit from the same fix — explicitly out of this pipeline's scope to retrofit, per the implementer's own note, but worth a tracked line so it isn't lost.
+
+   ```
+   - [ ] 2026-09-28 — **Document (and eventually retrofit) the `try { await action() } catch (err) { toast+log } finally { setSubmitting(false) }` client-form pattern.** `docs/work-log/2026-09-28-statistics-error-mapping.md`'s Phase 4 Implementer Notes found that a Server-Action-calling `onSubmit` with only a `finally` (no `catch`) leaves a genuinely-unexpected rejection as a silent, user-invisible unhandled-promise-rejection — worse than a stuck button. `statistics-form.tsx` now has the full pattern; `add-officer-term-form.tsx` (and likely other sibling forms) still has the weaker one. Write up the pattern once, then retrofit siblings opportunistically. — docs/work-log/2026-09-28-statistics-error-mapping.md
+   ```
+
+Neither follow-up blocks shipping — both are named, bounded, and low-risk; the second is explicitly a documentation/consistency debt on code this pipeline didn't touch.
+
+**Not a follow-up, already closed:** QA's carried note 2 (dead duplicate `afterAll` cleanup block in `presbytery.test.ts`) — I confirmed by direct read: the `finally` block appears exactly once now (lines 658–663), no duplicate remains. QA's carried note 3 (work-log wording "runs even if an earlier step throws" overstates the guarantee, "attempted" is the accurate word, the real fix is the delete-ordering) — the orchestrator's recording already treats this as resolved by re-reading, and I concur it's a prose-precision point about the **work-log's own account**, not the shipped code's behavior (the code comment at `presbytery.test.ts:565-566` carries the same optimistic phrasing but is accurate enough in context — the surrounding comment explains the *actual* fix is the delete ordering, immediately above the "runs even if" line — no functional risk, no action needed).
+
+## Rule 12 — Feedback row
+
+Not applicable. Nothing in the work-log's kickoff or Phase 1 names an originating `feedback` row UUID — this pipeline originated from two `docs/TODO.md` lines (59, 60), not in-app member feedback.
+
+## Rule 13 — What's-new advisory
+
+**No.** This is a bug fix on an internal presbytery-admin surface (`statistics.manage`-gated, presbytery-clerk-only). It removes a broken/uncaught-exception state rather than introducing new member-visible behavior, and the fix is invisible to anyone who wasn't already hitting the bug. No `whats_new_entries` row warranted.
+
+## Rule 14 — Functionality map
+
+**One clause, not none.** Line 25's stale clause — *"the statistics form has no year guard or error mapping for that refusal yet (`docs/TODO.md`)"* — is now false and should be replaced. Proposed replacement (matches Phase 3's own proposed line, which I've re-verified against the shipped behavior rather than taking on faith):
+
+> "the statistics form constrains the year picker to each congregation's affiliation window (`organization_affiliations_public`) and maps a residual about-org refusal to plain English; the anonymous submission-grant path's own report-year refusal stays folded into its existing uniform generic-fields message rather than a distinct string (`docs/work-log/2026-09-28-statistics-error-mapping.md`)."
+
+I extended Phase 3's proposed clause with the grant-path clause because the original kickoff and Phase 1 both treated bug 2 as part of the same functional area, and the map's existing paragraph already narrates the submission-grants feature elsewhere in the same bullet — a reader hitting the stale sentence should also learn the redistricting-branch question it implicitly raises is now answered.
+
+## Rule 15 — Architecture doc
+
+**No.** No new subsystem, no changed data flow, no changed deployment/runtime shape, no reversal of anything `docs/architecture.md` states as settled. This is a caller-side mapping/guard fix inside an existing subsystem.
+
+## Draft release-note paragraph (v0.28.1, non-engineer voice, fix class)
+
+> **Fixed: presbytery statistics form no longer errors out on a pre-affiliation year.** A presbytery clerk entering a congregation's annual statistics who picked a report year from before that congregation joined the presbytery used to see a technical database error and a Save button that never recovered. The year field now shows which years are valid for the selected congregation, and if an out-of-range year is entered anyway, the form explains why in plain language instead of failing silently.
 
 ## Red Flags (if NEEDS REWORK)
 
-- [Specific. What has to change before this ships.]
+None. No red flags — no invariant violation, no enumeration leak, no missing server-side enforcement, no failing gate.
 
+---
+
+## Per-Phase Status
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — walked both bugs against Phase 1's flows and both orchestrator rulings; confirmed the rescope and the uniform anonymous-path fold independently (read `actions.ts`, `statistics-form.tsx`, `presbytery.test.ts` `afterAll` directly rather than trusting Phase 5 alone); ruled on all three QA carried notes (upper-bound path: leave + comment, ready-to-paste TODO given; duplicate teardown block: confirmed removed; "attempted" wording: prose-only, no action needed); drafted Rule 14 functionality-map clause and the 0.28.1 release-note paragraph; Rule 13 (no) and Rule 15 (no) confirmed; Rule 12 not applicable (no feedback-row origin) | **SHIP WITH NOTES** | 2026-09-28 |
+
+**Handoff:** → orchestrator, to close the pipeline: apply the two `docs/TODO.md` follow-up lines above (Rule 10), replace `docs/TODO.md`'s existing lines 59/60 per Phase 3's proposed closure text (superseding both, with line 60's four-branch/Increment-4a remainder re-added as its own open line), apply the Rule 14 functionality-map clause above to line 25, and record the v0.28.1 release-note paragraph. No `docs/decisions.md` entry (Phase 3 already ruled none is warranted and I concur — nothing here rises to a pattern a future implementer could plausibly get wrong the other way without a recorded ruling). Pipeline closes at this SHIP WITH NOTES verdict per Workflow Rule; no further phase is triggered."}],"container":null,"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":307,"cache_read_input_tokens":108299,"output_tokens":6597,"output_tokens_details":{"thinking_tokens":0},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":307},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":6597,"cache_read_input_tokens":108299,"cache_creation_input_tokens":307,"cache_creation":{"ephemeral_5m_input_tokens":307,"ephemeral_1h_input_tokens":0},"type":"message"}],"speed":"standard"},"diagnostics":null,"context_management":null},"apiBlockIndex":0,"requestId":"req_011CfWabmSURiJ9fVPfVbtJL","attributionAgent":"analyst","type":"assistant","uuid":"95199d03-301d-4d01-bdd5-acbc53ad9f25","timestamp":"2026-09-28T21:54:23.740Z","effort":"high","perTurnEffort":null,"userType":"external","entrypoint":"cli","cwd":"/Users/cshenso/git/presby-platform/presby","sessionId":"b08e6db7-b5b1-4a1b-b94f-75e0928bed80","version":"2.1.273","gitBranch":"main","slug":"warm-honking-hartmanis"}
+
+### Orchestrator closure (2026-09-28)
+
+Shipped as v0.28.1. Integration applied by the orchestrator: TODO reconciled, release note, functionality map as ruled. The pipeline's Neon branch is deleted at cleanup.

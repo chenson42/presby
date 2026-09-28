@@ -120,6 +120,42 @@ export type PresbyteryResult<T> =
   | { kind: "invalid_input"; message: string };
 
 /**
+ * Walks the `.cause` chain Drizzle/the neon driver hangs off a thrown error
+ * — same helper, same reasoning, as `src/lib/filings.ts`'s and
+ * `src/lib/statistics-grants.ts`'s own `pgErrorInfo()` (per-module
+ * duplication is this codebase's own established convention for it, both
+ * existing copies say so explicitly — see this function's Phase 3 design
+ * note in the work-log, not a shared import).
+ */
+function pgErrorInfo(err: unknown): { code: string | undefined; message: string } {
+  const messages: string[] = [];
+  let code: string | undefined;
+  let current: unknown = err;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (current instanceof Error) messages.push(current.message);
+    if (
+      code === undefined &&
+      typeof current === "object" &&
+      current !== null &&
+      "code" in current
+    ) {
+      const c = (current as { code?: unknown }).code;
+      if (typeof c === "string") code = c;
+    }
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return { code, message: messages.join(" :: ") };
+}
+
+/** Safe substring of `presby_deny_about_org_write()`'s parameterized literal
+ *  (drizzle/0045, `presby_check_about_org_affiliated()` ← the
+ *  `congregation_statistics_about_org` trigger) — matched with `.includes()`
+ *  because the message carries the table name and as-of year, never
+ *  asserted verbatim. Same idiom as `filings.ts`'s
+ *  `ALREADY_WITHDRAWN_MARKER`/`SUPERSEDED_MARKER`. */
+const NOT_AFFILIATED_MARKER = "was not affiliated with this council as of";
+
+/**
  * Local, parameterized-by-key gate — same shape `person-sensitive.ts`
  * defines for its own four independent permissions, not `credentials.ts`'s
  * single-permission-only helper.
@@ -195,6 +231,114 @@ async function listMemberCongregations(
       ),
     )
     .orderBy(organizations.name);
+}
+
+/** One presbytery's per-congregation eligible report-year window, keyed by
+ *  `subjectOrgId`. `null` on either side means unbounded on that side
+ *  (still-affiliated-since-forever / currently affiliated, no end) — see
+ *  this function's own reduction rule below. A congregation absent from the
+ *  returned map has no affiliation row at all reachable from this presbytery
+ *  and should be treated as UNCONSTRAINED (orchestrator ruling 3), not as
+ *  "no eligible year." */
+interface AffiliationWindow {
+  minYear: number | null;
+  maxYear: number | null;
+}
+
+/**
+ * Reads `organization_affiliations_public` (drizzle/0044), not the base
+ * `organization_affiliations` table and not `presby_org_affiliated()` in a
+ * per-year loop — see this pipeline's work-log Phase 3 Design (a) for why
+ * both alternatives are wrong here: the base table's tenant policy filters
+ * on the RECORDING council, not the parent, so a presbytery's own
+ * `withOrgContext()` read can silently miss a span it did not itself record;
+ * a per-year `presby_org_affiliated()` loop would need up to 200 round trips
+ * per congregation to find a boundary this one aggregate query answers.
+ *
+ * WINDOW MATH — the day-before-`effective_to` rule. The about-org trigger
+ * accepts a year if EITHER Jan 1 or Dec 31 of that year falls inside
+ * `[effective_from, effective_to)` (drizzle/0044:711-716, reused verbatim at
+ * drizzle/0049:487-491). That means: `minYear = year(effective_from)` (Dec 31
+ * of the start year is always >= effective_from, whatever day mid-year it
+ * lands on, so the OR always passes for that year); `maxYear =
+ * year(effective_to - 1 day)`, NOT `year(effective_to)` — the range is
+ * half-open, so a departure exactly on January 1 excludes that whole year,
+ * and subtracting a day before taking the year reproduces the OR-of-both-
+ * endpoints check exactly rather than being off by one in that edge case.
+ *
+ * Reduces ACROSS EVERY SPAN for a subject (a congregation that left and
+ * rejoined) to the min of every bounded `minYear` and the max of every
+ * bounded `maxYear` — the envelope, not the precise union. A gap year in
+ * between is not visibly disabled by this window; (c) below still refuses a
+ * gap-year submission correctly. Named and accepted in the work-log rather
+ * than built exactly — revisit only if this actually bites a real
+ * redistricted-and-returned congregation.
+ *
+ * EXPORTED for direct testing (Phase 4 loop-back, 2026-09-28 — QA's named
+ * coverage gap 1). It cannot be pinned through `getCongregationStatistics
+ * Rollup()` itself: a subject only appears in that rollup's output when
+ * `organizations.parentId === organizationId`, which requires an OPEN
+ * (`effective_to is null`) span to that exact parent — and this function's
+ * own reduction rule ("any unbounded span forces that side to null," above)
+ * means a subject with an open span to `organizationId` ALWAYS gets
+ * `maxYear: null` from THIS function too. So a bounded, non-null `maxYear`
+ * can only ever be produced for a subject with NO open span to
+ * `organizationId` — which by construction is a subject `getCongregation
+ * StatisticsRollup()` never lists (confirmed empirically against the seeded
+ * Quillhaven/Southern-Fields fixture before writing this comment: Southern
+ * Fields' own `listMemberCongregations()` query returns zero rows for
+ * Quillhaven, even though `organization_affiliations_public` still carries
+ * its closed span there). The day-before-`effective_to` arithmetic and the
+ * multi-span envelope reduction are real, live code paths — just not ones
+ * `getCongregationStatisticsRollup()` can observe a bounded value from —
+ * so `presbytery.test.ts` calls this function directly.
+ */
+export async function fetchAffiliationWindows(
+  tx: OrgTx,
+  organizationId: string,
+): Promise<Map<string, AffiliationWindow>> {
+  const result = await tx.execute(sql`
+    select subject_org_id, effective_from, effective_to
+      from organization_affiliations_public
+     where parent_org_id = ${organizationId}::uuid
+  `);
+  const rows =
+    (
+      result as unknown as {
+        rows?: Array<{
+          subject_org_id: string;
+          effective_from: string | null;
+          effective_to: string | null;
+        }>;
+      }
+    ).rows ?? [];
+
+  const windows = new Map<string, AffiliationWindow>();
+  for (const row of rows) {
+    const minYear = row.effective_from
+      ? new Date(`${row.effective_from}T00:00:00Z`).getUTCFullYear()
+      : null;
+    const maxYear = row.effective_to
+      ? new Date(
+          new Date(`${row.effective_to}T00:00:00Z`).getTime() - 24 * 60 * 60 * 1000,
+        ).getUTCFullYear()
+      : null;
+
+    const existing = windows.get(row.subject_org_id);
+    if (!existing) {
+      windows.set(row.subject_org_id, { minYear, maxYear });
+      continue;
+    }
+    existing.minYear =
+      existing.minYear === null || minYear === null
+        ? null
+        : Math.min(existing.minYear, minYear);
+    existing.maxYear =
+      existing.maxYear === null || maxYear === null
+        ? null
+        : Math.max(existing.maxYear, maxYear);
+  }
+  return windows;
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +668,13 @@ export interface StatisticsRollupRow extends SasrAggregateInput {
   hasData: boolean;
   provenance: StatisticsProvenance | null;
   publishedAt: string | null;
+  /** This congregation's affiliation window with the presbytery, per
+   *  `fetchAffiliationWindows()` — `null` on either side means unbounded on
+   *  that side, and BOTH `null` (no affiliation row reachable at all) means
+   *  the year picker should render unconstrained, not "no eligible year"
+   *  (orchestrator ruling 3). */
+  affiliationMinYear: number | null;
+  affiliationMaxYear: number | null;
 }
 
 /** The provenance-coalesce read shared by 3b's own list and (per Phase 3's
@@ -578,6 +729,7 @@ function toRollupRow(
   cong: { id: string; name: string; platformStatus: string },
   year: number,
   row: typeof congregationStatistics.$inferSelect | undefined,
+  affiliationWindow: AffiliationWindow | undefined,
 ): StatisticsRollupRow {
   return {
     organizationId: cong.id,
@@ -587,6 +739,8 @@ function toRollupRow(
     hasData: row !== undefined,
     provenance: (row?.provenance as StatisticsProvenance | undefined) ?? null,
     publishedAt: row?.publishedAt ? row.publishedAt.toISOString() : null,
+    affiliationMinYear: affiliationWindow?.minYear ?? null,
+    affiliationMaxYear: affiliationWindow?.maxYear ?? null,
     minuteReference: row?.minuteReference ?? null,
     gainsProfessionsUnder18: row?.gainsProfessionsUnder18 ?? null,
     gainsProfessions18Plus: row?.gainsProfessions18Plus ?? null,
@@ -628,9 +782,17 @@ export async function getCongregationStatisticsRollup(
     const congregations = await listMemberCongregations(tx, organizationId);
     if (congregations.length === 0) return { kind: "ok", data: [] };
 
-    const byAboutOrg = await fetchStatisticsForYear(tx, organizationId, year);
+    const [byAboutOrg, affiliationWindows] = await Promise.all([
+      fetchStatisticsForYear(tx, organizationId, year),
+      fetchAffiliationWindows(tx, organizationId),
+    ]);
     const data = congregations.map((cong) =>
-      toRollupRow(cong, year, byAboutOrg.get(cong.id)),
+      toRollupRow(
+        cong,
+        year,
+        byAboutOrg.get(cong.id),
+        affiliationWindows.get(cong.id),
+      ),
     );
 
     return { kind: "ok", data };
@@ -799,56 +961,82 @@ export async function setCongregationStatistics(
     // replaces: same 23 columns, same partial conflict target, same 19
     // columns updated from EXCLUDED. `id` and `created_at` are never named,
     // which is exactly why no privilege on them is needed either.
-    const result = await tx.execute(sql`
-      insert into congregation_statistics (
-        organization_id, about_org_id, year, provenance,
-        minute_reference,
-        gains_professions_under18, gains_professions_18plus,
-        gains_certificate, gains_other,
-        losses_certificate, losses_deaths, losses_other,
-        ending_active, ending_baptized, ending_affiliate,
-        ending_other_participants, avg_weekly_worship_attendance,
-        potential_giving_units, baptisms_children, baptisms_adults,
-        officers_ruling_elder_count, officers_deacon_count, entered_by
-      ) values (
-        ${organizationId}::uuid, ${aboutOrgId}::uuid, ${year}::integer, 'presbytery_entered',
-        ${input.minuteReference ?? null},
-        ${input.gainsProfessionsUnder18 ?? null}, ${input.gainsProfessions18Plus ?? null},
-        ${input.gainsCertificate ?? null}, ${input.gainsOther ?? null},
-        ${input.lossesCertificate ?? null}, ${input.lossesDeaths ?? null}, ${input.lossesOther ?? null},
-        ${input.endingActive ?? null}, ${input.endingBaptized ?? null}, ${input.endingAffiliate ?? null},
-        ${input.endingOtherParticipants ?? null}, ${input.avgWeeklyWorshipAttendance ?? null},
-        ${input.potentialGivingUnits ?? null}, ${input.baptismsChildren ?? null}, ${input.baptismsAdults ?? null},
-        ${input.officersRulingElderCount ?? null}, ${input.officersDeaconCount ?? null}, ${actingUserId}::uuid
-      )
-      on conflict (organization_id, about_org_id, year, provenance)
-        where provenance in ('presbytery_entered', 'imported')
-      do update set
-        minute_reference = excluded.minute_reference,
-        gains_professions_under18 = excluded.gains_professions_under18,
-        gains_professions_18plus = excluded.gains_professions_18plus,
-        gains_certificate = excluded.gains_certificate,
-        gains_other = excluded.gains_other,
-        losses_certificate = excluded.losses_certificate,
-        losses_deaths = excluded.losses_deaths,
-        losses_other = excluded.losses_other,
-        ending_active = excluded.ending_active,
-        ending_baptized = excluded.ending_baptized,
-        ending_affiliate = excluded.ending_affiliate,
-        ending_other_participants = excluded.ending_other_participants,
-        avg_weekly_worship_attendance = excluded.avg_weekly_worship_attendance,
-        potential_giving_units = excluded.potential_giving_units,
-        baptisms_children = excluded.baptisms_children,
-        baptisms_adults = excluded.baptisms_adults,
-        officers_ruling_elder_count = excluded.officers_ruling_elder_count,
-        officers_deacon_count = excluded.officers_deacon_count,
-        entered_by = excluded.entered_by
-      returning id
-    `);
+    try {
+      const result = await tx.execute(sql`
+        insert into congregation_statistics (
+          organization_id, about_org_id, year, provenance,
+          minute_reference,
+          gains_professions_under18, gains_professions_18plus,
+          gains_certificate, gains_other,
+          losses_certificate, losses_deaths, losses_other,
+          ending_active, ending_baptized, ending_affiliate,
+          ending_other_participants, avg_weekly_worship_attendance,
+          potential_giving_units, baptisms_children, baptisms_adults,
+          officers_ruling_elder_count, officers_deacon_count, entered_by
+        ) values (
+          ${organizationId}::uuid, ${aboutOrgId}::uuid, ${year}::integer, 'presbytery_entered',
+          ${input.minuteReference ?? null},
+          ${input.gainsProfessionsUnder18 ?? null}, ${input.gainsProfessions18Plus ?? null},
+          ${input.gainsCertificate ?? null}, ${input.gainsOther ?? null},
+          ${input.lossesCertificate ?? null}, ${input.lossesDeaths ?? null}, ${input.lossesOther ?? null},
+          ${input.endingActive ?? null}, ${input.endingBaptized ?? null}, ${input.endingAffiliate ?? null},
+          ${input.endingOtherParticipants ?? null}, ${input.avgWeeklyWorshipAttendance ?? null},
+          ${input.potentialGivingUnits ?? null}, ${input.baptismsChildren ?? null}, ${input.baptismsAdults ?? null},
+          ${input.officersRulingElderCount ?? null}, ${input.officersDeaconCount ?? null}, ${actingUserId}::uuid
+        )
+        on conflict (organization_id, about_org_id, year, provenance)
+          where provenance in ('presbytery_entered', 'imported')
+        do update set
+          minute_reference = excluded.minute_reference,
+          gains_professions_under18 = excluded.gains_professions_under18,
+          gains_professions_18plus = excluded.gains_professions_18plus,
+          gains_certificate = excluded.gains_certificate,
+          gains_other = excluded.gains_other,
+          losses_certificate = excluded.losses_certificate,
+          losses_deaths = excluded.losses_deaths,
+          losses_other = excluded.losses_other,
+          ending_active = excluded.ending_active,
+          ending_baptized = excluded.ending_baptized,
+          ending_affiliate = excluded.ending_affiliate,
+          ending_other_participants = excluded.ending_other_participants,
+          avg_weekly_worship_attendance = excluded.avg_weekly_worship_attendance,
+          potential_giving_units = excluded.potential_giving_units,
+          baptisms_children = excluded.baptisms_children,
+          baptisms_adults = excluded.baptisms_adults,
+          officers_ruling_elder_count = excluded.officers_ruling_elder_count,
+          officers_deacon_count = excluded.officers_deacon_count,
+          entered_by = excluded.entered_by
+        returning id
+      `);
 
-    const row = (result as unknown as { rows?: Array<{ id?: string }> })
-      .rows?.[0];
-    return { kind: "ok", data: { id: row!.id! } };
+      const row = (result as unknown as { rows?: Array<{ id?: string }> })
+        .rows?.[0];
+      return { kind: "ok", data: { id: row!.id! } };
+    } catch (err) {
+      // Expected, routine refusal (a real, in-permission congregation whose
+      // year falls outside its affiliation window with this presbytery —
+      // e.g. a redistricted congregation, or a clerk mistyping the year) —
+      // `src/types/actions.ts`'s own contract reserves throwing for "truly
+      // unexpected" failures, so this maps to the SAME `invalid_input`
+      // variant the format checks above already use, rather than a new
+      // `PresbyteryResult` kind (see this pipeline's work-log Phase 3
+      // Design (c) for why: `actions.ts` has 6 switches over this shared
+      // type, none exhaustive, and a new variant would need a no-op case
+      // added to all 5 of them purely to keep TS's narrowing sound for a
+      // case only this function can produce).
+      const { code, message } = pgErrorInfo(err);
+      if (code === "42501" && message.includes(NOT_AFFILIATED_MARKER)) {
+        return {
+          kind: "invalid_input",
+          message: `${cong.name} wasn't affiliated with this presbytery in ${year} — check the year and try again.`,
+        };
+      }
+      // Anything unmapped is structurally unexpected — this INSERT can only
+      // trip its own about-org trigger — but matched defensively rather than
+      // assumed, same discipline `filings.ts`/`statistics-grants.ts` use for
+      // their own unmapped arms.
+      throw err;
+    }
   });
 }
 

@@ -24,7 +24,7 @@
 | 3 — Technical design | tech-lead | Complete — three `e2e/support/` modules fully signed (`db.ts`, `flags.ts`, `sasr-fixture.ts`); four spec files' full case lists (oversight 6, credentials 7, reports 10, filings round trip 9); three new fixture actors specified against `users.ts`/`seed-orgs.ts`; F113/F114/F115 fixes designed; DECISION-157 adopted verbatim; withdraw refusal copy resolved from `filings.ts`/`actions.ts` directly | Design complete, implementer named | 2026-09-28 |
 | 4 — Implementation | full-stack-developer | Complete (noting the loop-back) — original pass: 3 new `e2e/support/` modules, 4 new spec files (32 cases), F113/F114/F115 fixed, 2 rotten specs fixed, `flags.ts` extraction done, 161/0 full-suite run. Loop-back pass (closing QA's GAP-1): 3 new cases in `filings-round-trip.spec.ts` (flag-off/wrong-org-type/no-grant, failing-first proven via a real `role_grants` insert/delete), `presbytery-credentials.spec.ts` promoted to `describe.serial`, `sasr-fixture.ts`'s `pg_trigger` check constrained by table, F116's TODO line rewritten to state the product question. 164/0/0 full-suite run, DB left as found. | — | 2026-09-28 |
 | 5 — Verification | qa | **Second pass: PASS** — GAP-1 closed and re-proven failing-first on both the grant and flag axes; 164/0/0 on fresh `.next` + cold `.auth`; DB byte-identical. First pass FAIL (161/0/0 twice, DB byte-identical, F113/F114 and permission failing-first reproduced; one coverage gap [filings' three denial states, a Phase 2 ruling dropped in Phase 3] and one product finding [F116, pre-hydration select revert, outside scope]). Looped back to Phase 4; GAP-1 now closed per the Phase 4 loop-back section above, awaiting QA re-verification. | PASS | 2026-09-28 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-09-28 |
+| 6 — Shipped vs intent | analyst | Complete — shipped as v0.28.2 | SHIP WITH NOTES | 2026-09-28 |
 
 ---
 
@@ -2251,34 +2251,105 @@ Observations 1–3 (case 12 self-containment; case 11's sibling choice; the F115
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim by the orchestrator, 2026-09-28.*
+
+**Date:** 2026-09-28
+**Reviewed by:** analyst (read-only)
+**Environment:** worktree `/Users/cshenso/git/presby-platform/presby-wt-e2e`, branch `pipeline/presbytery-e2e`, Neon branch `br-red-moon-ax4gez04` (`.env.local` endpoint `ep-red-heart-axzlbff7`, confirmed matches QA's second-pass environment). `env | grep DATABASE_URL` empty throughout. No writes performed — `git diff 938e1c5 --stat`, untracked-file listing, and direct reads of `e2e/presbytery-oversight.spec.ts`, `e2e/filings-round-trip.spec.ts`, `e2e/support/sasr-fixture.ts`, `e2e/support/assert-fixture-invariants.ts`, `.github/workflows/e2e.yml`'s diff, and `docs/testing.md`'s diff, plus `docs/product/functionality-map.md` and `docs/TODO.md:113`.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> All five presbytery-portal surfaces named in Phase 1 now have real, permission-and-flag-proven Playwright coverage that mints its own fixtures and never touches Alder Creek's single production-shaped SASR row — the loop-back closed the one real gap (filings' three denial states) and QA independently re-proved it failing-first on both axes — but this pipeline surfaced one live product finding (F116) and a process defect (Phase 3 silently dropping an accepted Phase 2 ruling) that both need to leave this pipeline as named, tracked follow-ups rather than be absorbed into "done."
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The four-negative-state discipline is real, not decorative.** I read `presbytery-oversight.spec.ts` case 3 and `filings-round-trip.spec.ts` cases 10–12 directly: each denied case asserts its own anchor **visible** and a sibling anchor `toHaveCount(0)`, exactly per architect Phase 2 Notes §4. QA independently proved case 12 discriminates on the grant (real `role_grants` insert/delete) and on the flag (case 12 run alone at baseline-OFF fails for the flag reason) — this is falsifiable evidence, not an assertion that a green run implies coverage.
+- **The round trip honors DECISION-157 mechanically, not by convention.** `sasr-fixture.ts`'s `assertE2EOrg()` and `assertReservedYear()` are assert-and-throw guards, confirmed live by reading the file — not comments. `filings-round-trip.spec.ts` stages two fresh years (2094/2096) at `e2e-alpha` through `presby_publish_sasr_snapshot()` itself, and both `beforeAll`/`afterAll` call `assertSeedPublicationsIntact()`, which would throw the moment Alder Creek's 2025 row were touched. This is the correct, load-bearing response to the prior pipeline's QA FAIL, and it is enforced by code, not by the pipeline's own discipline alone.
+- **Audit events are asserted for every security-sensitive mutation named in Phase 1**, queried by literal `AUDIT_ACTIONS` string against a real `audit_events` row, not inferred from a 200 response (oversight, ordination/appointment, statistics/per-capita, and the withdrawal's `resource_id`/`metadata.aboutOrgId`/`metadata.recipientOrgId` triple).
+- **F113 is fixed and independently proven** (QA reproduced the pre-fix hard-throw under `CI=true` with `E2E_DATABASE_URL` unset, then the green run with it set) — this closes a CI job that, as the architect found, had never actually run and could not have passed.
+- **Flow 3 is correctly cross-referenced, not duplicated.** I grepped `presbytery-reports.spec.ts` directly: its header states Flow 3 is covered by `statistics-submit.spec.ts` and is "NOT re-covered here," with case 9 scoped narrowly to the third section's *own* flag-off state, which the existing spec never exercises (it always runs flag-on). This is exactly the Phase 1 ruling honored.
+- **Scope discipline held under real pressure.** `git diff 938e1c5 --stat` confirms nothing under `src/`, no `package.json`/lockfile change, none of the orchestrator's reserved shared files (`scripts/seed-dev.sql`, `test-rls.sql`, `docs/TODO.md`, `decisions.md`, `docs/STATE.md`) touched. `docs/STATE.md` appears only because the worktree branched from `4461a46`, one commit after `938e1c5` — not a pipeline edit, matching QA's own reading.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+| Phase 1 said | Shipped | Verdict |
+|---|---|---|
+| Five surfaces (oversight, reports/per-capita, submission grants cross-ref, credentials, filings round trip) get e2e coverage of the happy path and all four negative states | All four presbytery-portal surfaces (oversight, reports, credentials, filings) assert flag-off + wrong-org-type + no-grant, each with a sibling-anchor absence check; the fourth state (genuine DB error) is explicitly out of scope for e2e per architect Notes §4, with a pointer to the component-test coverage that does exercise it | **Matches**, with the documented, deliberate fourth-state carve-out |
+| "Publish" is staged, never browsed, and Alder Creek's 2025 row is never touched | Confirmed by code read (`sasr-fixture.ts`), by QA's independent SHA-256 byte-identical DB snapshot pre/post, and by a deliberate failing-first demonstration (Phase 4 Notes §6: withdrew Alder Creek's real row *inside an open transaction, then rolled back*, to prove the guard would catch it) | **Matches, and better than the minimum bar** — the implementer proved the guard against the actual danger, not a stand-in |
+| Flow 3 (submission grants) is cross-referenced, not re-covered | Confirmed — one new case (case 9) scoped to a gap `statistics-submit.spec.ts` genuinely leaves open, no duplication | **Matches** |
+| Four rotten specs get fixed: two stale `post-login-routing` assertions, one flaky `header-controls` case, `public-sites.spec.ts:334` | Three fixed (`post-login-routing` re-anchored on `data-testid="greeting-band"`, correctly diagnosed against a different root cause than Phase 3 assumed; `public-sites.spec.ts` fixed as spec rot against the real `presby-site-kit@4.0.0` block shape, F114, with a second undiscovered rot layer — the `contactForm` block — found and fixed in the same pass). `header-controls.spec.ts:110` was **not reproduced** by either the implementer (132 executions) or QA (20/20 standalone) — left unmodified rather than guessed at | **Matches Phase 1's framing exactly**: "fixing those is in scope" did not mean "force a change to a flake that won't reproduce," and the TODO line is correctly left open with the new evidence rather than closed on faith |
+| F113 (CI blocker) | Fixed, one line plus an explanatory comment block; QA calls out the comment block as a "deviation from the brief" but accepts it — I agree it's an improvement, not scope creep | **Matches** |
+
+## Rulings on the specific items named for this phase
+
+**1. Phase 1 Gap 3 — publish staged, never browsed.** Accepted as an intent-vs-shipped divergence, not a defect, exactly as QA's handoff framed it. This was named explicitly in Phase 1 (Gap 3), ruled on by the orchestrator (ruling 3/4), designed against by tech-lead, implemented faithfully, and verified twice by QA with a genuinely adversarial reproduction (the rollback test). The congregation-side self-service publish UI remains a distinct, larger pipeline — `docs/TODO.md:195` already tracks it as "Presbytery Increment 4a," unchanged by this pipeline. **Divergence accepted until Increment 4a; no action for this pipeline.**
+
+**2. The 360px filings scroller.** Confirmed asserted positively, not hidden. I read `filings-round-trip.spec.ts` case 9 directly: it asserts `scroller.evaluate((el) => el.scrollWidth > el.clientWidth)` is `true` (the known residual, made visible rather than skipped) **and** operates the real Withdraw button via `scrollIntoViewIfNeeded()` through to a genuine withdrawal and toast. `test.fixme`/`test.fail` were correctly avoided per architect Notes §5's reasoning (a `test.fail` would fire spuriously the day a card layout replaces the table). This is the shape Phase 1's own mobile-pass gap (Gap 8) asked for, done correctly.
+
+**3. F116 (product finding, outside scope).** Correctly kept outside this pipeline. It is a real, independently-reproduced hazard (QA reproduced the race directly against `statistics-form.tsx`'s native `<select>`, 1-of-3 silent reverts / 2-of-3 never-took-the-selection without the `networkidle` wait) on a form that writes a congregation's annual statistics — a data-integrity question, not a test-timing question. The TODO line was correctly rewritten mid-pipeline (Phase 5 loop-back item 4) to state the product question with the superseded test-convention wording struck through in place rather than deleted, which is the right way to preserve the retrospective record. The orchestrator's TODO line for F116 covers it adequately as written (line 1755–1759 of the work-log): it names the mechanism, the file, and explicitly asks for reproduction on a production build before deciding whether it's its own bug-fix pipeline. **No amendment needed.**
+
+**4. QA's three nits.** The orchestrator's plan (work-log line 2248: "Observations 1–3 ... become one `docs/TODO.md` follow-up line at integration") **covers all three adequately** as a single bundled line, because all three are the same class of finding (test-robustness gaps that don't affect current correctness): case 12's non-self-containment, case 11's choice of sibling anchor, and the F115 check's `rows.length` not being pinned to exactly 3. None of the three represents a false pass today — I confirmed this by reading `sasr-fixture.ts`'s trigger check myself (Notes above): it correctly constrains by `(tgname, relname)` per QA's request, and the `rows.length !== 3` gap is a real but narrow residual (only masks a *dropped* trigger, not a disabled one). Bundling is proportionate; I would not insist on three separate lines.
+
+**5. The retrospective note (Phase 3 dropped an accepted Phase 2 ruling without notation).** This is the one item in this pipeline I'd flag as more than a nit. Phase 2 Notes §4 was accepted verbatim by the orchestrator ("all nine rulings accepted") and explicitly enumerated filings' three anchors and named its fixtures; Phase 3's own design table for `filings-round-trip.spec.ts` silently omitted them with no scope notation anywhere in the design doc. That is exactly the failure mode CLAUDE.md's Phase 3 gate exists to prevent ("catching a mismatch here is one grep cheaper than a Phase 4 loop-back") — and here it cost a full Phase 4/5 loop-back cycle rather than being caught before Phase 4 started. The orchestrator's plan to carry this to the next release-slot retrospective is the right mechanism (it's a process finding about tech-lead's own design-review discipline, not a product or test defect), and I have nothing to add beyond confirming it should not be dropped a second time.
+
+**6. DECISION-157 (Phase 2 text) vs what shipped.** Confirmed by direct code read of `sasr-fixture.ts` and `assert-fixture-invariants.ts`: the decision's four Playwright-owned-namespace criteria (slug prefix `e2e-`, `@presby.invalid` emails, report years 2090–2099, `app_roles` keyed `e2e_*`) are each enforced by a guard somewhere in the shipped code — `assertE2EOrg()`/`assertReservedYear()` in `sasr-fixture.ts` for the org/year axes, `assertFixtureShape()` in `seed-orgs.ts` (pre-existing, extended per Phase 3's role-array note) for the people/role axes. The decision's one documented exception (`public-sites.spec.ts` mutating Alder Creek) is unchanged and still tracked as a migration follow-up, not treated as precedent, exactly as the decision text says. **The decision text accurately describes what shipped.**
+
+## Workflow Rule Application
+
+**Rule 13 (what's-new advisory) — No.** This pipeline is test infrastructure (`e2e/`, one CI-config line, doc updates) with zero `src/` changes and no member-visible behavior. Nothing here belongs in `whats_new_entries`.
+
+**Rule 14 (functionality map) — amend, don't confirm as-is.** The orchestrator's "Dev-loop tooling" clause update is the right *kind* of change (this pipeline materially changes the e2e suite count), but the number needs to reflect what's actually on disk, not an incremental bump. I counted directly: `ls e2e/*.spec.ts | wc -l` → **26** spec files after this pipeline (22 before it + this pipeline's 4 new files: `presbytery-oversight`, `presbytery-credentials`, `presbytery-reports`, `filings-round-trip`). The current functionality-map line (`docs/product/functionality-map.md:40`) still reads "11 e2e suites" — that figure was already stale by more than a factor of two *before* this pipeline landed (a pre-existing documentation-review gap, not something this pipeline broke), so whatever text the orchestrator drafted should update the count to **26**, not to some intermediate number derived from "11 + 4." Recommend the line read: `…seed script, 26 e2e suites (adds presbytery oversight/reports/credentials/filings coverage, 2026-09-28-presbytery-e2e), fork-sync skills…`. Flag the pre-existing 11→22 drift as its own line for the next documentation review (tech-lead), since it predates and is out of scope for this pipeline to fully explain.
+
+**Rule 15 (architecture.md) — No, and correctly not touched.** Nothing here is a new subsystem, changed data flow, or reversal of a settled architectural statement — it's coverage of existing, already-documented surfaces. `docs/testing.md` (not `architecture.md`) was the right file to update on-branch, and I read its diff directly: the three new Accounts rows and the DECISION-157 paragraph are accurate, correctly worded, and consistent with what the fixtures actually are (verified the role/permission lists against `docs/testing.md`'s own three new rows and the `seed-orgs.ts`-described grants — they match). **Reads correctly as written; no amendment needed.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: not applicable — no new UI surface, only test coverage of existing pages.
+- Failure microcopy: **pass** — every denial state's copy was asserted against the actual rendered string (`/isn't turned on for/i`, `/isn't the kind of organization this tool is built for/i`, `/don't have permission to manage .../i`), not a stand-in, across all four surfaces.
+- Permission gate: **pass** — every gate was proven failing-first on the live grant (insert/delete on the owner connection), independently reproduced by both the implementer and QA (twice, on both the grant and flag axes for the loop-back).
+- Audit event: **pass** — nine distinct `AUDIT_ACTIONS` keys asserted by direct SQL read against `audit_events`, including the withdrawal's full metadata triple.
+- Mobile (360px): **pass** — oversight's edit form and filings' withdraw both operated at 360×800, with the filings scroller residual asserted positively rather than hidden.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Each of the following already has a work-log line or an orchestrator-acknowledged path to `docs/TODO.md` at integration — none is new work invented by this Phase 6 review, all are confirmed still open as of this reading:
 
-## Red Flags (if NEEDS REWORK)
+1. **F116** — pre-hydration `<select>` reversion on `statistics-form.tsx` (data-integrity hazard on the presbytery clerk's annual form). Product question, not this pipeline's fix; the TODO line already states the question correctly (confirmed above).
+2. **`header-controls.spec.ts:110`** — flake not reproduced (132 executions across implementer + QA). Leave the TODO line open with the new evidence rather than marking it closed; re-observe once the CI `e2e` job actually runs now that F113 is fixed.
+3. **Three QA test-robustness observations** (case 12 self-containment, case 11's sibling-anchor choice, F115's un-pinned `rows.length`) — bundle into one `docs/TODO.md` line, per the orchestrator's own plan, confirmed adequate above.
+4. **Process retrospective**: Phase 3 silently dropped an accepted Phase 2 ruling (filings' three denial states) with no scope notation, costing a full Phase 4/5 loop-back. Carry to the next release-slot retrospective as named.
+5. **`docs/TODO.md:113` correction** — the "Four pre-existing e2e failures" line's claim that `public-sites.spec.ts:334` "resolves on merge via PR #17" is wrong; it was site-kit-v4 spec rot (F114), fixed here. Correct, don't just close, the line — and record that `header-controls.spec.ts:110` stays open per item 2 above, not silently marked done alongside the two genuinely-fixed items.
+6. **Two carried-forward Phase 2 follow-ups, unchanged**: migrate `public-sites.spec.ts` off Alder Creek onto an `e2e-*` org (DECISION-157's one documented exception); consider splitting `e2e/support/seed-orgs.ts` (now five appended blocks).
+7. **Two new Implementer-discovered follow-ups**: every `E2E_ORGS` org was missing its `active_membership` derived group (fixed here, but the next pipeline adding a first-ever membership at an `e2e-*` org should confirm the group still exists); "hard-delete a membership that already projected into `group_memberships`" has no sanctioned `presby_*` helper — the disable/delete/enable/verify remediation used here for cleanup is real but ad hoc and worth a decision on whether it deserves a first-class function.
+8. **Functionality-map correction (Rule 14 above)**: update the "Dev-loop tooling" e2e-suite count to 26, and separately flag the pre-existing 11→22 drift for the next documentation review.
 
-- [Specific. What has to change before this ships.]
+## Draft — 0.28.2 release-note paragraph (for a non-engineer reader)
+
+> **0.28.2 — Presbytery portal now has automated test coverage.** The tools presbytery clerks use every year — recording a congregation's standing, entering annual statistics and calculating per-capita billing, tracking ministers' ordinations and appointments, and publishing or withdrawing a congregation's official annual report — are now checked automatically every time we make a change, the same way we already check sign-in and the public website. These automated checks also confirm that someone without the right permission is turned away with a clear message, not a confusing error. Separately, we found and fixed a small bug in how our automated checks were configured: they had never actually been able to run in our normal review process, so this release also makes sure that gap is closed going forward.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete — all five Phase 1 surfaces confirmed delivered with failing-first-proven permission/flag coverage; DECISION-157 confirmed accurate to shipped code; F113/F114/F115 fixed and independently verified; GAP-1 loop-back confirmed closed on re-read; F116, the three QA nits, the Phase 3 retrospective note, and the functionality-map count are named as tracked follow-ups, not blockers | SHIP WITH NOTES | 2026-09-28 |
+
+## Handoff
+
+**Next: orchestrator, for integration.** Apply, in one PR via `/merge-pr`:
+- `docs/TODO.md` — correct (not close) the "Four pre-existing e2e failures" line per Follow-Up 5 above; add the bundled QA-nits line, the F116 line (already correctly worded), the two carried Phase 2 follow-ups, and the two new Implementer-discovered follow-ups.
+- `docs/product/functionality-map.md` — update the "Dev-loop tooling" e2e-suite count to 26 per the Rule 14 ruling above; separately note the pre-existing 11→22 drift for the next `documentation` review.
+- `docs/decisions.md` — append DECISION-157 verbatim (text confirmed accurate to shipped code above).
+- `docs/release-notes/v0.28.md` (or the next patch entry) — the draft paragraph above, amended as needed.
+- `docs/reviews/log.md` — carry the Phase 3-dropped-ruling note forward to the next release-slot retrospective, per the orchestrator's own plan.
+- `scripts/test-rls.sql` re-run on `development` after this merge, per Workflow Rule 16's standing requirement.
+- Delete the pipeline's Neon branch (`br-red-moon-ax4gez04`) at cleanup, per operator convention.
+
+No further pipeline phase is required — this closes `2026-09-28-presbytery-e2e`. The five follow-up threads above should each land as their own future work (most already have a natural home: F116 as a candidate bug-fix pipeline, the `public-sites.spec.ts` migration and `seed-orgs.ts` split as future e2e-infra pipelines, the retrospective note at the next release-slot review)."}],"container":null,"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":259,"cache_read_input_tokens":146182,"output_tokens":10902,"output_tokens_details":{"thinking_tokens":3296},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":259},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":10902,"cache_read_input_tokens":146182,"cache_creation_input_tokens":259,"cache_creation":{"ephemeral_5m_input_tokens":259,"ephemeral_1h_input_tokens":0},"type":"message"}],"speed":"standard"},"diagnostics":null,"context_management":null},"apiBlockIndex":1,"requestId":"req_011CfWbrPzAXKHe3LBWQoT4f","attributionAgent":"analyst","type":"assistant","uuid":"73bd6236-5084-494b-9769-d35f59d9d1d2","timestamp":"2026-09-28T22:11:32.243Z","effort":"high","perTurnEffort":null,"userType":"external","entrypoint":"cli","cwd":"/Users/cshenso/git/presby-platform/presby","sessionId":"b08e6db7-b5b1-4a1b-b94f-75e0928bed80","version":"2.1.273","gitBranch":"main","slug":"warm-honking-hartmanis"}
+
+### Orchestrator closure (2026-09-28)
+
+Shipped as v0.28.2. Integration applied by the orchestrator: TODO reconciled, release note, decision recorded, functionality map as ruled. The pipeline's Neon branch is deleted at cleanup.

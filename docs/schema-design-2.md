@@ -1564,6 +1564,22 @@ deliberately ships no writer. What I did, and deliberately did not do:
   call, not a Phase 4 one. **Recommended for the lifecycle-UI pipeline's scope**, alongside the
   writer it belongs with.
 
+## 2n. End-to-end coverage of the presbytery portal — findings (F113–F115)
+
+*(2026-09-28, `docs/work-log/2026-09-28-presbytery-e2e.md` Phase 2; recorded by the orchestrator.)*
+
+### F113 — `e2e.yml` would have failed at `globalSetup` on its first real run
+
+**F113 — `e2e.yml` would fail at `globalSetup` on its first real run.** No `E2E_DATABASE_URL` is written, so `runDbIsolationGuard()` hard-throws on the ephemeral branch's `*.neon.tech` host under `CI`. One-line fix in the "Write .env.local" step. Never observed because the job has always skipped.
+
+### F114 — `public-sites.spec.ts:334` was spec rot against `presby-site-kit` v4, not a product regression
+
+**F114 — `public-sites.spec.ts:334` is spec rot, not a product regression.** The spec stages a `presby-site-kit` v0.0.1-stub bundle (`mdxAst: null`) against an installed v4.0.0 renderer whose `extractBlocks()` collapses legacy shapes to an empty body; `frontMatter.title` is never an `<h1>` in v4 and "Content coming soon." no longer exists in the package. `docs/TODO.md`'s "resolves on merge via PR #17" is wrong.
+
+### F115 — the freeze-trigger teardown never verified re-enablement
+
+**F115 — the freeze-trigger teardown never verifies re-enablement.** `statistics-submit.spec.ts:223-260` disables three append-only triggers, deletes, re-enables inside the `do` block, and fires three idempotent re-enables after — but asserts nothing about the final state. If both layers ever fail, the suite leaves the DB with append-only enforcement OFF on three tables and nothing says so. `sasr-fixture.ts`'s teardown must end with a `select tgenabled from pg_trigger …` assertion that all three are `'O'`.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

@@ -42,6 +42,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID, createHash } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { formatDateUTC } from "@/lib/format-date";
+import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 // `./statistics-grants` -> `@/lib/email` -> `@/lib/email/queue.ts` ->
@@ -80,6 +81,7 @@ describe.skipIf(!hasDb)(
     let listStatisticsGrants: typeof import("./statistics-grants").listStatisticsGrants;
     let previewGrantedReturn: typeof import("./statistics-grants").previewGrantedReturn;
     let submitStatisticsGrant: typeof import("./statistics-grants").submitStatisticsGrant;
+    let GENERIC_FIELDS_ERROR: typeof import("./statistics-grants").GENERIC_FIELDS_ERROR;
 
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let statisticsSubmissionGrants: typeof import("@/lib/db/domain/returns").statisticsSubmissionGrants;
@@ -87,6 +89,8 @@ describe.skipIf(!hasDb)(
     let publications: typeof import("@/lib/db/domain/publication").publications;
     let congregationStatistics: typeof import("@/lib/db/domain/presbytery").congregationStatistics;
     let featureFlags: typeof import("@/lib/db/schema").featureFlags;
+    let organizations: typeof import("@/lib/db/domain/org").organizations;
+    let organizationAffiliations: typeof import("@/lib/db/domain/lifecycle").organizationAffiliations;
 
     // Report years this file owns exclusively — never the seeded
     // 2023/2024/2026 Quillhaven fixtures.
@@ -109,6 +113,26 @@ describe.skipIf(!hasDb)(
     const REVOKED_GRANT_ID = "ab100000-0000-0000-0000-000000000003";
     const USED_GRANT_ID = "ab100000-0000-0000-0000-000000000004";
 
+    // The redistricting-branch fixture (Phase 3 Design (d) /
+    // docs/work-log/2026-09-28-statistics-error-mapping.md test #3) — a
+    // THROWAWAY congregation this file mints itself (never Marrowbone/Alder
+    // Creek/Quillhaven), affiliated to Northern Reach only from a date AFTER
+    // REDISTRICTED_YEAR. Issuance only checks CURRENT-day affiliation
+    // (drizzle/0049:249), so issuing a grant for a year before that date
+    // succeeds; submission is what hits
+    // `presby_write_return_publication_chain()`'s report-year/affiliation
+    // check.
+    // The report year must be BEFORE the affiliation start (a return for a
+    // year before this congregation joined this presbytery) — NOT after,
+    // which would make `presby_org_affiliated()` answer true and the
+    // submission actually succeed (measured: an earlier draft of this
+    // fixture had these backwards and the "ok" branch fired instead).
+    const REDISTRICTED_YEAR = 2010;
+    const REDISTRICTED_AFFILIATED_FROM = "2020-01-01";
+    const REDISTRICTED_TOKEN = "test-grant-redistricted-2010";
+    const REDISTRICTED_GRANT_ID = "ab100000-0000-0000-0000-000000000005";
+    let redistrictedCongId = "";
+
     /** Fixed, deterministic — asserted verbatim against `formatDateUTC()`'s output. */
     const USED_SUBMITTED_AT = new Date("2026-03-14T12:00:00Z");
 
@@ -121,6 +145,7 @@ describe.skipIf(!hasDb)(
         listStatisticsGrants,
         previewGrantedReturn,
         submitStatisticsGrant,
+        GENERIC_FIELDS_ERROR,
       } = await import("./statistics-grants"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ statisticsSubmissionGrants, statisticalReturns } = await import(
@@ -129,6 +154,8 @@ describe.skipIf(!hasDb)(
       ({ publications } = await import("@/lib/db/domain/publication"));
       ({ congregationStatistics } = await import("@/lib/db/domain/presbytery"));
       ({ featureFlags } = await import("@/lib/db/schema"));
+      ({ organizations } = await import("@/lib/db/domain/org"));
+      ({ organizationAffiliations } = await import("@/lib/db/domain/lifecycle"));
 
       const platform = getPlatformDb();
 
@@ -220,6 +247,47 @@ describe.skipIf(!hasDb)(
           revokedAt: new Date(Date.now() - 699 * 24 * 60 * 60 * 1000),
         },
       ]);
+
+      // The redistricting-branch fixture: a THROWAWAY congregation, never
+      // Marrowbone/Alder Creek/Quillhaven, affiliated to Northern Reach only
+      // from REDISTRICTED_AFFILIATED_FROM (well after REDISTRICTED_YEAR).
+      // Same `organizations` + `organization_affiliations` shape
+      // `presbytery.test.ts`'s own `makeOrg()` helper uses, inlined here
+      // since this is the only fixture org this file needs.
+      const stamp = Date.now();
+      const [redistrictedCong] = await platform
+        .insert(organizations)
+        .values({
+          deletableUntil: fixtureDeletableUntil(),
+          organizationType: "congregation",
+          name: `Fixture Redistricted Congregation for statistics-grants.test.ts`,
+          slug: `statistics-grants-test-redistricted-${stamp}`,
+          path: `statistics_grants_test_redistricted_${stamp}`,
+          platformStatus: "invited",
+        })
+        .returning({ id: organizations.id });
+      redistrictedCongId = redistrictedCong!.id;
+      await platform.insert(organizationAffiliations).values({
+        organizationId: NORTHERN_REACH,
+        subjectOrgId: redistrictedCongId,
+        parentOrgId: NORTHERN_REACH,
+        relationshipType: "member_congregation",
+        effectiveFrom: REDISTRICTED_AFFILIATED_FROM,
+        authority: "recorded",
+        minuteReference:
+          "Fixture affiliation for statistics-grants.test.ts (redistricting branch)",
+      });
+      await platform.insert(statisticsSubmissionGrants).values({
+        id: REDISTRICTED_GRANT_ID,
+        organizationId: NORTHERN_REACH,
+        aboutOrgId: redistrictedCongId,
+        reportYear: REDISTRICTED_YEAR,
+        tokenHash: sha256Hex(REDISTRICTED_TOKEN),
+        issuedToName: "Test Fixture Clerk",
+        issuedToEmail: "clerk@redistricted.example.invalid",
+        issuedBy: CLERK_USER,
+        expiresAt: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
+      });
 
       // Flip the flag on for the duration of this file only — restored in
       // afterAll. isFlagEnabled() is a bare, fail-CLOSED check (this gates a
@@ -324,6 +392,19 @@ describe.skipIf(!hasDb)(
             eq(statisticsSubmissionGrants.reportYear, MANAGED_REJECT_YEAR),
           ),
         );
+
+      // The redistricting-branch fixture's throwaway congregation. The
+      // redistricting test never reaches the ARM-and-write section of
+      // `presby_write_return_publication_chain()` (it raises before any
+      // insert), so there is no statistical_returns/publications/
+      // congregation_statistics row to unwind — deleting the organization
+      // cascades its own affiliation row AND its own grant row (both
+      // `onDelete: "cascade"` on `aboutOrgId`/`subjectOrgId`).
+      if (redistrictedCongId) {
+        await platform
+          .delete(organizations)
+          .where(eq(organizations.id, redistrictedCongId));
+      }
     });
 
     // -------------------------------------------------------------------
@@ -648,6 +729,35 @@ describe.skipIf(!hasDb)(
           "clerk_of_session",
         );
         expect(result.kind).toBe("invalid_input");
+      });
+
+      // Phase 3 Design (d) / test #3 —
+      // docs/work-log/2026-09-28-statistics-error-mapping.md. The redistricted
+      // fixture congregation is affiliated to Northern Reach only from
+      // REDISTRICTED_AFFILIATED_FROM (2020-01-01); REDISTRICTED_YEAR (2010)
+      // predates that, so `presby_write_return_publication_chain()`'s
+      // report-year/affiliation check (drizzle/0049:487-498) refuses it — the
+      // SAME predicate the F80 collision guard uses. This is the ONE live
+      // caller of that branch (Increment 4a, the other caller, is unbuilt) —
+      // regression for statistics form year guard and error mapping.
+      it("invalid_input, folded into the SAME GENERIC_FIELDS_ERROR bucket (byte-identical, not a distinct string), for a report year predating the congregation's affiliation to its current presbytery — regression for statistics form year guard and error mapping", async () => {
+        const result = await submitStatisticsGrant(
+          REDISTRICTED_TOKEN,
+          {},
+          "Jane Clerk",
+          "clerk_of_session",
+        );
+        expect(result.kind).toBe("invalid_input");
+        if (result.kind === "invalid_input") {
+          // toBe (reference/value equality on a primitive string), not
+          // toContain — proving the redistricting cause was folded into the
+          // ONE uniform bucket rather than given its own string. Compared
+          // against the SAME constant the "payload key out of bounds" test
+          // above exercises via the identical catch arm, so a future edit
+          // that re-introduces a second string for this cause fails BOTH
+          // tests' shared assertion, not just this one.
+          expect(result.message).toBe(GENERIC_FIELDS_ERROR);
+        }
       });
 
       it("ok — spends the live token exactly once, end to end", async () => {

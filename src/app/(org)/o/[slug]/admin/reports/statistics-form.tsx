@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -67,6 +67,53 @@ const FIELD_GROUPS: Array<{
   },
 ];
 
+/** This congregation's affiliation window with the presbytery — see
+ *  `src/lib/presbytery.ts`'s `fetchAffiliationWindows()`. `null` on either
+ *  side means unbounded on that side; BOTH `null` (no affiliation row
+ *  reachable at all) renders unconstrained, per orchestrator ruling 3. */
+type StatisticsFormCongregation = {
+  organizationId: string;
+  name: string;
+  affiliationMinYear: number | null;
+  affiliationMaxYear: number | null;
+};
+
+/** Plain-English statement of a congregation's known affiliation bound(s),
+ *  in `reports-states.tsx`'s voice — short, no jargon. `null` when neither
+ *  bound is known (renders no hint at all). */
+function affiliationWindowCopy(
+  cong: StatisticsFormCongregation | undefined,
+): string | null {
+  if (!cong) return null;
+  const { name, affiliationMinYear: min, affiliationMaxYear: max } = cong;
+  if (min !== null && max !== null) {
+    return `${name} was affiliated with this presbytery from ${min} through ${max}.`;
+  }
+  if (min !== null) {
+    return `${name} was affiliated with this presbytery starting in ${min} — enter that year or later.`;
+  }
+  if (max !== null) {
+    return `${name} was affiliated with this presbytery through ${max} — enter that year or earlier.`;
+  }
+  return null;
+}
+
+/** Same fact as `affiliationWindowCopy()`, phrased as a validation error for
+ *  a year actually outside the known window. */
+function affiliationWindowError(
+  cong: StatisticsFormCongregation,
+  year: number,
+): string | null {
+  const { affiliationMinYear: min, affiliationMaxYear: max } = cong;
+  if (min !== null && year < min) {
+    return `${cong.name} wasn't affiliated with this presbytery until ${min} — enter ${min} or later.`;
+  }
+  if (max !== null && year > max) {
+    return `${cong.name} wasn't affiliated with this presbytery after ${max} — enter ${max} or earlier.`;
+  }
+  return null;
+}
+
 function defaultValues(
   congregations: Array<{ organizationId: string; name: string }>,
   year: number,
@@ -109,7 +156,7 @@ export function StatisticsForm({
 }: {
   slug: string;
   year: number;
-  congregations: Array<{ organizationId: string; name: string }>;
+  congregations: StatisticsFormCongregation[];
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -121,8 +168,16 @@ export function StatisticsForm({
 
   const {
     register,
+    control,
+    setError,
     formState: { errors },
   } = form;
+
+  const selectedAboutOrgId = useWatch({ control, name: "aboutOrgId" });
+  const selectedCongregation = congregations.find(
+    (cong) => cong.organizationId === selectedAboutOrgId,
+  );
+  const windowHint = affiliationWindowCopy(selectedCongregation);
 
   if (congregations.length === 0) {
     return (
@@ -133,6 +188,23 @@ export function StatisticsForm({
   }
 
   async function onSubmit(values: StatisticsFormValues) {
+    const yearValue = Number(values.year);
+
+    // UX pre-flight only — the trigger, mapped in setCongregationStatistics,
+    // is what actually enforces this; a caller bypassing the client entirely
+    // still gets the correct refusal server-side. See
+    // docs/work-log/2026-09-28-statistics-error-mapping.md Phase 3 Design (b).
+    const cong = congregations.find(
+      (c) => c.organizationId === values.aboutOrgId,
+    );
+    if (cong) {
+      const windowError = affiliationWindowError(cong, yearValue);
+      if (windowError) {
+        setError("year", { message: windowError });
+        return;
+      }
+    }
+
     const input: SasrAggregateInput = {
       minuteReference: values.minuteReference || undefined,
     };
@@ -142,24 +214,69 @@ export function StatisticsForm({
     }
 
     setSubmitting(true);
-    const result = await setCongregationStatisticsAction(
-      slug,
-      values.aboutOrgId,
-      Number(values.year),
-      input,
-    );
-    setSubmitting(false);
+    try {
+      const result = await setCongregationStatisticsAction(
+        slug,
+        values.aboutOrgId,
+        yearValue,
+        input,
+      );
 
-    if (result.ok) {
-      toast.success("Statistics saved.");
-      router.refresh();
-    } else {
-      toast.error(result.error);
+      if (result.ok) {
+        toast.success("Statistics saved.");
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch (err) {
+      // A genuinely unexpected rejection (a DB outage, a dropped
+      // connection — NOT the about-org refusal, which (c) maps to a normal
+      // `{ ok: false }` and never reaches here). Phase 3 Design (e) is
+      // right that this call is a client-side RPC, not a render, so
+      // `error.tsx` cannot and does not catch it — without a catch here it
+      // was, and would remain, TOTALLY SILENT to the user (confirmed
+      // reading Design (e)'s own "no user-visible message appears at all"
+      // — that observation describes the *rejection*, not an acceptable
+      // end state for THIS call site, since nothing downstream ever shows
+      // it). Logged to the browser console (Next.js Server Actions already
+      // redact the real error into a generic digest-only message before it
+      // reaches the client in production — no raw SQL/PII crosses this
+      // boundary) and surfaced with the same generic toast voice
+      // `reports-states.tsx` uses for a read-side load error, rather than
+      // left to vanish as an unhandled rejection. Divergence from the
+      // Phase 3 design doc, recorded in the work-log's Phase 4 Implementer
+      // Notes: the doc's own `finally`-only text under-specified this path.
+      console.error(
+        "[reports] setCongregationStatisticsAction: unexpected error",
+        err,
+      );
+      toast.error("We couldn't save this right now. Try again in a moment.");
+    } finally {
+      // Runs on ANY outcome — a mapped `{ ok: false }`, the catch above,
+      // all of it — so the button can never wedge on "Saving…" again. See
+      // Phase 3 Design (b): the one-line fix for the stuck-button bug.
+      setSubmitting(false);
     }
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="max-w-2xl space-y-4">
+    <form
+      onSubmit={form.handleSubmit(onSubmit)}
+      // Discovered via a failing form test (docs/work-log/
+      // 2026-09-28-statistics-error-mapping.md Phase 4): the `min`/`max`
+      // HTML attributes on the Year field (below) make an out-of-window
+      // value trip the BROWSER's native constraint validation, which cancels
+      // the "submit" event before React/RHF ever sees it — the custom
+      // pre-flight guard's plain-English, congregation-specific copy would
+      // never render, and a caller bypassing the client (the codebase's own
+      // stated adversarial concern) would get a generic, unstyled native
+      // tooltip instead of the zod/RHF error path every other check in this
+      // form already goes through. `noValidate` makes the resolver and the
+      // guard the sole, consistently-reachable path; `min`/`max` still work
+      // as spinner-arrow clamps.
+      noValidate
+      className="max-w-2xl space-y-4"
+    >
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label htmlFor="stats-congregation">
@@ -198,8 +315,13 @@ export function StatisticsForm({
             type="number"
             aria-required="true"
             className="mt-1"
+            min={selectedCongregation?.affiliationMinYear ?? undefined}
+            max={selectedCongregation?.affiliationMaxYear ?? undefined}
             {...register("year")}
           />
+          {windowHint && !errors.year && (
+            <p className="mt-1 text-sm text-muted-foreground">{windowHint}</p>
+          )}
           {errors.year && (
             <p className="mt-1 text-sm text-destructive">{errors.year.message}</p>
           )}

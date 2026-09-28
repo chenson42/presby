@@ -220,6 +220,8 @@ async function renderStatisticsSection({
               congregations={result.data.map((row) => ({
                 organizationId: row.organizationId,
                 name: row.name,
+                affiliationMinYear: row.affiliationMinYear,
+                affiliationMaxYear: row.affiliationMaxYear,
               }))}
             />
           </div>

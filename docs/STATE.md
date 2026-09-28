@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-28 evening (wave 5 in flight: error mapping merged as PR #21, v0.28.1; founding admin and e2e mid-pipeline)
+## RESUME HERE — updated 2026-09-28 night (wave 5: PRs #21 and #22 merged, v0.28.2; founding administrator in its F118 fix pass)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -94,11 +94,16 @@ parallel, each with its own worktree, Neon branch and work-log (the work-log is 
 `../presby-wt-boot` / `pipeline/founding-admin` (`docs/work-log/2026-09-28-founding-administrator.md`; migration
 `0054` reserved, DECISION-155, F107+; port 3400) — the deploy blocker; `pipeline/statistics-error-mapping` **merged** as PR #21 (`f2823ad`, v0.28.1; the reports form's year picker is
 constrained per congregation and the trigger's refusal mapped to English; bug 2 rescoped to the two live callers — the
-self-publish surface, Increment 4a, is its own future pipeline; no schema; suite 621 on `development`; Neon branch deleted); `../presby-wt-e2e` /
-`pipeline/presbytery-e2e` (Playwright coverage of oversight/reports/credentials/filings/grants + the four rotten specs;
-DECISION-157, F113–F116 — F116 is a product finding: a pre-hydration `<select>` revert on the statistics form; port 3600;
-QA second pass running). Founding admin: no migration after all (the `people.user_id` index was stopped by its pre-flight
-probe — a committed fixture duplicates a `user_id`, F112); Batch C running; F107–F112 + F117. Queued behind #1 (shares `org-provisioning.ts`): the
+self-publish surface, Increment 4a, is its own future pipeline; no schema; suite 621 on `development`; Neon branch deleted); `pipeline/presbytery-e2e` **merged** as PR #22 (`c7b7a34`, v0.28.2, DECISION-157, §2n F113–F115): four new specs on
+Playwright-owned fixtures only; suite 120/4/5 → 164/0/0; `e2e.yml` gains the `E2E_DATABASE_URL` line without which the
+job could never have passed (F113); `public-sites.spec.ts:334` was site-kit v4 spec rot (F114). F116 — a pre-hydration
+`<select>` revert on the statistics form — is a product finding tracked as a candidate bug-fix. No schema; suite 621 on
+`development`; Neon branch deleted. **Founding administrator** (`../presby-wt-boot`, `pipeline/founding-admin`): Batches
+A–C complete; NO migration (the `people.user_id` index was stopped by its pre-flight probe — a committed fixture duplicates
+a `user_id`, F112); Batch C's mandatory rehearsal found the bundle could not create a second person (F118) → Phase 2
+addendum: `staff.manage` joins the bundle, roll keys stay out; Phase 4 fix pass running, then QA, Phase 6, integrate as
+v0.29.0 (DECISION-155 + amendment; F107–F112, F117–F118). `org_portal.staff` is seeded OFF but is the founding
+administrator's only person-creation path — joins the go-live flag sweep. Queued behind #1 (shares `org-provisioning.ts`): the
 `/admin/organizations/new` parent-org/relationship-type picker. Closing the wave: the go-live flag sweep (placeholder
 tiles off, real presbytery flags on for PSV), a production migration runbook (production is still pre-0043 —
 operator step), and the what's-new entries owed at first enablement.

@@ -7,7 +7,7 @@ Updated 2026-09-25.
 
 ---
 
-## RESUME HERE — updated 2026-09-28 night (wave 5: PRs #21 and #22 merged, v0.28.2; founding administrator in its F118 fix pass)
+## RESUME HERE — saved 2026-09-28 ~22:45 UTC for a session restart (wave 5: PRs #21, #22 merged at v0.28.2; three pipelines open, three agents were mid-flight)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -114,6 +114,32 @@ br-broad-haze-axdhzmif). Queued behind #1 (shares `org-provisioning.ts`): the
 `/admin/organizations/new` parent-org/relationship-type picker. Closing the wave: the go-live flag sweep (placeholder
 tiles off, real presbytery flags on for PSV), a production migration runbook (production is still pre-0043 —
 operator step), and the what's-new entries owed at first enablement.
+
+**Session-restart handoff (2026-09-28 night).** Three agents were running when the operator paused; each writes only to
+its own pipeline's files, so nothing is lost, but their returns must be RECORDED by the next session before advancing:
+1. `../presby-wt-boot` — full-stack-developer "Phase 4 fix pass — F118" (adds `staff.manage` to the bundle, §44a edits
+   A–E, rehearsal step 6 on the staff-hire path). It writes its section into the work-log itself. Check the work-log's
+   Per-Phase Status: if Phase 4 reads Complete (fix pass noted) → spawn **qa** Phase 5 (full audit incl. the seven step-6
+   observations, `test-rls.sql` 640, the four+four unchanged-files check, fixture reset). If not Complete, resume from
+   the addendum's items (1)/(3)/(5).
+2. `../presby-wt-select` — analyst Phase 1 for F116 (must reproduce on a production build under throttling or return NOT
+   YET). Returns TEXT only; if the session died before it was recorded, its transcript is at the scratchpad path below
+   (`tasks/ab4442308d17321a0.output`) — record with `record-phase.py`, then rule: READY → tech-lead (Phase 2 skip
+   likely); NOT YET → correct the F116 TODO line at the next integration and delete the worktree/branch/Neon branch.
+3. `../presby-wt-picker` — tech-lead Phase 3 **returned and is written into the work-log** (native `<select>`; eligible parents fetched server-side, type-only; `[id]` stacking: founding-admin → affiliation → brand). Phase 4 must NOT start until
+   `pipeline/founding-admin` merges (shared `admin/organizations/new` + `[id]/page.tsx`); then merge main into the
+   branch, spawn full-stack-developer.
+Integration for each open pipeline: `w5-integrate.py boot|picker|select` in the scratchpad (inputs `<mode>-phase6.md`,
+`<mode>-todo-notes.txt`, `<mode>-release.md`, `<mode>-map.txt`; boot's are staged), versions boot 0.29.0 → picker
+0.30.0 → select patch; boot's DECISION-155 needs the F118 amendment appended and F111's worked example marked retired
+(§2m F107–F112, F117–F118). Scratchpad (survives on disk):
+`/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b08e6db7-b5b1-4a1b-b94f-75e0928bed80/scratchpad/`
+(`record-phase.py`, `w5-integrate.py`, `make-wave5*.py`, staged inputs) and `../tasks/*.output` (agent transcripts).
+Uncommitted work: `presby-wt-boot` (14 files — Batches A–C + fix pass; commit as `feat(admin):` once QA passes),
+`presby-wt-picker` and `presby-wt-select` (work-logs only). No dev servers, no scratch databases; Neon branches
+`pipeline-founding-admin`, `pipeline-org-parent-picker`, `pipeline-select-hydration` are live and are deleted at each
+pipeline's cleanup. Wave-5 close-out after those merge: the go-live flag sweep (placeholder tiles off; `org_portal.staff`
++ the presbytery flags on for PSV), a production migration runbook (production is still pre-0043), the what's-new entries.
 
 **Next, in order (the remaining candidates after wave 4):** the operator's
 three decisions (Neon secrets → CI jobs run; branch protection; delete the three Neon

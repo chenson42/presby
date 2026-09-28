@@ -103,7 +103,14 @@ A–C complete; NO migration (the `people.user_id` index was stopped by its pre-
 a `user_id`, F112); Batch C's mandatory rehearsal found the bundle could not create a second person (F118) → Phase 2
 addendum: `staff.manage` joins the bundle, roll keys stay out; Phase 4 fix pass running, then QA, Phase 6, integrate as
 v0.29.0 (DECISION-155 + amendment; F107–F112, F117–F118). `org_portal.staff` is seeded OFF but is the founding
-administrator's only person-creation path — joins the go-live flag sweep. Queued behind #1 (shares `org-provisioning.ts`): the
+administrator's only person-creation path — joins the go-live flag sweep. **Two more wave-5 pipelines opened
+2026-09-28 night, Phases 1–3 read-only in parallel per Rule 16:** `../presby-wt-picker` / `pipeline/org-parent-picker`
+(`docs/work-log/2026-09-28-organization-parent-picker.md`; the parent-council + relationship-type control on
+`/admin/organizations/new`; DECISION-158 if any, F119+; port 3500; Neon `pipeline-org-parent-picker`
+br-quiet-rain-axnzktt6; **Phase 4 only after `pipeline/founding-admin` merges** — shared files) and `../presby-wt-select` /
+`pipeline/select-hydration` (`docs/work-log/2026-09-28-select-hydration-revert.md`; F116 — Phase 1 must first reproduce on
+a production build under throttling, else NOT YET; DECISION-159 if any, F121+; port 3700; Neon `pipeline-select-hydration`
+br-broad-haze-axdhzmif). Queued behind #1 (shares `org-provisioning.ts`): the
 `/admin/organizations/new` parent-org/relationship-type picker. Closing the wave: the go-live flag sweep (placeholder
 tiles off, real presbytery flags on for PSV), a production migration runbook (production is still pre-0043 —
 operator step), and the what's-new entries owed at first enablement.

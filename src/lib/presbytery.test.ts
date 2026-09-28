@@ -75,11 +75,13 @@ describe.skipIf(!hasDb)(
     let getCongregationStatisticsRollup: typeof import("./presbytery").getCongregationStatisticsRollup;
     let getCongregationFilingHistory: typeof import("./presbytery").getCongregationFilingHistory;
     let setCongregationStatistics: typeof import("./presbytery").setCongregationStatistics;
+    let fetchAffiliationWindows: typeof import("./presbytery").fetchAffiliationWindows;
     let getPerCapitaOverview: typeof import("./presbytery").getPerCapitaOverview;
     let setPerCapitaRate: typeof import("./presbytery").setPerCapitaRate;
     let generatePerCapitaRecords: typeof import("./presbytery").generatePerCapitaRecords;
     let recordPerCapitaPayment: typeof import("./presbytery").recordPerCapitaPayment;
 
+    let withOrgContext: typeof import("@/lib/authz").withOrgContext;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let organizationAffiliations: typeof import("@/lib/db/domain/lifecycle").organizationAffiliations;
@@ -105,6 +107,18 @@ describe.skipIf(!hasDb)(
     let congB: string;
     let nwcA: string; // organization_type != 'congregation', child of presbyteryA
     let congOutsideB: string;
+    let congLateAffiliation: string; // presbyteryA, affiliated only from 2022-06-11 — the affiliation-window tests
+    // Phase 4 loop-back (2026-09-28) — the bounded-effective_to fixtures.
+    // congDeparted is CURRENTLY UNAFFILIATED (both spans closed, no
+    // successor) — reachable only via fetchAffiliationWindows() directly,
+    // never via getCongregationStatisticsRollup() (see that function's own
+    // header comment for why a bounded, non-null maxYear can never surface
+    // through the rollup). congRejoined left presbyteryA and came back — a
+    // CURRENT member (open second span), reachable via the rollup AND via
+    // setCongregationStatistics(), but its rollup-reported affiliationMaxYear
+    // is null by the envelope rule (an accepted simplification, not a gap).
+    let congDeparted: string;
+    let congRejoined: string;
 
     let clerkRoleA: string; // carries all three presbytery permissions
 
@@ -122,11 +136,13 @@ describe.skipIf(!hasDb)(
         getCongregationStatisticsRollup,
         getCongregationFilingHistory,
         setCongregationStatistics,
+        fetchAffiliationWindows,
         getPerCapitaOverview,
         setPerCapitaRate,
         generatePerCapitaRecords,
         recordPerCapitaPayment,
       } = await import("./presbytery"));
+      ({ withOrgContext } = await import("@/lib/authz"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
       ({ organizationAffiliations } = await import(
@@ -159,6 +175,11 @@ describe.skipIf(!hasDb)(
         label: string,
         organizationType: string,
         parentId: string | null,
+        /** Defaults to `"2000-01-01"` — the fixture's usual "affiliated
+         *  since before any report year this file exercises" convention.
+         *  Overridden by the affiliation-window tests below, which need a
+         *  congregation affiliated only from a LATER date. */
+        effectiveFrom = "2000-01-01",
       ) {
         const [row] = await platform
           .insert(organizations)
@@ -181,7 +202,7 @@ describe.skipIf(!hasDb)(
               organizationType === "new_worshiping_community"
                 ? "member_nwc"
                 : "member_congregation",
-            effectiveFrom: "2000-01-01",
+            effectiveFrom,
             authority: "recorded",
             minuteReference: `Fixture affiliation for presbytery.test.ts (${label})`,
           });
@@ -195,6 +216,98 @@ describe.skipIf(!hasDb)(
       congB = await makeOrg("CongB", "congregation", presbyteryA);
       nwcA = await makeOrg("NwcA", "new_worshiping_community", presbyteryA);
       congOutsideB = await makeOrg("CongOutsideB", "congregation", presbyteryB);
+      congLateAffiliation = await makeOrg(
+        "CongLateAffiliation",
+        "congregation",
+        presbyteryA,
+        "2022-06-11",
+      );
+
+      // Phase 4 loop-back (2026-09-28) — QA's named coverage gap 1: every
+      // fixture above has `effectiveTo: null`, so the closed-upper-bound
+      // ("day-before-effective_to") branch of fetchAffiliationWindows()'s
+      // arithmetic, and its multi-span envelope reduction, had zero
+      // automated coverage. `makeOrg()` only ever writes ONE open span, so
+      // both fixtures below are built by hand: the org first (parentId
+      // null, so makeOrg() writes no affiliation row of its own), then the
+      // organization_affiliations rows directly. A CLOSED span (effective_to
+      // set) also has to satisfy organization_affiliations_closed_shape
+      // (drizzle/0044): closedByOrgId/closedOn/closedMinuteReference all
+      // set together with effectiveTo, or all left null — closedBy (the
+      // acting USER) is deliberately excluded from that check (no
+      // app.current_user_id GUC exists yet) and is left null here too.
+      congDeparted = await makeOrg("CongDeparted", "congregation", null);
+      await platform.insert(organizationAffiliations).values([
+        {
+          organizationId: presbyteryA,
+          subjectOrgId: congDeparted,
+          parentOrgId: presbyteryA,
+          relationshipType: "member_congregation",
+          effectiveFrom: "2005-01-01",
+          effectiveTo: "2010-01-01",
+          authority: "recorded",
+          minuteReference:
+            "Fixture affiliation for presbytery.test.ts (CongDeparted span 1)",
+          closedByOrgId: presbyteryA,
+          closedOn: "2010-01-01",
+          closedMinuteReference:
+            "Fixture closure for presbytery.test.ts (CongDeparted span 1)",
+        },
+        {
+          organizationId: presbyteryA,
+          subjectOrgId: congDeparted,
+          parentOrgId: presbyteryA,
+          relationshipType: "member_congregation",
+          effectiveFrom: "2015-01-01",
+          effectiveTo: "2020-01-01",
+          authority: "recorded",
+          minuteReference:
+            "Fixture affiliation for presbytery.test.ts (CongDeparted span 2)",
+          closedByOrgId: presbyteryA,
+          closedOn: "2020-01-01",
+          closedMinuteReference:
+            "Fixture closure for presbytery.test.ts (CongDeparted span 2)",
+        },
+      ]);
+      // Both spans closed and neither reopened -> presby_apply_affiliation_
+      // to_org_tree() finds no open row for this subject and leaves
+      // organizations.parent_id null ("closed with no successor yet") — this
+      // fixture is therefore INVISIBLE to listMemberCongregations()/
+      // getCongregationStatisticsRollup(), by design; see fetchAffiliation
+      // Windows()'s own header comment.
+
+      congRejoined = await makeOrg("CongRejoined", "congregation", null);
+      await platform.insert(organizationAffiliations).values([
+        {
+          organizationId: presbyteryA,
+          subjectOrgId: congRejoined,
+          parentOrgId: presbyteryA,
+          relationshipType: "member_congregation",
+          effectiveFrom: "2010-01-01",
+          effectiveTo: "2015-01-01",
+          authority: "recorded",
+          minuteReference:
+            "Fixture affiliation for presbytery.test.ts (CongRejoined span 1, left)",
+          closedByOrgId: presbyteryA,
+          closedOn: "2015-01-01",
+          closedMinuteReference:
+            "Fixture closure for presbytery.test.ts (CongRejoined span 1)",
+        },
+        {
+          organizationId: presbyteryA,
+          subjectOrgId: congRejoined,
+          parentOrgId: presbyteryA,
+          relationshipType: "member_congregation",
+          effectiveFrom: "2020-01-01",
+          authority: "recorded",
+          minuteReference:
+            "Fixture affiliation for presbytery.test.ts (CongRejoined span 2, rejoined)",
+        },
+      ]);
+      // Span 2 is open, so this subject's parent_id resolves to presbyteryA
+      // — a CURRENT member, reachable via listMemberCongregations()/
+      // resolveMemberCongregation() and therefore via setCongregationStatistics()
+      // for real, live-trigger enforcement of span 1's boundary.
 
       // F16: the "Active Membership" derived roster group must exist before
       // ANY memberships insert at an org (presbyteryA/B only — congA/B/
@@ -443,84 +556,116 @@ describe.skipIf(!hasDb)(
     afterAll(async () => {
       const platform = getPlatformDb();
 
-      // The freeze trigger rejects UPDATE/DELETE on published_by_congregation
-      // rows — disabled for teardown's own cascade, same convention
-      // group_memberships_reject_derived documents elsewhere in this file
-      // family.
-      await platform.execute(
-        sql`alter table congregation_statistics disable trigger congregation_statistics_freeze`,
-      );
+      // Phase 4 loop-back (2026-09-28) — QA's Phase 5 FAIL: a mid-teardown
+      // FK violation on the organizations block below (Implementer Note 3's
+      // own account of the first RED run) aborted afterAll BEFORE it ever
+      // reached the people/users cleanup at the end, stranding three
+      // stamped `people` rows past their deletable_until window (caught by
+      // src/lib/db/fixture-deletable.test.ts's canary, not by this file).
+      // The people/users cleanup is now in a `finally` at the very end of
+      // this function's body, so it runs even if an earlier step throws —
+      // it does NOT reorder the org-side deletes above it, which must keep
+      // their existing dependency order (a congregation deleted before its
+      // presbytery, to clear the parent_org_id reference on organization_
+      // affiliations; deleting people first instead is not safe here: the
+      // clerk/narrow people hold `memberships` rows at presbyteryA whose
+      // derived "Active Membership" `group_memberships` row references them
+      // through a NON-cascading FK (DECISION-060) — deleting a person before
+      // that derived row is cleared would trade this leak for a fresh FK
+      // violation on group_memberships, and the org-delete block below
+      // already clears it correctly via the SAME organizations cascade).
       try {
-        await platform
-          .delete(congregationStatistics)
-          .where(inArray(congregationStatistics.organizationId, [presbyteryA, presbyteryB]));
-      } finally {
+        // The freeze trigger rejects UPDATE/DELETE on published_by_congregation
+        // rows — disabled for teardown's own cascade, same convention
+        // group_memberships_reject_derived documents elsewhere in this file
+        // family.
         await platform.execute(
-          sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`,
+          sql`alter table congregation_statistics disable trigger congregation_statistics_freeze`,
         );
-      }
-      // The publication and the artifact the projections pointed at. Both are
-      // frozen on EVERY connection (a grant does not bind neondb_owner), and
-      // both would otherwise be reached by the organizations cascade below and
-      // refused there instead — so they come out here, children first.
-      await platform.execute(
-        sql`alter table publications disable trigger publications_freeze`,
-      );
-      await platform.execute(
-        sql`alter table statistical_returns disable trigger statistical_returns_freeze`,
-      );
-      try {
-        await platform
-          .delete(publications)
-          .where(inArray(publications.organizationId, [congA, congB, nwcA, congOutsideB]));
-        await platform
-          .delete(statisticalReturns)
-          .where(
-            inArray(statisticalReturns.organizationId, [congA, congB, nwcA, congOutsideB]),
+        try {
+          await platform
+            .delete(congregationStatistics)
+            .where(inArray(congregationStatistics.organizationId, [presbyteryA, presbyteryB]));
+        } finally {
+          await platform.execute(
+            sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`,
           );
+        }
+        // The publication and the artifact the projections pointed at. Both are
+        // frozen on EVERY connection (a grant does not bind neondb_owner), and
+        // both would otherwise be reached by the organizations cascade below and
+        // refused there instead — so they come out here, children first.
+        await platform.execute(
+          sql`alter table publications disable trigger publications_freeze`,
+        );
+        await platform.execute(
+          sql`alter table statistical_returns disable trigger statistical_returns_freeze`,
+        );
+        try {
+          await platform
+            .delete(publications)
+            .where(inArray(publications.organizationId, [congA, congB, nwcA, congOutsideB]));
+          await platform
+            .delete(statisticalReturns)
+            .where(
+              inArray(statisticalReturns.organizationId, [congA, congB, nwcA, congOutsideB]),
+            );
+        } finally {
+          await platform.execute(
+            sql`alter table statistical_returns enable trigger statistical_returns_freeze`,
+          );
+          await platform.execute(
+            sql`alter table publications enable trigger publications_freeze`,
+          );
+        }
+
+        await platform
+          .delete(perCapitaRecords)
+          .where(inArray(perCapitaRecords.organizationId, [presbyteryA, presbyteryB]));
+        await platform
+          .delete(perCapitaRates)
+          .where(inArray(perCapitaRates.organizationId, [presbyteryA, presbyteryB]));
+        await platform
+          .delete(congregationOversight)
+          .where(inArray(congregationOversight.organizationId, [presbyteryA, presbyteryB]));
+
+        // Same trigger-disable teardown convention as officers.test.ts/
+        // children.test.ts/credentials.test.ts — deleting presbyteryA/B
+        // cascades into their derived "Active Membership" group_memberships
+        // rows, which reject direct delete.
+        await platform.execute(
+          sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+        );
+        try {
+          await platform.delete(organizations).where(eq(organizations.id, congA));
+          await platform.delete(organizations).where(eq(organizations.id, congB));
+          await platform.delete(organizations).where(eq(organizations.id, nwcA));
+          await platform.delete(organizations).where(eq(organizations.id, congOutsideB));
+          await platform
+            .delete(organizations)
+            .where(eq(organizations.id, congLateAffiliation));
+          // Phase 4 loop-back (2026-09-28) — both bounded-effective_to
+          // fixtures, deleted before presbyteryA for the same reason
+          // congLateAffiliation is: each still has an organization_
+          // affiliations row with parent_org_id = presbyteryA (congDeparted
+          // has TWO), and that FK is not cascade-on-parent — only
+          // subject_org_id cascades (drizzle/0044's own comment). Deleting
+          // the subject clears its own affiliation rows first.
+          await platform.delete(organizations).where(eq(organizations.id, congDeparted));
+          await platform.delete(organizations).where(eq(organizations.id, congRejoined));
+          await platform.delete(organizations).where(eq(organizations.id, presbyteryA));
+          await platform.delete(organizations).where(eq(organizations.id, presbyteryB));
+        } finally {
+          await platform.execute(
+            sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+          );
+        }
       } finally {
-        await platform.execute(
-          sql`alter table statistical_returns enable trigger statistical_returns_freeze`,
-        );
-        await platform.execute(
-          sql`alter table publications enable trigger publications_freeze`,
-        );
+        for (const id of [clerkPerson, narrowPerson, noMembershipPerson]) {
+          await platform.delete(people).where(eq(people.id, id));
+        }
+        await platform.delete(users).where(eq(users.id, grantingUserId));
       }
-
-      await platform
-        .delete(perCapitaRecords)
-        .where(inArray(perCapitaRecords.organizationId, [presbyteryA, presbyteryB]));
-      await platform
-        .delete(perCapitaRates)
-        .where(inArray(perCapitaRates.organizationId, [presbyteryA, presbyteryB]));
-      await platform
-        .delete(congregationOversight)
-        .where(inArray(congregationOversight.organizationId, [presbyteryA, presbyteryB]));
-
-      // Same trigger-disable teardown convention as officers.test.ts/
-      // children.test.ts/credentials.test.ts — deleting presbyteryA/B
-      // cascades into their derived "Active Membership" group_memberships
-      // rows, which reject direct delete.
-      await platform.execute(
-        sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
-      );
-      try {
-        await platform.delete(organizations).where(eq(organizations.id, congA));
-        await platform.delete(organizations).where(eq(organizations.id, congB));
-        await platform.delete(organizations).where(eq(organizations.id, nwcA));
-        await platform.delete(organizations).where(eq(organizations.id, congOutsideB));
-        await platform.delete(organizations).where(eq(organizations.id, presbyteryA));
-        await platform.delete(organizations).where(eq(organizations.id, presbyteryB));
-      } finally {
-        await platform.execute(
-          sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
-        );
-      }
-
-      for (const id of [clerkPerson, narrowPerson, noMembershipPerson]) {
-        await platform.delete(people).where(eq(people.id, id));
-      }
-      await platform.delete(users).where(eq(users.id, grantingUserId));
     });
 
     // -----------------------------------------------------------------
@@ -1040,6 +1185,135 @@ describe.skipIf(!hasDb)(
         const row = rollup.data.find((r) => r.organizationId === congB);
         expect(row?.hasData).toBe(false);
         expect(row?.provenance).toBeNull();
+      });
+
+      // ---------------------------------------------------------------
+      // Affiliation-window guard/mapping —
+      // docs/work-log/2026-09-28-statistics-error-mapping.md.
+      // congLateAffiliation is affiliated with presbyteryA only from
+      // 2022-06-11 (beforeAll above) — never a real historic congregation.
+      //
+      // MUST FAIL TODAY (a throw, not a returned result) before the Phase 3
+      // fix — this is the failing-first regression proof for Bug 1. Run
+      // against `git stash` (the pre-fix `presbytery.ts`) to confirm the red
+      // state before re-running green.
+      // ---------------------------------------------------------------
+
+      it("invalid_input (not a thrown exception) for a report year predating the congregation's affiliation — regression for statistics form year guard and error mapping", async () => {
+        const result = await setCongregationStatistics(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congLateAffiliation,
+          2015,
+          { endingActive: 10 },
+        );
+        expect(result.kind).toBe("invalid_input");
+        if (result.kind === "invalid_input") {
+          expect(result.message).toContain("2015");
+          expect(result.message.toLowerCase()).toContain("fixture congla");
+        }
+      });
+
+      it("accepts the affiliation-START year itself — pins the inclusive both-endpoints rule (minYear = year of effective_from, not effective_from + 1)", async () => {
+        const result = await setCongregationStatistics(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congLateAffiliation,
+          2022,
+          { endingActive: 11 },
+        );
+        expect(result.kind).toBe("ok");
+      });
+
+      it("getCongregationStatisticsRollup reports the affiliation window read-path: affiliationMinYear 2022, affiliationMaxYear null (open-ended)", async () => {
+        const rollup = await getCongregationStatisticsRollup(clerkPerson, presbyteryA, 2022);
+        if (rollup.kind !== "ok") throw new Error("expected ok");
+        const row = rollup.data.find((r) => r.organizationId === congLateAffiliation);
+        expect(row?.affiliationMinYear).toBe(2022);
+        expect(row?.affiliationMaxYear).toBeNull();
+      });
+
+      it("a congregation affiliated from the fixture's own baseline year reports that bound, with an open (null) max while still affiliated", async () => {
+        const rollup = await getCongregationStatisticsRollup(clerkPerson, presbyteryA, 2022);
+        if (rollup.kind !== "ok") throw new Error("expected ok");
+        const row = rollup.data.find((r) => r.organizationId === congA);
+        expect(row?.affiliationMinYear).toBe(2000);
+        expect(row?.affiliationMaxYear).toBeNull();
+      });
+
+      // ---------------------------------------------------------------
+      // Phase 4 loop-back (2026-09-28) — QA's Phase 5 named coverage gap 1:
+      // every fixture above has effective_to: null, so the closed-upper-
+      // bound ("day-before-effective_to") branch of the affiliation-window
+      // math had zero automated coverage (QA verified it live, by hand,
+      // against the seeded Quillhaven/Southern-Fields fixture — see the
+      // work-log's Phase 5 section — but nothing in this suite pinned it).
+      //
+      // congRejoined left presbyteryA (span 1: 2010-01-01 to 2015-01-01,
+      // CLOSED) and came back (span 2: 2020-01-01, OPEN) — a CURRENT member,
+      // so setCongregationStatistics() reaches the real live trigger for it.
+      // The about-org trigger checks HISTORY (presby_org_affiliated() at
+      // Jan 1 / Dec 31 of the report year), not "is this the open row," so
+      // it correctly refuses a year in the 2015-2020 gap and correctly
+      // accepts a year inside span 1 — independent of what the JS-computed
+      // picker window reports for this same congregation (see the next
+      // `it` below).
+      // ---------------------------------------------------------------
+
+      it("invalid_input for the year AT span 1's effective_to (2015) — the gap between leaving and rejoining, refused by the live trigger — regression for statistics form year guard and error mapping", async () => {
+        const result = await setCongregationStatistics(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congRejoined,
+          2015,
+          { endingActive: 20 },
+        );
+        expect(result.kind).toBe("invalid_input");
+        if (result.kind === "invalid_input") {
+          expect(result.message).toContain("2015");
+          expect(result.message.toLowerCase()).toContain("fixture congrejoined");
+        }
+      });
+
+      it("accepts the year before span 1's effective_to (2014) — pins the exclusive-upper-bound rule (maxYear = year(effective_to) - 1, not effective_to's own year)", async () => {
+        const result = await setCongregationStatistics(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congRejoined,
+          2014,
+          { endingActive: 21 },
+        );
+        expect(result.kind).toBe("ok");
+      });
+
+      it("getCongregationStatisticsRollup reports congRejoined's affiliationMinYear as the EARLIER (left) span's start (2010), and affiliationMaxYear as null — the envelope-not-union rule forces null once any span to this presbytery is open, which is exactly why this congregation still shows up in the rollup at all (see fetchAffiliationWindows()'s own header comment)", async () => {
+        const rollup = await getCongregationStatisticsRollup(clerkPerson, presbyteryA, 2014);
+        if (rollup.kind !== "ok") throw new Error("expected ok");
+        const row = rollup.data.find((r) => r.organizationId === congRejoined);
+        expect(row?.affiliationMinYear).toBe(2010);
+        expect(row?.affiliationMaxYear).toBeNull();
+      });
+
+      // congDeparted is fetched DIRECTLY through fetchAffiliationWindows()
+      // (exported for this purpose, see that function's header) rather than
+      // through getCongregationStatisticsRollup(): both of its spans are
+      // CLOSED (2005-01-01..2010-01-01, then 2015-01-01..2020-01-01), so it
+      // has no open row, organizations.parent_id never resolves to
+      // presbyteryA for it, and it is therefore invisible to
+      // listMemberCongregations()/the rollup — the one place a bounded,
+      // non-null affiliationMaxYear can actually be observed for a subject
+      // with a closed span to this presbytery.
+      it("fetchAffiliationWindows computes congDeparted's window as the envelope of BOTH closed spans: minYear 2005 (earliest span's start), maxYear 2019 (LATER span's effective_to (2020-01-01) minus one day, not the earlier span's 2009) — regression for statistics form year guard and error mapping", async () => {
+        const windows = await withOrgContext(clerkPerson, presbyteryA, (tx) =>
+          fetchAffiliationWindows(tx, presbyteryA),
+        );
+        const window = windows.get(congDeparted);
+        expect(window?.minYear).toBe(2005);
+        expect(window?.maxYear).toBe(2019);
       });
     });
 

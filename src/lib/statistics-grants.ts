@@ -71,6 +71,29 @@ const EXPIRES_MAX_DAYS = 180;
  *  to route the failure into `{ kind: "invalid" }`. */
 const GRANT_NOT_USABLE = "presby_submit_granted_return: grant not usable";
 
+/**
+ * The ONE uniform message every field-shaped `submitStatisticsGrant()`
+ * refusal returns — a bad SASR field value, the F80 collision guard, AND a
+ * report year predating the congregation's affiliation to its CURRENT
+ * presbytery (the redistricting branch of
+ * `presby_write_return_publication_chain()`, drizzle/0049:487-498).
+ *
+ * Exported (only) so the regression test can assert byte-identity against
+ * this constant rather than duplicating the literal — see
+ * `docs/work-log/2026-09-28-statistics-error-mapping.md` Phase 3 Design (d).
+ *
+ * DELIBERATELY ONE STRING FOR ALL THREE CAUSES — this is the F40-class
+ * enumeration-safety property `src/lib/statistics-grants.ts`'s own header
+ * establishes for this caller (anonymous, token-only, no proven
+ * organizational identity): naming "the report year" here is honest for the
+ * redistricting cause and harmless for the other two, but a caller must
+ * never learn WHICH of the three fired. Do not branch this into a distinct
+ * string keyed to "your congregation moved presbyteries" — that would reopen
+ * an oracle this codebase already closed once (F40).
+ */
+export const GENERIC_FIELDS_ERROR =
+  "Some entries could not be saved — check the highlighted fields and the report year, then try again.";
+
 function sha256Hex(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
@@ -657,8 +680,7 @@ export async function submitStatisticsGrant(
       // already proven by the time either can fire.
       return {
         kind: "invalid_input",
-        message:
-          "Some entries could not be saved — check the highlighted fields and try again.",
+        message: GENERIC_FIELDS_ERROR,
       };
     }
 

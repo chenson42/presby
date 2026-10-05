@@ -1,7 +1,13 @@
 import Link from "next/link";
+import { inArray } from "drizzle-orm";
 import { auth } from "@/auth";
+import { getPlatformDb } from "@/lib/db";
+import { organizations } from "@/lib/db/domain/org";
 import { FEATURES, hasFeature } from "@/lib/permissions";
-import { CreateOrganizationForm } from "./create-organization-form";
+import {
+  CreateOrganizationForm,
+  type EligibleParentsByType,
+} from "./create-organization-form";
 
 /**
  * Create organization — the one write path for `organizations`
@@ -13,7 +19,14 @@ import { CreateOrganizationForm } from "./create-organization-form";
  *
  * Auth/feature gate rendered INLINE, matching `page.tsx`/`[id]/page.tsx`'s
  * "You don't have permission..." pattern verbatim — not a redirect(). No data
- * fetch: a blank form has nothing to hydrate from.
+ * fetch for the form's own fields; the one read is the list of councils that
+ * can receive a new organization (parent picker, docs/work-log/
+ * 2026-09-28-organization-parent-picker.md). Its predicate is TYPE-ONLY —
+ * never `platform_status`: `presby_assert_council_authority()` checks type
+ * only, and an `invited`/`unmanaged` presbytery is a valid parent (PSV's own
+ * onboarding order depends on it). The org tree is public (DECISION-040), so
+ * listing councils leaks nothing. A fetch failure degrades to `null` — the
+ * rest of the form (name/slug/type) stays usable.
  */
 export default async function NewOrganizationPage() {
   const session = await auth();
@@ -26,6 +39,38 @@ export default async function NewOrganizationPage() {
         </p>
       </div>
     );
+  }
+
+  let eligibleParents: EligibleParentsByType = null;
+  try {
+    const rows = await getPlatformDb()
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+        organizationType: organizations.organizationType,
+      })
+      .from(organizations)
+      .where(
+        inArray(organizations.organizationType, [
+          "presbytery",
+          "synod",
+          "general_assembly",
+        ]),
+      )
+      .orderBy(organizations.name);
+    const grouped = { presbytery: [], synod: [], general_assembly: [] } as NonNullable<EligibleParentsByType>;
+    for (const r of rows) {
+      if (
+        r.organizationType === "presbytery" ||
+        r.organizationType === "synod" ||
+        r.organizationType === "general_assembly"
+      ) {
+        grouped[r.organizationType].push({ id: r.id, name: r.name });
+      }
+    }
+    eligibleParents = grouped;
+  } catch {
+    eligibleParents = null;
   }
 
   return (
@@ -47,7 +92,7 @@ export default async function NewOrganizationPage() {
         </p>
       </div>
 
-      <CreateOrganizationForm />
+      <CreateOrganizationForm eligibleParents={eligibleParents} />
     </div>
   );
 }

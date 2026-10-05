@@ -22,12 +22,14 @@ import {
   countFoundingAdministratorHolders,
   foundingAdministratorPlan,
 } from "@/lib/founding-administrator";
+import { getOrganizationAffiliationAdminDetail } from "@/lib/org-provisioning";
 import { BrandForm } from "./brand-form";
 import { NeutralizeDialog } from "./neutralize-dialog";
 import { SiteSection } from "./site-section";
 import { ProfileForm } from "./profile-form";
 import { ServiceTimesSection } from "./service-times-section";
 import { FoundingAdministratorSection } from "./founding-administrator-section";
+import { AffiliationSection } from "./affiliation-section";
 
 // officeTemplateKey -> display name. Not exported by
 // `@/lib/founding-administrator` — that module returns the key only
@@ -105,6 +107,8 @@ export default async function OrganizationBrandDetailPage({
     ? (OFFICE_TEMPLATE_DISPLAY_NAMES[plan.officeTemplateKey] ?? plan.officeTemplateKey)
     : null;
 
+  const affiliation = await getOrganizationAffiliationAdminDetail(id);
+
   const siteDetail = await getSiteAdminDetail(id);
   const profileDetail = await getOrganizationProfileAdminDetail(id);
   const serviceTimes = await listOrganizationServiceTimes(id);
@@ -179,6 +183,10 @@ export default async function OrganizationBrandDetailPage({
         administrationPermissionKeys={plan.administration.permissionKeys}
         officeTemplateName={officeTemplateName}
       />
+
+      {/* Stacking order (work-log Phase 3): founding administrator (actionable,
+          gating) -> council affiliation (identity) -> brand. */}
+      <AffiliationSection affiliation={affiliation} />
 
       <section className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">

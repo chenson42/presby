@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getPlatformDb } from "@/lib/db";
 import { organizations } from "@/lib/db/domain/org";
 import {
@@ -9,6 +9,7 @@ import {
 import { groupTypes, groups } from "@/lib/db/domain/groups";
 import { appRoles, appRolePermissions, roleGrants } from "@/lib/db/domain/authz";
 import { isReservedSlug } from "@/lib/reserved-slugs";
+import { RELATIONSHIP_BY_CHILD_TYPE } from "@/lib/org-display";
 import type { OrganizationType, PlatformStatus } from "@/lib/authz";
 
 /**
@@ -81,6 +82,7 @@ export type CreateOrganizationResult =
   // Distinct from invalid_input: the shape of what the admin typed is fine,
   // the polity is not.
   | { kind: "invalid_parent" }
+  | { kind: "relationship_mismatch" }
   // The platform-wide group_types rows (`court`, `roster`) are missing —
   // `npm run db:seed` has not been run against this database with
   // scripts/seed.ts's seedGroupTypes() addition. Distinct from
@@ -274,6 +276,19 @@ export async function createOrganization(
           "A parent organization needs a relationship type (member_congregation, member_nwc, member_presbytery, or member_synod).",
       };
     }
+    // The relationship type is derived from the child's type, never chosen:
+    // a congregation recorded as `member_nwc` would corrupt the per-capita
+    // "how many congregations" count. The trigger checks parent type against
+    // child type only, so this is the one layer that ties the relationship
+    // to the pair. Refused before any write. A general_assembly has no
+    // canonical pairing because nothing may be its parent.
+    const canonical = RELATIONSHIP_BY_CHILD_TYPE[input.organizationType];
+    if (!canonical) {
+      return { kind: "invalid_parent" };
+    }
+    if (input.relationshipType !== canonical) {
+      return { kind: "relationship_mismatch" };
+    }
     if (!input.recordedByUserId) {
       return {
         kind: "invalid_input",
@@ -436,6 +451,72 @@ export async function createOrganization(
     }
     throw err;
   }
+}
+
+/**
+ * The open affiliation of one organization, for the admin detail page's
+ * read-only "Council affiliation" section (docs/work-log/
+ * 2026-09-28-organization-parent-picker.md). `null` = no OPEN
+ * `organization_affiliations` row (`effective_to IS NULL`) for this subject:
+ * a headless organization, e.g. a root presbytery or synod.
+ *
+ * `getPlatformDb()`, matching the whole `[id]` page's posture — a platform
+ * operator holds no congregational membership to verify. The parent's name
+ * is public (DECISION-040).
+ */
+export type OrganizationAffiliationAdminDetail = {
+  relationshipType: RelationshipType;
+  /** null = "predates our records" (F41). */
+  effectiveFrom: string | null;
+  authority: "recorded" | "backfill";
+  minuteReference: string | null;
+  parent: {
+    id: string;
+    name: string;
+    slug: string;
+    organizationType: OrganizationType;
+  };
+} | null;
+
+export async function getOrganizationAffiliationAdminDetail(
+  organizationId: string,
+): Promise<OrganizationAffiliationAdminDetail> {
+  const [row] = await getPlatformDb()
+    .select({
+      relationshipType: organizationAffiliations.relationshipType,
+      effectiveFrom: organizationAffiliations.effectiveFrom,
+      authority: organizationAffiliations.authority,
+      minuteReference: organizationAffiliations.minuteReference,
+      parentId: organizations.id,
+      parentName: organizations.name,
+      parentSlug: organizations.slug,
+      parentType: organizations.organizationType,
+    })
+    .from(organizationAffiliations)
+    .innerJoin(
+      organizations,
+      eq(organizations.id, organizationAffiliations.parentOrgId),
+    )
+    .where(
+      and(
+        eq(organizationAffiliations.subjectOrgId, organizationId),
+        isNull(organizationAffiliations.effectiveTo),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return {
+    relationshipType: row.relationshipType as RelationshipType,
+    effectiveFrom: row.effectiveFrom,
+    authority: row.authority === "backfill" ? "backfill" : "recorded",
+    minuteReference: row.minuteReference,
+    parent: {
+      id: row.parentId,
+      name: row.parentName,
+      slug: row.parentSlug,
+      organizationType: row.parentType as OrganizationType,
+    },
+  };
 }
 
 // Re-exported so callers (the server action, tests) never need to import

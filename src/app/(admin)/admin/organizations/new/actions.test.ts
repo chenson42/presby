@@ -259,3 +259,145 @@ describe("createOrganizationAction — result mapping", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hierarchical provisioning — the parent / relationship / minute parsing
+// branch (DECISION-136). Backfilled by the org-parent-picker pipeline: the
+// branch existed with no coverage until the create form could first reach it.
+// ---------------------------------------------------------------------------
+
+describe("createOrganizationAction — parent and relationship parsing", () => {
+  const PARENT_ID = "cccccccc-2222-4222-8222-222222222222";
+
+  it("rejects a parentOrganizationId that is not a UUID without calling createOrganization", async () => {
+    const result = await createOrganizationAction(
+      formData({
+        ...VALID_FIELDS,
+        parentOrganizationId: "none",
+        relationshipType: "member_congregation",
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "Choose a valid parent organization.",
+    });
+    expect(mockCreateOrganization).not.toHaveBeenCalled();
+  });
+
+  it.each([["empty", ""], ["unknown", "member_diocese"]])(
+    "rejects a parent with an %s relationshipType",
+    async (_label, relationshipType) => {
+      const result = await createOrganizationAction(
+        formData({
+          ...VALID_FIELDS,
+          parentOrganizationId: PARENT_ID,
+          relationshipType,
+        }),
+      );
+      expect(result).toEqual({
+        ok: false,
+        error: "Choose a valid relationship to the parent.",
+      });
+      expect(mockCreateOrganization).not.toHaveBeenCalled();
+    },
+  );
+
+  it("empty parent and relationship fields (the form's None translation) create a root org with no parent keys", async () => {
+    const result = await createOrganizationAction(
+      formData({
+        ...VALID_FIELDS,
+        parentOrganizationId: "",
+        relationshipType: "",
+        minuteReference: "",
+      }),
+    );
+    expect(result.ok).toBe(true);
+    const input = mockCreateOrganization.mock.calls[0][0];
+    expect(input).not.toHaveProperty("parentOrganizationId");
+    expect(input).not.toHaveProperty("relationshipType");
+    expect(input).not.toHaveProperty("recordedByUserId");
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          parentOrganizationId: null,
+          relationshipType: null,
+        }),
+      }),
+    );
+  });
+
+  it("passes a valid parent, relationship, trimmed minute reference and the recording operator through", async () => {
+    const result = await createOrganizationAction(
+      formData({
+        ...VALID_FIELDS,
+        parentOrganizationId: PARENT_ID,
+        relationshipType: "member_congregation",
+        minuteReference: "  Minutes 2026-05, item 7  ",
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(mockCreateOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentOrganizationId: PARENT_ID,
+        relationshipType: "member_congregation",
+        minuteReference: "Minutes 2026-05, item 7",
+        recordedByUserId: "operator-1",
+      }),
+    );
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          parentOrganizationId: PARENT_ID,
+          relationshipType: "member_congregation",
+        }),
+      }),
+    );
+  });
+
+  it("a blank minute reference with a parent is passed as undefined (backfill)", async () => {
+    await createOrganizationAction(
+      formData({
+        ...VALID_FIELDS,
+        parentOrganizationId: PARENT_ID,
+        relationshipType: "member_nwc",
+        minuteReference: "   ",
+      }),
+    );
+    expect(mockCreateOrganization.mock.calls[0][0].minuteReference).toBeUndefined();
+  });
+
+  it("maps relationship_mismatch to human copy, with no audit event — regression for probe (d)", async () => {
+    mockCreateOrganization.mockResolvedValue({ kind: "relationship_mismatch" });
+    const result = await createOrganizationAction(
+      formData({
+        ...VALID_FIELDS,
+        parentOrganizationId: PARENT_ID,
+        relationshipType: "member_synod",
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "That relationship doesn't fit this organization type — choose the parent again and the relationship is set for you.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("maps invalid_parent to the one generic polity message and writes no audit event", async () => {
+    mockCreateOrganization.mockResolvedValue({ kind: "invalid_parent" });
+    const result = await createOrganizationAction(
+      formData({
+        ...VALID_FIELDS,
+        parentOrganizationId: PARENT_ID,
+        relationshipType: "member_congregation",
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "That parent organization can't receive this one — a presbytery receives congregations and new worshiping communities, a synod receives presbyteries, and the General Assembly receives synods.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+

@@ -79,7 +79,7 @@ test.describe.serial("Presbytery credentials (2026-09-28-presbytery-e2e)", () =>
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/credentials`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#ordination-person")).toBeEnabled();
     await page.locator("#ordination-person").selectOption({ label: "Cassius Brightwell" });
     await page.locator("#ordination-ministry").selectOption("ruling_elder");
     await page.locator("#ordination-ordained-on").fill("2020-06-01");
@@ -116,7 +116,7 @@ test.describe.serial("Presbytery credentials (2026-09-28-presbytery-e2e)", () =>
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/credentials`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#appointment-person")).toBeEnabled();
     await page.locator("#appointment-person").selectOption({ label: "Cassius Brightwell" });
     await page.locator("#appointment-serving-org").selectOption(E2E_ORGS.alpha.id);
     await page.locator("#appointment-call-type").selectOption("installed_pastor");
@@ -259,7 +259,7 @@ test.describe.serial("Presbytery credentials (2026-09-28-presbytery-e2e)", () =>
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/credentials`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#ordination-person")).toBeEnabled();
     await page.locator("#ordination-person").selectOption({ label: "Cassius Brightwell" });
     await page.locator("#ordination-ordained-on").fill("2021-01-15");
     await page.getByRole("button", { name: /^record ordination$/i }).click();

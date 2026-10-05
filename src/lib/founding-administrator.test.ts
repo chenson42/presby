@@ -37,7 +37,6 @@
  * regression test Batch A asked for in place of "two inserts with the same
  * user_id collide" — see that describe block's own comment.
  */
-import { execSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
@@ -45,52 +44,21 @@ import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 vi.mock("server-only", () => ({}));
 
 // ---------------------------------------------------------------------------
-// 1. Two Hierarchies — "four files unchanged" (Phase 2's mechanical test).
-// No DB. Compares the WORKING TREE (including uncommitted changes) against
-// `main`, which is what `git diff <ref> -- <path>` does regardless of
-// whether this pipeline branch has any commits of its own yet.
+// 1. Two Hierarchies — the "eight paths unchanged" mechanical test (Phase 2
+// Ruling 2 + the F118 addendum) was a PIPELINE-BRANCH discipline check: it
+// diffed the working tree against `main` to prove the founding-administrator
+// pipeline never touched the resolver (`src/lib/authz.ts`,
+// `role-definitions.ts`, `role-grants.ts`, `drizzle/0010`) or the
+// person-creation/staff-hire surfaces. It was satisfied and recorded when the
+// pipeline merged (PR #23, d48e1ef, v0.29.0 — docs/work-log/
+// 2026-09-28-founding-administrator.md Phase 5, "0 files" against the
+// merge-base and against main). Retired at the very next cross-pipeline merge
+// (F131, 2026-10-05): a "byte-identical to main" assertion is only meaningful
+// inside the pipeline it guards — kept in the suite it fails any later branch
+// that legitimately edits those paths (the hydration-gate pipeline wrapped the
+// member and staff forms). The durable form of the invariant is behavioural:
+// scripts/test-rls.sql §44 asserts what the designee can and cannot resolve.
 // ---------------------------------------------------------------------------
-
-describe("Two Hierarchies — eight paths unchanged (Phase 2 mechanical test, extended by the F118 addendum)", () => {
-  // Original four (Phase 2 Ruling 2): the resolver itself. Extended by the
-  // F118 addendum's binding instruction (Phase 2 addendum, Invariants Touched
-  // table) to also cover the person-creation and staff-hire surfaces the F118
-  // fix relies on but must not touch: the fix is a data-plan change (one key
-  // in `foundingAdministratorPlan()`'s enumerated array), never a code-path
-  // change to who may call `createPerson()` with a roll-bearing kind.
-  const PROTECTED_FILES = [
-    "src/lib/authz.ts",
-    "src/lib/role-definitions.ts",
-    "src/lib/role-grants.ts",
-    "drizzle/0010_presby_resolver.sql",
-    "src/lib/people.ts",
-    "src/lib/staff.ts",
-    "src/app/(org)/o/[slug]/admin/members",
-    "src/app/(org)/o/[slug]/admin/staff",
-  ];
-
-  // If `main` is not a reachable ref in this checkout (e.g. a CI runner with
-  // a shallow, branch-only clone), skip rather than fail — this is a
-  // pipeline-branch discipline check, not a proof that belongs in every
-  // possible CI shape.
-  let mainIsReachable = true;
-  try {
-    execSync("git rev-parse --verify main", { stdio: "ignore" });
-  } catch {
-    mainIsReachable = false;
-  }
-
-  it.skipIf(!mainIsReachable)(
-    "src/lib/authz.ts, src/lib/role-definitions.ts, src/lib/role-grants.ts, drizzle/0010_presby_resolver.sql, src/lib/people.ts, src/lib/staff.ts, and the members/staff admin surfaces are byte-identical to main",
-    () => {
-      const diff = execSync(
-        `git diff --name-only main -- ${PROTECTED_FILES.map((f) => `"${f}"`).join(" ")}`,
-        { encoding: "utf8" },
-      ).trim();
-      expect(diff).toBe("");
-    },
-  );
-});
 
 // ---------------------------------------------------------------------------
 // 2. Postgres-backed integration suite (plus, nested inside it for the

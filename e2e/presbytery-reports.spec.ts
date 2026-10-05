@@ -10,8 +10,10 @@
  * role; it is `statistics-submit.spec.ts`'s own shared fixture too.
  *
  * This file uses report/billing year 2095 (reserved SASR band) for its own
- * `congregation_statistics` write, and its OWN spec-local disable/delete/
- * enable helper scoped to `congregation_statistics_freeze` ONLY — not
+ * `congregation_statistics` write, and the shared disable/delete/enable
+ * helper in `e2e/support/statistics-fixture.ts` (scoped to
+ * `congregation_statistics_freeze` ONLY, guarded to e2e fixture orgs and the
+ * 2090-2099 band) — not
  * `e2e/support/sasr-fixture.ts`, which is scoped to the publish/withdraw
  * chain (`publications`/`statistical_returns`). The `presbytery_entered`
  * provenance path this page writes through (`setCongregationStatistics()`)
@@ -34,40 +36,11 @@ import { storageStatePath } from "./support/users";
 import { E2E_ORGS } from "./support/seed-orgs";
 import { platformSql, type Sql } from "./support/db";
 import { captureFlags, type FlagCapture, setFlag } from "./support/flags";
+import { removeCongregationStatistics } from "./support/statistics-fixture";
 
 const REPORTS_FLAG = "org_portal.reports";
 const SUBMISSION_GRANTS_FLAG = "statistics.submission_grants";
 const REPORT_YEAR = 2095;
-
-async function removeCongregationStatistics(
-  sql: Sql,
-  organizationId: string,
-  aboutOrgId: string,
-  year: number,
-): Promise<void> {
-  await sql.query(`
-    do $cleanup$
-    begin
-      alter table congregation_statistics disable trigger congregation_statistics_freeze;
-      delete from congregation_statistics
-       where organization_id = '${organizationId}'::uuid
-         and about_org_id = '${aboutOrgId}'::uuid
-         and year = ${year};
-      alter table congregation_statistics enable trigger congregation_statistics_freeze;
-    end
-    $cleanup$;
-  `);
-  await sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`;
-  const rows = (await sql`
-    select tgenabled from pg_trigger where tgname = 'congregation_statistics_freeze'
-  `) as { tgenabled: string }[];
-  if (rows[0]?.tgenabled !== "O") {
-    throw new Error(
-      "[presbytery-reports.spec] teardown left congregation_statistics_freeze " +
-        "disabled -- append-only enforcement is OFF until this is fixed by hand.",
-    );
-  }
-}
 
 test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
   let sql: Sql;
@@ -111,7 +84,7 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports?year=${REPORT_YEAR}`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#stats-congregation")).toBeEnabled();
     await page.locator("#stats-congregation").selectOption(E2E_ORGS.alpha.id);
     await page.locator("#stats-year").fill(String(REPORT_YEAR));
     await page.locator("#stats-endingActive").fill("120");
@@ -142,7 +115,7 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports?billingYear=${REPORT_YEAR}`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#rate-basis-year")).toBeEnabled();
     // Explicit basis year matching REPORT_YEAR itself -- the statistics row
     // case 1 just entered lives at year 2095, not the default basisYear
     // (billingYear - 2 = 2093), which would find nothing for e2e-alpha.
@@ -169,7 +142,7 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports?billingYear=${REPORT_YEAR}`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#rate-per-member")).toBeEnabled();
     await page.getByRole("button", { name: new RegExp(`generate ${REPORT_YEAR} records`, "i") }).click();
 
     await expect(page.getByText(/generated \d+ record/i)).toBeVisible({ timeout: 10_000 });
@@ -191,7 +164,7 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports?billingYear=${REPORT_YEAR}`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#payment-amount")).toBeEnabled();
     await page.locator("#payment-amount").fill("2100.00");
     await page.locator("#payment-date").fill("2095-03-15");
     await page.getByRole("button", { name: /^record payment$/i }).click();
@@ -220,7 +193,6 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports`);
-    await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: "Congregation Statistics" })).toBeVisible();
     await expect(page.getByRole("table")).toBeVisible();
 
@@ -242,7 +214,6 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports`);
-    await page.waitForLoadState("networkidle");
     await expect(page.getByText(/don't have permission to manage statistics/i)).toBeVisible();
     await expect(
       page.getByText(/don't have permission to manage per-capita billing/i),
@@ -258,7 +229,6 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.alpha.slug}/admin/reports`);
-    await page.waitForLoadState("networkidle");
     await expect(
       page.getByText(/isn't the kind of organization this tool is built for/i),
     ).toBeVisible();
@@ -278,7 +248,6 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
       const page = await context.newPage();
 
       await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports`);
-    await page.waitForLoadState("networkidle");
       await expect(page.getByText(/isn't turned on for .* yet/i)).toBeVisible();
       await expect(page.getByRole("heading", { name: "Congregation Statistics" })).toHaveCount(0);
 
@@ -299,7 +268,6 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
       const page = await context.newPage();
 
       await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports`);
-    await page.waitForLoadState("networkidle");
       // The page's own org_portal.reports flag is still ON -- the statistics
       // section renders live, proving this is the grants section's OWN gate,
       // not the whole-page flag.
@@ -323,7 +291,7 @@ test.describe.serial("Presbytery reports (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/reports?year=${REPORT_YEAR}`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#stats-congregation")).toBeEnabled();
     await page.locator("#stats-congregation").selectOption(E2E_ORGS.alpha.id);
     await page.locator("#stats-endingActive").fill("121");
     await page.getByRole("button", { name: /^save statistics$/i }).click();

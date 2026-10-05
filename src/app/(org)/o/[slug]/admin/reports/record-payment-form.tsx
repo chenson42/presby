@@ -16,9 +16,10 @@ import {
   type RecordPaymentFormValues,
 } from "./per-capita-schema";
 import { recordPerCapitaPaymentAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 /** Records a payment against ONE existing per-capita record —
  *  `paidStatus` is derived server-side from `paidAmount` vs. the record's
@@ -70,75 +71,77 @@ export function RecordPaymentForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="max-w-md space-y-4">
-      <div>
-        <Label htmlFor="payment-record">
-          Congregation
-          <RequiredMark />
-        </Label>
-        <div className="relative mt-1">
-          <select
-            id="payment-record"
-            className={SELECT_CLASSES}
-            aria-required="true"
-            {...register("recordId")}
-          >
-            {records.map((record) => (
-              <option key={record.recordId} value={record.recordId}>
-                {record.name} (${record.amountOwed} owed, {record.paidStatus})
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-        </div>
-        {errors.recordId && (
-          <p className="mt-1 text-sm text-destructive">{errors.recordId.message}</p>
-        )}
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
+    <HydrationGate>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="max-w-md space-y-4">
         <div>
-          <Label htmlFor="payment-amount">
-            Amount paid
+          <Label htmlFor="payment-record">
+            Congregation
             <RequiredMark />
           </Label>
-          <Input
-            id="payment-amount"
-            type="number"
-            step="0.01"
-            min={0}
-            aria-required="true"
-            className="mt-1"
-            {...register("paidAmount")}
-          />
-          {errors.paidAmount && (
-            <p className="mt-1 text-sm text-destructive">{errors.paidAmount.message}</p>
+          <div className="relative mt-1">
+            <select
+              id="payment-record"
+              className={SELECT_CLASSES}
+              aria-required="true"
+              {...register("recordId")}
+            >
+              {records.map((record) => (
+                <option key={record.recordId} value={record.recordId}>
+                  {record.name} (${record.amountOwed} owed, {record.paidStatus})
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
+          {errors.recordId && (
+            <p className="mt-1 text-sm text-destructive">{errors.recordId.message}</p>
           )}
         </div>
-        <div>
-          <Label htmlFor="payment-date">
-            Payment date
-            <RequiredMark />
-          </Label>
-          <Input
-            id="payment-date"
-            type="date"
-            aria-required="true"
-            className="mt-1"
-            {...register("paidAt")}
-          />
-          {errors.paidAt && (
-            <p className="mt-1 text-sm text-destructive">{errors.paidAt.message}</p>
-          )}
-        </div>
-      </div>
 
-      <Button type="submit" disabled={submitting} className="min-h-11">
-        {submitting ? "Recording…" : "Record payment"}
-      </Button>
-    </form>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="payment-amount">
+              Amount paid
+              <RequiredMark />
+            </Label>
+            <Input
+              id="payment-amount"
+              type="number"
+              step="0.01"
+              min={0}
+              aria-required="true"
+              className="mt-1"
+              {...register("paidAmount")}
+            />
+            {errors.paidAmount && (
+              <p className="mt-1 text-sm text-destructive">{errors.paidAmount.message}</p>
+            )}
+          </div>
+          <div>
+            <Label htmlFor="payment-date">
+              Payment date
+              <RequiredMark />
+            </Label>
+            <Input
+              id="payment-date"
+              type="date"
+              aria-required="true"
+              className="mt-1"
+              {...register("paidAt")}
+            />
+            {errors.paidAt && (
+              <p className="mt-1 text-sm text-destructive">{errors.paidAt.message}</p>
+            )}
+          </div>
+        </div>
+
+        <Button type="submit" disabled={submitting} className="min-h-11">
+          {submitting ? "Recording…" : "Record payment"}
+        </Button>
+      </form>
+    </HydrationGate>
   );
 }

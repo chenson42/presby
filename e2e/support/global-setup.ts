@@ -117,8 +117,11 @@ async function signInAndSave(
     if (!csrfRes.ok()) {
       throw new Error(
         `[globalSetup] CSRF fetch failed (HTTP ${csrfRes.status()}) for ${email}. ` +
-          `Is the dev server running on ${baseURL}? ` +
-          `(Tip: run \`npm run dev\` first, then \`npm run test:e2e\`)`
+          (process.env.PW_PROD_BUILD === "1"
+            ? `Did the production server (next build && next start) come up on ${baseURL}? ` +
+              `(The prod lane starts it itself: \`npm run test:e2e:prod\`)`
+            : `Is the dev server running on ${baseURL}? ` +
+              `(Tip: run \`npm run dev\` first, then \`npm run test:e2e\`)`)
       );
     }
     const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
@@ -210,11 +213,41 @@ function assertRateLimiterDisabled(): void {
   );
 }
 
+/**
+ * The production-build lane (PW_PROD_BUILD=1, DECISION-159) is worthless if a
+ * dev server answers it: a Turbopack dev server's hydration window is far wider
+ * than a real user's. playwright.config.ts already refuses E2E_BASE_URL and
+ * reuseExistingServer; this is the last layer, which fingerprints what the
+ * server actually returned. A dev page references the HMR client chunk
+ * (`[turbopack]_browser_dev_hmr-client_...`), a production page never does and
+ * always carries `/_next/static/**.js` script tags.
+ */
+export async function assertProductionServer(baseURL: string): Promise<void> {
+  const res = await fetch(`${baseURL}/signin`);
+  const html = await res.text();
+  if (/hmr-client|%5Bturbopack%5D|\[turbopack\]/i.test(html)) {
+    throw new Error(
+      `[globalSetup] PW_PROD_BUILD=1 but the server at ${baseURL} is a DEV server (its /signin HTML references the Turbopack HMR client). ` +
+        "The production lane must run against `next build && next start`; stop whatever is bound to that port.",
+    );
+  }
+  if (!/\/_next\/static\/[^"']*\.js/.test(html)) {
+    throw new Error(
+      `[globalSetup] PW_PROD_BUILD=1 but the server at ${baseURL} returned no /_next/static/**.js script tags on /signin (HTTP ${res.status}); it does not look like a Next production server.`,
+    );
+  }
+}
+
 export default async function globalSetup(config: FullConfig): Promise<void> {
   // DB isolation guard runs first — before any browser launch, and before we
   // write anything. It matters more now that this setup provisions users.
   runDbIsolationGuard();
   assertRateLimiterDisabled();
+  if (process.env.PW_PROD_BUILD === "1") {
+    await assertProductionServer(
+      config.projects[0].use.baseURL ?? "http://localhost:3800",
+    );
+  }
 
   const dbUrl = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
   // Organizations, people and memberships need the OWNER connection: dbUrl

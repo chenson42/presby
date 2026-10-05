@@ -1616,6 +1616,58 @@ deliberately ships no writer. What I did, and deliberately did not do:
 
 **F115 — the freeze-trigger teardown never verifies re-enablement.** `statistics-submit.spec.ts:223-260` disables three append-only triggers, deletes, re-enables inside the `do` block, and fires three idempotent re-enables after — but asserts nothing about the final state. If both layers ever fail, the suite leaves the DB with append-only enforcement OFF on three tables and nothing says so. `sasr-fixture.ts`'s teardown must end with a `select tgenabled from pg_trigger …` assertion that all three are `'O'`.
 
+## 2o. A form must not be operable before it hydrates — findings from F116 (F121–F129)
+
+*(2026-09-28 → 2026-10-05, `docs/work-log/2026-09-28-select-hydration-revert.md` Phases 1–5; recorded by the orchestrator at integration. No schema change; the pipeline's product is DECISION-159, a shared `HydrationGate`, a tripwire and a production-build e2e lane.)*
+
+### F116 — a pre-hydration selection in a react-hook-form native `<select>` is silently reverted, and the wrong record is persisted
+
+**F116 — on a production build under realistic throttling (CPU ×4 + slow-3G), a congregation picked in the statistics form's `#stats-congregation` before React hydrated was silently reverted 10/10 times, and the wrong congregation's statistics were persisted with a "Statistics saved." toast and an internally consistent audit row.** Mechanism: react-hook-form's uncontrolled `register()` reconciles `defaultValues` onto the live DOM when its ref callbacks attach during the hydration commit (`updateValidAndValue` → `setFieldValue`, `react-hook-form/dist/index.esm.mjs:2305-2317`), overwriting whatever the user did first. Nine-plus other forms shared the shape. Found by the presbytery-e2e pipeline's QA (the spec masked it with `waitForLoadState("networkidle")`); confirmed real by Phase 1 on `next build && next start`, not only on the Turbopack dev server.
+
+### F121 — a `Controller`-controlled native `<select>` does not close the window
+
+**F121 — a `Controller`-controlled native `<select>` does not close the pre-hydration window on React 19.2.** Hydrating a select only validates (`prepareToHydrateHostInstance`, `case "select":`); there is no `updateOptions` and no queued change event, and a selection made before React's root listeners exist is never replayed. The DOM keeps the user's choice while `field.value` keeps the default: the screen shows the right congregation and Submit sends the wrong one, until a later commit of that select snaps the DOM back at an arbitrary moment. The "obvious" fix converts a visible revert into an invisible wrong save. The same reasoning applies to any `value=`-controlled select.
+
+### F122 — the defect belongs to every registered field, not to selects
+
+**F122 — the defect belongs to RHF's mount reconciliation of every registered field.** Text and number inputs typed before hydration are visibly reset — on edit forms back to the stored value (the user's edit is lost), on the statistics form's optional number fields to `""` (submitted as `undefined`). Only a select falls back to a *different valid value* with no visible sign, which is why it is the worst case and why the fix is form-level, not select-level. Corollary observed by QA: before hydration an edit form's controls render **empty** — the stored values appear only when RHF writes `defaultValues` — so the gate makes a blank-and-dimmed edit form visible for the length of the JS download (see F130 if recorded).
+
+### F123 — a Submit before hydration is a native GET that leaks every field into the URL
+
+**F123 — a Submit before hydration performs a native GET to the current URL.** None of the forms sets `method` or `action`, and `register()` gives every field a `name`, so every field value lands in the query string, browser history and server access logs — on `edit-person-form` that is names, emails and addresses. Closed for all 18 roots by the gate, because Submit is disabled too.
+
+### F124 — native `<select>`s outside RHF carry the same divergence
+
+**F124 — native `<select>`s outside react-hook-form that are controlled by `useState` carry the F121 DOM/state divergence.** Text inputs heal themselves on the next keystroke; a select the user does not touch again does not. Harmless on filter and navigation selects, real on any that write data. Tracked for a triage audit, not fixed here; `GenerateRecordsButton` and other plain `onClick` buttons (F129) fold into the same triage.
+
+### F125 — `SELECT_CLASSES` is a hand-rolled control class string duplicated in 23 files
+
+**F125 — `SELECT_CLASSES` is duplicated in 23 files and had no `disabled:` variants**, in tension with Component Rule 5 / C2. This pipeline adds only `disabled:cursor-not-allowed disabled:opacity-50` to the 16 strings it touches; the consolidation into one native-select primitive (`npm run ui:add -- native-select` if the registry offers one and it passes the wrapper, else `src/components/shared/`) is tracked.
+
+### F126 — `networkidle` remains as a hydration mask elsewhere
+
+**F126 — `waitForLoadState("networkidle")` remains as a hydration mask in `e2e/filings-round-trip.spec.ts` (11 lines) and in the read-only/denied cases of `presbytery-oversight` (5) and `presbytery-credentials` (4).** The interaction cases in the three presbytery specs were unmasked by this pipeline (`toBeEnabled()` on a gated control is the honest hydration signal); the rest convert opportunistically.
+
+### F127 — the pre-push skill ran three of the tripwires
+
+**F127 — `.claude/skills/pre-push/SKILL.md` ran only three of the five (now six) tripwires** (`check:deps-drift` and `check:brand-scope` were CI-only). Step 3f (hydration gate) was added by this pipeline; the structural fix — replace the per-tripwire steps with `npm run check` — is tracked.
+
+### F128 — the production lane logs an aborted RSC prefetch at context close
+
+**F128 — in the production lane, `next start` logs `⨯ Error: The destination stream closed early.` (digest `2795983462`) when a spec's browser context closes.** QA re-characterised it: it appears only after hydration has run (0 times in the negative-control run where no JS executed) and exactly once per in-flight `?_rsc=` link prefetch at context close — Next's post-hydration RSC prefetch streams being aborted, the same thing a real user produces by navigating away mid-prefetch. Harmless. **Do not filter `stderr`** in the lane; a filter could hide a real server error.
+
+### F129 — plain `onClick` buttons are operable before hydration and lose the click silently
+
+**F129 — `GenerateRecordsButton` (a plain `onClick`) is enabled before hydration and a pre-hydration click is silently lost.** `presbytery-reports` case 3 waits on the per-capita rate form's gate as the nearest honest signal (same page, same hydration pass). Folded into F124's triage: any pre-hydration-operable control that writes data gets a gate or a documented reason not to.
+
+### F130 — edit forms render empty controls until hydration, now visibly blank-and-dimmed
+
+**F130 — an edit form's controls are empty in the server HTML and stay empty until react-hook-form writes `defaultValues` at hydration; the gate makes that window visible as a blank, dimmed form (≈7 s on slow-3G).** Pre-existing F122 behaviour, not a regression — before the gate those blank fields were *editable* and then overwritten. Affects the oversight edit form, edit-person, edit-group, edit-event, per-capita-rate and the statistics Year. Options for the architect: server-render stored values (element `defaultValue`/`defaultChecked`, which interacts with the F122 rejection and the checkbox/radio invariant in DECISION-159) or a visible "Loading…" cue inside `HydrationGate`. Tracked with the bundle-size line (the window is the 248 KiB / 16-chunk JS download on `/o/<slug>/admin/reports`).
+
+### F131 — a "byte-identical to main" test is only meaningful inside the pipeline it guards
+
+**F131 — the founding-administrator pipeline's "eight paths unchanged" vitest (Phase 2 Ruling 2 + the F118 addendum) diffed the working tree against `main` and so failed on the very next branch that legitimately edited those paths** — this pipeline, which wrapped the member and staff forms in `HydrationGate`. The check did its job (Phase 5 recorded "0 files" against the merge-base and against `main`; PR #23 merged with it green) and was retired at this integration with a comment recording why; its durable form is behavioural (`scripts/test-rls.sql` §44 asserts what the designee can and cannot resolve). Generalisation: a mechanical "unchanged vs `main`" assertion belongs to a pipeline's own Phase 4/5 gate (run against the merge-base), never to the permanent suite — it encodes "nobody else may ever touch these files", which is not an invariant anyone ruled.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

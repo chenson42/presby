@@ -20,6 +20,7 @@ import {
   type RecordRollActionValues,
 } from "./record-roll-action-schema";
 import { recordRollActionAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 // Same standard treatment as the household select in `edit-person-form.tsx`
 // on the same page (H2, docs/reviews/2026-08-26-portal-ux.md) — without
@@ -27,7 +28,7 @@ import { recordRollActionAction } from "./actions";
 // paints over the box and this select reads as a different, greyer control
 // than its neighbor.
 const SELECT_CLASSES =
-  "mt-1 w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "mt-1 w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 /**
  * A second, independent form beside `EditPersonForm` (Phase 2's placement
@@ -118,86 +119,88 @@ export function RecordRollActionForm({
         </div>
       )}
 
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <div>
-          <Label htmlFor="record-roll-action-kind">Roll action</Label>
-          <div className="relative">
-            <select
-              id="record-roll-action-kind"
-              className={SELECT_CLASSES}
-              aria-invalid={errors.kind ? "true" : undefined}
+      <HydrationGate>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <div>
+            <Label htmlFor="record-roll-action-kind">Roll action</Label>
+            <div className="relative">
+              <select
+                id="record-roll-action-kind"
+                className={SELECT_CLASSES}
+                aria-invalid={errors.kind ? "true" : undefined}
+                aria-describedby={
+                  errors.kind ? "record-roll-action-kind-error" : undefined
+                }
+                {...register("kind")}
+              >
+                {EDIT_TIME_ROLL_ACTION_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {ROLL_ACTION_KIND_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
+            {errors.kind && (
+              <p
+                id="record-roll-action-kind-error"
+                className="mt-1 text-sm text-destructive"
+              >
+                {errors.kind.message}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <Label htmlFor="record-roll-action-effective-date">
+              Effective date
+            </Label>
+            <Input
+              id="record-roll-action-effective-date"
+              type="date"
+              aria-invalid={errors.effectiveDate ? "true" : undefined}
               aria-describedby={
-                errors.kind ? "record-roll-action-kind-error" : undefined
+                errors.effectiveDate
+                  ? "record-roll-action-effective-date-error"
+                  : undefined
               }
-              {...register("kind")}
-            >
-              {EDIT_TIME_ROLL_ACTION_KINDS.map((kind) => (
-                <option key={kind} value={kind}>
-                  {ROLL_ACTION_KIND_LABELS[kind]}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
+              className="mt-1"
+              {...register("effectiveDate")}
+            />
+            {errors.effectiveDate && (
+              <p
+                id="record-roll-action-effective-date-error"
+                className="mt-1 text-sm text-destructive"
+              >
+                {errors.effectiveDate.message}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <Label htmlFor="record-roll-action-minute-reference">
+              Minute reference (optional)
+            </Label>
+            <Input
+              id="record-roll-action-minute-reference"
+              autoComplete="off"
+              className="mt-1"
+              {...register("minuteReference")}
             />
           </div>
-          {errors.kind && (
-            <p
-              id="record-roll-action-kind-error"
-              className="mt-1 text-sm text-destructive"
-            >
-              {errors.kind.message}
-            </p>
-          )}
-        </div>
 
-        <div>
-          <Label htmlFor="record-roll-action-effective-date">
-            Effective date
-          </Label>
-          <Input
-            id="record-roll-action-effective-date"
-            type="date"
-            aria-invalid={errors.effectiveDate ? "true" : undefined}
-            aria-describedby={
-              errors.effectiveDate
-                ? "record-roll-action-effective-date-error"
-                : undefined
-            }
-            className="mt-1"
-            {...register("effectiveDate")}
-          />
-          {errors.effectiveDate && (
-            <p
-              id="record-roll-action-effective-date-error"
-              className="mt-1 text-sm text-destructive"
-            >
-              {errors.effectiveDate.message}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <Label htmlFor="record-roll-action-minute-reference">
-            Minute reference (optional)
-          </Label>
-          <Input
-            id="record-roll-action-minute-reference"
-            autoComplete="off"
-            className="mt-1"
-            {...register("minuteReference")}
-          />
-        </div>
-
-        <Button
-          type="submit"
-          disabled={submitting}
-          className="min-h-[44px] min-w-[44px]"
-        >
-          {submitting ? "Recording…" : "Record roll action"}
-        </Button>
-      </form>
+          <Button
+            type="submit"
+            disabled={submitting}
+            className="min-h-[44px] min-w-[44px]"
+          >
+            {submitting ? "Recording…" : "Record roll action"}
+          </Button>
+        </form>
+      </HydrationGate>
     </div>
   );
 }

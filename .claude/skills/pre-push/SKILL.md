@@ -125,6 +125,16 @@ This only sees the CURRENT tracked tree, not git history — a value already com
 
 **Do not proceed if a HARD finding exists.** A SOFT finding needs review, not an automatic block — but don't wave one through without actually looking at it.
 
+## Step 3f: Hydration-Gate Tripwire
+
+```bash
+npm run check:hydration-gate
+```
+
+`scripts/check-hydration-gate.mjs` walks every `.ts` and `.tsx` under `src/` and fails if a non-test file calls `useForm` without importing `HydrationGate` from `@/components/shared/hydration-gate` and rendering `<HydrationGate>` (a `.ts` file that calls `useForm` fails outright, since it cannot render the gate). A react-hook-form form that is operable before it hydrates can have a user's pick or edit silently overwritten (F116, DECISION-159). Fix by wrapping the `<form>` element in `<HydrationGate>`; for a deliberately client-only, never-server-rendered form, annotate the `useForm` call (same line or the line above) with `// hydration-gate-ok: <reason>`.
+
+**Do not proceed if the hydration-gate check fails.**
+
 ## Step 4: Production Build
 
 ```bash

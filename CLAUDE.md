@@ -401,7 +401,11 @@ npm run check:secrets # Tripwire: scans every git-tracked file (the repo is publ
                        # exemption), plus env-var-shaped secrets, off-allowlist email addresses,
                        # and phone/SSN-shaped numbers outside the 555 fake-number convention
                        # (soft findings — annotate a real false positive with `// leak-ok: <reason>`)
-npm run check        # All five tripwires in sequence
+npm run check:hydration-gate # Tripwire: every useForm root renders <HydrationGate> (DECISION-159);
+                              # exemption `// hydration-gate-ok: <reason>`
+npm run check        # All six tripwires in sequence
+npm run test:e2e:prod # Hydration specs (e2e/hydration/) against `next build && next start` on
+                       # port 3800 (PW_PROD_BUILD=1); a dev server can never satisfy this lane
 npm run ui:add -- <component…>  # The ONLY supported way to generate a shadcn primitive.
                        # Wraps `shadcn add`, rewrites the radix-ui umbrella import to the
                        # individual package, restores the lockfile. Raw `npx shadcn add`
@@ -590,6 +594,13 @@ Three bugs in this project were phone-only and invisible to `curl`, `tsc`, and
 `next build`: blocked dev assets killing hydration, `display` on a `<summary>`
 breaking `<details>` on iOS, and a disclosure that never opened. A page that
 returns 200 is not a page that works.
+
+**A form must not be operable before it hydrates** — `HydrationGate` on every
+`useForm` root (DECISION-159). react-hook-form writes `defaultValues` over the
+live DOM in the hydration commit, so anything entered before that is silently
+overwritten (F116 persisted the wrong congregation's statistics). Pre-hydration
+behaviour is tested by holding the JS chunks (`e2e/hydration/`, both lanes),
+never by racing a throttle; `npm run check:hydration-gate` catches the 19th form.
 
 ## Post-Login Landing
 

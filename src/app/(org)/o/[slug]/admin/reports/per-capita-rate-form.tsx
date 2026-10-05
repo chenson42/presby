@@ -15,6 +15,7 @@ import {
   type PerCapitaRateFormValues,
 } from "./per-capita-schema";
 import { setPerCapitaRateAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 /**
  * Sets the presbytery's per-capita rate for `billingYear`. `basisYear`
@@ -65,51 +66,53 @@ export function PerCapitaRateForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="max-w-md space-y-4">
-      <input type="hidden" {...register("billingYear")} />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="rate-basis-year">
-            Basis year
-          </Label>
-          <Input
-            id="rate-basis-year"
-            type="number"
-            placeholder={String(billingYear - 2)}
-            className="mt-1"
-            {...register("basisYear")}
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Defaults to {billingYear - 2} (two years prior) if left blank.
-          </p>
-          {errors.basisYear && (
-            <p className="mt-1 text-sm text-destructive">{errors.basisYear.message}</p>
-          )}
-        </div>
-        <div>
-          <Label htmlFor="rate-per-member">
-            Rate per member
-            <RequiredMark />
-          </Label>
-          <Input
-            id="rate-per-member"
-            type="number"
-            step="0.01"
-            min={0}
-            aria-required="true"
-            className="mt-1"
-            {...register("ratePerMember")}
-          />
-          {errors.ratePerMember && (
-            <p className="mt-1 text-sm text-destructive">
-              {errors.ratePerMember.message}
+    <HydrationGate>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="max-w-md space-y-4">
+        <input type="hidden" {...register("billingYear")} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="rate-basis-year">
+              Basis year
+            </Label>
+            <Input
+              id="rate-basis-year"
+              type="number"
+              placeholder={String(billingYear - 2)}
+              className="mt-1"
+              {...register("basisYear")}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Defaults to {billingYear - 2} (two years prior) if left blank.
             </p>
-          )}
+            {errors.basisYear && (
+              <p className="mt-1 text-sm text-destructive">{errors.basisYear.message}</p>
+            )}
+          </div>
+          <div>
+            <Label htmlFor="rate-per-member">
+              Rate per member
+              <RequiredMark />
+            </Label>
+            <Input
+              id="rate-per-member"
+              type="number"
+              step="0.01"
+              min={0}
+              aria-required="true"
+              className="mt-1"
+              {...register("ratePerMember")}
+            />
+            {errors.ratePerMember && (
+              <p className="mt-1 text-sm text-destructive">
+                {errors.ratePerMember.message}
+              </p>
+            )}
+          </div>
         </div>
-      </div>
-      <Button type="submit" disabled={submitting} className="min-h-11">
-        {submitting ? "Saving…" : `Save rate for ${billingYear}`}
-      </Button>
-    </form>
+        <Button type="submit" disabled={submitting} className="min-h-11">
+          {submitting ? "Saving…" : `Save rate for ${billingYear}`}
+        </Button>
+      </form>
+    </HydrationGate>
   );
 }

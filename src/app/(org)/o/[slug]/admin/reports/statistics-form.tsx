@@ -17,9 +17,10 @@ import {
   type StatisticsFormValues,
 } from "./statistics-schema";
 import { setCongregationStatisticsAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 const FIELD_LABELS: Record<(typeof NUMERIC_STAT_FIELDS)[number], string> = {
   endingActive: "Active members",
@@ -260,116 +261,118 @@ export function StatisticsForm({
   }
 
   return (
-    <form
-      onSubmit={form.handleSubmit(onSubmit)}
-      // Discovered via a failing form test (docs/work-log/
-      // 2026-09-28-statistics-error-mapping.md Phase 4): the `min`/`max`
-      // HTML attributes on the Year field (below) make an out-of-window
-      // value trip the BROWSER's native constraint validation, which cancels
-      // the "submit" event before React/RHF ever sees it — the custom
-      // pre-flight guard's plain-English, congregation-specific copy would
-      // never render, and a caller bypassing the client (the codebase's own
-      // stated adversarial concern) would get a generic, unstyled native
-      // tooltip instead of the zod/RHF error path every other check in this
-      // form already goes through. `noValidate` makes the resolver and the
-      // guard the sole, consistently-reachable path; `min`/`max` still work
-      // as spinner-arrow clamps.
-      noValidate
-      className="max-w-2xl space-y-4"
-    >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="stats-congregation">
-            Congregation
-            <RequiredMark />
-          </Label>
-          <div className="relative mt-1">
-            <select
-              id="stats-congregation"
-              className={SELECT_CLASSES}
+    <HydrationGate>
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        // Discovered via a failing form test (docs/work-log/
+        // 2026-09-28-statistics-error-mapping.md Phase 4): the `min`/`max`
+        // HTML attributes on the Year field (below) make an out-of-window
+        // value trip the BROWSER's native constraint validation, which cancels
+        // the "submit" event before React/RHF ever sees it — the custom
+        // pre-flight guard's plain-English, congregation-specific copy would
+        // never render, and a caller bypassing the client (the codebase's own
+        // stated adversarial concern) would get a generic, unstyled native
+        // tooltip instead of the zod/RHF error path every other check in this
+        // form already goes through. `noValidate` makes the resolver and the
+        // guard the sole, consistently-reachable path; `min`/`max` still work
+        // as spinner-arrow clamps.
+        noValidate
+        className="max-w-2xl space-y-4"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="stats-congregation">
+              Congregation
+              <RequiredMark />
+            </Label>
+            <div className="relative mt-1">
+              <select
+                id="stats-congregation"
+                className={SELECT_CLASSES}
+                aria-required="true"
+                {...register("aboutOrgId")}
+              >
+                {congregations.map((cong) => (
+                  <option key={cong.organizationId} value={cong.organizationId}>
+                    {cong.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
+            {errors.aboutOrgId && (
+              <p className="mt-1 text-sm text-destructive">{errors.aboutOrgId.message}</p>
+            )}
+          </div>
+          <div>
+            <Label htmlFor="stats-year">
+              Year
+              <RequiredMark />
+            </Label>
+            <Input
+              id="stats-year"
+              type="number"
               aria-required="true"
-              {...register("aboutOrgId")}
-            >
-              {congregations.map((cong) => (
-                <option key={cong.organizationId} value={cong.organizationId}>
-                  {cong.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
+              className="mt-1"
+              min={selectedCongregation?.affiliationMinYear ?? undefined}
+              max={selectedCongregation?.affiliationMaxYear ?? undefined}
+              {...register("year")}
             />
+            {windowHint && !errors.year && (
+              <p className="mt-1 text-sm text-muted-foreground">{windowHint}</p>
+            )}
+            {errors.year && (
+              <p className="mt-1 text-sm text-destructive">{errors.year.message}</p>
+            )}
           </div>
-          {errors.aboutOrgId && (
-            <p className="mt-1 text-sm text-destructive">{errors.aboutOrgId.message}</p>
-          )}
         </div>
+
+        {FIELD_GROUPS.map((group) => (
+          <fieldset key={group.heading} className="space-y-2">
+            <legend className="text-sm font-medium">{group.heading}</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {group.fields.map((field) => (
+                <div key={field}>
+                  <Label htmlFor={`stats-${field}`}>{FIELD_LABELS[field]}</Label>
+                  <Input
+                    id={`stats-${field}`}
+                    type="number"
+                    min={0}
+                    className="mt-1"
+                    {...register(field)}
+                  />
+                  {errors[field] && (
+                    <p className="mt-1 text-sm text-destructive">{errors[field]?.message}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </fieldset>
+        ))}
+
         <div>
-          <Label htmlFor="stats-year">
-            Year
-            <RequiredMark />
-          </Label>
+          <Label htmlFor="stats-minute-reference">Minute reference (optional)</Label>
           <Input
-            id="stats-year"
-            type="number"
-            aria-required="true"
+            id="stats-minute-reference"
+            type="text"
+            placeholder="e.g. Session minutes, 12 Jan 2026"
             className="mt-1"
-            min={selectedCongregation?.affiliationMinYear ?? undefined}
-            max={selectedCongregation?.affiliationMaxYear ?? undefined}
-            {...register("year")}
+            {...register("minuteReference")}
           />
-          {windowHint && !errors.year && (
-            <p className="mt-1 text-sm text-muted-foreground">{windowHint}</p>
-          )}
-          {errors.year && (
-            <p className="mt-1 text-sm text-destructive">{errors.year.message}</p>
+          {errors.minuteReference && (
+            <p className="mt-1 text-sm text-destructive">
+              {errors.minuteReference.message}
+            </p>
           )}
         </div>
-      </div>
 
-      {FIELD_GROUPS.map((group) => (
-        <fieldset key={group.heading} className="space-y-2">
-          <legend className="text-sm font-medium">{group.heading}</legend>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {group.fields.map((field) => (
-              <div key={field}>
-                <Label htmlFor={`stats-${field}`}>{FIELD_LABELS[field]}</Label>
-                <Input
-                  id={`stats-${field}`}
-                  type="number"
-                  min={0}
-                  className="mt-1"
-                  {...register(field)}
-                />
-                {errors[field] && (
-                  <p className="mt-1 text-sm text-destructive">{errors[field]?.message}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </fieldset>
-      ))}
-
-      <div>
-        <Label htmlFor="stats-minute-reference">Minute reference (optional)</Label>
-        <Input
-          id="stats-minute-reference"
-          type="text"
-          placeholder="e.g. Session minutes, 12 Jan 2026"
-          className="mt-1"
-          {...register("minuteReference")}
-        />
-        {errors.minuteReference && (
-          <p className="mt-1 text-sm text-destructive">
-            {errors.minuteReference.message}
-          </p>
-        )}
-      </div>
-
-      <Button type="submit" disabled={submitting} className="min-h-11">
-        {submitting ? "Saving…" : "Save statistics"}
-      </Button>
-    </form>
+        <Button type="submit" disabled={submitting} className="min-h-11">
+          {submitting ? "Saving…" : "Save statistics"}
+        </Button>
+      </form>
+    </HydrationGate>
   );
 }

@@ -14,6 +14,7 @@ import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-
 import type { EventDetail, UpdateEventInput } from "@/lib/events";
 import { editEventSchema, type EditEventFormValues } from "./event-schema";
 import { updateEventAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 /**
  * Edits ONE occurrence's own fields — Flow 2's "single occurrence" case. NO
@@ -84,102 +85,104 @@ export function EditEventForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <Label htmlFor="edit-event-title">
-          Title
-          <RequiredMark />
-        </Label>
-        <Input
-          id="edit-event-title"
-          type="text"
-          className="mt-1"
-          aria-invalid={errors.title ? "true" : undefined}
-          aria-required="true"
-          {...register("title")}
+    <HydrationGate>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <div>
+          <Label htmlFor="edit-event-title">
+            Title
+            <RequiredMark />
+          </Label>
+          <Input
+            id="edit-event-title"
+            type="text"
+            className="mt-1"
+            aria-invalid={errors.title ? "true" : undefined}
+            aria-required="true"
+            {...register("title")}
+          />
+          {errors.title && (
+            <p className="mt-1 text-sm text-destructive">{errors.title.message}</p>
+          )}
+        </div>
+
+        <div>
+          <Label htmlFor="edit-event-description">Description (optional)</Label>
+          <Input id="edit-event-description" type="text" className="mt-1" {...register("description")} />
+          {errors.description && (
+            <p className="mt-1 text-sm text-destructive">{errors.description.message}</p>
+          )}
+        </div>
+
+        <div>
+          <Label htmlFor="edit-event-location">Location (optional)</Label>
+          <Input id="edit-event-location" type="text" className="mt-1" {...register("location")} />
+          {errors.location && (
+            <p className="mt-1 text-sm text-destructive">{errors.location.message}</p>
+          )}
+        </div>
+
+        <div>
+          <Label htmlFor="edit-event-starts-at">
+            Starts
+            <RequiredMark />
+          </Label>
+          <Input
+            id="edit-event-starts-at"
+            type="datetime-local"
+            className="mt-1"
+            aria-invalid={errors.startsAt ? "true" : undefined}
+            aria-required="true"
+            {...register("startsAt")}
+          />
+          {errors.startsAt && (
+            <p className="mt-1 text-sm text-destructive">{errors.startsAt.message}</p>
+          )}
+        </div>
+
+        <div>
+          <Label htmlFor="edit-event-ends-at">Ends (optional)</Label>
+          <Input
+            id="edit-event-ends-at"
+            type="datetime-local"
+            className="mt-1"
+            aria-invalid={errors.endsAt ? "true" : undefined}
+            {...register("endsAt")}
+          />
+          {errors.endsAt && (
+            <p className="mt-1 text-sm text-destructive">{errors.endsAt.message}</p>
+          )}
+        </div>
+
+        <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" className="h-4 w-4" {...register("isPublic")} />
+          Visible on the public calendar
+        </label>
+
+        <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" className="h-4 w-4" {...register("allowsCheckin")} />
+          Allow check-in for this event
+        </label>
+
+        <div className="flex items-center gap-3 pt-2">
+          <Button type="submit" disabled={submitting} className="min-h-11">
+            {submitting ? "Saving…" : "Save"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={submitting}
+            className="min-h-11"
+            onClick={() => guardedNavigate(`/o/${slug}/admin/events/${event.eventId}`)}
+          >
+            Cancel
+          </Button>
+        </div>
+        <UnsavedChangesDialog
+          open={discardOpen}
+          onOpenChange={setDiscardOpen}
+          onConfirmDiscard={confirmDiscard}
         />
-        {errors.title && (
-          <p className="mt-1 text-sm text-destructive">{errors.title.message}</p>
-        )}
-      </div>
-
-      <div>
-        <Label htmlFor="edit-event-description">Description (optional)</Label>
-        <Input id="edit-event-description" type="text" className="mt-1" {...register("description")} />
-        {errors.description && (
-          <p className="mt-1 text-sm text-destructive">{errors.description.message}</p>
-        )}
-      </div>
-
-      <div>
-        <Label htmlFor="edit-event-location">Location (optional)</Label>
-        <Input id="edit-event-location" type="text" className="mt-1" {...register("location")} />
-        {errors.location && (
-          <p className="mt-1 text-sm text-destructive">{errors.location.message}</p>
-        )}
-      </div>
-
-      <div>
-        <Label htmlFor="edit-event-starts-at">
-          Starts
-          <RequiredMark />
-        </Label>
-        <Input
-          id="edit-event-starts-at"
-          type="datetime-local"
-          className="mt-1"
-          aria-invalid={errors.startsAt ? "true" : undefined}
-          aria-required="true"
-          {...register("startsAt")}
-        />
-        {errors.startsAt && (
-          <p className="mt-1 text-sm text-destructive">{errors.startsAt.message}</p>
-        )}
-      </div>
-
-      <div>
-        <Label htmlFor="edit-event-ends-at">Ends (optional)</Label>
-        <Input
-          id="edit-event-ends-at"
-          type="datetime-local"
-          className="mt-1"
-          aria-invalid={errors.endsAt ? "true" : undefined}
-          {...register("endsAt")}
-        />
-        {errors.endsAt && (
-          <p className="mt-1 text-sm text-destructive">{errors.endsAt.message}</p>
-        )}
-      </div>
-
-      <label className="inline-flex min-h-11 items-center gap-2 text-sm">
-        <input type="checkbox" className="h-4 w-4" {...register("isPublic")} />
-        Visible on the public calendar
-      </label>
-
-      <label className="inline-flex min-h-11 items-center gap-2 text-sm">
-        <input type="checkbox" className="h-4 w-4" {...register("allowsCheckin")} />
-        Allow check-in for this event
-      </label>
-
-      <div className="flex items-center gap-3 pt-2">
-        <Button type="submit" disabled={submitting} className="min-h-11">
-          {submitting ? "Saving…" : "Save"}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting}
-          className="min-h-11"
-          onClick={() => guardedNavigate(`/o/${slug}/admin/events/${event.eventId}`)}
-        >
-          Cancel
-        </Button>
-      </div>
-      <UnsavedChangesDialog
-        open={discardOpen}
-        onOpenChange={setDiscardOpen}
-        onConfirmDiscard={confirmDiscard}
-      />
-    </form>
+      </form>
+    </HydrationGate>
   );
 }

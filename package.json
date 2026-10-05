@@ -1,6 +1,6 @@
 {
   "name": "presby",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "private": true,
   "description": "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods: rolls, officers, directory, and council operations. Pre-release.",
   "repository": {
@@ -25,6 +25,7 @@
     "test:db": "dotenv -e .env.local -- vitest run --no-file-parallelism",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:prod": "PW_PROD_BUILD=1 playwright test --project=prod-build",
     "visual:baseline": "PW_VISUAL=1 playwright test --project=visual --update-snapshots",
     "visual:check": "PW_VISUAL=1 playwright test --project=visual",
     "prepare": "node -e \"if(require('fs').existsSync('.git'))require('child_process').execSync('bash scripts/install-hooks.sh',{stdio:'inherit'})\"",
@@ -34,9 +35,10 @@
     "check:sql-date": "node scripts/check-sql-date.mjs",
     "check:deps-drift": "node scripts/check-deps-drift.mjs",
     "check:brand-scope": "node scripts/check-brand-scope.mjs",
+    "check:hydration-gate": "node scripts/check-hydration-gate.mjs",
     "check:secrets": "node scripts/check-secrets-pii.mjs",
     "check:schema-parity": "dotenv -e .env.local -- tsx scripts/check-schema-parity.ts",
-    "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope && npm run check:secrets",
+    "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope && npm run check:secrets && npm run check:hydration-gate",
     "docs:erd": "tsx scripts/generate-erd.ts"
   },
   "dependencies": {

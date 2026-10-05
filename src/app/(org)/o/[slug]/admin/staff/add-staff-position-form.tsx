@@ -21,9 +21,10 @@ import {
   type NewStaffPersonFormValues,
 } from "./position-schema";
 import { createStaffPersonAction, startStaffPositionAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 function defaultValues(
   people: StaffFormOptions["people"],
@@ -212,243 +213,245 @@ export function AddStaffPositionForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-      {people.length > 0 && !showNewPersonForm && (
-        <div className="space-y-2">
-          <Label htmlFor="staff-position-person-query">
-            Find person
-          </Label>
-          <Input
-            id="staff-position-person-query"
-            type="text"
-            placeholder="Type a name to filter the list…"
-            value={personQuery}
-            onChange={(e) => setPersonQuery(e.target.value)}
-          />
-
-          <Label htmlFor="staff-position-person">
-            Person
-            <RequiredMark />
-          </Label>
-          <div className="relative">
-            <select
-              id="staff-position-person"
-              className={SELECT_CLASSES}
-              aria-required="true"
-              {...register("personId")}
-            >
-              {filteredPeople.length === 0 ? (
-                <option value="">No matches</option>
-              ) : (
-                filteredPeople.map((person) => (
-                  <option key={person.personId} value={person.personId}>
-                    {person.displayName}
-                  </option>
-                ))
-              )}
-            </select>
-            <ChevronDown
-              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
+    <HydrationGate>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {people.length > 0 && !showNewPersonForm && (
+          <div className="space-y-2">
+            <Label htmlFor="staff-position-person-query">
+              Find person
+            </Label>
+            <Input
+              id="staff-position-person-query"
+              type="text"
+              placeholder="Type a name to filter the list…"
+              value={personQuery}
+              onChange={(e) => setPersonQuery(e.target.value)}
             />
-          </div>
-          {errors.personId && (
-            <p className="text-sm text-destructive">
-              {errors.personId.message}
-            </p>
-          )}
 
-          {canCreatePeople ? (
-            <button
-              type="button"
-              onClick={() => setShowNewPersonForm(true)}
-              className="min-h-11 text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            >
-              Can&apos;t find them? Add a new person
-            </button>
-          ) : (
+            <Label htmlFor="staff-position-person">
+              Person
+              <RequiredMark />
+            </Label>
+            <div className="relative">
+              <select
+                id="staff-position-person"
+                className={SELECT_CLASSES}
+                aria-required="true"
+                {...register("personId")}
+              >
+                {filteredPeople.length === 0 ? (
+                  <option value="">No matches</option>
+                ) : (
+                  filteredPeople.map((person) => (
+                    <option key={person.personId} value={person.personId}>
+                      {person.displayName}
+                    </option>
+                  ))
+                )}
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            </div>
+            {errors.personId && (
+              <p className="text-sm text-destructive">
+                {errors.personId.message}
+              </p>
+            )}
+
+            {canCreatePeople ? (
+              <button
+                type="button"
+                onClick={() => setShowNewPersonForm(true)}
+                className="min-h-11 text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Can&apos;t find them? Add a new person
+              </button>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Only current members show here. Ask someone who manages People
+                to add someone new.
+              </p>
+            )}
+          </div>
+        )}
+
+        {showNewPersonForm && canCreatePeople && (
+          <div className="space-y-3 rounded-md border border-border p-4">
+            <p className="text-sm font-medium">Add a new person</p>
             <p className="text-sm text-muted-foreground">
-              Only current members show here. Ask someone who manages People
-              to add someone new.
+              This creates a real person record, anchored here as a known
+              contact — not a member of the roll. Someone who manages People
+              can complete the fuller record later if needed.
             </p>
-          )}
-        </div>
-      )}
 
-      {showNewPersonForm && canCreatePeople && (
-        <div className="space-y-3 rounded-md border border-border p-4">
-          <p className="text-sm font-medium">Add a new person</p>
-          <p className="text-sm text-muted-foreground">
-            This creates a real person record, anchored here as a known
-            contact — not a member of the roll. Someone who manages People
-            can complete the fuller record later if needed.
-          </p>
+            <div>
+              <Label htmlFor="staff-new-person-first-name">
+                First name
+                <RequiredMark />
+              </Label>
+              <Input
+                id="staff-new-person-first-name"
+                type="text"
+                aria-required="true"
+                className="mt-1"
+                {...personForm.register("firstName")}
+              />
+              {personForm.formState.errors.firstName && (
+                <p className="mt-1 text-sm text-destructive">
+                  {personForm.formState.errors.firstName.message}
+                </p>
+              )}
+            </div>
 
-          <div>
-            <Label htmlFor="staff-new-person-first-name">
-              First name
-              <RequiredMark />
-            </Label>
-            <Input
-              id="staff-new-person-first-name"
-              type="text"
-              aria-required="true"
-              className="mt-1"
-              {...personForm.register("firstName")}
-            />
-            {personForm.formState.errors.firstName && (
-              <p className="mt-1 text-sm text-destructive">
-                {personForm.formState.errors.firstName.message}
-              </p>
-            )}
-          </div>
+            <div>
+              <Label htmlFor="staff-new-person-last-name">
+                Last name
+                <RequiredMark />
+              </Label>
+              <Input
+                id="staff-new-person-last-name"
+                type="text"
+                aria-required="true"
+                className="mt-1"
+                {...personForm.register("lastName")}
+              />
+              {personForm.formState.errors.lastName && (
+                <p className="mt-1 text-sm text-destructive">
+                  {personForm.formState.errors.lastName.message}
+                </p>
+              )}
+            </div>
 
-          <div>
-            <Label htmlFor="staff-new-person-last-name">
-              Last name
-              <RequiredMark />
-            </Label>
-            <Input
-              id="staff-new-person-last-name"
-              type="text"
-              aria-required="true"
-              className="mt-1"
-              {...personForm.register("lastName")}
-            />
-            {personForm.formState.errors.lastName && (
-              <p className="mt-1 text-sm text-destructive">
-                {personForm.formState.errors.lastName.message}
-              </p>
-            )}
-          </div>
+            <div>
+              <Label htmlFor="staff-new-person-email">Email (optional)</Label>
+              <Input
+                id="staff-new-person-email"
+                type="email"
+                className="mt-1"
+                {...personForm.register("email")}
+              />
+            </div>
 
-          <div>
-            <Label htmlFor="staff-new-person-email">Email (optional)</Label>
-            <Input
-              id="staff-new-person-email"
-              type="email"
-              className="mt-1"
-              {...personForm.register("email")}
-            />
-          </div>
+            <div>
+              <Label htmlFor="staff-new-person-phone">Phone (optional)</Label>
+              <Input
+                id="staff-new-person-phone"
+                type="tel"
+                className="mt-1"
+                {...personForm.register("phone")}
+              />
+            </div>
 
-          <div>
-            <Label htmlFor="staff-new-person-phone">Phone (optional)</Label>
-            <Input
-              id="staff-new-person-phone"
-              type="tel"
-              className="mt-1"
-              {...personForm.register("phone")}
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              disabled={creatingPerson}
-              className="min-h-11"
-              onClick={personForm.handleSubmit(handleCreatePerson)}
-            >
-              {creatingPerson ? "Adding…" : "Add person"}
-            </Button>
-            {people.length > 0 && (
+            <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
-                variant="outline"
+                disabled={creatingPerson}
                 className="min-h-11"
-                onClick={() => {
-                  setShowNewPersonForm(false);
-                  personForm.reset(EMPTY_NEW_PERSON);
-                }}
+                onClick={personForm.handleSubmit(handleCreatePerson)}
               >
-                Choose an existing person instead
+                {creatingPerson ? "Adding…" : "Add person"}
               </Button>
-            )}
+              {people.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11"
+                  onClick={() => {
+                    setShowNewPersonForm(false);
+                    personForm.reset(EMPTY_NEW_PERSON);
+                  }}
+                >
+                  Choose an existing person instead
+                </Button>
+              )}
+            </div>
           </div>
+        )}
+
+        <div>
+          <Label htmlFor="staff-position-position">
+            Position
+            <RequiredMark />
+          </Label>
+          <Input
+            id="staff-position-position"
+            type="text"
+            placeholder="e.g. Church Secretary"
+            aria-invalid={errors.position ? "true" : undefined}
+            aria-required="true"
+            className="mt-1"
+            {...register("position")}
+          />
+          {errors.position && (
+            <p className="mt-1 text-sm text-destructive">
+              {errors.position.message}
+            </p>
+          )}
         </div>
-      )}
 
-      <div>
-        <Label htmlFor="staff-position-position">
-          Position
-          <RequiredMark />
-        </Label>
-        <Input
-          id="staff-position-position"
-          type="text"
-          placeholder="e.g. Church Secretary"
-          aria-invalid={errors.position ? "true" : undefined}
-          aria-required="true"
-          className="mt-1"
-          {...register("position")}
+        <div>
+          <Label htmlFor="staff-position-department">
+            Department (optional)
+          </Label>
+          <Input
+            id="staff-position-department"
+            type="text"
+            placeholder="e.g. Facilities"
+            className="mt-1"
+            {...register("department")}
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="staff-position-starts-on">
+            Start date
+            <RequiredMark />
+          </Label>
+          <Input
+            id="staff-position-starts-on"
+            type="date"
+            aria-invalid={errors.startsOn ? "true" : undefined}
+            aria-describedby={
+              errors.startsOn ? "staff-position-starts-on-error" : undefined
+            }
+            aria-required="true"
+            className="mt-1"
+            {...register("startsOn")}
+          />
+          {errors.startsOn && (
+            <p
+              id="staff-position-starts-on-error"
+              className="mt-1 text-sm text-destructive"
+            >
+              {errors.startsOn.message}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <Label htmlFor="staff-position-minute-reference">
+            Minute reference (optional)
+          </Label>
+          <Input
+            id="staff-position-minute-reference"
+            type="text"
+            placeholder="e.g. Session minutes, 12 Jan 2026"
+            className="mt-1"
+            {...register("minuteReference")}
+          />
+        </div>
+
+        <Button type="submit" disabled={submitting} className="min-h-11">
+          {submitting ? "Recording…" : "Add staff position"}
+        </Button>
+        <UnsavedChangesDialog
+          open={discardOpen}
+          onOpenChange={setDiscardOpen}
+          onConfirmDiscard={confirmDiscard}
         />
-        {errors.position && (
-          <p className="mt-1 text-sm text-destructive">
-            {errors.position.message}
-          </p>
-        )}
-      </div>
-
-      <div>
-        <Label htmlFor="staff-position-department">
-          Department (optional)
-        </Label>
-        <Input
-          id="staff-position-department"
-          type="text"
-          placeholder="e.g. Facilities"
-          className="mt-1"
-          {...register("department")}
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="staff-position-starts-on">
-          Start date
-          <RequiredMark />
-        </Label>
-        <Input
-          id="staff-position-starts-on"
-          type="date"
-          aria-invalid={errors.startsOn ? "true" : undefined}
-          aria-describedby={
-            errors.startsOn ? "staff-position-starts-on-error" : undefined
-          }
-          aria-required="true"
-          className="mt-1"
-          {...register("startsOn")}
-        />
-        {errors.startsOn && (
-          <p
-            id="staff-position-starts-on-error"
-            className="mt-1 text-sm text-destructive"
-          >
-            {errors.startsOn.message}
-          </p>
-        )}
-      </div>
-
-      <div>
-        <Label htmlFor="staff-position-minute-reference">
-          Minute reference (optional)
-        </Label>
-        <Input
-          id="staff-position-minute-reference"
-          type="text"
-          placeholder="e.g. Session minutes, 12 Jan 2026"
-          className="mt-1"
-          {...register("minuteReference")}
-        />
-      </div>
-
-      <Button type="submit" disabled={submitting} className="min-h-11">
-        {submitting ? "Recording…" : "Add staff position"}
-      </Button>
-      <UnsavedChangesDialog
-        open={discardOpen}
-        onOpenChange={setDiscardOpen}
-        onConfirmDiscard={confirmDiscard}
-      />
-    </form>
+      </form>
+    </HydrationGate>
   );
 }

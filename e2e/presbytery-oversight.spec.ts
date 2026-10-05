@@ -68,7 +68,7 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#oversight-viability")).toBeEnabled();
     await page.locator("#oversight-viability").selectOption("2");
     await page.locator("#oversight-buildings").fill("Roof replaced 2026; no outstanding repairs.");
     await page.locator("#oversight-insurance-carrier").fill("E2E Fixture Mutual");
@@ -179,7 +179,7 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
     const page = await context.newPage();
 
     await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
-    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#oversight-viability")).toBeEnabled();
     await page.locator("#oversight-viability").selectOption("3");
     await page.getByRole("button", { name: /^save$/i }).click();
     await expect(page.getByText(/oversight record saved/i)).toBeVisible({ timeout: 10_000 });

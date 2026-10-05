@@ -15,6 +15,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 
 const mockPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
@@ -420,5 +421,13 @@ describe("MemberWizard — full happy path submit", () => {
     // Still on Review — the entered data is still visible/intact.
     expect(screen.getByText(/review & submit/i)).toBeTruthy();
     expect(screen.getByText(/Nora Ashgrove/)).toBeTruthy();
+  });
+});
+
+describe("MemberWizard — HydrationGate wiring (DECISION-159, F116)", () => {
+  it("the server render of the root (which has no <form> tag) is a disabled, busy fieldset", () => {
+    const html = renderToString(<MemberWizard slug="alder-creek" households={[]} />);
+    expect(html).toContain('<fieldset disabled=""');
+    expect(html).toContain('aria-busy="true"');
   });
 });

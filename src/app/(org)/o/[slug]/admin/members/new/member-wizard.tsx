@@ -21,6 +21,7 @@ import { HouseholdStep } from "./household-step";
 import { RollActionStep } from "./roll-action-step";
 import { ReviewStep } from "./review-step";
 import { createPersonAction, matchPersonAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 type StepId =
   | "search"
@@ -275,114 +276,116 @@ export function MemberWizard({
   );
 
   return (
-    <div className="space-y-6">
-      <WizardStepIndicator
-        currentIndex={currentIndex}
-        totalSteps={steps.length}
-        label={STEP_LABELS[currentStepId]}
-      />
+    <HydrationGate>
+      <div className="space-y-6">
+        <WizardStepIndicator
+          currentIndex={currentIndex}
+          totalSteps={steps.length}
+          label={STEP_LABELS[currentStepId]}
+        />
 
-      {currentStepId === "search" && (
-        <SearchStep form={form} onSearch={handleSearch} searching={searching} />
-      )}
-      {currentStepId === "confirm" && matchCandidate && (
-        <>
-          <ConfirmStep
-            displayName={matchCandidate.displayName}
-            onConfirm={handleConfirmMatch}
-            onReject={handleRejectMatch}
-          />
-          {/* Confirm's own two full-width buttons ARE the forward action —
-           * only Back is offered here, in case the search itself needs
-           * revising, matching req 6's "Back never discards data" even on
-           * this forced-choice screen. */}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={goBack}
-            className="min-h-[44px] min-w-[44px]"
-          >
-            Back
-          </Button>
-        </>
-      )}
-      {currentStepId === "identity" && <IdentityStep form={form} />}
-      {currentStepId === "contact" && <ContactAddressStep form={form} />}
-      {currentStepId === "household" && (
-        <HouseholdStep form={form} households={households} mode={householdMode} />
-      )}
-      {currentStepId === "rollAction" && <RollActionStep form={form} />}
-      {currentStepId === "review" && (
-        <ReviewStep form={form} householdName={selectedHousehold?.name} />
-      )}
-
-      {currentStepId !== "confirm" && currentStepId !== "search" && (
-        <div className="flex items-center justify-between gap-3 pt-2">
-          {currentIndex > 0 ? (
+        {currentStepId === "search" && (
+          <SearchStep form={form} onSearch={handleSearch} searching={searching} />
+        )}
+        {currentStepId === "confirm" && matchCandidate && (
+          <>
+            <ConfirmStep
+              displayName={matchCandidate.displayName}
+              onConfirm={handleConfirmMatch}
+              onReject={handleRejectMatch}
+            />
+            {/* Confirm's own two full-width buttons ARE the forward action —
+             * only Back is offered here, in case the search itself needs
+             * revising, matching req 6's "Back never discards data" even on
+             * this forced-choice screen. */}
             <Button
               type="button"
               variant="outline"
               onClick={goBack}
-              disabled={searching || submitting}
               className="min-h-[44px] min-w-[44px]"
             >
               Back
             </Button>
-          ) : (
-            <span />
-          )}
+          </>
+        )}
+        {currentStepId === "identity" && <IdentityStep form={form} />}
+        {currentStepId === "contact" && <ContactAddressStep form={form} />}
+        {currentStepId === "household" && (
+          <HouseholdStep form={form} households={households} mode={householdMode} />
+        )}
+        {currentStepId === "rollAction" && <RollActionStep form={form} />}
+        {currentStepId === "review" && (
+          <ReviewStep form={form} householdName={selectedHousehold?.name} />
+        )}
 
-          {currentStepId === "identity" && (
-            <Button
-              type="button"
-              onClick={handleIdentityNext}
-              className="min-h-[44px] min-w-[44px]"
-            >
-              Next
-            </Button>
-          )}
-          {currentStepId === "contact" && (
-            <Button
-              type="button"
-              onClick={handleContactNext}
-              className="min-h-[44px] min-w-[44px]"
-            >
-              Next
-            </Button>
-          )}
-          {currentStepId === "household" && (
-            <Button
-              type="button"
-              onClick={handleHouseholdNext}
-              disabled={
-                householdMode === "existing" && households.length === 0
-              }
-              className="min-h-[44px] min-w-[44px]"
-            >
-              Next
-            </Button>
-          )}
-          {currentStepId === "rollAction" && (
-            <Button
-              type="button"
-              onClick={handleRollActionNext}
-              className="min-h-[44px] min-w-[44px]"
-            >
-              Next
-            </Button>
-          )}
-          {currentStepId === "review" && (
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={submitting}
-              className="min-h-[44px] min-w-[44px]"
-            >
-              {submitting ? "Adding…" : "Add person"}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
+        {currentStepId !== "confirm" && currentStepId !== "search" && (
+          <div className="flex items-center justify-between gap-3 pt-2">
+            {currentIndex > 0 ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={goBack}
+                disabled={searching || submitting}
+                className="min-h-[44px] min-w-[44px]"
+              >
+                Back
+              </Button>
+            ) : (
+              <span />
+            )}
+
+            {currentStepId === "identity" && (
+              <Button
+                type="button"
+                onClick={handleIdentityNext}
+                className="min-h-[44px] min-w-[44px]"
+              >
+                Next
+              </Button>
+            )}
+            {currentStepId === "contact" && (
+              <Button
+                type="button"
+                onClick={handleContactNext}
+                className="min-h-[44px] min-w-[44px]"
+              >
+                Next
+              </Button>
+            )}
+            {currentStepId === "household" && (
+              <Button
+                type="button"
+                onClick={handleHouseholdNext}
+                disabled={
+                  householdMode === "existing" && households.length === 0
+                }
+                className="min-h-[44px] min-w-[44px]"
+              >
+                Next
+              </Button>
+            )}
+            {currentStepId === "rollAction" && (
+              <Button
+                type="button"
+                onClick={handleRollActionNext}
+                className="min-h-[44px] min-w-[44px]"
+              >
+                Next
+              </Button>
+            )}
+            {currentStepId === "review" && (
+              <Button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="min-h-[44px] min-w-[44px]"
+              >
+                {submitting ? "Adding…" : "Add person"}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    </HydrationGate>
   );
 }

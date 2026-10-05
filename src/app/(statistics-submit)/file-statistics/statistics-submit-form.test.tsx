@@ -25,6 +25,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 
 const mockSubmitGrantedReturnAction = vi.hoisted(() => vi.fn());
 vi.mock("../actions", () => ({
@@ -249,5 +250,21 @@ describe("StatisticsSubmitForm — the three result mappings", () => {
     const [input] = mockSubmitGrantedReturnAction.mock.calls[0];
     expect(input.attestedRole).toBe("other");
     expect(input.attestedRoleOther).toBe("Session treasurer");
+  });
+});
+
+describe("StatisticsSubmitForm — HydrationGate wiring (DECISION-159, F116)", () => {
+  it("the server render is a disabled, busy fieldset around the form", () => {
+    const html = renderToString(
+      <StatisticsSubmitForm
+        token="dev-token"
+        reportYear={2026}
+        formVersionKey="2024"
+        groups={GROUPS}
+        bounds={BOUNDS}
+      />,
+    );
+    expect(html).toContain('<fieldset disabled=""');
+    expect(html).toContain('aria-busy="true"');
   });
 });

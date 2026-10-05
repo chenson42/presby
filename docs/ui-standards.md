@@ -390,6 +390,18 @@ export function MyForm({ initialValue }: { initialValue: string }) {
 
 **When to add `react-hook-form` + `zod`:** When the form has more than four fields, has cross-field validation, or when per-field error display becomes unwieldy with plain `useState`. Add those dependencies via the architect agent before introducing them. If you do use RHF, add `aria-invalid` and `aria-describedby` on every field that can show an error.
 
+**Every `react-hook-form` form root is wrapped in `<HydrationGate>` (DECISION-159).** `register()` writes `defaultValues` over the live DOM when it attaches during hydration, so anything a user types or picks before the page's JavaScript has run is overwritten — and a native `<select>` falls back to a *different, valid* option with no visible sign (F116: a congregation's annual statistics were saved against the wrong congregation, with a success toast). `<HydrationGate>` (`src/components/shared/hydration-gate.tsx`) renders a `<fieldset disabled aria-busy>` around the form until the client has hydrated, so every control and Submit is inoperable for that moment (dimmed by the control's own `disabled:` styles — labels and hint text are never dimmed) and enabled the instant it ends. On a client-side navigation it is enabled from the first render, so there is no flash.
+
+```tsx
+return (
+  <HydrationGate>
+    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">…</form>
+  </HydrationGate>
+);
+```
+
+Wrap the `<form>` element from the outside (or, for a flow with no `<form>` tag such as `member-wizard`, its root element). Never add a `<legend>` to the gate, and never put opacity on it. A checkbox or radio registered under the gate must have a defined default and must not use `defaultChecked`. `npm run check:hydration-gate` fails any file that calls `useForm` without importing and rendering it; a deliberately client-only form carries `// hydration-gate-ok: <reason>` on or above the call. A new pre-hydration behaviour is tested by holding the page's JavaScript with `page.route` (see `docs/testing.md`), never by racing a throttle.
+
 **Submit button state:**
 - Show a loading indicator during `pending`. Use ellipsis ("Saving…") or a spinner — not the bare button text.
 - Disable the submit button while `pending` to prevent double-submission.
@@ -481,7 +493,7 @@ Every select and filter control in the app (`(admin)/admin/feedback/feedback-sta
 ```tsx
 <div className="relative">
   <select
-    className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base"
+    className="w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base disabled:cursor-not-allowed disabled:opacity-50"
     value={value}
     onChange={(e) => setValue(e.target.value)}
   >
@@ -499,6 +511,10 @@ Every select and filter control in the app (`(admin)/admin/feedback/feedback-sta
 `text-base`, not `text-sm` — the same 2026-08-27 operator legibility decision
 noted above; a select sitting next to a bordered `<Input>` in a filter row
 reads at the same size as the input now, not one step smaller.
+
+The `disabled:` variants matter even on a select you never disable yourself: inside a `<HydrationGate>` the form is briefly `disabled`, and a native select otherwise renders no hint of it (`Input`, `Textarea` and `Button` already style it).
+
+**A `value=`-controlled native `<select>` does not fix a pre-hydration pick — it hides it.** React 19 hydration of a `<select>` only validates; it neither writes the DOM selection nor replays a change made before React's listeners existed. A `Controller`- or `useState`-controlled select therefore keeps the user's choice on screen while the state holds the default, Submit sends the default, and the next commit snaps the DOM back at an arbitrary later moment (F121). Do not "fix" a hydration bug by converting a registered select to a controlled one; put the form in `<HydrationGate>`. Controlled selects outside react-hook-form that *write data* carry the same divergence and are tracked in F124.
 
 Always give it an associated `<label>`; use `"none"` (or another non-empty string) as the sentinel for "no selection," never `""` — a native `<select>` treats an empty-string option value the same as no `value` attribute at all, which breaks controlled-component behavior.
 
@@ -688,5 +704,6 @@ QA runs this in Phase 5 for any change that touches UI. A single unchecked box b
 - [ ] Page tested at ≥2 viewport widths (desktop 1440px, mobile 375px)
 - [ ] Every clickable surface is recognisable as clickable without hovering it
 - [ ] Every input has a real `<label>`; no placeholder standing in for one
+- [ ] Every react-hook-form form root is inside `<HydrationGate>` (`npm run check:hydration-gate` passes); at 360px the form is disabled while the page's JavaScript is held and enabled once it is released
 - [ ] Labels, buttons and errors use the congregation's words, not the schema's ("Add a member", not "Create person record")
 - [ ] Any flow that could take more than a few minutes survives a session expiry without discarding entered data

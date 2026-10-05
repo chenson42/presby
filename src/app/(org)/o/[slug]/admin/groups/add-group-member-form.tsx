@@ -16,9 +16,10 @@ import {
   type AddGroupMemberFormValues,
 } from "./group-schema";
 import { addGroupMemberAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -98,76 +99,78 @@ export function AddGroupMemberForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <Label htmlFor="add-group-member-person">Person</Label>
-        <div className="relative mt-1">
-          <select
-            id="add-group-member-person"
-            className={SELECT_CLASSES}
-            {...register("personId")}
-          >
-            {people.map((person) => (
-              <option key={person.personId} value={person.personId}>
-                {person.displayName}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
+    <HydrationGate>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <div>
+          <Label htmlFor="add-group-member-person">Person</Label>
+          <div className="relative mt-1">
+            <select
+              id="add-group-member-person"
+              className={SELECT_CLASSES}
+              {...register("personId")}
+            >
+              {people.map((person) => (
+                <option key={person.personId} value={person.personId}>
+                  {person.displayName}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
+          {errors.personId && (
+            <p className="mt-1 text-sm text-destructive">
+              {errors.personId.message}
+            </p>
+          )}
         </div>
-        {errors.personId && (
-          <p className="mt-1 text-sm text-destructive">
-            {errors.personId.message}
-          </p>
-        )}
-      </div>
 
-      <div>
-        <Label htmlFor="add-group-member-role">Role</Label>
-        <div className="relative mt-1">
-          <select
-            id="add-group-member-role"
-            className={SELECT_CLASSES}
-            {...register("groupRole")}
-          >
-            {GROUP_ROLES.map((value) => (
-              <option key={value} value={value}>
-                {GROUP_ROLE_LABELS[value]}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
+        <div>
+          <Label htmlFor="add-group-member-role">Role</Label>
+          <div className="relative mt-1">
+            <select
+              id="add-group-member-role"
+              className={SELECT_CLASSES}
+              {...register("groupRole")}
+            >
+              {GROUP_ROLES.map((value) => (
+                <option key={value} value={value}>
+                  {GROUP_ROLE_LABELS[value]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This is descriptive only — it does not grant software access.
+          </p>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          This is descriptive only — it does not grant software access.
-        </p>
-      </div>
 
-      <div>
-        <Label htmlFor="add-group-member-starts-on">Start date</Label>
-        <Input
-          id="add-group-member-starts-on"
-          type="date"
-          className="mt-1"
-          aria-invalid={errors.startsOn ? "true" : undefined}
-          {...register("startsOn")}
-        />
-        {errors.startsOn && (
-          <p className="mt-1 text-sm text-destructive">
-            {errors.startsOn.message}
-          </p>
-        )}
-      </div>
+        <div>
+          <Label htmlFor="add-group-member-starts-on">Start date</Label>
+          <Input
+            id="add-group-member-starts-on"
+            type="date"
+            className="mt-1"
+            aria-invalid={errors.startsOn ? "true" : undefined}
+            {...register("startsOn")}
+          />
+          {errors.startsOn && (
+            <p className="mt-1 text-sm text-destructive">
+              {errors.startsOn.message}
+            </p>
+          )}
+        </div>
 
-      <Button type="submit" disabled={submitting} className="min-h-11">
-        {submitting ? "Adding…" : "Add member"}
-      </Button>
-    </form>
+        <Button type="submit" disabled={submitting} className="min-h-11">
+          {submitting ? "Adding…" : "Add member"}
+        </Button>
+      </form>
+    </HydrationGate>
   );
 }

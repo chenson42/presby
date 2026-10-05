@@ -1210,7 +1210,7 @@ When a clerk picked a congregation on the statistics form very quickly on a slow
 
 ### Orchestrator note (2026-10-05, closing the pipeline)
 
-SHIP WITH NOTES accepted. Integrated as **v0.30.0**: feature commit, merge of `origin/main` (v0.29.0), then the housekeeping commit applying DECISION-159 (with the cost correction and the Phase 3 implementation specifics), `docs/schema-design-2.md` §2o (F116, F121–F130), the `docs/TODO.md` reconciliation, `CLAUDE.md` (Common Commands: six tripwires, `check:hydration-gate`, `test:e2e:prod`; the Verify-in-a-Browser rule), the functionality map, and `docs/release-notes/v0.30.md`. The pipeline's Neon branch is deleted at cleanup.
+SHIP WITH NOTES accepted. Integrated as **v0.30.0**: feature commit, merge of `origin/main` (v0.29.0), then the housekeeping commit applying DECISION-159 (with the cost correction and the Phase 3 implementation specifics), `docs/schema-design-2.md` §2o (F116, F121–F130), the `docs/TODO.md` reconciliation, `CLAUDE.md` (Common Commands: six tripwires, `check:hydration-gate`, `test:e2e:prod`; the Verify-in-a-Browser rule), the functionality map, and `docs/release-notes/v0.30.md`. The pipeline's Neon branch is deleted at cleanup. **F131 (found at integration):** the merged tree failed `src/lib/founding-administrator.test.ts`'s "eight paths unchanged" check, a pipeline-branch discipline test that diffs the working tree against `main` — this pipeline legitimately wrapped the member/staff forms. Retired with an explanatory comment (the behavioural guard is `test-rls.sql` §44); recorded in §2o.
 
 ---
 

@@ -1763,4 +1763,43 @@ values
 on conflict (id) do nothing;
 
 
+-- ---------------------------------------------------------------------------
+-- APPENDED BLOCK — pipeline/founding-admin (docs/work-log/2026-09-28-founding-
+-- administrator.md, Phase 3 "Seed Fixture"). Workflow Rule 16: one clearly
+-- delimited block at the END of this file, directly ahead of the final
+-- `commit;` — the same seam every recent pipeline's fixture block has landed
+-- at. If a merge conflict appears here, keep ALL blocks: append-only, none
+-- depends on another.
+--
+-- A sign-in-capable platform user with NO people row anywhere — not here, not
+-- elsewhere in this file, not in scripts/test-rls.sql. That absence is the
+-- whole point and is load-bearing. Every existing `set user_id` fixture
+-- (elder.fixture/f2 -> Marguerite Ashcombe, clerk.fixture/f3 -> Tobias
+-- Renwick, presbytery.clerk.fixture/f4 -> Idris Calloway) is already linked to
+-- a person, so designating any of them would resolve to the existing_person
+-- branch and would never exercise created_person — the branch the
+-- founding-administrator act is primarily for (Phase 2 Ruling 4, outcome 3).
+-- A browser rehearsal or a DB-backed test designates THIS user and watches a
+-- real `people` row be created and linked, live.
+--
+-- Same reserved example.invalid domain and invented name as every other
+-- fixture here (Key Invariant: No Real Data). Same shared fixture password
+-- documented in docs/testing.md ('e2e-fixture-only-not-a-secret', bcrypt-
+-- hashed below, byte-identical to clerk.fixture/presbytery.clerk.fixture).
+-- is_active so it can sign in; two_factor_required explicitly false for the
+-- same no-TOTP-detour reasoning as clerk.fixture/elder.fixture above.
+--
+-- Deliberately given NO memberships row and NO role_grants row: at seed time
+-- this user has no relationship to any organization at all, which is exactly
+-- the pre-designation state /launch routes to /no-organization (the same
+-- shape router.none@ has, one step earlier in the funnel).
+-- ---------------------------------------------------------------------------
+insert into users (id, email, name, email_verified, password, is_active, two_factor_required)
+values ('e0000000-0000-0000-0000-0000000000f5', 'founding.fixture@example.invalid',
+        'Fixture Founding Admin', now(),
+        '$2b$10$tHdp7RHkvStQGKE5A/BRTenWeJ/HUOeY3iA/MmCGXE2fUCS9wBzT2',
+        true, false)
+on conflict (id) do nothing;
+
+
 commit;

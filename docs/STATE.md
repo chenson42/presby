@@ -3,11 +3,17 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-09-25.
+Updated 2026-10-05.
 
 ---
 
-## RESUME HERE — updated 2026-09-28 night (wave 5: PRs #21 and #22 merged, v0.28.2; founding administrator in its F118 fix pass)
+## RESUME HERE — 2026-10-05: wave 5 integrating (founding administrator merged as v0.29.0; parent picker and select-hydration in flight)
+
+**Founding administrator** (`pipeline/founding-admin`) shipped as **v0.29.0** (DECISION-155 + F118 amendment; §2m F107–F112, F117–F118; SHIP WITH NOTES — every note is a `docs/TODO.md` line). No migration; `0054` is back in the pool. The presbytery handover is complete end to end; the congregation roll residual (F111/F118) and the designee-facing `org_portal.*` seed defaults are the first items of the go-live flag sweep. `pipeline/org-parent-picker` (`../presby-wt-picker`, port 3500, Neon `pipeline-org-parent-picker`) is unblocked for Phase 4. `pipeline/select-hydration` (`../presby-wt-select`, port 3700 / prod lane 3800, Neon `pipeline-select-hydration`) was reclassified to **Feature** at Phase 2 (DECISION-159 proposed: `HydrationGate` on all 18 RHF form roots + a `PW_PROD_BUILD=1` production-build Playwright lane; F121–F127) and is in Phase 4. The previous handoff below is kept for its wave-5 detail; this block supersedes its "in flight" claims.
+
+---
+
+## Previous handoff — saved 2026-09-28 ~22:45 UTC for a session restart (wave 5: PRs #21, #22 merged at v0.28.2; three pipelines open, three agents were mid-flight)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·
@@ -103,10 +109,54 @@ A–C complete; NO migration (the `people.user_id` index was stopped by its pre-
 a `user_id`, F112); Batch C's mandatory rehearsal found the bundle could not create a second person (F118) → Phase 2
 addendum: `staff.manage` joins the bundle, roll keys stay out; Phase 4 fix pass running, then QA, Phase 6, integrate as
 v0.29.0 (DECISION-155 + amendment; F107–F112, F117–F118). `org_portal.staff` is seeded OFF but is the founding
-administrator's only person-creation path — joins the go-live flag sweep. Queued behind #1 (shares `org-provisioning.ts`): the
+administrator's only person-creation path — joins the go-live flag sweep. **Two more wave-5 pipelines opened
+2026-09-28 night, Phases 1–3 read-only in parallel per Rule 16:** `../presby-wt-picker` / `pipeline/org-parent-picker`
+(`docs/work-log/2026-09-28-organization-parent-picker.md`; the parent-council + relationship-type control on
+`/admin/organizations/new`; DECISION-158 if any, F119+; port 3500; Neon `pipeline-org-parent-picker`
+br-quiet-rain-axnzktt6; **Phase 4 only after `pipeline/founding-admin` merges** — shared files) and `../presby-wt-select` /
+`pipeline/select-hydration` (`docs/work-log/2026-09-28-select-hydration-revert.md`; F116 — Phase 1 must first reproduce on
+a production build under throttling, else NOT YET; DECISION-159 if any, F121+; port 3700; Neon `pipeline-select-hydration`
+br-broad-haze-axdhzmif). Queued behind #1 (shares `org-provisioning.ts`): the
 `/admin/organizations/new` parent-org/relationship-type picker. Closing the wave: the go-live flag sweep (placeholder
 tiles off, real presbytery flags on for PSV), a production migration runbook (production is still pre-0043 —
 operator step), and the what's-new entries owed at first enablement.
+
+**Session-restart handoff (2026-09-28 night).** Three agents were running when the operator paused; each writes only to
+its own pipeline's files, so nothing is lost, but their returns must be RECORDED by the next session before advancing:
+1. `../presby-wt-boot` — the full-stack-developer "Phase 4 fix pass — F118" was **STOPPED by the orchestrator at
+   shutdown** mid-way through a `test-rls.sql` run. What landed on disk: `staff.manage` in `foundingAdministratorPlan()`'s
+   base array + the F118 doc comment (`src/lib/founding-administrator.ts`), `"staff.manage": "staff"` in
+   `PERMISSION_LABELS`, and §44a edits A–E incl. the new `44a (F118)` assertion in `scripts/test-rls.sql`. What did NOT
+   land: the test updates (plan shape 7→8 / 8→9, audit `permissionKeys`, dialog copy), the unchanged-files test
+   extension, the rehearsal step-6 re-run on the staff-hire path, and the work-log subsection (Phase 4 status row still
+   reads "Batch A complete…"; Phase 5 "Waiting"). Fixture `founding.fixture@example.invalid` has 0 `people` rows; no
+   rehearsal orgs, no stamped rows, no scratch DBs on `br-empty-frost-ax4mo8q5`. **Resume by re-spawning a
+   full-stack-developer fix pass with the addendum's items (1)/(3)/(5), telling it the code edits already exist** — it
+   verifies them, adds the tests, runs failing-first where still possible, does the rehearsal, writes the subsection.
+2. `../presby-wt-select` — analyst Phase 1 for F116 **returned and is recorded: READY WITH NOTES, and the bug is REAL
+   in production** — 10/10 silent reversions on `next build && next start` under CPU ×4 + slow-3G, and the wrong
+   congregation's statistics were PERSISTED with a "Statistics saved." toast and a consistent audit row. Mechanism: RHF
+   uncontrolled `register()` on a native `<select>` reconciles `defaultValues` onto the DOM at hydration; the same shape
+   is in 9+ other forms (person/org/household pickers in credentials, officers, groups, members, staff, per-capita
+   payments). **Treat as a PSV go-live blocker for the statistics form.** Next: spawn **architect** Phase 2 to rule the
+   fix scope (one form vs a shared `Controller`-based hydration-safe select) and where a production-build Playwright
+   regression lives (`playwright.config.ts` only knows `npm run dev`; CDP throttling helpers do not exist yet).
+   Also noted: `next build` in a worktree is flaky (`@vercel/turbopack-next … font` module-not-found) — use the
+   documented external hardlinked scratch copy.
+3. `../presby-wt-picker` — tech-lead Phase 3 **returned and is written into the work-log** (native `<select>`; eligible parents fetched server-side, type-only; `[id]` stacking: founding-admin → affiliation → brand). Phase 4 must NOT start until
+   `pipeline/founding-admin` merges (shared `admin/organizations/new` + `[id]/page.tsx`); then merge main into the
+   branch, spawn full-stack-developer.
+Integration for each open pipeline: `w5-integrate.py boot|picker|select` in the scratchpad (inputs `<mode>-phase6.md`,
+`<mode>-todo-notes.txt`, `<mode>-release.md`, `<mode>-map.txt`; boot's are staged), versions boot 0.29.0 → picker
+0.30.0 → select patch; boot's DECISION-155 needs the F118 amendment appended and F111's worked example marked retired
+(§2m F107–F112, F117–F118). Scratchpad (survives on disk):
+`/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b08e6db7-b5b1-4a1b-b94f-75e0928bed80/scratchpad/`
+(`record-phase.py`, `w5-integrate.py`, `make-wave5*.py`, staged inputs) and `../tasks/*.output` (agent transcripts).
+Uncommitted work: `presby-wt-boot` (14 files — Batches A–C + fix pass; commit as `feat(admin):` once QA passes),
+`presby-wt-picker` and `presby-wt-select` (work-logs only). No dev servers, no scratch databases; Neon branches
+`pipeline-founding-admin`, `pipeline-org-parent-picker`, `pipeline-select-hydration` are live and are deleted at each
+pipeline's cleanup. Wave-5 close-out after those merge: the go-live flag sweep (placeholder tiles off; `org_portal.staff`
++ the presbytery flags on for PSV), a production migration runbook (production is still pre-0043), the what's-new entries.
 
 **Next, in order (the remaining candidates after wave 4):** the operator's
 three decisions (Neon secrets → CI jobs run; branch protection; delete the three Neon

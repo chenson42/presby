@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { auth } from "@/auth";
 import { getPlatformDb } from "@/lib/db";
 import {
@@ -25,6 +26,7 @@ import {
   setOrganizationProfile,
   replaceOrganizationServiceTimes,
 } from "@/lib/sites";
+import { designateFoundingAdministrator } from "@/lib/founding-administrator";
 
 /**
  * The platform operator's brand actions — P0.5 slice c2 (Phase 3 re-run,
@@ -668,4 +670,117 @@ export async function setOrganizationServiceTimesAction(
   await revalidateLiveSitePath(platformDb, organizationId);
 
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// designateFoundingAdministratorAction — docs/work-log/
+// 2026-09-28-founding-administrator.md, DECISION-155. Hands a freshly
+// created (or already-existing-but-headless) organization to its first real
+// tenant administrator. Exact structural match to
+// setOrganizationBrandAction/setOrganizationProfileAction above: auth() ->
+// hasFeature(ADMIN_ORGANIZATIONS) -> field validation -> the lib function
+// (getPlatformDb() throughout, never withOrgContext() — see this file's own
+// header and src/lib/founding-administrator.ts's) -> recordAudit() only on
+// success (a refusal mutates nothing) -> revalidatePath.
+// ---------------------------------------------------------------------------
+
+const designeeEmailSchema = z.string().trim().toLowerCase().email().max(320);
+
+/**
+ * FormData fields: `organizationId` (uuid), `email`. The database chooses
+ * every subsequent branch (created_person vs. existing_person vs. one of
+ * the named refusals) — there is no person-picker on this form
+ * (work-log Phase 2 Ruling 4).
+ */
+export async function designateFoundingAdministratorAction(
+  formData: FormData,
+): Promise<PolicyResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) {
+    return { ok: false, error: "Invalid organization." };
+  }
+
+  const parsedEmail = designeeEmailSchema.safeParse(formData.get("email"));
+  if (!parsedEmail.success) {
+    return { ok: false, error: "Enter a valid email address." };
+  }
+
+  const result = await designateFoundingAdministrator(
+    organizationId,
+    parsedEmail.data,
+    session.user.id,
+  );
+
+  switch (result.kind) {
+    case "no_such_user":
+      return {
+        ok: false,
+        error:
+          "No platform account exists for that email yet. Ask them to sign up first (they'll land on a page saying they have no organizations), then designate them here.",
+      };
+    case "user_inactive":
+      return { ok: false, error: "That account has been deactivated." };
+    case "person_elsewhere":
+      return {
+        ok: false,
+        error:
+          "That account is already linked to a person at a different organization. Cross-organization transfers go through the certificate/transfer process, not this designation.",
+      };
+    case "membership_ended":
+      return {
+        ok: false,
+        error:
+          result.endedOn === "unknown"
+            ? "That person's relationship with this organization has ended."
+            : `That person's relationship with this organization ended on ${result.endedOn}.`,
+      };
+    case "has_holders":
+      return {
+        ok: false,
+        error:
+          "This organization already has someone who can manage roles — designation is only available while nobody does (including as a lockout recovery).",
+      };
+    case "provisioning_incomplete":
+      return {
+        ok: false,
+        error:
+          "This organization is missing its baseline setup — contact an engineer before designating an administrator.",
+      };
+    case "race":
+      return {
+        ok: false,
+        error:
+          "Someone just designated a founding administrator for this organization — refresh the page.",
+      };
+    case "db_error":
+      return {
+        ok: false,
+        error: "We couldn't complete that just now — try again in a moment.",
+      };
+    case "ok": {
+      await recordAudit({
+        action: AUDIT_ACTIONS.ORG_FOUNDING_ADMINISTRATOR_DESIGNATED,
+        resourceType: "organization",
+        resourceId: organizationId,
+        metadata: {
+          organizationId,
+          personId: result.personId,
+          userId: result.userId,
+          mode: result.mode,
+          officeRoleKey: result.officeRoleKey,
+          administrationRoleKey: result.administrationRoleKey,
+          permissionKeys: result.permissionKeys,
+          priorHolderCount: result.priorHolderCount,
+        },
+      });
+      revalidatePath(`/admin/organizations/${organizationId}`);
+      return { ok: true };
+    }
+  }
 }

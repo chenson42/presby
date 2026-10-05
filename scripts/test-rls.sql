@@ -7903,3 +7903,303 @@ commit;
 -- ===========================================================================
 -- END APPENDED SECTION — pipeline/withdraw.
 -- ===========================================================================
+
+-- APPENDED SECTION — pipeline/founding-admin.
+-- Workflow Rule 16: one delimited block at the END of this file.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 44. The founding administrator — the tenant-side shape the platform write
+--     leaves behind (docs/work-log/2026-09-28-founding-administrator.md,
+--     DECISION-155, F107-F111; Phase 2 Ruling 9's (i)-(iv)).
+--
+--     WHAT THIS SUITE CAN AND CANNOT PROVE (sections 34/35/41's own idiom).
+--     designateFoundingAdministrator() is a TypeScript function on the
+--     getPlatformDb()/neondb_owner connection. This suite cannot call it,
+--     cannot exercise the holder-count gate, and cannot reach the trigger
+--     refusals it maps to named results (person_elsewhere /
+--     membership_ended / provisioning_incomplete) — those are owner-path
+--     behaviours and live in src/lib/founding-administrator.test.ts on
+--     PLATFORM_DATABASE_URL, the same split section 41 already documents
+--     for presby_withdraw_publication().
+--
+--     What §44 proves is the SHAPE the write leaves behind: an ordinary,
+--     tenant-isolated org-owned role and person-arm grant, resolving
+--     through the ordinary four-arm resolver, with no platform residue and
+--     no reach outside the organization that owns it. Every row it needs is
+--     minted here and rolled back — Rule 16: a browser rehearsal consumes
+--     single-use seed rows, so a section that depended on them would be
+--     green once and red forever after.
+--
+--     The \set directives below live inside this block rather than in the
+--     file's shared header block for the same Rule 16 reason: one delimited
+--     addition at the END, not a second hand-edited seam near line 30.
+-- ---------------------------------------------------------------------------
+
+-- The designation's own fixture rows. fa000000-… is unused anywhere else in
+-- scripts/ or src/ (grepped 2026-09-28).
+\set FA_PERSON      '\'fa000000-0000-0000-0000-000000000001\''
+\set FA_ROLE        '\'fa000000-0000-0000-0000-000000000002\''
+\set FA_OFFICE_ROLE '\'fa000000-0000-0000-0000-000000000003\''
+\set FA_GRANT       '\'fa000000-0000-0000-0000-000000000004\''
+\set FA_OFFICE_GRANT '\'fa000000-0000-0000-0000-000000000005\''
+\set FA_DUP_A       '\'fa000000-0000-0000-0000-00000000000a\''
+\set FA_DUP_B       '\'fa000000-0000-0000-0000-00000000000b\''
+-- The seed fixture this pipeline adds: a sign-in-capable user with NO people
+-- row anywhere (scripts/seed-dev.sql, appended block). §44 borrows it as the
+-- user_id a designation would link, which is also what makes 44d's duplicate
+-- demonstration use the same column a real designation writes.
+\set FOUNDING_USER  '\'e0000000-0000-0000-0000-0000000000f5\''
+
+-- 44a/44b. (i) and (ii) share one transaction: (ii) has to look at the rows
+--          (i) minted, and nothing here may survive the section.
+--
+--          The bundle below mirrors foundingAdministratorPlan('congregation')
+--          exactly (DECISION-155): the eight-key administration half
+--          (DECISION-155 as amended by F118 — staff.manage joins the
+--          bundle), plus the office half copied from the
+--          congregation_stated_clerk template (statistics.publish). It is
+--          written as direct SQL for the same
+--          reason scripts/seed-dev.sql:1228-1240 is: adoptTemplate() and
+--          grantRole() structurally cannot originate an organization's first
+--          grant, which is the entire gap this pipeline exists to close.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+
+  -- The designee. DECISION-128/129 staff-style membership: engagement_status
+  -- 'staff', current_roll null, NO roll_actions row — the platform must not
+  -- fabricate a roll fact, and a pending roll action at an org with no
+  -- seated Session is unapprovable by construction.
+  insert into people (id, user_id, first_name, last_name)
+  values (:FA_PERSON, :FOUNDING_USER, 'Fixture', 'FoundingAdmin44');
+  insert into memberships (organization_id, person_id, engagement_status, current_roll)
+  values (:ALDER, :FA_PERSON, 'staff', null);
+
+  -- The administration half: org-owned, role_kind 'custom', is_protected
+  -- FALSE. Unprotected is load-bearing, not incidental — role-definitions.ts
+  -- refuses every mutation on a protected role, so a protected founding role
+  -- would make the bootstrap concentration permanent and un-splittable by
+  -- the organization that inherits it (Phase 2 Ruling 3b).
+  insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
+  values (:FA_ROLE, :ALDER, 'founding_administrator', 'Founding Administrator', 'custom', false);
+  insert into app_role_permissions (role_id, permission_key)
+  select :FA_ROLE, k from unnest(array[
+    'people.manage', 'roles.manage', 'role_grants.manage', 'groups.manage',
+    'officers.manage', 'org_features.manage', 'tickets.file',
+    'staff.manage']) as k;
+
+  -- The office half, copied from the live template row (organization_id is
+  -- null) rather than re-enumerated here, so drizzle/0037/0052 stay the
+  -- single source of the office's permission set.
+  insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
+  values (:FA_OFFICE_ROLE, :ALDER, 'fa44_congregation_stated_clerk',
+          'Stated Clerk (fixture copy)', 'custom', false);
+  insert into app_role_permissions (role_id, permission_key)
+  select :FA_OFFICE_ROLE, arp.permission_key
+    from app_role_permissions arp
+    join app_roles t on t.id = arp.role_id
+   where t.organization_id is null and t.key = 'congregation_stated_clerk';
+  select assert_eq(
+    (select count(*) from app_role_permissions where role_id = :FA_OFFICE_ROLE),
+    1, '44a: the office half is COPIED from the congregation_stated_clerk template, not re-enumerated (statistics.publish)');
+
+  -- Person-arm grants. granted_by is deliberately NULL here: the resolver's
+  -- four arms never read it (Phase 2, Two Hierarchies — it is provenance
+  -- only), and asserting the grant resolves anyway is what pins that claim.
+  insert into role_grants (id, organization_id, role_id, person_id, granted_by)
+  values (:FA_GRANT, :ALDER, :FA_ROLE, :FA_PERSON, null),
+         (:FA_OFFICE_GRANT, :ALDER, :FA_OFFICE_ROLE, :FA_PERSON, null);
+
+  -- (i) THE assertion Phase 2 Ruling 9 names first.
+  select assert_eq(
+    (select count(*) where presby_has_permission(:FA_PERSON, :ALDER, 'roles.manage')),
+    1, '44a (i): the designee holds roles.manage at their own org — the founding grant resolves through the ordinary person arm');
+
+  -- …and the rest of the ruled bundle, each key, so a quiet future edit to
+  -- foundingAdministratorPlan() that drops one is caught here too.
+  select assert_eq(
+    (select count(*) from unnest(array[
+       'people.manage', 'roles.manage', 'role_grants.manage', 'groups.manage',
+       'officers.manage', 'org_features.manage', 'tickets.file',
+       'staff.manage']) as k
+      where presby_has_permission(:FA_PERSON, :ALDER, k)),
+    8, '44a (i): every key of the administration half resolves (DECISION-155''s enumerated tier-1 set, as amended by F118 — eight keys)');
+
+  -- F118: the founding administrator CAN anchor a staff-kind person (the only
+  -- in-app person-creation path that writes no roll_actions row) and CANNOT
+  -- touch the roll. Both halves in one assertion, because the pair is the
+  -- ruling — either one alone would read as an arbitrary line.
+  select assert_eq(
+    (select count(*) from unnest(array[
+       'staff.manage', 'roll.propose', 'roll.approve']) as k
+      where presby_has_permission(:FA_PERSON, :ALDER, k)),
+    1, '44a (F118): the founding administrator anchors staff-kind people (staff.manage) but neither proposes nor approves a roll action — the roll begins when the Session is seated');
+
+  select assert_eq(
+    (select count(*) where presby_has_permission(:FA_PERSON, :ALDER, 'statistics.publish')),
+    1, '44a (i): the office half resolves too — the designee can do the congregation stated clerk''s own job, not merely administer roles');
+
+  -- No wildcard, proven by the permissions the bundle must NOT carry
+  -- (Key Invariant: No Role Carries a Wildcard). Tier 3 entire, plus the
+  -- tier-2 keys outside the office and the two roll keys Phase 2 excluded
+  -- by name (the roll is the system of record; approval is a Session act).
+  select assert_eq(
+    (select count(*) from unnest(array[
+       'demographics.manage', 'disabilities.manage', 'medical.manage',
+       'pastoral_notes.manage']) as k
+      where presby_has_permission(:FA_PERSON, :ALDER, k)),
+    0, '44a: the founding administrator holds NO tier-3 permission — pastoral, demographic, medical, disabilities');
+  -- `staff.manage` was excluded by the original Ruling 3 and is now CARRIED
+  -- (F118): it is the only person-creation path that writes no roll_actions
+  -- row, and the bundle's own premise — "a founding administrator enrolls
+  -- people as staff-kind anchors" — requires it.
+  select assert_eq(
+    (select count(*) from unnest(array[
+       'children.roster', 'ledger.approve', 'per_capita.manage',
+       'statistics.manage', 'roll.propose', 'roll.approve',
+       'branding.manage', 'events.manage', 'directory.view_hidden',
+       'credentials.manage']) as k
+      where presby_has_permission(:FA_PERSON, :ALDER, k)),
+    0, '44a: nor anything Phase 2 excluded by name — not a wildcard, and not a wildcard by enumeration either');
+
+  -- The presbytery-only key is presbytery-only. Alder Creek is a
+  -- congregation, so congregation_oversight.manage is not in its bundle.
+  select assert_eq(
+    (select count(*) where presby_has_permission(:FA_PERSON, :ALDER, 'congregation_oversight.manage')),
+    0, '44a: congregation_oversight.manage is presbytery-only — a congregation''s founding administrator does not get it');
+
+  -- (ii) A DIFFERENT ORGANIZATION SEES NONE OF IT. Same transaction, same
+  --      rows, one GUC away.
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) from app_roles where key in ('founding_administrator', 'fa44_congregation_stated_clerk')),
+    0, '44b (ii): bramblewood sees neither role the designation minted at alder');
+  select assert_eq(
+    (select count(*) from role_grants where person_id = :FA_PERSON),
+    0, '44b (ii): bramblewood sees neither of the designee''s grants');
+  select assert_eq(
+    (select count(*) from people where id = :FA_PERSON),
+    0, '44b (ii): bramblewood cannot even see the person the designation created');
+  select assert_eq(
+    (select count(*) where presby_has_permission(:FA_PERSON, :BRAMBLE, 'roles.manage')),
+    0, '44b (ii): the designee holds NOTHING at bramblewood — a founding grant confers no standing anywhere else');
+
+  -- F107's tenant-side twin: asking about ANOTHER org's permissions from
+  -- this context is refused outright, not answered falsely. This is the same
+  -- anti-fishing guard that makes presby_effective_permissions() uncallable
+  -- from the platform connection, which is why the holder-count gate is a
+  -- plain CTE on platformDb instead.
+  do $$ begin
+    perform presby_has_permission('fa000000-0000-0000-0000-000000000001',
+                                  '22222222-2222-2222-2222-222222222222',
+                                  'roles.manage');
+    raise exception 'FAIL 44b (ii): bramblewood fished alder''s effective permissions for the designee';
+  exception when insufficient_privilege then
+    raise notice 'pass  44b (ii): presby_effective_permissions refuses a cross-org question (F107''s anti-fishing guard)';
+  end $$;
+rollback;
+
+-- 44c. (iii) presby_app cannot mint a founding_administrator role for a
+--      DIFFERENT organization. The ordinary app_roles WITH CHECK already
+--      forbids it; pinning it here for this specific key means a future
+--      refactor of that policy is caught in the founding-administrator
+--      section too, not only in an unrelated one.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$ begin
+    insert into app_roles (organization_id, key, name, role_kind, is_protected)
+    values ('33333333-3333-3333-3333-333333333333', 'founding_administrator',
+            'Smuggled Founding Administrator', 'custom', false);
+    raise exception 'FAIL 44c (iii): alder minted a founding_administrator role for bramblewood';
+  exception when insufficient_privilege then
+    raise notice 'pass  44c (iii): presby_app cannot insert an app_roles row for another organization';
+  end $$;
+  -- The same refusal one table down: the org-owned role is the composite
+  -- anchor, so a permission row can only be hung off a role this org owns.
+  do $$ begin
+    insert into app_role_permissions (role_id, permission_key)
+    values ('f0000000-0000-0000-0000-00000000000e', 'roles.manage');
+    raise exception 'FAIL 44c (iii): alder attached a permission to the presbytery''s own role';
+  exception when insufficient_privilege then
+    raise notice 'pass  44c (iii): presby_app cannot attach a permission to another organization''s role';
+  end $$;
+rollback;
+
+-- 44d. (iv) DEFERRED — and this is the finding, not an omission.
+--
+--      Phase 2 Ruling 9 specified drizzle/0054 as one partial unique index,
+--      `people (user_id) where user_id is not null and merged_into_id is
+--      null` (F110), and made it conditional on a pre-flight duplicate probe
+--      against `development`. The probe was run (Phase 4 Batch A, 2026-09-28,
+--      read-only as neondb_owner on br-super-dawn-axfi55p6) and it is NOT
+--      clean: user_id e0000000-…-00a6 (router.dup@example.invalid) carries
+--      two live people rows, c1000000-…-0005 and c1000000-…-0006.
+--
+--      Those two rows are not data rot. They are a deliberate fixture
+--      (scripts/seed-dev.sql:836-838) whose ONLY purpose is to be the
+--      duplicate that userOrganizations()'s TypeScript de-duplication loop
+--      collapses — the very loop F110 cites as "a rendering workaround
+--      standing in for a missing constraint". Section 12 (line ~535) asserts
+--      presby_user_organizations(:U_DUP) returns exactly one fernwood row
+--      BECAUSE of them, and presby_user_organizations() itself already
+--      filters `p.merged_into_id is null`, so tombstoning one of the pair
+--      does not preserve the fixture — it destroys it. The index and the
+--      fixture are mutually exclusive by construction, and landing the index
+--      is therefore a coordinated retirement of the loop, its fixture, its
+--      section-12 assertion and src/lib/authz.test.ts:150,166 — not a
+--      one-line migration. Per Ruling 9's own instruction ("name it, don't
+--      assume it") 0054 is NOT shipped by this pipeline and is recorded as a
+--      follow-up instead.
+--
+--      So (iv) is written here as its own negative: a live demonstration
+--      that a second live people row sharing a user_id is currently
+--      ACCEPTED. This is the failing-first half of (iv), preserved in the
+--      suite rather than in a work-log paragraph. WHEN THE FOLLOW-UP LANDS
+--      THE INDEX, this block is what flips: replace the assert_eq below with
+--      a `do $$ … exception when unique_violation …` block and (iv) becomes
+--      the positive assertion Ruling 9 asked for.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  insert into people (id, user_id, first_name, last_name)
+  values (:FA_DUP_A, :FOUNDING_USER, 'Fixture', 'DupA44');
+  insert into memberships (organization_id, person_id, engagement_status)
+  values (:ALDER, :FA_DUP_A, 'staff');
+  insert into people (id, user_id, first_name, last_name)
+  values (:FA_DUP_B, :FOUNDING_USER, 'Fixture', 'DupB44');
+  insert into memberships (organization_id, person_id, engagement_status)
+  values (:ALDER, :FA_DUP_B, 'staff');
+  select assert_eq(
+    (select count(*) from people where user_id = :FOUNDING_USER and merged_into_id is null),
+    2, '44d (iv) DEFERRED: two live people rows still share one user_id — people_user_id_unique_idx does not exist yet (F110 follow-up; see this section''s header)');
+rollback;
+
+-- 44e. The blocker, pinned. The suite cannot take a global inventory of
+--      duplicate user_ids — people is FORCE ROW LEVEL SECURITY and presby_app
+--      only ever sees one organization at a time, so a cross-org probe is an
+--      owner-connection query (run in Phase 4 Batch A, recorded in the
+--      work-log). What it CAN pin is the one place the known duplicate lives:
+--      inside fernwood's context, router.dup@ is the only user_id with more
+--      than one live people row. The day that assertion reads 0, the fixture
+--      has been retired and the F110 index can land.
+begin;
+  select set_config('app.current_org_id', :FERNWOOD, true);
+  select assert_eq(
+    (select count(*) from (
+       select user_id from people
+        where user_id is not null and merged_into_id is null
+        group by user_id having count(*) > 1) d
+      where d.user_id <> :U_DUP),
+    0, '44e: router.dup@ is the ONLY duplicate user_id visible at fernwood — no second one has crept in (regression pin on the first in-app writer of people.user_id)');
+  select assert_eq(
+    (select count(*) from people where user_id = :U_DUP and merged_into_id is null),
+    2, '44e: the router.dup@ fixture is still exactly two live rows — the F110 blocker, and section 12''s de-duplication proof, are the same two rows');
+rollback;
+
+\echo ''
+\echo '======================================================'
+\echo ' Section 44 (founding administrator) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION — pipeline/founding-admin.
+-- ===========================================================================

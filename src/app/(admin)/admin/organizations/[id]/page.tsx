@@ -18,11 +18,25 @@ import {
   getOrganizationProfileAdminDetail,
   listOrganizationServiceTimes,
 } from "@/lib/sites";
+import {
+  countFoundingAdministratorHolders,
+  foundingAdministratorPlan,
+} from "@/lib/founding-administrator";
 import { BrandForm } from "./brand-form";
 import { NeutralizeDialog } from "./neutralize-dialog";
 import { SiteSection } from "./site-section";
 import { ProfileForm } from "./profile-form";
 import { ServiceTimesSection } from "./service-times-section";
+import { FoundingAdministratorSection } from "./founding-administrator-section";
+
+// officeTemplateKey -> display name. Not exported by
+// `@/lib/founding-administrator` — that module returns the key only
+// (work-log Phase 4 Batch B's "Contract Batch C consumes"); the human name
+// is this page's own display concern.
+const OFFICE_TEMPLATE_DISPLAY_NAMES: Record<string, string> = {
+  presbytery_stated_clerk: "Presbytery Stated Clerk",
+  congregation_stated_clerk: "Congregation Stated Clerk",
+};
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -77,6 +91,19 @@ export default async function OrganizationBrandDetailPage({
     .limit(1);
 
   if (!org) notFound();
+
+  // Read fresh on every render, never cached — the same discipline
+  // role-definitions.ts's roleHolderCount() states for its own gate
+  // (work-log Phase 3, "Component / Page Plan").
+  const foundingAdministratorHolderCount = await countFoundingAdministratorHolders(
+    platformDb,
+    id,
+  );
+  const foundingAdministratorCanDesignate = foundingAdministratorHolderCount === 0;
+  const plan = foundingAdministratorPlan(org.organizationType);
+  const officeTemplateName = plan.officeTemplateKey
+    ? (OFFICE_TEMPLATE_DISPLAY_NAMES[plan.officeTemplateKey] ?? plan.officeTemplateKey)
+    : null;
 
   const siteDetail = await getSiteAdminDetail(id);
   const profileDetail = await getOrganizationProfileAdminDetail(id);
@@ -142,6 +169,16 @@ export default async function OrganizationBrandDetailPage({
           <NeutralizeDialog organizationId={id} organizationName={org.name} />
         )}
       </div>
+
+      <FoundingAdministratorSection
+        organizationId={id}
+        organizationName={org.name}
+        organizationType={org.organizationType}
+        canDesignate={foundingAdministratorCanDesignate}
+        currentHolderCount={foundingAdministratorHolderCount}
+        administrationPermissionKeys={plan.administration.permissionKeys}
+        officeTemplateName={officeTemplateName}
+      />
 
       <section className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">

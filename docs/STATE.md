@@ -3,11 +3,17 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-09-25.
+Updated 2026-10-05.
 
 ---
 
-## RESUME HERE — saved 2026-09-28 ~22:45 UTC for a session restart (wave 5: PRs #21, #22 merged at v0.28.2; three pipelines open, three agents were mid-flight)
+## RESUME HERE — 2026-10-05: wave 5 integrating (founding administrator merged as v0.29.0; parent picker and select-hydration in flight)
+
+**Founding administrator** (`pipeline/founding-admin`) shipped as **v0.29.0** (DECISION-155 + F118 amendment; §2m F107–F112, F117–F118; SHIP WITH NOTES — every note is a `docs/TODO.md` line). No migration; `0054` is back in the pool. The presbytery handover is complete end to end; the congregation roll residual (F111/F118) and the designee-facing `org_portal.*` seed defaults are the first items of the go-live flag sweep. `pipeline/org-parent-picker` (`../presby-wt-picker`, port 3500, Neon `pipeline-org-parent-picker`) is unblocked for Phase 4. `pipeline/select-hydration` (`../presby-wt-select`, port 3700 / prod lane 3800, Neon `pipeline-select-hydration`) was reclassified to **Feature** at Phase 2 (DECISION-159 proposed: `HydrationGate` on all 18 RHF form roots + a `PW_PROD_BUILD=1` production-build Playwright lane; F121–F127) and is in Phase 4. The previous handoff below is kept for its wave-5 detail; this block supersedes its "in flight" claims.
+
+---
+
+## Previous handoff — saved 2026-09-28 ~22:45 UTC for a session restart (wave 5: PRs #21, #22 merged at v0.28.2; three pipelines open, three agents were mid-flight)
 
 **Pushed to `origin/main`, in order, since the 2026-09-24 stop:** `ac61c9d` fix(audit) ·
 `5421fb4` fix(auth) the callback sanitizer (v0.24.2, security review §A) ·

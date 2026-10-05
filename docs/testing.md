@@ -70,6 +70,7 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 | `presbytery-clerk@presby.invalid` | Perpetua Winlock, e2e-presbytery — holds `e2e_presbytery_clerk` (`congregation_oversight.manage`, `per_capita.manage`, `credentials.manage`, `statistics.manage`) | `/o/e2e-presbytery` — try `/o/e2e-presbytery/admin/oversight`, `/admin/reports`, `/admin/credentials` by hand |
 | `presbytery-nogrant@presby.invalid` | Cassius Brightwell, e2e-presbytery — a relationship with NO grant, the "state 3" denial fixture for oversight/reports/credentials at once | `/o/e2e-presbytery` |
 | `congregation-clerk@presby.invalid` | Ottoline Fairweather, e2e-alpha — holds `e2e_statistics_publish` (`statistics.publish`) | `/o/e2e-alpha` — try `/o/e2e-alpha/admin/filings` by hand |
+| `founding.fixture@example.invalid` | **No person row and no organization at all** — the pre-designation state. Designate this address as an organization's founding administrator at `/admin/organizations/<id>` to exercise the `created_person` branch (a `people` row is created and linked live) | `/no-organization` before the designation; `/o/<slug>` for the newly-handed-over organization after it |
 
 `clerk.fixture` and `elder.fixture` are provisioned by `scripts/seed-dev.sql`
 (not the Playwright roster) and use the same shared fixture password below.
@@ -81,6 +82,12 @@ the support-tickets pipeline upgraded it to sign-in-capable, since Marguerite
 Ashcombe (the person it's linked to) is the one fixture person holding
 `tickets.file`, and there was no other way to walk the tickets/feedback
 surfaces through a real browser session as the person they were built for.
+
+`founding.fixture` is deliberately linked to no person: it is the only
+seeded account that can exercise the founding-administrator create-person branch
+(the other three are already linked and would resolve to existing_person).
+Designating it consumes it, so re-run `scripts/seed-dev.sql` on a fresh
+database before rehearsing the handoff again.
 
 `org1-org2` is the ruling elder who serves on a presbytery committee — one
 person, two organizations, which is how PC(USA) service actually works.

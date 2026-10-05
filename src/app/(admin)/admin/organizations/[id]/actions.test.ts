@@ -93,6 +93,18 @@ vi.mock("@/lib/sites", () => ({
     mockReplaceOrganizationServiceTimes(...args),
 }));
 
+// @/lib/founding-administrator — mocked wholesale, same principle as
+// @/lib/sites above: SQL/trigger correctness (the full result-variant
+// matrix) is proven by founding-administrator.test.ts against a real
+// Postgres connection. This file proves only designateFoundingAdministratorAction's
+// own layer — auth/feature gate, zod validation, the result -> copy switch,
+// and that recordAudit()/revalidatePath() fire exactly once, only on `ok`.
+const mockDesignateFoundingAdministrator = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/founding-administrator", () => ({
+  designateFoundingAdministrator: (...args: unknown[]) =>
+    mockDesignateFoundingAdministrator(...args),
+}));
+
 // A PRE-EXISTING circular import (org.ts -> schema.ts -> domain/index.ts ->
 // authz.ts -> org.ts) breaks when `@/lib/db/domain/org` is the FIRST module
 // in that cycle to load — authz.ts's top-level `organizationType(...)` call
@@ -114,6 +126,7 @@ import {
   setSiteStatusAction,
   setOrganizationProfileAction,
   setOrganizationServiceTimesAction,
+  designateFoundingAdministratorAction,
 } from "./actions";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { FEATURES } from "@/lib/permissions";
@@ -1072,5 +1085,174 @@ describe("setOrganizationServiceTimesAction — kind and rows parsing", () => {
     expect(result).toEqual({ ok: true });
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
     expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// designateFoundingAdministratorAction — docs/work-log/
+// 2026-09-28-founding-administrator.md, DECISION-155. designateFoundingAdministrator()
+// itself is mocked wholesale (see the top of this file) — its own SQL/
+// trigger-driven correctness is proven by founding-administrator.test.ts
+// against a real Postgres connection. This suite proves only this action's
+// own layer: auth/feature gate, zod email validation, the full result ->
+// copy switch, and that recordAudit()/revalidatePath() fire exactly once,
+// only on `ok`.
+// ---------------------------------------------------------------------------
+
+const VALID_EMAIL = "designee@example.invalid";
+
+describe("designateFoundingAdministratorAction — authorization", () => {
+  it("rejects an unauthenticated caller without calling designateFoundingAdministrator", async () => {
+    mockAuth.mockResolvedValue(null);
+    const result = await designateFoundingAdministratorAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in user lacking admin.organizations", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+    const result = await designateFoundingAdministratorAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+  });
+});
+
+describe("designateFoundingAdministratorAction — input validation", () => {
+  it("rejects an invalid organizationId without calling designateFoundingAdministrator", async () => {
+    const result = await designateFoundingAdministratorAction(
+      formData({ organizationId: "not-a-uuid", email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", ""],
+    ["not an email", "not-an-email"],
+    ["too long", `${"a".repeat(310)}@example.invalid`],
+  ])("rejects an invalid email (%s) without calling designateFoundingAdministrator", async (_label, email) => {
+    const result = await designateFoundingAdministratorAction(
+      formData({ organizationId: VALID_ORG, email }),
+    );
+    expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
+    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+  });
+
+  it("normalizes the email (trim + lowercase) before calling designateFoundingAdministrator", async () => {
+    mockDesignateFoundingAdministrator.mockResolvedValue({ kind: "no_such_user" });
+    await designateFoundingAdministratorAction(
+      formData({ organizationId: VALID_ORG, email: "  Designee@Example.INVALID  " }),
+    );
+    expect(mockDesignateFoundingAdministrator).toHaveBeenCalledWith(
+      VALID_ORG,
+      "designee@example.invalid",
+      "operator-1",
+    );
+  });
+});
+
+describe("designateFoundingAdministratorAction — result mapping", () => {
+  it.each([
+    [
+      "no_such_user",
+      { kind: "no_such_user" },
+      "No platform account exists for that email yet. Ask them to sign up first (they'll land on a page saying they have no organizations), then designate them here.",
+    ],
+    [
+      "user_inactive",
+      { kind: "user_inactive" },
+      "That account has been deactivated.",
+    ],
+    [
+      "person_elsewhere",
+      { kind: "person_elsewhere" },
+      "That account is already linked to a person at a different organization. Cross-organization transfers go through the certificate/transfer process, not this designation.",
+    ],
+    [
+      "membership_ended (a real date)",
+      { kind: "membership_ended", endedOn: "2020-06-15" },
+      "That person's relationship with this organization ended on 2020-06-15.",
+    ],
+    [
+      "membership_ended (unknown — the trigger backstop, no date available)",
+      { kind: "membership_ended", endedOn: "unknown" },
+      "That person's relationship with this organization has ended.",
+    ],
+    [
+      "has_holders",
+      { kind: "has_holders", holderCount: 1 },
+      "This organization already has someone who can manage roles — designation is only available while nobody does (including as a lockout recovery).",
+    ],
+    [
+      "provisioning_incomplete",
+      { kind: "provisioning_incomplete" },
+      "This organization is missing its baseline setup — contact an engineer before designating an administrator.",
+    ],
+    [
+      "race",
+      { kind: "race" },
+      "Someone just designated a founding administrator for this organization — refresh the page.",
+    ],
+    [
+      "db_error",
+      { kind: "db_error" },
+      "We couldn't complete that just now — try again in a moment.",
+    ],
+  ])("maps %s to a client-visible error, writes no audit row", async (_label, mockResult, expectedError) => {
+    mockDesignateFoundingAdministrator.mockResolvedValue(mockResult);
+    const result = await designateFoundingAdministratorAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: expectedError });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("on success, writes ORG_FOUNDING_ADMINISTRATOR_DESIGNATED with ids-only metadata and revalidates the admin page", async () => {
+    mockDesignateFoundingAdministrator.mockResolvedValue({
+      kind: "ok",
+      mode: "created_person",
+      personId: "person-1",
+      userId: "user-1",
+      administrationRoleId: "admin-role-1",
+      administrationRoleKey: "founding_administrator",
+      officeRoleId: "office-role-1",
+      officeRoleKey: "congregation_stated_clerk",
+      // F118 — staff.manage joins the administration half; included here so
+      // this mock reflects the real bundle shape the audit row records.
+      permissionKeys: ["people.manage", "staff.manage", "statistics.publish"],
+      priorHolderCount: 0,
+    });
+
+    const result = await designateFoundingAdministratorAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTIONS.ORG_FOUNDING_ADMINISTRATOR_DESIGNATED,
+        resourceType: "organization",
+        resourceId: VALID_ORG,
+        metadata: {
+          organizationId: VALID_ORG,
+          personId: "person-1",
+          userId: "user-1",
+          mode: "created_person",
+          officeRoleKey: "congregation_stated_clerk",
+          administrationRoleKey: "founding_administrator",
+          permissionKeys: ["people.manage", "staff.manage", "statistics.publish"],
+          priorHolderCount: 0,
+        },
+      }),
+    );
+    // Ids only — the designee's email is never logged in audit metadata.
+    const call = mockRecordAudit.mock.calls[0]?.[0];
+    expect(JSON.stringify(call)).not.toContain(VALID_EMAIL);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
   });
 });

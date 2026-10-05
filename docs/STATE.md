@@ -7,7 +7,17 @@ Updated 2026-10-05.
 
 ---
 
-## RESUME HERE — 2026-10-05: wave 5 integrating (founding administrator v0.29.0 and the hydration gate v0.30.0 merged; parent picker in Phase 4)
+## RESUME HERE — 2026-10-05: wave 5's three pipelines are merged (v0.29.0, v0.30.0, v0.31.0); nothing is in flight
+
+**All three wave-5 pipelines shipped on 2026-10-05, one PR at a time, each with a full six-phase run:** founding administrator **v0.29.0** (PR #23, DECISION-155 + F118 amendment, §2m F107–F112/F117–F118); the hydration gate **v0.30.0** (PR #24, DECISION-159, §2o F116/F121–F131 — every react-hook-form root is inoperable until hydrated, six tripwires, `npm run test:e2e:prod`); the parent council picker **v0.31.0** (PR #25, DECISION-158 — the relationship type is enforced server-side in `createOrganization()`). Every Phase 6 was SHIP WITH NOTES and every note is a `docs/TODO.md` line. **No worktrees, pipeline branches or pipeline Neon branches are open**; `development` carries no new migration (none of the three shipped one — `0054` is back in the pool) and `test-rls.sql` passes 639/0 there after each merge; the appended `founding.fixture` seed block is applied on `development`. **CI on `main` is green again** (the production-dependency audit had been red since 2026-09-28 on `fast-uri`/`dompurify`; fixed in PR #23 by a lockfile-only bump). GitHub-hosted runners were starved during this session — several jobs were cancelled at 15 minutes having run zero steps and passed on re-run; that is the runner pool, not the code (Rule 11).
+
+**What PSV onboarding now has, end to end:** a platform admin creates PSV (`/admin/organizations/new`), creates its congregations *under* it with the parent picker, designates PSV's founding administrator by email, and that person reaches Roles, Staff, Features, Tickets, oversight, credentials, per-capita, statistics and filings unaided. **What still gates go-live** (all in `docs/TODO.md` → "Blocking a flag flip / go-live"): the seven `org_portal.*` flags the handoff depends on are seeded OFF (`scripts/seed.ts`) — flip the defaults or write the onboarding-runbook step; the production migration runbook (production is still pre-`0043`); the owed what's-new posts at first enablement. A congregation's founding administrator still cannot enrol a roll member (F111/F118 permission ceiling) — blocks the first congregation, not PSV.
+
+**Next candidates** (the operator picks): the go-live flag sweep + production migration runbook (PSV); the F111 permission-ceiling pipeline (first congregation); F130 / the first-load JS budget on form routes (the ≈7 s disabled window on slow-3G); the F124 triage (pre-hydration picks on `useState` selects, incl. the new parent picker's submit); the invitation flow for a designee with no account; the overdue reviews — the release-slot pair (`test-coverage`, `retrospective`) is 47 days past its 14-day cadence and the three releases today make it due now; `downstream-sync` 96 days; `upstream-sync` never run.
+
+---
+
+### Earlier the same day — founding administrator v0.29.0 and the hydration gate v0.30.0 merged; parent picker in Phase 4
 
 **Hydration gate** (`pipeline/select-hydration`, F116) shipped as **v0.30.0** (DECISION-159; §2o F116, F121–F130; SHIP WITH NOTES — every note is a `docs/TODO.md` line). Every react-hook-form root is inoperable until hydrated; `npm run check` has six tripwires; `npm run test:e2e:prod` is the production-build lane (port 3800). The go-live cost: a form on slow-3G is visibly disabled ≈7 s (the JS download) and edit forms are blank until then (F130). Its Neon branch is deleted; its worktree removed.
 

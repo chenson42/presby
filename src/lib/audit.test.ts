@@ -192,6 +192,9 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   STATISTICS_GRANT_REVOKED: "tenant.statistics_grant.revoked",
   STATISTICS_GRANT_SUBMITTED: "tenant.statistics_grant.submitted",
   STATISTICS_RETURN_WITHDRAWN: "tenant.statistics_return.withdrawn",
+  // Founding administrator designation (2026-09-28, DECISION-155) — written
+  // from src/app/(admin)/admin/organizations/[id]/actions.ts
+  ORG_FOUNDING_ADMINISTRATOR_DESIGNATED: "org.founding_administrator.designated",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

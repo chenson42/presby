@@ -327,6 +327,20 @@ export const AUDIT_ACTIONS = {
   // write is review-verified, not tripwire-proven.
   STATISTICS_RETURN_WITHDRAWN: "tenant.statistics_return.withdrawn",
   // Metadata: { organizationId, recipientOrgId, aboutOrgId, reportYear, publicationId }.
+  // ---------------------------------------------------------------------------
+  // APPENDED — pipeline/founding-admin, 2026-09-28 (DECISION-155). Written
+  // from src/app/(admin)/admin/organizations/[id]/actions.ts's
+  // designateFoundingAdministratorAction(). Platform-actor axis (`org.*`),
+  // same precedent as ORG_CREATED/ORG_BRAND_SET: a platform act against a
+  // tenant carries that tenant's organizationId as resourceId. One key
+  // only — revocation rides the existing TENANT_ROLE_REVOKED path, since
+  // the founding grant is an ordinary role_grants row once minted. A
+  // REFUSED designation writes no audit row (it mutates nothing).
+  // Metadata: { organizationId, personId, userId, mode, officeRoleKey,
+  // administrationRoleKey, permissionKeys, priorHolderCount }. Ids only —
+  // never the designee's email.
+  ORG_FOUNDING_ADMINISTRATOR_DESIGNATED: "org.founding_administrator.designated",
+  // ---------------------------------------------------------------------------
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

@@ -67,6 +67,7 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 | `org2-ended@presby.invalid` | A relationship that **ended** 31 Mar 2026 | `/no-organization` |
 | `clerk.fixture@example.invalid` | Tobias Renwick at Alder Creek — holds `stated_clerk` (`role_grants.manage`, and — groups-and-officers, 2026-08-26 — `officers.manage`) | `/o/alder-creek` — try `/o/alder-creek/admin/roles` (`org_portal.roles` flag permitting) and `/o/alder-creek/admin/officers` (`org_portal.officers` flag permitting) by hand |
 | `elder.fixture@example.invalid` | Marguerite Ashcombe at Alder Creek — holds `support_contact` (`tickets.file`), support-tickets pipeline | `/o/alder-creek` — try `/o/alder-creek/tickets` and `/o/alder-creek/feedback` by hand, `org_portal.tickets` flag permitting |
+| `founding.fixture@example.invalid` | **No person row and no organization at all** — the pre-designation state. Designate this address as an organization's founding administrator at `/admin/organizations/<id>` to exercise the `created_person` branch (a `people` row is created and linked live) | `/no-organization` before the designation; `/o/<slug>` for the newly-handed-over organization after it |
 
 `clerk.fixture` and `elder.fixture` are provisioned by `scripts/seed-dev.sql`
 (not the Playwright roster) and use the same shared fixture password below.
@@ -78,6 +79,12 @@ the support-tickets pipeline upgraded it to sign-in-capable, since Marguerite
 Ashcombe (the person it's linked to) is the one fixture person holding
 `tickets.file`, and there was no other way to walk the tickets/feedback
 surfaces through a real browser session as the person they were built for.
+
+`founding.fixture` is deliberately linked to no person: it is the only
+seeded account that can exercise the founding-administrator create-person branch
+(the other three are already linked and would resolve to existing_person).
+Designating it consumes it, so re-run `scripts/seed-dev.sql` on a fresh
+database before rehearsing the handoff again.
 
 `org1-org2` is the ruling elder who serves on a presbytery committee — one
 person, two organizations, which is how PC(USA) service actually works.

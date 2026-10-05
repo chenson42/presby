@@ -12,8 +12,8 @@
  * collaborator on this page (brand, profile, sites, service times) is
  * mocked at its existing boundary — this file does not re-test them.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 
 vi.mock("server-only", () => ({}));
 
@@ -68,8 +68,14 @@ const foundingSectionSpy = vi.hoisted(() => vi.fn());
 vi.mock("./founding-administrator-section", () => ({
   FoundingAdministratorSection: (props: unknown) => {
     foundingSectionSpy(props);
-    return null;
+    return <div data-testid="founding-section" />;
   },
+}));
+
+const mockGetAffiliation = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/org-provisioning", () => ({
+  getOrganizationAffiliationAdminDetail: (...args: unknown[]) =>
+    mockGetAffiliation(...args),
 }));
 
 vi.mock("./brand-form", () => ({ BrandForm: () => null }));
@@ -100,8 +106,13 @@ import OrganizationBrandDetailPage from "./page";
 
 const ORG_ID = "e0000000-0000-0000-0000-000000000001";
 
+beforeEach(() => {
+  mockGetAffiliation.mockResolvedValue(null);
+});
+
 afterEach(() => {
   cleanup();
+  mockGetAffiliation.mockReset();
   mockAuth.mockReset();
   mockCountHolders.mockReset();
   mockPlan.mockReset();
@@ -179,5 +190,64 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
     expect(props.canDesignate).toBe(false);
     expect(props.currentHolderCount).toBe(2);
     expect(props.officeTemplateName).toBeNull();
+  });
+});
+
+describe("OrganizationBrandDetailPage — council affiliation section", () => {
+  function arrange() {
+    mockAuth.mockResolvedValue({
+      user: { features: [FEATURES.ADMIN_ORGANIZATIONS] },
+    });
+    orgRowRef.current = {
+      id: ORG_ID,
+      name: "Alder Creek Presbyterian Church",
+      organizationType: "congregation",
+      platformStatus: "managed",
+    };
+    mockCountHolders.mockResolvedValue(0);
+    mockPlan.mockReturnValue({
+      administration: { key: "founding_administrator", name: "x", permissionKeys: [] },
+      officeTemplateKey: null,
+    });
+  }
+
+  it("reads the affiliation for this organization id", async () => {
+    arrange();
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(mockGetAffiliation).toHaveBeenCalledWith(ORG_ID);
+  });
+
+  it("stacks founding-administrator section, then council affiliation, then current brand", async () => {
+    arrange();
+    mockGetAffiliation.mockResolvedValue({
+      relationshipType: "member_congregation",
+      effectiveFrom: "2026-05-14",
+      authority: "backfill",
+      minuteReference: null,
+      parent: {
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "Presbytery Alpha",
+        slug: "alpha",
+        organizationType: "presbytery",
+      },
+    });
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+
+    const founding = screen.getByTestId("founding-section");
+    const affiliationHeading = screen.getByText("Council affiliation");
+    const brandHeading = screen.getByText("Current brand");
+    const follows = (a: Node, b: Node) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(founding, affiliationHeading)).toBe(true);
+    expect(follows(affiliationHeading, brandHeading)).toBe(true);
+    expect(screen.getByRole("link", { name: "Presbytery Alpha" })).toBeTruthy();
+  });
+
+  it("a headless organization still renders the section with the headless copy", async () => {
+    arrange();
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(
+      screen.getByText("This organization has no recorded parent council."),
+    ).toBeTruthy();
   });
 });

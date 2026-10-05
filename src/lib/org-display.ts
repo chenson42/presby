@@ -1,4 +1,5 @@
 import type { OrganizationType } from "@/lib/authz";
+import type { RelationshipType } from "@/lib/db/domain/lifecycle";
 
 /**
  * Display labels for the five organization types.
@@ -33,3 +34,35 @@ const LABELS: Record<OrganizationType, string> = {
 export function organizationTypeLabel(type: OrganizationType | string): string {
   return LABELS[type as OrganizationType] ?? type;
 }
+
+const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
+  member_congregation: "Member congregation",
+  member_nwc: "Member new worshiping community",
+  member_presbytery: "Member presbytery",
+  member_synod: "Member synod",
+};
+
+/**
+ * A human label for an affiliation's relationship type. One place, for the
+ * same reason as `organizationTypeLabel()`; falls back to the raw value.
+ */
+export function relationshipTypeLabel(type: RelationshipType | string): string {
+  return RELATIONSHIP_LABELS[type as RelationshipType] ?? type;
+}
+
+/**
+ * The one relationship type a child of each organization type is recorded
+ * under when it joins a parent council (drizzle/0044's `relationship_type`
+ * enum). Shared by the create form (which derives the hidden field from it)
+ * and `createOrganization()` (which refuses any other value): one table, so
+ * the courtesy filter and the enforcement boundary cannot drift. A
+ * `general_assembly` is absent — nothing is ever its parent.
+ */
+export const RELATIONSHIP_BY_CHILD_TYPE: Partial<
+  Record<OrganizationType, RelationshipType>
+> = {
+  congregation: "member_congregation",
+  new_worshiping_community: "member_nwc",
+  presbytery: "member_presbytery",
+  synod: "member_synod",
+};

@@ -35,3 +35,16 @@ describe("organizationTypeLabel", () => {
     expect(organizationTypeLabel("mid_council")).toBe("mid_council");
   });
 });
+
+describe("RELATIONSHIP_BY_CHILD_TYPE", () => {
+  it("pairs each child type with its canonical relationship, and gives general_assembly none", async () => {
+    const { RELATIONSHIP_BY_CHILD_TYPE } = await import("./org-display");
+    expect(RELATIONSHIP_BY_CHILD_TYPE).toEqual({
+      congregation: "member_congregation",
+      new_worshiping_community: "member_nwc",
+      presbytery: "member_presbytery",
+      synod: "member_synod",
+    });
+    expect(RELATIONSHIP_BY_CHILD_TYPE.general_assembly).toBeUndefined();
+  });
+});

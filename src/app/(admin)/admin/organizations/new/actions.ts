@@ -82,7 +82,9 @@ const RESERVED_SLUG_ERROR =
   "That slug is reserved for platform use — choose another.";
 
 /**
- * FormData fields: `name`, `slug`, `organizationType`, `platformStatus`.
+ * FormData fields: `name`, `slug`, `organizationType`, `platformStatus`, and
+ * optionally `parentOrganizationId`, `relationshipType` (derived by the form
+ * from RELATIONSHIP_BY_CHILD_TYPE) and `minuteReference`.
  */
 export async function createOrganizationAction(
   formData: FormData,
@@ -128,11 +130,12 @@ export async function createOrganizationAction(
     return { ok: false, error: RESERVED_SLUG_ERROR };
   }
 
-  // Optional hierarchical provisioning (DECISION-136). NO form control ships
-  // in this pipeline — the create form still offers root orgs only — but the
-  // fields are parsed here so the lifecycle-UI pipeline adds a <select>, not
-  // a whole second write path. Absent fields leave behavior byte-identical
-  // to before.
+  // Optional hierarchical provisioning (DECISION-136). The create form's
+  // parent <select> (2026-09-28-organization-parent-picker, v0.31.0) posts
+  // `parentOrganizationId` and a hidden `relationshipType` derived from
+  // RELATIONSHIP_BY_CHILD_TYPE; `createOrganization()` re-checks that pairing
+  // server-side (DECISION-158), so this action only shape-validates. Absent
+  // fields create a root organization, byte-identical to before.
   const parentRaw = String(formData.get("parentOrganizationId") ?? "").trim();
   const relationshipRaw = String(formData.get("relationshipType") ?? "").trim();
   const minuteRaw = String(formData.get("minuteReference") ?? "").trim();
@@ -192,6 +195,14 @@ export async function createOrganizationAction(
         ok: false,
         error:
           "That parent organization can't receive this one — a presbytery receives congregations and new worshiping communities, a synod receives presbyteries, and the General Assembly receives synods.",
+      };
+    case "relationship_mismatch":
+      // Reachable only by a hand-built POST: the form derives the
+      // relationship from the organization type.
+      return {
+        ok: false,
+        error:
+          "That relationship doesn't fit this organization type — choose the parent again and the relationship is set for you.",
       };
     case "invalid_input":
       // Defense-in-depth only; the validation above should catch everything

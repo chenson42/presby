@@ -116,6 +116,68 @@ test.describe("Admin — create organization (leaves no residue)", () => {
     }
   });
 
+  test("admin creates a congregation under e2e-presbytery and the Council affiliation section names it", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const slug = `e2e-org-create-child-${stamp}`;
+    const name = `E2E Fixture Child Congregation ${stamp}`;
+    const sql = platformSql();
+
+    try {
+      await page.goto("/admin/organizations/new");
+      await expect(
+        page.getByRole("heading", { name: "New organization" }),
+      ).toBeVisible({ timeout: 10_000 });
+
+      await page.locator("#name").fill(name);
+      await page.locator("#slug").fill(slug);
+      // congregation is the default type: the parent list is presbyteries only.
+      const parent = page.locator("#parentOrganizationChoice");
+      await expect(
+        parent.locator("option", { hasText: "Synod of the Coastal Plain" }),
+      ).toHaveCount(0);
+      await parent.selectOption({ label: "Presbytery of the Eastern Fells" });
+      await page.locator("#minuteReference").fill("E2E minute 2026-10, item 1");
+
+      await page.getByRole("button", { name: "Create organization" }).click();
+
+      await expect(page).toHaveURL(/\/admin\/organizations\/[0-9a-f-]{36}$/, {
+        timeout: 15_000,
+      });
+      await expect(page.getByRole("heading", { name })).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(
+        page.getByRole("heading", { name: "Council affiliation" }),
+      ).toBeVisible();
+      const parentLink = page.getByRole("link", {
+        name: "Presbytery of the Eastern Fells",
+      });
+      await expect(parentLink).toBeVisible();
+      await expect(parentLink).toHaveAttribute(
+        "href",
+        /\/admin\/organizations\/e2e00000-0000-0000-0000-000000000001$/,
+      );
+      await expect(page.getByText("Member congregation")).toBeVisible();
+      await expect(page.getByText("E2E minute 2026-10, item 1")).toBeVisible();
+
+      const rows = (await sql`
+        select a.relationship_type, a.authority, a.minute_reference, a.effective_to
+          from organization_affiliations a
+          join organizations o on o.id = a.subject_org_id
+         where o.slug = ${slug}
+      `) as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].relationship_type).toBe("member_congregation");
+      expect(rows[0].authority).toBe("recorded");
+      expect(rows[0].effective_to).toBeNull();
+    } finally {
+      // organization_affiliations.subject_org_id cascades on delete.
+      await deleteOrgBySlug(sql, slug);
+    }
+  });
+
   test("a duplicate slug shows the inline 'already taken' error and does not navigate away", async ({
     page,
   }) => {
@@ -189,6 +251,13 @@ test.describe("Admin — create organization at 360px", () => {
     ).toBeVisible();
     await expect(page.locator("#organizationType")).toBeVisible();
     await expect(page.locator("#platformStatus")).toBeVisible();
+    // Parent picker (org-parent-picker): the select, and — once a parent is
+    // chosen — the minute reference input, must both fit at 360px.
+    await expect(page.locator("#parentOrganizationChoice")).toBeVisible();
+    await page
+      .locator("#parentOrganizationChoice")
+      .selectOption({ label: "Presbytery of the Eastern Fells" });
+    await expect(page.locator("#minuteReference")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Create organization" }),
     ).toBeVisible();

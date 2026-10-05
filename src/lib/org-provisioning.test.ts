@@ -31,6 +31,7 @@ describe.skipIf(!hasDb)(
   () => {
     let deriveOrgPath: typeof import("./org-provisioning").deriveOrgPath;
     let createOrganization: typeof import("./org-provisioning").createOrganization;
+    let getOrganizationAffiliationAdminDetail: typeof import("./org-provisioning").getOrganizationAffiliationAdminDetail;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
@@ -68,9 +69,11 @@ describe.skipIf(!hasDb)(
     }
 
     beforeAll(async () => {
-      ({ deriveOrgPath, createOrganization } = await import(
-        "./org-provisioning"
-      ));
+      ({
+        deriveOrgPath,
+        createOrganization,
+        getOrganizationAffiliationAdminDetail,
+      } = await import("./org-provisioning"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
@@ -564,6 +567,97 @@ describe.skipIf(!hasDb)(
         expect(leftovers).toHaveLength(0);
       });
 
+      describe("relationship type must fit the (parent, child) pair — regression for probe (d)/(d2)", () => {
+        async function presbyteryParent(tag: string): Promise<string> {
+          const parent = await createOrganization({
+            name: `Fixture Presbytery ${tag}`,
+            slug: `org-prov-test-relp-${tag.replace("_", "-")}-${stamp}`,
+            organizationType: "presbytery",
+            platformStatus: "managed",
+          });
+          expect(parent.kind).toBe("ok");
+          if (parent.kind !== "ok") throw new Error("parent not created");
+          createdOrgIds.push(parent.organizationId);
+          return parent.organizationId;
+        }
+
+        async function countRowsFor(slug: string): Promise<{
+          orgs: number;
+          affiliations: number;
+        }> {
+          const platform = getPlatformDb();
+          const orgRows = await platform
+            .select({ id: organizations.id })
+            .from(organizations)
+            .where(eq(organizations.slug, slug));
+          let affiliations = 0;
+          for (const o of orgRows) {
+            const rows = await platform
+              .select({ id: organizationAffiliations.id })
+              .from(organizationAffiliations)
+              .where(eq(organizationAffiliations.subjectOrgId, o.id));
+            affiliations += rows.length;
+          }
+          return { orgs: orgRows.length, affiliations };
+        }
+
+        it.each(["member_synod", "member_nwc", "member_presbytery"] as const)(
+          "refuses a congregation under a presbytery recorded as %s, writing no organizations or organization_affiliations row",
+          async (wrong) => {
+            const parentId = await presbyteryParent(wrong);
+            const slug = `org-prov-test-relbad-${wrong.replace("_", "-")}-${stamp}`;
+            const result = await createOrganization({
+              name: "Should Never Be Created",
+              slug,
+              organizationType: "congregation",
+              platformStatus: "managed",
+              parentOrganizationId: parentId,
+              relationshipType: wrong,
+              recordedByUserId: await anyUserId(),
+            });
+            expect(result).toEqual({ kind: "relationship_mismatch" });
+            expect(await countRowsFor(slug)).toEqual({
+              orgs: 0,
+              affiliations: 0,
+            });
+          },
+        );
+
+        it("still accepts the canonical pair (congregation under a presbytery as member_congregation)", async () => {
+          const parentId = await presbyteryParent("canon");
+          const slug = `org-prov-test-relok-${stamp}`;
+          const result = await createOrganization({
+            name: "Fixture Canonical Congregation",
+            slug,
+            organizationType: "congregation",
+            platformStatus: "managed",
+            parentOrganizationId: parentId,
+            relationshipType: "member_congregation",
+            recordedByUserId: await anyUserId(),
+          });
+          expect(result.kind).toBe("ok");
+          if (result.kind !== "ok") return;
+          createdOrgIds.push(result.organizationId);
+          expect(await countRowsFor(slug)).toEqual({ orgs: 1, affiliations: 1 });
+        });
+
+        it("refuses a general_assembly with a parent (invalid_parent), writing no row", async () => {
+          const parentId = await presbyteryParent("ga");
+          const slug = `org-prov-test-relga-${stamp}`;
+          const result = await createOrganization({
+            name: "Should Never Be Created",
+            slug,
+            organizationType: "general_assembly",
+            platformStatus: "managed",
+            parentOrganizationId: parentId,
+            relationshipType: "member_synod",
+            recordedByUserId: await anyUserId(),
+          });
+          expect(result).toEqual({ kind: "invalid_parent" });
+          expect(await countRowsFor(slug)).toEqual({ orgs: 0, affiliations: 0 });
+        });
+      });
+
       it("refuses a parent with no relationship type rather than writing a half-recorded affiliation", async () => {
         const result = await createOrganization({
           name: "Should Never Be Created",
@@ -754,6 +848,107 @@ describe.skipIf(!hasDb)(
           .where(eq(organizations.slug, "admin"))
           .limit(1);
         expect(after).toHaveLength(0);
+      });
+    });
+
+    // -------------------------------------------------------------------
+    // getOrganizationAffiliationAdminDetail() — the [id] page's read
+    // -------------------------------------------------------------------
+
+    describe("getOrganizationAffiliationAdminDetail", () => {
+      it("returns the open row and the parent's identity for an org created under a parent", async () => {
+        const parent = await createOrganization({
+          name: "Fixture Detail Parent Presbytery",
+          slug: `org-prov-test-detail-parent-${stamp}`,
+          organizationType: "presbytery",
+          // `invited` on purpose: such a parent stays eligible and readable.
+          platformStatus: "invited",
+        });
+        expect(parent.kind).toBe("ok");
+        if (parent.kind !== "ok") return;
+        createdOrgIds.push(parent.organizationId);
+
+        const child = await createOrganization({
+          name: "Fixture Detail Child Congregation",
+          slug: `org-prov-test-detail-child-${stamp}`,
+          organizationType: "congregation",
+          platformStatus: "managed",
+          parentOrganizationId: parent.organizationId,
+          relationshipType: "member_congregation",
+          effectiveFrom: new Date("2026-04-02T12:00:00Z"),
+          minuteReference: "Stated meeting, 2026-04-02, item 3",
+          recordedByUserId: await anyUserId(),
+        });
+        expect(child.kind).toBe("ok");
+        if (child.kind !== "ok") return;
+        createdOrgIds.push(child.organizationId);
+
+        const detail = await getOrganizationAffiliationAdminDetail(
+          child.organizationId,
+        );
+        expect(detail).toEqual({
+          relationshipType: "member_congregation",
+          effectiveFrom: "2026-04-02",
+          authority: "recorded",
+          minuteReference: "Stated meeting, 2026-04-02, item 3",
+          parent: {
+            id: parent.organizationId,
+            name: "Fixture Detail Parent Presbytery",
+            slug: `org-prov-test-detail-parent-${stamp}`,
+            organizationType: "presbytery",
+          },
+        });
+      });
+
+      it("reports a backfill row (no minute) as authority 'backfill'", async () => {
+        const parent = await createOrganization({
+          name: "Fixture Backfill Parent Presbytery",
+          slug: `org-prov-test-bf-parent-${stamp}`,
+          organizationType: "presbytery",
+          platformStatus: "managed",
+        });
+        if (parent.kind !== "ok") throw new Error("parent create failed");
+        createdOrgIds.push(parent.organizationId);
+        const child = await createOrganization({
+          name: "Fixture Backfill Child NWC",
+          slug: `org-prov-test-bf-child-${stamp}`,
+          organizationType: "new_worshiping_community",
+          platformStatus: "managed",
+          parentOrganizationId: parent.organizationId,
+          relationshipType: "member_nwc",
+          recordedByUserId: await anyUserId(),
+        });
+        if (child.kind !== "ok") throw new Error("child create failed");
+        createdOrgIds.push(child.organizationId);
+
+        const detail = await getOrganizationAffiliationAdminDetail(
+          child.organizationId,
+        );
+        expect(detail?.authority).toBe("backfill");
+        expect(detail?.minuteReference).toBeNull();
+        expect(detail?.relationshipType).toBe("member_nwc");
+      });
+
+      it("returns null for a headless (root) organization", async () => {
+        const root = await createOrganization({
+          name: "Fixture Headless Presbytery",
+          slug: `org-prov-test-headless-${stamp}`,
+          organizationType: "presbytery",
+          platformStatus: "managed",
+        });
+        if (root.kind !== "ok") throw new Error("root create failed");
+        createdOrgIds.push(root.organizationId);
+        expect(
+          await getOrganizationAffiliationAdminDetail(root.organizationId),
+        ).toBeNull();
+      });
+
+      it("returns null for an id that does not exist", async () => {
+        expect(
+          await getOrganizationAffiliationAdminDetail(
+            "00000000-0000-4000-8000-0000000000fe",
+          ),
+        ).toBeNull();
       });
     });
   },

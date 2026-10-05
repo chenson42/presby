@@ -4,6 +4,14 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-157 — e2e specs mutate only Playwright-owned fixtures.**
+
+An end-to-end spec may **read** any seeded row. It may **create, mutate or delete** only rows it created itself or rows in the Playwright-owned namespace: organization slugs prefixed `e2e-`, user emails at `@presby.invalid`, SASR report years in the reserved 2090–2099 band, and `app_roles` keyed `e2e_*`. Mutation helpers in `e2e/support/` enforce this with an assert-and-throw guard in the shape of `seed-orgs.ts`'s `assertFixtureShape()` — the rule is a guard, not a comment, because the failure it prevents has already happened once. A manual browser rehearsal counts as a spec for this purpose: it consumes the same single-use rows. `scripts/seed-dev.sql` is shaped to exercise specific findings (`scripts/test-rls.sql` asserts against Alder Creek's single publication by id), so a spec that writes to it damages the isolation suite, not merely itself. One documented exception exists — `public-sites.spec.ts`, which mutates Alder Creek's `organization_sites` because `elder.fixture` is the only sign-in-capable `tickets.file` holder — carried with a migration follow-up, not treated as precedent.
+
+(2026-09-28, adopted at Phase 6; `docs/work-log/2026-09-28-presbytery-e2e.md`.)
+
+---
+
 **DECISION-154: every anonymous read on the public-site render path
 (`(public)/site/[slug]`) fails closed to the identical generic `not_found`
 response — no exceptions, no per-read judgment call.** `getPublishedSite()`,

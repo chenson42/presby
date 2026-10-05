@@ -47,6 +47,7 @@ import { neon } from "@neondatabase/serverless";
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { storageStatePath } from "./support/users";
 import { E2E_ORGS } from "./support/seed-orgs";
+import { getFlag, setFlag } from "./support/flags";
 
 type Sql = ReturnType<typeof neon<false, false>>;
 
@@ -64,20 +65,6 @@ const REVOKED_REPORT_YEAR = 2093;
 
 function sha256Hex(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
-}
-
-async function getFlag(sql: Sql, key: string): Promise<boolean> {
-  const rows = (await sql`
-    select enabled from feature_flags where key = ${key}
-  `) as { enabled: boolean }[];
-  if (rows.length === 0) {
-    throw new Error(`[statistics-submit.spec] no feature_flags row for "${key}"`);
-  }
-  return rows[0].enabled;
-}
-
-async function setFlag(sql: Sql, key: string, enabled: boolean): Promise<void> {
-  await sql`update feature_flags set enabled = ${enabled} where key = ${key}`;
 }
 
 /** Reads the queued email row directly — the queue TABLE, not a mailbox — and

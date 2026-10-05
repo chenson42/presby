@@ -67,6 +67,9 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 | `org2-ended@presby.invalid` | A relationship that **ended** 31 Mar 2026 | `/no-organization` |
 | `clerk.fixture@example.invalid` | Tobias Renwick at Alder Creek — holds `stated_clerk` (`role_grants.manage`, and — groups-and-officers, 2026-08-26 — `officers.manage`) | `/o/alder-creek` — try `/o/alder-creek/admin/roles` (`org_portal.roles` flag permitting) and `/o/alder-creek/admin/officers` (`org_portal.officers` flag permitting) by hand |
 | `elder.fixture@example.invalid` | Marguerite Ashcombe at Alder Creek — holds `support_contact` (`tickets.file`), support-tickets pipeline | `/o/alder-creek` — try `/o/alder-creek/tickets` and `/o/alder-creek/feedback` by hand, `org_portal.tickets` flag permitting |
+| `presbytery-clerk@presby.invalid` | Perpetua Winlock, e2e-presbytery — holds `e2e_presbytery_clerk` (`congregation_oversight.manage`, `per_capita.manage`, `credentials.manage`, `statistics.manage`) | `/o/e2e-presbytery` — try `/o/e2e-presbytery/admin/oversight`, `/admin/reports`, `/admin/credentials` by hand |
+| `presbytery-nogrant@presby.invalid` | Cassius Brightwell, e2e-presbytery — a relationship with NO grant, the "state 3" denial fixture for oversight/reports/credentials at once | `/o/e2e-presbytery` |
+| `congregation-clerk@presby.invalid` | Ottoline Fairweather, e2e-alpha — holds `e2e_statistics_publish` (`statistics.publish`) | `/o/e2e-alpha` — try `/o/e2e-alpha/admin/filings` by hand |
 | `founding.fixture@example.invalid` | **No person row and no organization at all** — the pre-designation state. Designate this address as an organization's founding administrator at `/admin/organizations/<id>` to exercise the `created_person` branch (a `people` row is created and linked live) | `/no-organization` before the designation; `/o/<slug>` for the newly-handed-over organization after it |
 
 `clerk.fixture` and `elder.fixture` are provisioned by `scripts/seed-dev.sql`
@@ -118,6 +121,16 @@ tenant.
 
 **Nothing is inside an organization yet.** `/o/<slug>` is a deliberate landing
 stub: P0 built the routing, P1 builds the portal.
+
+**DECISION-157** governs which fixtures an e2e spec may mutate: any seeded
+row may be READ, but only Playwright-owned rows (`e2e-*` slugs,
+`@presby.invalid` emails, SASR report years 2090–2099, `app_roles` keyed
+`e2e_*`) may be created, mutated, or deleted. `scripts/seed-dev.sql`'s own
+fixtures (Alder Creek, Northern Reach, etc.) are shaped to exercise specific
+findings and `scripts/test-rls.sql` assertions — mutating them from a spec
+has broken the isolation suite once already. The one documented exception is
+`public-sites.spec.ts`, tracked as a migration follow-up in `docs/TODO.md`,
+not treated as precedent.
 
 ---
 

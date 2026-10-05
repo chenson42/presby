@@ -23,6 +23,7 @@ next-env.d.ts
 # Test output
 coverage/
 /test-results/
+/test-results-prod/
 playwright-report/
 
 # Playwright storageState — contains live session cookies; never commit

@@ -15,9 +15,10 @@ import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-
 import type { PersonForEdit, UpdatePersonInput } from "@/lib/people";
 import { editPersonSchema, type EditPersonValues } from "./edit-person-schema";
 import { updatePersonAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 function initialHouseholdMode(
   person: PersonForEdit,
@@ -135,129 +136,131 @@ export function EditPersonForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-      <div className="space-y-4">
-        <h2 className="text-lg font-medium">Name</h2>
-        <TextField id="firstName" label="First name" register={register} name="identity.firstName" error={errors.identity?.firstName?.message} required />
-        <TextField id="lastName" label="Last name" register={register} name="identity.lastName" error={errors.identity?.lastName?.message} required />
-        <TextField id="middleName" label="Middle name (optional)" register={register} name="identity.middleName" />
-        <TextField id="preferredName" label="Preferred name (optional)" register={register} name="identity.preferredName" />
-        <TextField id="suffix" label="Suffix (optional)" register={register} name="identity.suffix" />
-      </div>
-
-      <div className="space-y-4">
-        <h2 className="text-lg font-medium">Contact & address</h2>
-        <TextField id="email" label="Email (optional)" type="email" register={register} name="contact.email" />
-        <TextField id="phone" label="Phone (optional)" type="tel" register={register} name="contact.phone" />
-        <TextField id="line1" label="Address (optional)" register={register} name="address.line1" />
-        <TextField id="city" label="City" register={register} name="address.city" />
-        <TextField id="region" label="State" register={register} name="address.region" />
-        <TextField id="postalCode" label="ZIP code" register={register} name="address.postalCode" />
-      </div>
-
-      <fieldset className="space-y-2">
-        <legend className="text-lg font-medium">Household</legend>
-        <div className="flex flex-col gap-2">
-          <label className="inline-flex min-h-11 items-center gap-2 text-sm">
-            <input
-              type="radio"
-              value="none"
-              {...register("household.mode")}
-              className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            />
-            No household
-          </label>
-          <label className="inline-flex min-h-11 items-center gap-2 text-sm">
-            <input
-              type="radio"
-              value="existing"
-              {...register("household.mode")}
-              className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              disabled={households.length === 0}
-            />
-            Add to an existing household
-          </label>
-          <label className="inline-flex min-h-11 items-center gap-2 text-sm">
-            <input
-              type="radio"
-              value="new"
-              {...register("household.mode")}
-              className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            />
-            Create a new household
-          </label>
+    <HydrationGate>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <div className="space-y-4">
+          <h2 className="text-lg font-medium">Name</h2>
+          <TextField id="firstName" label="First name" register={register} name="identity.firstName" error={errors.identity?.firstName?.message} required />
+          <TextField id="lastName" label="Last name" register={register} name="identity.lastName" error={errors.identity?.lastName?.message} required />
+          <TextField id="middleName" label="Middle name (optional)" register={register} name="identity.middleName" />
+          <TextField id="preferredName" label="Preferred name (optional)" register={register} name="identity.preferredName" />
+          <TextField id="suffix" label="Suffix (optional)" register={register} name="identity.suffix" />
         </div>
-      </fieldset>
 
-      {householdMode === "existing" &&
-        (households.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No households exist yet. Choose &quot;Create a new household&quot; instead.
-          </p>
-        ) : (
-          <div>
-            <Label htmlFor="edit-person-household-id">
-              Household
-              <RequiredMark />
-            </Label>
-            <div className="relative mt-1">
-              <select
-                id="edit-person-household-id"
-                className={SELECT_CLASSES}
-                aria-required="true"
-                {...register("household.householdId")}
-              >
-                <option value="">Choose a household…</option>
-                {households.map((h) => (
-                  <option key={h.householdId} value={h.householdId}>
-                    {h.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
+        <div className="space-y-4">
+          <h2 className="text-lg font-medium">Contact & address</h2>
+          <TextField id="email" label="Email (optional)" type="email" register={register} name="contact.email" />
+          <TextField id="phone" label="Phone (optional)" type="tel" register={register} name="contact.phone" />
+          <TextField id="line1" label="Address (optional)" register={register} name="address.line1" />
+          <TextField id="city" label="City" register={register} name="address.city" />
+          <TextField id="region" label="State" register={register} name="address.region" />
+          <TextField id="postalCode" label="ZIP code" register={register} name="address.postalCode" />
+        </div>
+
+        <fieldset className="space-y-2">
+          <legend className="text-lg font-medium">Household</legend>
+          <div className="flex flex-col gap-2">
+            <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+              <input
+                type="radio"
+                value="none"
+                {...register("household.mode")}
+                className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               />
-            </div>
-            {errors.household?.householdId && (
-              <p className="mt-1 text-sm text-destructive">
-                {errors.household.householdId.message}
-              </p>
-            )}
+              No household
+            </label>
+            <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+              <input
+                type="radio"
+                value="existing"
+                {...register("household.mode")}
+                className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                disabled={households.length === 0}
+              />
+              Add to an existing household
+            </label>
+            <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+              <input
+                type="radio"
+                value="new"
+                {...register("household.mode")}
+                className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              />
+              Create a new household
+            </label>
           </div>
-        ))}
+        </fieldset>
 
-      {householdMode === "new" && (
-        <TextField
-          id="householdName"
-          label="Household name"
-          register={register}
-          name="household.name"
-          error={errors.household?.name?.message}
-          required
+        {householdMode === "existing" &&
+          (households.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No households exist yet. Choose &quot;Create a new household&quot; instead.
+            </p>
+          ) : (
+            <div>
+              <Label htmlFor="edit-person-household-id">
+                Household
+                <RequiredMark />
+              </Label>
+              <div className="relative mt-1">
+                <select
+                  id="edit-person-household-id"
+                  className={SELECT_CLASSES}
+                  aria-required="true"
+                  {...register("household.householdId")}
+                >
+                  <option value="">Choose a household…</option>
+                  {households.map((h) => (
+                    <option key={h.householdId} value={h.householdId}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden
+                />
+              </div>
+              {errors.household?.householdId && (
+                <p className="mt-1 text-sm text-destructive">
+                  {errors.household.householdId.message}
+                </p>
+              )}
+            </div>
+          ))}
+
+        {householdMode === "new" && (
+          <TextField
+            id="householdName"
+            label="Household name"
+            register={register}
+            name="household.name"
+            error={errors.household?.name?.message}
+            required
+          />
+        )}
+
+        <div className="flex items-center gap-3 pt-2">
+          <Button type="submit" disabled={submitting} className="min-h-[44px] min-w-[44px]">
+            {submitting ? "Saving…" : "Save"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={submitting}
+            className="min-h-[44px] min-w-[44px]"
+            onClick={() => guardedNavigate(`/o/${slug}/admin/members`)}
+          >
+            Cancel
+          </Button>
+        </div>
+        <UnsavedChangesDialog
+          open={discardOpen}
+          onOpenChange={setDiscardOpen}
+          onConfirmDiscard={confirmDiscard}
         />
-      )}
-
-      <div className="flex items-center gap-3 pt-2">
-        <Button type="submit" disabled={submitting} className="min-h-[44px] min-w-[44px]">
-          {submitting ? "Saving…" : "Save"}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting}
-          className="min-h-[44px] min-w-[44px]"
-          onClick={() => guardedNavigate(`/o/${slug}/admin/members`)}
-        >
-          Cancel
-        </Button>
-      </div>
-      <UnsavedChangesDialog
-        open={discardOpen}
-        onOpenChange={setDiscardOpen}
-        onConfirmDiscard={confirmDiscard}
-      />
-    </form>
+      </form>
+    </HydrationGate>
   );
 }
 

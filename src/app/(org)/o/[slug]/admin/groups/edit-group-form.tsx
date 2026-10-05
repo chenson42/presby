@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import type { UpdateGroupInput } from "@/lib/groups";
 import { editGroupSchema, type EditGroupFormValues } from "./group-schema";
 import { updateGroupAction } from "./actions";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 
 /**
  * Edits an existing managed group's name/description/meeting schedule —
@@ -72,48 +73,50 @@ export function EditGroupForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <Label htmlFor="edit-group-name">Name</Label>
-        <Input
-          id="edit-group-name"
-          type="text"
-          className="mt-1"
-          aria-invalid={errors.name ? "true" : undefined}
-          {...register("name")}
-        />
-        {errors.name && (
-          <p className="mt-1 text-sm text-destructive">
-            {errors.name.message}
-          </p>
-        )}
-      </div>
+    <HydrationGate>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <div>
+          <Label htmlFor="edit-group-name">Name</Label>
+          <Input
+            id="edit-group-name"
+            type="text"
+            className="mt-1"
+            aria-invalid={errors.name ? "true" : undefined}
+            {...register("name")}
+          />
+          {errors.name && (
+            <p className="mt-1 text-sm text-destructive">
+              {errors.name.message}
+            </p>
+          )}
+        </div>
 
-      <div>
-        <Label htmlFor="edit-group-description">Description (optional)</Label>
-        <Input
-          id="edit-group-description"
-          type="text"
-          className="mt-1"
-          {...register("description")}
-        />
-      </div>
+        <div>
+          <Label htmlFor="edit-group-description">Description (optional)</Label>
+          <Input
+            id="edit-group-description"
+            type="text"
+            className="mt-1"
+            {...register("description")}
+          />
+        </div>
 
-      <div>
-        <Label htmlFor="edit-group-meets-when">
-          When does it meet? (optional)
-        </Label>
-        <Input
-          id="edit-group-meets-when"
-          type="text"
-          className="mt-1"
-          {...register("meetsWhen")}
-        />
-      </div>
+        <div>
+          <Label htmlFor="edit-group-meets-when">
+            When does it meet? (optional)
+          </Label>
+          <Input
+            id="edit-group-meets-when"
+            type="text"
+            className="mt-1"
+            {...register("meetsWhen")}
+          />
+        </div>
 
-      <Button type="submit" disabled={submitting} className="min-h-11">
-        {submitting ? "Saving…" : "Save changes"}
-      </Button>
-    </form>
+        <Button type="submit" disabled={submitting} className="min-h-11">
+          {submitting ? "Saving…" : "Save changes"}
+        </Button>
+      </form>
+    </HydrationGate>
   );
 }

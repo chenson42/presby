@@ -22,6 +22,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 
 const mockSetCongregationStatisticsAction = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
@@ -147,5 +148,15 @@ describe("StatisticsForm — the stuck-button bug (Root Cause / Phase 3 Design (
     expect(toastError).toHaveBeenCalledWith(
       "We couldn't save this right now. Try again in a moment.",
     );
+  });
+});
+
+describe("StatisticsForm — HydrationGate wiring (DECISION-159, F116)", () => {
+  it("the server render is a disabled, busy fieldset around the form", () => {
+    const html = renderToString(
+      <StatisticsForm slug="northern-reach" year={2024} congregations={[CONGREGATION_WITH_WINDOW]} />,
+    );
+    expect(html).toContain('<fieldset disabled=""');
+    expect(html).toContain('aria-busy="true"');
   });
 });

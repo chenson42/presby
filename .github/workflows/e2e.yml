@@ -63,7 +63,7 @@ jobs:
     needs: check-secrets
     if: needs.check-secrets.outputs.has-neon == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 
@@ -142,12 +142,32 @@ jobs:
         env:
           CI: "true"
 
+      # DECISION-159: the pre-hydration regression again, against a production
+      # build (next build && next start, port 3800, never a reused server).
+      # Same ephemeral Neon branch -- the spec mints its own fixture rows, so a
+      # second branch buys nothing. `!cancelled()`, not `always()`: still runs
+      # when the dev-server lane above failed (the two lanes are independent
+      # evidence), but a cancelled run (concurrency group) stops. Traces go to
+      # test-results-prod/ so this lane cannot wipe the first lane's
+      # test-results/ (Playwright cleans its outputDir at start). The budget
+      # (15 min step, 40 min job) is reasoned, not measured: this job has never
+      # run (NEON_API_KEY absent) -- revisit at its first real run.
+      - name: Run hydration specs against a production build
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: npm run test:e2e:prod
+        env:
+          CI: "true"
+          PW_OUTPUT_DIR: test-results-prod
+
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-traces
-          path: test-results/
+          path: |
+            test-results/
+            test-results-prod/
           retention-days: 7
 
       - name: Delete Neon branch

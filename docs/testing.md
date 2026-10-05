@@ -212,6 +212,41 @@ psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/test-rls.sql
 
 ---
 
+## Pre-hydration specs and the production-build lane
+
+A form that is operable before it hydrates can lose what a user does to it (DECISION-159). Specs for that live in `e2e/hydration/` and are deterministic: they hold every `/_next/static/**.js` request with `page.route` behind a promise, `goto` with `waitUntil: "domcontentloaded"` (Next's scripts are `async`, so the page parses fully with no JavaScript), assert the pre-hydration state, release the scripts, and use **control enablement** (`toBeEnabled()`) as the hydration signal. Do not synchronize with throttling, `waitForTimeout`, or `networkidle` — they race, and `networkidle` is how this class of bug was masked for a month. Assert **persisted** state with `platformSql`, not just the DOM, and mint your own fixture rows (DECISION-157; the statistics spec uses report year 2096).
+
+These specs run in the normal `npm run test:e2e` (the `chromium` project, dev server) **and** in a second lane against a production build:
+
+```bash
+npm run test:e2e:prod     # PW_PROD_BUILD=1: npm run build && npm run start -- --port 3800, hydration specs only
+```
+
+The lane always starts its own server (`reuseExistingServer: false`, port 3800, `PW_PROD_PORT` to override), rejects `E2E_BASE_URL`, and `globalSetup` fails if the server on that port is not a production build. It coexists with a dev server in the same checkout (`next build` preserves `.next/dev`). **From a worktree** the build can fail intermittently with `Can't resolve '@vercel/turbopack-next/internal/font/google/font'` (the committed `turbopack.root` is the repo's parent directory, shared with every sibling worktree); build in a scratch copy outside `~/git/presby-platform/` with a **hardlinked** `node_modules`:
+
+```bash
+# 1. Nothing exported may beat .env.local; nothing may hold the port.
+env | grep -E '^(DATABASE_URL|PLATFORM_DATABASE_URL|APP_DATABASE_URL)='   # must print nothing
+lsof -nP -iTCP:3800 -sTCP:LISTEN                                          # must print nothing
+grep RATE_LIMIT_DISABLED .env.local                                       # must be =true
+# 2-4. Own parent directory, so turbopack.root contains only the copy.
+SCRATCH=/private/tmp/presby-select-prod; rm -rf "$SCRATCH"; mkdir -p "$SCRATCH/app"
+rsync -a --exclude .git --exclude .next --exclude node_modules \
+  --exclude test-results --exclude test-results-prod ./ "$SCRATCH/app/"   # keeps .env.local
+cp -al node_modules "$SCRATCH/app/node_modules"   # hardlink, never a symlink; same filesystem
+# 5. Builds, starts on 3800, runs e2e/hydration/ only, tears the server down.
+(cd "$SCRATCH/app" && npm run test:e2e:prod 2>&1 | tee "$SCRATCH/lane.log")
+# 6. Negative control: revert the form under test in the COPY, expect red, restore, expect green.
+git show <pre-gate-sha>:"src/app/(org)/o/[slug]/admin/reports/statistics-form.tsx" \
+  > "$SCRATCH/app/src/app/(org)/o/[slug]/admin/reports/statistics-form.tsx"
+# 7. Clean up.
+cd /; rm -rf "$SCRATCH"; lsof -nP -iTCP:3800 -sTCP:LISTEN   # nothing listening
+```
+
+If the build ever flakes anyway, `rm -rf "$SCRATCH/app/.next"` and retry. A negative control is part of the job: with the form under test reverted to its pre-gate version, the spec must go red at the pre-release `toBeDisabled()`.
+
+---
+
 ## Continuous integration
 
 Two workflows run the database-backed suites on an ephemeral Neon branch:
@@ -242,6 +277,8 @@ absent — see `docs/deployment.md` for what adding them turns on.
 one place in this repo's test suites where the sign-in limiter is exercised
 live, for real, under the standard config. `e2e` keeps `RATE_LIMIT_DISABLED=
 true`, because its shared fixture user signs in far more than 5/min.
+
+`e2e.yml` runs the production lane as a second step of the same job (`if: ${{ !cancelled() }}`, traces in `test-results-prod/`); like the rest of that job it is paper until `NEON_API_KEY` is added, so the local lane run is the gate until then.
 
 The retrospective's `deletable_until` fixture-exemption fuse (a 2-hour window
 before a scratch-org fixture becomes permanently undeletable, Rule-16 finding

@@ -7,7 +7,19 @@ Updated 2026-10-05.
 
 ---
 
-## RESUME HERE — 2026-10-05: wave 5's three pipelines are merged (v0.29.0, v0.30.0, v0.31.0); nothing is in flight
+## RESUME HERE — 2026-10-07: production migrated through 0053; Vercel access restored; nothing in flight
+
+**2026-10-07.** The operator's Vercel access is restored. **Production (`br-wild-band-ax96gv09`) was migrated `0043`→`0053`** by
+hand-applied `psql`, one transaction per file, after a Neon snapshot (`snap-orange-math-axbat01u`) and a full catalog diff; the
+catalog now matches `development` exactly, `check:schema-parity` is 0 failing, every pre-existing row count is unchanged, and
+`scripts/seed.ts` added the two flag rows production lacked. Procedure recorded in `docs/deployment.md` → Migrations. **Two
+findings for the operator:** (1) production's `presby_app` password is a dev-style `dev-only-…` string — rotate it once the Vercel
+env is yours to update (`docs/deployment.md` → Security); (2) production already has 36 of 40 flags ON, **including the four
+"coming soon" placeholders** (`org_portal.giving`/`.worship`/`.committees`/`.communications`) and `org_portal.insights` — with two
+real organizations in that database, flip those five OFF before anyone real signs in; the four OFF are the newest
+(`org_portal.filings`, `statistics.submission_grants`, `org_portal.feature_categories`, `org_portal.statistical_publication`).
+
+### 2026-10-05: wave 5's three pipelines are merged (v0.29.0, v0.30.0, v0.31.0); nothing is in flight
 
 **All three wave-5 pipelines shipped on 2026-10-05, one PR at a time, each with a full six-phase run:** founding administrator **v0.29.0** (PR #23, DECISION-155 + F118 amendment, §2m F107–F112/F117–F118); the hydration gate **v0.30.0** (PR #24, DECISION-159, §2o F116/F121–F131 — every react-hook-form root is inoperable until hydrated, six tripwires, `npm run test:e2e:prod`); the parent council picker **v0.31.0** (PR #26, DECISION-158 — the relationship type is enforced server-side in `createOrganization()`). Every Phase 6 was SHIP WITH NOTES and every note is a `docs/TODO.md` line. **No worktrees, pipeline branches or pipeline Neon branches are open**; `development` carries no new migration (none of the three shipped one — `0054` is back in the pool) and `test-rls.sql` passes 639/0 there after each merge; the appended `founding.fixture` seed block is applied on `development`. **CI on `main` is green again** (the production-dependency audit had been red since 2026-09-28 on `fast-uri`/`dompurify`; fixed in PR #23 by a lockfile-only bump). GitHub-hosted runners were starved during this session — several jobs were cancelled at 15 minutes having run zero steps and passed on re-run; that is the runner pool, not the code (Rule 11).
 
@@ -42,7 +54,8 @@ rulings in all, QA re-verified on the live catalog (`test-rls.sql` 412 / exit 0 
 INSERT half — closing instrument is a raw column-list insert in
 `src/lib/presbytery.ts`, `docs/TODO.md` Next Up).
 
-**Production has NOT been migrated** past what it had before `0043` (deploys do not
+**Production WAS migrated through `0053` on 2026-10-07** — see `docs/deployment.md` → Migrations for the exact
+procedure (snapshot, catalog diff, hand-apply with `psql`, verify, seed). (Historical note, kept for the record: deploys do not
 migrate; `npm run db:migrate` / `psql "$MIGRATE_DATABASE_URL" -f …` against
 production is a deliberate, separate operator step). `development` carries
 `0043`–`0047` at the shipped state.
@@ -198,8 +211,10 @@ document; this is the summary.
 - **Neon.** Production is the `presby` project's `production` branch
   (`polished-snow-90038485` / `br-wild-band-ax96gv09`). `development`
   (`br-super-dawn-axfi55p6`) is forked from it and is what `.env.local` points
-  at for local work. **Production has not been migrated** past migration
-  `0047` — `development` has. A Vercel deploy does not run migrations;
+  at for local work. **Production was migrated through `0053` on 2026-10-07**
+  (snapshot `snap-orange-math-axbat01u` taken first; procedure in
+  `docs/deployment.md`). The migration ledger is still ten rows on both
+  branches, so the apply command stays the `psql` form. A Vercel deploy does not run migrations;
   `npm run db:migrate` (or `psql "$MIGRATE_DATABASE_URL" -f …` when the
   runner's ledger is incomplete, as it is on `development`) is a separate,
   deliberate step. Full detail: `docs/deployment.md`.

@@ -67,6 +67,15 @@ et al. on `presby` does not match what is deployed.
 nameservers** (`ns07/ns08.domaincontrol.com`), so DNS is controlled independently
 of the Vercel account. The apex 308-redirects to `www`; `www` is canonical.
 
+### ⚠️ Security: the production `presby_app` password is a dev-style string
+
+Found 2026-10-07 while migrating: the `presby_app` role on the `production`
+branch authenticates with a `dev-only-…`-prefixed password, the shape the CI
+composite action and the dev recipe mint for throwaway branches. It is the
+live tenant-connection credential. Rotate it (Neon → Roles → reset password)
+**after** the Vercel environment that holds it is under your control and can
+be updated in the same change — rotating first takes the site down.
+
 ### ⚠️ Security: live credentials in an account we don't control
 
 The legacy `presby-portal` deployment holds **valid `presby_app` credentials for
@@ -102,10 +111,50 @@ Deployment & production section.
 
 ## Migrations
 
-**A Vercel deploy does not run database migrations.** `npm run db:migrate`
-against a target database is a separate, deliberate step — run it by hand
-after a deploy, never assume it happened as part of one. As of this writing,
-`production` has **not** been migrated to the latest schema; `development` has.
+**A Vercel deploy does not run database migrations.** Applying migrations to a
+target database is a separate, deliberate step — run it by hand after a deploy,
+never assume it happened as part of one.
+
+**Production was migrated through `drizzle/0053` on 2026-10-07** (previously at
+`0042`). How it was done, so the next one is a copy, not a rediscovery:
+
+1. **Snapshot first.** A Neon snapshot of `production` was taken before any
+   statement ran (`pre-migration-0043-0053-2026-10-07`,
+   `snap-orange-math-axbat01u`); `restore_snapshot` is the rollback.
+2. **Diff the live catalog against `development` before applying** — tables,
+   views, functions, columns, triggers, policies. Production carried four
+   leftovers development no longer had (`sasr_reports`,
+   `congregation_statistics.supersedes_publication_id`,
+   `group_types.organization_id`, `organization_settings.pcusa_pin`) and 843
+   duplicate global `group_types` rows; every one is handled by a statement
+   inside `0043`–`0053` (verified by grep before running), and the row counts
+   on the objects being dropped were checked (all zero).
+3. **Hand-apply with `psql`, not `drizzle-kit migrate`.** Production's
+   `drizzle.__drizzle_migrations` ledger records only the first ten migrations
+   (the same partial-ledger state `docs/testing.md` describes for the dev
+   database), so `db:migrate` would try to re-run `0010`. Command, per file,
+   strictly in journal order:
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -q -f drizzle/00XX_*.sql`
+   — one transaction per file, **except `0047`, which carries its own
+   `begin;`/`commit;` block and runs without `-1`**. None of `0043`–`0053`
+   contains a statement that cannot run inside a transaction block (checked).
+4. **Verify:** the catalog diff against `development` is empty; 61 tables carry
+   `FORCE ROW LEVEL SECURITY` and none has RLS without FORCE;
+   `MIGRATE_DATABASE_URL=<prod> npx tsx scripts/check-schema-parity.ts` reports
+   0 failing; every pre-existing row count is unchanged (2 organizations, 395
+   people, 68 users, 18 memberships, 628 audit events); the backfills landed
+   (1 open affiliation, 2 name-history rows, 4 SASR form versions, 6 global
+   `group_types`).
+5. **Seed the catalogs:** `scripts/seed.ts` run with the production
+   `DATABASE_URL` (`presby_app`) and `PLATFORM_DATABASE_URL` (owner) exported
+   and every `SEED_*`/`INITIAL_ADMIN_EMAILS` variable empty — it is
+   idempotent (`onConflictDoNothing`) and only added the two flag rows that
+   post-dated production's last seed. It never flips an existing flag.
+
+The ledger is still ten rows on both `development` and `production`. Until it
+is reconciled (a small, separate task: insert the `0011`–`0053` rows with
+drizzle's hash of each file), the apply command for either database stays the
+`psql` form above; `db:migrate` remains the from-empty command CI uses.
 
 ---
 

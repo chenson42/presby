@@ -54,7 +54,7 @@ function siteOrigin(): string {
  * is real future work — see docs/TODO.md.
  */
 const PORTAL_NAV_GROUP = "Connect";
-const PORTAL_LABEL = "Our Directory";
+const PORTAL_LABEL = "Our Portal";
 /** Slots the portal entry into the content's own navOrder sequence — fpcw's
  * real menu places "Our Directory" mid-group (between "Our Newsletter" at
  * 22 and "Upcoming Events" at 24), not trailing the group. Same

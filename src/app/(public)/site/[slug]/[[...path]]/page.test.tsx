@@ -279,7 +279,7 @@ describe("PublicSitePage — the ok path", () => {
         pageUrl: expect.any(Function),
         portalUrl: "/o/alder-creek",
         portalNavGroup: "Connect",
-        portalLabel: "Our Directory",
+        portalLabel: "Our Portal",
       }),
     );
   });

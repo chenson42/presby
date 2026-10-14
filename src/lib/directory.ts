@@ -29,7 +29,8 @@ import type { db } from "@/lib/db";
  *     `docs/schema-design.md` §11 formula — `current_roll` in the
  *     roll-member statuses OR `engagement_status = 'regular'`, minus
  *     `directory_hidden`, minus deceased, minus a merged (tombstoned)
- *     person. A first-time visitor with a live membership can browse the
+ *     person, minus an ended relationship (`ended_on` set — the access
+ *     gate's own definition of "current", F136). A first-time visitor with a live membership can browse the
  *     directory without themselves being published in it.
  *
  * A missing `person_privacy` row defaults to the COLUMN'S OWN declared
@@ -234,8 +235,15 @@ const UUID_RE =
  * rather than re-typing it.
  *
  * `includeHidden` (Increment 4) drops ONLY the `directory_hidden` term —
- * every other eligibility rule (not merged, not deceased, current-roll/
- * engagement) is UNCHANGED and still applies even to an elevated caller.
+ * every other eligibility rule (not merged, not deceased, relationship not
+ * ended, current-roll/engagement) is UNCHANGED and still applies even to an
+ * elevated caller.
+ *
+ * `m.ended_on is null` is the access gate's own definition of a current
+ * relationship (`presby_membership_is_active()`, drizzle/0015) and is NOT a
+ * date comparison: a future-dated `ended_on` counts as ended, exactly as the
+ * gate treats it. Without this term a person whose relationship had ended but
+ * whose `engagement_status` stayed 'regular' was listed (F136).
  * The caller must have already re-verified `directory.view_hidden` before
  * passing `true` here; this function trusts its own argument, same as
  * `queryDirectoryRows()` trusts `opts` — the re-verification itself lives in
@@ -249,6 +257,7 @@ function directoryEligibilityWhereSql(
     ${includeHidden ? sql`true` : sql`coalesce(pp.directory_hidden, false) = false`}
     and p.merged_into_id is null
     and p.date_of_death is null
+    and m.ended_on is null
     and ${
       status
         ? sql`m.current_roll = ${status}`
@@ -335,6 +344,50 @@ function directoryFromWhereSql(
          opts.personId ? sql`and m.person_id = ${opts.personId}::uuid` : sql``
        }
   `;
+}
+
+/**
+ * Find-a-person's search (portal home): at most `limit` distinct person ids in
+ * `organizationId` whose name, preferred name, or ANY email/phone contact value
+ * matches `query`. The caller has already verified `directory.view` inside
+ * this same transaction.
+ *
+ * Exported as a finder rather than exporting the predicate: eligibility is
+ * `directoryEligibilityWhereSql(false)` — the one shared predicate, never a
+ * hand copy — so find-person can only ever match someone the directory itself
+ * would list (F136). Contact matching deliberately covers every contact row,
+ * not just the primary one the directory's own search uses; that difference
+ * predates this function and is unchanged.
+ */
+export async function findDirectoryPersonIds(
+  tx: OrgTx,
+  organizationId: string,
+  query: string,
+  limit: number,
+): Promise<string[]> {
+  const like = `%${query}%`;
+  const result = await tx.execute(sql`
+    select distinct m.person_id as person_id
+      from memberships m
+      join people p on p.id = m.person_id
+      left join person_privacy pp
+             on pp.person_id = m.person_id
+            and pp.organization_id = m.organization_id
+      left join contact_methods cm
+             on cm.person_id = p.id and cm.kind in ('email', 'phone')
+     where m.organization_id = ${organizationId}::uuid
+       and ${directoryEligibilityWhereSql(false)}
+       and (
+         p.first_name ilike ${like}
+         or p.last_name ilike ${like}
+         or p.preferred_name ilike ${like}
+         or cm.value ilike ${like}
+       )
+     limit ${limit}
+  `);
+  return (
+    (result as unknown as { rows?: Array<{ person_id: string }> }).rows ?? []
+  ).map((row) => row.person_id);
 }
 
 /**

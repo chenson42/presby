@@ -150,3 +150,19 @@ describe("BrandTokens — [data-brand-neutral] escape hatch (Google-button fix, 
     );
   });
 });
+
+describe("BrandTokens - categorical event-type tokens (DECISION-161)", () => {
+  it("never re-declares a --category-* token in ordinary emission", () => {
+    const { container } = render(BrandTokens({ brand: BRAND }));
+    expect(styleText(container)).not.toContain("--category-");
+  });
+
+  it("under light_only, pins them to their LIGHT platform values like every platform colour", () => {
+    const { container } = render(BrandTokens({ brand: BRAND, lightOnly: true }));
+    const css = styleText(container);
+    expect(css).toContain(
+      `--category-rose-foreground: ${PLATFORM_TOKENS.light["--category-rose-foreground"]};`,
+    );
+    expect(css).not.toContain(PLATFORM_TOKENS.dark["--category-rose-foreground"]);
+  });
+});

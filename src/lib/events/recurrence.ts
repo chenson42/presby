@@ -121,25 +121,25 @@ function getNthDayOfMonth(
   if (nth === -1) {
     // Find last occurrence
     // Start from end of month and work backwards
-    const lastDay = new Date(year, month + 1, 0);
-    const lastDayOfWeek = lastDay.getDay();
+    const lastDay = new Date(Date.UTC(year, month + 1, 0));
+    const lastDayOfWeek = lastDay.getUTCDay();
     let daysBack = lastDayOfWeek - dayOfWeek;
     if (daysBack < 0) daysBack += 7;
-    return new Date(year, month, lastDay.getDate() - daysBack);
+    return new Date(Date.UTC(year, month, lastDay.getUTCDate() - daysBack));
   }
 
   // Find first occurrence of the day in the month
-  const firstOfMonth = new Date(year, month, 1);
-  const firstDayOfWeek = firstOfMonth.getDay();
+  const firstOfMonth = new Date(Date.UTC(year, month, 1));
+  const firstDayOfWeek = firstOfMonth.getUTCDay();
   let daysForward = dayOfWeek - firstDayOfWeek;
   if (daysForward < 0) daysForward += 7;
 
   // Calculate the Nth occurrence
   const day = 1 + daysForward + (nth - 1) * 7;
-  const result = new Date(year, month, day);
+  const result = new Date(Date.UTC(year, month, day));
 
   // Verify we're still in the same month
-  if (result.getMonth() !== month) {
+  if (result.getUTCMonth() !== month) {
     throw new Error(`No ${nth}th occurrence of day ${dayOfWeek} in month ${month}`);
   }
 
@@ -157,13 +157,13 @@ export function getNextOccurrence(date: Date, pattern: string): Date {
 
     switch (parsed.value) {
       case "weekly":
-        next.setDate(next.getDate() + 7);
+        next.setUTCDate(next.getUTCDate() + 7);
         break;
       case "biweekly":
-        next.setDate(next.getDate() + 14);
+        next.setUTCDate(next.getUTCDate() + 14);
         break;
       case "monthly":
-        next.setMonth(next.getMonth() + 1);
+        next.setUTCMonth(next.getUTCMonth() + 1);
         break;
     }
 
@@ -175,8 +175,8 @@ export function getNextOccurrence(date: Date, pattern: string): Date {
     const nthValue = ordinal === "last" ? -1 : parseInt(ordinal);
 
     // Start from next month
-    let targetMonth = date.getMonth() + 1;
-    let targetYear = date.getFullYear();
+    let targetMonth = date.getUTCMonth() + 1;
+    let targetYear = date.getUTCFullYear();
     if (targetMonth > 11) {
       targetMonth = 0;
       targetYear++;
@@ -186,7 +186,7 @@ export function getNextOccurrence(date: Date, pattern: string): Date {
     const result = getNthDayOfMonth(targetYear, targetMonth, dayIndex, nthValue);
 
     // Preserve the time from the original date
-    result.setHours(date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds());
+    result.setUTCHours(date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds(), date.getUTCMilliseconds());
 
     return result;
   }

@@ -22,8 +22,9 @@
  *   dotenv -e .env.local -- vitest run src/lib/events.test.ts
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
+import { useProcessTimeZone } from "@/lib/testing/time-zone";
 
 vi.mock("server-only", () => ({}));
 
@@ -40,6 +41,7 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
   let cancelEvent: typeof import("./events").cancelEvent;
 
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
+  let events: typeof import("@/lib/db/domain/events").events;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let people: typeof import("@/lib/db/domain/people").people;
   let memberships: typeof import("@/lib/db/domain/people").memberships;
@@ -66,6 +68,7 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
     ({ listEvents, getEvent, createEvent, updateEvent, extendSeriesPattern, cancelEvent } =
       await import("./events"));
     ({ getPlatformDb } = await import("@/lib/db"));
+    ({ events } = await import("@/lib/db/domain/events"));
     ({ organizations } = await import("@/lib/db/domain/org"));
     ({ people, memberships } = await import("@/lib/db/domain/people"));
     ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
@@ -775,6 +778,66 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
       const starts = result.data.map((e) => e.startsAt);
       const sorted = [...starts].sort();
       expect(starts).toEqual(sorted);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // F134 — typed digits are stored as typed, whatever the server's zone
+  // ---------------------------------------------------------------------
+
+  describe("wall-clock storage under a non-UTC process — regression for typed event times shifting off-UTC (F134)", () => {
+    // New York observes DST and is never UTC: the old LOCAL-field writer
+    // stored 23:00 for a typed 19:00 here, and drifted a weekly series by an
+    // hour across 2026-11-01.
+    useProcessTimeZone("America/New_York", { beforeAll, afterAll });
+
+    /** The stored digits, read raw on the owner connection (no driver Date). */
+    async function storedDigits(ids: string[]): Promise<string[]> {
+      const rows = await getPlatformDb()
+        .select({
+          id: events.id,
+          stored: sql<string>`to_char(${events.startsAt}, 'YYYY-MM-DD HH24:MI:SS')`,
+        })
+        .from(events)
+        .where(inArray(events.id, ids));
+      return ids.map((id) => rows.find((r) => r.id === id)!.stored);
+    }
+
+    it("a single event stores the typed 19:00, not the UTC-shifted 23:00", async () => {
+      const result = await createEvent(managerPerson, orgA, actingUserId, {
+        title: "Wall-clock single",
+        startsAt: "2026-10-14T19:00",
+        endsAt: "2026-10-14T20:30",
+        isPublic: true,
+        allowsCheckin: false,
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(await storedDigits(result.data.occurrenceIds)).toEqual([
+        "2026-10-14 19:00:00",
+      ]);
+      const detail = await getEvent(managerPerson, orgA, result.data.eventId);
+      expect(detail.kind).toBe("ok");
+      if (detail.kind !== "ok") return;
+      expect(detail.data.startsAt).toBe("2026-10-14T19:00:00");
+      expect(detail.data.endsAt).toBe("2026-10-14T20:30:00");
+    });
+
+    it("a weekly series across the US DST end stores 19:00 on every occurrence", async () => {
+      const result = await createEvent(managerPerson, orgA, actingUserId, {
+        title: "Wall-clock series",
+        startsAt: "2026-10-25T19:00",
+        isPublic: true,
+        allowsCheckin: false,
+        recurrence: { pattern: "weekly", count: 3 },
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(await storedDigits(result.data.occurrenceIds)).toEqual([
+        "2026-10-25 19:00:00",
+        "2026-11-01 19:00:00",
+        "2026-11-08 19:00:00",
+      ]);
     });
   });
 });

@@ -11,6 +11,7 @@ import {
   parsePattern,
   seriesTotalWithinCap,
 } from "@/lib/events/recurrence";
+import { formatWallClock, parseWallClock } from "@/lib/events/wall-clock";
 
 /**
  * Calendar events — docs/work-log/2026-08-26-events-model.md, Phase 3 design,
@@ -22,17 +23,20 @@ import {
  * `hasEventsManage` helper, typed `EventsResult` variants instead of thrown
  * exceptions for every expected/denied outcome.
  *
- * WALL-CLOCK TIMESTAMPS, NEVER `.toISOString()` (DECISION-113 ruling 3).
- * `startsAt`/`endsAt` are `timestamp` columns with NO time zone — Drizzle
- * (via node-postgres's own type parser) round-trips them as `Date` objects
- * constructed from and read back through LOCAL `Date` getters/setters, the
- * same discipline `src/lib/events/recurrence.ts`'s own pattern math already
- * uses throughout. Calling `.toISOString()` on one of these would apply a
- * UTC conversion the value was never given a zone to justify, corrupting the
- * literal stored wall-clock digits. `formatWallClock`/`parseWallClock` below
- * are the two ends of that discipline; `cancelledAt` is the one legitimate
- * `timestamptz` column here (DECISION-113's own carve-out) and DOES use
- * `.toISOString()`, correctly, as a real instant.
+ * WALL-CLOCK TIMESTAMPS, TYPED DIGITS IN THE UTC FIELDS (DECISION-113 ruling
+ * 3, corrected by F134). `startsAt`/`endsAt` are `timestamp` columns with NO
+ * time zone. Drizzle WRITES such a column with `value.toISOString()` and READS
+ * it by appending "+0000", so a `Date` carries wall-clock digits faithfully
+ * only through its UTC fields: `parseWallClock`/`formatWallClock`
+ * (`src/lib/events/wall-clock.ts`) and `recurrence.ts` use `Date.UTC` and
+ * `getUTC*`/`setUTC*` throughout, and nothing here depends on the server's
+ * time zone. (The earlier wording of this paragraph said LOCAL getters were
+ * the discipline; that stored the typed digits only when the process ran in
+ * UTC.) A value that came out of these functions is not an instant — never
+ * hand it to anything that treats it as one. `cancelledAt` is the one
+ * legitimate `timestamptz` column here (DECISION-113's own carve-out) and DOES
+ * use `.toISOString()`, correctly, as a real instant. `eslint.config.mjs`
+ * bans local Date getters/setters in this module and its siblings.
  *
  * SAME-ORG PARENT GUARD (`parent_event_id` carries no database FK on the
  * organization axis — architect's Phase 2 ruling, DECISION-115 ruling 3):
@@ -66,8 +70,6 @@ const TITLE_MAX = 200;
 const DESCRIPTION_MAX = 2000;
 const LOCATION_MAX = 200;
 
-const WALL_CLOCK_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
-
 /**
  * The single-permission gate every exported function in this module checks
  * FIRST — not exported, same discipline `hasGroupsManage`/`hasOfficersManage`
@@ -88,40 +90,6 @@ async function hasEventsManage(
   return (
     (result as unknown as { rows?: Array<{ allowed?: boolean }> }).rows?.[0]
       ?.allowed === true
-  );
-}
-
-/**
- * `'YYYY-MM-DDTHH:mm'` or `'YYYY-MM-DDTHH:mm:ss'` (a native `<input
- * type="datetime-local">`'s own value shape) → a `Date` built from LOCAL
- * components, so the digits typed by the caller are exactly the digits that
- * round-trip through the `timestamp` (no tz) column — see this file's own
- * header. Throws on a malformed string — a genuine call-shape defect (the UI
- * always sends this exact shape), not a user-facing denial, same discipline
- * `groups.ts`'s `DATE_RE` check documents for `startsOn`.
- */
-function parseWallClock(value: string): Date {
-  if (!WALL_CLOCK_RE.test(value)) {
-    throw new Error(
-      `parseWallClock: expected 'YYYY-MM-DDTHH:mm[:ss]', got ${JSON.stringify(value)}`,
-    );
-  }
-  const [datePart, timePart] = value.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute, second] = timePart.split(":").map(Number);
-  return new Date(year, month - 1, day, hour, minute, second ?? 0, 0);
-}
-
-/**
- * The inverse of `parseWallClock` — a `Date` (read back from a `timestamp`,
- * no-tz column) → `'YYYY-MM-DDTHH:mm:ss'`, using LOCAL getters throughout.
- * NEVER `.toISOString()` — see this file's own header.
- */
-function formatWallClock(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   );
 }
 

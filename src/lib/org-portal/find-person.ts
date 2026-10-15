@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
+import { findDirectoryPersonIds } from "@/lib/directory";
 
 /**
  * The DB-level half of portal-home find-a-person (Phase 3, Increment 1).
@@ -16,21 +17,19 @@ import { withOrgContext } from "@/lib/authz";
  * GATED ON `directory.view`, THE SAME PERMISSION `getDirectory()` CHECKS,
  * via the identical `presby_has_permission()` SQL call — a search box on
  * the portal home must never surface a person the directory itself would
- * refuse to show. FILTERED BY THE SAME ELIGIBILITY PREDICATE `getDirectory()`
- * uses (current-roll/engagement, not hidden, not merged, not deceased) —
- * copied here rather than imported, because `getDirectory()`'s predicate is
- * inline SQL, not an extracted fragment; Phase 3's cross-cutting risk note
- * (predicate drift) flags this as the single highest-risk repeat in the
- * whole four-increment pipeline and names it explicitly for that reason.
+ * refuse to show. The eligibility predicate is not repeated here: the search
+ * runs through `findDirectoryPersonIds()` in `src/lib/directory.ts`, which
+ * composes the one shared `directoryEligibilityWhereSql()` the directory's
+ * own readers use (not hidden, not merged, not deceased, relationship not
+ * ended, current-roll/engagement). That predicate stays private to
+ * `directory.ts`; this module consumes it only through the finder, so there
+ * is no hand copy to drift (F136 — the previous copy had already drifted, and
+ * the single-match jump could redirect to a person page the directory 404s).
  */
 
 export type FindPersonMatchesResult =
   | { kind: "ok"; personIds: string[] }
   | { kind: "forbidden" };
-
-interface MatchRow {
-  person_id: string;
-}
 
 /**
  * At most TWO ids — the caller only needs to distinguish zero / one / many,
@@ -59,33 +58,12 @@ export async function findPersonMatches(
       return { kind: "forbidden" };
     }
 
-    const like = `%${query}%`;
-    const result = await tx.execute(sql`
-      select distinct m.person_id as person_id
-        from memberships m
-        join people p on p.id = m.person_id
-        left join person_privacy pp
-               on pp.person_id = m.person_id
-              and pp.organization_id = m.organization_id
-        left join contact_methods cm
-               on cm.person_id = p.id and cm.kind in ('email', 'phone')
-       where m.organization_id = ${organizationId}::uuid
-         and coalesce(pp.directory_hidden, false) = false
-         and p.merged_into_id is null
-         and p.date_of_death is null
-         and (
-           m.current_roll in ('active', 'baptized', 'affiliate', 'other_participant')
-           or m.engagement_status = 'regular'
-         )
-         and (
-           p.first_name ilike ${like}
-           or p.last_name ilike ${like}
-           or p.preferred_name ilike ${like}
-           or cm.value ilike ${like}
-         )
-       limit 2
-    `);
-    const rows = (result as unknown as { rows?: MatchRow[] }).rows ?? [];
-    return { kind: "ok", personIds: rows.map((row) => row.person_id) };
+    const personIds = await findDirectoryPersonIds(
+      tx,
+      organizationId,
+      query,
+      2,
+    );
+    return { kind: "ok", personIds };
   });
 }

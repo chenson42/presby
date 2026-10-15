@@ -77,6 +77,12 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
   let hhHiddenPerson: string;
   let hhOrgBPerson: string;
 
+  // F136 fixture — a relationship that ENDED but whose engagement_status
+  // stayed 'regular', placed in householdVisible; and a same-shaped member
+  // with no end date (the over-exclusion control).
+  let endedMember: string;
+  let currentSameShape: string;
+
   // Increment 4 fixture — deacon linkage / directory.view_hidden.
   let elevatedPerson: string; // orgA, holds directory.view AND directory.view_hidden
   let orgUnitActive: string; // orgA district, one active deacon term
@@ -412,6 +418,32 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       directoryHidden: true,
     });
 
+    // F136 — the exact shape of the two measured rows on the shared dev
+    // branch (engagement 'regular', current_roll null, ended_on set), put in
+    // the visible household so the household assertions are built-in proof.
+    // memberships_one_active_roll_idx is partial on current_roll = 'active'
+    // and ended_on is null, so this row is legal.
+    endedMember = await person("Rowan", "Ashgrove-Pell", null);
+    currentSameShape = await person("Wren", "Ashgrove-Vale", null);
+    await platform.insert(memberships).values([
+      {
+        organizationId: orgA,
+        personId: endedMember,
+        householdId: householdVisible,
+        householdRole: "other",
+        engagementStatus: "regular",
+        currentRoll: null,
+        endedOn: "2026-03-31",
+      },
+      // Identical except no end date, and no household.
+      {
+        organizationId: orgA,
+        personId: currentSameShape,
+        engagementStatus: "regular",
+        currentRoll: null,
+      },
+    ]);
+
     // ------------------------------------------------------------------
     // Increment 4 fixture — deacon linkage / directory.view_hidden.
     // ------------------------------------------------------------------
@@ -670,6 +702,8 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       hhPerson2,
       hhHiddenPerson,
       hhOrgBPerson,
+      endedMember,
+      currentSameShape,
       elevatedPerson,
       deaconActive1,
       deaconActive2,
@@ -1252,6 +1286,70 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
         { includeHidden: true },
       );
       expect(result).toEqual({ kind: "not-found" });
+    });
+  });
+
+  describe("an ended relationship is not in the directory (F136)", () => {
+    it("getDirectory omits an ended member, with and without a search", async () => {
+      const all = await getDirectory(control, orgA);
+      const searched = await getDirectory(control, orgA, { search: "Ashgrove" });
+      if (all.kind !== "ok" || searched.kind !== "ok") {
+        throw new Error("expected ok");
+      }
+      expect(all.entries.map((e) => e.personId)).not.toContain(endedMember);
+      expect(searched.entries.map((e) => e.personId)).not.toContain(
+        endedMember,
+      );
+    });
+
+    it("getPersonDetail returns not-found for an ended member", async () => {
+      const result = await getPersonDetail(control, orgA, endedMember);
+      expect(result).toEqual({ kind: "not-found" });
+    });
+
+    it("getHouseholdDetail does not count or list an ended member", async () => {
+      const result = await getHouseholdDetail(control, orgA, householdVisible);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.household.memberCount).toBe(2);
+      expect(result.household.members.map((m) => m.personId).sort()).toEqual(
+        [hhPerson1, hhPerson2].sort(),
+      );
+    });
+
+    it("getHouseholds does not count an ended member", async () => {
+      const result = await getHouseholds(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const winterbourne = result.households.find(
+        (h) => h.householdId === householdVisible,
+      );
+      expect(winterbourne?.memberCount).toBe(2);
+    });
+
+    it("includeHidden does not resurrect an ended member", async () => {
+      // getParishRoster exposes only household counts, not member ids, so the
+      // id-level check is getDirectory; the household-level one is getHouseholds.
+      const directory = await getDirectory(elevatedPerson, orgA, {
+        includeHidden: true,
+      });
+      const households = await getHouseholds(elevatedPerson, orgA, {
+        includeHidden: true,
+      });
+      if (directory.kind !== "ok" || households.kind !== "ok") {
+        throw new Error("expected ok");
+      }
+      expect(directory.entries.map((e) => e.personId)).not.toContain(
+        endedMember,
+      );
+      expect(
+        households.households.find((h) => h.householdId === householdVisible)
+          ?.memberCount,
+      ).toBe(2);
+    });
+
+    it("an otherwise identical member with no end date is still listed", async () => {
+      const result = await getDirectory(control, orgA, { search: "Ashgrove" });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.entries.map((e) => e.personId)).toContain(currentSameShape);
     });
   });
 

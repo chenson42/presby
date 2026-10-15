@@ -22,6 +22,7 @@ describe.skipIf(!hasDb)(
   "findPersonMatches (Postgres-backed, real dev database)",
   () => {
     let findPersonMatches: typeof import("./find-person").findPersonMatches;
+    let getPersonDetail: typeof import("../directory").getPersonDetail;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
@@ -46,9 +47,11 @@ describe.skipIf(!hasDb)(
     let hidden: string; // directory_hidden — must never match
     let visitor: string; // no roll status — must never match (DECISION-065)
     let byEmail: string; // matched only via contact_methods
+    let endedMember: string; // relationship ended, engagement still 'regular' (F136)
 
     beforeAll(async () => {
       ({ findPersonMatches } = await import("./find-person"));
+      ({ getPersonDetail } = await import("../directory"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
@@ -179,6 +182,7 @@ describe.skipIf(!hasDb)(
       hidden = await person("Blythe", "Osei");
       visitor = await person("Callum", "Petrakis");
       byEmail = await person("Noor", "Whitcombe");
+      endedMember = await person("Quillon", "Ferrowby");
 
       async function membership(
         organizationId: string,
@@ -202,6 +206,14 @@ describe.skipIf(!hasDb)(
       await membership(orgA, hidden, "regular", "active");
       await membership(orgA, visitor, "visitor", null);
       await membership(orgA, byEmail, "regular", "active");
+      // F136 — relationship ended, engagement_status stayed 'regular'.
+      await platform.insert(memberships).values({
+        organizationId: orgA,
+        personId: endedMember,
+        engagementStatus: "regular",
+        currentRoll: null,
+        endedOn: "2026-03-31",
+      });
 
       await platform
         .insert(personPrivacy)
@@ -226,6 +238,7 @@ describe.skipIf(!hasDb)(
         hidden,
         visitor,
         byEmail,
+        endedMember,
       ].filter(Boolean);
 
       for (const id of allPeople) {
@@ -287,6 +300,42 @@ describe.skipIf(!hasDb)(
     it("a visitor with no roll status never matches (DECISION-065)", async () => {
       const result = await findPersonMatches(seeker, orgA, "Callum");
       expect(result).toEqual({ kind: "ok", personIds: [] });
+    });
+
+    it("does not match a member whose relationship has ended (F136)", async () => {
+      const result = await findPersonMatches(seeker, orgA, "Ferrowby");
+      expect(result).toEqual({ kind: "ok", personIds: [] });
+    });
+
+    it("find-person and the directory agree on who is eligible (F136)", async () => {
+      const cases: Array<{ id: string; term: string }> = [
+        { id: unique, term: "Okonkwo-Vance" },
+        { id: byEmail, term: "noor.whitcombe" },
+        { id: hidden, term: "Osei" },
+        { id: visitor, term: "Petrakis" },
+        { id: endedMember, term: "Ferrowby" },
+      ];
+      for (const { id, term } of cases) {
+        const found = await findPersonMatches(seeker, orgA, term);
+        const detail = await getPersonDetail(seeker, orgA, id);
+        if (found.kind !== "ok") throw new Error("expected ok");
+        expect(found.personIds.includes(id), term).toBe(detail.kind === "ok");
+      }
+
+      // Non-vacuity: the eligible side is non-empty, and the ended member is
+      // absent from BOTH surfaces (pre-fix both wrongly agreed it was eligible).
+      for (const { id, term } of cases.slice(0, 2)) {
+        const found = await findPersonMatches(seeker, orgA, term);
+        if (found.kind !== "ok") throw new Error("expected ok");
+        expect(found.personIds).toEqual([id]);
+        expect((await getPersonDetail(seeker, orgA, id)).kind).toBe("ok");
+      }
+      const ended = await findPersonMatches(seeker, orgA, "Ferrowby");
+      if (ended.kind !== "ok") throw new Error("expected ok");
+      expect(ended.personIds).not.toContain(endedMember);
+      expect(await getPersonDetail(seeker, orgA, endedMember)).toEqual({
+        kind: "not-found",
+      });
     });
 
     it("someone with no directory.view grant gets forbidden, not an empty list", async () => {

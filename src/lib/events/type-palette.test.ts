@@ -15,6 +15,50 @@ import {
   isEventTypeIcon,
   typeColorClasses,
 } from "./type-palette";
+import { STANDARD_EVENT_TYPES } from "./type-seed-plan";
+
+/**
+ * drizzle/0054 holds the THIRD copy of the palette and icon lists (the CHECK
+ * constraints) and the SECOND copy of the standard type set (the section-8
+ * backfill VALUES). These cases read the migration text itself, so a change to
+ * either TypeScript list without a matching migration - or the reverse - fails
+ * here rather than as a 23514 at the first write.
+ */
+const MIGRATION = readFileSync(
+  fileURLToPath(
+    new URL("../../../drizzle/0054_presby_calendar_event_types.sql", import.meta.url),
+  ),
+  "utf8",
+);
+
+/** The quoted list of the single-line `check (<column> in (...))` for one constraint. */
+function checkList(constraint: string, column: string): string[] {
+  const re = new RegExp(
+    `add constraint ${constraint}\\s*\\n\\s*check \\(${column} in \\(([^)]*)\\)\\);`,
+  );
+  const match = MIGRATION.match(re);
+  expect(match, `no single-line ${constraint} CHECK in drizzle/0054`).not.toBeNull();
+  return [...match![1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+}
+
+/** The backfill VALUES tuples between the backfill-event-types markers. */
+function backfillTuples() {
+  const begin = MIGRATION.indexOf("-- BEGIN backfill-event-types");
+  const end = MIGRATION.indexOf("-- END backfill-event-types");
+  expect(begin, "BEGIN backfill-event-types marker").toBeGreaterThan(-1);
+  expect(end, "END backfill-event-types marker").toBeGreaterThan(begin);
+  const block = MIGRATION.slice(begin, end);
+  const tuple =
+    /\(\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*(\d+),\s*(true|false),\s*(true|false)\s*\)/g;
+  return [...block.matchAll(tuple)].map((m) => ({
+    name: m[1],
+    color: m[2],
+    icon: m[3],
+    sortOrder: Number(m[4]),
+    isActive: m[5] === "true",
+    isFallback: m[6] === "true",
+  }));
+}
 
 describe("EVENT_TYPE_COLORS", () => {
   it("is exactly the brand contract's CATEGORY_KEYS", () => {
@@ -93,5 +137,29 @@ describe("guards and fallback", () => {
     expect(typeColorClasses(null)).toBe(TYPE_COLOR_CLASSES.neutral);
     expect(typeColorClasses(undefined)).toBe(TYPE_COLOR_CLASSES.neutral);
     expect(typeColorClasses("teal")).toBe(TYPE_COLOR_CLASSES.teal);
+  });
+});
+
+describe("drizzle/0054 parity (the migration is the third copy)", () => {
+  it("event_types_color_allowed lists exactly EVENT_TYPE_COLORS, in order", () => {
+    expect(checkList("event_types_color_allowed", "color")).toEqual([...EVENT_TYPE_COLORS]);
+  });
+
+  it("event_types_icon_allowed lists exactly EVENT_TYPE_ICONS, in order", () => {
+    expect(checkList("event_types_icon_allowed", "icon")).toEqual([...EVENT_TYPE_ICONS]);
+  });
+
+  it("the backfill VALUES equal STANDARD_EVENT_TYPES, tuple for tuple", () => {
+    expect(backfillTuples()).toEqual(STANDARD_EVENT_TYPES.map((t) => ({ ...t })));
+  });
+
+  it("the backfill gives non-congregational orgs the fallback row only", () => {
+    const begin = MIGRATION.indexOf("-- BEGIN backfill-event-types");
+    const block = MIGRATION.slice(begin, MIGRATION.indexOf("-- END backfill-event-types"));
+    // The join predicate eventTypeSeedPlan() mirrors: fallback OR a
+    // congregation/NWC. Normalise whitespace so a reflow is not a failure.
+    expect(block.replace(/\s+/g, " ")).toContain(
+      "on (v.is_fallback or o.organization_type in ('congregation', 'new_worshiping_community'))",
+    );
   });
 });

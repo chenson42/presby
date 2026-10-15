@@ -45,8 +45,14 @@ The operator asked: *"align the portal home page with the ../../fpcw-directory p
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-14 |
 | 3 — Technical design | tech-lead | Complete (contract confirmed by the calendar's Phase 3, relayed below) | Design complete; implementer named | 2026-10-14 |
 | 4 — Implementation | full-stack-developer | Complete (Part B; Part A shipped separately as PR #28, v0.31.1) | — | 2026-10-15 |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-10-15 |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (N1–N2 filed; N3 already staged) | 2026-10-15 |
+
+## Pipeline closed (orchestrator, 2026-10-15)
+
+Phase 6 SHIP WITH NOTES. Close-out in one `docs:` commit: this section; `docs/TODO.md` (Phase 3's six lines + N1, N2 + the Done line; the owed what's-new line records the fold into the calendar's D8 entry per Rule 13); DECISION-162 in `docs/decisions.md` (architect's text + the Phase 3 household/main-row paragraph); F136 in `docs/schema-design-2.md` reworded now both legs are fixed; the functionality-map "Portal home" and org-portal lines (stamp 0.33.0); `docs/release-notes/v0.33.md` (0.33.0) with the 0.32 → 0.33 nav link; `package.json` 0.33.0. `docs/architecture.md` unchanged (Rule 15). Next: `/pre-push`, push, PR, `/merge-pr` (operator pre-authorized merging), delete Neon branch `br-late-meadow-axpro6c7`.
+
+---
 
 ---
 
@@ -1280,10 +1286,158 @@ Suggested split per the design's Implementation Order: (1) `feat(portal-home): t
 
 # Phase 5 — Verification (qa)
 
-*(pending)*
+*Recorded verbatim by the orchestrator, 2026-10-15.*
+
+**Date:** 2026-10-15
+**Verified by:** qa
+**Worktree / branch:** `/Users/cshenso/git/presby-platform/presby-home`, `pipeline/portal-home-alignment`. While I was verifying, the orchestrator committed the work as `8e8e698` (feat) and `ff6731f` (test(e2e)). `git diff main --stat` is the same before and after the commits: 20 files, +2838/−182. The working tree is clean.
+**DB:** `.env.local`. Its endpoint (`ep-gentle-cherry-…`) is different from the main checkout's (`ep-lingering-meadow-…`). I could not map the endpoint to `br-late-meadow-axpro6c7` myself (`neonctl` is scoped to a different org); that mapping rests on the orchestrator's statement.
+
+**Not an auth-touching diff.** `git diff --name-only main` contains nothing under `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/` or `src/lib/auth/`, so the MFA-enrolled e2e requirement does not apply. The full e2e suite ran against a real dev server anyway.
+
+## Type Check
+
+`npm run typecheck`: **PASS** (exit 0, 8.6 s). `npm run lint` (`--max-warnings=0`): **PASS**. `npm run check`: **PASS** — all six tripwires.
+
+## Unit Tests
+
+**`npm test`** — Total 5426 | Passed 4244 | Failed 0 | Skipped 1182 | 15.0 s. Files: 302 passed, 38 skipped (the DB-backed `describe.skipIf(!hasDb)` files; all ran in the DB lane).
+
+**`npm run test:db`** (full lane, `--no-file-parallelism`, pipeline branch) — Total 5426 | Passed 5426 | Failed 0 | **Skipped 0** | 666 s. Files: 340 of 340 passed.
+
+Failures: none.
+
+## End-to-End Tests
+
+Dev server from this worktree on :3700; the main checkout's :3000 server (PID 15271) was not touched. My server was stopped by its PIDs afterwards; nothing is left on :3700.
+
+- `E2E_BASE_URL=http://localhost:3700 npx playwright test e2e/portal-home-cards.spec.ts` — Total 11 | Passed 11 | Failed 0 | 24.9 s
+- `E2E_BASE_URL=http://localhost:3700 npm run test:e2e` (full suite) — Total 195 | Passed 195 | Failed 0 | Skipped 0 | Flaky 0 | 4.9 min. `post-login-routing.spec.ts` tests 4 and 7 both **passed** on this branch, so the `docs/TODO.md:126` note did not apply to this run.
+
+After the run the spec's fixture rows were gone (0 events and 0 groups with `e2ce%` ids); `org_portal.home_v2`, `org_portal.directory` and `org_portal.directory_v2` were still ON.
+
+**Phone / zoom spot check** (headless Chromium, read-only geometry probe, signed in on `/o/alder-creek`):
+
+| User | Width | Result |
+|---|---|---|
+| clerk | 360 | Both cards stacked (Yours x24 y478 w312; Coming up x24 y708 w312). Overflow 0. Three event rows, 130 px each. Household "The Renwick Family" links to `/directory/households/<id>`. Find-a-person present. |
+| clerk | 640 (≈1280 at 200%) | Stacked, both w592 at x24. Overflow 0. Rows 106 px. |
+| elder | 360 | Stacked. Yours is the groups block only, one "Session" pill: 14 px (`text-sm`), not inside a link, `ul` computes `flex-wrap: wrap`. Overflow 0. Rows 130 px. |
+| elder | 640 | Stacked. Overflow 0. Rows 106 px. |
+
+- **Calendar toggle OFF** (owner connection): for both users at 360, 640 and 1280, Coming up absent, row class `grid grid-cols-1 items-start gap-6` (no `md:grid-cols-2`), Yours w1104 of main's 1152 at 1280, overflow 0 everywhere.
+- **Toggle restored** with its original `updated_at` (`t | 2026-10-15 15:44:10.09981+00`); at 1280 both cards side by side again (x88 and x652, w540 each, `md:grid-cols-2`).
+- **Pills wrapping:** both Alder Creek users hold at most one pill; the e2e assertion at 360 covers it (a 60-character unbroken group name, no overflow, `portal-home-cards.spec.ts:73`).
+- **`text-xs`:** 4 elements under `main`, all the tile grid's pre-existing "Coming soon" badges (Phase 3 E4, TODO drafted). None from this diff.
+
+**Not run:** true browser-zoom 200% (640 px viewport stands in); interactive keyboard tab order / focus rings (the `focus-visible:ring-2 … ring-offset-2` classes are on the event rows and links, confirmed by reading); 768 px in my probe (covered by e2e `:108`, `:179`, `:193`).
+
+## Regression Tests Added
+
+- **`getViewerGroups` self-scope** (`src/lib/org-portal/my-groups.test.ts`, DB lane, fake clock): another member's groups excluded `:330`; another org's excluded with the viewer in both orgs `:350`; `active_membership` excluded by `derived_from` not name (a managed group named "Active Membership" still returned) `:286`; Session included and ended diaconate term excluded `:310`; ended / not-yet-started / boundary-ended (`ends_on` = org-local today) excluded `:316`; projection exactly `{groupId, name}` `:357`; arity 2 `:365`; org zone decides "today" (Pacific/Auckland vs New York) `:369`; default zone with no settings row `:390`; shared group once `:340`; duplicate rows once `:345`; `OrgAccessError` `:412`; DB error propagates `:418`.
+- **Household count (F136)** (`src/lib/org-portal/home-data.test.ts`): `:350` the directory's count excludes ended, deceased, hidden and off-roll; `:362` agrees with `getHouseholdDetail`; `:370` a household of one suppressed; `:376` a directory-hidden viewer sees no household (page shows 1); `:387` an ineligible viewer still sees the directory's count; `:396` without `directory.view`, `canViewDirectory` false and household null (gated, not merely filtered).
+- **`countHouseholdDirectoryMembers`** (`src/lib/directory.test.ts`, `describe("countHouseholdDirectoryMembers (portal home)")` at `@@ -1355`): ended member excluded; agrees with the household page; hidden-only household is 0; `view_hidden` holder still gets the ordinary count; cross-org is 0; own org counts.
+- **`composeMainRow`** (`src/lib/org-portal/main-row.test.ts:39–148`, 13 cases): none/single/double; empty, failed, disabled, forbidden; frozen-input purity; `UPCOMING_EVENTS_LIMIT === 4`.
+- **Page orchestration** (`src/app/(org)/o/[slug]/page.test.tsx`): `:410` gate held until `assertOrgAccess` resolves; `:427` all three loaders start before any resolves; `:448` loaders get only server-resolved ids, groups call has exactly 2 arguments; `:466` no flag key containing "calendar" is read; `:476–496` Find-a-person visibility incl. fail-closed; `:543`, `:606` fixed log string, `"SECRET_SQL"` never logged; `:563`, `:625` `OrgAccessError` re-thrown; `:660` no `loading.tsx`, no `Suspense`.
+- **Deliberate change to a pinned test:** `src/components/org-portal/yours-zone.test.tsx:2–10` records why the singular "1 member" case was deleted (D2).
+
+**Failing-first:** not observed by me; Phase 4 does not record it. By reading the old `home-data.ts` query (`ended_on is null` only) I confirm `home-data.test.ts:350` and `:370` would fail against it (H1 would count 5 not 2; the widow's household returned with count 2). Confirmation by reading, not execution. The F136 predicate regression itself was Part A (PR #28), verified there.
+
+**Advisory, not blocking:** no test checks a *current* diaconate membership positively (`:310` checks Session included and an ended deacon term excluded, exactly the designed fixture); the exclusion is a single `derived_from is distinct from 'active_membership'` (`my-groups.ts:79`), so diaconate inclusion cannot differ from Session's without code that names it; the ended-deacon case has no check that a materialised row exists, so it could pass vacuously (Book Club at `:316` covers ended memberships non-vacuously). Worth a one-line follow-up.
+
+## Coverage on Critical Modules
+
+`src/lib/permissions.ts` 100%/100%; `src/lib/two-factor.ts` 91.3% statements (untouched; target met); `src/lib/flags.ts` 100%/100%; `src/lib/org-portal/main-row.ts` (new, pure) 100%/100%/100%. Coverage written to the scratchpad.
+
+## Diff verification (read, not inferred)
+
+- Every new tenant read goes through `withOrgContext()` on `db` (`my-groups.ts:71`, `home-data.ts` one transaction, `listUpcomingMemberEvents` `calendar.ts:541`). `getPlatformDb()` under `src/app/(org)/` and `src/lib/org-portal/` appears only in `*.test.ts` fixture setup (house pattern); in no production file. Live catalog (SELECT only): the seven touched tables are all `relforcerowsecurity = t`; `groups`/`group_memberships` policies are tenancy-only, so the self-scope really is the application predicate `gm.person_id = ${viewerPersonId}` (`my-groups.ts:85`). The `presby_app` session zone is `GMT`, which is why `current_date` would have been wrong.
+- **`getViewerGroups`** (`my-groups.ts:67`): exactly `(viewerPersonId, organizationId)`, the page passes `resolved.org.personId`/`organizationId`; projects `g.id`, `g.name` only (`:76`); excludes on `derived_from` (`:79`); "today" is `todayInOrgZone(new Date(), await orgTimeZoneInTx(tx, organizationId))` (`:72–73`) bound as `${today}::date`; no `current_date` or `now()`.
+- **`events.view` not read at page level:** the card is decided by the `kind` of `listUpcomingMemberEvents` through `composeMainRow`; the calendar applies toggle → `events.view OR events.manage` → zone inside one transaction (`calendar.ts:541–551`).
+- **`directory.view`** read once via `checkDirectoryView` inside `getPortalHomeData` (`home-data.ts:95`), gating the household block (`:111`) and Find-a-person (`page.tsx:235`); fails closed if the home read fails.
+- **Household count:** `countHouseholdDirectoryMembers` (`home-data.ts:114`, defined `directory.ts:485`) calls `countDirectoryRows` with `includeHidden: false` (`:492`); `household` non-null only when `memberCount >= 2` (`home-data.ts:119`); the old private count query is gone; `find-person.ts` uses the exported `checkDirectoryView`.
+- **Main row:** `HomeMainRow` is a Server Component (no `'use client'` in any new file); classes `grid grid-cols-1 items-start gap-6` plus `md:grid-cols-2` only when `layout === "double"` (`home-main-row.tsx:34–35`); `none` renders `null`; `composeMainRow` pure and fully tested.
+- **Failure domains:** `assertOrgAccess` first and sequential (`page.tsx:158`); one `Promise.all` (`:198`); each tenant loader its own `withOrgContext()` wrapped by `loadWidget` (`:260`), which re-throws `OrgAccessError` (`:268`) and logs a fixed string with ids only (`:269`).
+- No `Suspense`; no `loading.tsx` in `src/app/(org)/o/[slug]/`. `Badge` text size overridden to `text-sm whitespace-normal break-words` (`yours-zone.tsx:86`); `badge.tsx` untouched. `data-testid="greeting-band"` still present (`greeting-band.tsx:50`).
+
+## Feature-Gate Audit
+
+No `route.ts` and no `"use server"` action added or changed. Tenant permissions go through `presby_has_permission`, not `FEATURES.*`.
+
+| Route or read function | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| GET page `/o/[slug]` (`page.tsx`) | yes: `cachedAuth()`, `/signin` redirect, `resolveOrgContext` four-way miss, `assertOrgAccess` (`:158`), `org_portal.home_v2` flag | n/a — the page reads no permission itself (pinned `page.test.tsx:466`) | n/a (tenant axis) |
+| `getPortalHomeData` | inherits the session; `withOrgContext` membership re-check | tenant check `checkDirectoryView` = `presby_has_permission(…,'directory.view')` | `directory.view` — same call as the directory pages and the find-person action |
+| `getViewerGroups` | `withOrgContext` membership re-check | permission-less self-read under DECISION-162's four conditions, all held and pinned | none by design |
+| `listUpcomingMemberEvents` (calendar-owned) | `withOrgContext` | private gate: org toggle, then `events.view OR events.manage` | correct; the calendar's own gate |
+| `countHouseholdDirectoryMembers` (new export) | n/a | no check, as documented; its only caller runs `checkDirectoryView` first in the same transaction (`home-data.ts:95→111→114`) | precondition held |
+| `findPersonMatches` (changed) | n/a | `checkDirectoryView` before the search; the action re-checks on submit | `directory.view` |
+
+## Verdict
+
+**PASS**
+
+All required checks green: typecheck, lint, six tripwires; 4244 unit tests; 5426 DB-lane tests with 0 skips; 11/11 new e2e and 195/195 full e2e on a real dev server, 0 skips; the feature-gate audit and every architect condition verified by reading. Not done: true browser-zoom 200% (640 px used), interactive keyboard focus check, watching any test fail before the change. Side effects, all reversed: the Alder Creek calendar toggle flipped and restored with its original `updated_at`; the e2e fixture created and removed its own rows; no repository file written.
+
+**Handoff:** analyst (Phase 6). Points: the advisory diaconate-inclusion test gap; the pre-existing `text-xs` "Coming soon" badges (E4, TODO drafted); the Rule-10/14 housekeeping drafts at the end of Phase 3 still need recording at integration.
+
 
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)
 
-*(pending)*
+*Recorded verbatim by the orchestrator, 2026-10-15. The analyst started its own dev server from this worktree on :3900, drove it with headless Chromium at 375 and 1280 px as `clerk.fixture` and `elder.fixture` on `/o/alder-creek`, stopped it by PID, and left the main checkout's :3000 server untouched. "Observed" means seen in the browser or on the database; "inferred" means read from code or tests.*
+
+## VERDICT
+
+**SHIP WITH NOTES**
+
+## ONE-LINE TAKE
+
+> The portal home now carries the pieces of fpcw-directory's home that presby lacked, and each one behaved as Phase 1 described in my browser pass. The notes are one test gap QA flagged, a phone-density polish item, and one what's-new decision. None blocks shipping.
+
+## What's Working
+
+All of this was **observed**.
+
+- **The original ask.** Compared with fpcw-directory's home: greeting already there and stronger; Find a person present for both clerk and elder; Yours = household plus groups, with fpcw's signups deliberately dropped; Coming up = a card showing one row per series; main row side by side from `md`; tiles unchanged (R1/R2/R3).
+- **Side-by-side layout.** At 1280, clerk has Yours at x88 w540 and Coming up at x652 w540, both at y438. At 375 they stack at x24 w327, zero horizontal overflow. Heading order is h1, h2 Yours, h2 Coming up, then the domain h2s.
+- **One row per series, and it is the next occurrence.** Sunday worship is a weekly series with Oct 11 (past), Oct 18, Oct 25, Nov 1, 8, 15, 22 (future); the card shows exactly one "Sunday worship", "Sun, Oct 18 · 10:30 AM". The cancelled "Fellowship supper" (Oct 20) is absent. Only three series are upcoming today, so the four-row cap was not exercised live (the e2e spec covers it; read, not re-run).
+- **Round trip.** A row links to `/o/alder-creek/calendar/<id>?from=%2Fo%2Falder-creek`; the detail page showed the h1 "Sunday worship" and "Back to home" to `/o/alder-creek`, which returned to the home. The footer link `href` is `/o/alder-creek/calendar` (read; the e2e spec clicks it).
+- **Household count agrees with the household page.** "The Renwick Family · 3 members" on the card; the household page says "3 members" and lists the three.
+- **Groups pills.** Elder sees "My groups" with one "Session" pill (14px, not a link; household block correctly omitted). Clerk (Session term ended) sees no pills and no groups block. Neither sees "Active Membership". Alphabetical order and the exclusion rules rest on QA's DB tests.
+- **Microcopy matches Phase 1 exactly.** "Coming up"; "Nothing is on the calendar right now." with "Open the calendar →"; both link labels carry an arrow Phase 3 added.
+- **Empty state (observed, on a mutated demo calendar).** No org in the dev branch gave toggle on + `events.view` + zero events, so I temporarily set `cancelled_at` on Alder Creek's 8 upcoming uncancelled events: at 375 and 1280 Yours stayed at full size and Coming up showed the empty copy and link as a short card (w540 × h174 at 1280). Restored by id; the card repopulated.
+- **`e2e-alpha`, as F133 predicted.** As `org1@presby.invalid` and `org1-org2@presby.invalid`: neither card renders and there is no `home-main-row` element; Find a person is absent (no `directory.view`); the tiles still render (never permission-filtered). This is the "none" layout, not the empty state.
+- **Toggle-off.** With the Alder Creek `org_portal.calendar` toggle off (owner connection): "Coming up" vanished, the row lost `md:grid-cols-2`, Yours went to w1104 of 1152 at 1280; unchanged at 375. Restored with the original `updated_at` and re-checked side by side at 1280.
+- **Keyboard.** Tab order at 1280: household link, the three event rows in order, "See the full calendar", then the tiles — reading order. Each shows a 2px ring with 2px offset under `:focus-visible`, confirmed in screenshots. This closes QA's "not run interactively" gap.
+
+## Intent-vs-Shipped Diff
+
+- Phase 1 said Church Events with an audience filter, a "Church Events" heading, a client-side height trim, `sm:`. Shipped: "Coming up", no filter (no audience columns), no trim, `md:`. **Matches R4/R5/OQ6.**
+- Phase 1 said event rows are two lines. Shipped: title, date and time, a type chip, a location; at 375 the chip wraps under the date, so each row is 130px and the card is about 540px tall. **Acceptable drift** (the chip and location are the calendar's own pieces), but the one place the phone experience got heavier than described — follow-up N2.
+- Household of one suppressed, count by the directory's rule: observed 3 = 3; the suppression and exclusions rest on QA's DB tests. **Matches (by tests).**
+- Find a person hidden without `directory.view`: observed absent at `e2e-alpha`. **Matches.**
+- Groups pills static, no cap, no links: observed non-link 14px pill (`text-xs` overridden at the call site; primitive untouched). **Matches.** The 60-character wrap is e2e-covered.
+- Each widget fails independently with the designed events-failure copy: in `upcoming-events-card.tsx:111-114`, log string pinned in `page.test.tsx`. **Inferred, not observed** (no read failure forced). **Matches by code and test.**
+- Greeting server-clock hour tracked, not fixed: untouched; TODO line exists. **Matches.**
+- R1/R2/R3: tile grid untouched; Members and Directory tiles still show at `e2e-alpha` with no grants. **Matches.**
+
+## Edge Cases
+
+- Empty state: **pass** (observed). Failure microcopy: **pass by reading and tests**, not observed live. Permission gate: **pass** (observed: card and Find-a-person absent without the grants, toggle-off hides the card, tiles unfiltered; inferred from QA: `events.view` decided only by the calendar function's `kind`, `directory.view` read once; `withOrgContext()` the only read path, no `getPlatformDb()` in production files). Audit event: **not applicable**. Mobile: **pass at 375 and 1280**; 200% zoom not run (QA's 640px viewport stood in).
+
+## Follow-Ups (SHIP WITH NOTES)
+
+Six lines are already staged in `docs/TODO.md` from Phase 3 (tile visibility revisit, roll-approvals badge, greeting hour, member-facing group page, `Badge` `text-xs`, find-person vs directory-search semantics). Three more:
+
+1. **N1: a positive current-diaconate case for `getViewerGroups`** (QA advisory, agreed). `my-groups.test.ts:310` checks Session included and an *ended* deacon term excluded; nothing proves a *current* diaconate membership appears, and the ended-deacon negative has no assertion that the materialised row exists, so it can pass vacuously. Risk is low (one `derived_from` filter covers both courts); the point is that Phase 1 R6 promised both derived groups.
+2. **N2: Coming up card density at 360–375px.** Each row is 130px because the chip wraps under the date and the location is a third line, so a three-event card is about 540px and pushes the tool tiles a full screen down. Try the chip inline with the date at `sm:` only, or drop it below `sm`, and settle with the operator on a phone. Same pass: the card's top padding plus `py-3` on the first row gives a larger top gap than bottom; the footer link has a large gap above; the row focus ring sits flush against the text (rows have no horizontal padding).
+3. **N3: the `Badge` `text-xs` line (E4) is correctly staged and not a blocker.** QA's four `text-xs` elements are the tile grid's pre-existing "Coming soon" badges; this diff adds none.
+
+**Rule 10:** the staged Done line's "follow-ups filed above" is true once N1 and N2 are added in the same closing commit. **Rule 12:** no feedback row (inferred from the Source section). **Rule 13:** warranted, but do **not** publish a separate entry — fold one sentence into the calendar's pending D8 entry ("The next few events also appear on your home page under **Coming up**.") and publish them together after N5's production count; the `v0.33.md` paragraph is the release record, not a what's-new body. **Rule 14:** the staged "Portal home" line matches what I observed. **Rule 15:** `docs/architecture.md` unchanged, agreed.
+
+## Side effects of my verification (all reversed)
+
+Alder Creek events: 8 upcoming rows cancelled and restored (final: 8 uncancelled, 1 originally cancelled; no `updated_at` disturbed). Calendar toggle: flipped off and back on, original `updated_at` restored. No repository file written.
+

@@ -34,6 +34,8 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
   let getHouseholdDetail: typeof import("./directory").getHouseholdDetail;
   let getPersonDetail: typeof import("./directory").getPersonDetail;
   let getParishRoster: typeof import("./directory").getParishRoster;
+  let countHouseholdDirectoryMembers: typeof import("./directory").countHouseholdDirectoryMembers;
+  let withOrgContext: typeof import("@/lib/authz").withOrgContext;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let organizations: typeof import("@/lib/db/domain/org").organizations;
   let orgUnits: typeof import("@/lib/db/domain/org").orgUnits;
@@ -108,7 +110,9 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       getHouseholdDetail,
       getPersonDetail,
       getParishRoster,
+      countHouseholdDirectoryMembers,
     } = await import("./directory"));
+    ({ withOrgContext } = await import("@/lib/authz"));
     ({ getPlatformDb } = await import("@/lib/db"));
     ({ organizations, orgUnits } = await import("@/lib/db/domain/org"));
     ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
@@ -1350,6 +1354,54 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       const result = await getDirectory(control, orgA, { search: "Ashgrove" });
       if (result.kind !== "ok") throw new Error("expected ok");
       expect(result.entries.map((e) => e.personId)).toContain(currentSameShape);
+    });
+  });
+
+  describe("countHouseholdDirectoryMembers (portal home)", () => {
+    it("counts the ordinary directory's members of a household, excluding the ended one", async () => {
+      const count = await withOrgContext(control, orgA, (tx) =>
+        countHouseholdDirectoryMembers(tx, orgA, householdVisible),
+      );
+      // hhPerson1 + hhPerson2; endedMember (F136) is in the household but ended.
+      expect(count).toBe(2);
+    });
+
+    it("agrees with the household page's own memberCount", async () => {
+      const count = await withOrgContext(control, orgA, (tx) =>
+        countHouseholdDirectoryMembers(tx, orgA, householdVisible),
+      );
+      const detail = await getHouseholdDetail(control, orgA, householdVisible);
+      if (detail.kind !== "ok") throw new Error("expected ok");
+      expect(count).toBe(detail.household.memberCount);
+    });
+
+    it("is 0 for a household whose only member is directory-hidden", async () => {
+      const count = await withOrgContext(control, orgA, (tx) =>
+        countHouseholdDirectoryMembers(tx, orgA, householdHiddenOnly),
+      );
+      expect(count).toBe(0);
+    });
+
+    it("never counts a directory-hidden member, even for a viewer who holds directory.view_hidden", async () => {
+      // includeHidden is not a parameter: an elevated viewer gets the ordinary count.
+      const count = await withOrgContext(elevatedPerson, orgA, (tx) =>
+        countHouseholdDirectoryMembers(tx, orgA, householdHiddenOnly),
+      );
+      expect(count).toBe(0);
+    });
+
+    it("cannot see another org's household from this org's context", async () => {
+      const count = await withOrgContext(control, orgA, (tx) =>
+        countHouseholdDirectoryMembers(tx, orgA, householdOrgB),
+      );
+      expect(count).toBe(0);
+    });
+
+    it("counts a household in its own org", async () => {
+      const count = await withOrgContext(forbiddenPerson, orgB, (tx) =>
+        countHouseholdDirectoryMembers(tx, orgB, householdOrgB),
+      );
+      expect(count).toBe(1);
     });
   });
 

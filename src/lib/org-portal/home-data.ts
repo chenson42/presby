@@ -1,35 +1,62 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
+import {
+  checkDirectoryView,
+  countHouseholdDirectoryMembers,
+} from "@/lib/directory";
 
 /**
- * The "yours" zone's data for the portal-home rebuild (Phase 3, Increment 1).
+ * The portal home's own-row data: the greeting's display name, whether the
+ * viewer may use the directory, and the "Yours" card's household.
  *
  * ONE `withOrgContext()` TRANSACTION, `getDirectory()`'s pattern — the
- * membership re-check and both reads below run inside the same
- * transaction-scoped `app.current_org_id`, so nothing races between "is
- * this person still at this org" and "what does their own row say".
+ * membership re-check and every read below run inside the same
+ * transaction-scoped `app.current_org_id`, so nothing races between "is this
+ * person still at this org" and "what does their own row say".
  *
- * READS ONLY THE VIEWER'S OWN ROW. No permission check runs here, on
- * purpose: `withOrgContext()`'s own membership re-check IS the entire gate
- * — a person reading their own membership/household summary needs no
- * `directory.view` grant, the same way `getPortalHomeData` differs from
- * `getDirectory()` in scope, not in trust model.
+ * THE DISPLAY NAME is a permission-less read of the viewer's own row:
+ * `withOrgContext()`'s membership re-check is its whole gate, and a person
+ * reading their own name needs no grant.
+ *
+ * `canViewDirectory` AND THE HOUSEHOLD BLOCK run `directory.view` through the
+ * directory module's own `checkDirectoryView()` (the identical
+ * `presby_has_permission()` call `getDirectory()` makes). A household is a
+ * list of OTHER PEOPLE, which is directory data even when the scope is the
+ * viewer's own household, so it is read only for a `directory.view` holder.
+ * `canViewDirectory` also tells the page whether to render find-a-person (whose
+ * authority runs only on submit, so the page has to decide visibility first —
+ * the one page-level permission read DECISION-162 allows).
+ *
+ * THE HOUSEHOLD COUNT IS THE DIRECTORY'S COUNT (`countHouseholdDirectoryMembers`),
+ * never a private copy of the eligibility rule (F136: this file once counted
+ * `ended_on is null` only, so a widow's home said "2 members" while the
+ * household page showed one). A household with fewer than TWO eligible people
+ * is not shown at all — "Your household contains only you" is noise — so
+ * `household` is non-null only when `memberCount >= 2`, by construction, and
+ * `YoursZone` renders what it is given with no second copy of the rule (D2).
+ *
+ * A directory-hidden viewer with one visible housemate therefore gets a count
+ * of one (they are not in the count) and no card (D3): they never see a wrong
+ * number, and the household stays reachable from the directory. A viewer who
+ * is themselves ineligible (a visitor) but whose household has two eligible
+ * members sees "2 members" — it is the directory's count, and the card links to
+ * a page showing exactly those two.
  */
 
 export interface PortalHomeHousehold {
   id: string;
   name: string;
-  /** Count of OTHER CURRENT (not-ended) memberships sharing this household,
-   * plus the viewer themselves. */
+  /** The directory's count of this household. `>= 2` by construction. */
   memberCount: number;
 }
 
 export interface PortalHomeData {
   displayName: string;
-  /** `null`, never an empty object, when the viewer has no `household_id`
-   * (a very live case — presby's `households` link is nullable per
-   * membership). */
+  /** `directory.view`, read once here. Gates find-a-person and the household. */
+  canViewDirectory: boolean;
+  /** `null`, never an empty object: no household id, no `directory.view`, or
+   * fewer than two eligible members. */
   household: PortalHomeHousehold | null;
 }
 
@@ -41,7 +68,6 @@ interface PersonRow {
 
 interface HouseholdRow {
   name: string;
-  member_count: string;
 }
 
 export async function getPortalHomeData(
@@ -66,31 +92,36 @@ export async function getPortalHomeData(
       ? (personRow.preferred_name ?? personRow.first_name)
       : "there";
 
+    const canViewDirectory = await checkDirectoryView(
+      tx,
+      personId,
+      organizationId,
+    );
+
     let household: PortalHomeHousehold | null = null;
-    if (personRow?.household_id) {
+    if (canViewDirectory && personRow?.household_id) {
+      const householdId = personRow.household_id;
       const householdResult = await tx.execute(sql`
-        select h.name as name,
-               count(hm.id) filter (where hm.ended_on is null) as member_count
+        select h.name as name
           from households h
-          left join memberships hm
-                 on hm.household_id = h.id
-                and hm.organization_id = h.organization_id
-         where h.id = ${personRow.household_id}::uuid
+         where h.id = ${householdId}::uuid
            and h.organization_id = ${organizationId}::uuid
-         group by h.name
       `);
-      const householdRows =
-        (householdResult as unknown as { rows?: HouseholdRow[] }).rows ?? [];
-      const row = householdRows[0];
-      if (row) {
-        household = {
-          id: personRow.household_id,
-          name: row.name,
-          memberCount: Number(row.member_count),
-        };
+      const householdRow = (
+        householdResult as unknown as { rows?: HouseholdRow[] }
+      ).rows?.[0];
+      if (householdRow) {
+        const memberCount = await countHouseholdDirectoryMembers(
+          tx,
+          organizationId,
+          householdId,
+        );
+        if (memberCount >= 2) {
+          household = { id: householdId, name: householdRow.name, memberCount };
+        }
       }
     }
 
-    return { displayName, household };
+    return { displayName, canViewDirectory, household };
   });
 }

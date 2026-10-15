@@ -4,6 +4,31 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-162 — On the `(org)` portal home, a tile is navigation and a widget is data. Tiles are never filtered by the viewer's permission (the destination owns the denial). A widget hides when its own read function denies, and that denial comes from the function's result, never from a separate page-level permission read. Tile density, badges and the main row's height stay server-side and unchanged. Each widget is its own `withOrgContext()` failure domain under one `Promise.all`, with no savepoints and no `Suspense`.**
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-portal-home-alignment` (Phase 2 architect, from the Phase 1 analyst's R1–R5)
+
+**Tiles.** The registry stays permission-blind (`src/lib/org-portal/tiles.ts:8-18`). fpcw-directory hides tiles by permission only because its destinations redirect silently. presby's destinations render honest Forbidden states, so hiding a tile buys no discretion and adds a second gate that can disagree with the destination about one grant, which is the defect DECISION-003 exists to prevent. Accepted cost: an ordinary member sees operate tiles (such as Members) that end in a Forbidden page. Revisit trigger, as its own pipeline: a per-tile `requires` key, one batched permission read, and a test pinning each tile to its destination's gate. This ruling forbids *permission* filtering only. An org-toggle axis ("is this feature on for this org") is the flag question at organization grain and is not excluded.
+
+**Widgets.** A widget renders data, so it hides when the viewer may not read that data: the home page carries no denial a member can do nothing about. To keep the asymmetry from recreating the two-gates defect, a widget's visibility is derived from its own read function's result (for example `forbidden` or `disabled` renders nothing), and the page does not pre-read the permission. The one exception is a widget whose authority runs only on submit (Find-a-person). Its visibility uses the identical `presby_has_permission` call the action makes, and the action remains the authority. This rule is recorded here and does not amend DECISION-003, which governs the two mechanisms, not where a check lives.
+
+**Layout.** Tile columns stay at one on phones and two from `sm` (descriptions carry meaning, sections hold four tiles at most, and `TileGrid` is shared with both admin hubs). No count-badge hook (an unused prop is speculative, and the one real queue needs its own gated count function). No client-side height matching. The main row is a server component at `md:grid-cols-2 items-start` with a fixed four-row events card, and a lone card takes the full width.
+
+**Failure domains.** Each widget reads in its own `withOrgContext()` transaction. At most three run concurrently after `assertOrgAccess`, each wrapped so that `OrgAccessError` re-throws and any other failure degrades only that widget. Savepoints were rejected: there is no precedent, they would force callers' transactions into other modules' public reads, they serialise everything onto one connection, and they do not isolate the correlated connection failure anyway. `Suspense` was rejected: a skeleton for a card that may resolve to nothing is the scaffolding this page forbids, and an error after the first flush loses its status code.
+
+**Self-reads.** A widget may read the viewer's *own* rows without a permission (the `home-data.ts` trust model), provided four conditions hold. Because RLS on these tables is tenancy-only, the self-scope is an application predicate, so the conditions are what hold it:
+
+- the person id is the server-resolved one and the function takes no other;
+- the projection is the minimum needed for display;
+- a database test proves another member's rows are not returned;
+- the function lives outside any module whose header promises a permission gate on every export.
+
+**Household and main row (Phase 3).** The household card is a directory view of the viewer's own household: its count is `countHouseholdDirectoryMembers`, built on the directory's own query with `includeHidden: false`, so the home page and the household page cannot disagree (F136). A household with fewer than two eligible people is not shown, and a directory-hidden viewer with one visible housemate therefore sees no card, because the count they are not in is one. The household links to its page only when both `org_portal.directory` and `org_portal.directory_v2` are on, otherwise to `/directory`. Which cards render, and whether the main row is one column or two, is a pure function of the loader results (`composeMainRow`), so a lone card takes the full width on the server with no client measurement. **Failure-domain bound (amended):** four concurrent tenant transactions after the gate (home, groups, events, and the tile registry's org-toggle read), plus the layout's; `appPool` queues rather than fails when saturated.
+
+(2026-10-14, adopted at Phase 2; household/main-row paragraph appended at Phase 3; `docs/work-log/2026-10-14-portal-home-alignment.md`.)
+
+---
+
 **DECISION-167 — The tile gate.** The tile gate.
 
 **Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 3 tech-lead implementation ruling; number assigned by the orchestrator)

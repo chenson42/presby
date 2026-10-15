@@ -467,6 +467,33 @@ async function countDirectoryRows(
 }
 
 /**
+ * Counts the people the ordinary directory would show in this household — the
+ * number `getHouseholdDetail()` reports as `memberCount` for the same viewer
+ * (F136: the portal home and the household page cannot disagree).
+ *
+ * Performs NO permission check: the caller must have established
+ * `directory.view` in the SAME transaction (`checkDirectoryView`).
+ * `includeHidden` is deliberately not a parameter — the home is not an
+ * elevated surface, so a `directory.view_hidden` holder gets the ordinary count
+ * there too.
+ *
+ * Tradeoff: `countDirectoryRows` carries the lateral contact joins this count
+ * does not need. That is fine for a household (a handful of rows behind
+ * `memberships_org_household_idx`); revisit only if a count ever runs
+ * unscoped.
+ */
+export async function countHouseholdDirectoryMembers(
+  tx: OrgTx,
+  organizationId: string,
+  householdId: string,
+): Promise<number> {
+  return countDirectoryRows(tx, organizationId, {
+    householdId,
+    includeHidden: false,
+  });
+}
+
+/**
  * `getDirectory()`'s own mapping. Every field it set through Increment 3 is
  * UNCHANGED; Increment 4 adds `isHidden` (see this file's own header for why
  * that is safe to compute unconditionally, even for an ordinary caller).
@@ -510,8 +537,13 @@ function mapRowExtended(row: DirectoryRow): DirectoryEntry {
 }
 
 /** The `directory.view` check, factored out so all four readers below run
- * the identical `presby_has_permission()` call `getDirectory()` always has. */
-async function checkDirectoryView(
+ * the identical `presby_has_permission()` call `getDirectory()` always has.
+ *
+ * Exported (portal-home alignment) so the portal home and find-a-person run
+ * THIS call rather than a private copy of the SQL: one definition of "may this
+ * person see the directory", the way `directoryEligibilityWhereSql()` is one
+ * definition of "who appears". */
+export async function checkDirectoryView(
   tx: OrgTx,
   personId: string,
   organizationId: string,

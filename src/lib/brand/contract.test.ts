@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   BRAND_ROLES,
+  CATEGORY_KEYS,
+  CATEGORY_PAIRS,
   BRAND_TOKEN_VERSION,
   FOCUS_RING_OFFSET_PX,
   LEGAL_PAIRS,
@@ -11,6 +13,7 @@ import {
   TOKEN_POLICY,
   TYPE_SCALE,
   type BrandRole,
+  type CategoryKey,
   type PlatformTokenName,
   type Scheme,
 } from "./contract";
@@ -546,5 +549,123 @@ describe("contrast", () => {
       expect(ratio.toFixed(2)).toBe("3.00");
       expect(meets(nonText!, "#595959", "#000000")).toBe(false);
     });
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * (d) The categorical event-type family (DECISION-161)
+ *
+ * Not part of LEGAL_PAIRS (see CATEGORY_PAIRS' header), so its proof is its own
+ * group. As in (a), the floor is read FROM THE PAIR, and ratios are computed
+ * with the repo's own contrastRatio - never trusted from the design's table.
+ * ---------------------------------------------------------------------- */
+
+describe("CATEGORY_PAIRS against the platform palette", () => {
+  for (const pair of CATEGORY_PAIRS) {
+    for (const scheme of SCHEMES) {
+      it(`${scheme}: ${pair.fg} on ${pair.bg} clears ${pair.min}:1 (${pair.kind})`, () => {
+        const fg = PLATFORM_TOKENS[scheme][pair.fg];
+        const bg = PLATFORM_TOKENS[scheme][pair.bg];
+        const ratio = contrastRatio(fg, bg);
+        expect(
+          ratio,
+          `${pair.fg} (${fg}) on ${pair.bg} (${bg}) in ${scheme} is ${ratio.toFixed(2)}:1, floor ${pair.min}:1`,
+        ).toBeGreaterThanOrEqual(pair.min);
+      });
+    }
+  }
+
+  it("gives every key all three pairs: 7:1 on its tint, 3:1 on --background and --card", () => {
+    expect(CATEGORY_KEYS).toHaveLength(9);
+    for (const key of CATEGORY_KEYS) {
+      const mine = CATEGORY_PAIRS.filter((p) => p.fg === `--category-${key}-foreground`);
+      expect(mine.map((p) => `${p.bg}@${p.min}`).sort()).toEqual(
+        [`--category-${key}@7`, "--background@3", "--card@3"].sort(),
+      );
+    }
+  });
+
+  it("classifies exactly the categorical-marked tokens as the CATEGORY_KEYS tint/ink pairs, all platform", () => {
+    const marked = TOKEN_POLICY.filter((e) => "categorical" in e).map((e) => e.token);
+    const expected = CATEGORY_KEYS.flatMap((k) => [
+      `--category-${k}`,
+      `--category-${k}-foreground`,
+    ]);
+    expect([...marked].sort()).toEqual([...expected].sort());
+    for (const entry of TOKEN_POLICY) {
+      if ("categorical" in entry) expect(entry.policy).toBe("platform");
+    }
+  });
+
+  it("keeps the family out of the brand role machinery", () => {
+    const roleTokens = new Set<string>(Object.values(ROLE_TO_TOKEN));
+    for (const pair of LEGAL_PAIRS) {
+      expect(String(pair.fg)).not.toContain("category");
+      expect(String(pair.bg)).not.toContain("category");
+    }
+    for (const key of CATEGORY_KEYS) {
+      expect(roleTokens.has(`--category-${key}`)).toBe(false);
+      expect(roleTokens.has(`--category-${key}-foreground`)).toBe(false);
+    }
+  });
+
+  it("declares every category token in globals.css for both schemes and in @theme inline", () => {
+    const blocks = schemeBlocks();
+    for (const key of CATEGORY_KEYS) {
+      for (const token of [`--category-${key}`, `--category-${key}-foreground`]) {
+        expect(blocks.light.has(token), `:root lacks ${token}`).toBe(true);
+        expect(blocks.dark.has(token), `.dark lacks ${token}`).toBe(true);
+        expect(GLOBALS_CSS).toContain(`--color-${token.slice(2)}: var(${token});`);
+      }
+    }
+  });
+
+  /**
+   * S3: the eight selectable inks must be distinguishable by hue, not only by
+   * lightness - the colour is never the only signal, but a pair of inks 10
+   * degrees apart is a pair nobody can tell apart. Pairwise OKLCH hue
+   * distance >= 30 degrees, both schemes. `neutral` is achromatic, so it is
+   * excluded (its hue is noise).
+   */
+  describe("S3: pairwise ink hue distance", () => {
+    const MIN_HUE_DISTANCE_DEG = 30;
+    const selectable = CATEGORY_KEYS.filter((k): k is Exclude<CategoryKey, "neutral"> => k !== "neutral");
+
+    function oklabHue(css: string): number {
+      const { r, g, b } = parseColor(css);
+      const lin = (c: number) => {
+        const v = c / 255;
+        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      };
+      const [lr, lg, lb] = [lin(r), lin(g), lin(b)];
+      const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+      const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+      const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+      const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+      const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+      return ((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360;
+    }
+
+    for (const scheme of SCHEMES) {
+      it(`${scheme}: no two selectable inks are closer than ${MIN_HUE_DISTANCE_DEG} degrees`, () => {
+        const hues = selectable.map((k) => ({
+          key: k,
+          hue: oklabHue(PLATFORM_TOKENS[scheme][`--category-${k}-foreground`]),
+        }));
+        let min = Infinity;
+        for (let i = 0; i < hues.length; i++) {
+          for (let j = i + 1; j < hues.length; j++) {
+            const d = Math.abs(hues[i].hue - hues[j].hue);
+            const dist = Math.min(d, 360 - d);
+            min = Math.min(min, dist);
+            expect(
+              dist,
+              `${hues[i].key} and ${hues[j].key} inks are ${dist.toFixed(1)} degrees apart in ${scheme}`,
+            ).toBeGreaterThanOrEqual(MIN_HUE_DISTANCE_DEG);
+          }
+        }
+        expect(min).toBeLessThan(360);
+      });
+    }
   });
 });

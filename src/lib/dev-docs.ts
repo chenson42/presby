@@ -425,4 +425,10 @@ export const INVARIANTS: {
       "If a report field cannot be derived, the gap is in the operational model, not in the report.",
     enforcement: "documented",
   },
+  {
+    title: "A congregation's event types always include one fallback — except where nobody made one",
+    detail:
+      "event_types carries a partial unique index allowing at most one is_fallback row per org, a CHECK that it is active, and a CHECK that it is neutral and nothing else is (drizzle/0054). 'At least one' cannot be a constraint, so it is paper: provisioning, the 0054 backfill and the manager's 'Add the standard event types' action create it, and the calendar must (and does) render correctly with zero types, showing untyped events as neutral with no filter pills.",
+    enforcement: "documented",
+  },
 ];

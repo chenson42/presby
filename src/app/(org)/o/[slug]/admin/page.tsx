@@ -5,11 +5,8 @@ import {
   resolveOrgContext,
 } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
-import {
-  DOMAIN_LABELS,
-  DOMAIN_ORDER,
-  visiblePortalTiles,
-} from "@/lib/org-portal/tiles";
+import { DOMAIN_LABELS, DOMAIN_ORDER } from "@/lib/org-portal/tiles";
+import { visiblePortalTiles } from "@/lib/org-portal/visible-tiles";
 import { DomainTileSections } from "@/components/shared/domain-tile-sections";
 import { TILE_ICONS } from "@/components/org-portal/tile-icons";
 import { OrgAccessDenied, OrgAccessEnded } from "../org-states";
@@ -97,7 +94,14 @@ export default async function AdminHubPage({
     return <AdminHubFlagOff name={resolved.org.name} />;
   }
 
-  const tiles = await visiblePortalTiles("administer", resolved.org.organizationType);
+  const tiles = await visiblePortalTiles(
+    "administer",
+    resolved.org.organizationType,
+    {
+      personId: resolved.org.personId,
+      organizationId: resolved.org.organizationId,
+    },
+  );
 
   return (
     <section className="space-y-6">

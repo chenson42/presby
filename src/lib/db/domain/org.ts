@@ -113,32 +113,53 @@ export const organizations = pgTable(
  * Per-org sensitive configuration, split out of `organizations` so the org tree
  * can stay publicly readable. Resolved in review round 1.
  */
-export const organizationSettings = pgTable("organization_settings", {
-  organizationId: uuid("organization_id")
-    .primaryKey()
-    .references(() => organizations.id, { onDelete: "cascade" }),
-  // `pcusaPin` moved to `organizationIdentifiers` (kind = 'pcusa_pin') in
-  // drizzle/0043 — D24. It could not stay here: this table IS tenant-
-  // isolated, so the presbytery running an import could not read a
-  // congregation's own OGA church PIN, the identifier a cross-council
-  // importer needs most.
-  // Includes sessionServesAsTrustees, hasDeacons, trackDisabilityPerPerson.
-  settings: jsonb("settings").notNull().default({}),
-  // Per-congregation 2FA policy. NOT a feature flag: a flag is an environment
-  // toggle, this is tenant state (DECISION-003). A typed column rather than a
-  // key in `settings` above, because it is read on the sign-in path and a
-  // boolean deciding whether 2FA is enforced belongs to the database, not to
-  // whatever last wrote the blob.
-  //
-  // Resolved at sign-in by presby_two_factor_required() and projected into the
-  // session — the Edge gate reads the claim and cannot reach the database.
-  // Default false, so every existing congregation keeps today's behavior.
-  requireTwoFactor: boolean("require_two_factor").notNull().default(false),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const organizationSettings = pgTable(
+  "organization_settings",
+  {
+    organizationId: uuid("organization_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // `pcusaPin` moved to `organizationIdentifiers` (kind = 'pcusa_pin') in
+    // drizzle/0043 — D24. It could not stay here: this table IS tenant-
+    // isolated, so the presbytery running an import could not read a
+    // congregation's own OGA church PIN, the identifier a cross-council
+    // importer needs most.
+    // Includes sessionServesAsTrustees, hasDeacons, trackDisabilityPerPerson.
+    settings: jsonb("settings").notNull().default({}),
+    // Per-congregation 2FA policy. NOT a feature flag: a flag is an environment
+    // toggle, this is tenant state (DECISION-003). A typed column rather than a
+    // key in `settings` above, because it is read on the sign-in path and a
+    // boolean deciding whether 2FA is enforced belongs to the database, not to
+    // whatever last wrote the blob.
+    //
+    // Resolved at sign-in by presby_two_factor_required() and projected into the
+    // session — the Edge gate reads the claim and cannot reach the database.
+    // Default false, so every existing congregation keeps today's behavior.
+    requireTwoFactor: boolean("require_two_factor").notNull().default(false),
+    // The IANA zone in which "now" is read for this org: today's highlight, the
+    // default calendar month, the Today link, the home card's "upcoming" test
+    // (DECISION-160). NEVER used to convert a stored `events.starts_at` — those
+    // are wall-clock (DECISION-113 ruling 3). Default America/New_York (US-only,
+    // D6); set by a platform admin in v1, no org-admin UI. Most orgs have no
+    // settings row at all (F132), so the READER falls back to the default; the
+    // row (drizzle/0054 backfill, createOrganization()) is a convenience, not
+    // the contract.
+    timeZone: text("time_zone").notNull().default("America/New_York"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    // Two clauses (drizzle/0054): the shape clause rejects POSIX strings and
+    // bare abbreviations Postgres would accept and Intl would not; the second
+    // makes Postgres refuse a name its own tzdata does not know.
+    check(
+      "organization_settings_time_zone_valid",
+      sql`${t.timeZone} ~ '^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$' and (timestamp '2000-01-01' at time zone ${t.timeZone}) is not null`,
+    ),
+  ],
+);
 
 /**
  * External identifiers for an organization — OGA church PIN, psvonline

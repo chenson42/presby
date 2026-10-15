@@ -22,6 +22,15 @@ import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
+// org-provisioning.ts imports ORG_FEATURE_CATALOG from org-features.ts, which
+// imports @/lib/audit, which transitively imports @/auth (next-auth) — not
+// resolvable in this test environment (the same constraint org-features.test.ts
+// documents). Nothing here calls recordAudit().
+vi.mock("@/lib/audit", () => ({
+  AUDIT_ACTIONS: { ORG_FEATURE_TOGGLED: "tenant.org_feature.toggled" },
+  recordAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
 );
@@ -40,6 +49,11 @@ describe.skipIf(!hasDb)(
     let appRolePermissions: typeof import("@/lib/db/domain/authz").appRolePermissions;
     let roleGrants: typeof import("@/lib/db/domain/authz").roleGrants;
     let organizationAffiliations: typeof import("@/lib/db/domain/lifecycle").organizationAffiliations;
+    let organizationSettings: typeof import("@/lib/db/domain/org").organizationSettings;
+    let organizationFeatureToggles: typeof import("@/lib/db/domain/org-features").organizationFeatureToggles;
+    let eventTypes: typeof import("@/lib/db/domain/events").eventTypes;
+    let eventTypeSeedPlan: typeof import("./org-provisioning").eventTypeSeedPlan;
+    let baselineRoleSeedPlan: typeof import("./org-provisioning").baselineRoleSeedPlan;
     let users: typeof import("@/lib/db/schema").users;
 
     const stamp = Date.now();
@@ -73,7 +87,14 @@ describe.skipIf(!hasDb)(
         deriveOrgPath,
         createOrganization,
         getOrganizationAffiliationAdminDetail,
+        eventTypeSeedPlan,
+        baselineRoleSeedPlan,
       } = await import("./org-provisioning"));
+      ({ organizationSettings } = await import("@/lib/db/domain/org"));
+      ({ organizationFeatureToggles } = await import(
+        "@/lib/db/domain/org-features"
+      ));
+      ({ eventTypes } = await import("@/lib/db/domain/events"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
@@ -180,11 +201,146 @@ describe.skipIf(!hasDb)(
       });
     });
 
+    describe("baselineRoleSeedPlan / eventTypeSeedPlan (pure plans)", () => {
+      it("gives the member role a LIST of permissions: directory.view and events.view", () => {
+        for (const type of [
+          "congregation",
+          "presbytery",
+          "synod",
+          "general_assembly",
+          "new_worshiping_community",
+        ] as const) {
+          const plan = baselineRoleSeedPlan(type);
+          expect(plan).toHaveLength(1);
+          expect(plan[0].key).toBe("member");
+          expect(plan[0].permissionKeys).toEqual(["directory.view", "events.view"]);
+        }
+      });
+
+      it("re-exports the pure event-type seed plan (congregation: the standard nine; presbytery: the fallback only)", () => {
+        expect(eventTypeSeedPlan("congregation")).toHaveLength(9);
+        expect(eventTypeSeedPlan("new_worshiping_community")).toHaveLength(9);
+        expect(eventTypeSeedPlan("presbytery").map((t) => t.name)).toEqual(["General"]);
+      });
+    });
+
     // -------------------------------------------------------------------
     // createOrganization()
     // -------------------------------------------------------------------
 
     describe("createOrganization", () => {
+      describe("calendar provisioning (DECISION-160/161): settings row, default-on toggle, event types", () => {
+        async function provisioned(
+          label: string,
+          organizationType: "congregation" | "presbytery" | "new_worshiping_community",
+        ) {
+          const result = await createOrganization({
+            name: `Fixture ${label} for org-provisioning.test.ts`,
+            slug: `org-prov-test-cal-${label}-${stamp}`,
+            organizationType,
+            platformStatus: "unmanaged",
+          });
+          expect(result.kind).toBe("ok");
+          if (result.kind !== "ok") throw new Error("createOrganization failed");
+          createdOrgIds.push(result.organizationId);
+          return result.organizationId;
+        }
+
+        async function readCalendarRows(organizationId: string) {
+          const platform = getPlatformDb();
+          const settings = await platform
+            .select({
+              timeZone: organizationSettings.timeZone,
+              requireTwoFactor: organizationSettings.requireTwoFactor,
+            })
+            .from(organizationSettings)
+            .where(eq(organizationSettings.organizationId, organizationId));
+          const toggles = await platform
+            .select({
+              featureKey: organizationFeatureToggles.featureKey,
+              enabled: organizationFeatureToggles.enabled,
+              updatedBy: organizationFeatureToggles.updatedBy,
+            })
+            .from(organizationFeatureToggles)
+            .where(eq(organizationFeatureToggles.organizationId, organizationId));
+          const types = await platform
+            .select({
+              name: eventTypes.name,
+              color: eventTypes.color,
+              icon: eventTypes.icon,
+              sortOrder: eventTypes.sortOrder,
+              isActive: eventTypes.isActive,
+              isFallback: eventTypes.isFallback,
+            })
+            .from(eventTypes)
+            .where(eq(eventTypes.organizationId, organizationId))
+            .orderBy(eventTypes.sortOrder);
+          return { settings, toggles, types };
+        }
+
+        it("a congregation gets a default settings row, the enabled calendar toggle, and the standard nine types", async () => {
+          const id = await provisioned("cong", "congregation");
+          const { settings, toggles, types } = await readCalendarRows(id);
+
+          expect(settings).toEqual([
+            { timeZone: "America/New_York", requireTwoFactor: false },
+          ]);
+          // Only the provisionedOn entry; the two members toggles stay absent
+          // (a missing row is OFF, DECISION-097).
+          expect(toggles).toEqual([
+            { featureKey: "org_portal.calendar", enabled: true, updatedBy: null },
+          ]);
+          expect(types).toEqual(
+            eventTypeSeedPlan("congregation").map((t) => ({
+              name: t.name,
+              color: t.color,
+              icon: t.icon,
+              sortOrder: t.sortOrder,
+              isActive: t.isActive,
+              isFallback: t.isFallback,
+            })),
+          );
+        });
+
+        it("a new worshiping community gets the standard nine too", async () => {
+          const id = await provisioned("nwc", "new_worshiping_community");
+          const { types } = await readCalendarRows(id);
+          expect(types).toHaveLength(9);
+          expect(types.filter((t) => t.isFallback)).toHaveLength(1);
+        });
+
+        it("a presbytery gets the settings row, the toggle, and the fallback type only", async () => {
+          const id = await provisioned("presb", "presbytery");
+          const { settings, toggles, types } = await readCalendarRows(id);
+          expect(settings).toHaveLength(1);
+          expect(toggles.map((t) => t.featureKey)).toEqual(["org_portal.calendar"]);
+          expect(types).toEqual([
+            {
+              name: "General",
+              color: "neutral",
+              icon: "CalendarDays",
+              sortOrder: 99,
+              isActive: true,
+              isFallback: true,
+            },
+          ]);
+        });
+
+        it("the member role holds BOTH directory.view and events.view for a presbytery as well", async () => {
+          const id = await provisioned("perm", "presbytery");
+          const platform = getPlatformDb();
+          const rows = await platform
+            .select({ permissionKey: appRolePermissions.permissionKey })
+            .from(appRolePermissions)
+            .innerJoin(appRoles, eq(appRolePermissions.roleId, appRoles.id))
+            .where(eq(appRoles.organizationId, id));
+          expect(rows.map((r) => r.permissionKey).sort()).toEqual([
+            "directory.view",
+            "events.view",
+          ]);
+        });
+      });
+
       it("creates a congregation with Session, Board of Deacons, and Active Membership", async () => {
         const slug = `org-prov-test-cong-${stamp}`;
         const result = await createOrganization({
@@ -253,8 +409,12 @@ describe.skipIf(!hasDb)(
           .from(appRolePermissions)
           .innerJoin(appRoles, eq(appRolePermissions.roleId, appRoles.id))
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(permissionRows).toHaveLength(1);
-        expect(permissionRows[0].permissionKey).toBe("directory.view");
+        // DECISION-160 R9: the member role also carries events.view, the
+        // member calendar's read grant.
+        expect(permissionRows.map((r) => r.permissionKey).sort()).toEqual([
+          "directory.view",
+          "events.view",
+        ]);
 
         const activeMembershipGroupId = groupRows.find(
           (g) => g.derivedFrom === "active_membership",

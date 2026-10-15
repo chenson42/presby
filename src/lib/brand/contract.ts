@@ -75,11 +75,46 @@ export type TokenEntry = {
   readonly reserved?: true;
   /** Not a colour, so it carries no palette value and no contrast pair. */
   readonly nonColour?: true;
+  /**
+   * A categorical (event-type) colour: platform-fixed like every `platform`
+   * token, but a member of the CATEGORY_KEYS family whose pairs live in
+   * CATEGORY_PAIRS, not LEGAL_PAIRS (DECISION-161). A marker, not a fourth
+   * policy class - the partition stays three-way.
+   */
+  readonly categorical?: true;
   /** The constraint slice b's generator must implement, for `bounded` only. */
   readonly bound?: string;
   /** One sentence, quotable in a review. */
   readonly why: string;
 };
+
+/**
+ * The closed categorical palette (DECISION-161): eight hues plus `neutral`,
+ * which is RESERVED for an organization's fallback event type. Each key has
+ * two tokens - `--category-<key>` (the tint surface) and
+ * `--category-<key>-foreground` (the "ink": label text, icon, swatch, rule).
+ * The family is named `category`, not `event`, because it is a platform
+ * vocabulary other things (tags) may adopt; no token name may contain
+ * "brand" (check:brand-scope rule C1).
+ */
+export const CATEGORY_KEYS = [
+  "rose",
+  "orange",
+  "amber",
+  "lime",
+  "teal",
+  "sky",
+  "violet",
+  "fuchsia",
+  "neutral",
+] as const;
+
+export type CategoryKey = (typeof CATEGORY_KEYS)[number];
+
+const CATEGORY_TINT_WHY =
+  "A categorical event-type tint: platform-fixed for every organization, so a brand colour can never recolour a category and a category never reads as a brand.";
+const CATEGORY_INK_WHY =
+  "The ink for its category tint: label text at 7:1 on the tint, and icon, swatch and rule at 3:1 on the page and card surfaces, in both schemes (CATEGORY_PAIRS).";
 
 export const TOKEN_POLICY = [
   {
@@ -249,6 +284,24 @@ export const TOKEN_POLICY = [
     reserved: true,
     why: "Reserved with --info, for the same reason its fill is.",
   },
+  { token: "--category-rose", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-rose-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-orange", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-orange-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-amber", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-amber-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-lime", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-lime-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-teal", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-teal-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-sky", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-sky-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-violet", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-violet-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-fuchsia", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-fuchsia-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
+  { token: "--category-neutral", policy: "platform", categorical: true, why: CATEGORY_TINT_WHY },
+  { token: "--category-neutral-foreground", policy: "platform", categorical: true, why: CATEGORY_INK_WHY },
 ] as const satisfies readonly TokenEntry[];
 
 /** Every custom property the contract knows about. Derived, never restated. */
@@ -436,6 +489,35 @@ export type LegalPair = (typeof LEGAL_PAIRS)[number];
 
 /** Block `tone:` typing falls out of the array rather than being restated. */
 export type LegalTone = LegalPair["bg"];
+
+/* -------------------------------------------------------------------------
+ * Category pairs (DECISION-161)
+ *
+ * Deliberately NOT in BRAND_ROLES, ROLE_TO_TOKEN or LEGAL_PAIRS: generate.ts
+ * iterates BRAND_ROLES for every seed, LEGAL_PAIRS is the site-kit agent's
+ * instruction payload, and LegalTone types the public-site blocks. A category
+ * colour is none of those things, so it gets its own token-name-based list
+ * with the same `min`/`kind` shape. contract.test.ts iterates this array and
+ * asserts, from the `categorical` marker, that every key has its full set.
+ * ---------------------------------------------------------------------- */
+
+export type CategoryPair = {
+  readonly fg: `--category-${CategoryKey}-foreground`;
+  readonly bg: `--category-${CategoryKey}` | "--background" | "--card";
+  /** The WCAG contrast floor for THIS pair. */
+  readonly min: number;
+  readonly kind: "body" | "non-text";
+};
+
+export const CATEGORY_PAIRS: readonly CategoryPair[] = CATEGORY_KEYS.flatMap(
+  (key): CategoryPair[] => [
+    // Entry text is `text-sm` on member pages, so the AAA floor applies (D1).
+    { fg: `--category-${key}-foreground`, bg: `--category-${key}`, min: 7, kind: "body" },
+    // Swatch, icon and left rule are non-text UI: 3:1 on both surfaces.
+    { fg: `--category-${key}-foreground`, bg: "--background", min: 3, kind: "non-text" },
+    { fg: `--category-${key}-foreground`, bg: "--card", min: 3, kind: "non-text" },
+  ],
+);
 
 /* -------------------------------------------------------------------------
  * Emission
@@ -703,6 +785,24 @@ export const PLATFORM_TOKENS = {
     "--border": "hsl(215 20% 83%)",
     "--input": "hsl(217 16% 56%)",
     "--ring": "hsl(213 73% 38%)",
+    "--category-rose": "#ffebea",
+    "--category-rose-foreground": "#852e33",
+    "--category-orange": "#ffece0",
+    "--category-orange-foreground": "#793b00",
+    "--category-amber": "#faf0d2",
+    "--category-amber-foreground": "#5e4900",
+    "--category-lime": "#e7f6da",
+    "--category-lime-foreground": "#365500",
+    "--category-teal": "#d3f9f4",
+    "--category-teal-foreground": "#00574f",
+    "--category-sky": "#e2f3ff",
+    "--category-sky-foreground": "#00517a",
+    "--category-violet": "#efeeff",
+    "--category-violet-foreground": "#4f3f8a",
+    "--category-fuchsia": "#ffe9f7",
+    "--category-fuchsia-foreground": "#793064",
+    "--category-neutral": "#eef0f3",
+    "--category-neutral-foreground": "#494c51",
   },
   dark: {
     "--background": "hsl(215 71% 8%)",
@@ -726,5 +826,23 @@ export const PLATFORM_TOKENS = {
     "--border": "hsl(213 59% 22%)",
     "--input": "hsl(217 16% 44%)",
     "--ring": "hsl(214 70% 68%)",
+    "--category-rose": "#442323",
+    "--category-rose-foreground": "#ffa7a7",
+    "--category-orange": "#412714",
+    "--category-orange-foreground": "#faaf7c",
+    "--category-amber": "#382c0c",
+    "--category-amber-foreground": "#dcbe69",
+    "--category-lime": "#253317",
+    "--category-lime-foreground": "#a8ce81",
+    "--category-teal": "#053631",
+    "--category-teal-foreground": "#5ed6c8",
+    "--category-sky": "#133144",
+    "--category-sky-foreground": "#7ecaff",
+    "--category-violet": "#2d2945",
+    "--category-violet-foreground": "#c0b6ff",
+    "--category-fuchsia": "#3e2336",
+    "--category-fuchsia-foreground": "#f3a6d9",
+    "--category-neutral": "#2b2e33",
+    "--category-neutral-foreground": "#bdc1c7",
   },
 } as const satisfies Record<Scheme, Record<PlatformTokenName, string>>;

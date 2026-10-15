@@ -90,7 +90,7 @@ return (
 |---|---|---|
 | **brandable** | A per-org brand may re-declare this freely. | `--primary`, `--primary-foreground`, `--ring`, and the additive `--brand-raw` / `--brand-raw-foreground` (decorative, non-interactive surfaces only — not in `globals.css` until the per-org emitter ships) |
 | **bounded** | A per-org brand may re-declare this only within a named constraint the ramp generator enforces. | `--background` (near-white or near-dark band — a congregation may have a cream page, not a gold one), `--foreground` (computed against `--background` at 7:1), `--accent` (a near-neutral tint of `--muted` — it is the menu/hover surface under *content*-axis text, not a second brand fill), `--accent-foreground` (computed against `--accent` at 7:1) |
-| **platform** | Never re-declarable, by any organization. | `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--muted`, `--muted-foreground`, `--secondary`, `--secondary-foreground`, `--destructive`, `--destructive-foreground`, `--border`, `--input`, `--radius` (not a color), and the reserved-but-unbuilt `--success`, `--warning`, `--info` families |
+| **platform** | Never re-declarable, by any organization. | `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--muted`, `--muted-foreground`, `--secondary`, `--secondary-foreground`, `--destructive`, `--destructive-foreground`, `--border`, `--input`, `--radius` (not a color), the categorical `--category-<key>` / `--category-<key>-foreground` pairs (nine keys), and the reserved-but-unbuilt `--success`, `--warning`, `--info` families |
 
 Unlisted is not brandable — it's a missing classification, and it fails a test.
 
@@ -113,6 +113,8 @@ natively (a recorded divergence from the shadcn upstream's `bg-transparent` — 
 file's header and `docs/work-log/2026-08-27-input-background-standard.md`), so never
 re-add `bg-background` in a caller's `className`; the recipe above is for raw elements
 only.
+
+**Category colours (event types).** A fourth family of platform tokens: `--category-<key>` (the tint) and `--category-<key>-foreground` (the ink) for nine closed keys — rose, orange, amber, lime, teal, sky, violet, fuchsia, and neutral (reserved for an organization's default event type). They are `platform` with a `categorical` marker in `TOKEN_POLICY`, so no organization's brand can re-declare them, and `CATEGORY_PAIRS` in `src/lib/brand/contract.ts` proves, in both colour schemes, ink on tint at 7:1 and ink on `--background` and `--card` at 3:1. Use them through the static map in `src/lib/events/type-palette.ts` (`bg-category-teal text-category-teal-foreground border-l-category-teal-foreground`) — never build the class name from the key, because Tailwind only finds literal strings. A category colour never carries meaning alone: pair it with an icon and a visible or screen-reader name, and a 4px ink rule so it survives a black-and-white print. They are **not** the status colours; `--success`, `--warning` and `--info` remain reserved and the status-chip gap stays open.
 
 **Never write a Tailwind palette literal** — `bg-blue-600`, `text-amber-700`, `border-green-500`, `dark:text-red-300`, and so on. If you need a color that isn't one of the tokens above, that's a missing token and a design decision, not a class string to reach for. Raise it — status chips (success/warning/info) are the known gap here (tracked in `docs/TODO.md`); everything else routes through the tokens.
 

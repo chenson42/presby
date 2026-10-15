@@ -127,6 +127,9 @@ export default async function EventDetailPage({
           {event.allowsCheckin && " · Check-in enabled"}
           {isCancelled && " · Cancelled"}
         </p>
+        {event.eventType && (
+          <p className="mt-1 text-sm text-muted-foreground">Type: {event.eventType.name}</p>
+        )}
         {event.location && (
           <p className="mt-2 text-sm text-muted-foreground">{event.location}</p>
         )}

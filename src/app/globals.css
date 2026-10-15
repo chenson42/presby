@@ -91,6 +91,28 @@
      That is D4 made structural instead of dependent on a lucky value — see
      FOCUS_RING_OFFSET_PX in src/lib/brand/contract.ts. */
   --ring: hsl(213 73% 38%);
+
+  /* Event-type categories (DECISION-161): tint + ink per key, platform-fixed.
+     CATEGORY_PAIRS in contract.ts proves ink on tint >= 7:1 and ink on
+     --background / --card >= 3:1 in both schemes. */
+  --category-rose: #ffebea;
+  --category-rose-foreground: #852e33;
+  --category-orange: #ffece0;
+  --category-orange-foreground: #793b00;
+  --category-amber: #faf0d2;
+  --category-amber-foreground: #5e4900;
+  --category-lime: #e7f6da;
+  --category-lime-foreground: #365500;
+  --category-teal: #d3f9f4;
+  --category-teal-foreground: #00574f;
+  --category-sky: #e2f3ff;
+  --category-sky-foreground: #00517a;
+  --category-violet: #efeeff;
+  --category-violet-foreground: #4f3f8a;
+  --category-fuchsia: #ffe9f7;
+  --category-fuchsia-foreground: #793064;
+  --category-neutral: #eef0f3;
+  --category-neutral-foreground: #494c51;
 }
 
 .dark {
@@ -131,6 +153,28 @@
   --border: hsl(213 59% 22%);
   --input: hsl(217 16% 44%); /* 3.47:1 on background (D3) */
   --ring: hsl(214 70% 68%); /* = --primary; 7.54:1 on surface, offset per the light block */
+
+  /* Event-type categories (DECISION-161): tint + ink per key, platform-fixed.
+     CATEGORY_PAIRS in contract.ts proves ink on tint >= 7:1 and ink on
+     --background / --card >= 3:1 in both schemes. */
+  --category-rose: #442323;
+  --category-rose-foreground: #ffa7a7;
+  --category-orange: #412714;
+  --category-orange-foreground: #faaf7c;
+  --category-amber: #382c0c;
+  --category-amber-foreground: #dcbe69;
+  --category-lime: #253317;
+  --category-lime-foreground: #a8ce81;
+  --category-teal: #053631;
+  --category-teal-foreground: #5ed6c8;
+  --category-sky: #133144;
+  --category-sky-foreground: #7ecaff;
+  --category-violet: #2d2945;
+  --category-violet-foreground: #c0b6ff;
+  --category-fuchsia: #3e2336;
+  --category-fuchsia-foreground: #f3a6d9;
+  --category-neutral: #2b2e33;
+  --category-neutral-foreground: #bdc1c7;
 }
 
 @theme inline {
@@ -161,6 +205,25 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  --color-category-rose: var(--category-rose);
+  --color-category-rose-foreground: var(--category-rose-foreground);
+  --color-category-orange: var(--category-orange);
+  --color-category-orange-foreground: var(--category-orange-foreground);
+  --color-category-amber: var(--category-amber);
+  --color-category-amber-foreground: var(--category-amber-foreground);
+  --color-category-lime: var(--category-lime);
+  --color-category-lime-foreground: var(--category-lime-foreground);
+  --color-category-teal: var(--category-teal);
+  --color-category-teal-foreground: var(--category-teal-foreground);
+  --color-category-sky: var(--category-sky);
+  --color-category-sky-foreground: var(--category-sky-foreground);
+  --color-category-violet: var(--category-violet);
+  --color-category-violet-foreground: var(--category-violet-foreground);
+  --color-category-fuchsia: var(--category-fuchsia);
+  --color-category-fuchsia-foreground: var(--category-fuchsia-foreground);
+  --color-category-neutral: var(--category-neutral);
+  --color-category-neutral-foreground: var(--category-neutral-foreground);
 
   /*
    * Tailwind v4 defaults (node_modules/tailwindcss/theme.css): --radius-sm

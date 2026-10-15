@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -7,10 +8,93 @@ import {
   timestamp,
   index,
   unique,
+  uniqueIndex,
+  check,
   foreignKey,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./org";
 import { users } from "../schema";
+// A zero-runtime-import palette module (it imports only the brand contract),
+// so the domain file's CHECK lists and the app's picker read ONE TypeScript
+// source. drizzle/0054 holds the third copy; type-palette.test.ts pins it.
+import { EVENT_TYPE_COLORS, EVENT_TYPE_ICONS } from "../../events/type-palette";
+
+const sqlList = (values: readonly string[]) =>
+  sql.raw(values.map((value) => `'${value}'`).join(","));
+
+/**
+ * Per-org event taxonomy (DECISION-161) - drizzle/0054_presby_calendar_event_types.sql.
+ *
+ * An org's own values for ONE platform-designed, tier-1 attribute of an event,
+ * with a closed palette and a closed icon list: the `tags` shape D8 already
+ * permits, NOT a custom field, and NOT a precedent for org-owned `group_types`
+ * (DECISION-110/151 keep those global). Declared above `events` because it is
+ * the FK target.
+ *
+ * Most of the enforcement is in the DDL and only partly expressible here;
+ * stated so a reader does not mistake absence for permission:
+ *   - ENABLE + FORCE ROW LEVEL SECURITY and the standard tenant_isolation
+ *     policy (F1).
+ *   - presby_app and presby_platform hold SELECT, INSERT, UPDATE and NO DELETE:
+ *     a type is retired (is_active = false), never removed. FK cascades from
+ *     organizations run as the owner and need no grant.
+ *   - `is_fallback`: at most one per org (partial unique index), always active,
+ *     always `neutral`, and nothing else may be `neutral`
+ *     (event_types_neutral_is_fallback). "At least one" cannot be a constraint,
+ *     so it is paper: the calendar must render correctly with zero rows.
+ */
+export const eventTypes = pgTable(
+  "event_types",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color").notNull(),
+    icon: text("icon").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    isFallback: boolean("is_fallback").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    updatedBy: uuid("updated_by").references(() => users.id),
+  },
+  (t) => [
+    // Composite Tenant Keys (F2): the target of events_event_type_fk.
+    unique("event_types_id_org_key").on(t.id, t.organizationId),
+    // Case-insensitive, and covers RETIRED rows (a retired name stays reserved).
+    uniqueIndex("event_types_org_lower_name_idx").on(
+      t.organizationId,
+      sql`lower(${t.name})`,
+    ),
+    uniqueIndex("event_types_one_fallback_idx")
+      .on(t.organizationId)
+      .where(sql`${t.isFallback}`),
+    check(
+      "event_types_name_shape",
+      sql`${t.name} = btrim(${t.name}) and char_length(${t.name}) between 1 and 60`,
+    ),
+    check(
+      "event_types_color_allowed",
+      sql`${t.color} in (${sqlList(EVENT_TYPE_COLORS)})`,
+    ),
+    check(
+      "event_types_icon_allowed",
+      sql`${t.icon} in (${sqlList(EVENT_TYPE_ICONS)})`,
+    ),
+    check("event_types_fallback_active", sql`not ${t.isFallback} or ${t.isActive}`),
+    check(
+      "event_types_neutral_is_fallback",
+      sql`(${t.color} = 'neutral') = ${t.isFallback}`,
+    ),
+  ],
+);
 
 /**
  * Calendar events. See docs/work-log/2026-08-26-events-model.md (Phase 3) and
@@ -25,9 +109,11 @@ import { users } from "../schema";
  * header; this table answers "what's on the calendar" — neither writes the
  * other (DECISION-113 ruling 2).
  *
- * Occurrence times are wall-clock local (`timestamp` without time zone, no
- * org-timezone column exists per D6/US-only scope) so a stored "7:00 PM"
- * survives a DST transition with no extra machinery (DECISION-113 ruling 3).
+ * Occurrence times are wall-clock local (`timestamp` without time zone) so a
+ * stored "7:00 PM" survives a DST transition with no extra machinery
+ * (DECISION-113 ruling 3). `organizationSettings.timeZone` (drizzle/0054,
+ * DECISION-160) is the zone in which NOW is read for an org - it never
+ * converts a stored occurrence time.
  * `cancelledAt` is the one legitimate `timestamptz` column here — an instant,
  * not a schedule fact.
  *
@@ -71,6 +157,13 @@ export const events = pgTable(
     // constraint itself is enforced by
     // drizzle/0048_presby_security_b.sql's `events_parent_fk`.
     parentEventId: uuid("parent_event_id"),
+    // Optional type (DECISION-161). NULL = untyped: rendered and filtered as
+    // the org's is_fallback type. Composite FK below, NO ACTION - NOT set null
+    // (it would null the NOT NULL organization_id half of the key) and NOT
+    // restrict (an immediate check can fail the fixture-org cascade that
+    // removes events and event_types in one statement). Not one of the six
+    // frozen DECISION-113 columns.
+    eventTypeId: uuid("event_type_id"),
     // Convenience generation string only (e.g. "weekly", "2nd Tuesday") —
     // NEVER parsed at read time (DECISION-113 ruling 1). Set ONLY on a
     // series' first (parent) row; null on every generated child and on every
@@ -97,6 +190,13 @@ export const events = pgTable(
     // list, extendSeriesPattern's latest-occurrence lookup).
     index("events_org_parent_idx").on(t.organizationId, t.parentEventId),
     unique("events_id_org_key").on(t.id, t.organizationId),
+    // Serves "events of this type" and the calendar's type filter.
+    index("events_org_type_idx").on(t.organizationId, t.eventTypeId),
+    foreignKey({
+      columns: [t.eventTypeId, t.organizationId],
+      foreignColumns: [eventTypes.id, eventTypes.organizationId],
+      name: "events_event_type_fk",
+    }),
     // Composite Tenant Keys (F2 / B-M3). A child occurrence may only point at
     // a parent in ITS OWN org. No new index: events_org_parent_idx above
     // already leads with the same pair. DDL: drizzle/0048 section 7.

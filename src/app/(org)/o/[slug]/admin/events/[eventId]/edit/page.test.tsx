@@ -29,8 +29,10 @@ vi.mock("@/lib/flags", () => ({
 }));
 
 const getEvent = vi.fn();
+const getEventTypePickerData = vi.fn();
 vi.mock("@/lib/events", () => ({
   getEvent: (...args: unknown[]) => getEvent(...args),
+  getEventTypePickerData: (...args: unknown[]) => getEventTypePickerData(...args),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -45,8 +47,18 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("../../edit-event-form", () => ({
-  EditEventForm: ({ event }: { event: { title: string } }) => (
-    <div>EditEventForm for {event.title}</div>
+  EditEventForm: ({
+    event,
+    typePicker,
+    orgName,
+  }: {
+    event: { title: string };
+    typePicker: { options: unknown[] };
+    orgName: string;
+  }) => (
+    <div>
+      EditEventForm for {event.title} / {orgName} / {typePicker.options.length} types
+    </div>
   ),
 }));
 
@@ -59,6 +71,10 @@ afterEach(() => {
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
   getEvent.mockReset();
+  getEventTypePickerData.mockReset().mockResolvedValue({
+    kind: "ok",
+    data: { options: [{ id: "t1" }, { id: "t2" }], fallbackName: "General" },
+  });
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -95,6 +111,7 @@ function baseEvent(overrides: Record<string, unknown> = {}) {
     parentEventId: null,
     recurrencePattern: null,
     recurrenceCount: null,
+    eventType: null,
     seriesOccurrences: [],
     ...overrides,
   };
@@ -132,7 +149,52 @@ describe("EditEventPage", () => {
     render(el);
 
     expect(screen.getByRole("heading", { name: /edit event/i })).toBeTruthy();
-    expect(screen.getByText("EditEventForm for Session meeting")).toBeTruthy();
+    expect(
+      screen.getByText("EditEventForm for Session meeting / Alder Creek Presbyterian Church / 2 types"),
+    ).toBeTruthy();
+  });
+
+  it("asks the picker for the event's CURRENT type so a retired one stays selectable", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    getEvent.mockResolvedValue({
+      kind: "ok",
+      data: baseEvent({ eventType: { id: "retired-type", name: "Old Study" } }),
+    });
+
+    await EditEventPage({ params: makeParams() });
+
+    expect(getEventTypePickerData).toHaveBeenCalledWith("person-1", "org-1", {
+      currentTypeId: "retired-type",
+    });
+  });
+
+  it("does not load the picker for a cancelled event (it 404s first)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    getEvent.mockResolvedValue({
+      kind: "ok",
+      data: baseEvent({ cancelledAt: "2027-02-01T00:00:00.000Z" }),
+    });
+
+    await expect(EditEventPage({ params: makeParams() })).rejects.toThrow("NOT_FOUND");
+    expect(getEventTypePickerData).not.toHaveBeenCalled();
+  });
+
+  it("renders the load-error state, not a picker-less form, when the picker fails to load", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    getEvent.mockResolvedValue({ kind: "ok", data: baseEvent() });
+    getEventTypePickerData.mockRejectedValue(new Error("connection reset"));
+
+    const el = await EditEventPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.getByText(/couldn.t load event records right now/i)).toBeTruthy();
+    expect(screen.queryByText(/EditEventForm/)).toBeNull();
   });
 
   it("renders EventsForbidden when getEvent() returns forbidden", async () => {

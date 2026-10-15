@@ -4,6 +4,120 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-167 — The tile gate.** The tile gate.
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 3 tech-lead implementation ruling; number assigned by the orchestrator)
+
+`visiblePortalTiles` takes a required `viewer`; flag(s) then org toggle; a toggle-read failure hides the tile and logs ids only.
+
+(2026-10-14, adopted at Phase 3; `docs/work-log/2026-10-14-member-calendar.md`.)
+
+---
+
+**DECISION-166 — Wall-clock discipline made mechanical.** Wall-clock discipline made mechanical.
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 3 tech-lead implementation ruling; number assigned by the orchestrator)
+
+The events writer and recurrence math use `Date` through UTC fields only; S1's scoped ESLint block bans local getters/setters/constructors in those paths; every time-dependent unit test runs under UTC, America/New_York and Pacific/Honolulu through `useProcessTimeZone`; S3's 30° ink-hue floor is a contract test.
+
+(2026-10-14, adopted at Phase 3; `docs/work-log/2026-10-14-member-calendar.md`.)
+
+---
+
+**DECISION-165 — Placements: the event-type seed plan is a pure module, and the NO ACTION cascade proof is a DB-backed test.** Placements.
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 3 tech-lead implementation ruling; number assigned by the orchestrator)
+
+A1 (`eventTypeSeedPlan` in a pure module, re-exported from `org-provisioning.ts`) and A2 (the NO ACTION cascade proof is a DB-backed test, not a `presby_app` RLS assertion).
+
+(2026-10-14, adopted at Phase 3; `docs/work-log/2026-10-14-member-calendar.md`.)
+
+---
+
+**DECISION-164 — The calendar read module.** The calendar read module.
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 3 tech-lead implementation ruling; number assigned by the orchestrator)
+
+Gate, visibility predicate and projection are private to `src/lib/calendar.ts` and shared by `getMonthCalendar`, `getMemberEvent` and `listUpcomingMemberEvents`; times leave SQL as `to_char` text; month bounds are half-open on bound `'YYYY-MM-DD'` text; untyped events resolve to the fallback row in SQL so rendering and filtering cannot disagree; a type filter is a set of *active* types; "upcoming" is `starts_at >= org-local today 00:00` (an event stays listed until its day ends) with one row per series; the filter `IN (…)` list is built with `sql.join`, never `= any(array)`.
+
+(2026-10-14, adopted at Phase 3; `docs/work-log/2026-10-14-member-calendar.md`.)
+
+---
+
+**DECISION-163 — Event-type palette and schema choices.** Event-type palette and schema choices.
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 3 tech-lead implementation ruling; number assigned by the orchestrator)
+
+`neutral` is reserved for the fallback in both directions by one CHECK; the nine colour keys and fifteen icon names are a closed list duplicated in `drizzle/0054`, `type-palette.ts` and (derived) the Drizzle domain file, with the domain file importing the zero-runtime-import palette module so there is one TypeScript source; `type-palette.test.ts` reads the migration and pins all three.
+
+(2026-10-14, adopted at Phase 3; `docs/work-log/2026-10-14-member-calendar.md`.)
+
+---
+
+**DECISION-161 — `event_types` is a per-org, tag-shaped taxonomy (D8-compatible; `group_types` stays global). `events.event_type_id` is a composite FK with NO ACTION, not SET NULL or RESTRICT. Types are never hard-deleted (no DELETE grant). Non-congregation orgs are seeded with the fallback only. The type palette is a platform-classified `categorical` token family with its own `CATEGORY_PAIRS`, outside the brand role vocabulary. Event-type mutations are not audited.**
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 2)
+
+D8 keeps custom fields out because a field nobody designed has no validation, reporting or sensitivity tier. Event types add no field. They are an org's own values for one platform-designed, tier-1 attribute, with a closed palette and a closed icon set. That is the same shape as `tags`, which `docs/schema-design.md` already names for "event targeting". This is not a precedent for org-owned `group_types`, which DECISION-110/151 keep global because the derived-group machinery keys on them.
+
+Table shape, declared in `src/lib/db/domain/events.ts` above `events`:
+
+- `unique (id, organization_id)`;
+- a case-insensitive name index unique per org, covering retired rows too;
+- a partial unique index allowing one fallback per org;
+- `CHECK (not is_fallback or is_active)`;
+- CHECK-constrained closed palette and icon lists;
+- `updated_by` / `updated_at` for attribution;
+- FORCE RLS with the standard tenant policy;
+- `select, insert, update` granted, and no DELETE.
+
+"At least one fallback" is `paper`. The calendar must render correctly with zero types.
+
+`events.(event_type_id, organization_id)` references `event_types (id, organization_id)` with the default NO ACTION:
+
+- `SET NULL` would null the NOT NULL `organization_id`. The PG15+ column-list form exists, but it describes a delete path that doesn't exist.
+- `RESTRICT` checks immediately and can fail the `deletable_until` fixture cascade, which deletes `events` and `event_types` in the same statement.
+
+Seeding: a pure `eventTypeSeedPlan(organizationType)` sits beside `groupSeedPlan`. Congregations and new worshiping communities get the standard set; presbytery, synod and GA orgs get the neutral "General" fallback only. The 0054 backfill mirrors the plan idempotently, and nothing creates types lazily on a read.
+
+The palette is 8 categorical keys plus `neutral`, as `--category-<key>` and `--category-<key>-foreground`. They are `platform` policy with a `categorical: true` marker; no fourth policy class is added. The emitter's policy-derived filter makes them impossible for a brand to re-declare. They are kept out of `BRAND_ROLES`, `ROLE_TO_TOKEN` and `LEGAL_PAIRS`, because those drive the per-seed generator and the site-kit agent's tone vocabulary. A separate `CATEGORY_PAIRS` asserts, in both colour schemes, ink on tint ≥ 7:1 and ink on `--background` / `--card` ≥ 3:1. The CSS lives in `globals.css` with `@theme inline` mappings, and classes come from a static lookup map. `check:brand-scope` is unchanged; its grep is not what enforces this.
+
+Event-type mutations extend DECISION-113 ruling 5: they are content configuration, are not audited, and supersede the kickoff's audit line. The per-org toggle flip stays audited.
+
+(2026-10-14, adopted at Phase 2; `docs/work-log/2026-10-14-member-calendar.md`.)
+
+---
+
+**DECISION-160 — The member calendar is a toggle-only org feature: an `ORG_FEATURE_CATALOG` entry with `flag: null`, ON by default for existing and new orgs as explicit rows. The tile registry gains an org-feature gate in a new `visible-tiles.ts`. The read gate is `events.view OR events.manage`. A feature's member read surface goes in the operate tiles and its authoring surface on the admin hub. `organization_settings.time_zone` is the zone in which "now" is read, never a conversion of stored times, and the events writer stores wall-clock digits regardless of the server's time zone.**
+
+**Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-member-calendar` (Phase 2)
+
+Per operator ruling 2, the calendar has no platform flag. `isOrgFeatureEnabled()` never read a per-key flag (call sites did), so a toggle-only key needs no resolver change. The missing axis is made explicit instead: every catalog entry carries a required `flag: string | null` and a `provisionedOn` boolean. `org_portal.calendar` is `flag: null`, category `worship`, `provisionedOn: true`.
+
+The default is ON, stored as rows: migration 0054 backfills an enabled row for every org, and `createOrganization()` inserts one in its transaction. That keeps DECISION-097's "missing row = off" unconditional, so a code constant can never silently flip every org that has no row. What is given up: there is no platform-wide kill switch. Rollback is per org or a revert, which the operator accepted ("we are not live yet").
+
+DECISION-115 ruling 4 is amended. A `PortalTile` carries `flagKey`, `orgFeatureKey`, or both (enforced by `tsc`). `visiblePortalTiles` moves to `src/lib/org-portal/visible-tiles.ts`, because importing `org-features` into `tiles.ts` closes a module-load cycle through `org-feature-categories.ts`'s top-level `DOMAIN_ORDER` read (F135). It takes the viewer's ids, and it hides a tile rather than throwing when the toggle read fails. The org toggle is not a permission, so tiles still never check permissions.
+
+DECISION-113 ruling 7 is reversed for events only, by a general rule: a feature's member read surface goes in the operate section and its authoring surface on the admin hub. The new `calendar` tile is operate; the `events` tile becomes "Manage events", administer. The member read gate is `events.view OR events.manage`. It exposes nothing the admin list doesn't already show to `events.manage`, and it is implemented as two `presby_has_permission` calls, not as an implication in the resolver.
+
+`organization_settings.time_zone`:
+
+- `text not null default 'America/New_York'`.
+- A CHECK on IANA shape plus Postgres recognition. `timezone(text, timestamp)` is IMMUTABLE. The shape clause is needed because Postgres accepts POSIX `UTC+5`.
+- The reader falls back to the default (F132). The migration and provisioning also write a default settings row.
+
+The column is the zone in which "now" is read and never converts a stored `starts_at`. DECISION-113 ruling 3 (wall-clock storage) stands, with its stated reason superseded.
+
+`Intl.DateTimeFormat` with an explicit `en-US` locale, an explicit `timeZone` and `hourCycle: "h23"` is permitted for numeric `formatToParts` only, and only in `src/lib/shared/org-time.ts`. It is a different API from the banned `toLocale*`.
+
+Finally, the events wall-clock writer and the recurrence math switch to `Date` objects used only through their UTC fields. Drizzle writes `toISOString()` and reads with `+0000` appended, so stored digits were correct only on a server running UTC (F134). This ships as a separate `fix(events):` commit with a regression test under `TZ=America/New_York`. No dependency is added.
+
+(2026-10-14, adopted at Phase 2; `docs/work-log/2026-10-14-member-calendar.md`.)
+
+---
+
+---
+
 **DECISION-159 — A react-hook-form form is inoperable until it hydrates, and pre-hydration behaviour is regression-tested in a production-build e2e lane that holds back the JavaScript chunks instead of racing a throttle.**
 
 **Status:** Resolved · **Date:** 2026-10-05 · **Feature:** `2026-09-28-select-hydration-revert` (Phase 2 architect; implementation specifics Phase 3 tech-lead; cost measured Phase 5 qa)

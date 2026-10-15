@@ -5,7 +5,7 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
-import { listEvents } from "@/lib/events";
+import { getEventTypePickerData, listEvents } from "@/lib/events";
 import { isFlagEnabled } from "@/lib/flags";
 import { OrgAccessDenied, OrgAccessEnded } from "../../../org-states";
 import { EventsFlagOff, EventsForbidden, EventsLoadError } from "../events-states";
@@ -66,8 +66,10 @@ export default async function NewEventPage({
   }
 
   let result;
+  let picker;
   try {
     result = await listEvents(resolved.org.personId, resolved.org.organizationId);
+    picker = await getEventTypePickerData(resolved.org.personId, resolved.org.organizationId);
   } catch (err) {
     if (err instanceof OrgAccessError) {
       throw err;
@@ -78,7 +80,9 @@ export default async function NewEventPage({
   if (result.kind === "forbidden") {
     return <EventsForbidden name={resolved.org.name} />;
   }
-  if (result.kind !== "ok") {
+  // A picker that failed to load is a load error, not a form without one: on
+  // the edit form a missing picker would read as "No type" and clear the type.
+  if (result.kind !== "ok" || picker.kind !== "ok") {
     return <EventsLoadError slug={slug} />;
   }
 
@@ -88,7 +92,7 @@ export default async function NewEventPage({
         <h1 className="text-2xl font-semibold">New event</h1>
         <p className="mt-1 text-sm text-muted-foreground">{resolved.org.name}</p>
       </div>
-      <NewEventForm slug={slug} />
+      <NewEventForm slug={slug} typePicker={picker.data} orgName={resolved.org.name} />
     </section>
   );
 }

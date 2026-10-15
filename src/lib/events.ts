@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
 import { type db } from "@/lib/db";
-import { events } from "@/lib/db/domain/events";
+import { eventTypes, events } from "@/lib/db/domain/events";
 import {
   MAX_SERIES_TOTAL,
   generateRecurringDates,
@@ -11,6 +11,15 @@ import {
   parsePattern,
   seriesTotalWithinCap,
 } from "@/lib/events/recurrence";
+import { formatWallClock, parseWallClock } from "@/lib/events/wall-clock";
+import {
+  DEFAULT_EVENT_TYPE_ICON,
+  isEventTypeColor,
+  isEventTypeIcon,
+  type EventTypeColor,
+  type EventTypeIcon,
+} from "@/lib/events/type-palette";
+import { isUuidShaped } from "@/lib/shared/uuid";
 
 /**
  * Calendar events — docs/work-log/2026-08-26-events-model.md, Phase 3 design,
@@ -22,17 +31,20 @@ import {
  * `hasEventsManage` helper, typed `EventsResult` variants instead of thrown
  * exceptions for every expected/denied outcome.
  *
- * WALL-CLOCK TIMESTAMPS, NEVER `.toISOString()` (DECISION-113 ruling 3).
- * `startsAt`/`endsAt` are `timestamp` columns with NO time zone — Drizzle
- * (via node-postgres's own type parser) round-trips them as `Date` objects
- * constructed from and read back through LOCAL `Date` getters/setters, the
- * same discipline `src/lib/events/recurrence.ts`'s own pattern math already
- * uses throughout. Calling `.toISOString()` on one of these would apply a
- * UTC conversion the value was never given a zone to justify, corrupting the
- * literal stored wall-clock digits. `formatWallClock`/`parseWallClock` below
- * are the two ends of that discipline; `cancelledAt` is the one legitimate
- * `timestamptz` column here (DECISION-113's own carve-out) and DOES use
- * `.toISOString()`, correctly, as a real instant.
+ * WALL-CLOCK TIMESTAMPS, TYPED DIGITS IN THE UTC FIELDS (DECISION-113 ruling
+ * 3, corrected by F134). `startsAt`/`endsAt` are `timestamp` columns with NO
+ * time zone. Drizzle WRITES such a column with `value.toISOString()` and READS
+ * it by appending "+0000", so a `Date` carries wall-clock digits faithfully
+ * only through its UTC fields: `parseWallClock`/`formatWallClock`
+ * (`src/lib/events/wall-clock.ts`) and `recurrence.ts` use `Date.UTC` and
+ * `getUTC*`/`setUTC*` throughout, and nothing here depends on the server's
+ * time zone. (The earlier wording of this paragraph said LOCAL getters were
+ * the discipline; that stored the typed digits only when the process ran in
+ * UTC.) A value that came out of these functions is not an instant — never
+ * hand it to anything that treats it as one. `cancelledAt` is the one
+ * legitimate `timestamptz` column here (DECISION-113's own carve-out) and DOES
+ * use `.toISOString()`, correctly, as a real instant. `eslint.config.mjs`
+ * bans local Date getters/setters in this module and its siblings.
  *
  * SAME-ORG PARENT GUARD (`parent_event_id` carries no database FK on the
  * organization axis — architect's Phase 2 ruling, DECISION-115 ruling 3):
@@ -52,6 +64,18 @@ import {
  * any existing row's own fields. A materialized occurrence a check-in might
  * already reference can never move under either path.
  *
+ * EVENT TYPES (DECISION-161). `eventTypeId` on create/update is optional; a
+ * non-null id is pre-checked INSIDE the transaction (a UUID-shaped string that
+ * names an ACTIVE type of THIS org, or the type this very event already
+ * carries) and refused with `invalid_input` otherwise, so a garbage string
+ * never reaches Postgres as a 22P02 and a foreign or retired type is a message,
+ * not a 500. The composite FK `events_event_type_fk` is the backstop for a race.
+ * `createEvent` writes the type on the parent AND on every generated child, and
+ * `extendSeriesPattern` copies the parent's type onto its children - those two
+ * hand-written field copies are exactly where a type would silently be lost.
+ * `updateEvent` edits ONE occurrence, so changing one occurrence's type leaves a
+ * mixed series (acceptable for v1, said so in the edit form).
+ *
  * NO AUDIT EVENTS ON ANY MUTATION HERE (DECISION-113 ruling 5) — event
  * create/edit/cancel is content configuration, not an identity/access/
  * security-control change, matching the `replaceOrganizationServiceTimes`/
@@ -65,8 +89,6 @@ const EVENTS_MANAGE = "events.manage";
 const TITLE_MAX = 200;
 const DESCRIPTION_MAX = 2000;
 const LOCATION_MAX = 200;
-
-const WALL_CLOCK_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
 
 /**
  * The single-permission gate every exported function in this module checks
@@ -88,40 +110,6 @@ async function hasEventsManage(
   return (
     (result as unknown as { rows?: Array<{ allowed?: boolean }> }).rows?.[0]
       ?.allowed === true
-  );
-}
-
-/**
- * `'YYYY-MM-DDTHH:mm'` or `'YYYY-MM-DDTHH:mm:ss'` (a native `<input
- * type="datetime-local">`'s own value shape) → a `Date` built from LOCAL
- * components, so the digits typed by the caller are exactly the digits that
- * round-trip through the `timestamp` (no tz) column — see this file's own
- * header. Throws on a malformed string — a genuine call-shape defect (the UI
- * always sends this exact shape), not a user-facing denial, same discipline
- * `groups.ts`'s `DATE_RE` check documents for `startsOn`.
- */
-function parseWallClock(value: string): Date {
-  if (!WALL_CLOCK_RE.test(value)) {
-    throw new Error(
-      `parseWallClock: expected 'YYYY-MM-DDTHH:mm[:ss]', got ${JSON.stringify(value)}`,
-    );
-  }
-  const [datePart, timePart] = value.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute, second] = timePart.split(":").map(Number);
-  return new Date(year, month - 1, day, hour, minute, second ?? 0, 0);
-}
-
-/**
- * The inverse of `parseWallClock` — a `Date` (read back from a `timestamp`,
- * no-tz column) → `'YYYY-MM-DDTHH:mm:ss'`, using LOCAL getters throughout.
- * NEVER `.toISOString()` — see this file's own header.
- */
-function formatWallClock(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   );
 }
 
@@ -153,6 +141,8 @@ export interface EventDetail extends EventListEntry {
   parentEventId: string | null;
   recurrencePattern: string | null; // only ever set on the series' first row
   recurrenceCount: number | null;
+  /** The event's own type (null = untyped, rendered as the org's fallback). */
+  eventType: { id: string; name: string } | null;
   /** Other rows sharing this event's own id-or-parent series, if any. */
   seriesOccurrences: Array<{
     eventId: string;
@@ -175,6 +165,7 @@ interface EventRow {
   parentEventId: string | null;
   recurrencePattern: string | null;
   recurrenceCount: number | null;
+  eventTypeId: string | null;
 }
 
 function toListEntry(row: EventRow): EventListEntry {
@@ -205,6 +196,7 @@ const EVENT_COLUMNS = {
   parentEventId: events.parentEventId,
   recurrencePattern: events.recurrencePattern,
   recurrenceCount: events.recurrenceCount,
+  eventTypeId: events.eventTypeId,
 } as const;
 
 /**
@@ -231,6 +223,29 @@ function validateFieldLengths(input: {
     return `Location must be ${LOCATION_MAX} characters or fewer.`;
   }
   return null;
+}
+
+export const EVENT_TYPE_UNAVAILABLE = "That event type isn't available. Choose another.";
+
+/**
+ * Whether `typeId` may be written onto an event of this org. A UUID-shaped
+ * string naming a type of THIS org that is active - or that the event already
+ * carries (a retired type already on this event stays selectable, so editing
+ * an old event does not force a re-type).
+ */
+async function eventTypeUsable(
+  tx: OrgTx,
+  organizationId: string,
+  typeId: string,
+  currentTypeId: string | null,
+): Promise<boolean> {
+  if (!isUuidShaped(typeId)) return false; // a garbage id must not reach Postgres as a 22P02
+  const [row] = await tx
+    .select({ id: eventTypes.id, isActive: eventTypes.isActive })
+    .from(eventTypes)
+    .where(and(eq(eventTypes.id, typeId), eq(eventTypes.organizationId, organizationId)))
+    .limit(1);
+  return !!row && (row.isActive || row.id === currentTypeId);
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +332,21 @@ export async function getEvent(
         .orderBy(events.startsAt);
     }
 
+    let eventType: { id: string; name: string } | null = null;
+    if (row.eventTypeId) {
+      const [typeRow] = await tx
+        .select({ id: eventTypes.id, name: eventTypes.name })
+        .from(eventTypes)
+        .where(
+          and(
+            eq(eventTypes.id, row.eventTypeId),
+            eq(eventTypes.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      eventType = typeRow ?? null;
+    }
+
     return {
       kind: "ok",
       data: {
@@ -326,6 +356,7 @@ export async function getEvent(
         parentEventId: row.parentEventId,
         recurrencePattern: row.recurrencePattern,
         recurrenceCount: row.recurrenceCount,
+        eventType,
         seriesOccurrences: seriesRows.map((r) => ({
           eventId: r.id,
           startsAt: formatWallClock(r.startsAt),
@@ -351,6 +382,8 @@ export interface CreateEventInput {
   allowsCheckin: boolean;
   /** Present only when creating a repeating series. */
   recurrence?: { pattern: string; count: number };
+  /** Optional event type (DECISION-161); null/absent = untyped. Copied to every generated child. */
+  eventTypeId?: string | null;
 }
 
 /**
@@ -388,6 +421,13 @@ export async function createEvent(
       };
     }
 
+    if (
+      input.eventTypeId &&
+      !(await eventTypeUsable(tx, organizationId, input.eventTypeId, null))
+    ) {
+      return { kind: "invalid_input", message: EVENT_TYPE_UNAVAILABLE };
+    }
+
     let pattern: string | undefined;
     if (input.recurrence) {
       if (!seriesTotalWithinCap(input.recurrence.count)) {
@@ -418,6 +458,7 @@ export async function createEvent(
         endsAt,
         isPublic: input.isPublic,
         allowsCheckin: input.allowsCheckin,
+        eventTypeId: input.eventTypeId ?? null,
         parentEventId: null,
         recurrencePattern: pattern ?? null,
         recurrenceCount: input.recurrence?.count ?? null,
@@ -449,6 +490,7 @@ export async function createEvent(
             endsAt: childEndsAt,
             isPublic: input.isPublic,
             allowsCheckin: input.allowsCheckin,
+            eventTypeId: input.eventTypeId ?? null,
             parentEventId: parent!.id,
             recurrencePattern: null,
             recurrenceCount: null,
@@ -476,6 +518,8 @@ export interface UpdateEventInput {
   endsAt?: string;
   isPublic: boolean;
   allowsCheckin: boolean;
+  /** `undefined` leaves the type unchanged; `null` clears it; an id sets it. */
+  eventTypeId?: string | null;
 }
 
 /**
@@ -496,7 +540,11 @@ export async function updateEvent(
     }
 
     const [existing] = await tx
-      .select({ id: events.id, cancelledAt: events.cancelledAt })
+      .select({
+        id: events.id,
+        cancelledAt: events.cancelledAt,
+        eventTypeId: events.eventTypeId,
+      })
       .from(events)
       .where(and(eq(events.id, input.eventId), eq(events.organizationId, organizationId)))
       .limit(1);
@@ -518,6 +566,18 @@ export async function updateEvent(
       };
     }
 
+    if (
+      input.eventTypeId &&
+      !(await eventTypeUsable(
+        tx,
+        organizationId,
+        input.eventTypeId,
+        existing.eventTypeId,
+      ))
+    ) {
+      return { kind: "invalid_input", message: EVENT_TYPE_UNAVAILABLE };
+    }
+
     await tx
       .update(events)
       .set({
@@ -528,6 +588,10 @@ export async function updateEvent(
         endsAt,
         isPublic: input.isPublic,
         allowsCheckin: input.allowsCheckin,
+        // undefined = leave the column out of the SET entirely (unchanged).
+        ...(input.eventTypeId !== undefined
+          ? { eventTypeId: input.eventTypeId }
+          : {}),
       })
       .where(eq(events.id, input.eventId));
 
@@ -644,6 +708,7 @@ export async function extendSeriesPattern(
           endsAt: childEndsAt,
           isPublic: parent.isPublic,
           allowsCheckin: parent.allowsCheckin,
+          eventTypeId: parent.eventTypeId,
           parentEventId: parent.id,
           recurrencePattern: null,
           recurrenceCount: null,
@@ -701,5 +766,84 @@ export async function cancelEvent(
       .where(eq(events.id, eventId));
 
     return { kind: "ok", data: { eventId } };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// getEventTypePickerData
+// ---------------------------------------------------------------------------
+
+export interface EventTypePickerOption {
+  id: string;
+  name: string;
+  colorToken: EventTypeColor;
+  iconKey: EventTypeIcon;
+  /** True only for the event's own CURRENT type when that type has been retired. */
+  isRetired: boolean;
+}
+
+export interface EventTypePickerData {
+  options: EventTypePickerOption[];
+  /** The fallback's name (what "No type" renders as), or null for an org with none. */
+  fallbackName: string | null;
+}
+
+/**
+ * What the event forms' type picker offers, under `events.manage` (the people
+ * using the forms hold it; `event_types.manage` is a different permission).
+ * `options` = the ACTIVE non-fallback types in manager order, plus the event's
+ * CURRENT type when it has been retired (`isRetired: true`, so editing an old
+ * event does not silently drop its type). The fallback is never an option - it
+ * IS "No type" - and a current type equal to the fallback maps to "No type", so
+ * it is not added either.
+ */
+export async function getEventTypePickerData(
+  viewerPersonId: string,
+  organizationId: string,
+  opts?: { currentTypeId?: string | null },
+): Promise<EventsResult<EventTypePickerData>> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasEventsManage(tx, viewerPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    const currentTypeId =
+      opts?.currentTypeId && isUuidShaped(opts.currentTypeId)
+        ? opts.currentTypeId.toLowerCase()
+        : null;
+
+    const rows = await tx
+      .select({
+        id: eventTypes.id,
+        name: eventTypes.name,
+        color: eventTypes.color,
+        icon: eventTypes.icon,
+        isActive: eventTypes.isActive,
+        isFallback: eventTypes.isFallback,
+      })
+      .from(eventTypes)
+      .where(eq(eventTypes.organizationId, organizationId))
+      .orderBy(eventTypes.sortOrder, sql`lower(${eventTypes.name})`, eventTypes.id);
+
+    const options: EventTypePickerOption[] = rows
+      .filter(
+        (r) =>
+          !r.isFallback && (r.isActive || r.id.toLowerCase() === currentTypeId),
+      )
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        colorToken: isEventTypeColor(r.color) ? r.color : "neutral",
+        iconKey: isEventTypeIcon(r.icon) ? r.icon : DEFAULT_EVENT_TYPE_ICON,
+        isRetired: !r.isActive,
+      }));
+
+    return {
+      kind: "ok",
+      data: {
+        options,
+        fallbackName: rows.find((r) => r.isFallback)?.name ?? null,
+      },
+    };
   });
 }

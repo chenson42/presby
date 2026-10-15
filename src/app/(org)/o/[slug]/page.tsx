@@ -11,11 +11,8 @@ import {
 } from "@/lib/feedback-prompt";
 import { isFlagEnabled } from "@/lib/flags";
 import { getPortalHomeData } from "@/lib/org-portal/home-data";
-import {
-  DOMAIN_LABELS,
-  DOMAIN_ORDER,
-  visiblePortalTiles,
-} from "@/lib/org-portal/tiles";
+import { DOMAIN_LABELS, DOMAIN_ORDER } from "@/lib/org-portal/tiles";
+import { visiblePortalTiles } from "@/lib/org-portal/visible-tiles";
 import { GreetingBand } from "@/components/shared/greeting-band";
 import { FindPersonForm } from "@/components/org-portal/find-person-form";
 import { YoursZone } from "@/components/org-portal/yours-zone";
@@ -172,7 +169,14 @@ export default async function OrgPage({
     homeData = null;
   }
 
-  const tiles = await visiblePortalTiles("operate", resolved.org.organizationType);
+  const tiles = await visiblePortalTiles(
+    "operate",
+    resolved.org.organizationType,
+    {
+      personId: resolved.org.personId,
+      organizationId: resolved.org.organizationId,
+    },
+  );
 
   // Feedback prompt (mid-design operator correction, §6b): flag-gated AND
   // suppressed by the same shared rule /home applies. Keyed by the

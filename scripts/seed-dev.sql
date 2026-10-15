@@ -1801,5 +1801,142 @@ values ('e0000000-0000-0000-0000-0000000000f5', 'founding.fixture@example.invali
         true, false)
 on conflict (id) do nothing;
 
+-- ---------------------------------------------------------------------------
+-- APPENDED BLOCK - pipeline/member-calendar (docs/work-log/
+-- 2026-10-14-member-calendar.md, Phase 3 "Drafts for integration"). Workflow
+-- Rule 16: one clearly delimited block at the END of this file, directly ahead
+-- of the final `commit;`. If a merge conflict appears here, keep ALL blocks:
+-- append-only, none depends on another.
+--
+-- 1. Mirror of drizzle/0054's backfills for the organizations THIS file
+--    created. CI runs migrations on an EMPTY database, so 0054's backfills
+--    saw no organization and did nothing; a fresh fixture must end up in the
+--    same state a migrated database does. All four statements are the
+--    migration's own, verbatim and idempotent (on conflict / where not exists),
+--    so running this file against an already-migrated database is also safe.
+-- ---------------------------------------------------------------------------
+insert into organization_settings (organization_id)
+select o.id from organizations o
+on conflict (organization_id) do nothing;
+
+insert into organization_feature_toggles (organization_id, feature_key, enabled, updated_by)
+select o.id, 'org_portal.calendar', true, null
+  from organizations o
+on conflict (organization_id, feature_key) do nothing;
+
+insert into app_role_permissions (role_id, permission_key)
+select r.id, 'events.view'
+  from app_roles r
+ where r.key = 'member' and r.organization_id is not null
+on conflict (role_id, permission_key) do nothing;
+
+insert into event_types (organization_id, name, color, icon, sort_order, is_active, is_fallback)
+select o.id, v.name, v.color, v.icon, v.sort_order, v.is_active, v.is_fallback
+  from organizations o
+  join (values
+    ('Worship',                       'teal',    'Church',         10, true,  false),
+    ('Special Services and Holidays', 'violet',  'Sparkles',       20, false, false),
+    ('Music',                         'fuchsia', 'Music',          30, false, false),
+    ('Classes and Bible Study',       'sky',     'BookOpen',       40, true,  false),
+    ('Youth and Children',            'lime',    'Backpack',       50, true,  false),
+    ('Meals and Fellowship',          'amber',   'Utensils',       60, false, false),
+    ('Mission and Outreach',          'rose',    'HeartHandshake', 70, false, false),
+    ('Committees',                    'orange',  'Gavel',          80, true,  false),
+    ('General',                       'neutral', 'CalendarDays',   99, true,  true)
+  ) as v(name, color, icon, sort_order, is_active, is_fallback)
+    on (v.is_fallback
+        or o.organization_type in ('congregation', 'new_worshiping_community'))
+ where not exists (select 1 from event_types et where et.organization_id = o.id)
+on conflict do nothing;
+
+-- ---------------------------------------------------------------------------
+-- 2. event_types.manage: NO default binding in production (DECISION-161).
+--    This grant to stated_clerk (f0000000-...-0005, Tobias Renwick /
+--    clerk.fixture@example.invalid) is a TEST-REACHABILITY CONVENIENCE ONLY,
+--    the same posture as events.manage's own fixture grant above - not a
+--    recommended default.
+-- ---------------------------------------------------------------------------
+insert into app_role_permissions (role_id, permission_key) values
+  ('f0000000-0000-0000-0000-000000000005', 'event_types.manage')
+on conflict (role_id, permission_key) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- 3. Fixture events at Alder Creek, so the calendar shows something on a
+--    fresh database. Dates are RELATIVE to the day the seed runs (the first of
+--    the current month plus offsets), so the current month always has
+--    entries; titles name no weekday for that reason. Ids are e9100000-... -
+--    deliberately NOT e9000000-..., which scripts/test-rls.sql section 27
+--    inserts inside a rolled-back transaction.
+--
+--    Exercises: a typed weekly series that spans the previous, current and
+--    next months (10 stored rows, 1 parent + 9 children); typed single
+--    events; one NON-PUBLIC event (members still see it - is_public is only
+--    the public-site and Copy-month switch); one CANCELLED event (members
+--    never see it); one event typed with a RETIRED type (visible under "All",
+--    absent under any type filter); one UNTYPED event (renders as General).
+-- ---------------------------------------------------------------------------
+with base as (
+  select (date_trunc('month', current_date)
+          + (((7 - extract(dow from date_trunc('month', current_date))::int) % 7)
+             * interval '1 day')
+          - interval '14 days')::timestamp as first_service
+)
+insert into events
+  (id, organization_id, title, location, starts_at, ends_at, is_public,
+   parent_event_id, recurrence_pattern, recurrence_count, event_type_id)
+select format('e9100000-0000-0000-0000-%s', lpad((100 + i)::text, 12, '0'))::uuid,
+       '22222222-2222-2222-2222-222222222222'::uuid,
+       'Sunday worship',
+       'Sanctuary',
+       b.first_service + (i * interval '7 days') + interval '10 hours 30 minutes',
+       b.first_service + (i * interval '7 days') + interval '11 hours 45 minutes',
+       true,
+       case when i = 0 then null
+            else 'e9100000-0000-0000-0000-000000000100'::uuid end,
+       case when i = 0 then 'weekly' end,
+       case when i = 0 then 10 end,
+       (select id from event_types
+         where organization_id = '22222222-2222-2222-2222-222222222222' and name = 'Worship')
+  from base b, generate_series(0, 9) as i;
+
+insert into events
+  (id, organization_id, title, description, location, starts_at, ends_at,
+   is_public, cancelled_at, event_type_id)
+select v.id::uuid, '22222222-2222-2222-2222-222222222222'::uuid,
+       v.title, v.description, v.location,
+       date_trunc('month', current_date)::timestamp + v.starts_offset,
+       case when v.ends_offset is null then null
+            else date_trunc('month', current_date)::timestamp + v.ends_offset end,
+       v.is_public,
+       case when v.cancelled then now() end,
+       (select id from event_types
+         where organization_id = '22222222-2222-2222-2222-222222222222' and name = v.type_name)
+  from (values
+    ('e9100000-0000-0000-0000-000000000201', 'Bible study: the Gospel of Mark',
+       'Open to everyone. Bring a Bible or borrow one at the door.',
+       'Library',          interval '9 days 19 hours',  interval '9 days 20 hours 30 minutes',
+       true,  false, 'Classes and Bible Study'),
+    ('e9100000-0000-0000-0000-000000000202', 'Youth group pizza night',
+       null,
+       'Fellowship Hall',  interval '11 days 18 hours', interval '11 days 20 hours',
+       true,  false, 'Youth and Children'),
+    ('e9100000-0000-0000-0000-000000000203', 'Session stated meeting',
+       'Members-only: not shown on the public website or in Copy month.',
+       'Library',          interval '13 days 19 hours', interval '13 days 21 hours',
+       false, false, 'Committees'),
+    ('e9100000-0000-0000-0000-000000000204', 'Fellowship supper',
+       null,
+       'Fellowship Hall',  interval '19 days 18 hours', null,
+       true,  true,  'Meals and Fellowship'),
+    ('e9100000-0000-0000-0000-000000000205', 'Soup and sandwich lunch',
+       'Typed with a retired event type: visible under All, absent under any filter.',
+       'Fellowship Hall',  interval '21 days 12 hours', interval '21 days 13 hours 30 minutes',
+       true,  false, 'Meals and Fellowship'),
+    ('e9100000-0000-0000-0000-000000000206', 'Congregational picnic',
+       'Untyped on purpose: renders and filters as General.',
+       'Riverside Park',   interval '24 days 12 hours', interval '24 days 15 hours',
+       true,  false, null)
+  ) as v(id, title, description, location, starts_offset, ends_offset,
+         is_public, cancelled, type_name);
 
 commit;

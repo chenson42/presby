@@ -6,6 +6,7 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
+import { canManageEventTypes } from "@/lib/event-types";
 import { listEvents } from "@/lib/events";
 import { isFlagEnabled } from "@/lib/flags";
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,20 @@ export default async function EventsPage({
     return <EventsLoadError slug={slug} />;
   }
 
+  // The "Event types" entry point needs `event_types.manage`, a separate grant
+  // from `events.manage`. A failed read hides the button; it never blocks the page.
+  let canManageTypes = false;
+  try {
+    canManageTypes = await canManageEventTypes(
+      resolved.org.personId,
+      resolved.org.organizationId,
+    );
+  } catch (err) {
+    if (err instanceof OrgAccessError) {
+      throw err;
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -100,9 +115,16 @@ export default async function EventsPage({
           <h1 className="text-2xl font-semibold">Events</h1>
           <p className="mt-1 text-sm text-muted-foreground">{resolved.org.name}</p>
         </div>
-        <Button asChild className="min-h-11">
-          <Link href={`/o/${slug}/admin/events/new`}>New event</Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild className="min-h-11">
+            <Link href={`/o/${slug}/admin/events/new`}>New event</Link>
+          </Button>
+          {canManageTypes && (
+            <Button asChild variant="outline" className="min-h-11">
+              <Link href={`/o/${slug}/admin/events/types`}>Event types</Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       <EventsList slug={slug} entries={result.data} />

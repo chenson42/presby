@@ -37,6 +37,9 @@ describe.skipIf(!hasDb)(
   "org-features.ts (Postgres-backed, real dev database)",
   () => {
     let isOrgFeatureEnabled: typeof import("./org-features").isOrgFeatureEnabled;
+    let orgFeatureEnabledInTx: typeof import("./org-features").orgFeatureEnabledInTx;
+    let isCategoryAxisOn: typeof import("./org-features").isCategoryAxisOn;
+    let withOrgContext: typeof import("@/lib/authz").withOrgContext;
     let listFeatureToggles: typeof import("./org-features").listFeatureToggles;
     let toggleOrgFeature: typeof import("./org-features").toggleOrgFeature;
     let AUDIT_ACTIONS: typeof import("@/lib/audit").AUDIT_ACTIONS;
@@ -66,8 +69,14 @@ describe.skipIf(!hasDb)(
     let grantingUserId: string;
 
     beforeAll(async () => {
-      ({ isOrgFeatureEnabled, listFeatureToggles, toggleOrgFeature } =
-        await import("./org-features"));
+      ({
+        isOrgFeatureEnabled,
+        listFeatureToggles,
+        toggleOrgFeature,
+        orgFeatureEnabledInTx,
+        isCategoryAxisOn,
+      } = await import("./org-features"));
+      ({ withOrgContext } = await import("@/lib/authz"));
       ({ AUDIT_ACTIONS } = await import("@/lib/audit"));
       ({ getPlatformDb } = await import("@/lib/db"));
       ({ organizations } = await import("@/lib/db/domain/org"));
@@ -470,6 +479,122 @@ describe.skipIf(!hasDb)(
         if (result.kind !== "ok") return;
         const entry = result.toggles.find((t) => t.key === KEY);
         expect(entry!.categoryEnabled).toBe(false);
+      });
+    });
+
+    // -------------------------------------------------------------------
+    // orgFeatureEnabledInTx() — the in-transaction half, and the calendar key
+    // (DECISION-160 R1: a toggle-only entry with `flag: null`).
+    // -------------------------------------------------------------------
+    describe("orgFeatureEnabledInTx() agrees with isOrgFeatureEnabled()", () => {
+      const CALENDAR = "org_portal.calendar"; // category: "worship", flag: null
+
+      afterEach(async () => {
+        await setCategoryAxisFlag(false);
+        await getPlatformDb()
+          .delete(organizationFeatureCategories)
+          .where(eq(organizationFeatureCategories.organizationId, orgA));
+        await getPlatformDb()
+          .delete(organizationFeatureToggles)
+          .where(eq(organizationFeatureToggles.organizationId, orgA));
+      });
+
+      async function viaTx(key: string): Promise<boolean> {
+        const axis = await isCategoryAxisOn();
+        return withOrgContext(managerPerson, orgA, (tx) =>
+          orgFeatureEnabledInTx(tx, orgA, key, axis),
+        );
+      }
+
+      async function setToggle(key: string, enabled: boolean) {
+        await getPlatformDb()
+          .insert(organizationFeatureToggles)
+          .values({ organizationId: orgA, featureKey: key, enabled, updatedBy: null })
+          .onConflictDoUpdate({
+            target: [
+              organizationFeatureToggles.organizationId,
+              organizationFeatureToggles.featureKey,
+            ],
+            set: { enabled },
+          });
+      }
+
+      it("isCategoryAxisOn reflects the flag row", async () => {
+        await setCategoryAxisFlag(false);
+        expect(await isCategoryAxisOn()).toBe(false);
+        await setCategoryAxisFlag(true);
+        expect(await isCategoryAxisOn()).toBe(true);
+      });
+
+      it.each([
+        [KEY, "people"],
+        [CALENDAR, "worship"],
+      ])("%s: every axis x category x toggle combination matches the cached resolver", async (key, category) => {
+        for (const axis of [false, true]) {
+          for (const categoryRow of [undefined, true, false]) {
+            for (const toggle of [undefined, true, false]) {
+              await setCategoryAxisFlag(axis);
+              await getPlatformDb()
+                .delete(organizationFeatureCategories)
+                .where(eq(organizationFeatureCategories.organizationId, orgA));
+              await getPlatformDb()
+                .delete(organizationFeatureToggles)
+                .where(eq(organizationFeatureToggles.organizationId, orgA));
+              if (categoryRow !== undefined) await setCategoryRow(orgA, category, categoryRow);
+              if (toggle !== undefined) await setToggle(key, toggle);
+
+              const expected = !(axis && categoryRow === false) && toggle === true;
+              const label = `axis=${axis} category=${categoryRow} toggle=${toggle}`;
+              expect(await viaTx(key), `${key} tx ${label}`).toBe(expected);
+              expect(await isOrgFeatureEnabled(managerPerson, orgA, key), `${key} resolver ${label}`).toBe(expected);
+            }
+          }
+        }
+      });
+
+      it("the calendar key: a missing toggle row is OFF (DECISION-097), an enabled row is ON with no platform flag involved", async () => {
+        expect(await viaTx(CALENDAR)).toBe(false);
+        await setToggle(CALENDAR, true);
+        expect(await viaTx(CALENDAR)).toBe(true);
+        expect(await isOrgFeatureEnabled(managerPerson, orgA, CALENDAR)).toBe(true);
+      });
+
+      it("the calendar key follows the WORSHIP category, not the people category", async () => {
+        await setToggle(CALENDAR, true);
+        await setCategoryAxisFlag(true);
+        await setCategoryRow(orgA, "people", false);
+        expect(await viaTx(CALENDAR)).toBe(true); // an unrelated category is irrelevant
+        await setCategoryRow(orgA, "worship", false);
+        expect(await viaTx(CALENDAR)).toBe(false);
+      });
+
+      it("an uncatalogued key skips the category check and reads only its toggle row", async () => {
+        await setCategoryAxisFlag(true);
+        await setCategoryRow(orgA, "people", false);
+        await setCategoryRow(orgA, "worship", false);
+        await setToggle("org_portal.not_in_the_catalog", true);
+        expect(await viaTx("org_portal.not_in_the_catalog")).toBe(true);
+      });
+
+      it("listFeatureToggles lists the calendar entry (worship, disabled until a row exists)", async () => {
+        const before = await listFeatureToggles(managerPerson, orgA);
+        if (before.kind !== "ok") throw new Error("list failed");
+        const off = before.toggles.find((t) => t.key === CALENDAR);
+        expect(off).toMatchObject({ name: "Member calendar", category: "worship", enabled: false });
+
+        await setToggle(CALENDAR, true);
+        const after = await listFeatureToggles(managerPerson, orgA);
+        if (after.kind !== "ok") throw new Error("list failed");
+        expect(after.toggles.find((t) => t.key === CALENDAR)?.enabled).toBe(true);
+      });
+
+      it("toggleOrgFeature accepts the calendar key (it is in the catalog) and audits it", async () => {
+        const r = await toggleOrgFeature(managerPerson, orgA, grantingUserId, CALENDAR, true);
+        expect(r).toEqual({ kind: "ok" });
+        expect(await viaTx(CALENDAR)).toBe(true);
+        expect(mockRecordAudit).toHaveBeenCalledWith(
+          expect.objectContaining({ metadata: { organizationId: orgA, featureKey: CALENDAR, enabled: true } }),
+        );
       });
     });
   },

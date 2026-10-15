@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { RequiredMark } from "@/components/shared/required-mark";
 import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
-import type { EventDetail, UpdateEventInput } from "@/lib/events";
+import type { EventDetail, EventTypePickerData, UpdateEventInput } from "@/lib/events";
+import { EventTypePicker } from "@/components/org-portal/event-types/event-type-picker";
 import { editEventSchema, type EditEventFormValues } from "./event-schema";
 import { updateEventAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
@@ -31,12 +32,18 @@ import { HydrationGate } from "@/components/shared/hydration-gate";
 export function EditEventForm({
   slug,
   event,
+  typePicker,
+  orgName,
 }: {
   slug: string;
   event: EventDetail;
+  typePicker: EventTypePickerData;
+  orgName: string;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+
+  const isSeriesOccurrence = event.parentEventId !== null || event.recurrencePattern !== null;
 
   const form = useForm<EditEventFormValues>({
     resolver: zodResolver(editEventSchema),
@@ -48,6 +55,12 @@ export function EditEventForm({
       endsAt: event.endsAt ? event.endsAt.slice(0, 16) : "",
       isPublic: event.isPublic,
       allowsCheckin: event.allowsCheckin,
+      // The fallback is never a picker option (it IS "No type"), so an event
+      // stored against it also reads "none".
+      eventTypeId:
+        event.eventType && typePicker.options.some((o) => o.id === event.eventType!.id)
+          ? event.eventType.id
+          : "none",
     },
   });
 
@@ -69,6 +82,7 @@ export function EditEventForm({
       endsAt: values.endsAt || undefined,
       isPublic: values.isPublic,
       allowsCheckin: values.allowsCheckin,
+      eventTypeId: values.eventTypeId === "none" ? null : values.eventTypeId,
     };
 
     setSubmitting(true);
@@ -121,6 +135,16 @@ export function EditEventForm({
           )}
         </div>
 
+        <EventTypePicker
+          id="edit-event-type"
+          selectProps={register("eventTypeId")}
+          options={typePicker.options}
+          fallbackName={typePicker.fallbackName}
+        />
+        {isSeriesOccurrence && (
+          <p className="-mt-2 text-sm text-muted-foreground">Changes this occurrence only.</p>
+        )}
+
         <div>
           <Label htmlFor="edit-event-starts-at">
             Starts
@@ -157,6 +181,10 @@ export function EditEventForm({
           <input type="checkbox" className="h-4 w-4" {...register("isPublic")} />
           Visible on the public calendar
         </label>
+        <p className="-mt-2 text-sm text-muted-foreground">
+          If unchecked, the event still shows on the member calendar for everyone in {orgName}.
+          It just stays off the public website.
+        </p>
 
         <label className="inline-flex min-h-11 items-center gap-2 text-sm">
           <input type="checkbox" className="h-4 w-4" {...register("allowsCheckin")} />

@@ -57,6 +57,10 @@ Scope was decided with the operator on 2026-10-14 from a two-repo survey:
 | 5 — Verification | qa | Complete | PASS (advisories A1–A3) | 2026-10-15 |
 | 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (N1 fixed before push; N2–N6 tracked) | 2026-10-15 |
 
+## Pipeline closed (orchestrator, 2026-10-15)
+
+Phase 6 SHIP WITH NOTES. N1 fixed before push (`fix(calendar):` `8fb090c`, segment-local `not-found.tsx` + test); N2–N5 filed in `docs/TODO.md` (Ready to build); N6 folded into the release note. Close-out: `docs/release-notes/v0.32.md` (0.32.0, D6 + N6 + a Permissions/Routes block), `package.json` 0.31.0 → 0.32.0, `docs/TODO.md` Done line, `docs/product/functionality-map.md` (D7: index tail, two full-map bullets, the portal-IA tile sentence; stamp 0.32.0). D8 what's-new: publish after N5's production count (Rule 13). `docs/architecture.md` unchanged (Rule 15). `CLAUDE.md`: no new route group, npm script or capability-map section applies — one optional pointer under Permissions vs Flags to DECISION-160 was left for the next documentation review rather than edited here. Next: `/pre-push`, then push + PR on the operator's say-so; merge after PR #28; then `2026-10-14-portal-home-alignment` Phase 4 unblocks.
+
 ---
 
 # Phase 1 — Functional Refinement (analyst)

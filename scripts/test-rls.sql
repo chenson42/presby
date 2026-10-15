@@ -1174,7 +1174,7 @@ begin;
   values (:ALDER, 'org_portal.members_create', true, (select id from users limit 1))
   on conflict (organization_id, feature_key) do update
     set enabled = excluded.enabled, updated_by = excluded.updated_by;
-  select assert_eq((select count(*) from organization_feature_toggles), 1,
+  select assert_eq((select count(*) from organization_feature_toggles where feature_key = 'org_portal.members_create'), 1,
                    'alder: sees its own toggle row');
   -- assert_eq is bigint-only (no boolean overload) — every boolean check in
   -- this section goes through the FROM-less `count(*) WHERE <bool>` idiom
@@ -1187,7 +1187,7 @@ begin;
     1, 'alder: the toggle it just wrote reads back enabled');
 
   select set_config('app.current_org_id', :BRAMBLE, true);
-  select assert_eq((select count(*) from organization_feature_toggles), 0,
+  select assert_eq((select count(*) from organization_feature_toggles where feature_key = 'org_portal.members_create'), 0,
                    'bramblewood: sees no alder toggle rows');
   -- Known cross-org read, same discipline as sections 14/15's known-id check
   -- (a composite PK here, not a surrogate id — same property either way): a
@@ -1842,7 +1842,7 @@ begin;
   values ('e9000000-0000-0000-0000-000000000001', :ALDER,
           'Session Stated Meeting', now(), false, false);
   select assert_eq(
-    (select count(*) from events where organization_id = :ALDER),
+    (select count(*) from events where id = 'e9000000-0000-0000-0000-000000000001'),
     1, 'alder: sees its own newly-inserted event');
 
   select set_config('app.current_org_id', :BRAMBLE, true);
@@ -8148,7 +8148,7 @@ rollback;
 --      is therefore a coordinated retirement of the loop, its fixture, its
 --      section-12 assertion and src/lib/authz.test.ts:150,166 — not a
 --      one-line migration. Per Ruling 9's own instruction ("name it, don't
---      assume it") 0054 is NOT shipped by this pipeline and is recorded as a
+--      assume it") the next free migration number is NOT shipped by that pipeline and is recorded as a
 --      follow-up instead.
 --
 --      So (iv) is written here as its own negative: a live demonstration
@@ -8202,4 +8202,318 @@ rollback;
 
 -- ===========================================================================
 -- END APPENDED SECTION — pipeline/founding-admin.
+-- ===========================================================================
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/member-calendar (docs/work-log/
+-- 2026-10-14-member-calendar.md, Phase 3 "Drafts for integration").
+-- Workflow Rule 16: appended at the END of this file by the orchestrator at
+-- integration. If another pipeline appended a section 45 first, renumber this
+-- one; nothing below depends on the number.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 45. Member calendar + event types (drizzle/0054_presby_calendar_event_types.sql,
+--     DECISION-160 / DECISION-161; scripts/seed-dev.sql's appended
+--     pipeline/member-calendar block supplies every fixture row read here).
+--
+--     Seven things:
+--       (a) the two permission-catalog rows (tier 1, no org column, readable
+--           with no GUC set);
+--       (b) event_types tenant isolation - FORCE RLS, cross-org reads return
+--           zero by blanket query AND by known id, the WITH CHECK half rejects
+--           a cross-org write;
+--       (c) the grant shape is HALF the model: select/insert/update, never
+--           DELETE, for presby_app AND presby_platform - and a real DELETE
+--           attempt is refused;
+--       (d) the table's own invariants: one fallback per org, a fallback is
+--           active and neutral and nothing else is neutral, the closed palette
+--           and icon lists, trimmed names, case-insensitive uniqueness;
+--       (e) events.event_type_id is a COMPOSITE FK (F2): a type from another
+--           org is refused even though RLS would hide it, and the delete
+--           action is NO ACTION (confdeltype 'a'). The cascade-with-typed-
+--           events proof needs an organization DELETE, which presby_app cannot
+--           issue (SELECT only on organizations), so it lives in
+--           src/lib/event-types.test.ts on the owner connection;
+--       (f) organization_settings.time_zone - NOT NULL default, and the
+--           two-clause CHECK refuses a POSIX string, a bare abbreviation and
+--           an unknown name;
+--       (g) the seed mirror reached the fixture: Alder Creek's calendar toggle
+--           and member-role events.view are present and invisible to
+--           Bramblewood, and the fixture events have their documented shape.
+--
+--     No block below writes durably: every one ends in rollback.
+-- ---------------------------------------------------------------------------
+\set CAL_SERIES_PARENT '\'e9100000-0000-0000-0000-000000000100\''
+
+-- (a) the catalog rows. permissions has no organization_id and no RLS.
+begin;
+  select assert_eq(
+    (select count(*) from permissions where key = 'events.view' and sensitivity_tier = 1),
+    1, 'permissions: events.view catalog row exists, tier 1');
+  select assert_eq(
+    (select count(*) from permissions where key = 'event_types.manage' and sensitivity_tier = 1),
+    1, 'permissions: event_types.manage catalog row exists, tier 1');
+rollback;
+
+-- (b) isolation.
+begin;
+  select assert_eq((select count(*) from event_types), 0,
+                   'unset GUC: event_types invisible');
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq((select count(*) from event_types), 9,
+                   'alder: sees its own nine event types (the standard congregation set)');
+  select assert_eq((select count(*) from event_types where is_active), 5,
+                   'alder: five of the nine are active (Worship, Classes and Bible Study, Youth and Children, Committees, General)');
+  select assert_eq(
+    (select count(*) from event_types
+      where is_fallback and name = 'General' and color = 'neutral' and is_active),
+    1, 'alder: exactly one fallback, General, neutral and active');
+  select id::text as alder_type from event_types where name = 'Worship' \gset
+
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from event_types), 9,
+                   'bramblewood: sees its OWN nine event types, not alder''s eighteen');
+  select assert_eq(
+    (select count(*) from event_types where id = :'alder_type'),
+    0, 'bramblewood: cross-org read of alder''s event type by known id returns zero');
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  do $$
+  begin
+    insert into event_types (organization_id, name, color, icon)
+    values ('22222222-2222-2222-2222-222222222222', 'Hijacked Type', 'teal', 'Church');
+    raise exception 'FAIL - bramblewood wrote an event type into alder''s organization';
+  exception when insufficient_privilege then
+    raise notice 'pass  event_types tenant_isolation: cross-org write rejected';
+  end $$;
+rollback;
+
+-- (c) FORCE RLS, the policy, and the grant shape.
+begin;
+  select assert_eq(
+    (select count(*) from pg_class where relname = 'event_types' and relrowsecurity and relforcerowsecurity),
+    1, 'event_types: row level security is ENABLED and FORCED (F1)');
+  select assert_eq(
+    (select count(*) from pg_policies
+      where tablename = 'event_types' and policyname = 'tenant_isolation'),
+    1, 'event_types: the standard tenant_isolation policy exists');
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app', 'event_types', 'SELECT')),
+       (has_table_privilege('presby_app', 'event_types', 'INSERT')),
+       (has_table_privilege('presby_app', 'event_types', 'UPDATE')),
+       (has_table_privilege('presby_platform', 'event_types', 'SELECT')),
+       (has_table_privilege('presby_platform', 'event_types', 'INSERT')),
+       (has_table_privilege('presby_platform', 'event_types', 'UPDATE'))) v(b) where b),
+    6, 'event_types: presby_app and presby_platform both hold select, insert, update');
+  select assert_eq(
+    (select count(*) from (values
+       (has_table_privilege('presby_app', 'event_types', 'DELETE')),
+       (has_table_privilege('presby_platform', 'event_types', 'DELETE'))) v(b) where b),
+    0, 'event_types: NEITHER connection holds DELETE - a type is retired, never removed (DECISION-161)');
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    delete from event_types where name = 'Worship';
+    raise exception 'FAIL - presby_app deleted an event type';
+  exception when insufficient_privilege then
+    raise notice 'pass  event_types: presby_app DELETE refused';
+  end $$;
+rollback;
+
+-- (d) the table's own invariants.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    insert into event_types (organization_id, name, color, icon, is_fallback)
+    values ('22222222-2222-2222-2222-222222222222', 'Second Default', 'neutral', 'Church', true);
+    raise exception 'FAIL - a second fallback was accepted';
+  exception when unique_violation then
+    raise notice 'pass  event_types: a second fallback per org is refused (event_types_one_fallback_idx)';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    update event_types set is_active = false where is_fallback;
+    raise exception 'FAIL - the fallback was deactivated';
+  exception when check_violation then
+    raise notice 'pass  event_types: the fallback cannot be retired (event_types_fallback_active)';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    update event_types set color = 'neutral' where name = 'Worship';
+    raise exception 'FAIL - a non-fallback type took neutral';
+  exception when check_violation then
+    raise notice 'pass  event_types: neutral is reserved for the fallback (event_types_neutral_is_fallback)';
+  end $$;
+  do $$
+  begin
+    update event_types set color = 'teal' where is_fallback;
+    raise exception 'FAIL - the fallback left neutral';
+  exception when check_violation then
+    raise notice 'pass  event_types: the fallback must stay neutral';
+  end $$;
+  do $$
+  begin
+    update event_types set color = 'chartreuse' where name = 'Worship';
+    raise exception 'FAIL - a color outside the closed palette was accepted';
+  exception when check_violation then
+    raise notice 'pass  event_types: the palette is closed (event_types_color_allowed)';
+  end $$;
+  do $$
+  begin
+    update event_types set icon = 'Rocket' where name = 'Worship';
+    raise exception 'FAIL - an icon outside the closed list was accepted';
+  exception when check_violation then
+    raise notice 'pass  event_types: the icon list is closed (event_types_icon_allowed)';
+  end $$;
+  do $$
+  begin
+    update event_types set name = ' Worship ' where name = 'Worship';
+    raise exception 'FAIL - an untrimmed name was accepted';
+  exception when check_violation then
+    raise notice 'pass  event_types: names must be trimmed (event_types_name_shape)';
+  end $$;
+  do $$
+  begin
+    update event_types set name = 'GENERAL' where name = 'Worship';
+    raise exception 'FAIL - a case-insensitive duplicate name was accepted';
+  exception when unique_violation then
+    raise notice 'pass  event_types: names are unique per org case-insensitively (event_types_org_lower_name_idx)';
+  end $$;
+rollback;
+
+-- (e) events.event_type_id: composite FK, NO ACTION.
+begin;
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select id::text as bramble_type from event_types where name = 'Worship' \gset
+  select set_config('rls_test.bramble_type', :'bramble_type', true);
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    -- RLS hides the type from alder, but the FK check is an RI query that
+    -- ignores RLS: it is the COMPOSITE key (id, organization_id) that refuses.
+    insert into events (organization_id, title, starts_at, event_type_id)
+    values ('22222222-2222-2222-2222-222222222222', 'Cross-org typed event', now(),
+            current_setting('rls_test.bramble_type')::uuid);
+    raise exception 'FAIL - an event was typed with another organization''s event type';
+  exception when foreign_key_violation then
+    raise notice 'pass  events_event_type_fk: a cross-org event_type_id is refused (F2)';
+  end $$;
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from pg_constraint
+      where conname = 'events_event_type_fk' and contype = 'f' and confdeltype = 'a'),
+    1, 'events_event_type_fk: ON DELETE NO ACTION (not set null, not restrict) - DECISION-161');
+  insert into events (id, organization_id, title, starts_at, event_type_id)
+  values ('e9100000-0000-0000-0000-0000000009aa', :ALDER, 'RLS typed event', now(),
+          (select id from event_types where name = 'Worship'));
+  insert into events (id, organization_id, title, starts_at)
+  values ('e9100000-0000-0000-0000-0000000009ab', :ALDER, 'RLS untyped event', now());
+  select assert_eq(
+    (select count(*) from events where id in ('e9100000-0000-0000-0000-0000000009aa','e9100000-0000-0000-0000-0000000009ab')
+       and ((id = 'e9100000-0000-0000-0000-0000000009aa' and event_type_id is not null)
+         or (id = 'e9100000-0000-0000-0000-0000000009ab' and event_type_id is null))),
+    2, 'events: a same-org typed event and an untyped event are both accepted');
+rollback;
+
+-- (f) organization_settings.time_zone.
+begin;
+  select assert_eq(
+    (select count(*) from information_schema.columns
+      where table_name = 'organization_settings' and column_name = 'time_zone'
+        and is_nullable = 'NO' and column_default like '%America/New_York%'),
+    1, 'organization_settings.time_zone: NOT NULL, default America/New_York');
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from organization_settings where time_zone = 'America/New_York'),
+    1, 'alder: its settings row exists and reads the default zone');
+  do $$
+  begin
+    update organization_settings set time_zone = 'UTC+5';
+    raise exception 'FAIL - a POSIX time zone was accepted';
+  exception when check_violation then
+    raise notice 'pass  organization_settings_time_zone_valid: POSIX UTC+5 refused (Postgres would accept it, Intl would not)';
+  end $$;
+  do $$
+  begin
+    update organization_settings set time_zone = 'EST';
+    raise exception 'FAIL - a bare abbreviation was accepted';
+  exception when check_violation then
+    raise notice 'pass  organization_settings_time_zone_valid: bare EST refused';
+  end $$;
+  do $$
+  begin
+    update organization_settings set time_zone = 'Nope/Zone';
+    raise exception 'FAIL - an unknown zone was accepted';
+  exception when check_violation or invalid_parameter_value then
+    raise notice 'pass  organization_settings_time_zone_valid: unknown zone refused (check_violation or 22023, AND has no evaluation order)';
+  end $$;
+  update organization_settings set time_zone = 'America/Chicago';
+  select assert_eq(
+    (select count(*) from organization_settings where time_zone = 'America/Chicago'),
+    1, 'organization_settings: a real IANA zone is accepted');
+rollback;
+
+-- (g) the seed mirror and the fixture shape.
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  select assert_eq(
+    (select count(*) from organization_feature_toggles
+      where feature_key = 'org_portal.calendar' and enabled),
+    1, 'alder: the calendar toggle is ON (DECISION-160: explicit rows, on by default)');
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = :MEMBER_ROLE and permission_key = 'events.view'),
+    1, 'alder: the baseline member role holds events.view');
+  select assert_eq(
+    (select count(*) from events where parent_event_id = :CAL_SERIES_PARENT),
+    9, 'alder: the weekly worship series has nine children under one parent');
+  select assert_eq(
+    (select count(*) from events where title = 'Fellowship supper' and cancelled_at is not null),
+    1, 'alder: the fixture cancelled event exists');
+  select assert_eq(
+    (select count(*) from events where title = 'Session stated meeting' and not is_public),
+    1, 'alder: the fixture non-public event exists');
+  select assert_eq(
+    (select count(*) from events where event_type_id is null and title = 'Congregational picnic'),
+    1, 'alder: the fixture untyped event exists');
+
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = :MEMBER_ROLE and permission_key = 'events.view'),
+    0, 'bramblewood: cannot see alder''s member-role binding');
+  select assert_eq(
+    (select count(*) from events where parent_event_id = :CAL_SERIES_PARENT),
+    0, 'bramblewood: cannot see alder''s series');
+rollback;
+
+\echo ''
+\echo '======================================================'
+\echo ' Section 45 (member calendar + event types) complete.'
+\echo '======================================================'
+
+-- ===========================================================================
+-- END APPENDED SECTION - pipeline/member-calendar.
 -- ===========================================================================

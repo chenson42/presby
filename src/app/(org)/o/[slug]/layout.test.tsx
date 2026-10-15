@@ -230,6 +230,7 @@ describe("OrgSlugLayout — org_portal.chrome_v2 ON, active relationship", () =>
     expect(portalNavSpy).toHaveBeenCalledWith({
       slug: "fixture",
       organizationType: "congregation",
+      viewer: { personId: "person-1", organizationId: "org-1" },
     });
     expect(getOrgMarkForLayout).toHaveBeenCalledWith("org-1", "person-1");
   });
@@ -325,6 +326,7 @@ describe("OrgSlugLayout — org_portal.chrome_v3 ON, active relationship", () =>
       slug: "fixture",
       organizationName: "Fixture Congregation",
       organizationType: "congregation",
+      viewer: { personId: "person-1", organizationId: "org-1" },
       profile: { address: "1 Fixture Way", phone: "555-0100" },
     });
     expect(getOrgProfileForFooter).toHaveBeenCalledWith("org-1", "person-1");

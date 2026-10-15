@@ -1,5 +1,9 @@
 import { isFlagEnabled } from "@/lib/flags";
-import { DOMAIN_LABELS, DOMAIN_ORDER, visiblePortalTiles } from "@/lib/org-portal/tiles";
+import { DOMAIN_LABELS, DOMAIN_ORDER } from "@/lib/org-portal/tiles";
+import {
+  visiblePortalTiles,
+  type TileViewer,
+} from "@/lib/org-portal/visible-tiles";
 import type { OrganizationType } from "@/lib/authz";
 import { PortalNavLinks, type PortalNavEntry } from "./portal-nav-links";
 
@@ -83,12 +87,16 @@ import { PortalNavLinks, type PortalNavEntry } from "./portal-nav-links";
 export async function PortalNav({
   slug,
   organizationType,
+  viewer,
 }: {
   slug: string;
   organizationType: OrganizationType;
+  /** REQUIRED (member-calendar R1): the ids the per-org tile toggle read
+   * needs, from the same `resolveOrgContext()` result as `organizationType`. */
+  viewer: TileViewer;
 }) {
   const [tiles, adminHubEnabled] = await Promise.all([
-    visiblePortalTiles("operate", organizationType),
+    visiblePortalTiles("operate", organizationType, viewer),
     isFlagEnabled("org_portal.admin_hub"),
   ]);
 

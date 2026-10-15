@@ -3599,6 +3599,58 @@ src/lib/testing/calendar-fixture.ts
 
 Trailers: `Work-Log: 2026-10-14-member-calendar`. Not in commit 4: the work-log itself (the orchestrator's), `drizzle/meta/_journal.json`, `domain/index.ts`, `seed-dev.sql`, `test-rls.sql` (Rule 16).
 
+## Commit 5 — `feat(portal): a calendar tile and a per-org tile gate` (full-stack-developer, 2026-10-15)
+
+### What changed
+
+- `src/lib/org-portal/tiles.ts` is data and types again. `PortalTile` is `PortalTileBase & PortalTileGate`, where the gate is `{ flagKey: string; orgFeatureKey?: OrgFeatureKey } | { flagKey?: undefined; orgFeatureKey: OrgFeatureKey }`; `OrgFeatureKey` is a **type-only** import (F135). `calendar` tile added immediately before `events` (operate, worship, `orgFeatureKey: "org_portal.calendar"`, no `flagKey`); `events` relabelled "Manage events", moved to `administer`, `domain: "worship"` kept (reverses DECISION-113 ruling 7 for events only, per R6). `visiblePortalTiles` and the `isFlagEnabled` import left the file. 20 tiles.
+- `src/lib/org-portal/visible-tiles.ts` (new, `server-only`): `visiblePortalTiles(category, organizationType, viewer: TileViewer)`; order is category -> `orgTypeScope` -> `tile.flagKey` -> the catalog entry's non-null `flag` -> `isOrgFeatureEnabled(viewer.personId, viewer.organizationId, key)`. Any error from the gate read hides that tile and logs the two ids only (never the message or stack); it never throws. Dedup: a per-tile `cache()`d resolver keyed on **primitives** (an object-valued `viewer` would defeat `cache()`), on top of `isOrgFeatureEnabled`'s own `cache()`, so nav, footer and page cost one toggle read per request.
+- `tile-icons.tsx`: `calendar: CalendarDays`, `events: CalendarCog` (events previously fell through to the `LayoutGrid` fallback).
+- The five callers: `(org)/o/[slug]/page.tsx`, `admin/page.tsx`, `portal-nav.tsx` (required `viewer` prop), `portal-footer.tsx` (required `viewer` prop), `layout.tsx` (threads `viewer` from the existing `resolved.kind === "ok"` branch; no new query). Note: the design's prose says "four callers" but its table lists five rows; the fifth is `layout.tsx`. `portal-nav.tsx` is at `src/app/(org)/o/[slug]/portal-nav.tsx`, not `src/components/org-portal/`.
+
+### Tests
+
+- `tiles.test.ts`: no longer mocks `@/lib/flags` at all (importing `tiles.ts` must not need the resolver chain; a runtime import creeping back in fails at load). 20 tiles; key list; `EXPECTED` and the operate/administer test updated; "every tile has a gate" and "every `flagKey` a tile declares is seeded" replace "every flagKey is seeded"; the calendar tile is toggle-only; labels and hrefs of `Calendar` / `Manage events`.
+- `org-feature-catalog.test.ts`: the tile-key assertion commit 4 left out (every `PORTAL_TILES` `orgFeatureKey` is a catalog key). This is where the "every `orgFeatureKey` is a catalog key" check lives rather than in `tiles.test.ts`, because that file now deliberately imports nothing from `org-features` and this one already mocks the chain.
+- `visible-tiles.test.ts` (new): every pre-existing `visiblePortalTiles` case carried over with the third argument; plus toggle on shows the calendar with no flag on, toggle off hides it, a rejecting toggle read hides it without throwing and logs ids only (asserted: ids present, the error message and table name absent), an `OrgAccessError`-shaped rejection likewise, no toggle read for a tile an earlier filter excluded, a non-null catalog `flag` is read before the toggle, `events` in administer and `calendar` in operate, declaration order.
+- Caller tests re-pointed at the `visible-tiles` mock with the viewer asserted: `page.test.tsx`, `admin/page.test.tsx`, `portal-nav.test.tsx`, `portal-footer.test.tsx`, `layout.test.tsx` (both spies receive `viewer`). `visible-tiles` is mocked in every one, so there is no DB-backed `visible-tiles` test; the design did not call for one.
+
+### Checks
+
+- `npm run typecheck`: clean. **Gate-less tile is a type error**, proven with a scratch file (deleted): a tile with neither gate fails with "Property 'orgFeatureKey' is missing ... but required"; `orgFeatureKey: "org_portal.nope"` fails; `orgFeatureKey` alone, `flagKey` alone and both together compile; `visiblePortalTiles("operate", "congregation")` fails "Expected 3 arguments, but got 2".
+- `npm run lint`: clean (`--max-warnings=0`). `npm run check`: all six tripwires pass. `npm test`: 280 files passed / 37 skipped, 4,003 tests passed / 1,148 skipped (the DB-backed suites skip without `.env.local`).
+- DB-backed, serial, `.env.local` (pipeline Neon branch): `org-features.test.ts`, `org-feature-categories.test.ts`, `calendar.test.ts` — 3 files, 180 tests passed.
+
+### Browser (dev server from this worktree on :3600, headless Chromium, signed in as `clerk.fixture@example.invalid`; server stopped afterwards)
+
+- `/o/alder-creek`, toggle on, 375px and 1280px: Worship & Events section shows **Calendar** ("See what's coming up.", links to `/o/alder-creek/calendar") above "Worship & Service Planning (Coming soon)"; no Events tile anywhere in operate; the persistent nav's "Worship & Events" anchor is present; the nav and footer both list "Calendar"; no horizontal overflow at either width. At 375px the tiles stack one per row, the Calendar tile carries its `CalendarDays` icon, and the footer wraps cleanly.
+- `/o/alder-creek/admin`, both widths: "Manage events" ("Create and manage calendar events, including repeating series.", links to `/o/alder-creek/admin/events") renders in the Worship & Events section, with Roles/Tickets/Features/Branding under Administration; no overflow.
+- Toggle flipped off in SQL (`organization_feature_toggles`, `alder-creek`, `org_portal.calendar`), reloaded at both widths: the Calendar tile is gone from the home grid, the nav row and the footer; the Worship & Events section and "Worship & Service Planning" remain; the admin hub is unchanged. Toggle flipped back on afterwards (verified `t`).
+- Not covered here: the `/o/alder-creek/calendar` page itself does not exist until commit 6, so the tile's href 404s on this branch by design.
+
+### Commit 5 file list (`git add` by path)
+
+```
+src/app/(org)/o/[slug]/admin/page.test.tsx
+src/app/(org)/o/[slug]/admin/page.tsx
+src/app/(org)/o/[slug]/layout.test.tsx
+src/app/(org)/o/[slug]/layout.tsx
+src/app/(org)/o/[slug]/page.test.tsx
+src/app/(org)/o/[slug]/page.tsx
+src/app/(org)/o/[slug]/portal-nav.test.tsx
+src/app/(org)/o/[slug]/portal-nav.tsx
+src/components/org-portal/portal-footer.test.tsx
+src/components/org-portal/portal-footer.tsx
+src/components/org-portal/tile-icons.tsx
+src/lib/org-feature-catalog.test.ts
+src/lib/org-portal/tiles.test.ts
+src/lib/org-portal/tiles.ts
+src/lib/org-portal/visible-tiles.test.ts
+src/lib/org-portal/visible-tiles.ts
+```
+
+Trailers: `Work-Log: 2026-10-14-member-calendar`. Escalation to Phase 3: none (one wording note above: "four callers" vs five rows). Not in commit 5: the work-log, and the integration edits other processes had already made in this worktree when I finished (`docs/TODO.md`, `docs/decisions.md`, `docs/ui-standards.md`, `drizzle/meta/_journal.json`, `scripts/seed-dev.sql`, `scripts/test-rls.sql`) — I did not touch those.
+
 *Handoff:* **full-stack-developer**, commit 5 (`tiles.ts`, `visible-tiles.ts`, the tile registry and the five caller files): `OrgFeatureKey` now includes `org_portal.calendar` and `isOrgFeatureEnabled` is unchanged in signature. Then **ux-developer**, commit 6, consuming the pages' read functions above, `getEventTypePickerData`, the five actions, and the pure `calendar/*` formatters; the home pipeline consumes `listUpcomingMemberEvents`, `todayInOrgZone`, `formatTime`, `formatShortDate` exactly as signed above.
 
 *(Commit 6 UI section to follow.)*

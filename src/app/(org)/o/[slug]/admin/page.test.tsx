@@ -80,8 +80,14 @@ vi.mock("@/lib/org-portal/tiles", () => ({
     "communications",
     "administration",
   ],
-  visiblePortalTiles: (category: string, organizationType: string) =>
-    visiblePortalTiles(category, organizationType),
+}));
+
+vi.mock("@/lib/org-portal/visible-tiles", () => ({
+  visiblePortalTiles: (
+    category: string,
+    organizationType: string,
+    viewer: unknown,
+  ) => visiblePortalTiles(category, organizationType, viewer),
 }));
 
 vi.mock("@/components/org-portal/tile-icons", () => ({
@@ -210,7 +216,10 @@ describe("AdminHubPage — the flag-before-registry ordering contract", () => {
     // organizationType (bug fix, docs/work-log/
     // 2026-08-27-credentials-tile-org-type.md): forwarded from the resolved
     // org, not hardcoded or omitted.
-    expect(visiblePortalTiles).toHaveBeenCalledWith("administer", "congregation");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("administer", "congregation", {
+      personId: "person-1",
+      organizationId: "org-1",
+    });
   });
 });
 

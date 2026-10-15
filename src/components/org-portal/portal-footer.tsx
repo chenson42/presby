@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { visiblePortalTiles } from "@/lib/org-portal/tiles";
+import {
+  visiblePortalTiles,
+  type TileViewer,
+} from "@/lib/org-portal/visible-tiles";
 import type { OrganizationType } from "@/lib/authz";
 import type { OrgProfileForFooter } from "@/lib/sites";
 
@@ -15,10 +18,11 @@ import type { OrgProfileForFooter } from "@/lib/sites";
  * does not take this row down, and vice versa"). This means the cheap,
  * DB-free, flag-table-backed `visiblePortalTiles()` read runs twice per
  * request when `org_portal.chrome_v3` is on (once for `PortalNav`, once
- * here) — named, not hidden, per Phase 3's Component Plan; tracked as a
- * docs/TODO.md follow-up alongside the already-named `resolveOrgContext`
- * double-read if `visiblePortalTiles()` ever needs org-scoped filtering that
- * makes the double call more than a rounding error.
+ * here) — named, not hidden. Since member-calendar (R1) the read is also
+ * org-scoped (the per-org calendar toggle), which is exactly the case this
+ * note anticipated: it stays cheap because `visiblePortalTiles()` resolves
+ * each tile through a `cache()`-keyed read on primitive ids, so the second and
+ * third callers in a request cost nothing.
  *
  * THREE BLOCKS, IN ORDER, per Phase 3's Component Plan:
  *
@@ -83,14 +87,18 @@ export async function PortalFooter({
   slug,
   organizationName,
   organizationType,
+  viewer,
   profile,
 }: {
   slug: string;
   organizationName: string;
   organizationType: OrganizationType;
+  /** REQUIRED (member-calendar R1): the ids the per-org tile toggle read
+   * needs, from the same `resolveOrgContext()` result as `organizationType`. */
+  viewer: TileViewer;
   profile: OrgProfileForFooter | null;
 }) {
-  const tiles = await visiblePortalTiles("operate", organizationType);
+  const tiles = await visiblePortalTiles("operate", organizationType, viewer);
   const hasContactInfo = Boolean(profile?.address || profile?.phone);
 
   return (

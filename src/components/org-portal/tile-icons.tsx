@@ -1,6 +1,8 @@
 import {
   BarChart3,
   BookOpen,
+  CalendarCog,
+  CalendarDays,
   FileBarChart,
   Gavel,
   HandCoins,
@@ -48,6 +50,11 @@ export const TILE_ICONS: Record<string, LucideIcon> = {
   reports: FileBarChart,
   insights: BarChart3,
   communications: Megaphone,
+  // docs/work-log/2026-10-14-member-calendar.md (R6): the member read surface
+  // and the authoring surface get distinct glyphs, since both sit under
+  // Worship & Events. Before this, "events" fell through to `LayoutGrid`.
+  calendar: CalendarDays,
+  events: CalendarCog,
 };
 
 /**

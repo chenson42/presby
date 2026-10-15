@@ -1,9 +1,22 @@
 import "server-only";
-import { isFlagEnabled } from "@/lib/flags";
 import type { OrganizationType } from "@/lib/authz";
+// TYPE-ONLY, and load-bearing (F135): a runtime import of `org-features` here
+// would close the cycle tiles -> org-features -> org-feature-categories ->
+// tiles (org-feature-categories reads `DOMAIN_ORDER` at module scope). This
+// module is DATA AND TYPES; the one function that reads the database for a
+// tile's visibility lives in `./visible-tiles.ts`, which is free to import
+// `org-features`.
+import type { OrgFeatureKey } from "@/lib/org-features";
 
 /**
  * The portal-home tool-tile registry (Phase 2/3, Increment 1).
+ *
+ * AMENDED 2026-10-14 (member-calendar, R1/F135, DECISION-160/167): "flag-only"
+ * below now reads "flag and/or per-org toggle". A tile may also be gated by
+ * `orgFeatureKey` (see `PortalTileGate`), and the function that evaluates
+ * the gates, `visiblePortalTiles`, moved to `./visible-tiles.ts` so this file
+ * stays data + types and can never close an import cycle. Everything below
+ * about NOT being a permission check is unchanged.
  *
  * FLAG-ONLY, AND THAT IS THE WHOLE DESIGN. A tile's visibility here answers
  * "is this feature on at all" — the same question `OrgPortalStub` already
@@ -126,12 +139,11 @@ export const DOMAIN_ORDER: readonly PortalDomain[] = [
   "administration",
 ];
 
-export interface PortalTile {
+interface PortalTileBase {
   key: string;
   label: string;
   description: string;
   href: (slug: string) => string;
-  flagKey: string;
   /** Routing only — which page renders the tile. Never a permission check. */
   category: PortalTileCategory;
   /**
@@ -185,6 +197,27 @@ export interface PortalTile {
    */
   comingSoon?: boolean;
 }
+
+/**
+ * How a tile is gated — at least one of the two, enforced by `tsc` (a tile
+ * with neither is a type error, so a new tile can never ship ungated by
+ * omission). Presentational visibility only, never a permission (DECISION-003):
+ * the destination route is the sole authority on what a click can do.
+ *
+ *  - `flagKey` — a platform `feature_flags` row (`isFlagEnabled`): "is this
+ *    behavior on at all." Every one must be seeded by `scripts/seed.ts`.
+ *  - `orgFeatureKey` — a key of `ORG_FEATURE_CATALOG`: the per-organization
+ *    toggle (`organization_feature_toggles`). A tile that sets it WITHOUT a
+ *    `flagKey` is toggle-only (the calendar, DECISION-160: no platform kill
+ *    switch, the per-org toggle is the whole gate). A tile that sets both
+ *    needs both on; the catalog entry's own `flag`, when non-null, is read
+ *    too (`visible-tiles.ts`).
+ */
+export type PortalTileGate =
+  | { flagKey: string; orgFeatureKey?: OrgFeatureKey }
+  | { flagKey?: undefined; orgFeatureKey: OrgFeatureKey };
+
+export type PortalTile = PortalTileBase & PortalTileGate;
 
 export const PORTAL_TILES: readonly PortalTile[] = [
   {
@@ -287,16 +320,33 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     domain: "administration",
   },
   {
+    key: "calendar",
+    label: "Calendar",
+    description: "See what's coming up.",
+    href: (slug) => `/o/${slug}/calendar`,
+    // docs/work-log/2026-10-14-member-calendar.md, Phase 3 (R1, R6,
+    // DECISION-160): the member READ surface, so `operate` (DECISION-105's
+    // routine-work test). Toggle-only — no `flagKey`; the per-org toggle is
+    // the entire gate, and a tile's visibility is still never a permission:
+    // `events.view` is checked by the calendar page itself.
+    orgFeatureKey: "org_portal.calendar",
+    category: "operate",
+    domain: "worship",
+  },
+  {
     key: "events",
-    label: "Events",
+    label: "Manage events",
     description: "Create and manage calendar events, including repeating series.",
     href: (slug) => `/o/${slug}/admin/events`,
-    // docs/work-log/2026-08-26-events-model.md, Phase 3 / DECISION-115
-    // ruling 4: `operate` (DECISION-113 ruling 7, DECISION-105's routine-work
-    // test) — putting events on the calendar is day-to-day congregational
-    // work, not org setup/governance.
+    // docs/work-log/2026-10-14-member-calendar.md, Phase 3 (R6): the
+    // AUTHORING surface moves to the admin hub. This REVERSES DECISION-113
+    // ruling 7 / DECISION-115 ruling 4 (`operate`) for events only — now
+    // that the member read surface exists as its own `operate` tile, putting
+    // events on the calendar is administering the org's calendar. `domain`
+    // stays `worship` (Worship & Events); `category` and `domain` are
+    // orthogonal.
     flagKey: "org_portal.events",
-    category: "operate",
+    category: "administer",
     domain: "worship",
   },
   {
@@ -440,44 +490,3 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     comingSoon: true,
   },
 ] as const;
-
-/**
- * The tiles a viewer sees for one category at one organization — filtered by
- * category, then by `orgTypeScope` (if the tile declares one), then by flag,
- * nothing else. Order follows `PORTAL_TILES`'s declaration order, which the
- * tile grid renders as-is (no re-sorting at the render layer).
- *
- * FOUR CALLERS: `/o/<slug>/page.tsx` calls `visiblePortalTiles("operate",
- * organizationType)`, `/o/<slug>/admin/page.tsx` calls `visiblePortalTiles
- * ("administer", organizationType)`, and `portal-nav.tsx` and
- * `portal-footer.tsx` each call it with `"operate"` and the org type
- * threaded from `layout.tsx` — the footer was the caller a hand enumeration
- * missed and only `tsc` caught when this parameter became required
- * (2026-08-27 bug fix), which is exactly why it is required. There is no
- * unparameterized overload and no default category, and — bug fix, docs/
- * work-log/2026-08-27-credentials-tile-org-type.md — `organizationType` is
- * likewise REQUIRED, not defaulted. The failure modes are asymmetric: a
- * forgotten `organizationType` defaulting to "show everywhere" would
- * silently reopen the exact bug this parameter exists to close (the
- * presbytery-only Credentials tile rendering for every congregation); a
- * required parameter fails at `tsc` before it ships. An ungoverned call is
- * exactly the bug this signature makes impossible to write by accident
- * (Phase 3 design; org-type ruling per this bug fix's Phase 2 review).
- */
-export async function visiblePortalTiles(
-  category: PortalTileCategory,
-  organizationType: OrganizationType,
-): Promise<PortalTile[]> {
-  const candidates = PORTAL_TILES.filter(
-    (tile) =>
-      tile.category === category &&
-      (!tile.orgTypeScope || tile.orgTypeScope.includes(organizationType)),
-  );
-  const checks = await Promise.all(
-    candidates.map(async (tile) => ({
-      tile,
-      enabled: await isFlagEnabled(tile.flagKey),
-    })),
-  );
-  return checks.filter((c) => c.enabled).map((c) => c.tile);
-}

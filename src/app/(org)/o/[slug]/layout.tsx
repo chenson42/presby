@@ -3,6 +3,7 @@ import { cachedAuth } from "@/lib/auth/cached-auth";
 import { resolveOrgContext, type OrganizationType } from "@/lib/authz";
 import { getOrgBrandForLayout, getOrgMarkForLayout } from "@/lib/brand/read-org-brand";
 import { isFlagEnabled } from "@/lib/flags";
+import type { TileViewer } from "@/lib/org-portal/visible-tiles";
 import { getOrgProfileForFooter, type OrgProfileForFooter } from "@/lib/sites";
 import { BrandTokens } from "@/components/brand/brand-tokens";
 import { GlobalNav } from "@/components/shared/global-nav";
@@ -87,6 +88,9 @@ export default async function OrgSlugLayout({
   // `chromeV2Enabled` or `chromeV3Enabled`) because chrome_v2 and chrome_v3
   // are independent rollback units and either could be the only one on.
   let orgOrganizationType: OrganizationType | null = null;
+  // Member-calendar R1/F135: the ids the per-org tile toggle read needs,
+  // from the SAME resolution as `orgOrganizationType` — no new query.
+  let tileViewer: TileViewer | null = null;
   let showFooter = false;
   let footerProfile: OrgProfileForFooter | null = null;
   let footerOrgName = "";
@@ -106,6 +110,10 @@ export default async function OrgSlugLayout({
       ]);
     if (resolved.kind === "ok") {
       orgOrganizationType = resolved.org.organizationType;
+      tileViewer = {
+        personId: resolved.org.personId,
+        organizationId: resolved.org.organizationId,
+      };
       feedbackHref = feedbackEnabled ? `/o/${slug}/feedback` : undefined;
       // BOTH ids from the SAME resolution, not `session.user.id` — see
       // read-org-brand.ts's header comment for why that distinction is
@@ -151,8 +159,12 @@ export default async function OrgSlugLayout({
             signOutRedirectTo={`/site/${slug}`}
             feedbackHref={feedbackHref}
           />
-          {showPortalNav && orgOrganizationType ? (
-            <PortalNav slug={slug} organizationType={orgOrganizationType} />
+          {showPortalNav && orgOrganizationType && tileViewer ? (
+            <PortalNav
+              slug={slug}
+              organizationType={orgOrganizationType}
+              viewer={tileViewer}
+            />
           ) : null}
         </>
       ) : (
@@ -179,11 +191,12 @@ export default async function OrgSlugLayout({
       >
         {children}
       </main>
-      {session?.user && showFooter && orgOrganizationType ? (
+      {session?.user && showFooter && orgOrganizationType && tileViewer ? (
         <PortalFooter
           slug={slug}
           organizationName={footerOrgName}
           organizationType={orgOrganizationType}
+          viewer={tileViewer}
           profile={footerProfile}
         />
       ) : null}

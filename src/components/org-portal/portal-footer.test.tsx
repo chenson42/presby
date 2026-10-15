@@ -20,12 +20,17 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { PortalTile } from "@/lib/org-portal/tiles";
 
 const visiblePortalTiles = vi.fn();
-vi.mock("@/lib/org-portal/tiles", () => ({
-  visiblePortalTiles: (category: string, organizationType: string) =>
-    visiblePortalTiles(category, organizationType),
+vi.mock("@/lib/org-portal/visible-tiles", () => ({
+  visiblePortalTiles: (
+    category: string,
+    organizationType: string,
+    viewer: unknown,
+  ) => visiblePortalTiles(category, organizationType, viewer),
 }));
 
 import { PortalFooter } from "./portal-footer";
+
+const VIEWER = { personId: "person-1", organizationId: "org-1" };
 
 beforeEach(() => {
   visiblePortalTiles.mockReset().mockResolvedValue([]);
@@ -54,6 +59,7 @@ async function renderFooter(
     slug: "alder-creek",
     organizationName: "Alder Creek Presbyterian Church",
     organizationType: "congregation",
+    viewer: VIEWER,
     profile: null,
     ...props,
   });
@@ -123,13 +129,13 @@ describe("PortalFooter — nav recap", () => {
   it("calls visiblePortalTiles with the 'operate' category, never 'administer'", async () => {
     visiblePortalTiles.mockResolvedValue([]);
     await renderFooter();
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation", VIEWER);
   });
 
   it("forwards organizationType to visiblePortalTiles() unchanged — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", async () => {
     visiblePortalTiles.mockResolvedValue([]);
     await renderFooter({ organizationType: "presbytery" });
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "presbytery");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "presbytery", VIEWER);
   });
 
   it("recaps every visible tile from visiblePortalTiles(), built from the slug", async () => {

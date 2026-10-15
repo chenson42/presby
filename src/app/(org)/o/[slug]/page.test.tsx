@@ -57,8 +57,14 @@ const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
   DOMAIN_LABELS: { people: "People & Membership" },
   DOMAIN_ORDER: ["people"],
-  visiblePortalTiles: (category: string, organizationType: string) =>
-    visiblePortalTiles(category, organizationType),
+}));
+
+vi.mock("@/lib/org-portal/visible-tiles", () => ({
+  visiblePortalTiles: (
+    category: string,
+    organizationType: string,
+    viewer: unknown,
+  ) => visiblePortalTiles(category, organizationType, viewer),
 }));
 
 const getFeedbackPromptState = vi.fn();
@@ -177,7 +183,10 @@ describe("OrgPage — org_portal.home_v2 ON", () => {
     // organizationType (bug fix, docs/work-log/
     // 2026-08-27-credentials-tile-org-type.md): forwarded from the resolved
     // org, not hardcoded or omitted.
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation", {
+      personId: "person-1",
+      organizationId: "org-1",
+    });
     // org_portal.motion (docs/work-log/2026-08-26-portal-visual-modernization.md)
     // must be read alongside org_portal.home_v2, and — mocked false here — must
     // NOT leave the greeting band's mount fade-in classes present. This is the

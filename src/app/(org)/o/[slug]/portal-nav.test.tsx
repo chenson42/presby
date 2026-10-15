@@ -51,8 +51,14 @@ vi.mock("@/lib/org-portal/tiles", () => ({
     "communications",
     "administration",
   ],
-  visiblePortalTiles: (category: string, organizationType: string) =>
-    visiblePortalTiles(category, organizationType),
+}));
+
+vi.mock("@/lib/org-portal/visible-tiles", () => ({
+  visiblePortalTiles: (
+    category: string,
+    organizationType: string,
+    viewer: unknown,
+  ) => visiblePortalTiles(category, organizationType, viewer),
 }));
 
 const isFlagEnabled = vi.fn();
@@ -69,6 +75,8 @@ vi.mock("./portal-nav-links", () => ({
 }));
 
 import { PortalNav } from "./portal-nav";
+
+const VIEWER = { personId: "person-1", organizationId: "org-1" };
 
 afterEach(() => {
   cleanup();
@@ -93,7 +101,7 @@ describe("PortalNav — entry construction", () => {
     visiblePortalTiles.mockResolvedValue([]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     expect(screen.getByTestId("portal-nav-links-stub")).toBeTruthy();
@@ -106,18 +114,18 @@ describe("PortalNav — entry construction", () => {
     visiblePortalTiles.mockResolvedValue([]);
     isFlagEnabled.mockResolvedValue(false);
 
-    await PortalNav({ slug: "acme", organizationType: "congregation" });
+    await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
 
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation", VIEWER);
   });
 
   it("forwards organizationType to visiblePortalTiles() unchanged — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", async () => {
     visiblePortalTiles.mockResolvedValue([]);
     isFlagEnabled.mockResolvedValue(false);
 
-    await PortalNav({ slug: "northern-reach", organizationType: "presbytery" });
+    await PortalNav({ slug: "northern-reach", organizationType: "presbytery", viewer: VIEWER });
 
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "presbytery");
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "presbytery", VIEWER);
   });
 
   it("produces one anchor entry per domain with a visible tile, in DOMAIN_ORDER order, each pointing at /o/<slug>#domain-<key> and exact:true", async () => {
@@ -128,7 +136,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     expect(linksSpy).toHaveBeenCalledWith({
@@ -164,7 +172,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     const entries = linksSpy.mock.calls[0][0].entries;
@@ -181,7 +189,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     const entries = linksSpy.mock.calls[0][0].entries;
@@ -202,7 +210,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     expect(linksSpy).toHaveBeenCalledWith({
@@ -218,7 +226,7 @@ describe("PortalNav — entry construction", () => {
       key === "org_portal.admin_hub",
     );
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     expect(linksSpy).toHaveBeenCalledWith({
@@ -254,7 +262,7 @@ describe("PortalNav — entry construction", () => {
     );
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.admin_hub");
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     const entries = linksSpy.mock.calls[0][0].entries as Array<{
@@ -279,7 +287,7 @@ describe("PortalNav — entry construction", () => {
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     const entries = linksSpy.mock.calls[0][0].entries;
@@ -292,7 +300,7 @@ describe("PortalNav — entry construction", () => {
     visiblePortalTiles.mockResolvedValue([]);
     isFlagEnabled.mockResolvedValue(false);
 
-    await PortalNav({ slug: "acme", organizationType: "congregation" });
+    await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
 
     expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.admin_hub");
   });
@@ -311,7 +319,7 @@ describe("PortalNav — a presbytery-only domain absent for a congregation", () 
     ]);
     isFlagEnabled.mockResolvedValue(false);
 
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation" });
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     const entries = linksSpy.mock.calls[0][0].entries;

@@ -23,6 +23,7 @@ vi.mock("@/lib/audit", () => ({
 // (see events.schema.test.ts), so load it first in the canonical order.
 import "@/lib/db/schema";
 import { ORG_FEATURE_CATALOG } from "./org-features";
+import { PORTAL_TILES } from "./org-portal/tiles";
 
 const SEED = readFileSync(
   path.resolve(__dirname, "../../scripts/seed.ts"),
@@ -79,6 +80,18 @@ describe("ORG_FEATURE_CATALOG", () => {
       const entry = ORG_FEATURE_CATALOG.find((e) => e.key === key);
       expect(entry?.flag).toBe(key);
       expect(entry?.provisionedOn).toBe(false);
+    }
+  });
+
+  it("names, for every PORTAL_TILES orgFeatureKey, a real catalog key (R1: a typo'd toggle key would hide the tile for everyone, forever)", () => {
+    const catalogKeys = new Set<string>(ORG_FEATURE_CATALOG.map((e) => e.key));
+    const gated = PORTAL_TILES.filter((t) => t.orgFeatureKey !== undefined);
+    expect(gated.map((t) => t.key)).toContain("calendar");
+    for (const tile of gated) {
+      expect(
+        catalogKeys.has(tile.orgFeatureKey as string),
+        `${tile.key} -> ${tile.orgFeatureKey}`,
+      ).toBe(true);
     }
   });
 });

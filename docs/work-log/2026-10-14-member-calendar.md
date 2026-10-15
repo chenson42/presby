@@ -53,9 +53,9 @@ Scope was decided with the operator on 2026-10-14 from a two-repo survey:
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-14 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-14 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named | 2026-10-14 |
-| 4 — Implementation | api-developer (commits 1, 4) · ux-developer (2, 6) · database-admin (3) · full-stack-developer (5) · orchestrator (0, 7) | In progress — commits 0 `651f069`, 2 `7cca13b`, 1 `c654b06`, 3 `a6daf31` on the branch; 4 `45ababe`; 5 `8d78e48`, 7 `2a2e0d6`+`83b2edd`+`c0582ad`; commit 6 in progress | — | 2026-10-15 |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 4 — Implementation | api-developer (commits 1, 4) · ux-developer (2, 6) · database-admin (3) · full-stack-developer (5) · orchestrator (0, 7) | In progress — commits 0 `651f069`, 2 `7cca13b`, 1 `c654b06`, 3 `a6daf31` on the branch; 4 `45ababe`; 5 `8d78e48`, 7 `2a2e0d6`+`83b2edd`+`c0582ad`; 6 `60a3511` — all seven commits on the branch | Complete | 2026-10-15 |
+| 5 — Verification | qa | Complete | PASS (advisories A1–A3) | 2026-10-15 |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (N1 fixed before push; N2–N6 tracked) | 2026-10-15 |
 
 ---
 
@@ -3753,10 +3753,220 @@ Commits: `chore(schema)` (journal + seed-dev), `test(rls)` (test-rls), `docs` (d
 
 # Phase 5 — Verification (qa)
 
-*(pending)*
+*Recorded verbatim by the orchestrator, 2026-10-15.*
+
+**Date:** 2026-10-15
+**Verified by:** qa (read-only. I wrote no repo files and authored no tests. All database writes were either rolled back or made on the throwaway `qa_check` database, which has been dropped.)
+**Worktree:** `/Users/cshenso/git/presby-platform/presby-calendar`, branch `pipeline/member-calendar`, ten commits `651f069..60a3511`. The tree is clean apart from the work-log status table.
+
+## Type Check
+
+`npm run typecheck`: **PASS** (exit 0). `npm run lint` (`--max-warnings=0`): **PASS** (exit 0). `npm run check`: **PASS**. All six tripwires pass: audit-coverage, `sql<Date>`, deps-drift, brand-scope, secrets/PII and hydration-gate.
+
+## Unit Tests
+
+| Lane | Files | Tests | Failed | Skipped | Duration |
+|---|---|---|---|---|---|
+| `npm test` (mocked, no DB env) | 298 passed, 37 skipped | 4182 passed, 1148 skipped | 0 | 37 files / 1148 tests | 14.3s |
+| `npm run test:db` (full, serial, pipeline branch `neondb`) | **335 passed of 335** | **5330 passed of 5330** | 0 | **0** | 684s |
+
+- The 37 files skipped in the mocked lane are the `describe.skipIf(!hasDb)` DB suites. All of them ran in the DB lane, which had zero skips.
+- **Time-zone discipline.** I ran the pure suites (`src/lib/events/**`, `src/lib/calendar/**`, `src/lib/shared/org-time.test.ts`) once each under outer `TZ=UTC`, `TZ=America/New_York` and `TZ=Pacific/Honolulu`. Each run gave identical results: 9 files passed, 2 skipped, 407 tests passed, 195 skipped. The 2 skipped files are the DB-backed `src/lib/calendar.test.ts` (142 tests) and `src/lib/events.test.ts` (53); both ran in `test:db`. `calendar.test.ts` also loops over all three process zones internally (`describe.each(TEST_TIME_ZONES)`, `src/lib/calendar.test.ts:242`). Not run: `npm test` / `npm run test:db` as a whole under each outer TZ (recipe step 3 in full).
+- **Failing-first check, reproduced independently (F134, the only `fix:` commit).** In a scratch copy outside the repo, I replaced `src/lib/events/wall-clock.ts` with main's local-field codec and `recurrence.ts` with main's version. `src/lib/events/wall-clock.test.ts` then went **5 failed / 7 passed**: both non-UTC zones failed, UTC passed. This matches the Phase 4 record. With the files restored (`cmp` identical) it went **12 passed**. The DB-backed twin (`src/lib/events.test.ts:1088–1126`) was not re-run against the old writer; its failing-first evidence is the implementer's recorded output only.
+
+## Schema/RLS Audit (live catalog, after 0054)
+
+Owner connection, read-only transaction, on `neondb` of the pipeline branch:
+
+- `event_types` has `relrowsecurity = t` and `relforcerowsecurity = t`. `events`, `organization_settings` and `organization_feature_toggles` are also FORCE.
+- `pg_policies`: one `tenant_isolation`, PERMISSIVE, cmd ALL. Both `qual` and `with_check` are `(organization_id = presby_current_org())`.
+- `aclexplode(relacl)`: `presby_app` = INSERT, SELECT, UPDATE. `presby_platform` = INSERT, SELECT, UPDATE. **Neither has DELETE.** `neondb_owner` holds every privilege through ownership.
+- `events_event_type_fk`: `confdeltype = 'a'`, `confupdtype = 'a'`, `confmatchtype = 's'`, defined as `FOREIGN KEY (event_type_id, organization_id) REFERENCES event_types(id, organization_id)`.
+- **CHECKs present:** `event_types_name_shape`, `_color_allowed` (9 keys), `_icon_allowed` (15), `_fallback_active`, `_neutral_is_fallback`, and `organization_settings_time_zone_valid` (the shape regex AND `at time zone … is not null`).
+- **Indexes present:** `event_types_one_fallback_idx … WHERE is_fallback`, `event_types_org_lower_name_idx (organization_id, lower(name))`, `event_types_id_org_key`, and `events_org_type_idx`.
+- **Columns:** `events.event_type_id` is a nullable uuid. `organization_settings.time_zone` is `text NOT NULL DEFAULT 'America/New_York'`.
+- **Data:** 15 of 15 orgs have exactly one fallback (0 otherwise). Congregations have 9 orgs / 81 types / 45 active; presbyteries 5/5/5; synod 1/1/1. There are 15 settings rows and 15 `org_portal.calendar` toggles, all enabled.
+- **CHECK probe (rolled back):** `UTC+5` and `EST` are both refused by `organization_settings_time_zone_valid`. `America/Chicago` is accepted. Alder Creek's value afterwards is still `America/New_York`.
+- **Probes as `presby_app`** (`rolbypassrls = f`, rolled back), with the layer that actually refuses each:
+
+| Claim | Probe | Refusing layer |
+|---|---|---|
+| A cross-org read returns zero rows | Bramblewood GUC, select Alder's fallback by id → 0 (own: 9). No GUC → 0 | RLS `tenant_isolation` |
+| No hard delete | `DELETE` → `permission denied for table event_types` | The grant |
+| Same-org type only (F2) | Bramblewood event with Alder's type id → 23503 `events_event_type_fk` | Composite FK |
+| Owner/platform path | `DELETE` as `neondb_owner` → 8 rows removed, then rolled back. `pg_trigger` on `event_types` is empty | **Nothing.** See advisory A2 |
+
+- `npm run check:schema-parity`: 68 domain tables, 6 differences, all 6 allowlisted, **0 failing**. The result is the same on `neondb` and on the from-empty `qa_check`.
+- **Isolation suite, from scratch** (not run against `neondb`, as instructed): `create database qa_check` on the branch; `drizzle-kit migrate` with the URL rewritten by sed: **55/55** rows in `drizzle.__drizzle_migrations`; `install-test-helpers.sql` exit 0; `tsx scripts/seed.ts` exit 0 (40 flags and 6 group_types written to `qa_check`, `neondb` untouched); `seed-dev.sql` (`ON_ERROR_STOP=1`) exit 0, giving 16 events, 50 types and 10 calendar toggles; `scripts/test-rls.sql` as `presby_app` on `qa_check`: **exit 0, 678 `pass` notices, 0 failures, 0 ERROR lines, and "Section 45 (member calendar + event types) complete."** Section 45 contributed 39 passes. `drop database qa_check with (force)` done; `pg_database` is back to `neondb, postgres, template0, template1`.
+
+## End-to-End Tests
+
+**Not an auth-touching diff.** `git diff --name-only main..HEAD` touches nothing under `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/` or `src/lib/auth/`. The MFA-enrolled e2e requirement therefore does not apply, although the full suite below includes `totp-full-login.spec.ts` and it passed.
+
+| Run | Total | Passed | Failed | Skipped | Duration |
+|---|---|---|---|---|---|
+| `E2E_BASE_URL=http://localhost:3700 npx playwright test e2e/member-calendar.spec.ts e2e/hydration/event-types-form.spec.ts` (dev server from this worktree, cwd verified) | 16 | 16 | 0 | 0 | 52.3s |
+| Full chromium suite against the same :3700 server (Phase 3 recipe step 5) | 184 | 184 | 0 | 0 | 4.9m |
+| `npm run test:e2e:prod` (scratch copy with a hardlinked `node_modules`, fresh `.next`, built and started on :3800) | 4 | 4 | 0 | 0 | 34.3s |
+
+- **Production-lane negative control.** With `<HydrationGate>` removed from `event-type-form.tsx` in the scratch copy and rebuilt, `e2e/hydration/event-types-form.spec.ts:64` went **red**, at `:71` (`toHaveAttribute("aria-busy","true")`, element not found). The scratch copy was then deleted.
+- **Servers.** I stopped every server I started: :3700 and :3800 are free. I did not touch :3000.
+- **Fixtures.** No leftovers: 0 `e2ca%` events, 0 `E2E %` types, 0 `e2e_calendar_%` roles. `org_portal.events` was restored to `t`, and 0 calendar toggles are off.
+
+**Phone viewport.** Headless Chromium at 375px, mobile/touch, signed in as `clerk.fixture@example.invalid`, against :3700:
+
+- **`/o/alder-creek/calendar`:** HTTP 200, scrollWidth 375 = clientWidth. Grid hidden, list visible, Month/List switch hidden.
+- **The `<details>` disclosure:** starts closed ("Show filters", pills hidden); a tap opens it ("Hide filters", pills visible, 44px pill height, still no overflow); a second tap closes it. `<summary>` computes to `display: list-item` and its class list contains no display utility.
+- **`/calendar/<id>`:** 200, no overflow. **`/admin/events/types`:** 200, no overflow.
+- **`text-xs`:** zero occurrences inside `<main>` on all four pages (calendar, `?view=list`, detail, types). The only `text-xs` in the DOM is the header avatar initials badge, shared chrome not changed by this diff.
+
+Not done from the recipe's step 4: dark mode, a `light_only` org or brand-coloured org, 200% zoom, a black-and-white print preview, a real iOS Safari, and pasting Copy month into a word processor.
+
+## Regression Tests Added
+
+- **G1 (the members-only copy).** `new-event-form.test.tsx:221`, `edit-event-form.test.tsx:210` (hint text); `src/lib/calendar.test.ts:389` (non-public included for members), `:698` (same for upcoming); `e2e/member-calendar.spec.ts:84`.
+- **G2 (as ruled: cancelled hidden).** `src/lib/calendar.test.ts:389`, `:643`, `:698`; `e2e/member-calendar.spec.ts:84`, `:137`.
+- **G3 (detail projection and 404).** `src/lib/calendar.test.ts:598` (exact key set), `:643` (null after the gate for garbage/foreign/missing/cancelled), `:285` (forbidden before any lookup); `[eventId]/page.test.tsx:134`, `:201`; `e2e/member-calendar.spec.ts:137` (identical 404 body for four ids).
+- **G4 (series children copy the type).** `src/lib/events.test.ts:877`, `:890`, `:909`, `:991`; `edit-event-form.test.tsx:193`.
+- **G5 / G6 (zone and wall clock).** `org-time.test.ts:16`, `:43`, `:65`; `calendar.test.ts:545`, `:564` (month-end evening), `:575` (no settings row, F132), `:375` (half-open bounds), `:769`; `events/wall-clock.test.ts:23`, `:46`; `events.test.ts:1088–1126`; `org-settings.test.ts:17`, `:27`.
+- **G7 (URL params).** `calendar/month.test.ts:100`, `:123`; `calendar/filters.test.ts:44–105`, `:87` (a foreign id does not count toward "N active"), `:180–234` (`safeCalendarBackHref`); `calendar.test.ts:470`; `calendar/page.test.tsx:105`, `:155`; `e2e/member-calendar.spec.ts:147`, `:154`.
+- **G8 (state across navigation).** `calendar/month-nav.test.tsx:22`; `page.test.tsx:217`, `:230`; `e2e/member-calendar.spec.ts:109`, `:177`.
+- **G9 (clipboard content).** `calendar/clipboard.test.ts:76`, `:91`, `:128`, `:152`, `:161`, `:170`; `calendar/copy-month-button.test.tsx:52`, `:65`, `:132`; `e2e/member-calendar.spec.ts:207`.
+- **G10 (fallback and CHECK rules).** `scripts/test-rls.sql:8342`, `:8353`, `:8364`, `:8418`, `:8456`; `event-types.test.ts:350`, `:416`, `:477`, `:537` (NO ACTION cascade proof); `type-seed-plan.test.ts` (18); `type-palette.test.ts` (migration-parity); `domain/events.schema.test.ts`.
+- **G13 (empty states).** `calendar/page.test.tsx:344`, `:357`, `:370`, `:382`, `:391`; `calendar.test.ts:485`, `:498`, `:506`, `:518`, `:530`; `admin/events/types/page.test.tsx:171`.
+- **G14 (mobile).** `e2e/member-calendar.spec.ts:167`, `:177`; `calendar/calendar-filters.test.tsx:32`; `page.test.tsx:283`, `month-grid.test.tsx:104`, `month-list.test.tsx:71`, `calendar-entry.test.tsx:71`, `[eventId]/page.test.tsx:209`; `e2e/hydration/event-types-form.spec.ts:64`.
+- **G15 (the OR gate).** `calendar.test.ts:267`, `:273`, `:279`, `:290`.
+
+**Gaps with no test:** none of the listed G-items is uncovered. One untested edge is advisory A1 below.
+
+## Coverage on Critical Modules
+
+Mocked-lane numbers (`vitest --coverage`, v8). `src/lib/permissions.ts`: **100%** / 100%. `src/lib/two-factor.ts`: **91.3%** statements. `src/lib/flags.ts`: **100%** / 100%. New pure modules at 100% statements: `calendar/{clipboard,filters,month,wall-clock}.ts`, `events/{type-palette,type-seed-plan,wall-clock}.ts`, `org-settings.ts`, `org-portal/visible-tiles.ts`, `shared/org-time.ts`, `shared/uuid.ts`; `events/recurrence.ts` 97.2%; lowest branch coverage `org-time.ts` 87.5% and `clipboard.ts` 96.2%.
+
+## Feature-Gate Audit
+
+Verified by reading the route and action bodies. `src/proxy.ts` is unchanged, and the Edge 2FA gate on `/o/` covers both calendar segments. The diff adds no `route.ts`. Permissions here are `presby_has_permission` catalog rows, not `FEATURES.*`.
+
+| Route or action | `auth()` present? | Gate present? | Correct key? |
+|---|---|---|---|
+| `GET /o/[slug]/calendar` (`calendar/page.tsx:62`) | yes (`cachedAuth`), then the four-way miss and `assertOrgAccess` (`:92`) | `getMonthCalendar`, inside one `withOrgContext`: the toggle (`calendar.ts:216`) → the view-OR-manage gate in one statement (`:227–244`) → the zone (`:303`) → the queries. `org_portal.events` is read only to show the admin links, and only when `canManage` (`page.tsx:119–126`) | `org_portal.calendar` toggle + `events.view` OR `events.manage` |
+| `GET /o/[slug]/calendar/[eventId]` (`[eventId]/page.tsx:41`) | yes, plus `assertOrgAccess` (`:67`) | `getMemberEvent`: gate first (`calendar.ts:458–464`), UUID check after the gate (`:467`), cancelled excluded; `notFound()` on null (`page.tsx:85`) | same |
+| `listUpcomingMemberEvents` (consumed by the home pipeline) | the caller's | toggle → gate → zone → query, one `withOrgContext` (`calendar.ts:541–551`) | same |
+| `GET /o/[slug]/admin/events/types` (`types/page.tsx:31`) | yes, plus `assertOrgAccess` (`:55`) | the bare `org_portal.events` flag (`:57`), then `listEventTypes` gated on `event_types.manage` (`event-types.ts:176`) | `event_types.manage` |
+| the five event-type actions (`types/actions.ts:93–188`) | yes, `auth()` in `resolveActingIdentity` (`:50`); slug re-resolved, never a client org id | `hasEventTypesManage` first inside each library function's `withOrgContext` (`event-types.ts:241`, `:309`, `:374`, `:415`, `:483`); `events.manage` alone is forbidden (`event-types.test.ts:89`); no flag check in the actions, matching the `admin/events/actions.ts` precedent | `event_types.manage` |
+| `createEventAction` / `updateEventAction` (`eventTypeId` passed through) | yes | `hasEventsManage` first (`events.ts:406`, `:538`), then `eventTypeUsable` (`:236–249`); a cross-org id returns `invalid_input` (`events.test.ts:925–941`, `:1020–1032`) | `events.manage` |
+| Tile gate (`visible-tiles.ts:62–85`) | n/a | flag → the catalog's non-null flag → org toggle. **No permission check.** On error it catches, hides the tile and logs ids only | n/a (DECISION-003 honoured) |
+
+Other invariants checked: no audit rows (DECISION-161 R7; `types/actions.ts:30–39` header, no `@/lib/audit` import); `getPlatformDb()` nowhere in production code under `src/app/(org)/`; no `loading.tsx` under the three new segments; no `console.log` in production paths of the diff; no native dialogs.
+
+## Advisories (not blocking; each should become a tracked line)
+
+- **A1. An empty-string `eventTypeId` gives a 500 instead of `invalid_input`.** `src/lib/events.ts:425` (create) and `:570` (update) guard with `input.eventTypeId && …`, so `""` skips `eventTypeUsable`, is written as `""` (`:461`, `:493`, `:592–594`), and Postgres throws 22P02 uncaught. Reach: only an `events.manage` holder calling the Server Action by hand (the forms map "none" to `null`); the transaction aborts and nothing is written. Untested (`events.test.ts:925–941` covers `"not-a-uuid"` but not `""`). Fix: guard on `!= null`.
+- **A2. The DELETE refusal is real only on the tenant connection.** `scripts/test-rls.sql:8319`'s message ("NEITHER connection holds DELETE") credits a grant on `presby_platform`, and nothing connects as that role; the platform connection is `neondb_owner` (DECISION-146), which deleted 8 event types in a rolled-back probe, and no trigger binds that path. The design accepts this (the cascade and fixture teardown rely on owner deletes; no production code deletes types). Fix the assertion wording; have DECISION-161 name the owner path as unbound by design, unlike D10's organizations trigger.
+- **A3.** `isCategoryAxisOn()` (a global flag) is read before the `withOrgContext` transaction (`calendar.ts:292`, `:455`, `:539`); the per-org toggle and everything after it are inside the one transaction. Documented in the module header; not a defect.
+
+## Verdict
+
+**PASS**
+
+Every required check is green: typecheck, lint, all six tripwires, the mocked and full DB lanes (0 skips), the three-zone pure runs, the live-catalog re-read, the from-scratch isolation suite (678 passes, Section 45 complete), the feature-gate audit, the dev-server e2e (16/16 targeted, 184/184 full), the production hydration lane (4/4, with a red negative control), and the 375px phone check. Not an auth-touching diff, so the MFA-enrolled requirement is not triggered. A1 and A2 are advisories for Phase 6 / `docs/TODO.md`, not blockers. Recipe step 4 items not run (manual, worth an operator look): dark mode or a `light_only` org, 200% zoom, print preview, real iOS Safari, a Copy-month paste into a word processor.
+
 
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)
 
-*(pending)*
+*Recorded verbatim by the orchestrator, 2026-10-15. The analyst changed no repo files; its scratch files are in the session scratchpad.*
+
+## VERDICT
+
+**SHIP WITH NOTES**
+
+## ONE-LINE TAKE
+
+> A baseline member opens Calendar from the portal and reads a month grid (or a phone list) of colour-and-icon-typed events. A clerk manages the types behind it, and every operator ruling and Phase 1 flow landed as written. The one defect worth fixing before push is that a cancelled or stale event link says "We couldn't find that organization."
+
+## How I observed it
+
+- **Server and browser.** Dev server from the worktree on :3900; headless Chromium at 375, 1280, 640 and 320px.
+- **Users.** `clerk.fixture` (`events.manage` and `event_types.manage`); `elder.fixture` (baseline member role only); `org1@presby.invalid` at `e2e-alpha` (an org with no `member` role).
+- **Today in the fixture.** Org-local "today" rendered as Thu Oct 15 2026, correctly marked in the grid.
+- **Inferred, not observed:** the home "upcoming" list's exclusion of cancelled events (from QA's DB-lane tests), 2FA mid-enrolment (Edge matcher read by QA, unchanged), and the DB-failure state.
+
+## What's Working
+
+- **Elder's access.** The elder, with no `events.manage`, reads the calendar. The Calendar tile shows on `/o/alder-creek`, in the nav and in the footer (`events.view` through the backfilled baseline `member` role). "Add an event" and "Manage events" are absent from the elder's calendar. The detail page has no "Edit this event" for the elder; the clerk sees it, pointing at `/admin/events/<id>`. `/admin/events/types` shows the designed copy for the elder: "You don't have permission to manage event types at Alder Creek Presbyterian Church. If you think this is a mistake, ask your stated clerk or another administrator there." `/admin/events` forbids the elder too.
+- **Phone layout.** At 375px only the list renders and the Month/List switch is gone. No overflow on any page. The "Show filters" disclosure is present.
+- **Hostile URLs.** `?month=0000-01`, `?month=garbage&types=not-a-uuid&view=zzz` and `?month=2000-01` all render with no error; the last reads "Nothing is scheduled for January 2000." `?from=https://evil.example` falls back to "Back to calendar" at `/o/alder-creek/calendar`; a valid `from` round-trips. Filtering to Committees in Nov 2026 gives "No events match these event types." with a "Show all event types" link to `?month=2026-11`.
+- **Copy Month.** Toast: "Calendar copied (1 members-only event left out)". The clipboard held both `text/plain` and `text/html`; the plain text is `October 2026` then `Sun Oct 4 / 10:30a Sunday worship - Sanctuary` blocks; the HTML has a `<table>` with no `<script>`, `href`, org name, UUID or type name, and excludes the members-only Session meeting and the cancelled supper. Inserted into a contenteditable it renders as a 6×7 month table with a heading (a stand-in for a word processor, not a real one).
+- **Dark mode.** Emulated `prefers-color-scheme: dark` on the calendar and the types manager; all text and icons legible. Contrast computed from the live CSS variables for all nine keys:
+
+  | Pair | Light | Dark |
+  |---|---|---|
+  | ink on tint | 7.52–7.61 | 7.51–7.60 |
+  | ink on background | 8.48–8.71 | 10.07–10.66 |
+  | ink on card | 8.48–8.71 | 9.25–9.80 |
+
+- **Zoom.** 640px at deviceScaleFactor 2 (200% of 1280) and 320px: overflow 0 everywhere, every filter pill 44px tall. The only sub-44px items are the switch glyphs (their wrapping label is 44px) and the existing "Back to portal" link.
+- **Microcopy.** Every specified string is present and verbatim: the public-checkbox hint; "Changes this occurrence only." on a series occurrence, absent on a one-off; "No type (shown as General)", "Event type (optional)", "Colors the event on the calendar."; "The default type can't be retired."; the duplicate-name message echoing what was typed ("You already have an event type called 'worship'.", no row created); "The calendar isn't turned on for Alder Creek Presbyterian Church yet."; "The calendar isn't available to your account at Wrenfield Presbyterian Church yet. If you think it should be, ask your stated clerk or another administrator there."
+
+## Operator rulings, as shipped
+
+| Ruling | What I checked | Result |
+|---|---|---|
+| Time zone YES | `organization_settings.time_zone` exists, default `America/New_York`, Alder Creek reads it. "Today" is correct. | Matches |
+| No platform flag; per-org toggle | `grep` of `scripts/seed.ts` finds no calendar flag. `feature_flags` has 0 rows matching `calendar`. In `src/`, `org_portal.calendar` appears only as the toggle key and tile key. The toggle is on for 15 of 15 orgs. | Matches |
+| `events.view` backfill YES | The Alder Creek `member` role holds `directory.view, events.view`. `baselineRoleSeedPlan` grants both. | Matches |
+| Cancelled events HIDDEN | The Oct 20 "Fellowship supper" is absent from the month grid, the 375px list and the 1280px `?view=list`; its detail URL returns 404; excluded from Copy Month; the admin list still shows it. The upcoming list is inferred from the DB-lane tests. | Matches |
+
+## Intent-vs-Shipped Diff
+
+- **Tile matrix.** Flipped `org_portal.events` and the Alder Creek toggle as `neondb_owner`, one combination at a time, observed for the clerk and the elder:
+
+  | events flag (E) / calendar toggle (C) | Home tile | Admin hub "Manage events" | Calendar page |
+  |---|---|---|---|
+  | E on / C on | Calendar | present | grid, "Add an event" and "Manage events" for the clerk only |
+  | E off / C on | Calendar | absent | grid, no add or manage links for either user |
+  | E off / C off | none | absent | "isn't turned on yet" |
+  | E on / C off | none (the dead-end Events tile is gone) | present | "isn't turned on yet" |
+
+  Phase 1 said the same four outcomes; shipped matches. The hub tile shows to the elder too, who gets a forbidden page on click — tiles never check permissions, by design; accepted as drift. **Restore:** `update feature_flags set enabled=true where key='org_portal.events';` and `update organization_feature_toggles set enabled=true where organization_id=(select id from organizations where slug='alder-creek') and feature_key='org_portal.calendar';`. Final state confirmed: events flag `t`, `feature_categories` `f` (as before), Alder Creek toggle `t`, 15 of 15 calendar toggles on.
+- **Flows 1–6.** Match, with one exception next.
+- **Flow 3 failure.** Phase 1 said a missing id, a foreign id, a non-UUID and (by ruling) a cancelled id all return "the identical 404". Shipped: the four give the same response, but the copy is wrong. **What the member sees:** "We couldn't find that organization. Check the address for a typo. Organization links look like /o/alder-creek…", with a "Back to your organizations" link. **Cause:** `calendar/[eventId]` has no segment-local `not-found.tsx`; it falls through to `/o/[slug]/not-found.tsx`, whose copy is about the organization. `directory/[personId]/not-found.tsx` and `tickets/[id]/not-found.tsx` exist because of exactly this problem. **Why it matters:** the cancelled-hidden ruling makes this path common — a cancelled event's bookmarked, emailed or open-tab link now lands here. Verdict: acceptable on the "identical" requirement, a regression in microcopy quality (N1).
+- **G1, members-only.** The elder sees "Session stated meeting" (`is_public` false), and the hint text is present. Matches.
+- **G11, print.** With `emulateMedia print`, grayscale and a PDF: the action bar, nav and pills are hidden; entries keep the icon and a 4px solid rule. But the sr-only type name doesn't print and every type's rule is the same dark grey, so in black and white only the small icon identifies the type and nothing maps icons to types. Two print layout flaws: a mid-word break ("Congregationa / l picnic") in narrow cells, and a day number overlapping its entry on the first row after a page break. Acceptable drift, noted as N4.
+- **G9, Copy Month versus the screen.** The grid shows the Sep 27 worship in the leading cell; the copy leaves that cell empty (adjacent-month cells numbered but empty, by design). Minor; a newsletter editor may be surprised.
+- **Permission gate.** The elder gets the "isn't available" copy where `events.view` is missing — observed for `org1` at `e2e-alpha`, an org with no `member` role. That org's home also shows the Calendar tile, so the click lands on the forbidden page. This is F133, already known and in the TODO draft.
+
+## Edge Cases
+
+- **Empty state:** pass for empty month, filter-hides-all, and org-with-no-events by test and source; the "{Org} hasn't added any events yet." card was not seen rendered live (needs an org with `events.view` and zero events; none reachable without mutating data).
+- **Failure microcopy:** pass; flag-off and forbidden strings seen live, the load-error string only in code and QA's tests; the wrong-organization 404 copy is the exception (N1).
+- **Permission gate:** pass. **Audit event:** not applicable (DECISION-161). **Mobile (360px):** pass (375, 320 and 640 tested).
+
+## Follow-Ups (each a concrete `docs/TODO.md` line)
+
+I recommend N1 is fixed before pushing. It is a one-file change.
+
+- **N1 (fix before push).** Add `src/app/(org)/o/[slug]/calendar/[eventId]/not-found.tsx` with event-specific copy. Suggested: "We couldn't find that event. It may have been cancelled or removed." Link back to the calendar or home. Keep the "no `loading.tsx` on the segment" rule, and test that all four miss cases render the same string.
+- **N2 — QA A1.** `src/lib/events.ts:425` and `:570` guard with `input.eventTypeId && …`, so an empty-string `eventTypeId` skips the pre-check and gives a 500. Guard on `!= null` and add the `""` case beside `events.test.ts:925–941`. Only a hand-crafted action call by an `events.manage` holder triggers it; low priority.
+- **N3 — QA A2.** Reword the `scripts/test-rls.sql:8319` assertion message ("NEITHER connection holds DELETE"): the platform connection is `neondb_owner`, and QA's probe deleted 8 event types in a rolled-back transaction. Have DECISION-161 name the owner path as unbound by design.
+- **N4 — print.** Add a printed legend (icon to type name) or print the type name visibly; fix the mid-word wrap and the day-number overlap after a page break; consider printing the adjacent-month entries, or saying in Copy Month that they are omitted.
+- **N5 — F133, before 0054 reaches production.** Deployment-engineer counts production's org-owned `member` roles and `organization_settings` rows; decide whether the Calendar tile should stay visible for orgs where the baseline grant doesn't reach (the dead-end tile observed at `e2e-alpha`).
+- **N6 — release note D6.** Add: "Cancelled events don't appear on the calendar at all; administrators still see them under Manage events." D6 mentions cancelled events only for Copy Month, and the operator ruled against the G2 recommendation.
+- **Already in the Phase 3 TODO draft:** the audience tier below "all members"; the time-zone editor; v1 non-goals (all-day, multi-day, week/day views); retired-type events under All and under no filter; S2, S4, S5; `visual:baseline` after the tile move.
+- **Not observed:** a brand-coloured or `light_only` org; a real iOS Safari; a real word-processor paste; 2FA mid-enrolment.
+
+## Housekeeping at SHIP
+
+- **Rule 12:** operator request, no feedback row. **Rule 13:** a what's-new entry is warranted; publish the D8 text only once N5's production count shows the baseline grant reaches the target org. **Rule 14:** apply D7; D4 TODO reconciliation plus N1–N5; D6 release note plus the N6 sentence. **Rule 15:** `docs/architecture.md` needs no change.
+
+## Red Flags
+
+None. Nothing needs to reopen an earlier phase.
+
+## Disclosures
+
+- **Cleanup incident.** To shut down the :3900 server the analyst ran a broad `pkill -f next-server`; it had not checked whether the main checkout's demo server on :3000 was running first. *(Orchestrator: it was; restarted after this section was recorded.)*
+- **Writes.** Two reversible writes on this pipeline's Neon branch, both restored (the flag/toggle flips; a duplicate-name attempt that created no row). Sessions were created by signing in as fixture users. The :3900 dev server is stopped.
+

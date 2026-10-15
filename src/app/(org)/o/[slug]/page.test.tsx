@@ -3,22 +3,27 @@
  * Orchestration tests for `/o/<slug>`'s page.tsx.
  *
  * The four-way-miss branches (not-found/forbidden/ended) are unchanged from
- * P0 and already covered by e2e (post-login-routing.spec.ts). What Increment
- * 1 adds, and what is NOT tested anywhere else, is the ORDERING AND
- * ERROR-HANDLING CONTRACT this pipeline's design calls mandatory:
+ * P0 and already covered by e2e (post-login-routing.spec.ts). What this file
+ * pins is the ORDERING AND ERROR-HANDLING CONTRACT of the home, as extended by
+ * the portal-home alignment pipeline
+ * (docs/work-log/2026-10-14-portal-home-alignment.md, DECISION-162):
  *
  *   1. `org_portal.home_v2` OFF renders the unchanged `OrgPortalStub` and
- *      never calls `getPortalHomeData()` or `visiblePortalTiles()`.
- *   2. `org_portal.home_v2` ON renders the new home, with a greeting, the
- *      find-a-person form, the "yours" zone, and the tile grid.
- *   3. A non-`OrgAccessError` failure from `getPortalHomeData()` degrades
- *      to a `null` home data (greeting says "Welcome.", no "yours" zone) —
- *      never a crash.
- *   4. `OrgAccessError` from `getPortalHomeData()` is RE-THROWN, not
- *      swallowed — `[slug]/error.tsx` owns that copy.
+ *      never calls a v2 loader.
+ *   2. ON: `assertOrgAccess` is the first and sequential gate; then the three
+ *      tenant loaders run under ONE `Promise.all` (independent failure
+ *      domains).
+ *   3. A non-`OrgAccessError` failure degrades only its own widget, logging a
+ *      fixed string with ids only; `OrgAccessError` from any loader re-throws.
+ *   4. Find-a-person shows only for a `directory.view` holder.
+ *   5. The "Coming up" card is decided by the list function's `kind`; the page
+ *      reads no calendar flag and no permission helper of its own.
+ *   6. No `loading.tsx`, no `Suspense` (the `(org)` contract).
  *
  * Every collaborator is mocked; this file makes no DB connection.
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
@@ -53,6 +58,17 @@ vi.mock("@/lib/org-portal/home-data", () => ({
   getPortalHomeData: (...args: unknown[]) => getPortalHomeData(...args),
 }));
 
+const getViewerGroups = vi.fn();
+vi.mock("@/lib/org-portal/my-groups", () => ({
+  getViewerGroups: (...args: unknown[]) => getViewerGroups(...args),
+}));
+
+const listUpcomingMemberEvents = vi.fn();
+vi.mock("@/lib/calendar", () => ({
+  listUpcomingMemberEvents: (...args: unknown[]) =>
+    listUpcomingMemberEvents(...args),
+}));
+
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
   DOMAIN_LABELS: { people: "People & Membership" },
@@ -75,7 +91,7 @@ vi.mock("@/lib/feedback-prompt", () => ({
 }));
 
 vi.mock("@/components/org-portal/find-person-form", () => ({
-  FindPersonForm: () => null,
+  FindPersonForm: () => <div data-testid="find-person-form-stub" />,
 }));
 
 const domainTileSectionsSpy = vi.fn();
@@ -115,6 +131,10 @@ afterEach(() => {
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
   getPortalHomeData.mockReset();
+  getViewerGroups.mockReset().mockResolvedValue([]);
+  listUpcomingMemberEvents
+    .mockReset()
+    .mockResolvedValue({ kind: "disabled" });
   visiblePortalTiles.mockReset().mockResolvedValue([]);
   getFeedbackPromptState.mockReset().mockResolvedValue(null);
   shouldShowFeedbackPrompt.mockReset().mockReturnValue(false);
@@ -153,6 +173,8 @@ describe("OrgPage — org_portal.home_v2 OFF (the regression floor)", () => {
 
     expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.home_v2");
     expect(getPortalHomeData).not.toHaveBeenCalled();
+    expect(getViewerGroups).not.toHaveBeenCalled();
+    expect(listUpcomingMemberEvents).not.toHaveBeenCalled();
     expect(visiblePortalTiles).not.toHaveBeenCalled();
     expect(screen.getByText(/you're in/i)).toBeTruthy();
   });
@@ -165,6 +187,7 @@ describe("OrgPage — org_portal.home_v2 ON", () => {
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.home_v2");
     getPortalHomeData.mockResolvedValue({
       displayName: "Sam",
+      canViewDirectory: true,
       household: { id: "h1", name: "The Fennimore Family", memberCount: 2 },
     });
     visiblePortalTiles.mockResolvedValue([]);
@@ -208,6 +231,7 @@ describe("OrgPage — org_portal.home_v2 ON", () => {
     );
     getPortalHomeData.mockResolvedValue({
       displayName: "Sam",
+      canViewDirectory: true,
       household: null,
     });
     visiblePortalTiles.mockResolvedValue([]);
@@ -253,7 +277,11 @@ describe("OrgPage — DomainTileSections wiring (commit 1, docs/work-log/2026-08
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.home_v2");
-    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    getPortalHomeData.mockResolvedValue({
+      displayName: "Sam",
+      canViewDirectory: true,
+      household: null,
+    });
     const tiles = [{ key: "directory", href: (slug: string) => `/o/${slug}/directory` }];
     visiblePortalTiles.mockResolvedValue(tiles);
 
@@ -282,7 +310,11 @@ describe("OrgPage — feedback prompt card (mid-design operator correction, §6b
       async (key: string) =>
         key === "org_portal.home_v2" || key === "org_portal.feedback",
     );
-    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    getPortalHomeData.mockResolvedValue({
+      displayName: "Sam",
+      canViewDirectory: true,
+      household: null,
+    });
     visiblePortalTiles.mockResolvedValue([]);
     getFeedbackPromptState.mockResolvedValue(null);
     shouldShowFeedbackPrompt.mockReturnValue(true);
@@ -298,7 +330,11 @@ describe("OrgPage — feedback prompt card (mid-design operator correction, §6b
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.home_v2");
-    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    getPortalHomeData.mockResolvedValue({
+      displayName: "Sam",
+      canViewDirectory: true,
+      household: null,
+    });
     visiblePortalTiles.mockResolvedValue([]);
     getFeedbackPromptState.mockResolvedValue(null);
     shouldShowFeedbackPrompt.mockReturnValue(true);
@@ -316,7 +352,11 @@ describe("OrgPage — feedback prompt card (mid-design operator correction, §6b
       async (key: string) =>
         key === "org_portal.home_v2" || key === "org_portal.feedback",
     );
-    getPortalHomeData.mockResolvedValue({ displayName: "Sam", household: null });
+    getPortalHomeData.mockResolvedValue({
+      displayName: "Sam",
+      canViewDirectory: true,
+      household: null,
+    });
     visiblePortalTiles.mockResolvedValue([]);
     getFeedbackPromptState.mockResolvedValue({
       optedOut: false,
@@ -329,6 +369,302 @@ describe("OrgPage — feedback prompt card (mid-design operator correction, §6b
     render(el);
 
     expect(screen.queryByTestId("feedback-prompt-card-stub")).toBeNull();
+  });
+});
+
+function homeOn(extra: string[] = []) {
+  cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+  resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+  isFlagEnabled.mockImplementation(
+    async (key: string) => key === "org_portal.home_v2" || extra.includes(key),
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const HOME = {
+  displayName: "Sam",
+  canViewDirectory: true,
+  household: null,
+};
+
+const EVENT = {
+  id: "e1",
+  seriesKey: "e1",
+  title: "Choir rehearsal",
+  startsAtWallClock: "2026-10-18T10:30",
+  endsAtWallClock: null,
+  location: null,
+  eventType: { name: "Music", colorToken: "violet", iconKey: "Music" },
+};
+
+describe("OrgPage — gate ordering and concurrency", () => {
+  it("holds every loader until assertOrgAccess resolves", async () => {
+    homeOn();
+    const gate = deferred<void>();
+    assertOrgAccess.mockReset().mockReturnValue(gate.promise);
+    getPortalHomeData.mockResolvedValue(HOME);
+
+    const pending = OrgPage({ params: makeParams() });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getPortalHomeData).not.toHaveBeenCalled();
+    expect(getViewerGroups).not.toHaveBeenCalled();
+    expect(listUpcomingMemberEvents).not.toHaveBeenCalled();
+
+    gate.resolve();
+    await pending;
+    expect(getPortalHomeData).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts all three loaders before any of them resolves (one Promise.all)", async () => {
+    homeOn();
+    const home = deferred<typeof HOME>();
+    const groups = deferred<unknown[]>();
+    const events = deferred<unknown>();
+    getPortalHomeData.mockReturnValue(home.promise);
+    getViewerGroups.mockReturnValue(groups.promise);
+    listUpcomingMemberEvents.mockReturnValue(events.promise);
+
+    const pending = OrgPage({ params: makeParams() });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getPortalHomeData).toHaveBeenCalledTimes(1);
+    expect(getViewerGroups).toHaveBeenCalledTimes(1);
+    expect(listUpcomingMemberEvents).toHaveBeenCalledTimes(1);
+
+    home.resolve(HOME);
+    groups.resolve([]);
+    events.resolve({ kind: "disabled" });
+    await pending;
+  });
+
+  it("passes the server-resolved ids, and nothing else, to each loader", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    await OrgPage({ params: makeParams() });
+
+    expect(getPortalHomeData).toHaveBeenCalledWith("person-1", "org-1");
+    expect(getViewerGroups).toHaveBeenCalledWith("person-1", "org-1");
+    expect(listUpcomingMemberEvents).toHaveBeenCalledWith("person-1", "org-1", {
+      limit: 4,
+    });
+    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation", {
+      personId: "person-1",
+      organizationId: "org-1",
+    });
+    // arity: no target-person parameter, ever.
+    expect(getViewerGroups.mock.calls[0]).toHaveLength(2);
+  });
+
+  it("requests no flag whose key contains 'calendar'", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    await OrgPage({ params: makeParams() });
+    const keys = isFlagEnabled.mock.calls.map((c) => String(c[0]));
+    expect(keys.some((k) => k.includes("calendar"))).toBe(false);
+  });
+});
+
+describe("OrgPage — find-a-person visibility", () => {
+  it("is shown when the viewer can view the directory", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    render(await OrgPage({ params: makeParams() }));
+    expect(screen.getByTestId("find-person-form-stub")).toBeTruthy();
+  });
+
+  it("is hidden when the viewer cannot", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue({ ...HOME, canViewDirectory: false });
+    render(await OrgPage({ params: makeParams() }));
+    expect(screen.queryByTestId("find-person-form-stub")).toBeNull();
+  });
+
+  it("is hidden when the home read failed (fail closed)", async () => {
+    homeOn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    getPortalHomeData.mockRejectedValue(new Error("connection reset"));
+    render(await OrgPage({ params: makeParams() }));
+    expect(screen.queryByTestId("find-person-form-stub")).toBeNull();
+  });
+});
+
+describe("OrgPage — household link target", () => {
+  const withHousehold = {
+    ...HOME,
+    household: { id: "h1", name: "The Fennimore Family", memberCount: 2 },
+  };
+
+  it("links to the household page when directory and directory_v2 are both on", async () => {
+    homeOn(["org_portal.directory", "org_portal.directory_v2"]);
+    getPortalHomeData.mockResolvedValue(withHousehold);
+    render(await OrgPage({ params: makeParams() }));
+    expect(
+      screen
+        .getByRole("link", { name: /view household/i })
+        .getAttribute("href"),
+    ).toBe("/o/alder-creek/directory/households/h1");
+  });
+
+  it.each([
+    ["org_portal.directory"],
+    ["org_portal.directory_v2"],
+    [],
+  ])("links to the directory when only %s is on", async (...on) => {
+    homeOn(on);
+    getPortalHomeData.mockResolvedValue(withHousehold);
+    render(await OrgPage({ params: makeParams() }));
+    expect(
+      screen.getByRole("link", { name: /view directory/i }).getAttribute("href"),
+    ).toBe("/o/alder-creek/directory");
+  });
+});
+
+describe("OrgPage — groups", () => {
+  it("renders the viewer's groups as pills", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    getViewerGroups.mockResolvedValue([
+      { groupId: "g1", name: "Altar Guild" },
+      { groupId: "g2", name: "Session" },
+    ]);
+    render(await OrgPage({ params: makeParams() }));
+    expect(screen.getByText("Altar Guild")).toBeTruthy();
+    expect(screen.getByText("Session")).toBeTruthy();
+  });
+
+  it("a groups failure omits only the pills, keeps greeting and household, and logs a fixed string", async () => {
+    homeOn();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    getPortalHomeData.mockResolvedValue({
+      ...HOME,
+      household: { id: "h1", name: "The Fennimore Family", memberCount: 2 },
+    });
+    getViewerGroups.mockRejectedValue(new Error("relation SECRET_SQL missing"));
+    render(await OrgPage({ params: makeParams() }));
+
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Sam\./);
+    expect(screen.getByText("The Fennimore Family")).toBeTruthy();
+    expect(screen.queryByText("My groups")).toBeNull();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[org-home] widget read failed; degrading",
+      { widget: "groups", personId: "person-1", organizationId: "org-1" },
+    );
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("SECRET_SQL");
+  });
+
+  it("re-throws OrgAccessError from the groups loader", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    getViewerGroups.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
+    await expect(OrgPage({ params: makeParams() })).rejects.toThrow(
+      "mock: no active membership",
+    );
+  });
+});
+
+describe("OrgPage — Coming up", () => {
+  it("renders the card with row links and the footer link for rows", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    listUpcomingMemberEvents.mockResolvedValue({ kind: "ok", data: [EVENT] });
+    render(await OrgPage({ params: makeParams() }));
+
+    expect(screen.getByRole("heading", { name: "Coming up" })).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /choir rehearsal/i }).getAttribute("href"),
+    ).toBe("/o/alder-creek/calendar/e1?from=%2Fo%2Falder-creek");
+    expect(screen.getByRole("link", { name: /see the full calendar/i })).toBeTruthy();
+  });
+
+  it("renders the empty copy for ok with no rows", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    listUpcomingMemberEvents.mockResolvedValue({ kind: "ok", data: [] });
+    render(await OrgPage({ params: makeParams() }));
+    expect(screen.getByText("Nothing is on the calendar right now.")).toBeTruthy();
+  });
+
+  it.each(["disabled", "forbidden"])(
+    "renders no card for %s",
+    async (kind) => {
+      homeOn();
+      getPortalHomeData.mockResolvedValue(HOME);
+      listUpcomingMemberEvents.mockResolvedValue({ kind });
+      render(await OrgPage({ params: makeParams() }));
+      expect(screen.queryByRole("heading", { name: "Coming up" })).toBeNull();
+    },
+  );
+
+  it("a thrown read shows the failure copy and logs the same fixed string", async () => {
+    homeOn();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    getPortalHomeData.mockResolvedValue(HOME);
+    listUpcomingMemberEvents.mockRejectedValue(new Error("timeout SECRET_SQL"));
+    render(await OrgPage({ params: makeParams() }));
+
+    expect(
+      screen.getByText(
+        "We can't load upcoming events right now. Try again in a moment.",
+      ),
+    ).toBeTruthy();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[org-home] widget read failed; degrading",
+      { widget: "events", personId: "person-1", organizationId: "org-1" },
+    );
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("SECRET_SQL");
+  });
+
+  it("re-throws OrgAccessError from the events loader", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    listUpcomingMemberEvents.mockRejectedValue(
+      new OrgAccessError("person-1", "org-1"),
+    );
+    await expect(OrgPage({ params: makeParams() })).rejects.toThrow(
+      "mock: no active membership",
+    );
+  });
+});
+
+describe("OrgPage — main-row layout", () => {
+  it("both cards present: the row is a two-column grid at md", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue({
+      ...HOME,
+      household: { id: "h1", name: "The Fennimore Family", memberCount: 2 },
+    });
+    listUpcomingMemberEvents.mockResolvedValue({ kind: "ok", data: [EVENT] });
+    render(await OrgPage({ params: makeParams() }));
+    expect(screen.getByTestId("home-main-row").className).toContain(
+      "md:grid-cols-2",
+    );
+  });
+
+  it("no cards: no grid wrapper element at all", async () => {
+    homeOn();
+    getPortalHomeData.mockResolvedValue(HOME);
+    render(await OrgPage({ params: makeParams() }));
+    expect(screen.queryByTestId("home-main-row")).toBeNull();
+  });
+});
+
+describe("OrgPage — the (org) streaming contract", () => {
+  it("has no loading.tsx beside it and imports no Suspense", () => {
+    const dir = join(process.cwd(), "src/app/(org)/o/[slug]");
+    expect(existsSync(join(dir, "loading.tsx"))).toBe(false);
+    const source = readFileSync(join(dir, "page.tsx"), "utf8");
+    // The docblock names Suspense to explain its absence; check the import
+    // and the element, not the word.
+    expect(source).not.toMatch(/import[^;]*\bSuspense\b/);
+    expect(source).not.toContain("<Suspense");
   });
 });
 

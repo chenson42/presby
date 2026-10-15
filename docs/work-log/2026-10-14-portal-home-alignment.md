@@ -44,7 +44,7 @@ The operator asked: *"align the portal home page with the ../../fpcw-directory p
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-14 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-14 |
 | 3 — Technical design | tech-lead | Complete (contract confirmed by the calendar's Phase 3, relayed below) | Design complete; implementer named | 2026-10-14 |
-| 4 — Implementation | full-stack-developer | Blocked on `2026-10-14-member-calendar` merge | — | — |
+| 4 — Implementation | full-stack-developer | Complete (Part B; Part A shipped separately as PR #28, v0.31.1) | — | 2026-10-15 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1196,11 +1196,85 @@ order by s.starts_at_wc, s.id
 limit ${limit}
 ```
 
+## Orchestrator note at Phase 4 start (2026-10-15)
+
+Both prerequisites merged: PR #28 (`fix(directory):` Part A, v0.31.1 — `directoryEligibilityWhereSql()` now carries `m.ended_on is null`, `findDirectoryPersonIds()` exported) and PR #29 (the calendar, v0.32.0 — `listUpcomingMemberEvents`, `MemberEventsResult`, `UpcomingMemberEvent` in `src/lib/calendar.ts`; `formatTime` in `src/lib/calendar/wall-clock.ts`, `formatShortDate` in `src/lib/calendar/month.ts`; `todayInOrgZone` in `src/lib/shared/org-time.ts`; `orgTimeZoneInTx` in `src/lib/org-settings.ts`; `EventTypeChip`/`EventTypeIcon` in `src/components/org-portal/event-types/`; `visiblePortalTiles(tiles, { category, orgType, viewer })` in `src/lib/org-portal/visible-tiles.ts`; routes `/o/<slug>/calendar` and `/calendar/[eventId]` accepting `?from=%2Fo%2F<slug>`). Part B (the feature) now builds on `main` `f27706a`; Part A is DONE and is not re-implemented here. Rule 16: a fresh worktree `../presby-home` on `pipeline/portal-home-alignment`, Neon branch `br-late-meadow-axpro6c7` (parent `development`, which has 0054 applied and the Alder Creek demo calendar loaded).
+
 ---
 
 # Phase 4 — Implementation
 
-*(pending — blocked on the calendar pipeline's merge)*
+*Part B (the feature), built 2026-10-15 in worktree `../presby-home`, branch `pipeline/portal-home-alignment`, Neon branch `br-late-meadow-axpro6c7`. Part A is merged (PR #28) and was not re-implemented. Nothing committed or pushed; Rule-16 files untouched.*
+
+## Files Created
+
+- `src/lib/org-portal/my-groups.ts` (+ `my-groups.test.ts`, DB-backed) - `getViewerGroups(viewerPersonId, organizationId)`, the exact SQL from B.1 (`exists`, `derived_from is distinct from 'active_membership'`, date-aware currency bound as `'YYYY-MM-DD'` from `todayInOrgZone` via `orgTimeZoneInTx`), the four architect conditions in its header.
+- `src/lib/org-portal/main-row.ts` (+ `main-row.test.ts`) - pure `composeMainRow`, `UPCOMING_EVENTS_LIMIT = 4`, `Loaded<T>`, `UpcomingCardState`, `MainRowPlan`.
+- `src/components/org-portal/upcoming-events-card.tsx` (+ test) - "Coming up".
+- `src/components/org-portal/home-main-row.tsx` (+ test) - server component; `data-testid="home-main-row"`.
+- `e2e/portal-home-cards.spec.ts` and `e2e/support/home-cards-fixture.ts` - see Implementer Notes for the fixture-mechanism deviation.
+
+## Files Modified
+
+- `src/lib/directory.ts` - `checkDirectoryView` exported; new `countHouseholdDirectoryMembers` on `countDirectoryRows` with `includeHidden: false` (documented no-permission-check precondition).
+- `src/lib/org-portal/home-data.ts` - returns `{ displayName, canViewDirectory, household }`; household read only for a `directory.view` holder, counted by the directory's own rule, `null` below two; header rewritten.
+- `src/lib/org-portal/find-person.ts` - private `directory.view` SQL replaced by the exported `checkDirectoryView` (behaviour identical).
+- `src/components/org-portal/yours-zone.tsx` - groups block (`Badge variant="secondary"`, `text-sm whitespace-normal break-words` override, no links), household link target by `householdPageEnabled`, singular branch deleted, card omitted when both empty.
+- `src/app/(org)/o/[slug]/page.tsx` - `assertOrgAccess` first and sequential, then one `Promise.all`; local `loadWidget`; Find-a-person only when `canViewDirectory`; `HomeMainRow`; no `Suspense`, no `loading.tsx`; docblock rewritten.
+- Tests updated: `page.test.tsx` (rewritten mocks, 34 cases), `yours-zone.test.tsx` (household-of-one case deleted deliberately, reason in the header), `home-data.test.ts` (extended fixture and cases), `directory.test.ts` (+6 `countHouseholdDirectoryMembers` cases).
+
+## Endpoints / Action Signatures
+
+None. Server functions only (all `withOrgContext()` on `db`; `getPlatformDb()` appears nowhere): `getViewerGroups(viewerPersonId, organizationId)` - no permission, self-read under the four conditions; `countHouseholdDirectoryMembers(tx, organizationId, householdId)` - no check, caller must have run `checkDirectoryView` in the same transaction; `getPortalHomeData` signature unchanged. Gates: `org_portal.home_v2` (page); `directory.view` read once via `canViewDirectory`; the events card decided purely by `listUpcomingMemberEvents`' `kind`; flags newly read on the page: `org_portal.directory`, `org_portal.directory_v2` (household link target only). No calendar flag read (pinned by a test).
+
+## Schema Changes
+
+None. No migration.
+
+## Audit Events
+
+None - read-only. `npm run check:audit` passes.
+
+## Env / FEATURES
+
+None.
+
+## Verification
+
+- Unit/jsdom: `npm test` - 302 files passed, 38 skipped; 4244 tests passed, 1182 skipped (the skips are the DB-backed files when not run with `.env.local`).
+- DB-backed, serial against the pipeline's Neon branch: `home-data`, `directory`, `find-person`, `my-groups` and the rest of `src/lib/org-portal` - 7 files, 197 tests passed. `my-groups.test.ts` alone: 15 tests, under a fake clock (2026-03-02T03:00Z: New York 03-01, UTC 03-02; the zone case uses Pacific/Auckland because the `organization_settings_time_zone_valid` check rejects the bare name `UTC`).
+- `npm run typecheck`, `npm run lint` (max-warnings 0), `npm run check` (all six tripwires), `npm run build`: all green.
+- e2e: `E2E_BASE_URL=http://localhost:3600 npx playwright test e2e/portal-home-cards.spec.ts` - 11 passed. The full `npm run test:e2e` was NOT run (Phase 5 / QA).
+
+## Browser observations (this worktree, dev server on :3600, now stopped)
+
+Alder Creek, signed in with the fixture users, at 360 / 768 / 1280 px:
+
+- `clerk.fixture` (household "The Renwick Family", 3 members, link "View household"): both cards. 360: Yours (y 478) then Coming up (y 708), both x 24, width 312, stacked. 768: side by side, both y 490, x 24 and 396, width 348 each. 1280: both y 438, x 88 and 652, width 540 each. No horizontal overflow at any width. Coming up shows 3 rows (the demo calendar has only three upcoming series today, 2026-10-15), each with date and time, a type chip, a location and a chevron; "See the full calendar" footer. The clerk's Session term ended 2026-01-11, so no Session pill - correct, not a defect.
+- `elder.fixture` (current Session term, no household): Yours renders as the groups block only ("My groups" with a single "Session" pill, no household block), Coming up beside it at 768 and 1280 (events.view reaches the elder through the baseline member role), stacked at 360. The elder's earlier ended Session term does not duplicate the pill.
+- Calendar toggle flipped off in SQL for Alder Creek (restored to on afterwards, verified): Coming up disappears; Yours takes the full width (768: width 720 of 768; 1280: 1104 of 1152; 360 unchanged).
+- Event row links go to `/o/alder-creek/calendar/<id>?from=%2Fo%2Falder-creek`; the e2e spec clicks one and confirms "Back to home" returns to the home, and that the footer link reaches the calendar.
+- The long unbroken (60-character) group name and event title wrap with no horizontal scroll at 360 (e2e assertion). Event rows measure at least 44px tall.
+- 200% browser zoom was not run; a 200%-zoomed 1280 window is a 640 CSS px layout (stacked, between the 360 and 768 cases both checked). Left to QA's manual pass.
+
+## Implementer Notes
+
+- **Deviation (not an escalation): e2e fixture mechanism.** Phase 3 sketched new orgs and users appended to `e2e/support/seed-orgs.ts`. The tree already has the calendar pipeline's spec-owned-fixture pattern (DECISION-157), so the spec instead sets up and tears down its own rows at e2e-alpha (`e2e/support/home-cards-fixture.ts`: ids `e2ce...`, role keys `e2e_home_*`, `E2E ` names; teardown deletes by those ids, restores the shared people's household links and the calendar toggle, and verifies nothing is left). It reuses the existing fixture people (org-single: household, two groups, directory.view, events.view; org-multi: events.view only; congregation-clerk: the household's second member). `seed-orgs.ts` is untouched. The "passed-parent series", "a 60-character name and title", "four-row limit", "cancelled event hidden", "Find a person absent without directory.view" and "no cards" cases are all covered. The three calendar-pipeline-owned seed rows and the `member-calendar.spec.ts` fixture are not touched. `playwright.config.ts` runs one worker, so the two fixtures never overlap.
+- **Contingent items C1-C7:** all resolved against the merged code with no change to the design. C1 `listUpcomingMemberEvents`/`MemberEventsResult`/`UpcomingMemberEvent` from `@/lib/calendar` as specified; C2 `formatShortDate` (month.ts) + `formatTime` + `dayKeyOf` (wall-clock.ts); C3 `EventTypeChip` takes name/colorToken/iconKey and the null-type case renders the neutral `EventTypeIcon` with no label (the detail page omits it entirely; the card keeps the glyph so the row's rhythm holds); C4 `todayInOrgZone(now, tz)`; C5 `visiblePortalTiles("operate", orgType, viewer)` was already in the page; C6/C7 as relayed.
+- **Layout detail the design did not state:** the row grid is `grid grid-cols-1 items-start gap-6` (+ `md:grid-cols-2` only for two cards). `grid-cols-1` is `minmax(0,1fr)`, which is what keeps a 60-character unbroken string from widening the track.
+- **Test choice:** the page test pins "no `Suspense`" by matching the import and the element, not the word (the docblock names Suspense to explain its absence).
+- **Teardown note:** when stopping the :3600 dev server I ran `pkill -f next-server`, which is broader than intended; nothing is listening on :3000 now. If the main checkout's dev server was up, it needs restarting.
+- E1 (pool bound is four tenant transactions plus the layout's) was implemented as the design stated; no architect response was needed to build it.
+
+## Exact file list for the commit(s)
+
+Modified: `src/lib/directory.ts`, `src/lib/directory.test.ts`, `src/lib/org-portal/find-person.ts`, `src/lib/org-portal/home-data.ts`, `src/lib/org-portal/home-data.test.ts`, `src/components/org-portal/yours-zone.tsx`, `src/components/org-portal/yours-zone.test.tsx`, `src/app/(org)/o/[slug]/page.tsx`, `src/app/(org)/o/[slug]/page.test.tsx`, `docs/work-log/2026-10-14-portal-home-alignment.md`.
+New: `src/lib/org-portal/my-groups.ts`, `src/lib/org-portal/my-groups.test.ts`, `src/lib/org-portal/main-row.ts`, `src/lib/org-portal/main-row.test.ts`, `src/components/org-portal/upcoming-events-card.tsx`, `src/components/org-portal/upcoming-events-card.test.tsx`, `src/components/org-portal/home-main-row.tsx`, `src/components/org-portal/home-main-row.test.tsx`, `e2e/portal-home-cards.spec.ts`, `e2e/support/home-cards-fixture.ts`.
+Suggested split per the design's Implementation Order: (1) `feat(portal-home): the viewer's groups and a directory-accurate household count` (my-groups, directory.ts, home-data, find-person, yours-zone + tests, and the page's minimal wiring - note `page.tsx` currently carries the final wiring for both commits, so one commit is simpler); (2) `feat(portal-home): the Coming up card and the main row`; (3) `test(e2e): portal home cards at three widths`.
+
+## Handoff
+
+**Next agent: qa (Phase 5).** In the browser, open `/o/<slug>` for a member who has both cards, one card and none, at 360 / 768 / 1280 and 200% zoom; check keyboard tab order and focus rings on the event rows and footer link, and a long group name and event title. Run the full `npm run test:e2e` (only the new spec was run here) and the DB-backed suites serially. Phase 6 housekeeping (TODO, DECISION-162, F136, release notes, functionality map) is the orchestrator's, from the drafts at the end of Phase 3.
 
 ---
 

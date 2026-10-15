@@ -10,12 +10,19 @@ import {
   shouldShowFeedbackPrompt,
 } from "@/lib/feedback-prompt";
 import { isFlagEnabled } from "@/lib/flags";
+import { listUpcomingMemberEvents } from "@/lib/calendar";
 import { getPortalHomeData } from "@/lib/org-portal/home-data";
+import { getViewerGroups } from "@/lib/org-portal/my-groups";
+import {
+  composeMainRow,
+  UPCOMING_EVENTS_LIMIT,
+  type Loaded,
+} from "@/lib/org-portal/main-row";
 import { DOMAIN_LABELS, DOMAIN_ORDER } from "@/lib/org-portal/tiles";
 import { visiblePortalTiles } from "@/lib/org-portal/visible-tiles";
 import { GreetingBand } from "@/components/shared/greeting-band";
 import { FindPersonForm } from "@/components/org-portal/find-person-form";
-import { YoursZone } from "@/components/org-portal/yours-zone";
+import { HomeMainRow } from "@/components/org-portal/home-main-row";
 import { DomainTileSections } from "@/components/shared/domain-tile-sections";
 import { TILE_ICONS } from "@/components/org-portal/tile-icons";
 import { FeedbackPromptCard } from "@/components/shared/feedback-prompt-card";
@@ -52,12 +59,38 @@ import {
  * PAST THE GATE, THIS PAGE BRANCHES ON `org_portal.home_v2` (Phase 3,
  * Increment 1). OFF renders the unchanged P0 stand-in, `OrgPortalStub` — the
  * regression floor this increment ships against. ON renders the real portal
- * home: a time-aware greeting, find-a-person, the "yours" zone, and the
- * flag-gated tile grid `OrgPortalStub`'s four links became. Both branches
+ * home: a time-aware greeting, find-a-person (only for `directory.view`
+ * holders), the main row ("Yours" and "Coming up"), and the flag-gated tile
+ * grid `OrgPortalStub`'s four links became. Both branches
  * coexist deliberately (Phase 3: "Remove `OrgPortalStub` ... once the v2
  * path is default; until then both coexist") — this pipeline does not flip
  * the flag on, so nothing here changes what a fork sees until a later
  * increment turns it on.
+ *
+ * INDEPENDENT FAILURE DOMAINS (DECISION-162). After the gate, ONE
+ * `Promise.all` runs the flag reads, the tile registry, the feedback-prompt
+ * state and three tenant loaders — `getPortalHomeData`, `getViewerGroups`,
+ * `listUpcomingMemberEvents` — each in its own `withOrgContext()` transaction
+ * (Postgres aborts a transaction after a failed statement, so independent
+ * widgets cannot share one). Each loader goes through `loadWidget` below:
+ * `OrgAccessError` re-throws to `error.tsx`; any other failure logs a fixed
+ * string with ids only and returns a failed marker. How each renders:
+ *
+ *   home read fails    → greeting "Welcome."; find-a-person hidden (whether the
+ *                        viewer may use the directory is unknown: fail closed);
+ *                        household absent
+ *   groups read fails  → the groups block is omitted (absence makes no claim)
+ *   events read fails  → "Coming up" shows its "can't load" copy (a missing
+ *                        card would be indistinguishable from "no events")
+ *   events `disabled` / `forbidden` → no card, no message
+ *
+ * The page asks NO permission question of its own except `directory.view`
+ * (via `getPortalHomeData`'s `canViewDirectory`), and reads NO calendar flag —
+ * the calendar's per-org toggle and `events.view` are evaluated inside
+ * `listUpcomingMemberEvents`, and its `kind` decides the card (DECISION-162).
+ * Which cards exist and how many columns is `composeMainRow`, a pure function.
+ * No `Suspense` and no `loading.tsx` (the `(org)` contract; a streamed boundary
+ * would flush a 200 before an `OrgAccessError` could render).
  *
  * DOMAIN-SECTIONED TILE GRID (commit 2, docs/work-log/
  * 2026-08-27-product-ia-scaffold.md, Phase 3, DECISION-117): the flat
@@ -143,49 +176,53 @@ export default async function OrgPage({
     );
   }
 
-  // getPortalHomeData() reads a NON-ESSENTIAL summary (the viewer's own
-  // display name and household). A DB failure here must not take the whole
-  // home page down — it degrades to `null`, which GreetingBand and YoursZone
-  // both already treat as "nothing to show" rather than an error. Only
-  // OrgAccessError (the relationship vanishing mid-request) re-throws, so
-  // error.tsx's copy — not a silent "Welcome." — is what a member sees.
-  //
-  // org_portal.motion (Phase 3, docs/work-log/
-  // 2026-08-26-portal-visual-modernization.md) gates ONLY the greeting
-  // band's mount fade-in, read alongside the home-data fetch below and
-  // threaded through as GreetingBand's required `motionEnabled` prop.
-  const motionEnabled = await isFlagEnabled("org_portal.motion");
+  const ids = {
+    personId: resolved.org.personId,
+    organizationId: resolved.org.organizationId,
+  };
 
-  let homeData: Awaited<ReturnType<typeof getPortalHomeData>> | null = null;
-  try {
-    homeData = await getPortalHomeData(
-      resolved.org.personId,
-      resolved.org.organizationId,
-    );
-  } catch (err) {
-    if (err instanceof OrgAccessError) {
-      throw err;
-    }
-    homeData = null;
-  }
-
-  const tiles = await visiblePortalTiles(
-    "operate",
-    resolved.org.organizationType,
-    {
-      personId: resolved.org.personId,
-      organizationId: resolved.org.organizationId,
-    },
-  );
-
-  // Feedback prompt (mid-design operator correction, §6b): flag-gated AND
-  // suppressed by the same shared rule /home applies. Keyed by the
-  // signed-in user's own users.id — NOT resolved.org.personId, a different
-  // id space feedbackPromptState does not recognize.
-  const [feedbackEnabled, promptState] = await Promise.all([
+  // org_portal.motion gates ONLY the greeting band's mount fade-in. The
+  // feedback prompt state is keyed by the signed-in user's own users.id — NOT
+  // resolved.org.personId, a different id space feedbackPromptState does not
+  // recognize.
+  const [
+    motionEnabled,
+    directoryEnabled,
+    directoryV2Enabled,
+    feedbackEnabled,
+    home,
+    groups,
+    events,
+    tiles,
+    promptState,
+  ] = await Promise.all([
+    isFlagEnabled("org_portal.motion"),
+    isFlagEnabled("org_portal.directory"),
+    isFlagEnabled("org_portal.directory_v2"),
     isFlagEnabled("org_portal.feedback"),
+    loadWidget("home", ids, () =>
+      getPortalHomeData(ids.personId, ids.organizationId),
+    ),
+    loadWidget("groups", ids, () =>
+      getViewerGroups(ids.personId, ids.organizationId),
+    ),
+    loadWidget("events", ids, () =>
+      listUpcomingMemberEvents(ids.personId, ids.organizationId, {
+        limit: UPCOMING_EVENTS_LIMIT,
+      }),
+    ),
+    visiblePortalTiles("operate", resolved.org.organizationType, ids),
     getFeedbackPromptState(session.user.id),
   ]);
+
+  const homeData = home.ok ? home.value : null;
+  // Unknown (the home read failed) is the same as "no": fail closed.
+  const canViewDirectory = homeData?.canViewDirectory === true;
+  const plan = composeMainRow({
+    household: homeData?.household ?? null,
+    groups: groups.ok ? groups.value : [],
+    events,
+  });
   const showFeedbackPrompt =
     feedbackEnabled && shouldShowFeedbackPrompt(promptState);
 
@@ -195,8 +232,12 @@ export default async function OrgPage({
         displayName={homeData?.displayName ?? null}
         motionEnabled={motionEnabled}
       />
-      <FindPersonForm slug={resolved.org.slug} />
-      <YoursZone slug={resolved.org.slug} household={homeData?.household ?? null} />
+      {canViewDirectory && <FindPersonForm slug={resolved.org.slug} />}
+      <HomeMainRow
+        slug={resolved.org.slug}
+        plan={plan}
+        householdPageEnabled={directoryEnabled && directoryV2Enabled}
+      />
       <DomainTileSections
         tiles={tiles}
         getHref={(tile) => tile.href(resolved.org.slug)}
@@ -207,4 +248,28 @@ export default async function OrgPage({
       {showFeedbackPrompt && <FeedbackPromptCard />}
     </div>
   );
+}
+
+/**
+ * One widget's read, as an independent failure domain. `OrgAccessError` (the
+ * relationship vanished mid-request) re-throws so `error.tsx`'s copy — not a
+ * silent degrade — is what the member sees; anything else logs a FIXED string
+ * with ids only (never the error, its message or its stack: a driver message
+ * can embed a SQL fragment) and returns a failed marker the render handles.
+ */
+async function loadWidget<T>(
+  widget: "home" | "groups" | "events",
+  ids: { personId: string; organizationId: string },
+  read: () => Promise<T>,
+): Promise<Loaded<T>> {
+  try {
+    return { ok: true, value: await read() };
+  } catch (err) {
+    if (err instanceof OrgAccessError) throw err;
+    console.error("[org-home] widget read failed; degrading", {
+      widget,
+      ...ids,
+    });
+    return { ok: false };
+  }
 }

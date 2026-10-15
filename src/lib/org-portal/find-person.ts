@@ -1,7 +1,6 @@
 import "server-only";
-import { sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
-import { findDirectoryPersonIds } from "@/lib/directory";
+import { checkDirectoryView, findDirectoryPersonIds } from "@/lib/directory";
 
 /**
  * The DB-level half of portal-home find-a-person (Phase 3, Increment 1).
@@ -15,7 +14,7 @@ import { findDirectoryPersonIds } from "@/lib/directory";
  * pattern).
  *
  * GATED ON `directory.view`, THE SAME PERMISSION `getDirectory()` CHECKS,
- * via the identical `presby_has_permission()` SQL call — a search box on
+ * via the directory module's own exported `checkDirectoryView()` — a search box on
  * the portal home must never surface a person the directory itself would
  * refuse to show. The eligibility predicate is not repeated here: the search
  * runs through `findDirectoryPersonIds()` in `src/lib/directory.ts`, which
@@ -41,19 +40,7 @@ export async function findPersonMatches(
   query: string,
 ): Promise<FindPersonMatchesResult> {
   return withOrgContext(personId, organizationId, async (tx) => {
-    const permissionCheck = await tx.execute(sql`
-      select presby_has_permission(
-               ${personId}::uuid,
-               ${organizationId}::uuid,
-               'directory.view'
-             ) as allowed
-    `);
-    const allowed =
-      (
-        permissionCheck as unknown as {
-          rows?: Array<{ allowed?: boolean }>;
-        }
-      ).rows?.[0]?.allowed === true;
+    const allowed = await checkDirectoryView(tx, personId, organizationId);
     if (!allowed) {
       return { kind: "forbidden" };
     }

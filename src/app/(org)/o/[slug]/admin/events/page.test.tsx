@@ -34,6 +34,11 @@ vi.mock("@/lib/flags", () => ({
   isFlagEnabled: (...args: unknown[]) => isFlagEnabled(...args),
 }));
 
+const canManageEventTypes = vi.fn();
+vi.mock("@/lib/event-types", () => ({
+  canManageEventTypes: (...args: unknown[]) => canManageEventTypes(...args),
+}));
+
 const listEvents = vi.fn();
 vi.mock("@/lib/events", () => ({
   listEvents: (...args: unknown[]) => listEvents(...args),
@@ -60,6 +65,7 @@ afterEach(() => {
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
   listEvents.mockReset();
+  canManageEventTypes.mockReset().mockResolvedValue(false);
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -172,6 +178,38 @@ describe("EventsPage — result branches", () => {
     expect(screen.getByText("Session meeting")).toBeTruthy();
     const newEventLink = screen.getByRole("link", { name: /new event/i });
     expect(newEventLink.getAttribute("href")).toBe("/o/alder-creek/admin/events/new");
+  });
+
+  it("shows an 'Event types' button only to someone holding event_types.manage", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listEvents.mockResolvedValue({ kind: "ok", data: [] });
+
+    canManageEventTypes.mockResolvedValue(true);
+    const { unmount } = render(await EventsPage({ params: makeParams() }));
+    expect(canManageEventTypes).toHaveBeenCalledWith("person-1", "org-1");
+    expect(screen.getByRole("link", { name: /^event types$/i }).getAttribute("href")).toBe(
+      "/o/alder-creek/admin/events/types",
+    );
+    unmount();
+
+    canManageEventTypes.mockResolvedValue(false);
+    render(await EventsPage({ params: makeParams() }));
+    expect(screen.queryByRole("link", { name: /^event types$/i })).toBeNull();
+  });
+
+  it("hides the 'Event types' button, and still renders the list, when the permission read fails", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listEvents.mockResolvedValue({ kind: "ok", data: [] });
+    canManageEventTypes.mockRejectedValue(new Error("connection reset"));
+
+    render(await EventsPage({ params: makeParams() }));
+
+    expect(screen.getByRole("link", { name: /new event/i })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /^event types$/i })).toBeNull();
   });
 
   it("renders the empty state when listEvents() returns ok with zero entries", async () => {

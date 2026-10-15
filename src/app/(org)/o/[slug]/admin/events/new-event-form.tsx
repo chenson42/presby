@@ -19,7 +19,8 @@ import {
   PATTERN_LABELS,
   buildDayOfWeekPattern,
 } from "@/lib/events/recurrence";
-import type { CreateEventInput } from "@/lib/events";
+import type { CreateEventInput, EventTypePickerData } from "@/lib/events";
+import { EventTypePicker } from "@/components/org-portal/event-types/event-type-picker";
 import { createEventSchema, type CreateEventFormValues } from "./event-schema";
 import { createEventAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
@@ -36,6 +37,7 @@ function defaultValues(): CreateEventFormValues {
     endsAt: "",
     isPublic: true,
     allowsCheckin: false,
+    eventTypeId: "none",
     repeats: false,
     patternType: "simple",
     simplePattern: "weekly",
@@ -63,7 +65,15 @@ function defaultValues(): CreateEventFormValues {
  * end-before-start check and the 52-occurrence cap are both re-enforced in
  * `src/lib/events.ts`, not just this form's own zod shape.
  */
-export function NewEventForm({ slug }: { slug: string }) {
+export function NewEventForm({
+  slug,
+  typePicker,
+  orgName,
+}: {
+  slug: string;
+  typePicker: EventTypePickerData;
+  orgName: string;
+}) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
 
@@ -98,6 +108,7 @@ export function NewEventForm({ slug }: { slug: string }) {
       endsAt: values.endsAt || undefined,
       isPublic: values.isPublic,
       allowsCheckin: values.allowsCheckin,
+      eventTypeId: values.eventTypeId === "none" ? null : values.eventTypeId,
       recurrence: values.repeats ? { pattern, count: Number(values.count) } : undefined,
     };
 
@@ -152,6 +163,13 @@ export function NewEventForm({ slug }: { slug: string }) {
           )}
         </div>
 
+        <EventTypePicker
+          id="new-event-type"
+          selectProps={register("eventTypeId")}
+          options={typePicker.options}
+          fallbackName={typePicker.fallbackName}
+        />
+
         <div>
           <Label htmlFor="new-event-starts-at">
             Starts
@@ -192,6 +210,10 @@ export function NewEventForm({ slug }: { slug: string }) {
           />
           Visible on the public calendar
         </label>
+        <p className="-mt-2 text-sm text-muted-foreground">
+          If unchecked, the event still shows on the member calendar for everyone in {orgName}.
+          It just stays off the public website.
+        </p>
 
         <label className="inline-flex min-h-11 items-center gap-2 text-sm">
           <input

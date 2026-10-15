@@ -5,7 +5,7 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
-import { getEvent } from "@/lib/events";
+import { getEvent, getEventTypePickerData } from "@/lib/events";
 import { isFlagEnabled } from "@/lib/flags";
 import { OrgAccessDenied, OrgAccessEnded } from "../../../../org-states";
 import { EventsFlagOff, EventsForbidden, EventsLoadError } from "../../events-states";
@@ -90,13 +90,37 @@ export default async function EditEventPage({
     notFound();
   }
 
+  // The picker needs the event's current type so a retired one stays visible.
+  let picker;
+  try {
+    picker = await getEventTypePickerData(resolved.org.personId, resolved.org.organizationId, {
+      currentTypeId: result.data.eventType?.id ?? null,
+    });
+  } catch (err) {
+    if (err instanceof OrgAccessError) {
+      throw err;
+    }
+    return <EventsLoadError slug={slug} />;
+  }
+  if (picker.kind === "forbidden") {
+    return <EventsForbidden name={resolved.org.name} />;
+  }
+  if (picker.kind !== "ok") {
+    return <EventsLoadError slug={slug} />;
+  }
+
   return (
     <section className="max-w-xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Edit event</h1>
         <p className="mt-1 text-sm text-muted-foreground">{resolved.org.name}</p>
       </div>
-      <EditEventForm slug={slug} event={result.data} />
+      <EditEventForm
+        slug={slug}
+        event={result.data}
+        typePicker={picker.data}
+        orgName={resolved.org.name}
+      />
     </section>
   );
 }

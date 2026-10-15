@@ -29,8 +29,10 @@ vi.mock("@/lib/flags", () => ({
 }));
 
 const listEvents = vi.fn();
+const getEventTypePickerData = vi.fn();
 vi.mock("@/lib/events", () => ({
   listEvents: (...args: unknown[]) => listEvents(...args),
+  getEventTypePickerData: (...args: unknown[]) => getEventTypePickerData(...args),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -45,7 +47,19 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("../new-event-form", () => ({
-  NewEventForm: ({ slug }: { slug: string }) => <div>NewEventForm for {slug}</div>,
+  NewEventForm: ({
+    slug,
+    typePicker,
+    orgName,
+  }: {
+    slug: string;
+    typePicker: { options: unknown[]; fallbackName: string | null };
+    orgName: string;
+  }) => (
+    <div>
+      NewEventForm for {slug} / {orgName} / {typePicker.options.length} types / {typePicker.fallbackName}
+    </div>
+  ),
 }));
 
 import NewEventPage from "./page";
@@ -57,6 +71,10 @@ afterEach(() => {
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
   listEvents.mockReset();
+  getEventTypePickerData.mockReset().mockResolvedValue({
+    kind: "ok",
+    data: { options: [{ id: "t1" }], fallbackName: "General" },
+  });
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -112,7 +130,26 @@ describe("NewEventPage", () => {
     render(el);
 
     expect(screen.getByRole("heading", { name: /new event/i })).toBeTruthy();
-    expect(screen.getByText("NewEventForm for alder-creek")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "NewEventForm for alder-creek / Alder Creek Presbyterian Church / 1 types / General",
+      ),
+    ).toBeTruthy();
+    expect(getEventTypePickerData).toHaveBeenCalledWith("person-1", "org-1");
+  });
+
+  it("renders the load-error state, not a picker-less form, when the picker fails to load", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listEvents.mockResolvedValue({ kind: "ok", data: [] });
+    getEventTypePickerData.mockRejectedValue(new Error("connection reset"));
+
+    const el = await NewEventPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.getByText(/couldn.t load event records right now/i)).toBeTruthy();
+    expect(screen.queryByText(/NewEventForm/)).toBeNull();
   });
 
   it("redirects to /signin when unauthenticated", async () => {

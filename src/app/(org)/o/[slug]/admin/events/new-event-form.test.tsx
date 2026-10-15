@@ -31,6 +31,16 @@ vi.mock("sonner", () => ({
 }));
 
 import { NewEventForm } from "./new-event-form";
+import type { EventTypePickerData } from "@/lib/events";
+
+const NO_TYPES: EventTypePickerData = { options: [], fallbackName: null };
+const WITH_TYPES: EventTypePickerData = {
+  options: [
+    { id: "11111111-1111-4111-8111-111111111111", name: "Worship", colorToken: "teal", iconKey: "Church", isRetired: false },
+    { id: "22222222-2222-4222-8222-222222222222", name: "Study", colorToken: "sky", iconKey: "BookOpen", isRetired: false },
+  ],
+  fallbackName: "General",
+};
 
 afterEach(() => {
   cleanup();
@@ -45,7 +55,7 @@ describe("NewEventForm — a single event", () => {
   it("submits title/startsAt with no recurrence field when 'repeats' is unchecked", async () => {
     mockCreateEventAction.mockResolvedValueOnce({ ok: true, data: { eventId: "event-99" } });
 
-    render(<NewEventForm slug="alder-creek" />);
+    render(<NewEventForm slug="alder-creek" typePicker={NO_TYPES} orgName="Alder Creek Presbyterian Church" />);
 
     fireEvent.change(screen.getByLabelText(/^title/i), {
       target: { value: "Session meeting" },
@@ -76,7 +86,7 @@ describe("NewEventForm — a single event", () => {
       error: "Title must be 200 characters or fewer.",
     });
 
-    render(<NewEventForm slug="alder-creek" />);
+    render(<NewEventForm slug="alder-creek" typePicker={NO_TYPES} orgName="Alder Creek Presbyterian Church" />);
     fireEvent.change(screen.getByLabelText(/^title/i), {
       target: { value: "Session meeting" },
     });
@@ -93,7 +103,7 @@ describe("NewEventForm — a single event", () => {
   });
 
   it("does not reveal the repeat-pattern fields until 'repeats' is checked", () => {
-    render(<NewEventForm slug="alder-creek" />);
+    render(<NewEventForm slug="alder-creek" typePicker={NO_TYPES} orgName="Alder Creek Presbyterian Church" />);
     expect(screen.queryByLabelText(/number of occurrences/i)).toBeNull();
 
     fireEvent.click(screen.getByLabelText(/this event repeats/i));
@@ -105,7 +115,7 @@ describe("NewEventForm — a repeating series", () => {
   it("collapses a simple-pattern repeat into a single recurrence.pattern string", async () => {
     mockCreateEventAction.mockResolvedValueOnce({ ok: true, data: { eventId: "event-1" } });
 
-    render(<NewEventForm slug="alder-creek" />);
+    render(<NewEventForm slug="alder-creek" typePicker={NO_TYPES} orgName="Alder Creek Presbyterian Church" />);
     fireEvent.change(screen.getByLabelText(/^title/i), {
       target: { value: "Choir practice" },
     });
@@ -132,7 +142,7 @@ describe("NewEventForm — a repeating series", () => {
   it("collapses a day-of-week repeat into an ordinal+day pattern string", async () => {
     mockCreateEventAction.mockResolvedValueOnce({ ok: true, data: { eventId: "event-1" } });
 
-    render(<NewEventForm slug="alder-creek" />);
+    render(<NewEventForm slug="alder-creek" typePicker={NO_TYPES} orgName="Alder Creek Presbyterian Church" />);
     fireEvent.change(screen.getByLabelText(/^title/i), {
       target: { value: "Committee meeting" },
     });
@@ -157,5 +167,59 @@ describe("NewEventForm — a repeating series", () => {
         recurrence: { pattern: "2nd Tuesday", count: 3 },
       }),
     );
+  });
+});
+
+describe("NewEventForm — the event type picker", () => {
+  it("renders nothing when the organization has no types to choose from", () => {
+    render(<NewEventForm slug="alder-creek" typePicker={NO_TYPES} orgName="Alder Creek" />);
+    expect(screen.queryByLabelText(/event type/i)).toBeNull();
+  });
+
+  it("offers 'No type (shown as General)' first, then the active types", () => {
+    render(<NewEventForm slug="alder-creek" typePicker={WITH_TYPES} orgName="Alder Creek" />);
+    const select = screen.getByLabelText(/event type \(optional\)/i) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      "No type (shown as General)",
+      "Worship",
+      "Study",
+    ]);
+    expect(select.value).toBe("none");
+    expect(screen.getByText("Colors the event on the calendar.")).toBeTruthy();
+  });
+
+  it("submits eventTypeId null for 'No type' and the id for a chosen type", async () => {
+    mockCreateEventAction.mockResolvedValue({ ok: true, data: { eventId: "event-1" } });
+    render(<NewEventForm slug="alder-creek" typePicker={WITH_TYPES} orgName="Alder Creek" />);
+    fireEvent.change(screen.getByLabelText(/^title/i), { target: { value: "Vespers" } });
+    fireEvent.change(screen.getByLabelText(/^starts/i), { target: { value: "2027-03-01T19:00" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /create event/i }));
+    });
+    expect(mockCreateEventAction).toHaveBeenLastCalledWith(
+      "alder-creek",
+      expect.objectContaining({ eventTypeId: null }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/event type \(optional\)/i), {
+      target: { value: WITH_TYPES.options[0].id },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /create event/i }));
+    });
+    expect(mockCreateEventAction).toHaveBeenLastCalledWith(
+      "alder-creek",
+      expect.objectContaining({ eventTypeId: WITH_TYPES.options[0].id }),
+    );
+  });
+
+  it("says an unchecked 'Visible on the public calendar' still shows to members", () => {
+    render(<NewEventForm slug="alder-creek" typePicker={NO_TYPES} orgName="Alder Creek Presbyterian Church" />);
+    expect(
+      screen.getByText(
+        /still shows on the member calendar for everyone in Alder Creek Presbyterian Church\. It just stays off the public website\./i,
+      ),
+    ).toBeTruthy();
   });
 });

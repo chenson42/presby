@@ -8,6 +8,7 @@ const baseCreate = {
   endsAt: "",
   isPublic: true,
   allowsCheckin: false,
+  eventTypeId: "none",
   repeats: false,
   patternType: "simple" as const,
   simplePattern: "weekly" as const,
@@ -149,7 +150,17 @@ describe("editEventSchema", () => {
     endsAt: "",
     isPublic: true,
     allowsCheckin: false,
+    eventTypeId: "none",
   };
+
+  it("requires an eventTypeId string (\"none\" means no type)", () => {
+    const { eventTypeId: _omitted, ...withoutType } = base;
+    expect(editEventSchema.safeParse(withoutType).success).toBe(false);
+    expect(editEventSchema.safeParse({ ...base, eventTypeId: "none" }).success).toBe(true);
+    expect(
+      editEventSchema.safeParse({ ...base, eventTypeId: "11111111-1111-4111-8111-111111111111" }).success,
+    ).toBe(true);
+  });
 
   it("accepts a minimal valid submission", () => {
     expect(editEventSchema.safeParse(base).success).toBe(true);

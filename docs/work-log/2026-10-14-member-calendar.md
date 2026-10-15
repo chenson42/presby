@@ -53,7 +53,7 @@ Scope was decided with the operator on 2026-10-14 from a two-repo survey:
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-14 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-14 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named | 2026-10-14 |
-| 4 — Implementation | api-developer (commits 1, 4) · ux-developer (2, 6) · database-admin (3) · full-stack-developer (5) · orchestrator (0, 7) | In progress — commits 0 `651f069`, 2 `7cca13b`, 1 `c654b06`, 3 `a6daf31` on the branch; 4 `45ababe`; commit 5 in progress | — | 2026-10-15 |
+| 4 — Implementation | api-developer (commits 1, 4) · ux-developer (2, 6) · database-admin (3) · full-stack-developer (5) · orchestrator (0, 7) | In progress — commits 0 `651f069`, 2 `7cca13b`, 1 `c654b06`, 3 `a6daf31` on the branch; 4 `45ababe`; 5 `8d78e48`, 7 `2a2e0d6`+`83b2edd`+`c0582ad`; commit 6 in progress | — | 2026-10-15 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3653,7 +3653,93 @@ Trailers: `Work-Log: 2026-10-14-member-calendar`. Escalation to Phase 3: none (o
 
 *Handoff:* **full-stack-developer**, commit 5 (`tiles.ts`, `visible-tiles.ts`, the tile registry and the five caller files): `OrgFeatureKey` now includes `org_portal.calendar` and `isOrgFeatureEnabled` is unchanged in signature. Then **ux-developer**, commit 6, consuming the pages' read functions above, `getEventTypePickerData`, the five actions, and the pure `calendar/*` formatters; the home pipeline consumes `listUpcomingMemberEvents`, `todayInOrgZone`, `formatTime`, `formatShortDate` exactly as signed above.
 
-*(Commit 6 UI section to follow.)*
+## Commit 6 - `feat(calendar): the member calendar, the detail page and the event-types manager` (ux-developer, 2026-10-15)
+
+**Escalation to Phase 3: none.** Built as specified; the small departures are under Implementer Notes.
+
+### Fixture data for the browser check (step 0)
+
+Applied the D2 block (`-- APPENDED BLOCK - pipeline/member-calendar`, lines 1805-1941 of `scripts/seed-dev.sql`, wrapped in `begin; ... commit;`) to the pipeline branch with `psql "$MIGRATE_DATABASE_URL"`: **16 events** at Alder Creek (16 in total on the branch, was 0) and **9 event types** there. The block does not carry the older `events.manage` grant to `stated_clerk` (that lives earlier in the seed), so `clerk.fixture` initially held `event_types.manage` only; I applied that single idempotent row (`app_role_permissions`, role `f0000000-...-0005`, `events.manage`) by hand to reach the admin surfaces. Browser-created test types were deleted afterwards; the e2e runs leave 0 `e2ca` events, 0 `E2E ` types, 0 `e2e_calendar_` roles (verified by query).
+
+### Files Created
+
+- Shared pieces, `src/components/org-portal/event-types/`: `event-type-icon.tsx`, `event-type-chip.tsx`, `event-type-swatch.tsx`, `event-type-picker.tsx`.
+- Calendar route, `src/app/(org)/o/[slug]/calendar/`: `page.tsx`, `calendar-states.tsx`, `calendar-filters.tsx` (the `<details>` + inline copies of the pills; not named in the plan, split out of `page.tsx`), `month-nav.tsx`, `type-filter-pills.tsx`, `month-grid.tsx`, `month-list.tsx`, `calendar-entry.tsx`, `copy-month-button.tsx` (the only client island), `[eventId]/page.tsx`, `calendar-test-data.ts` (test fixture builders only).
+- Manager, `src/app/(org)/o/[slug]/admin/events/types/`: `page.tsx`, `event-types-states.tsx`, `event-type-list.tsx`, `event-type-form.tsx`, `event-type-schema.ts`, `seed-standard-types-button.tsx` (client; the empty-state action, not named in the plan).
+- e2e: `e2e/support/calendar-fixture.ts`, `e2e/member-calendar.spec.ts`, `e2e/hydration/event-types-form.spec.ts`.
+
+### Files Modified
+
+`admin/events/`: `page.tsx` (outline **Event types** button behind `canManageEventTypes`, a failed read hides it), `new/page.tsx` and `[eventId]/edit/page.tsx` (load `getEventTypePickerData`; edit passes the current type), `new-event-form.tsx`, `edit-event-form.tsx` (picker, `eventTypeId`, the public-checkbox hint, the series-occurrence note), `event-schema.ts` (`eventTypeId: z.string()`), `[eventId]/page.tsx` (`Type:` line). Their tests were updated in step.
+
+### Tests
+
+- New component/page tests: every calendar-route file (`calendar-states`, `month-nav`, `type-filter-pills`, `calendar-entry`, `month-grid`, `month-list`, `calendar-filters`, `copy-month-button`, `page`, `[eventId]/page`), the four shared pieces, and the manager (`event-type-schema`, `event-type-form`, `event-type-list`, `event-types-states`, `seed-standard-types-button`, `page`). Updated: `new-event-form`, `edit-event-form`, `event-schema`, `admin/events/page`, `new/page`, `[eventId]/page`, `[eventId]/edit/page` tests.
+- `npm test`: **298 files passed / 37 skipped; 4,182 tests passed / 1,148 skipped, 0 failed** (commit 5 was 280 / 4,003).
+- `npm run typecheck` clean; `npm run lint` (`--max-warnings=0`) clean; `npm run check` all six tripwires pass (hydration-gate passes for `event-type-form.tsx`; brand-scope C2 needed three `// ui-ok:` annotations: the radio option card, the type chip, and the grid's `<table>`, hoisted into a tiny `GridTable` wrapper so the comment can sit on the line above `<table`).
+- e2e against a dev server from this worktree on :3600 (`E2E_BASE_URL=http://localhost:3600 npx playwright test e2e/member-calendar.spec.ts e2e/hydration/event-types-form.spec.ts`): **16 passed**. The hydration spec also passes in the production lane (`PW_PROD_BUILD=1 npx playwright test e2e/hydration/event-types-form.spec.ts`, :3800): 1 passed.
+
+### Browser (headless Chromium, dev server on :3600, signed in as `clerk.fixture@example.invalid`; server stopped afterwards)
+
+- **`/o/alder-creek/calendar` at 1280px:** month grid (real table, seven headers), list hidden; today shown as a filled circle; entries show icon, time, title and location on the type's tint with a 4px ink rule; five pills (All, Worship, Classes and Bible Study, Youth and Children, Committees, General) with Month/List switch at the right; Today and Copy month top right; no horizontal overflow. Pill click filtered (URL `?month=...&types=<id>`), **All** cleared it. `?view=list` shows the list and hides the grid.
+- **375px:** list only (grouped by day with full type names visible), Month/List switch hidden, no overflow. The `<details>` disclosure **opens and closes on a tap of its summary** (label swaps Show filters / Hide filters, pills visible when open); choosing Worship navigated to `?types=<id>`, the filter survived a hard reload, and prev / next / Today hrefs all carried `types` (Today dropped `month`).
+- **Copy month (1280px):** disabled while the JavaScript chunks were held, enabled after release; click produced the toast "Calendar copied (1 members-only event left out)" and the clipboard held `October 2026` then `Sun Oct 4` / `  10:30a Sunday worship - Sanctuary` blocks with the members-only Session meeting absent.
+- **Fallbacks:** `?month=0000-01` and `?types=not-a-uuid` render the current month with no error; `?month=2000-01` shows "Nothing is scheduled for January 2000."
+- **Detail `/o/alder-creek/calendar/<id>`:** title, type chip, "Sunday, October 4, 2026, 10:30 AM - 11:45 AM", location, "Part of a repeating series", and (for the clerk, flag on) **Edit this event** to `/admin/events/<id>`. Cancelled event: **404**; non-UUID: **404**; `?from=%2Fo%2Falder-creek` reads "Back to home" (`/o/alder-creek`); `?from=https://evil.example` falls back to "Back to calendar" (`/o/alder-creek/calendar`).
+- **`/o/alder-creek/admin/events/types`, 1280 and 375px:** list of nine types with swatch, icon, Default / Retired text badges and "Used by N events"; no overflow at either width. Added a type (name, Violet, Music), duplicate refused with "You already have an event type called 'zz browser 1280'.", edited it in a dialog (rename + recolour to Lime; dialog closed), moved it up one place, and retired it (Retired badge appears). The default type (General): switch disabled, "The default type can't be retired." shown, no move buttons.
+- **Picker:** `/admin/events/new` lists "No type (shown as General)", Worship, Classes and Bible Study, Youth and Children, Committees (retired types absent); the edit page for a Worship series occurrence defaults to Worship and shows "Changes this occurrence only." and the members-visibility hint; no overflow at 375px.
+
+### Implementer Notes (what a reviewer should click through, copy to review, tradeoffs)
+
+- **Click through:** `/o/<slug>/calendar` at a phone width (open the filter disclosure, tap a pill, reload), tap an event, Back; `/o/<slug>/admin/events/types` (add / edit / reorder / retire); the Event type select on New event and Edit event; Copy month, then paste into a document.
+- **New copy for a fork's branding pass:** every string in "Empty states and microcopy" of the plan, the three calendar state messages, the manager's header text and retired-types hint, "Add the standard event types" and its toasts ("Added N event types.", "The standard event types were already there."), "Event type added." / "Event type saved.", "<name> retired." / "<name> is offered again.", "Edit event type" / "Changes apply to every event of this type.", "The default type can't be retired.", the picker's label and hint, and the public-checkbox hint.
+- **Picker load failure is a load error, not a picker-less form.** If `getEventTypePickerData` fails, `new/page.tsx` and `[eventId]/edit/page.tsx` render `EventsLoadError`. A form without the picker would submit `eventTypeId: null` and, on edit, silently clear the event's type.
+- **Edit page order:** the cancelled-event 404 runs before the picker load (no wasted query, and the existing 404 test stays meaningful).
+- **Switch name:** the manager's switch carries `aria-label="Offered (<type name>)"` and the visible "Offered" text is `aria-hidden`; a wrapping `<label>` with an `sr-only` suffix did not produce an accessible name in jsdom/testing-library, and the explicit label contains the visible text (WCAG 2.5.3).
+- **Month nav heading in print:** the paging buttons are `print:hidden`; the month heading stays so a printed month is titled.
+- **Pills hidden at zero or one active type** (`types.length > 1`); the empty-org state also hides Today and Copy month (nothing to copy), and an empty month hides Copy month.
+- **Forms inside `HydrationGate`:** the manager's add form and its edit dialog form; `fieldset[data-slot="hydration-gate"]` is `aria-busy` pre-hydration (asserted by the new hydration spec).
+- **Not done (optional in the plan):** the `/admin/design-system` category swatch row.
+
+### Commit 6 file list (`git add` by path)
+
+```
+e2e/hydration/event-types-form.spec.ts
+e2e/member-calendar.spec.ts
+e2e/support/calendar-fixture.ts
+src/app/(org)/o/[slug]/admin/events/[eventId]/edit/page.test.tsx
+src/app/(org)/o/[slug]/admin/events/[eventId]/edit/page.tsx
+src/app/(org)/o/[slug]/admin/events/[eventId]/page.test.tsx
+src/app/(org)/o/[slug]/admin/events/[eventId]/page.tsx
+src/app/(org)/o/[slug]/admin/events/edit-event-form.test.tsx
+src/app/(org)/o/[slug]/admin/events/edit-event-form.tsx
+src/app/(org)/o/[slug]/admin/events/event-schema.test.ts
+src/app/(org)/o/[slug]/admin/events/event-schema.ts
+src/app/(org)/o/[slug]/admin/events/new-event-form.test.tsx
+src/app/(org)/o/[slug]/admin/events/new-event-form.tsx
+src/app/(org)/o/[slug]/admin/events/new/page.test.tsx
+src/app/(org)/o/[slug]/admin/events/new/page.tsx
+src/app/(org)/o/[slug]/admin/events/page.test.tsx
+src/app/(org)/o/[slug]/admin/events/page.tsx
+src/app/(org)/o/[slug]/admin/events/types/event-type-form.test.tsx
+src/app/(org)/o/[slug]/admin/events/types/event-type-form.tsx
+src/app/(org)/o/[slug]/admin/events/types/event-type-list.test.tsx
+src/app/(org)/o/[slug]/admin/events/types/event-type-list.tsx
+src/app/(org)/o/[slug]/admin/events/types/event-type-schema.test.ts
+src/app/(org)/o/[slug]/admin/events/types/event-type-schema.ts
+src/app/(org)/o/[slug]/admin/events/types/event-types-states.test.tsx
+src/app/(org)/o/[slug]/admin/events/types/event-types-states.tsx
+src/app/(org)/o/[slug]/admin/events/types/page.test.tsx
+src/app/(org)/o/[slug]/admin/events/types/page.tsx
+src/app/(org)/o/[slug]/admin/events/types/seed-standard-types-button.test.tsx
+src/app/(org)/o/[slug]/admin/events/types/seed-standard-types-button.tsx
+src/app/(org)/o/[slug]/calendar/            (whole directory, 21 files incl. [eventId]/)
+src/components/org-portal/event-types/      (whole directory, 6 files)
+```
+
+Trailers: `Work-Log: 2026-10-14-member-calendar`. Not in commit 6: this work-log and the Rule-16 files.
+
+*Handoff:* **qa** (Phase 5) next; commit 6 is the last code commit.
 
 ### Commit 7 (integration, orchestrator) — landed BEFORE commits 5 and 6 (2026-10-15)
 

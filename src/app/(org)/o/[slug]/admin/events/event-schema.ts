@@ -37,6 +37,8 @@ const baseFields = {
   endsAt: z.string().optional(),
   isPublic: z.boolean(),
   allowsCheckin: z.boolean(),
+  /** An event type id, or "none" (no type - shown as the default type). */
+  eventTypeId: z.string(),
 };
 
 function refineTimes(

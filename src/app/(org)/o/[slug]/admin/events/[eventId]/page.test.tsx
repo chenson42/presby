@@ -96,6 +96,7 @@ function baseEvent(overrides: Record<string, unknown> = {}) {
     parentEventId: null,
     recurrencePattern: null,
     recurrenceCount: null,
+    eventType: null,
     seriesOccurrences: [],
     ...overrides,
   };
@@ -123,6 +124,24 @@ describe("EventDetailPage — result branches", () => {
     expect(screen.getByRole("heading", { name: /session meeting/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: /edit event/i })).toBeTruthy();
     expect(screen.getByText("CancelEventDialog")).toBeTruthy();
+  });
+
+  it("shows a 'Type:' line only when the event has a type", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+
+    getEvent.mockResolvedValue({
+      kind: "ok",
+      data: baseEvent({ eventType: { id: "t1", name: "Worship" } }),
+    });
+    const { unmount } = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.getByText("Type: Worship")).toBeTruthy();
+    unmount();
+
+    getEvent.mockResolvedValue({ kind: "ok", data: baseEvent() });
+    render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.queryByText(/^Type:/)).toBeNull();
   });
 
   it("renders NO Edit link and NO Cancel dialog for a cancelled event", async () => {

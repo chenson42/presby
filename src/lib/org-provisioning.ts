@@ -1,13 +1,17 @@
 import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { getPlatformDb } from "@/lib/db";
-import { organizations } from "@/lib/db/domain/org";
+import { organizationSettings, organizations } from "@/lib/db/domain/org";
 import {
   organizationAffiliations,
   type RelationshipType,
 } from "@/lib/db/domain/lifecycle";
 import { groupTypes, groups } from "@/lib/db/domain/groups";
 import { appRoles, appRolePermissions, roleGrants } from "@/lib/db/domain/authz";
+import { eventTypes } from "@/lib/db/domain/events";
+import { organizationFeatureToggles } from "@/lib/db/domain/org-features";
+import { eventTypeSeedPlan } from "@/lib/events/type-seed-plan";
+import { ORG_FEATURE_CATALOG } from "@/lib/org-features";
 import { isReservedSlug } from "@/lib/reserved-slugs";
 import { RELATIONSHIP_BY_CHILD_TYPE } from "@/lib/org-display";
 import type { OrganizationType, PlatformStatus } from "@/lib/authz";
@@ -28,6 +32,13 @@ import type { OrganizationType, PlatformStatus } from "@/lib/authz";
  * time ANYONE inserts a `memberships` row for an org with no
  * `active_membership` group. A two-step "insert org, then seed groups"
  * sequence would leave a real window where the org exists but is unusable.
+ *
+ * The same transaction also writes the org's `organization_settings` row (so
+ * the time zone is explicit, F132), one enabled `organization_feature_toggles`
+ * row for every `ORG_FEATURE_CATALOG` entry with `provisionedOn` (today the
+ * member calendar; a missing toggle row still means OFF, DECISION-097), and the
+ * org's event types from `eventTypeSeedPlan(type)` (DECISION-160/161). A
+ * half-provisioned org cannot exist.
  */
 
 export type CreateOrganizationInput = {
@@ -206,6 +217,14 @@ function groupSeedPlan(
 }
 
 /**
+ * `eventTypeSeedPlan` lives in the pure `src/lib/events/type-seed-plan.ts` so
+ * the event-types manager can read it without importing the platform
+ * connection; it is re-exported here so the DECISION-100 adjacency with
+ * `groupSeedPlan` still holds for anyone reading the seed plans in one place.
+ */
+export { eventTypeSeedPlan };
+
+/**
  * The baseline `app_roles` to seed for a freshly-created org — sibling to
  * `groupSeedPlan()`, same inline-conditional shape. Per DECISION-100 /
  * Phase 2's ruling, this returns the SAME one-item plan for every
@@ -217,6 +236,10 @@ function groupSeedPlan(
  * type-varying baseline role is proposed, without a signature change at that
  * point. Do not add a conditional branch pre-emptively.
  *
+ * The member role holds TWO permissions, `directory.view` and `events.view`
+ * (DECISION-160 R9, the member calendar's read grant) — `permissionKeys` is a
+ * list so adding a third does not change the shape again.
+ *
  * Byte-for-byte the same SHAPE as `scripts/seed-dev.sql`'s own Alder Creek
  * `member` role fixture (`f0000000-0000-0000-0000-000000000004`, lines
  * ~266-267, 303, 372-373): same key, same name, same `role_kind`/
@@ -224,21 +247,21 @@ function groupSeedPlan(
  * wire `app_roles.organizationTypeScope`/`organizationId IS NULL` template
  * columns — confirmed out of scope (DECISION-100).
  */
-function baselineRoleSeedPlan(
+export function baselineRoleSeedPlan(
   // Unused today — kept for call-compatibility with groupSeedPlan(); see the
   // doc comment above.
   organizationType: OrganizationType,
 ): Array<{
   key: string;
   name: string;
-  permissionKey: string;
+  permissionKeys: readonly string[];
   boundToDerivedFrom: "active_membership";
 }> {
   return [
     {
       key: "member",
       name: "Member",
-      permissionKey: "directory.view",
+      permissionKeys: ["directory.view", "events.view"],
       boundToDerivedFrom: "active_membership",
     },
   ];
@@ -421,10 +444,12 @@ export async function createOrganization(
           })
           .returning({ id: appRoles.id });
 
-        await tx.insert(appRolePermissions).values({
-          roleId: roleRow.id,
-          permissionKey: r.permissionKey,
-        });
+        await tx.insert(appRolePermissions).values(
+          r.permissionKeys.map((permissionKey) => ({
+            roleId: roleRow.id,
+            permissionKey,
+          })),
+        );
 
         // Group arm only — `personId` stays null. The person arm would
         // FK-violate `role_grants_person_fk`, which requires an existing
@@ -436,6 +461,41 @@ export async function createOrganization(
           groupId: boundGroup.id,
         });
       }
+
+      // The org's own settings row, so its time zone is an explicit stored
+      // value and not only the reader's fallback (F132). Defaults: zone
+      // America/New_York, require_two_factor false.
+      await tx.insert(organizationSettings).values({ organizationId: orgRow.id });
+
+      // Default-on toggles: one enabled row per catalog entry flagged
+      // `provisionedOn` (DECISION-160 R1). `updatedBy: null` records "the
+      // platform provisioned this", not a person's choice.
+      const provisionedToggles = ORG_FEATURE_CATALOG.filter(
+        (entry) => entry.provisionedOn,
+      );
+      if (provisionedToggles.length > 0) {
+        await tx.insert(organizationFeatureToggles).values(
+          provisionedToggles.map((entry) => ({
+            organizationId: orgRow.id,
+            featureKey: entry.key,
+            enabled: true,
+            updatedBy: null,
+          })),
+        );
+      }
+
+      // The org's event types. Never created lazily on a read (DECISION-161).
+      await tx.insert(eventTypes).values(
+        eventTypeSeedPlan(input.organizationType).map((t) => ({
+          organizationId: orgRow.id,
+          name: t.name,
+          color: t.color,
+          icon: t.icon,
+          sortOrder: t.sortOrder,
+          isActive: t.isActive,
+          isFallback: t.isFallback,
+        })),
+      );
 
       return orgRow.id;
     });

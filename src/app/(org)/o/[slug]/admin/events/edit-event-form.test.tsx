@@ -47,6 +47,7 @@ function makeEvent(overrides: Partial<EventDetail> = {}): EventDetail {
     parentEventId: null,
     recurrencePattern: null,
     recurrenceCount: null,
+    eventType: null,
     seriesOccurrences: [],
     ...overrides,
   };

@@ -39,6 +39,8 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
   let updateEvent: typeof import("./events").updateEvent;
   let extendSeriesPattern: typeof import("./events").extendSeriesPattern;
   let cancelEvent: typeof import("./events").cancelEvent;
+  let getEventTypePickerData: typeof import("./events").getEventTypePickerData;
+  let eventTypes: typeof import("@/lib/db/domain/events").eventTypes;
 
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let events: typeof import("@/lib/db/domain/events").events;
@@ -65,10 +67,17 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
   let actingUserId: string;
 
   beforeAll(async () => {
-    ({ listEvents, getEvent, createEvent, updateEvent, extendSeriesPattern, cancelEvent } =
-      await import("./events"));
+    ({
+      listEvents,
+      getEvent,
+      createEvent,
+      updateEvent,
+      extendSeriesPattern,
+      cancelEvent,
+      getEventTypePickerData,
+    } = await import("./events"));
     ({ getPlatformDb } = await import("@/lib/db"));
-    ({ events } = await import("@/lib/db/domain/events"));
+    ({ events, eventTypes } = await import("@/lib/db/domain/events"));
     ({ organizations } = await import("@/lib/db/domain/org"));
     ({ people, memberships } = await import("@/lib/db/domain/people"));
     ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
@@ -778,6 +787,297 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
       const starts = result.data.map((e) => e.startsAt);
       const sorted = [...starts].sort();
       expect(starts).toEqual(sorted);
+    });
+  });
+
+
+  // ---------------------------------------------------------------------
+  // Event types (DECISION-161): the optional event_type_id on create/update
+  // ---------------------------------------------------------------------
+
+  describe("event types on the write path", () => {
+    const UNAVAILABLE = "That event type isn't available. Choose another.";
+    let worship: string; // orgA, active
+    let study: string; // orgA, active
+    let retiredOld: string; // orgA, retired
+    let retiredOther: string; // orgA, retired
+    let fallback: string; // orgA fallback
+    let foreignType: string; // orgB, active
+
+    async function addType(
+      organizationId: string,
+      name: string,
+      opts: { color: string; isActive?: boolean; isFallback?: boolean; sortOrder: number },
+    ) {
+      const [row] = await getPlatformDb()
+        .insert(eventTypes)
+        .values({
+          organizationId,
+          name,
+          color: opts.color,
+          icon: "CalendarDays",
+          sortOrder: opts.sortOrder,
+          isActive: opts.isActive ?? true,
+          isFallback: opts.isFallback ?? false,
+        })
+        .returning({ id: eventTypes.id });
+      return row!.id;
+    }
+
+    async function storedTypeIds(ids: string[]): Promise<Array<string | null>> {
+      const rows = await getPlatformDb()
+        .select({ id: events.id, typeId: events.eventTypeId })
+        .from(events)
+        .where(inArray(events.id, ids));
+      return ids.map((id) => rows.find((r) => r.id === id)!.typeId);
+    }
+
+    async function eventCount(): Promise<number> {
+      const result = await listEvents(managerPerson, orgA);
+      return result.kind === "ok" ? result.data.length : -1;
+    }
+
+    const base = {
+      startsAt: "2027-05-01T10:00",
+      isPublic: true,
+      allowsCheckin: false,
+    };
+
+    beforeAll(async () => {
+      worship = await addType(orgA, "Worship", { color: "teal", sortOrder: 10 });
+      study = await addType(orgA, "Study", { color: "sky", sortOrder: 20 });
+      retiredOld = await addType(orgA, "Old Retired", { color: "violet", sortOrder: 30, isActive: false });
+      retiredOther = await addType(orgA, "Other Retired", { color: "rose", sortOrder: 40, isActive: false });
+      fallback = await addType(orgA, "General", { color: "neutral", sortOrder: 99, isFallback: true });
+      foreignType = await addType(orgB, "Foreign", { color: "teal", sortOrder: 10 });
+    });
+
+    it("createEvent writes the type; getEvent returns it as { id, name }", async () => {
+      const result = await createEvent(managerPerson, orgA, actingUserId, {
+        ...base,
+        title: "Typed single",
+        eventTypeId: worship,
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(await storedTypeIds(result.data.occurrenceIds)).toEqual([worship]);
+      const detail = await getEvent(managerPerson, orgA, result.data.eventId);
+      expect(detail.kind === "ok" && detail.data.eventType).toEqual({ id: worship, name: "Worship" });
+    });
+
+    it("an untyped event has eventType null", async () => {
+      const result = await createEvent(managerPerson, orgA, actingUserId, { ...base, title: "Untyped" });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(await storedTypeIds(result.data.occurrenceIds)).toEqual([null]);
+      const detail = await getEvent(managerPerson, orgA, result.data.eventId);
+      expect(detail.kind === "ok" && detail.data.eventType).toBeNull();
+    });
+
+    it("createEvent copies the type onto EVERY generated child of a series", async () => {
+      const result = await createEvent(managerPerson, orgA, actingUserId, {
+        ...base,
+        title: "Typed series",
+        eventTypeId: study,
+        recurrence: { pattern: "weekly", count: 4 },
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(result.data.occurrenceIds).toHaveLength(4);
+      expect(await storedTypeIds(result.data.occurrenceIds)).toEqual([study, study, study, study]);
+    });
+
+    it("extendSeriesPattern copies the parent's type onto the new children", async () => {
+      const created = await createEvent(managerPerson, orgA, actingUserId, {
+        ...base,
+        title: "Extend typed series",
+        eventTypeId: worship,
+        recurrence: { pattern: "weekly", count: 2 },
+      });
+      expect(created.kind).toBe("ok");
+      if (created.kind !== "ok") return;
+      const extended = await extendSeriesPattern(managerPerson, orgA, {
+        parentEventId: created.data.eventId,
+        pattern: "weekly",
+        additionalCount: 3,
+      });
+      expect(extended.kind).toBe("ok");
+      if (extended.kind !== "ok") return;
+      expect(await storedTypeIds(extended.data.occurrenceIds)).toEqual([worship, worship, worship]);
+    });
+
+    it("extending an UNTYPED series leaves the children untyped", async () => {
+      const created = await createEvent(managerPerson, orgA, actingUserId, {
+        ...base,
+        title: "Extend untyped series",
+        recurrence: { pattern: "weekly", count: 2 },
+      });
+      if (created.kind !== "ok") throw new Error("create failed");
+      const extended = await extendSeriesPattern(managerPerson, orgA, {
+        parentEventId: created.data.eventId,
+        pattern: "weekly",
+        additionalCount: 1,
+      });
+      if (extended.kind !== "ok") throw new Error("extend failed");
+      expect(await storedTypeIds(extended.data.occurrenceIds)).toEqual([null]);
+    });
+
+    describe("createEvent refuses an unusable type with invalid_input, writing NOTHING", () => {
+      it.each([
+        ["another org's type", () => foreignType],
+        ["a garbage string", () => "not-a-uuid"],
+        ["a SQL-looking string", () => "' or 1=1 --"],
+        ["a retired type", () => retiredOld],
+        ["a UUID that exists nowhere", () => "11111111-2222-4333-8444-555555555555"],
+      ])("%s", async (_label, typeId) => {
+        const before = await eventCount();
+        const result = await createEvent(managerPerson, orgA, actingUserId, {
+          ...base,
+          title: "Should not exist",
+          eventTypeId: typeId(),
+          recurrence: { pattern: "weekly", count: 3 },
+        });
+        expect(result).toEqual({ kind: "invalid_input", message: UNAVAILABLE });
+        expect(await eventCount()).toBe(before);
+      });
+
+      it("the type check does not mask the length checks that come first", async () => {
+        const result = await createEvent(managerPerson, orgA, actingUserId, {
+          ...base,
+          title: "",
+          eventTypeId: foreignType,
+        });
+        expect(result).toEqual({ kind: "invalid_input", message: "Title is required." });
+      });
+    });
+
+    describe("updateEvent and the type", () => {
+      async function typedEvent(typeId: string | null) {
+        const created = await createEvent(managerPerson, orgA, actingUserId, {
+          ...base,
+          title: "Update subject",
+          eventTypeId: typeId,
+        });
+        if (created.kind !== "ok") throw new Error("create failed");
+        return created.data.eventId;
+      }
+      const edit = (eventId: string, extra: { eventTypeId?: string | null } = {}) => ({
+        eventId,
+        title: "Update subject",
+        startsAt: "2027-05-01T10:00",
+        isPublic: true,
+        allowsCheckin: false,
+        ...extra,
+      });
+
+      it("omitting eventTypeId leaves the type unchanged", async () => {
+        const id = await typedEvent(worship);
+        expect((await updateEvent(managerPerson, orgA, edit(id))).kind).toBe("ok");
+        expect(await storedTypeIds([id])).toEqual([worship]);
+      });
+
+      it("null clears the type", async () => {
+        const id = await typedEvent(worship);
+        expect((await updateEvent(managerPerson, orgA, edit(id, { eventTypeId: null }))).kind).toBe("ok");
+        expect(await storedTypeIds([id])).toEqual([null]);
+      });
+
+      it("a different ACTIVE type sets it", async () => {
+        const id = await typedEvent(worship);
+        expect((await updateEvent(managerPerson, orgA, edit(id, { eventTypeId: study }))).kind).toBe("ok");
+        expect(await storedTypeIds([id])).toEqual([study]);
+      });
+
+      it("updating one occurrence's type leaves the rest of the series alone (a mixed series)", async () => {
+        const created = await createEvent(managerPerson, orgA, actingUserId, {
+          ...base,
+          title: "Update subject",
+          eventTypeId: worship,
+          recurrence: { pattern: "weekly", count: 3 },
+        });
+        if (created.kind !== "ok") throw new Error("create failed");
+        const [parentId, second, third] = created.data.occurrenceIds;
+        expect((await updateEvent(managerPerson, orgA, edit(second, { eventTypeId: study }))).kind).toBe("ok");
+        expect(await storedTypeIds([parentId, second, third])).toEqual([worship, study, worship]);
+      });
+
+      it("a retired type ALREADY on this event is accepted; a DIFFERENT retired type is refused", async () => {
+        const id = await typedEvent(worship);
+        // Retire "Worship" out from under the event (owner connection).
+        await getPlatformDb().update(eventTypes).set({ isActive: false }).where(eq(eventTypes.id, worship));
+        try {
+          // Re-saving with the type it already carries keeps working.
+          expect((await updateEvent(managerPerson, orgA, edit(id, { eventTypeId: worship }))).kind).toBe("ok");
+          expect(await storedTypeIds([id])).toEqual([worship]);
+          // Choosing some OTHER retired type is not.
+          expect(await updateEvent(managerPerson, orgA, edit(id, { eventTypeId: retiredOther }))).toEqual({
+            kind: "invalid_input",
+            message: UNAVAILABLE,
+          });
+          expect(await storedTypeIds([id])).toEqual([worship]);
+        } finally {
+          await getPlatformDb().update(eventTypes).set({ isActive: true }).where(eq(eventTypes.id, worship));
+        }
+      });
+
+      it.each([
+        ["another org's type", () => foreignType],
+        ["a garbage string", () => "nope"],
+      ])("refuses %s and changes nothing", async (_label, typeId) => {
+        const id = await typedEvent(study);
+        expect(await updateEvent(managerPerson, orgA, edit(id, { eventTypeId: typeId() }))).toEqual({
+          kind: "invalid_input",
+          message: UNAVAILABLE,
+        });
+        expect(await storedTypeIds([id])).toEqual([study]);
+      });
+    });
+
+    describe("getEventTypePickerData", () => {
+      it("is forbidden without events.manage", async () => {
+        expect(await getEventTypePickerData(grantlessPerson, orgA)).toEqual({ kind: "forbidden" });
+      });
+
+      it("offers the active non-fallback types in manager order; the fallback is not an option", async () => {
+        const result = await getEventTypePickerData(managerPerson, orgA);
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") return;
+        expect(result.data.options.map((o) => o.name)).toEqual(["Worship", "Study"]);
+        expect(result.data.options.every((o) => o.isRetired === false)).toBe(true);
+        expect(result.data.fallbackName).toBe("General");
+        expect(result.data.options[0]).toEqual({
+          id: worship,
+          name: "Worship",
+          colorToken: "teal",
+          iconKey: "CalendarDays",
+          isRetired: false,
+        });
+      });
+
+      it("includes the event's CURRENT type when it is retired, flagged", async () => {
+        const result = await getEventTypePickerData(managerPerson, orgA, { currentTypeId: retiredOld });
+        if (result.kind !== "ok") throw new Error("picker failed");
+        expect(result.data.options.map((o) => [o.name, o.isRetired])).toEqual([
+          ["Worship", false],
+          ["Study", false],
+          ["Old Retired", true],
+        ]);
+      });
+
+      it("a current type that is the fallback maps to 'No type' (not added); garbage or foreign ids add nothing", async () => {
+        for (const currentTypeId of [fallback, "garbage", foreignType, null, undefined]) {
+          const result = await getEventTypePickerData(managerPerson, orgA, { currentTypeId });
+          if (result.kind !== "ok") throw new Error("picker failed");
+          expect(result.data.options.map((o) => o.name)).toEqual(["Worship", "Study"]);
+        }
+      });
+
+      it("never lists another org's types", async () => {
+        const result = await getEventTypePickerData(outsidePerson, orgB);
+        if (result.kind !== "ok") throw new Error("picker failed");
+        expect(result.data.options.map((o) => o.name)).toEqual(["Foreign"]);
+        expect(result.data.fallbackName).toBeNull();
+      });
     });
   });
 

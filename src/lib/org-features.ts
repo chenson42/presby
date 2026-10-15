@@ -1,8 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { and, eq, sql } from "drizzle-orm";
-import type { db } from "@/lib/db";
-import { withOrgContext } from "@/lib/authz";
+import { withOrgContext, type OrgTx } from "@/lib/authz";
 import { organizationFeatureToggles } from "@/lib/db/domain/org-features";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { isFlagEnabled } from "@/lib/flags";
@@ -49,8 +48,6 @@ import { DOMAIN_LABELS } from "@/lib/org-portal/tiles";
 
 const CATEGORY_AXIS_FLAG = "org_portal.feature_categories";
 
-type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
 const ORG_FEATURES_MANAGE = "org_features.manage";
 
 /**
@@ -67,6 +64,14 @@ export const ORG_FEATURE_CATALOG = [
     // Feature-categories axis (docs/work-log/2026-08-27-feature-categories.md,
     // Phase 3) — People & Membership.
     category: "people" as const,
+    // The platform flag that kill-switches this feature globally. Call sites
+    // gate on `entry.flag === null || await isFlagEnabled(entry.flag)`, THEN
+    // the org toggle, THEN the permission (DECISION-160, R1).
+    flag: "org_portal.members_create" as const,
+    // Whether `createOrganization()` writes an enabled toggle row for a new
+    // org. A missing row still means OFF (DECISION-097) — the default-on is a
+    // stored row, never a code constant.
+    provisionedOn: false as const,
   },
   // Member edit: tiered sensitive information (docs/work-log/
   // 2026-08-26-member-sensitive-info.md, Phase 3/DECISION-108). A DEDICATED
@@ -79,6 +84,22 @@ export const ORG_FEATURE_CATALOG = [
     description:
       "Lets this organization enter pastoral notes, demographics, medical/allergy info, and disability records for its members, subject to each viewer's own tier-3 permission grants.",
     category: "people" as const,
+    flag: "org_portal.sensitive_info" as const,
+    provisionedOn: false as const,
+  },
+  // Member calendar (docs/work-log/2026-10-14-member-calendar.md, DECISION-160
+  // R1). TOGGLE-ONLY: there is no platform flag for it (`flag: null`), so the
+  // org toggle is the only off switch and call sites skip the flag step.
+  // Provisioned ON: migration 0054 writes an explicit enabled row for every
+  // existing org and `createOrganization()` writes one for every new org.
+  {
+    key: "org_portal.calendar",
+    name: "Member calendar",
+    description:
+      "Shows the calendar of this organization's events to every member who has calendar access, with event types, colors and filters.",
+    category: "worship" as const,
+    flag: null,
+    provisionedOn: true as const,
   },
 ] as const;
 
@@ -136,38 +157,70 @@ export const isOrgFeatureEnabled = cache(
     // happens INSIDE the same withOrgContext transaction as the toggle read
     // below, so composing two axes costs one transaction, not two.
     const catalogEntry = ORG_FEATURE_CATALOG.find((entry) => entry.key === key);
-    const categoryAxisOn = catalogEntry
-      ? await isFlagEnabled(CATEGORY_AXIS_FLAG)
-      : false;
+    const categoryAxisOn = catalogEntry ? await isCategoryAxisOn() : false;
 
-    return withOrgContext(personId, organizationId, async (tx) => {
-      if (catalogEntry && categoryAxisOn) {
-        const categoryEnabled = await categoryEnabledInTx(
-          tx,
-          organizationId,
-          catalogEntry.category,
-        );
-        if (!categoryEnabled) {
-          // A category-off result short-circuits to false without the
-          // second round trip to organization_feature_toggles.
-          return false;
-        }
-      }
-
-      const [row] = await tx
-        .select({ enabled: organizationFeatureToggles.enabled })
-        .from(organizationFeatureToggles)
-        .where(
-          and(
-            eq(organizationFeatureToggles.organizationId, organizationId),
-            eq(organizationFeatureToggles.featureKey, key),
-          ),
-        )
-        .limit(1);
-      return row?.enabled ?? false;
-    });
+    return withOrgContext(personId, organizationId, (tx) =>
+      orgFeatureEnabledInTx(tx, organizationId, key, categoryAxisOn),
+    );
   },
 );
+
+/**
+ * The category-axis kill switch (`org_portal.feature_categories`), read ONCE
+ * and OUTSIDE any transaction — `isFlagEnabled()` runs on its own connection,
+ * so calling it inside a `withOrgContext` callback would hold two connections
+ * for one request. Callers that compose several gates in one transaction (the
+ * member calendar read path) read this first, then pass the boolean to
+ * `orgFeatureEnabledInTx`.
+ */
+export function isCategoryAxisOn(): Promise<boolean> {
+  return isFlagEnabled(CATEGORY_AXIS_FLAG);
+}
+
+/**
+ * The in-transaction half of `isOrgFeatureEnabled`: category (only when the
+ * axis is on and `key` is a catalog entry) -> toggle row. Missing toggle row
+ * -> `false`, unconditionally (DECISION-097): a code default must never be
+ * able to flip every org that has no row.
+ *
+ * Does NOT read the entry's platform `flag`. That is the call site's job:
+ * `entry.flag === null || await isFlagEnabled(entry.flag)`, then this, then the
+ * permission. `isOrgFeatureEnabled` itself still reads only the category axis,
+ * which is why the existing `admin/members/**` call sites — which already do
+ * `isFlagEnabled(KEY)` first — need no change.
+ */
+export async function orgFeatureEnabledInTx(
+  tx: OrgTx,
+  organizationId: string,
+  key: string,
+  categoryAxisOn: boolean,
+): Promise<boolean> {
+  const catalogEntry = ORG_FEATURE_CATALOG.find((entry) => entry.key === key);
+  if (catalogEntry && categoryAxisOn) {
+    const categoryEnabled = await categoryEnabledInTx(
+      tx,
+      organizationId,
+      catalogEntry.category,
+    );
+    if (!categoryEnabled) {
+      // A category-off result short-circuits to false without the second
+      // round trip to organization_feature_toggles.
+      return false;
+    }
+  }
+
+  const [row] = await tx
+    .select({ enabled: organizationFeatureToggles.enabled })
+    .from(organizationFeatureToggles)
+    .where(
+      and(
+        eq(organizationFeatureToggles.organizationId, organizationId),
+        eq(organizationFeatureToggles.featureKey, key),
+      ),
+    )
+    .limit(1);
+  return row?.enabled ?? false;
+}
 
 export interface FeatureToggleEntry {
   key: string;
@@ -208,7 +261,7 @@ export async function listFeatureToggles(
 ): Promise<ListFeatureTogglesResult> {
   // Same "read the flag once, outside the transaction" shape as
   // isOrgFeatureEnabled() above.
-  const categoryAxisOn = await isFlagEnabled(CATEGORY_AXIS_FLAG);
+  const categoryAxisOn = await isCategoryAxisOn();
 
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasOrgFeaturesManage(tx, viewerPersonId, organizationId))) {

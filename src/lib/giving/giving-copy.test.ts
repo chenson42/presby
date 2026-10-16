@@ -8,7 +8,13 @@ import {
   STATE_COPY,
   STRIPE_RECEIPT_NOTE,
   GIVE_MESSAGES,
+  GIVE_PAGE,
+  RETURN_COPY,
+  RETURN_PANELS,
   allGivingCopy,
+  feePreviewText,
+  giveHeading,
+  returnGiftLine,
   disconnectDialogBody,
   rateLimitedMessage,
 } from "./giving-copy";
@@ -80,5 +86,49 @@ describe("giving-copy", () => {
     expect(rateLimitedMessage(61)).toMatch(/in 2 minutes\./);
     expect(rateLimitedMessage(0)).toMatch(/in 1 minute\./);
     expect(rateLimitedMessage(Number.NaN)).toMatch(/in 1 minute\./);
+  });
+
+  it("the donor-facing strings are in the forbidden-word walk (so a future edit cannot call a receipt an acknowledgment unnoticed)", () => {
+    const all = allGivingCopy();
+    for (const text of [
+      GIVE_PAGE.giftOnly,
+      GIVE_PAGE.processing,
+      GIVE_PAGE.monthly,
+      RETURN_PANELS.received.body,
+      RETURN_PANELS.confirming.heading,
+      RETURN_COPY.monthlyStop,
+      giveHeading("Alder Creek"),
+      feePreviewText("$50.00", "$1.75", "$51.75"),
+      returnGiftLine("$25.00", "General Fund", true),
+    ]) {
+      expect(all, text).toContain(text);
+    }
+  });
+
+  it("the thank-you panel calls Stripe's receipt a payment receipt and separates it from the year-end statement (G18)", () => {
+    expect(RETURN_PANELS.received.body).toMatch(/payment receipt/i);
+    expect(RETURN_PANELS.received.body).toMatch(/year-end giving statement/i);
+    for (const panel of Object.values(RETURN_PANELS)) {
+      expect(`${panel.heading} ${panel.body}`).not.toMatch(/acknowledg/i);
+    }
+  });
+
+  it("every return panel has a heading and a body, and the confirming one is the sentence the design promises", () => {
+    expect(Object.keys(RETURN_PANELS).sort()).toEqual(["bank_pending", "confirming", "error", "failed", "received", "unknown"]);
+    expect(RETURN_PANELS.confirming.heading).toBe("We've received your gift and are confirming it");
+    expect(RETURN_PANELS.error.body).toMatch(/Your gift is not affected/);
+    expect(RETURN_PANELS.bank_pending.body).toMatch(/several days/);
+  });
+
+  it("the give form says it is gifts only and that cover-fees is optional", () => {
+    expect(GIVE_PAGE.giftOnly).toMatch(/gifts only/);
+    expect(GIVE_PAGE.giftOnly).toMatch(/no goods or services/);
+    expect(GIVE_PAGE.coverFeesHint).toMatch(/unticked by default/);
+    expect(GIVE_PAGE.amountHint).toContain("$1 to $25,000");
+  });
+
+  it("the return gift line names the amount and fund, with 'every month' only for a monthly gift", () => {
+    expect(returnGiftLine("$37.50", "General Fund", false)).toBe("$37.50 to General Fund");
+    expect(returnGiftLine("$37.50", "General Fund", true)).toBe("$37.50 every month to General Fund");
   });
 });

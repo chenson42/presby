@@ -16,7 +16,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-15 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
-| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3 complete; 4a complete, 4b pending (ux-developer) | — | 2026-10-16 |
+| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; Batch 5 pending (database-admin → full-stack-developer) | — | 2026-10-16 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3541,6 +3541,92 @@ The amount cases (`"10.999"`, `"1e3"`, `"-5"`, `"٣٠"`) are asserted in `give-i
 ### Handoff
 
 Next agent: **ux-developer (Batch 4b)** — `GiveForm` (public and member), `/site/[slug]/give` and `give/return` pages, `/o/[slug]/giving/give` and `give/return`, the `giving` live slot, the return panels and `<ReturnPoller>`, `giving-unavailable-notice.tsx`, and the hydration/page-state/e2e specs, all from the "Contract for 4b" above. The CSP is already served; 4b's job is to browser-verify it on the real pages at 360 px.
+
+
+## Batch 4b — give form, pages, live slot, return panels (ux-developer)
+
+*2026-10-16, ux-developer, worktree `presby-giving` on `pipeline/online-giving`, Neon branch `br-winter-band-axb6tzax`. Nothing committed. No Rule 16 shared file edited. No schema change, no new dependency, no new route handler. No Stripe account, no Stripe key, no Stripe.js, no iframe: the only third-party origin on any give page is the Turnstile widget (and only when `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set). Own dev server on 3100 (started and stopped by PID, twice: once for development, once restarted after `npm run build`); the demo server on 3000 (PID 15271) was never touched; the prod lane used 3800 and left nothing listening.*
+
+### Files Created
+
+**Components — `src/components/giving/`**
+- `give-form.tsx` (client; `useForm` + `<HydrationGate>`) - the one form for the public page, the live slot and the member page (`mode="public" | "member"`; member renders no Turnstile). Preset chips ($25/$50/$100/$250, fill the amount), "Amount (US dollars)" text input with `inputMode="decimal"` (the "other"), fund select (hidden when one fund, hidden input still sends `fundId`), once/monthly radios, cover-fees checkbox (default off) that reveals card/bank (only when both are enabled) and a live `gift + fees = total` line from `grossUp()` with the org's own rates (display only, `role="status"`), Turnstile (`key`-ed so a fresh widget follows every non-checkout result), honeypot `_hp`, hidden `idempotencyKey`, "Give", pending relabel "Starting your gift…", gift-only and processing disclosures, the monthly stop note once monthly is chosen, the church phone line, and the donor-worded test-mode notice. Builds its `FormData` explicitly from the contract field names (never a total; `coverFees` is `on` or absent; `method` is `either` only when both methods are enabled and fees are not being covered). Re-keys with `crypto.randomUUID()` in the result handler after every result except `checkout` and `already_started`. `checkout` is asserted with `isCheckoutUrl(url)` AND `new URL(url).origin === "https://checkout.stripe.com"` before `window.location.assign`; anything else is the generic error plus a fresh attempt. A `pageshow` (bfcache) handler un-sticks a form the donor returns to with Stripe's back button.
+- `give-return-panel.tsx` (server) - the five panels plus `error`; `return-poller.tsx` (client; 6 x 5 s `router.refresh()`, then "Still confirming…", timer in a ref so a re-render cannot restart it); `giving-unavailable-notice.tsx` (shared with the slot; `headingLevel` 1 or 2); `contact-line.tsx` (the church phone as a `tel:` link only when it is phone-shaped).
+- Tests beside each: `give-form.test.tsx` (43), `give-return-panel.test.tsx` (15), `return-poller.test.tsx` (2), `giving-unavailable-notice.test.tsx` (4).
+
+**Pages**
+- `src/app/(public)/site/[slug]/give/page.tsx` (+ `page.test.tsx`, 9) and `give/return/page.tsx` (+ test, 7). Give: `force-dynamic` (a per-request idempotency key must never be cached and shared), `cache()`d config read, `absent` -> `notFound()`, `unavailable` -> notice, `live` -> form. Return: `noindex, nofollow`, `referrer: no-referrer`, reads no organization at all (its markup does not depend on whether the slug is a tenant), a missing or repeated `session_id` is `unknown` with no database call. No `loading.tsx` on either.
+- `src/app/(org)/o/[slug]/giving/give/page.tsx` (+ test, 11) and `give/return/page.tsx` (+ test, 6). Full `(org)` pattern in the page: `cachedAuth` -> `resolveOrgContext` four-way -> `assertOrgAccess` -> `loadGivingToggle` (member give only; the return page deliberately does NOT read the toggle, so turning it off cannot strand a donor mid-gift). No giving permission is checked anywhere.
+- `src/app/(public)/site/[slug]/public-giving-slot.tsx` (+ test, 11) - the `giving` slot; wired as `giving: (filter) => <PublicGivingSlot slug={slug} filter={filter} />` in `[[...path]]/page.tsx` (closes over `slug` only); `filter.fund` honoured only when it is one of the org's online funds; ids namespaced (`slot-give-*`).
+
+**Specs**
+- `e2e/giving-public.spec.ts` (22 tests), `e2e/hydration/giving-give-form.spec.ts` (1, both lanes).
+
+### Files Modified
+- `src/lib/giving/giving-copy.ts` (+ `giving-copy.test.ts`, +5): `GIVE_PAGE`, `TEST_MODE_DONOR_DETAIL`, `GIVING_UNAVAILABLE`, `RETURN_PANELS`, `RETURN_COPY`, `giveHeading`, `feePreviewText`, `returnGiftLine`, all added to `allGivingCopy()` (so the forbidden-word walk covers them).
+- `src/components/giving/test-mode-badge.tsx`: optional `detail` prop (the default still speaks to the treasurer; the give page passes the donor's wording).
+- `src/app/(public)/site/[slug]/[[...path]]/page.tsx` + `page.test.tsx` (the exact-slot-set assertion is now `committeeDirectory, giving, staffDirectory`, plus a case that the `giving` resolver closes over the page's slug).
+- `e2e/support/giving-fixture.ts`: `offerFundOnline(..., which)` (a second online fund with its own display name), `addLiveSite`/`removeSite` (live `organization_sites` row, optional staged bundle), `seedReturnIntent`, `latestIntents`.
+
+### Schema Changes / Audit Events
+None. Starting a gift is `audit-exempt` (4a); the new pages and the form write nothing themselves.
+
+### Commands and results (all in `/Users/cshenso/git/presby-platform/presby-giving`)
+
+| Command | Result |
+|---|---|
+| `npm run typecheck`; `npm run lint -- --max-warnings=0` | clean |
+| `npm run check` (all seven tripwires) | passed. `check:brand-scope` C2 caught three button-shaped class strings in my first return panel; replaced with `<Button asChild>` |
+| `check:secrets` over the 27 new and modified `.ts/.tsx/.md` paths (`checkSecretsPii`) | first pass: 8 soft findings (phones outside the 555-01xx convention in my tests); fixed to `614-555-01xx`; re-run: 0 findings |
+| `npm run test` | 395 files passed, 54 skipped; 5633 tests passed, 1546 skipped |
+| DB-backed lane | not run: Batch 4b touches no DB-backed module (`giving-copy`, `test-mode-badge` and components are pure; no `src/lib/giving` query module changed). The page-to-database path is exercised by the e2e below against the real functions |
+| `npm run build` (dev server stopped first) | exit 0; `/site/[slug]/give` and `/site/[slug]/give/return` listed dynamic |
+| `E2E_BASE_URL=http://localhost:3100 npx playwright test e2e/giving-public.spec.ts e2e/hydration/giving-give-form.spec.ts` (dev server started with `RATE_LIMIT_DISABLED`, `STRIPE_WEBHOOK_SECRET`, `CRON_SECRET`; `STRIPE_SECRET_KEY` unset) | 23 passed |
+| `E2E_BASE_URL=http://localhost:3100 npx playwright test` (whole suite) | **289 passed (9.1 min)** |
+| `npm run test:e2e:prod` (`next build && next start` on 3800) | **6 passed**, including `giving-give-form.spec.ts` under the enforced CSP on a production build |
+| Fixture cleanup | `select count(*) from organizations where slug like 'e2e-giving-%'` = 0; no intents left on `alder-creek`; servers stopped, nothing on 3100 or 3800 |
+
+**Failing-first proofs** (mutate one mechanism, run the owning test, restore from a backup, re-run green):
+
+| Mechanism broken | Fails |
+|---|---|
+| the Checkout origin assertion replaced with `allowed = true` | `give-form.test.tsx`: all 8 refusal cases (look-alike `checkout.stripe.com.evil.example`, `evilcheckout.stripe.com`, userinfo, port, `http:`, `javascript:`, nested, empty) |
+| no re-key after `unavailable` | `give-form.test.tsx` "unavailable: ... the NEXT submit carries a fresh key" |
+| `<HydrationGate>` removed from `give-form.tsx` (negative control) | `e2e/hydration/giving-give-form.spec.ts` red at the first `aria-busy="true"` assertion (dev lane); restored, green in both lanes |
+| the `ReturnPoller` timer tied to router identity | `return-poller.test.tsx` (found for real: the first draft restarted its interval after "spent"; fixed with a ref) |
+
+### Browser verification (phone viewport, screenshots read)
+- 360 px, Chromium: `/site/alder-creek/give` (live, test mode, cover-fees ticked with the preview), the fixture's unavailable page, the slot on a staged site page, and every return panel (`confirming`, `received` monthly, `bank_pending`, `failed`, `unknown`). No sideways scroll on any (asserted in the spec), every form button, checkbox/radio label and select at least 40 px tall (the amount input is `min-h-11`). Screenshots: `test-results/giving-public-360/` (gitignored).
+- **Enforced CSP on the real pages**: the give page and every return panel return `content-security-policy` and a console with zero errors or violations (asserted in the spec, dev lane; the production build ran the same page under the policy in the prod lane and hydrated). The slot page carries only the report-only policy (by design) and its console is clean too. No script, iframe or response header names a Stripe origin.
+
+### Deviations from the design, each with its reason
+1. **Toggle-off with a live public site is `unavailable`, not `absent`.** The database function returns `absent` for a toggle-off org only when it has no live site; with a live site it returns `unavailable` (the site is already public, so the notice reveals nothing). The page renders what the function says. The byte-identical `absent` proof (unknown slug, non-tenant presbytery, toggle-off org without a site) compares status, the CSP header and the full markup, with only Next's per-request `__next_r` / `_rsc` tokens masked; a second test pins the with-site behaviour. Tell the analyst: the Phase 3 sentence "toggle-off org renders `absent`" is true only without a live site.
+2. **The slot renders the unavailable notice when giving is off (it is only reachable for a live site).** `absent` renders nothing but is effectively unreachable inside a slot (it needs no live site, yet the host page is a live site's page). The notice is more honest than a hole where the author placed a form.
+3. **The form builds its `FormData` itself** rather than posting the DOM form, so `method` is computed (`either` / the single enabled method / the explicit card-or-bank when fees are covered) and `coverFees` follows the contract exactly. The hidden `idempotencyKey` input and the honeypot are still real DOM inputs.
+4. **Member return page carries the `session_id` through the sign-in callback** so a member who was signed out lands back on the same panel (`/signin` sanitizes the callback to a same-origin path).
+5. **The return page shows no organization name and no church phone**, because `ReturnState` carries neither and reading the organization would make the page's markup depend on whether the slug is a tenant. The panels say "contact the church" and link back to the church's site or the portal. If the product wants the phone on a thank-you panel, that needs a field on `presby_giving_return_state` (a 4a/0055 change).
+6. **`TestModeBadge` gained a `detail` prop** instead of a second component; the default text is unchanged.
+7. **Preset chips are fixed at $25/$50/$100/$250**, not per-congregation. A per-org list is a future setting, not a Batch 4 need.
+
+### UX tradeoffs
+- Cover-fees preselects nothing visible until ticked, then defaults the method to Card (the fee preview needs one; the donor can switch to Bank account and the preview recomputes).
+- "Still confirming" after 30 s is a calm statement, not an error: a slow webhook is not a problem.
+- The gift-only sentence says "no goods or services in return" and does not use the "intangible religious benefits" phrase; that wording is the CPA question (Operator Q6).
+
+### New copy a fork's branding pass should review
+`GIVE_PAGE`, `TEST_MODE_DONOR_DETAIL`, `GIVING_UNAVAILABLE`, `RETURN_PANELS`, `RETURN_COPY` in `src/lib/giving/giving-copy.ts`. Review the `received` panel (receipt versus year-end statement) and the `giftOnly` sentence with the CPA.
+
+### Operator smoke still owed
+A real redirect to Hosted Checkout and back (docs/deployment.md, "Operator test-mode smoke", step 8): the `checkout` branch is proven only with a mocked action result and the origin assertion; the `confirming` -> `received` flip is proven with a gift row seeded directly (the poller picks it up within one 5 s round), not with a real webhook.
+
+### What Batch 5 must know
+- Nothing in 4b touches statements. The `received` panel promises only that the year-end statement is "separate" and "comes after the year ends"; it does not promise a month or that statements are enabled (they stay disabled in production until Operator Q6).
+- `giving-fixture.ts` gained `seedReturnIntent` and `addLiveSite`; gifts and reversals are append-only and delete-guarded, so a spec that seeds a gift must remove the whole fixture organization (as `removeGivingFixture` does) and must NOT call `setConnection(sql, fx, null)` afterwards (`clearConnections` deletes intents, which the gift FK refuses).
+- The give routes are `force-dynamic` on purpose; do not add `generateStaticParams` or a cache to them.
+- Open items already on the list and now load-bearing: Upstash, `NEXT_PUBLIC_APP_URL` (an unset or non-https value makes giving `unavailable` in production), Turnstile keys for the public form, and the B7 tokenizer follow-up from 4a.
+
+### Handoff
+Next: **Batch 5, database-admin (5a: `0056`) then full-stack-developer (5b)**, per the Implementation Order. Phase 5 (qa) follows Batch 6 for the whole pipeline, or per batch if the orchestrator runs it that way; QA for Batch 4 should run `e2e/giving-public.spec.ts` and `e2e/hydration/giving-give-form.spec.ts` (both lanes) and re-read the negative control above.
 
 
 # Phase 5 — Verification (qa)

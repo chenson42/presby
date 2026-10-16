@@ -47,6 +47,11 @@ vi.mock("../actions", () => ({
   submitContactMessageAction: vi.fn(),
 }));
 
+// The `giving` slot imports the give action and the public-config reader (both
+// server-only, database-backed); neither runs in this orchestration test.
+vi.mock("../give/actions", () => ({ createPublicGiveSessionAction: vi.fn() }));
+vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: vi.fn() }));
+
 // resolveLogoUrl()'s dynamically-imported getPlatformDb() chain — mocked
 // the same way @/lib/sites is mocked above, and for the identical reason:
 // @/lib/db's module-scope pool construction throws outside a real
@@ -76,6 +81,7 @@ vi.mock("next/navigation", () => ({
 import PublicSitePage, { generateMetadata } from "./page";
 import { PublicStaffDirectory } from "../staff-directory";
 import { PublicCommitteeDirectory } from "../committee-directory";
+import { PublicGivingSlot } from "../public-giving-slot";
 
 afterEach(() => {
   cleanup();
@@ -550,7 +556,25 @@ describe("PublicSitePage — the ok path", () => {
     expect(resolved.props.filter).toEqual({});
   });
 
-  it("exposes exactly staffDirectory and committeeDirectory — no other named slot", async () => {
+  it("passes a liveSlots.giving resolver that closes over the page's own slug and hands the marker's filter to <PublicGivingSlot> (docs/work-log/2026-10-15-online-giving.md, G16)", async () => {
+    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await PublicSitePage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
+    };
+    const suppliedFilter = { fund: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const resolved = call.liveSlots?.giving?.(suppliedFilter) as {
+      type: unknown;
+      props: { slug: string; filter: unknown };
+    };
+    expect(resolved.type).toBe(PublicGivingSlot);
+    expect(resolved.props).toEqual({ slug: "alder-creek", filter: suppliedFilter });
+  });
+
+  it("exposes exactly staffDirectory, committeeDirectory and giving — no other named slot", async () => {
     getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
@@ -561,6 +585,7 @@ describe("PublicSitePage — the ok path", () => {
     };
     expect(Object.keys(call.liveSlots ?? {}).sort()).toEqual([
       "committeeDirectory",
+      "giving",
       "staffDirectory",
     ]);
   });

@@ -223,6 +223,105 @@ export function rateLimitedMessage(retryAfterSeconds: number): string {
   return `Too many attempts. Please try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}. You haven't been charged.`;
 }
 
+/**
+ * The give page and its return panels (Batch 4b): what a visitor or member reads
+ * around the form. Written for a donor, not a treasurer (`MONTHLY_STOP_NOTE`
+ * above speaks to the congregation). The "gift only" line is the online form's
+ * half of G7; the receipt line follows G18 (a payment receipt is not the year-end
+ * statement). A fork's branding pass reviews these with the rest of the file.
+ */
+export const GIVE_PAGE = {
+  intro: "Your gift goes to the congregation's own account. You finish on Stripe's secure page, so your card or bank details never pass through this site.",
+  presetsLabel: "Choose an amount",
+  amountLabel: "Amount (US dollars)",
+  amountHint: "Pick one above, or type any amount from $1 to $25,000.",
+  fundLabel: "Fund",
+  frequencyLabel: "How often?",
+  onceLabel: "Give once",
+  monthlyLabel: "Give every month",
+  coverFeesLabel: "Add the processing fee so the full amount reaches the church",
+  coverFeesHint: "Left unticked by default. Ticking it makes your total a little higher.",
+  methodLabel: "How will you pay?",
+  methodHint: "The fee is different for each, so choose one.",
+  cardLabel: "Card",
+  bankLabel: "Bank account",
+  feeNeedsAmount: "Enter an amount to see the fee.",
+  feeNote: "You will see the final total on Stripe's page before you pay.",
+  giftOnly: "This form is for gifts only. You receive no goods or services in return. Dinners, tickets and purchases are not made here.",
+  processing: "Stripe charges the congregation a processing fee on each gift. Bank transfers take several days to confirm.",
+  monthly: "A monthly gift repeats until it is stopped. To stop or change it, contact the church and a treasurer will cancel it.",
+  submit: "Give",
+  submitting: "Starting your gift…",
+  contactPrefix: "Questions, or want to give another way? Call",
+  contactGeneric: "Questions, or want to give another way? Contact the church.",
+} as const;
+
+/** Said on the give page itself while the congregation's Stripe account is in test mode. */
+export const TEST_MODE_DONOR_DETAIL =
+  "Online giving here is set up for practice only. Nothing you enter is a real gift, and no real money moves.";
+
+export function giveHeading(organizationName: string): string {
+  return `Give to ${organizationName}`;
+}
+
+/** "Gift $50.00 + fees $1.75 = total $51.75" - display only; Stripe's page shows the real total. */
+export function feePreviewText(gift: string, fees: string, total: string): string {
+  return `Your gift ${gift} + fees ${fees} = total ${total}`;
+}
+
+/** The notice for a congregation whose site is live but whose giving is not (also the slot's). */
+export const GIVING_UNAVAILABLE = {
+  heading: "Online giving isn't available right now",
+  body: "Nothing has been charged. Please try again later, or give another way.",
+} as const;
+
+export type ReturnPanelKey = "confirming" | "received" | "bank_pending" | "failed" | "unknown" | "error";
+
+/** One heading and one body per return panel. Nothing here is a name, an email or an id. */
+export const RETURN_PANELS: Record<ReturnPanelKey, { heading: string; body: string }> = {
+  confirming: {
+    heading: "We've received your gift and are confirming it",
+    body: "This usually takes a few seconds and this page updates by itself. You can also close it: nothing more is needed from you.",
+  },
+  received: {
+    heading: "Thank you for your gift",
+    body: "Stripe emails a payment receipt to the address you gave at checkout. That receipt is separate from your congregation's year-end giving statement, which comes after the year ends.",
+  },
+  bank_pending: {
+    heading: "Your bank transfer is on its way",
+    body: "Bank transfers take several days to confirm. Your gift is recorded once your bank confirms it, and nothing more is needed from you.",
+  },
+  failed: {
+    heading: "Your gift didn't go through",
+    body: "No gift was recorded. If you see a charge you don't recognize, contact the church. You are welcome to try again.",
+  },
+  unknown: {
+    heading: "We can't find that gift",
+    body: "This link may have expired or may be incomplete. If you gave and want to check, contact the church.",
+  },
+  error: {
+    heading: "We can't load this right now",
+    body: "Your gift is not affected. Try again in a moment.",
+  },
+};
+
+export const RETURN_COPY = {
+  monthlyEvery: "every month",
+  monthlyStop:
+    "This gift repeats every month. To stop or change it, contact the church and a treasurer will cancel it.",
+  stillConfirming:
+    "Still confirming. This can take a few minutes. You don't need to do anything, and you can close this page.",
+  giveAgain: "Give again",
+  tryAgain: "Try again",
+  backToSite: "Back to the church's website",
+  backToPortal: "Back to the portal",
+} as const;
+
+/** "$50.00 to General Fund" or "$25.00 every month to General Fund". */
+export function returnGiftLine(amount: string, fundName: string, monthly: boolean): string {
+  return `${amount}${monthly ? ` ${RETURN_COPY.monthlyEvery}` : ""} to ${fundName}`;
+}
+
 /** Every exported string, flattened - what `giving-copy.test.ts` scans. */
 export function allGivingCopy(): string[] {
   const out: string[] = [];
@@ -249,6 +348,11 @@ export function allGivingCopy(): string[] {
     GIVE_PAGE_COPY,
     RATES_COPY,
     GIVE_MESSAGES,
+    GIVE_PAGE,
+    TEST_MODE_DONOR_DETAIL,
+    GIVING_UNAVAILABLE,
+    RETURN_PANELS,
+    RETURN_COPY,
   ].forEach(walk);
   out.push(
     disconnectDialogBody(0),
@@ -256,6 +360,10 @@ export function allGivingCopy(): string[] {
     disconnectDialogBody(3),
     rateLimitedMessage(1),
     rateLimitedMessage(61),
+    giveHeading("Alder Creek"),
+    feePreviewText("$50.00", "$1.75", "$51.75"),
+    returnGiftLine("$25.00", "General Fund", true),
+    returnGiftLine("$25.00", "General Fund", false),
   );
   return out;
 }

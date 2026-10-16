@@ -28,6 +28,7 @@
  * deletes by the ids and slug prefix defined here only.
  */
 
+import { createHash } from "node:crypto";
 import { generateSync } from "otplib";
 import type { Browser, BrowserContext } from "@playwright/test";
 import type { Sql } from "./db";
@@ -315,11 +316,102 @@ export async function setConnection(sql: Sql, fx: GivingFixture, spec: Connectio
   return connId;
 }
 
-/** Marks one fund as offered online (a go-live prerequisite). */
-export async function offerFundOnline(sql: Sql, fx: GivingFixture, on: boolean): Promise<void> {
+/**
+ * Marks one fund as offered online (a go-live prerequisite). `which` picks the
+ * fund; the online display names differ ("Giving" / "Building campaign") so a
+ * form with two online funds shows two distinguishable options.
+ */
+export async function offerFundOnline(
+  sql: Sql,
+  fx: GivingFixture,
+  on: boolean,
+  which: "general" | "building" = "general",
+): Promise<void> {
+  const name = which === "general" ? "Giving" : "Building campaign";
   await sql`
-    update giving_funds set offered_online = ${on}, online_display_name = ${on ? "Giving" : null}
-     where id = ${fx.funds.general}::uuid`;
+    update giving_funds set offered_online = ${on}, online_display_name = ${on ? name : null}
+     where id = ${fx.funds[which]}::uuid`;
+}
+
+/**
+ * Gives the fixture congregation a LIVE public site row (and, if `bundle` is
+ * given, a staged content bundle), the precondition for the give page's
+ * `unavailable` state and for the `giving` live slot. `organizations.status` is
+ * 'active' by default. The row cascades away with the organization.
+ */
+export async function addLiveSite(sql: Sql, fx: GivingFixture, bundle?: { pages: unknown[] }): Promise<void> {
+  assertFixtureSlug(fx.slug);
+  let bundleKey: string | null = null;
+  if (bundle) {
+    const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, pages: bundle.pages, imageKeys: {} }), "utf-8");
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    const rows = (await sql`
+      insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes)
+      values (${fx.orgId}::uuid, ${contentHash}, 'application/json', ${bytes.byteLength}, decode(${bytes.toString("hex")}, 'hex'))
+      returning id`) as { id: string }[];
+    bundleKey = rows[0]!.id;
+  }
+  await sql`
+    insert into organization_sites (organization_id, repo, status, content_bundle_key, last_ingested_at)
+    values (${fx.orgId}::uuid, ${`org/site-${fx.slug}`}, 'live', ${bundleKey}::uuid, ${bundleKey ? new Date().toISOString() : null}::timestamptz)
+    on conflict (organization_id) do update set status = 'live', content_bundle_key = excluded.content_bundle_key`;
+}
+
+export async function removeSite(sql: Sql, fx: GivingFixture): Promise<void> {
+  assertFixtureSlug(fx.slug);
+  await sql`delete from organization_sites where organization_id = ${fx.orgId}::uuid`;
+}
+
+export type ReturnKind = "confirming" | "received" | "received_monthly" | "bank_pending" | "failed";
+
+/**
+ * Seeds one checkout intent (and, where the state needs it, one gift) so the
+ * return page can render each of its panels with no Stripe account. The session
+ * id is `cs_test_<kind>_fixture` (matches the reader's `^cs_[A-Za-z0-9_]{8,255}$`).
+ * The intent's connection must already exist (`setConnection`). Returns the id.
+ */
+export async function seedReturnIntent(
+  sql: Sql,
+  fx: GivingFixture,
+  connectionId: string,
+  kind: ReturnKind,
+  n: number,
+  sessionId = `cs_test_${kind}_fixture`,
+): Promise<string> {
+  const intentId = id(100 + n);
+  const monthly = kind === "received_monthly";
+  const status = kind === "failed" ? "failed" : kind === "confirming" ? "open" : "completed";
+  await sql`
+    insert into giving_checkout_intents (id, organization_id, connection_id, fund_id, donor_id, frequency, method_choice,
+           cover_fees, gift_amount_cents, donor_covered_fee_cents, total_cents, livemode, idempotency_key, status,
+           checkout_session_id, subscription_id, expires_at, completed_at)
+    values (${intentId}::uuid, ${fx.orgId}::uuid, ${connectionId}::uuid, ${fx.funds.general}::uuid, ${fx.donors.imogen}::uuid,
+            ${monthly ? "monthly" : "once"}, 'either', false, 3750, 0, 3750, false, ${id(200 + n)}, ${status},
+            ${sessionId}, ${monthly ? "sub_fixture_return_0001" : null}, now() + interval '1 day', ${status === "completed" ? new Date().toISOString() : null}::timestamptz)`;
+  if (kind === "received" || kind === "bank_pending") {
+    const giftStatus = kind === "received" ? "succeeded" : "pending";
+    await sql`
+      with armed as (select set_config('presby.giving_write_active', 'true', true))
+      insert into giving_gifts (organization_id, donor_id, fund_id, source, provider, connection_id, intent_id,
+             external_transaction_id, method, amount_cents, status, occurred_on, occurred_at, livemode)
+      select ${fx.orgId}::uuid, ${fx.donors.imogen}::uuid, ${fx.funds.general}::uuid, 'online', 'stripe', ${connectionId}::uuid,
+             ${intentId}::uuid, ${`ch_fixture_${kind}_0001`}, ${kind === "received" ? "card" : "us_bank_account"}, 3750,
+             ${giftStatus}, current_date, now(), false
+        from armed`;
+  }
+  return sessionId;
+}
+
+/** The newest checkout intent the fixture org has (what the hydration spec asserts persisted). */
+export async function latestIntents(sql: Sql, fx: GivingFixture) {
+  return (await sql`
+    select fund_id, frequency, gift_amount_cents, total_cents, donor_covered_fee_cents, cover_fees, method_choice, status
+      from giving_checkout_intents
+     where organization_id = ${fx.orgId}::uuid
+     order by created_at desc`) as {
+    fund_id: string; frequency: string; gift_amount_cents: number; total_cents: number;
+    donor_covered_fee_cents: number; cover_fees: boolean; method_choice: string; status: string;
+  }[];
 }
 
 /** An inbox event for the fixture org's connection in a given status (a dead letter for the requeue spec). */

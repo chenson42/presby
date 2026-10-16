@@ -12,6 +12,7 @@ import { ContactForm } from "../contact-form";
 import { PresbyteryFallback } from "../presbytery-fallback";
 import { PublicStaffDirectory } from "../staff-directory";
 import { PublicCommitteeDirectory } from "../committee-directory";
+import { PublicGivingSlot } from "../public-giving-slot";
 
 /**
  * DECISION-121 — org types that get the minimal sign-in fallback instead of
@@ -329,6 +330,9 @@ export default async function PublicSitePage({
       committeeDirectory: (filter) => (
         <PublicCommitteeDirectory slug={slug} filter={filter} />
       ),
+      // Closes over `slug` only; the marker's `filter.fund` is validated
+      // against the organization's online funds inside the slot.
+      giving: (filter) => <PublicGivingSlot slug={slug} filter={filter} />,
     },
   });
 

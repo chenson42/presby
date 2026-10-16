@@ -11,9 +11,11 @@ import { TEST_MODE_BADGE } from "@/lib/giving/giving-copy";
  * Not colour alone: an icon, the words "Test mode", and a dashed border (it
  * survives a black-and-white print). A server component with no data; the
  * decision to render it is the caller's (`admin/giving/test-mode-slot.tsx`).
+ * `detail` lets the donor-facing give page say the same fact in a donor's words
+ * (the default speaks to the treasurer: "Your Stripe account").
  * Platform tokens only - the same neutral surface on every brand.
  */
-export function TestModeBadge({ className }: { className?: string }) {
+export function TestModeBadge({ className, detail }: { className?: string; detail?: string }) {
   return (
     <div
       role="status"
@@ -22,7 +24,7 @@ export function TestModeBadge({ className }: { className?: string }) {
     >
       <FlaskConical className="mt-0.5 size-5 shrink-0" aria-hidden />
       <p className="text-sm">
-        <span className="font-semibold">{TEST_MODE_BADGE.label}.</span> {TEST_MODE_BADGE.detail}
+        <span className="font-semibold">{TEST_MODE_BADGE.label}.</span> {detail ?? TEST_MODE_BADGE.detail}
       </p>
     </div>
   );

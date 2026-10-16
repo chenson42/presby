@@ -51,6 +51,11 @@ vi.mock("@/lib/org-features", () => ({
   listFeatureToggles: (...args: unknown[]) => listFeatureToggles(...args),
 }));
 
+const loadOffWarnings = vi.fn();
+vi.mock("@/lib/org-feature-warnings", () => ({
+  loadOffWarnings: (...args: unknown[]) => loadOffWarnings(...args),
+}));
+
 const listFeatureCategories = vi.fn();
 vi.mock("@/lib/org-feature-categories", () => ({
   listFeatureCategories: (...args: unknown[]) => listFeatureCategories(...args),
@@ -100,6 +105,7 @@ afterEach(() => {
   isFlagEnabled.mockReset();
   listFeatureToggles.mockReset();
   listFeatureCategories.mockReset();
+  loadOffWarnings.mockReset().mockResolvedValue({});
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -364,5 +370,45 @@ describe("FeaturesPage — category-picker section (docs/work-log/2026-08-27-fea
       screen.getByText(/don.t have permission to manage features/i),
     ).toBeTruthy();
     expect(listFeatureToggles).not.toHaveBeenCalled();
+  });
+});
+
+describe("FeaturesPage — page-side OFF warnings (docs/work-log/2026-10-15-online-giving.md)", () => {
+  const TOGGLES = {
+    kind: "ok" as const,
+    toggles: [
+      { key: "org_portal.giving", name: "Giving", description: "Giving.", enabled: true, updatedAt: null, updatedByEmail: null, category: "giving", categoryLabel: "Giving & Finance", categoryEnabled: true },
+      { key: "org_portal.calendar", name: "Calendar", description: "Cal.", enabled: false, updatedAt: null, updatedByEmail: null, category: "worship", categoryLabel: "Worship", categoryEnabled: true },
+    ],
+  };
+
+  it("asks for warnings for the toggles that are currently ON only, with the resolved person and organization", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ features: true });
+    listFeatureToggles.mockResolvedValue(TOGGLES);
+    await FeaturesPage({ params: makeParams() });
+    expect(loadOffWarnings).toHaveBeenCalledWith("person-1", "org-1", ["org_portal.giving"]);
+  });
+
+  it("an OrgAccessError from the warning read is rethrown; an unexpected error never hides the page", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ features: true });
+    listFeatureToggles.mockResolvedValue(TOGGLES);
+    loadOffWarnings.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
+    await expect(FeaturesPage({ params: makeParams() })).rejects.toThrow("mock: no active membership");
+    loadOffWarnings.mockRejectedValue(new Error("boom"));
+    render(await FeaturesPage({ params: makeParams() }));
+    expect(screen.getByRole("heading", { name: /^giving$/i })).toBeTruthy();
+  });
+
+  it("is never read for a forbidden viewer (no toggles list, no warning query)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ features: true });
+    listFeatureToggles.mockResolvedValue({ kind: "forbidden" });
+    await FeaturesPage({ params: makeParams() });
+    expect(loadOffWarnings).not.toHaveBeenCalled();
   });
 });

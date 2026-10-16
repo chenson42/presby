@@ -17,6 +17,7 @@ import {
   FeaturesForbidden,
   FeaturesLoadError,
 } from "./features-states";
+import { loadOffWarnings, type OffWarning } from "@/lib/org-feature-warnings";
 import { FeaturesList } from "./features-list";
 import { FeatureCategoriesList } from "./feature-categories-list";
 
@@ -148,6 +149,23 @@ export default async function FeaturesPage({
     return <FeaturesForbidden name={resolved.org.name} />;
   }
 
+  // Page-side "turning this OFF has a consequence" warnings (a registry the
+  // catalog never imports - DECISION-130's one-way rule). Only for toggles
+  // that are ON and have an entry; today that is Giving's active monthly
+  // gifts. A failure to read one becomes a generic warning, never silence.
+  let offWarnings: Record<string, OffWarning> = {};
+  try {
+    offWarnings = await loadOffWarnings(
+      resolved.org.personId,
+      resolved.org.organizationId,
+      togglesResult.toggles.filter((t) => t.enabled).map((t) => t.key),
+    );
+  } catch (err) {
+    if (err instanceof OrgAccessError) {
+      throw err;
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div>
@@ -159,7 +177,7 @@ export default async function FeaturesPage({
 
       {categories && <FeatureCategoriesList slug={slug} categories={categories} />}
 
-      <FeaturesList slug={slug} toggles={togglesResult.toggles} />
+      <FeaturesList slug={slug} toggles={togglesResult.toggles} offWarnings={offWarnings} />
     </section>
   );
 }

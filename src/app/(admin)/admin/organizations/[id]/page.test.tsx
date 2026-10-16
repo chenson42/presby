@@ -72,6 +72,23 @@ vi.mock("./founding-administrator-section", () => ({
   },
 }));
 
+const mockCountGiving = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/treasurer-designation", () => ({
+  countGivingManageHolders: (...args: unknown[]) => mockCountGiving(...args),
+  // The real predicate is a one-line allow-list; restated here so the page's
+  // branching is exercised, not the mock's.
+  treasurerDesignationApplies: (t: string) =>
+    t === "congregation" || t === "new_worshiping_community",
+}));
+
+const treasurerSectionSpy = vi.hoisted(() => vi.fn());
+vi.mock("./treasurer-designation-section", () => ({
+  TreasurerDesignationSection: (props: unknown) => {
+    treasurerSectionSpy(props);
+    return <div data-testid="treasurer-section" />;
+  },
+}));
+
 const mockGetAffiliation = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/org-provisioning", () => ({
   getOrganizationAffiliationAdminDetail: (...args: unknown[]) =>
@@ -108,6 +125,7 @@ const ORG_ID = "e0000000-0000-0000-0000-000000000001";
 
 beforeEach(() => {
   mockGetAffiliation.mockResolvedValue(null);
+  mockCountGiving.mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -117,6 +135,8 @@ afterEach(() => {
   mockCountHolders.mockReset();
   mockPlan.mockReset();
   foundingSectionSpy.mockReset();
+  mockCountGiving.mockReset();
+  treasurerSectionSpy.mockReset();
   orgRowRef.current = null;
   brandRowRef.current = null;
   selectCallCount.current = 0;
@@ -190,6 +210,82 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
     expect(props.canDesignate).toBe(false);
     expect(props.currentHolderCount).toBe(2);
     expect(props.officeTemplateName).toBeNull();
+  });
+});
+
+describe("OrganizationBrandDetailPage — treasurer-designation gate props (online giving, R2)", () => {
+  function arrangeOrg(organizationType: string) {
+    mockAuth.mockResolvedValue({
+      user: { features: [FEATURES.ADMIN_ORGANIZATIONS] },
+    });
+    orgRowRef.current = {
+      id: ORG_ID,
+      name: "Alder Creek Presbyterian Church",
+      organizationType,
+      platformStatus: "managed",
+    };
+    mockCountHolders.mockResolvedValue(0);
+    mockPlan.mockReturnValue({
+      administration: { key: "founding_administrator", name: "x", permissionKeys: [] },
+      officeTemplateKey: null,
+    });
+  }
+
+  it("a congregation with no giving.manage holder gets canDesignate: true and a fresh count of 0", async () => {
+    arrangeOrg("congregation");
+    mockCountGiving.mockResolvedValue(0);
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(mockCountGiving).toHaveBeenCalledWith(expect.anything(), ORG_ID);
+    expect(treasurerSectionSpy).toHaveBeenCalledTimes(1);
+    const props = treasurerSectionSpy.mock.calls[0][0];
+    expect(props).toEqual({
+      organizationId: ORG_ID,
+      organizationName: "Alder Creek Presbyterian Church",
+      canDesignate: true,
+      currentHolderCount: 0,
+    });
+  });
+
+  it("a congregation that already has holders gets canDesignate: false and the COUNT only (no names are ever passed)", async () => {
+    arrangeOrg("congregation");
+    mockCountGiving.mockResolvedValue(2);
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    const props = treasurerSectionSpy.mock.calls[0][0];
+    expect(props.canDesignate).toBe(false);
+    expect(props.currentHolderCount).toBe(2);
+    expect(Object.keys(props).sort()).toEqual([
+      "canDesignate",
+      "currentHolderCount",
+      "organizationId",
+      "organizationName",
+    ]);
+  });
+
+  it("a new worshiping community renders the section", async () => {
+    arrangeOrg("new_worshiping_community");
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(treasurerSectionSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["presbytery", "synod", "general_assembly"])(
+    "a %s renders NO treasurer section and the page does not even read the holder count",
+    async (type) => {
+      arrangeOrg(type);
+      render(await OrganizationBrandDetailPage({ params: makeParams() }));
+      expect(treasurerSectionSpy).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("treasurer-section")).toBeNull();
+      expect(mockCountGiving).not.toHaveBeenCalled();
+    },
+  );
+
+  it("stacks the treasurer section directly after the founding-administrator section", async () => {
+    arrangeOrg("congregation");
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    const founding = screen.getByTestId("founding-section");
+    const treasurer = screen.getByTestId("treasurer-section");
+    expect(
+      Boolean(founding.compareDocumentPosition(treasurer) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
   });
 });
 

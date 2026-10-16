@@ -270,19 +270,23 @@ describe.skipIf(!hasDb)(
         expect(offeredCategories("congregation")).toContain("governance");
       });
 
-      it("presbytery: also offers every domain (governance carries both universal and presbytery-only tiles)", () => {
+      it("presbytery: offers every domain EXCEPT giving (governance carries both universal and presbytery-only tiles; both giving tiles are scoped to congregation/NWC — online giving, Batch 1b)", () => {
         const categories = offeredCategories("presbytery");
         expect(categories).not.toContain("administration");
+        expect(categories).not.toContain("giving");
         expect(categories).toEqual(
           expect.arrayContaining([
             "people",
             "worship",
-            "giving",
             "governance",
             "reports",
             "communications",
           ]),
         );
+      });
+
+      it("new worshiping community: offers the giving domain (the giving tiles' orgTypeScope includes it)", () => {
+        expect(offeredCategories("new_worshiping_community")).toContain("giving");
       });
 
       it("order follows DOMAIN_ORDER, not declaration order in PORTAL_TILES", () => {

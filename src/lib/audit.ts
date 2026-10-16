@@ -341,6 +341,62 @@ export const AUDIT_ACTIONS = {
   // never the designee's email.
   ORG_FOUNDING_ADMINISTRATOR_DESIGNATED: "org.founding_administrator.designated",
   // ---------------------------------------------------------------------------
+  // APPENDED — pipeline/online-giving, 2026-10-15 (docs/work-log/
+  // 2026-10-15-online-giving.md, Phase 3 "AUDIT_ACTIONS keys"). EVERY giving
+  // key, all batches, declared up front so later batches never edit this file.
+  // Existing string values above stay frozen. Metadata is ids and counts only
+  // — never a donor's name, email or address, and never an amount alongside an
+  // identity (amountCents only where the contract says so).
+  //   - `org.*` keys are PLATFORM-actor acts against a tenant (resourceId = the
+  //     tenant's organizationId, F18): ORG_TREASURER_DESIGNATED is written from
+  //     src/app/(admin)/admin/organizations/[id]/actions.ts;
+  //     ORG_GIVING_EVENT_REQUEUED from src/app/(admin)/admin/giving/actions.ts.
+  //   - `tenant.giving_*` keys are written from the co-located
+  //     src/app/(org)/o/[slug]/admin/giving/**/actions.ts files (user actor),
+  //     or are hand-audited system/route-handler writes that `check:audit`
+  //     (which scans only actions.ts) cannot see: src/lib/giving/ingest/
+  //     process.ts (CONNECTION_STATUS_CHANGED, REVERSAL_RECORDED,
+  //     EVENT_DEAD_LETTERED, DONOR_AUTOLINKED, DONOR_LINK_CONFLICT; actor
+  //     null), gifts/export/route.ts (GIFTS_EXPORTED) and the statement
+  //     download / print-run route handlers (STATEMENT_DOWNLOADED,
+  //     STATEMENTS_BULK_DOWNLOADED). Same precedent as RATE_LIMIT_BLOCKED and
+  //     SITE_CONTENT_INGESTED above.
+  //   - The giving-team grant/revoke reuses TENANT_ROLE_GRANTED/_REVOKED with
+  //     metadata.path = "giving_team"; the per-org toggle reuses
+  //     ORG_FEATURE_TOGGLED. Neither has a key of its own.
+  // Designation metadata: { organizationId, personId, roleId, permissionKeys }.
+  ORG_TREASURER_DESIGNATED: "org.treasurer.designated",
+  ORG_GIVING_EVENT_REQUEUED: "org.giving_event.requeued",
+  GIVING_CONNECTION_CREATED: "tenant.giving_connection.created",
+  GIVING_CONNECTION_STATUS_CHANGED: "tenant.giving_connection.status_changed",
+  GIVING_CONNECTION_DISCONNECTED: "tenant.giving_connection.disconnected",
+  GIVING_PUBLIC_PAGE_TOGGLED: "tenant.giving_connection.public_toggled",
+  GIVING_CONNECTION_RATES_CHANGED: "tenant.giving_connection.rates_changed",
+  GIVING_FUND_CREATED: "tenant.giving_fund.created",
+  GIVING_FUND_UPDATED: "tenant.giving_fund.updated",
+  GIVING_FUND_RETIRED: "tenant.giving_fund.retired",
+  GIVING_FUND_REACTIVATED: "tenant.giving_fund.reactivated",
+  GIVING_SETTINGS_CHANGED: "tenant.giving_settings.changed",
+  GIVING_GIFT_RECORDED: "tenant.giving_gift.recorded",
+  GIVING_GIFT_VOIDED: "tenant.giving_gift.voided",
+  GIVING_REVERSAL_RECORDED: "tenant.giving_reversal.recorded",
+  GIVING_EVENT_DEAD_LETTERED: "tenant.giving_event.dead_lettered",
+  GIVING_DONOR_CREATED: "tenant.giving_donor.created",
+  GIVING_DONOR_CONTACT_CHANGED: "tenant.giving_donor.contact_changed",
+  GIVING_DONOR_MERGED: "tenant.giving_donor.merged",
+  GIVING_DONOR_LINK_CONFIRMED: "tenant.giving_donor.link_confirmed",
+  GIVING_DONOR_LINK_REMOVED: "tenant.giving_donor.link_removed",
+  GIVING_DONOR_LINK_DISMISSED: "tenant.giving_donor.link_dismissed",
+  GIVING_DONOR_AUTOLINKED: "tenant.giving_donor.autolinked",
+  GIVING_DONOR_LINK_CONFLICT: "tenant.giving_donor.link_conflict",
+  GIVING_GIFTS_EXPORTED: "tenant.giving_gifts.exported",
+  GIVING_STATEMENT_ISSUED: "tenant.giving_statement.issued",
+  GIVING_STATEMENT_REISSUED: "tenant.giving_statement.reissued",
+  GIVING_STATEMENT_NOTICE_SENT: "tenant.giving_statement.notice_sent",
+  GIVING_STATEMENT_DELIVERY_RECORDED: "tenant.giving_statement.delivery_recorded",
+  GIVING_STATEMENT_DOWNLOADED: "tenant.giving_statement.downloaded",
+  GIVING_STATEMENTS_BULK_DOWNLOADED: "tenant.giving_statements.bulk_downloaded",
+  // ---------------------------------------------------------------------------
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

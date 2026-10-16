@@ -39,6 +39,10 @@ export const permissions = pgTable("permissions", {
   description: text("description").notNull(),
   // 1 directory | 2 financial | 3 pastoral, demographic, medical
   sensitivityTier: smallint("sensitivity_tier").notNull().default(1),
+  // drizzle/0055 section 2 (DECISION-170/175): holding a key with this set,
+  // at any active membership, requires 2FA at sign-in - read by arm B of
+  // presby_two_factor_required(). True for the three giving.* keys only.
+  requiresTwoFactor: boolean("requires_two_factor").notNull().default(false),
 });
 
 export const appRoles = pgTable(

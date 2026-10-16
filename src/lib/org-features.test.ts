@@ -18,7 +18,7 @@
  * `admin/roles/actions.test.ts` hit the identical constraint first.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
@@ -595,6 +595,250 @@ describe.skipIf(!hasDb)(
         expect(mockRecordAudit).toHaveBeenCalledWith(
           expect.objectContaining({ metadata: { organizationId: orgA, featureKey: CALENDAR, enabled: true } }),
         );
+      });
+    });
+
+    // -------------------------------------------------------------------
+    // Applicability (`orgTypes`) — online-giving Batch 1b, Phase 3
+    // "Permissions & Flags". The giving toggle exists only for a congregation
+    // or a new worshiping community. Orgs A and B are congregations; the
+    // NWC half and the presbytery half need their own fixture orgs (no NWC
+    // exists on `development`).
+    // -------------------------------------------------------------------
+    describe("orgTypes applicability — org_portal.giving", () => {
+      const GIVING = "org_portal.giving";
+      let orgPresbytery: string;
+      let orgNwc: string;
+      let presbyteryManager: string;
+      let nwcManager: string;
+
+      async function makeTypedOrg(
+        type: "presbytery" | "new_worshiping_community",
+        label: string,
+      ) {
+        const platform = getPlatformDb();
+        const stamp = Date.now();
+        const [org] = await platform
+          .insert(organizations)
+          .values({
+            deletableUntil: fixtureDeletableUntil(),
+            organizationType: type,
+            name: `Fixture ${label} for org-features.test.ts`,
+            slug: `org-features-test-${label.toLowerCase()}-${stamp}`,
+            path: `org_features_test_${label.toLowerCase()}_${stamp}`,
+            platformStatus: "unmanaged",
+          })
+          .returning({ id: organizations.id });
+        const organizationId = org!.id;
+
+        const [gt] = await platform
+          .select({ id: groupTypes.id })
+          .from(groupTypes)
+          .where(eq(groupTypes.key, "roster"))
+          .limit(1);
+        await platform.insert(groups).values({
+          organizationId,
+          groupTypeId: gt!.id,
+          name: "Active Membership",
+          membershipSource: "derived",
+          derivedFrom: "active_membership",
+          isProtected: true,
+        });
+
+        const [role] = await platform
+          .insert(appRoles)
+          .values({
+            organizationId,
+            key: "features_manager",
+            name: "Features Manager",
+            roleKind: "custom",
+          })
+          .returning({ id: appRoles.id });
+        await platform
+          .insert(appRolePermissions)
+          .values({ roleId: role!.id, permissionKey: "org_features.manage" });
+
+        const [p] = await platform
+          .insert(people)
+          .values({
+            firstName: "Odalys",
+            lastName: label,
+            deletableUntil: fixtureDeletableUntil(),
+          })
+          .returning({ id: people.id });
+        await platform.insert(memberships).values({
+          organizationId,
+          personId: p!.id,
+          engagementStatus: "regular",
+        });
+        await platform.insert(roleGrants).values({
+          organizationId,
+          roleId: role!.id,
+          personId: p!.id,
+          startsOn: "2020-01-01",
+        });
+        return { organizationId, personId: p!.id };
+      }
+
+      beforeAll(async () => {
+        const pres = await makeTypedOrg("presbytery", "Presbytery");
+        orgPresbytery = pres.organizationId;
+        presbyteryManager = pres.personId;
+        const nwc = await makeTypedOrg("new_worshiping_community", "Nwc");
+        orgNwc = nwc.organizationId;
+        nwcManager = nwc.personId;
+      });
+
+      afterAll(async () => {
+        const platform = getPlatformDb();
+        for (const id of [orgPresbytery, orgNwc]) {
+          await platform
+            .delete(organizationFeatureToggles)
+            .where(eq(organizationFeatureToggles.organizationId, id));
+        }
+        await platform.execute(
+          sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+        );
+        try {
+          for (const id of [orgPresbytery, orgNwc]) {
+            await platform.delete(organizations).where(eq(organizations.id, id));
+          }
+        } finally {
+          await platform.execute(
+            sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+          );
+        }
+        for (const id of [presbyteryManager, nwcManager]) {
+          await platform.delete(people).where(eq(people.id, id));
+        }
+      });
+
+      afterEach(async () => {
+        const platform = getPlatformDb();
+        for (const id of [orgA, orgPresbytery, orgNwc]) {
+          await platform
+            .delete(organizationFeatureToggles)
+            .where(
+              and(
+                eq(organizationFeatureToggles.organizationId, id),
+                eq(organizationFeatureToggles.featureKey, GIVING),
+              ),
+            );
+        }
+      });
+
+      async function viaTx(
+        personId: string,
+        organizationId: string,
+      ): Promise<boolean> {
+        return withOrgContext(personId, organizationId, (tx) =>
+          orgFeatureEnabledInTx(tx, organizationId, GIVING, false),
+        );
+      }
+
+      it("listFeatureToggles lists the giving entry for a congregation and an NWC, off by default (provisioned OFF)", async () => {
+        for (const [person, org] of [
+          [managerPerson, orgA],
+          [nwcManager, orgNwc],
+        ] as const) {
+          const result = await listFeatureToggles(person, org);
+          if (result.kind !== "ok") throw new Error("list failed");
+          const entry = result.toggles.find((t) => t.key === GIVING);
+          expect(entry).toMatchObject({
+            name: "Giving",
+            category: "giving",
+            enabled: false,
+          });
+        }
+      });
+
+      it("listFeatureToggles OMITS the giving entry for a presbytery (and still lists the three untyped entries)", async () => {
+        const result = await listFeatureToggles(presbyteryManager, orgPresbytery);
+        if (result.kind !== "ok") throw new Error("list failed");
+        const keys = result.toggles.map((t) => t.key);
+        expect(keys).not.toContain(GIVING);
+        expect(keys).toEqual(
+          expect.arrayContaining([
+            "org_portal.members_create",
+            "org_portal.sensitive_info",
+            "org_portal.calendar",
+          ]),
+        );
+      });
+
+      it("toggleOrgFeature turns giving on for a congregation and for an NWC, audited", async () => {
+        for (const [person, org] of [
+          [managerPerson, orgA],
+          [nwcManager, orgNwc],
+        ] as const) {
+          mockRecordAudit.mockClear();
+          const r = await toggleOrgFeature(person, org, grantingUserId, GIVING, true);
+          expect(r).toEqual({ kind: "ok" });
+          expect(await viaTx(person, org)).toBe(true);
+          expect(mockRecordAudit).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: { organizationId: org, featureKey: GIVING, enabled: true },
+            }),
+          );
+        }
+      });
+
+      it("toggleOrgFeature returns invalid_key for a presbytery, writes no row and no audit", async () => {
+        const r = await toggleOrgFeature(
+          presbyteryManager,
+          orgPresbytery,
+          grantingUserId,
+          GIVING,
+          true,
+        );
+        expect(r).toEqual({ kind: "invalid_key" });
+        expect(mockRecordAudit).not.toHaveBeenCalled();
+        const rows = await getPlatformDb()
+          .select({ k: organizationFeatureToggles.featureKey })
+          .from(organizationFeatureToggles)
+          .where(eq(organizationFeatureToggles.organizationId, orgPresbytery));
+        expect(rows.map((x) => x.k)).not.toContain(GIVING);
+      });
+
+      it("a non-holder at a presbytery still gets forbidden, not invalid_key (the permission check comes first)", async () => {
+        // outsiderPerson belongs to orgA only, so use a congregation outsider:
+        // forbidden must beat applicability for someone without the permission.
+        const r = await toggleOrgFeature(
+          outsiderPerson,
+          orgA,
+          grantingUserId,
+          GIVING,
+          true,
+        );
+        expect(r).toEqual({ kind: "forbidden" });
+      });
+
+      it("orgFeatureEnabledInTx is FALSE for a presbytery even with a stray enabled row, and TRUE for a congregation with the same row", async () => {
+        const platform = getPlatformDb();
+        await platform.insert(organizationFeatureToggles).values([
+          { organizationId: orgPresbytery, featureKey: GIVING, enabled: true, updatedBy: null },
+          { organizationId: orgA, featureKey: GIVING, enabled: true, updatedBy: null },
+        ]);
+        expect(await viaTx(presbyteryManager, orgPresbytery)).toBe(false);
+        expect(
+          await isOrgFeatureEnabled(presbyteryManager, orgPresbytery, GIVING),
+        ).toBe(false);
+        expect(await viaTx(managerPerson, orgA)).toBe(true);
+      });
+
+      it("the untyped entries are unaffected at a presbytery (calendar still resolves from its row)", async () => {
+        await getPlatformDb()
+          .insert(organizationFeatureToggles)
+          .values({
+            organizationId: orgPresbytery,
+            featureKey: "org_portal.calendar",
+            enabled: true,
+            updatedBy: null,
+          });
+        const on = await withOrgContext(presbyteryManager, orgPresbytery, (tx) =>
+          orgFeatureEnabledInTx(tx, orgPresbytery, "org_portal.calendar", false),
+        );
+        expect(on).toBe(true);
       });
     });
   },

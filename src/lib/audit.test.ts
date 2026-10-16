@@ -195,6 +195,39 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Founding administrator designation (2026-09-28, DECISION-155) — written
   // from src/app/(admin)/admin/organizations/[id]/actions.ts
   ORG_FOUNDING_ADMINISTRATOR_DESIGNATED: "org.founding_administrator.designated",
+  // Online giving (2026-10-15, docs/work-log/2026-10-15-online-giving.md) — every
+  // key of every batch, declared up front in Batch 1b.
+  ORG_TREASURER_DESIGNATED: "org.treasurer.designated",
+  ORG_GIVING_EVENT_REQUEUED: "org.giving_event.requeued",
+  GIVING_CONNECTION_CREATED: "tenant.giving_connection.created",
+  GIVING_CONNECTION_STATUS_CHANGED: "tenant.giving_connection.status_changed",
+  GIVING_CONNECTION_DISCONNECTED: "tenant.giving_connection.disconnected",
+  GIVING_PUBLIC_PAGE_TOGGLED: "tenant.giving_connection.public_toggled",
+  GIVING_CONNECTION_RATES_CHANGED: "tenant.giving_connection.rates_changed",
+  GIVING_FUND_CREATED: "tenant.giving_fund.created",
+  GIVING_FUND_UPDATED: "tenant.giving_fund.updated",
+  GIVING_FUND_RETIRED: "tenant.giving_fund.retired",
+  GIVING_FUND_REACTIVATED: "tenant.giving_fund.reactivated",
+  GIVING_SETTINGS_CHANGED: "tenant.giving_settings.changed",
+  GIVING_GIFT_RECORDED: "tenant.giving_gift.recorded",
+  GIVING_GIFT_VOIDED: "tenant.giving_gift.voided",
+  GIVING_REVERSAL_RECORDED: "tenant.giving_reversal.recorded",
+  GIVING_EVENT_DEAD_LETTERED: "tenant.giving_event.dead_lettered",
+  GIVING_DONOR_CREATED: "tenant.giving_donor.created",
+  GIVING_DONOR_CONTACT_CHANGED: "tenant.giving_donor.contact_changed",
+  GIVING_DONOR_MERGED: "tenant.giving_donor.merged",
+  GIVING_DONOR_LINK_CONFIRMED: "tenant.giving_donor.link_confirmed",
+  GIVING_DONOR_LINK_REMOVED: "tenant.giving_donor.link_removed",
+  GIVING_DONOR_LINK_DISMISSED: "tenant.giving_donor.link_dismissed",
+  GIVING_DONOR_AUTOLINKED: "tenant.giving_donor.autolinked",
+  GIVING_DONOR_LINK_CONFLICT: "tenant.giving_donor.link_conflict",
+  GIVING_GIFTS_EXPORTED: "tenant.giving_gifts.exported",
+  GIVING_STATEMENT_ISSUED: "tenant.giving_statement.issued",
+  GIVING_STATEMENT_REISSUED: "tenant.giving_statement.reissued",
+  GIVING_STATEMENT_NOTICE_SENT: "tenant.giving_statement.notice_sent",
+  GIVING_STATEMENT_DELIVERY_RECORDED: "tenant.giving_statement.delivery_recorded",
+  GIVING_STATEMENT_DOWNLOADED: "tenant.giving_statement.downloaded",
+  GIVING_STATEMENTS_BULK_DOWNLOADED: "tenant.giving_statements.bulk_downloaded",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;
@@ -226,6 +259,32 @@ describe("AUDIT_ACTIONS catalog — regression for audit-string drift", () => {
     const actualKeys = Object.keys(AUDIT_ACTIONS);
     for (const key of actualKeys) {
       expect(expectedKeys.has(key)).toBe(true);
+    }
+  });
+});
+
+describe("AUDIT_ACTIONS — online-giving keys (Batch 1b)", () => {
+  const givingKeys = Object.keys(AUDIT_ACTIONS).filter(
+    (k) => k.startsWith("GIVING_") || k === "ORG_TREASURER_DESIGNATED" || k === "ORG_GIVING_EVENT_REQUEUED",
+  ) as Array<keyof typeof AUDIT_ACTIONS>;
+
+  it("declares all 31 giving keys up front", () => {
+    expect(givingKeys).toHaveLength(31);
+  });
+
+  it("keeps every string value unique across the whole catalog (a duplicate would make two acts indistinguishable in audit_events)", () => {
+    const values = Object.values(AUDIT_ACTIONS);
+    expect(new Set(values).size).toBe(values.length);
+  });
+
+  it("puts platform-actor acts on the org.* axis and tenant acts on tenant.giving_*", () => {
+    for (const key of givingKeys) {
+      const value = AUDIT_ACTIONS[key];
+      if (key.startsWith("ORG_")) {
+        expect(value, key).toMatch(/^org\./);
+      } else {
+        expect(value, key).toMatch(/^tenant\.giving_[a-z_]+\.[a-z_]+$/);
+      }
     }
   });
 });

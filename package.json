@@ -36,9 +36,10 @@
     "check:deps-drift": "node scripts/check-deps-drift.mjs",
     "check:brand-scope": "node scripts/check-brand-scope.mjs",
     "check:hydration-gate": "node scripts/check-hydration-gate.mjs",
+    "check:giving-boundaries": "node scripts/check-giving-boundaries.mjs",
     "check:secrets": "node scripts/check-secrets-pii.mjs",
     "check:schema-parity": "dotenv -e .env.local -- tsx scripts/check-schema-parity.ts",
-    "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope && npm run check:secrets && npm run check:hydration-gate",
+    "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope && npm run check:secrets && npm run check:hydration-gate && npm run check:giving-boundaries",
     "docs:erd": "tsx scripts/generate-erd.ts"
   },
   "dependencies": {
@@ -75,6 +76,7 @@
     "resend": "^6.12.3",
     "server-only": "^0.0.1",
     "sonner": "^2.0.7",
+    "stripe": "23.0.0",
     "tailwind-merge": "^3.6.0",
     "tw-animate-css": "^1.4.0",
     "ws": "^8.21.3",

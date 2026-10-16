@@ -84,6 +84,80 @@ const config = [
     files: ["src/components/shared/formatted-date.tsx"],
     rules: { "no-restricted-syntax": "off" },
   },
+  // Online giving, R8 / Phase 2 S1 / P3-2 (docs/work-log/2026-10-15-online-giving.md):
+  // the `stripe` package is imported at runtime by EXACTLY ONE file,
+  // src/lib/giving/providers/stripe/client.ts, the allowlist module — the only
+  // code a restricted key's scope has to be reasoned about for. The same rule is
+  // enforced independently, in CI and in `npm run check`, by
+  // scripts/check-giving-boundaries.mjs (B1/B2); this block is the editor-time
+  // half. Three layers, later config winning:
+  //   1. Everywhere under src/: "stripe" and "stripe/*" are restricted, TYPE
+  //      imports included (the provider-neutral core knows no provider's types).
+  //   2. Inside the provider folder: type-only imports are allowed (normalize.ts
+  //      and status.ts type their inputs with the SDK's types).
+  //   3. client.ts, and test files in the provider folder (the replay harness
+  //      signs payloads with the SDK's own test-header helper): unrestricted.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "stripe",
+              message:
+                "Only src/lib/giving/providers/stripe/client.ts imports the stripe package (R8). Call one of its exports.",
+            },
+          ],
+          patterns: [
+            {
+              group: ["stripe/*"],
+              message:
+                "Only src/lib/giving/providers/stripe/client.ts imports the stripe package (R8). Call one of its exports.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/lib/giving/providers/stripe/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": "off",
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "stripe",
+              allowTypeImports: true,
+              message:
+                "Only client.ts imports the stripe package at runtime (R8); type-only imports are fine in this folder.",
+            },
+          ],
+          patterns: [
+            {
+              group: ["stripe/*"],
+              allowTypeImports: true,
+              message:
+                "Only client.ts imports the stripe package at runtime (R8); type-only imports are fine in this folder.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "src/lib/giving/providers/stripe/client.ts",
+      "src/lib/giving/providers/stripe/**/*.test.{ts,tsx}",
+    ],
+    rules: {
+      "no-restricted-imports": "off",
+      "@typescript-eslint/no-restricted-imports": "off",
+    },
+  },
 ];
 
 export default config;

@@ -40,7 +40,14 @@ beforeEach(() => {
   isOrgFeatureEnabled.mockReset().mockResolvedValue(false);
   catalog.length = 0;
   catalog.push({ key: "org_portal.calendar", flag: null });
+  catalog.push({ key: "org_portal.giving", flag: null });
 });
+
+/** Turns exactly the named org-toggle keys on. */
+const toggleOn = (...keys: string[]) =>
+  isOrgFeatureEnabled.mockImplementation(
+    async (_person: string, _org: string, key: string) => keys.includes(key),
+  );
 
 describe("visiblePortalTiles(category, organizationType, viewer) — category, then org-type scope, then flag(s), then org toggle", () => {
   it("returns no operate tiles when every flag is off", async () => {
@@ -60,9 +67,13 @@ describe("visiblePortalTiles(category, organizationType, viewer) — category, t
     isOrgFeatureEnabled.mockResolvedValue(true);
     const tiles = await visiblePortalTiles("operate", "presbytery", VIEWER);
     const expectedKeys = PORTAL_TILES.filter(
-      (t) => t.category === "operate",
+      (t) =>
+        t.category === "operate" &&
+        (!t.orgTypeScope || t.orgTypeScope.includes("presbytery")),
     ).map((t) => t.key);
     expect(tiles.map((t) => t.key).sort()).toEqual(expectedKeys.sort());
+    // The giving tiles are scoped to congregation/NWC: excluded here by scope.
+    expect(tiles.map((t) => t.key)).not.toContain("giving");
     for (const tile of tiles) {
       expect(tile.category).toBe("operate");
     }
@@ -181,10 +192,36 @@ describe("visiblePortalTiles(category, organizationType, viewer) — category, t
     expect(tiles.map((t) => t.key)).toEqual(["branding"]);
   });
 
-  it("giving tile is independent — org_portal.giving on, everything else off (operate)", async () => {
+  it("giving tiles are toggle-only — org_portal.giving ON as an ORG TOGGLE shows 'giving' (operate) and 'giving-admin' (administer); no platform flag is consulted for them (R11)", async () => {
+    isFlagEnabled.mockResolvedValue(false);
+    toggleOn("org_portal.giving");
+    const operate = await visiblePortalTiles("operate", "congregation", VIEWER);
+    expect(operate.map((t) => t.key)).toEqual(["giving"]);
+    const administer = await visiblePortalTiles("administer", "congregation", VIEWER);
+    expect(administer.map((t) => t.key)).toEqual(["giving-admin"]);
+    expect(isFlagEnabled).not.toHaveBeenCalledWith("org_portal.giving");
+  });
+
+  it("giving tiles are hidden when only the retired platform flag name is 'on' and the org toggle is off (the flag no longer gates anything)", async () => {
     isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.giving");
-    const tiles = await visiblePortalTiles("operate", "congregation", VIEWER);
-    expect(tiles.map((t) => t.key)).toEqual(["giving"]);
+    isOrgFeatureEnabled.mockResolvedValue(false);
+    expect(
+      (await visiblePortalTiles("operate", "congregation", VIEWER)).map((t) => t.key),
+    ).toEqual([]);
+    expect(
+      (await visiblePortalTiles("administer", "congregation", VIEWER)).map((t) => t.key),
+    ).toEqual([]);
+  });
+
+  it("giving tiles show at a new worshiping community but never at a presbytery, even with the toggle on (orgTypeScope, equal to the catalog's orgTypes)", async () => {
+    isFlagEnabled.mockResolvedValue(false);
+    toggleOn("org_portal.giving");
+    const nwc = await visiblePortalTiles("operate", "new_worshiping_community", VIEWER);
+    expect(nwc.map((t) => t.key)).toEqual(["giving"]);
+    const presbytery = await visiblePortalTiles("operate", "presbytery", VIEWER);
+    expect(presbytery.map((t) => t.key)).not.toContain("giving");
+    const presbyteryAdmin = await visiblePortalTiles("administer", "presbytery", VIEWER);
+    expect(presbyteryAdmin.map((t) => t.key)).not.toContain("giving-admin");
   });
 
   it("worship tile is independent — org_portal.worship on, everything else off (operate)", async () => {
@@ -224,7 +261,11 @@ describe("visiblePortalTiles(category, organizationType, viewer) — category, t
     isOrgFeatureEnabled.mockResolvedValue(true);
     const tiles = await visiblePortalTiles("operate", "presbytery", VIEWER);
     expect(tiles.map((t) => t.key)).toEqual(
-      PORTAL_TILES.filter((t) => t.category === "operate").map((t) => t.key),
+      PORTAL_TILES.filter(
+        (t) =>
+          t.category === "operate" &&
+          (!t.orgTypeScope || t.orgTypeScope.includes("presbytery")),
+      ).map((t) => t.key),
     );
   });
 
@@ -334,7 +375,7 @@ describe("visiblePortalTiles(category, organizationType, viewer) — category, t
 describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F135)", () => {
   it("shows the calendar tile when the org toggle is on and no platform flag is on", async () => {
     isFlagEnabled.mockResolvedValue(false);
-    isOrgFeatureEnabled.mockResolvedValue(true);
+    toggleOn("org_portal.calendar");
     const tiles = await visiblePortalTiles("operate", "congregation", VIEWER);
     expect(tiles.map((t) => t.key)).toEqual(["calendar"]);
     expect(isOrgFeatureEnabled).toHaveBeenCalledWith(
@@ -391,12 +432,26 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
   it("never reads the toggle for a tile an earlier filter excluded (category, org-type scope)", async () => {
     isFlagEnabled.mockResolvedValue(true);
     isOrgFeatureEnabled.mockResolvedValue(true);
-    // calendar is `operate`: an `administer` call must never consult its toggle.
+    // calendar is `operate`: an `administer` call must never consult its
+    // toggle — it consults only giving-admin's.
     await visiblePortalTiles("administer", "congregation", VIEWER);
-    expect(isOrgFeatureEnabled).not.toHaveBeenCalled();
-    // ...and an operate call does, exactly once, for the one toggle-gated tile.
+    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2])).toEqual([
+      "org_portal.giving",
+    ]);
+    isOrgFeatureEnabled.mockClear();
+    // ...and an operate call does, once each, for the two toggle-gated tiles.
     await visiblePortalTiles("operate", "congregation", VIEWER);
-    expect(isOrgFeatureEnabled).toHaveBeenCalledTimes(1);
+    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
+      "org_portal.calendar",
+      "org_portal.giving",
+    ]);
+    isOrgFeatureEnabled.mockClear();
+    // A presbytery's operate call never reads the giving toggle: orgTypeScope
+    // excludes the tile before any gate read.
+    await visiblePortalTiles("operate", "presbytery", VIEWER);
+    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2])).toEqual([
+      "org_portal.calendar",
+    ]);
   });
 
   it("reads the catalog entry's own platform flag when it is non-null, BEFORE the toggle", async () => {
@@ -411,16 +466,23 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
     );
     const tiles = await visiblePortalTiles("operate", "congregation", VIEWER);
     expect(tiles.map((t) => t.key)).not.toContain("calendar");
-    expect(isOrgFeatureEnabled).not.toHaveBeenCalled();
+    // The killed calendar's toggle is never read (giving's, unrelated, is).
+    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2])).not.toContain(
+      "org_portal.calendar",
+    );
   });
 
-  it("with every platform flag off, only the toggle-only tile reads a toggle (flag-gated tiles are excluded before any toggle read)", async () => {
+  it("with every platform flag off, only the toggle-only tiles read a toggle (flag-gated tiles are excluded before any toggle read)", async () => {
     isFlagEnabled.mockResolvedValue(false);
     await visiblePortalTiles("operate", "congregation", VIEWER);
     await visiblePortalTiles("administer", "congregation", VIEWER);
-    // calendar has no flagKey, so its toggle IS read on the operate call —
-    // that is the only read.
-    expect(isOrgFeatureEnabled).toHaveBeenCalledTimes(1);
+    // calendar and giving have no flagKey, so their toggles ARE read on the
+    // operate call; giving-admin's on the administer call. Nothing else.
+    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
+      "org_portal.calendar",
+      "org_portal.giving",
+      "org_portal.giving",
+    ]);
   });
 
   it("puts 'events' in administer and 'calendar' in operate, in PORTAL_TILES declaration order", async () => {

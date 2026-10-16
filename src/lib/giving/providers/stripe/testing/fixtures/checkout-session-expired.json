@@ -1,0 +1,31 @@
+{
+  "id": "evt_fixtureCheckoutSessionExpired",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790000000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "checkout.session.expired",
+  "data": {
+    "object": {
+      "id": "cs_fixtureExpired0001",
+      "object": "checkout.session",
+      "mode": "payment",
+      "currency": "usd",
+      "customer": null,
+      "customer_details": null,
+      "client_reference_id": null,
+      "metadata": {
+        "presby_intent_id": "00000000-0000-4000-8000-000000000000"
+      },
+      "payment_method_types": [
+        "card"
+      ],
+      "created": 1789999940,
+      "payment_status": "unpaid",
+      "payment_intent": null,
+      "amount_total": 5000,
+      "subscription": null
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "evt_fixtureChargeDisputeCreatedAch",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790864000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "charge.dispute.created",
+  "data": {
+    "object": {
+      "id": "dp_fixtureReturn000001",
+      "object": "dispute",
+      "amount": 10000,
+      "currency": "usd",
+      "payment_intent": "pi_fixtureAch00000001",
+      "charge": "ch_fixtureCharge000002",
+      "status": "needs_response",
+      "reason": "debit_not_authorized",
+      "payment_method_details": {
+        "type": "us_bank_account"
+      },
+      "created": 1790864000
+    }
+  }
+}

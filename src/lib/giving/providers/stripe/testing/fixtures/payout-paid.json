@@ -1,0 +1,21 @@
+{
+  "id": "evt_fixturePayoutPaid",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790100000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "payout.paid",
+  "data": {
+    "object": {
+      "id": "po_fixturePayout000001",
+      "object": "payout",
+      "amount": 12000,
+      "currency": "usd",
+      "arrival_date": 1790100000,
+      "automatic": true,
+      "status": "paid",
+      "type": "bank_account"
+    }
+  }
+}

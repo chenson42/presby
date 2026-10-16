@@ -1,0 +1,22 @@
+{
+  "id": "evt_fixturePayoutFailed",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790200000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "payout.failed",
+  "data": {
+    "object": {
+      "id": "po_fixturePayout000002",
+      "object": "payout",
+      "amount": 7500,
+      "currency": "usd",
+      "arrival_date": 1790200000,
+      "automatic": true,
+      "status": "failed",
+      "type": "bank_account",
+      "failure_code": "account_closed"
+    }
+  }
+}

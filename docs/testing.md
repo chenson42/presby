@@ -254,6 +254,63 @@ If the build ever flakes anyway, `rm -rf "$SCRATCH/app/.next"` and retry. A nega
 
 ---
 
+## Online giving: the signed-event replay harness
+
+Online giving's riskiest code is the webhook, and there is no Stripe account in
+CI. So the webhook is tested the way Stripe would drive it: fixture event bodies
+(`src/lib/giving/providers/stripe/testing/fixtures/*.json`, one per handled event
+type, all invented data) are **signed with the real scheme** and POSTed to the
+**real route** of a running dev server, against the real database.
+
+```bash
+# The server needs the two secrets this spec signs with. NON-key-shaped literals:
+# the SDK only needs HMAC bytes, and a key-shaped string in a public repo is a
+# check:secrets finding. STRIPE_SECRET_KEY stays UNSET - the webhook verifies with
+# the SDK's static helper, and that is part of what is proved.
+# <!-- leak-ok: non-key-shaped test literals, not credentials -->
+STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret CRON_SECRET=giving-e2e-cron-secret \
+  RATE_LIMIT_DISABLED=true npx next dev -p 3100 &
+E2E_BASE_URL=http://localhost:3100 npx playwright test e2e/giving-webhook.spec.ts
+```
+
+`playwright.config.ts` passes both secrets to a server *it* starts, so
+`npm run test:e2e` needs nothing extra; a server you started yourself needs them
+in its environment, and the spec's first test says so in words rather than
+failing every case with a 503. Stop only the server you started.
+
+What the spec proves, end to end: a bad signature is a 400 and writes nothing; a
+good one is a 200 and the gift is applied from presby's own intent (a body naming
+a foreign fund changes nothing); a byte-identical replay is a no-op; an unknown
+account and a `livemode` mismatch get the **same 200** and write nothing; a refund
+that arrives *before* its gift parks and then applies exactly once after the gift
+(the cron retries it); an over-reversal dead-letters and shows on the
+congregation's giving overview as a **count only**; `account.application.deauthorized`
+disconnects and is audited as a system act; a wrong API version dead-letters with
+its code. The secret-unset 503 is a unit test (`route.test.ts`): a running dev
+server's environment cannot change per request.
+
+The fixture signer is `testing/sign-event.ts` (`node:crypto`, so Playwright and
+the tripwire-restricted tree can import it); `sign-event.test.ts` proves its
+header is byte-for-byte what the Stripe SDK's own `generateTestHeaderString`
+produces and that `Stripe.webhooks.constructEvent` accepts it.
+
+The rest of the batch is covered by layers that need no server:
+
+| Layer | Where | Run |
+|---|---|---|
+| Pure: `normalize` (a fixture per event type, anomalies), `status` (v1/v2 agreement table), origin assertions (look-alike hosts, userinfo, ports), request builders, outcome aggregation + audit planning | `src/lib/giving/providers/stripe/*.test.ts`, `src/lib/giving/ingest/outcome.test.ts` | `npm run test` |
+| The allowlist: exact export set, forbidden-method grep, SDK-pinned API version, a failure whose message contains the secret never leaks it | `client.test.ts`, `client.sdk.test.ts` (fake SDK) | `npm run test` |
+| Processor orchestration with mocked database and client; routes with mocked ingest | `ingest/process.test.ts`, `src/app/api/**/route.test.ts` | `npm run test` |
+| The SECURITY DEFINER apply functions, inbox lifecycle (back-off, ageing, dead letters), the processor against the real database with a mocked Stripe client, the connection library, the owner-only health reader | `ingest/*.db.test.ts`, `connection.db.test.ts`, `src/lib/admin/giving-ingest-health.db.test.ts` | `npm run test:db` |
+
+**Not covered, and why.** Nothing here calls Stripe: not the account create, the
+onboarding link, Checkout, the balance-transaction or invoice reads, or a real
+`account.updated` for a v2 account. Those need the operator's test-mode platform
+account and are the smoke checklist in `docs/deployment.md` → "Online giving
+(Stripe)". Automating Stripe-hosted Checkout is out of scope permanently.
+
+---
+
 ## Continuous integration
 
 Two workflows run the database-backed suites on an ephemeral Neon branch:

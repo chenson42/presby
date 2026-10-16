@@ -1,0 +1,16 @@
+{
+  "id": "evt_fixtureAccountApplicationDeauthorized",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790000000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "account.application.deauthorized",
+  "data": {
+    "object": {
+      "id": "ca_fixtureApplication01",
+      "object": "application",
+      "name": "Fixture Platform"
+    }
+  }
+}

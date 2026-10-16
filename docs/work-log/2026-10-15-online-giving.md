@@ -3640,6 +3640,8 @@ Next: **Batch 5, database-admin (5a: `0056`) then full-stack-developer (5b)**, p
 - giving: `presby_giving_dead_letters` has no supporting index (3a-fix accepted gap)
 - giving: a retry of a failed intent with the same key can leave one unused Checkout session (expires in 31 min; 4a note)
 - retrospective: Phase 3 reads the pinned SDK's changelog before marking an API fact confirmed (two misses: account-link `configurations`, Checkout `payment_method_types`) → `.claude/agents/tech-lead.md`
+- giving: platform-wide `blob_assets` immutability (statement PDFs only are frozen today; 5a ruling 2)
+- giving: the three Batch 5a suggested TODO lines (see 5a section)
 - operator: Stripe test-mode platform account (Connect) → run the smoke in docs/deployment.md; CPA review of statement wording + four accounting questions before any real statement; Upstash + Turnstile before go-live
 
 ### Shared-file edits (from Batch 1a "Integration edits")
@@ -3657,7 +3659,7 @@ Next: **Batch 5, database-admin (5a: `0056`) then full-stack-developer (5b)**, p
 - Batch 3b: the test-mode badge is shown only to `giving.view`/`giving.manage` holders (a recorder must see no provider state).
 - Batch 2: void requires `giving.record` even for a manage-only holder (1a D2).
 
-Batches 1–4 committed: 591f6a1, e880147, 05e3636, 70cab12, 682ef86, 158be83, 3c86287, f3b6921.
+Batches 1–4 committed: 591f6a1, e880147, 05e3636, 70cab12, 682ef86, 158be83, 3c86287, f3b6921; 5a committed next (see git log).
 
 ## Batch 5a — statements schema 0056 and pdfkit (database-admin)
 
@@ -3852,6 +3854,18 @@ None. Schema only. `GIVING_STATEMENT_ISSUED` / `_REISSUED` / `_NOTICE_SENT` / `_
 ### Handoff
 
 Next: **full-stack-developer (5b)** — renderer, `statements.ts`, pages, routes, notice email, the `GIVING_STATEMENTS_ENABLED` production gate, on top of the tables, fragments and fixtures above. Integration (orchestrator): the journal entry above; nothing new in `scripts/test-rls.sql` beyond Batch 1a's `\ir giving/test-rls-46.sql` (it includes the harness itself); expected integrated count 924 on `development`, 938 from scratch.
+
+---
+### Orchestrator ruling on the Batch 5a questions (2026-10-16)
+
+Committed as the ninth commit on `pipeline/online-giving` (`feat(giving): contribution statements schema 0056 …`).
+
+1. **Two donors each holding a statement for the same year, then merged — accepted for v1.** Both documents are true records of what was issued. The merge makes the root's statement stale (5a's staleness rule), and the re-issue produces the consolidated version n+1 under the root. The member surface (Batch 6) lists statements under the root donor newest-first, with superseded and merged-source statements under a "previous versions" disclosure, never silently hidden. Phase 6 reading note.
+2. **PDF immutability scoped to statement PDFs — accepted.** A platform-wide `blob_assets` immutability rule is a separate decision for the storage adapter, not this pipeline. TODO line at integration.
+3. **Findings:** 5a's two candidates are **F144** and **F145** (text in the 5a section) → `docs/schema-design-2.md` at integration.
+4. **The three suggested TODO lines** join the Integration checklist above.
+
+Next: `full-stack-developer` (5b) — renderer, `statements.ts`, pages, routes, notice email — then Batch 6.
 
 ---
 

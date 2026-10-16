@@ -68,6 +68,26 @@
 --   (D5) giving_gifts_failure_code_shape: failure_code only on a failed
 --        gift; giving_checkout_intents_covered_shape: no covered fee unless
 --        cover_fees. Both follow from the design's state rules.
+--
+-- CORRECTION (2026-10-16, in place: this migration is unreleased; work-log
+-- Batch 3a open questions 1-2 and the orchestrator's ruling, "Batch 3a-fix"):
+--   (C1) presby_giving_claim_event() also returns external_event_id and
+--        organization_id, appended after livemode (existing columns and their
+--        order unchanged). With the event id the processor can re-fetch a
+--        purged body, and with the organization its audit rows carry the org.
+--        `create or replace` cannot change a return type, so a guarded drop
+--        (section 17c) runs first. It drops only while a different shape is
+--        installed, so a re-apply keeps the same function. 17bb restates the
+--        EXECUTE grant.
+--   (C2) presby_giving_dead_letters(p_limit) (section 17aa) is OWNER-ONLY. It
+--        returns a bounded list of dead-lettered events: ids, type,
+--        received_at, attempts and the last error code. It never returns a
+--        body or amount. The platform's requeue control needs an id to pass
+--        to presby_giving_requeue_event(), and nothing else supplies one. It is
+--        a sibling function, not a widening of presby_giving_ingest_health():
+--        that function returns one counts row per connection, read with
+--        `select *` by src/lib/admin/giving-ingest-health.ts. It does not arm
+--        the write marker.
 
 -- ---------------------------------------------------------------------------
 -- 1. The provider enum - one value; Vanco arrives as `alter type ... add value`
@@ -1620,10 +1640,28 @@ end $$;
 
 -- (17c) Claim: zero rows unless claimable (received/parked and due, or
 -- processing with an expired lease). Sets processing, a 2-minute lease and
--- attempts + 1, and returns the body.
+-- attempts + 1, and returns the body, the provider's event id (C1, so a purged
+-- body can be re-fetched) and the organization (C1, for the processor's audit
+-- rows; derived from the inbox row, never from a parameter).
+--
+-- Correction C1 (header): the return shape gained two columns, which
+-- `create or replace` refuses. Drop only while a DIFFERENT shape is installed,
+-- so a re-apply keeps the same function (and OID). Nothing depends on it.
+do $$
+declare
+  v_fn regprocedure := to_regprocedure('presby_giving_claim_event(uuid)');
+begin
+  if v_fn is not null and pg_get_function_result(v_fn) is distinct from
+     'TABLE(raw_body text, event_type text, attempts integer, body_purged boolean, connection_id uuid, external_account_id text, livemode boolean, external_event_id text, organization_id uuid)'
+  then
+    execute 'drop function presby_giving_claim_event(uuid)';
+  end if;
+end $$;
+
 create or replace function presby_giving_claim_event(p_inbox_id uuid)
 returns table (raw_body text, event_type text, attempts integer, body_purged boolean,
-               connection_id uuid, external_account_id text, livemode boolean)
+               connection_id uuid, external_account_id text, livemode boolean,
+               external_event_id text, organization_id uuid)
 language plpgsql security definer
 set search_path = public, pg_temp
 as $$
@@ -1636,11 +1674,14 @@ begin
      where e.id = p_inbox_id
        and ((e.status in ('received', 'parked') and e.next_attempt_at <= now())
             or (e.status = 'processing' and (e.locked_until is null or e.locked_until < now())))
-    returning e.raw_body, e.event_type, e.attempts, e.body_purged_at, e.connection_id, e.livemode
+    returning e.raw_body, e.event_type, e.attempts, e.body_purged_at, e.connection_id, e.livemode,
+              e.external_event_id, e.organization_id
   )
   select cl.raw_body, cl.event_type, cl.attempts, cl.body_purged_at is not null,
-         cl.connection_id, c.external_account_id, cl.livemode
-    from claimed cl join giving_provider_connections c on c.id = cl.connection_id;
+         cl.connection_id, c.external_account_id, cl.livemode,
+         cl.external_event_id, cl.organization_id
+    from claimed cl
+    join giving_provider_connections c on c.id = cl.connection_id and c.organization_id = cl.organization_id;
 end $$;
 
 -- (17d) Finish. p_outcome in applied | ignored | parked | failed | dead.
@@ -2486,9 +2527,11 @@ begin
   return v_n;
 end $$;
 
--- (17aa) OWNER-ONLY (P3-6): platform ingest health and dead-letter replay,
--- called through getPlatformDb() from src/lib/admin/giving-ingest-health.ts.
--- No amounts, names, bodies or event ids.
+-- (17aa) OWNER-ONLY (P3-6): platform ingest health, the dead-letter list (C2)
+-- and dead-letter replay, called through getPlatformDb() from
+-- src/lib/admin/giving-ingest-health.ts. No amounts, names or bodies from any
+-- of them. Only the dead-letter list returns event ids, because replay needs
+-- one.
 create or replace function presby_giving_ingest_health()
 returns table (organization_id uuid, connection_id uuid, provider text, livemode boolean, status text,
                received_count bigint, applied_count bigint, parked_count bigint, dead_letter_count bigint,
@@ -2509,6 +2552,25 @@ as $$
    order by c.organization_id, c.created_at;
 $$;
 
+-- C2: dead letters, oldest first, at most 100 (p_limit is clamped to 1..100).
+-- last_error_class is the inbox's last_error: a short code that
+-- giving_events_last_error_shape bounds to ^[a-z0-9_:]*$ and 60 characters,
+-- never a payload fragment. No raw_body, no amounts, no donor fields. `language
+-- sql`, so #variable_conflict does not apply; every column is qualified.
+create or replace function presby_giving_dead_letters(p_limit integer default 100)
+returns table (event_id uuid, connection_id uuid, organization_id uuid, external_event_id text,
+               event_type text, received_at timestamptz, attempts integer, last_error_class text)
+language sql stable security definer
+set search_path = public, pg_temp
+as $$
+  select e.id, e.connection_id, e.organization_id, e.external_event_id, e.event_type,
+         e.received_at, e.attempts, e.last_error
+    from giving_provider_events e
+   where e.status = 'dead_letter'
+   order by e.received_at, e.id
+   limit least(greatest(coalesce(p_limit, 100), 1), 100);
+$$;
+
 create or replace function presby_giving_requeue_event(p_inbox_id uuid)
 returns text language plpgsql security definer
 set search_path = public, pg_temp
@@ -2527,7 +2589,7 @@ end $$;
 
 -- (17bb) EXECUTE. Revoke from everyone first (an in-place re-apply corrects a
 -- hand-added grant), then grant presby_app exactly the tenant/ingest/public
--- surface. Internal helpers, trigger functions and the two owner-only
+-- surface. Internal helpers, trigger functions and the three owner-only
 -- functions get no grant at all. presby_platform gets nothing (0052's
 -- precedent: a platform-shell role never performs a council's act).
 do $$
@@ -2570,7 +2632,8 @@ grant execute on function presby_giving_attention_events() to presby_app;
 grant execute on function presby_giving_active_schedule_count() to presby_app;
 grant execute on function presby_giving_purge_bodies() to presby_app;
 grant execute on function presby_giving_expire_intents() to presby_app;
--- NOT granted (owner only, P3-6): presby_giving_ingest_health(), presby_giving_requeue_event(uuid).
+-- NOT granted (owner only, P3-6): presby_giving_ingest_health(), presby_giving_dead_letters(integer)
+-- (C2), presby_giving_requeue_event(uuid).
 
 comment on function presby_giving_ingest_event(giving_provider, text, text, boolean, text, text) is
   'Webhook ingest (R6). No org parameter: the connection is resolved by (provider, external_account_id), regardless of its status. accepted | duplicate | ignored (unknown account, malformed ids, livemode mismatch - writes nothing).';
@@ -2582,6 +2645,10 @@ comment on function presby_public_giving_config(text) is
   'The public give surface''s one read (R13): exactly one row, state live | unavailable | absent. Never an acct_ id or an org id; absent is byte-identical for an unknown slug, a non-tenant slug and a toggle-off org.';
 comment on function presby_giving_ingest_health() is
   'OWNER ONLY (P3-6): per-connection inbox counts for the platform health page. EXECUTE granted to nobody; called through getPlatformDb() from src/lib/admin/giving-ingest-health.ts only.';
+comment on function presby_giving_dead_letters(integer) is
+  'OWNER ONLY (P3-6, correction C2): dead-lettered inbox events, oldest first, at most 100. Returns ids, event type, received_at, attempts and the last error code, never a body or amount. Feeds the platform requeue control. EXECUTE granted to nobody; called through getPlatformDb() from src/lib/admin/giving-ingest-health.ts only.';
+comment on function presby_giving_claim_event(uuid) is
+  'Claims one due inbox row (2-minute lease, attempts + 1) and returns its body, event type, attempts, purge flag, connection, account id, livemode, the provider event id and the organization (correction C1). Zero rows when the row is not claimable. Org derived from the inbox row, never a parameter.';
 comment on function presby_giving_requeue_event(uuid) is
   'OWNER ONLY (P3-6): replays a dead letter (dead_letter -> received, attempts = 0). Audited ORG_GIVING_EVENT_REQUEUED by the caller.';
 

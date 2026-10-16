@@ -16,7 +16,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-15 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
-| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–2 complete; 3a complete, 3b pending (ux-developer) | — | 2026-10-15 |
+| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3a complete; 3a-fix complete; api-developer addendum and 3b pending | — | 2026-10-16 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3093,6 +3093,120 @@ Counts and timestamps only; organization names come from the `organizations` joi
 
 Next agent: **ux-developer (Batch 3b)** — connect panel, `connect/return` page, platform health pages (`(admin)/admin/giving`, `ingest-health-section.tsx`) from the contract above. Operator Q1 gates the live smoke, not 3b's UI work. Open questions 1 and 2 are schema asks for database-admin before 3b's requeue control; they do not block the rest.
 
+
+---
+### Orchestrator ruling on the Batch 3a open questions (2026-10-16)
+
+Batches 1, 2 and 3a are committed on `pipeline/online-giving` as `591f6a1`, `e880147`, `05e3636` (operator authorized commit-per-batch on 2026-10-16). Files touched by more than one batch sit in the commit of the batch that created them.
+
+1. **`presby_giving_claim_event()` return shape — in-place correction to 0055 (unreleased, `drizzle/` rule).** It also returns `external_event_id` and `organization_id`, so a purged body can be re-fetched through `retrieveEvent` and the processor's audit rows carry `organizationId`. `database-admin`, with the §46 draft and `giving.db.test.ts` pinned, then `api-developer` wires the two columns (the code path already exists).
+2. **Dead-letter enumeration — same correction.** `presby_giving_ingest_health()` gains a bounded dead-letter list (event id, connection id, organization id, event type, received_at, attempts, last error class — no body), or an owner-only sibling `presby_giving_dead_letters(limit)` if the health function's shape is better left as counts. Either way owner-only, no `presby_app` grant, pinned by §46i. 3b builds the requeue control against it.
+3. **Payouts attestation audit — add `GIVING_PAYOUTS_ATTESTED` to `AUDIT_ACTIONS`** (existing values frozen) and write it from `attestPayoutsAction`. `api-developer` addendum.
+4. **Dispute escalation — subscribe to `charge.dispute.funds_withdrawn` and `charge.dispute.funds_reinstated` in addition to `created`/`closed`.** The reversal is keyed on the dispute id: whichever of `created` (non-warning status) or `funds_withdrawn` arrives first records it, the other is `noop` (the existing `apply_reversal` existence check, F143). `funds_reinstated` and `closed: won` both map to the reinstatement reversal, same idempotence. An inquiry (`warning_*`) still records nothing. `api-developer` addendum: `normalize`, the handled-event set, the deployment doc's endpoint event list, fixtures and the replay harness. 
+5. **Process note for the retrospective:** twice in this pipeline a docs page read at Phase 3 disagreed with the pinned SDK's typings (`configurations` on account links, `payment_method_types` on Checkout). Phase 3 reads the changelog of the version it pins before marking an API fact "confirmed". Tech-lead records it at the next retrospective; `.claude/agents/tech-lead.md` gets the line then.
+
+Order: database-admin (1, 2) → api-developer addendum (1–4 wiring) → ux-developer 3b. Each writes its own subsection below.
+
+## Batch 3a-fix — 0055 in-place correction (database-admin)
+
+*2026-10-16, database-admin, worktree `presby-giving` on `pipeline/online-giving` (HEAD `05e3636`), Neon branch `br-winter-band-axb6tzax`. Nothing committed. No Rule 16 shared file edited. No server started or stopped. Scope: items 1 and 2 of the orchestrator's 3a ruling, nothing else.*
+
+### Files Modified
+
+- `drizzle/0055_presby_giving.sql`, corrected in place (unreleased; same file, same number, no 0056):
+  - Header: a new **CORRECTION (2026-10-16)** block after D1–D5. It names C1 and C2 and cites the Batch 3a open questions 1–2 and the ruling.
+  - Section 17c, C1. A guarded `do` block comes first. It drops `presby_giving_claim_event(uuid)` only while `pg_get_function_result()` differs from the corrected shape, because `create or replace` cannot change a return type. Then the corrected function. The join to connections is now composite (`c.id = cl.connection_id and c.organization_id = cl.organization_id`); the result is unchanged and the FK already guaranteed it.
+  - Section 17aa, C2: the new `presby_giving_dead_letters(integer)`. The 17aa comment now says only this function returns event ids.
+  - Section 17bb: "two owner-only" becomes "three". The NOT-granted note names `dead_letters`. New `comment on function` for `claim_event` and `dead_letters`. The revoke loop already covers every `presby_giving_%`, so the new function is revoked from `public, presby_app, presby_platform` with no new statement.
+- `scripts/giving/test-rls-46.sql`: the §46e header now names the three owner-only functions. The owner-only privilege assertions cover three, not two. New C2 block: permission denied for `presby_app`, the result shape pinned exactly, no body/amount/donor column, and the body never reads `raw_body`. New C1 block: the result shape pinned, plus a live claim as `presby_app` returning the event id and Alder. §46i gains its own transaction with the arming set **by name** and the owner-only callable set **by name**.
+- `src/lib/db/domain/giving.db.test.ts`: the owner-only test now covers `dead_letters` (refused with and without an org context; the ACL of all three names the owner alone). Two new tests: `claim_event returns external_event_id and organization_id…` and `dead_letters lists a dead-lettered event…never a body, and feeds requeue`.
+- `src/lib/db/domain/giving.ts`: comments only. The approximate 0055 line references moved with the header (13 ~804, grants ~835/~839, 14 ~888, 15 ~1197, 17 ~1565, 18 ~2656). The inbox doc comment names the reader functions and C1/C2. No table, column, constraint or index changed, so there is nothing for `giving.schema.test.ts` to mirror.
+
+### Schema Changes
+
+**Mode: hand-written, in-place correction** of `drizzle/0055_presby_giving.sql`. It is unreleased, applied only to the pipeline branch. `_journal.json` is unchanged: the integration entry `{ "idx": 55, … "tag": "0055_presby_giving" }` from Batch 1a still stands.
+
+**Choice for item 2: the sibling `presby_giving_dead_letters()`, not a widened health function.** `listIngestHealth()` (`src/lib/admin/giving-ingest-health.ts:63`) reads `select * from presby_giving_ingest_health()` into a fixed one-row-per-connection counts type. `giving.db.test.ts` filters that function `where connection_id = …`. A per-event list is a different cardinality, and folding it in as an array column would change a shape both callers rely on. Separately, the health function's documented promise ("no event ids") stays true.
+
+**Exact signatures, for the api-developer:**
+
+```sql
+presby_giving_claim_event(p_inbox_id uuid)
+  returns table (raw_body text, event_type text, attempts integer, body_purged boolean,
+                 connection_id uuid, external_account_id text, livemode boolean,
+                 external_event_id text,      -- NEW (C1): the provider's evt_… id
+                 organization_id uuid)        -- NEW (C1): from the inbox row, never a parameter
+  -- plpgsql, SECURITY DEFINER, search_path = public, pg_temp, #variable_conflict use_column
+  -- EXECUTE: presby_app (unchanged). Zero rows when not claimable (unchanged).
+
+presby_giving_dead_letters(p_limit integer default 100)
+  returns table (event_id uuid,               -- the inbox id: what presby_giving_requeue_event(uuid) takes
+                 connection_id uuid, organization_id uuid,
+                 external_event_id text, event_type text,
+                 received_at timestamptz, attempts integer,
+                 last_error_class text)       -- giving_provider_events.last_error: a short code,
+                                              -- CHECK-bounded ^[a-z0-9_:]*$, <= 60 chars; may be null
+  -- language sql, STABLE, SECURITY DEFINER, search_path = public, pg_temp
+  -- (#variable_conflict is plpgsql-only and does not apply; every column is qualified)
+  -- status = 'dead_letter' only; oldest first (received_at, id); p_limit clamped to 1..100
+  -- OWNER ONLY: EXECUTE revoked from public, presby_app, presby_platform. Does NOT arm the write marker.
+```
+
+No body, amount, donor field or payload fragment is returned.
+
+**Whole-file idempotence, proven by applying the finished file and re-applying it.** The snapshot is Batch 1a's: row counts on all 12 tables plus `permissions`/`app_roles`/`app_role_permissions`/`feature_flags`/toggles, and counts of giving functions, triggers, policies, constraints, indexes and table ACL entries. It adds a function-ACL count, an md5 over `pg_get_functiondef ‖ proacl ‖ oid` of every giving function (so a re-apply that silently dropped and recreated `claim_event` would show as a new OID), and an md5 of the inbox rows.
+- Apply #1: exit 0, 0 ERRORs. Apply #2: exit 0, 0 ERRORs. **Snapshots byte-identical**, so the guarded drop does not fire on a re-apply:
+  `acl=115 app_roles=31 arp=163 connections=3 constraints=262 … fnacl=78 fns=51 … indexes=54 … policies=12 … triggers=13`.
+- Against the pre-change baseline, only `fns` 50→51 (`dead_letters`) and `fnacl` 77→78 (its owner-only ACL entry) differ. Every row count and the inbox digest are unchanged.
+- The guarded drop's other branch, the old seven-column shape installed when 0055 is applied, is the path the pipeline branch first took and is exercised again by the M3 restore below. Exit 0, and `claim_event` keeps its `presby_app` grant (`{neondb_owner=X/neondb_owner,presby_app=X/neondb_owner}`).
+
+**`scripts/giving/test-rls-46.sql` as `presby_app`: 201 passes, exit 0** (was 193; +8). After integration the integrated `test-rls.sql` count from Batch 1a moves from 857 to **865** (664 + 201); no other section is touched.
+
+**Failing-first.** I broke one mechanism as owner, ran a no-stop copy of §46 as `presby_app` and `giving.db.test.ts`, restored by re-applying 0055 (dropping the mutated function first where its return type changed), and confirmed §46 green at 201 each time. Lines are `test-rls-46.sql` as it now stands. In a no-stop run, the first failure in a transaction masks later assertions in that transaction; that is why the by-name §46i checks have their own transaction.
+
+| Mechanism broken | Fails |
+|---|---|
+| M1 `grant execute on presby_giving_dead_letters(integer) to presby_app` | `:362` 46e owner-only not executable (got 1); `:385` 46e "presby_app executed presby_giving_dead_letters()"; `:874` 46i EXECUTE list ≠ the 27; `:912` 46i owner-only callable set ≠ {ingest_health, dead_letters, requeue_event}; Vitest › "the owner-only functions are not executable by presby_app" |
+| M2 `dead_letters` also returns `raw_body` | `:390` 46e result shape (got 0); Vitest › "dead_letters lists a dead-lettered event…" (column list). The two assertions masked behind `:390` were checked directly in the mutated state: `:395` "no result column is a body" → 1 and `:400` "never reads raw_body" → 1, both expected 0 |
+| M3 `claim_event` reverted to the original seven columns | `:420` 46e C1 result shape (got 0); Vitest › "claim_event returns external_event_id and organization_id…" |
+| M4 `dead_letters` rewritten to arm `presby.giving_write_active` | `:879` 46i arming count 6≠5; `:897` 46i arming set by name (diff of 1). Vitest unaffected: the marker is §46i's pin |
+| M5 `grant execute on presby_giving_dead_letters(integer) to public` | `:362`, `:385` 46e; `:850` 46i "no giving function grants EXECUTE to PUBLIC"; `:912` 46i owner-only set; Vitest › owner-only test (the ACL now names PUBLIC) |
+
+§46e's "presby_app cannot read the inbox" (`:349` permission denied and `:356` the privilege-count assertion) is unchanged and green.
+
+**Commands** (worktree):
+
+| Command | Result |
+|---|---|
+| `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0055_presby_giving.sql` ×2 | exit 0 / exit 0, identical snapshots |
+| `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/giving/test-rls-46.sql` | exit 0, **201 passes** |
+| `npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/db/domain/giving.db.test.ts src/lib/db/domain/giving.schema.test.ts src/lib/giving/two-factor-agreement.test.ts src/lib/giving/ingest/ src/lib/admin/giving-ingest-health.db.test.ts` | **9 files, 201 tests, all passed**: giving.db 19 (was 17), giving.schema 20, two-factor-agreement 3, apply.db 53, lifecycle.db 32, process.db 18, process 27, outcome 24, giving-ingest-health.db 5 |
+| `npm run typecheck` | exit 0 |
+| `npm run lint -- --max-warnings=0` | exit 0 |
+| `npm run check` (all seven tripwires; `check:secrets` sees every file touched here, all tracked) | exit 0 |
+| `npx dotenv -e .env.local -- npm run check:schema-parity` | exit 0: 68 tables, 6 allowlisted, 0 failing. `giving.ts` is still not exported from the domain index (integration step 4); no table shape changed, so Batch 1a's 80-table merged-copy result stands |
+
+No existing 3a test broke. `functions.ts`'s `claimEvent()` already read both columns when present, so with the correction live the processor fills `organizationId` and `externalEventId`, and `process.db.test.ts` (18) and `process.test.ts` (27) pass unchanged.
+
+**Fixture hygiene.** The new Vitest cases leave their inbox rows terminal (`ignored`), so no sweep can pick them up before teardown, and the org cascade removes them in `afterAll`. Afterwards there are 0 `giving-db-test*` orgs, and the inbox digest equals the pre-change baseline. §46's C1 block rolls back.
+
+### Audit Events
+
+None. Schema only. `presby_giving_requeue_event()` remains audited `ORG_GIVING_EVENT_REQUEUED` by its caller.
+
+### Implementer Notes
+
+**Found on arrival, before any change: §46 was red on the pipeline branch.** Baseline §46 failed at `test-rls-46.sql:363` (then line numbering) with "46e: …alder: one parked, one dead letter — expected 1, got 0". The seed draft's parked inbox row `d9100000-…-000000000070` (`scripts/giving/seed-dev-giving.sql:282–285`) had become `dead_letter / normalize_api_version`, `processed_at` 2026-10-16 04:26 UTC. That is during Batch 3a's run, when `e2e/giving-webhook.spec.ts` (`:115`, `:160`) called `GET /api/cron/giving`. The cron sweeps every due event on the branch, and the seed stamps that row `next_attempt_at = now() + 5 minutes` with a fixture body that has no `api_version`. I restored the row to its seeded shape on the owner connection (fixture data, pipeline branch only), and the baseline was then 193/193. **For the orchestrator, before integration:** the same thing will happen on `development` the first time anything runs the giving cron there (the e2e spec, or a deployment's cron), and §46e will go red. Either the seed's parked row gets a far-future `next_attempt_at`, or the e2e spec stops running a global cron sweep. I made neither change, because both are outside this correction's scope. If the e2e spec is run on this branch again before then, the row will need the same restore.
+
+**Residual, accepted:** `dead_letters` has no supporting index. It filters `status = 'dead_letter'` across all orgs, and `giving_events_org_status_idx` leads with `organization_id`. The page that calls it also calls `presby_giving_ingest_health()`, which already scans the whole inbox, so an index here would not change the page's cost. A partial index `(received_at) where status = 'dead_letter'` is the fix if the platform page ever measures slow.
+
+**What the api-developer must know (addendum, items 1–2 wiring):**
+1. `src/lib/giving/ingest/functions.ts` `ClaimedEvent`: `externalEventId` and `organizationId` are now always returned. Make them required (`string`) and delete the "Not returned … today" comment. `process.ts:119–122`'s comment and its `if (!claim.externalEventId) return dead("body_purged")` fallback are now dead code for a real claim; keep or drop the guard as you prefer, but the comment is stale. `process.ts:261` now always includes `organizationId` in the audit metadata; per 3a deviation 9, consider whether `resourceId` should still be the connection.
+2. Add the reader to `src/lib/admin/giving-ingest-health.ts` (the one file B6 allows), for example `listDeadLetters(limit = 100): Promise<DeadLetterRow[]>` with `{ eventId, connectionId, organizationId, externalEventId, eventType, receivedAt: string /* ISO via toIso */, attempts: number, lastErrorClass: string | null }`, via `getPlatformDb().execute(sql\`select * from presby_giving_dead_letters(${limit}::integer)\`)`. `eventId` is the argument `requeueDeadLetter()` takes.
+3. **`scripts/check-giving-boundaries.mjs:118` `OWNER_ONLY_FUNCTIONS` must gain `"presby_giving_dead_letters"`**, with a matching case in `check-giving-boundaries.test.mjs`'s B6 `it.each` and the B6 header comment (`:47`). Until then the tripwire does not keep the new owner-only name out of the rest of the giving tree. The database still refuses `presby_app` either way.
+4. Tests to add on your side: a `process.db.test.ts` case that a purged-body event re-fetches through `retrieveEvent` with the claim's `externalEventId` (mocked client), and that processor audit rows carry `organizationId`.
+
+**Next agent:** api-developer (3a addendum: ruling items 1–4 wiring, including the four points above), then ux-developer (3b) builds the requeue control against `listDeadLetters()`/`requeueDeadLetter()`.
 
 ---
 

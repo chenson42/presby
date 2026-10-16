@@ -30,15 +30,15 @@ import { users } from "../schema";
  * so a reader does not mistake absence for permission:
  *
  *   - ENABLE + FORCE ROW LEVEL SECURITY and the standard tenant_isolation
- *     policy on all twelve tables (0055 section 13, ~line 784; F1). The 2FA arm
- *     that reads permissions.requires_two_factor is section 18 (~line 2589).
- *   - Grants (0055 section 13, ~line 815): NO DELETE for anyone; presby_platform
+ *     policy on all twelve tables (0055 section 13, ~line 804; F1). The 2FA arm
+ *     that reads permissions.requires_two_factor is section 18 (~line 2656).
+ *   - Grants (0055 section 13, ~line 835): NO DELETE for anyone; presby_platform
  *     holds nothing; presby_app holds NO privilege at all on
  *     giving_provider_events, only SELECT on gifts, reversals, intents,
  *     identities, settlements and lines, and a COLUMN-level UPDATE on nine
- *     connection columns (~line 819). Gifts and reversals are written only by
- *     the presby_giving_* SECURITY DEFINER functions (section 17, ~line 1545).
- *   - Triggers (section 14, ~line 868), firing on every connection including
+ *     connection columns (~line 839). Gifts and reversals are written only by
+ *     the presby_giving_* SECURITY DEFINER functions (section 17, ~line 1565).
+ *   - Triggers (section 14, ~line 888), firing on every connection including
  *     the owner path (F44):
  *       giving_gifts_write_guard / giving_reversals_write_guard - any write
  *         needs the transaction-local marker presby.giving_write_active; a
@@ -51,7 +51,7 @@ import { users } from "../schema";
  *       giving_connections_status_guard - disconnected is terminal;
  *       giving_connections_insert_guard - a connection is born onboarding.
  *     Plus three DECISION-175 triggers on administrative_commissions,
- *     org_delegations and app_role_permissions (section 15, ~line 1177).
+ *     org_delegations and app_role_permissions (section 15, ~line 1197).
  *   - Partial indexes are declared below with their `where`; the CHECK
  *     constraints are mirrored by NAME (giving.schema.test.ts pins every name
  *     0055 creates), their SQL is a faithful copy, and 0055 wins if they ever
@@ -488,7 +488,10 @@ export const givingCheckoutIntents = pgTable(
  * The webhook inbox (R6). presby_app holds NO privilege on this table - every
  * read and write is a SECURITY DEFINER function. Declared here for types and
  * for the owner-only health reader; a tenant query against it is a
- * permission error by design.
+ * permission error by design. The functions that read it, and the columns
+ * each returns, are 0055 section 17 (claim_event ~line 1661; ingest_health,
+ * dead_letters and requeue_event ~line 2530, all three OWNER-ONLY,
+ * corrections C1/C2 of 2026-10-16).
  */
 export const givingProviderEvents = pgTable(
   "giving_provider_events",

@@ -13,7 +13,10 @@
  *     rejects cross-org references, through the presby_app connection;
  *   - the public config's `unavailable` state and an `onboarding` connection;
  *   - "another member's rows are not returned" for the confirmed-link read
- *     shape the member self-view (R14, Batch 6) will use.
+ *     shape the member self-view (R14, Batch 6) will use;
+ *   - correction C1/C2 (2026-10-16): the claim's two appended columns, and the
+ *     owner-only dead-letter list returning a dead-lettered event without its
+ *     body (presby_app cannot call it, so section 46 pins only its shape).
  *
  * Run with:
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/db/domain/giving.db.test.ts
@@ -427,6 +430,8 @@ describe.skipIf(!hasDb)("drizzle/0055 giving schema (Postgres-backed)", () => {
 
     it("the owner-only functions are not executable by presby_app", async () => {
       await expectRaise(asTenant(null, (tx) => tx.execute(sql`select * from presby_giving_ingest_health()`)), /permission denied/);
+      await expectRaise(asTenant(null, (tx) => tx.execute(sql`select * from presby_giving_dead_letters()`)), /permission denied/);
+      await expectRaise(asTenant(orgA, (tx) => tx.execute(sql`select * from presby_giving_dead_letters(5)`)), /permission denied/);
       await expectRaise(
         asTenant(null, (tx) => tx.execute(sql`select presby_giving_requeue_event(gen_random_uuid())`)),
         /permission denied/,
@@ -434,6 +439,85 @@ describe.skipIf(!hasDb)("drizzle/0055 giving schema (Postgres-backed)", () => {
       const health = await q(sql`select * from presby_giving_ingest_health() where connection_id = ${connA}`);
       expect(health).toHaveLength(1);
       expect(Object.keys(health[0]!)).not.toContain("raw_body");
+      // The full owner-only set, and that its ACL names the owner alone (no PUBLIC, no presby_platform).
+      const acl = await q(sql`
+        select p.proname::text as f, p.proacl::text as acl from pg_proc p
+         where p.proname in ('presby_giving_ingest_health', 'presby_giving_dead_letters', 'presby_giving_requeue_event')
+         order by 1`);
+      expect(acl.map((r) => r.f)).toEqual(["presby_giving_dead_letters", "presby_giving_ingest_health", "presby_giving_requeue_event"]);
+      for (const r of acl) expect(r.acl).toMatch(/^\{[a-z_]+=X\/[a-z_]+\}$/);
+    });
+
+    /** Ingests a fresh event on connA as presby_app (the webhook's path) and returns its inbox id. */
+    async function ingestOnA(eventId: string, type = "charge.refunded", body = '{"fixture":"giving.db.test"}') {
+      const [conn] = await q(sql`select external_account_id from giving_provider_connections where id = ${connA}`);
+      const ev = await asTenant(null, async (tx) =>
+        fx.rowsOf(
+          await tx.execute(sql`select * from presby_giving_ingest_event('stripe', ${String(conn!.external_account_id)},
+                                 ${eventId}, false, ${type}, ${body})`),
+        )[0]!,
+      );
+      expect(ev.outcome).toBe("accepted");
+      return String(ev.inbox_id);
+    }
+
+    it("claim_event returns external_event_id and organization_id, appended after the original seven (C1)", async () => {
+      const eventId = `evt_dbtestclaim${Date.now()}`;
+      const inbox = await ingestOnA(eventId, "charge.refunded", '{"claim":"c1"}');
+      const row = await asTenant(null, async (tx) =>
+        fx.rowsOf(await tx.execute(sql`select * from presby_giving_claim_event(${inbox})`))[0]!,
+      );
+      expect(Object.keys(row)).toEqual([
+        "raw_body", "event_type", "attempts", "body_purged", "connection_id", "external_account_id", "livemode",
+        "external_event_id", "organization_id",
+      ]);
+      expect(row.external_event_id).toBe(eventId);
+      expect(row.organization_id).toBe(orgA);
+      expect(row.connection_id).toBe(connA);
+      expect(row.raw_body).toBe('{"claim":"c1"}');
+      expect(row.attempts).toBe(1);
+      // Leave it terminal so nothing sweeps it before teardown.
+      await asTenant(null, (tx) => tx.execute(sql`select presby_giving_finish_event(${inbox}, 'ignored', 'fixture')`));
+    });
+
+    it("dead_letters lists a dead-lettered event - ids, type, attempts, error code - never a body, and feeds requeue (C2)", async () => {
+      const eventId = `evt_dbtestdead${Date.now()}`;
+      const inbox = await ingestOnA(eventId, "charge.dispute.created", '{"secret_body":"never listed"}');
+      await asTenant(null, async (tx) => {
+        await tx.execute(sql`select * from presby_giving_claim_event(${inbox})`);
+        const [f] = fx.rowsOf(await tx.execute(sql`select presby_giving_finish_event(${inbox}, 'dead', 'normalize_bad_shape') as s`));
+        expect(f!.s).toBe("dead_letter");
+      });
+      // A received, not-yet-processed event of the same connection is NOT a dead letter.
+      const live = await ingestOnA(`evt_dbtestlive${Date.now()}`);
+
+      const rows = await q(sql`select * from presby_giving_dead_letters() where connection_id = ${connA}`);
+      expect(rows).toHaveLength(1);
+      const [d] = rows;
+      expect(Object.keys(d!)).toEqual([
+        "event_id", "connection_id", "organization_id", "external_event_id", "event_type", "received_at", "attempts",
+        "last_error_class",
+      ]);
+      expect(d!.event_id).toBe(inbox);
+      expect(d!.organization_id).toBe(orgA);
+      expect(d!.external_event_id).toBe(eventId);
+      expect(d!.event_type).toBe("charge.dispute.created");
+      expect(d!.attempts).toBe(1);
+      expect(d!.last_error_class).toBe("normalize_bad_shape");
+      expect(JSON.stringify(rows)).not.toContain("secret_body");
+      expect(rows.map((r) => r.event_id)).not.toContain(live);
+
+      // Bounded: the limit is clamped to 1..100.
+      expect((await q(sql`select * from presby_giving_dead_letters(0)`)).length).toBeLessThanOrEqual(1);
+      expect((await q(sql`select * from presby_giving_dead_letters(10000)`)).length).toBeLessThanOrEqual(100);
+
+      // The id it returns is what the owner-only replay takes; once requeued it is no longer listed.
+      const [r] = await q(sql`select presby_giving_requeue_event(${String(d!.event_id)}) as outcome`);
+      expect(r!.outcome).toBe("requeued");
+      expect(await q(sql`select 1 from presby_giving_dead_letters() where event_id = ${inbox}`)).toHaveLength(0);
+      // Leave both terminal so nothing sweeps them before teardown.
+      await q(sql`update giving_provider_events set status = 'ignored', processed_at = now(), last_error = 'fixture'
+                   where id in (${inbox}, ${live})`);
     });
   });
 

@@ -332,8 +332,14 @@ begin;
 rollback;
 
 -- ===========================================================================
--- (e) The inbox is unreachable except through functions; the two
+-- (e) The inbox is unreachable except through functions; the three
 --     owner-only functions are owner-only.
+--     Correction C1/C2 (0055 header, 2026-10-16): presby_giving_dead_letters()
+--     is the third, and its result shape is pinned here from the catalog.
+--     Running it against a dead-lettered fixture event is the OWNER's act, so
+--     src/lib/db/domain/giving.db.test.ts proves that it returns the row and
+--     never a body. The claim's two new columns (C1) ARE reachable as
+--     presby_app, and are proven in the block after this one.
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
@@ -349,15 +355,16 @@ begin;
       where has_table_privilege('presby_app', 'giving_provider_events', v.p)),
     0, '46e: presby_app holds NO privilege of any kind on giving_provider_events');
   select assert_eq(
-    (select count(*) from (values ('presby_giving_ingest_health()'), ('presby_giving_requeue_event(uuid)')) v(f)
+    (select count(*) from (values ('presby_giving_ingest_health()'), ('presby_giving_dead_letters(integer)'),
+                                  ('presby_giving_requeue_event(uuid)')) v(f)
       where has_function_privilege('presby_app', v.f, 'EXECUTE')
          or has_function_privilege('presby_platform', v.f, 'EXECUTE')),
-    0, '46e: presby_giving_ingest_health / requeue_event are NOT executable by presby_app or presby_platform (P3-6)');
+    0, '46e: presby_giving_ingest_health / dead_letters / requeue_event are NOT executable by presby_app or presby_platform (P3-6, C2)');
   select assert_eq(
     (select count(*) from pg_proc p
-      where p.proname in ('presby_giving_ingest_health', 'presby_giving_requeue_event')
+      where p.proname in ('presby_giving_ingest_health', 'presby_giving_dead_letters', 'presby_giving_requeue_event')
         and has_function_privilege(p.proowner, p.oid, 'EXECUTE')),
-    2, '46e: ...and are executable by their owner');
+    3, '46e: ...and are executable by their owner');
   select assert_eq(
     (select count(*) from presby_giving_attention_events() where parked_count = 1 and dead_letter_count = 1),
     1, '46e: the tenant slice of the inbox is counts only - alder: one parked, one dead letter');
@@ -365,6 +372,32 @@ begin;
   select assert_eq(
     (select count(*) from presby_giving_attention_events() where parked_count = 0 and dead_letter_count = 0),
     1, '46e: bramblewood''s counts do not include alder''s inbox');
+rollback;
+
+-- C2: the dead-letter list is owner-only and its shape carries no body.
+begin;
+  do $$
+  begin
+    perform * from presby_giving_dead_letters(1);
+    raise exception 'FAIL - presby_app executed presby_giving_dead_letters()';
+  exception when insufficient_privilege then
+    raise notice 'pass  46e: presby_app calling presby_giving_dead_letters() is permission denied (C2)';
+  end $$;
+  select assert_eq(
+    (select count(*) from pg_proc p
+      where p.oid = 'presby_giving_dead_letters(integer)'::regprocedure
+        and pg_get_function_result(p.oid) = 'TABLE(event_id uuid, connection_id uuid, organization_id uuid, external_event_id text, event_type text, received_at timestamp with time zone, attempts integer, last_error_class text)'),
+    1, '46e: presby_giving_dead_letters() returns exactly (event_id, connection_id, organization_id, external_event_id, event_type, received_at, attempts, last_error_class) (C2)');
+  select assert_eq(
+    (select count(*) from pg_proc p, unnest(p.proargnames, p.proargmodes::text[]) a(n, m)
+      where p.oid = 'presby_giving_dead_letters(integer)'::regprocedure
+        and m = 't' and n ~ '(body|amount|cents|name|email|address|payload)'),
+    0, '46e: ...and no result column is a body, an amount or a donor field');
+  select assert_eq(
+    (select count(*) from pg_proc p
+      where p.oid = 'presby_giving_dead_letters(integer)'::regprocedure
+        and p.prosrc ~ 'raw_body'),
+    0, '46e: ...and its body never reads raw_body');
 rollback;
 
 begin;
@@ -375,6 +408,23 @@ begin;
   exception when insufficient_privilege then
     raise notice 'pass  46e: tenant-path functions refuse with no org context (uniform insufficient_privilege)';
   end $$;
+rollback;
+
+-- C1: the claim returns the provider's event id and the organization, both
+-- from the inbox row the event was resolved to (never a parameter).
+begin;
+  select assert_eq(
+    (select count(*) from pg_proc p
+      where p.oid = 'presby_giving_claim_event(uuid)'::regprocedure
+        and pg_get_function_result(p.oid) = 'TABLE(raw_body text, event_type text, attempts integer, body_purged boolean, connection_id uuid, external_account_id text, livemode boolean, external_event_id text, organization_id uuid)'),
+    1, '46e: presby_giving_claim_event() keeps its seven columns in order and appends external_event_id, organization_id (C1)');
+  select inbox_id::text as ev from presby_giving_ingest_event('stripe', 'acct_fixture000000000001',
+         'evt_rls46_claimcols1', false, 'charge.refunded', '{"rls":"46e"}') \gset
+  select assert_eq(
+    (select count(*) from presby_giving_claim_event(:'ev')
+      where external_event_id = 'evt_rls46_claimcols1' and organization_id = :ALDER
+        and connection_id = :G_TEST_CONN and raw_body = '{"rls":"46e"}'),
+    1, '46e: a claim as presby_app returns the event id and alder as the organization (C1)');
 rollback;
 
 -- ===========================================================================
@@ -827,6 +877,39 @@ begin;
     (select count(*) from pg_proc p
       where p.prosrc like '%presby.giving_write_active'', ''true''%'),
     5, '46i: exactly five functions arm presby.giving_write_active (apply_gift, apply_gift_fee, apply_reversal, record_offline_gift, void_gift - and no other)');
+rollback;
+
+-- Correction C1/C2: the arming set and the owner-only set, BY NAME. Their own
+-- transaction, so a failure above cannot mask them.
+begin;
+  -- The arming set by name, so a changed or added function that starts arming it is
+  -- named in the diff (C1 changed claim_event; C2 added dead_letters, and
+  -- neither may arm it).
+  with arming as (
+    select p.proname::text as f from pg_proc p
+     where p.prosrc like '%presby.giving_write_active'', ''true''%'),
+  expected(f) as (values
+    ('presby_giving_apply_gift'), ('presby_giving_apply_gift_fee'), ('presby_giving_apply_reversal'),
+    ('presby_giving_record_offline_gift'), ('presby_giving_void_gift'))
+  select assert_eq(
+    (select count(*) from ((select f from arming except select f from expected)
+                           union all (select f from expected except select f from arming)) d),
+    0, '46i: the arming set is exactly those five by name - presby_giving_claim_event and presby_giving_dead_letters are not in it');
+  -- The OWNER-ONLY callable surface, by name: every giving function that is
+  -- neither an internal helper (presby_giving__*) nor a trigger function and
+  -- that presby_app cannot execute.
+  with owner_only as (
+    select p.proname::text as f from pg_proc p
+     where (p.proname like 'presby\_giving%' or p.proname = 'presby_public_giving_config')
+       and p.proname not like 'presby\_giving\_\_%'
+       and p.prorettype <> 'trigger'::regtype
+       and not has_function_privilege('presby_app', p.oid, 'EXECUTE')),
+  expected(f) as (values
+    ('presby_giving_ingest_health'), ('presby_giving_dead_letters'), ('presby_giving_requeue_event'))
+  select assert_eq(
+    (select count(*) from ((select f from owner_only except select f from expected)
+                           union all (select f from expected except select f from owner_only)) d),
+    0, '46i: the owner-only callable set is exactly ingest_health, dead_letters, requeue_event (P3-6, C2)');
 rollback;
 
 -- ===========================================================================

@@ -26,6 +26,7 @@ import {
   countGivingManageHolders,
   treasurerDesignationApplies,
 } from "@/lib/treasurer-designation";
+import { listIngestHealth, type IngestHealthRow } from "@/lib/admin/giving-ingest-health";
 import { getOrganizationAffiliationAdminDetail } from "@/lib/org-provisioning";
 import { BrandForm } from "./brand-form";
 import { NeutralizeDialog } from "./neutralize-dialog";
@@ -34,6 +35,7 @@ import { ProfileForm } from "./profile-form";
 import { ServiceTimesSection } from "./service-times-section";
 import { FoundingAdministratorSection } from "./founding-administrator-section";
 import { TreasurerDesignationSection } from "./treasurer-designation-section";
+import { IngestHealthSection } from "./ingest-health-section";
 import { AffiliationSection } from "./affiliation-section";
 
 // officeTemplateKey -> display name. Not exported by
@@ -119,6 +121,18 @@ export default async function OrganizationBrandDetailPage({
   const givingManageHolderCount = treasurerApplies
     ? await countGivingManageHolders(platformDb, id)
     : 0;
+
+  // Payment-notice health (Batch 3b), same applicability as the treasurer
+  // section. Counts only; a failed read is `null` (rendered as "can't load",
+  // never as an empty, all-clear list) and never takes the page down.
+  let ingestHealth: IngestHealthRow[] | null = null;
+  if (treasurerApplies) {
+    try {
+      ingestHealth = (await listIngestHealth()).filter((row) => row.organizationId === id);
+    } catch {
+      ingestHealth = null;
+    }
+  }
 
   const affiliation = await getOrganizationAffiliationAdminDetail(id);
 
@@ -206,9 +220,12 @@ export default async function OrganizationBrandDetailPage({
         />
       )}
 
+      {treasurerApplies && <IngestHealthSection rows={ingestHealth} />}
+
       {/* Stacking order (work-log Phase 3): founding administrator (actionable,
           gating) -> treasurer designation (actionable, gating, applicable org
-          types only) -> council affiliation (identity) -> brand. */}
+          types only) -> payment-notice health (read-only, same org types) ->
+          council affiliation (identity) -> brand. */}
       <AffiliationSection affiliation={affiliation} />
 
       <section className="mt-8">

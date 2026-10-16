@@ -247,6 +247,98 @@ export async function addForeignEntry(sql: Sql, fx: GivingFixture, amountCents: 
       from armed`;
 }
 
+export type ConnectionSpec = {
+  status: "onboarding" | "active" | "restricted" | "disconnected";
+  /** Default false: a Stripe TEST-mode account (the badge shows). */
+  livemode?: boolean;
+  detailsSubmitted?: boolean;
+  requirementsDue?: boolean;
+  disabledReason?: string | null;
+  attested?: boolean;
+  publicOn?: boolean;
+  disconnectedReason?: "treasurer" | "deauthorized";
+  /** Active monthly gifts (intents with a live subscription) to seed behind the connection. */
+  schedules?: number;
+};
+
+let connectionCounter = 0;
+
+/** Removes this fixture org's inbox events, intents and connections (owner path; no gift or reversal exists to block it). */
+export async function clearConnections(sql: Sql, fx: GivingFixture): Promise<void> {
+  await sql`delete from giving_provider_events where organization_id = ${fx.orgId}::uuid`;
+  await sql`delete from giving_checkout_intents where organization_id = ${fx.orgId}::uuid`;
+  await sql`delete from giving_provider_connections where organization_id = ${fx.orgId}::uuid`;
+}
+
+/**
+ * Replaces the fixture org's connection with exactly one row in the given state
+ * (or none, for `null`) - the way the connect-panel spec reaches every state
+ * without a Stripe account. The write marker is armed in the SAME statement as
+ * the insert (the http driver has no multi-statement transaction), which is the
+ * only way past the born-onboarding insert guard. Account ids are `acct_fixture…`.
+ * Returns the connection id (or null).
+ */
+export async function setConnection(sql: Sql, fx: GivingFixture, spec: ConnectionSpec | null): Promise<string | null> {
+  assertFixtureSlug(fx.slug);
+  await clearConnections(sql, fx);
+  if (spec === null) return null;
+  connectionCounter += 1;
+  const accountId = `acct_fixture${fx.slug.replace(/\D/g, "")}${connectionCounter}`.slice(0, 40);
+  const connId = id(50 + connectionCounter);
+  const active = spec.status === "active";
+  const open = spec.status !== "disconnected";
+  const detailsSubmitted = spec.detailsSubmitted ?? (spec.status !== "onboarding");
+  const attested = spec.attested === true || spec.publicOn === true;
+  await sql`
+    with armed as (select set_config('presby.giving_write_active', 'true', true))
+    insert into giving_provider_connections (id, organization_id, provider, external_account_id, livemode, status,
+           charges_enabled, payouts_enabled, details_submitted, card_enabled, ach_enabled, requirements_due, disabled_reason,
+           payouts_attested_at, public_enabled_at, disconnected_at, disconnected_reason, last_status_at)
+    select ${connId}::uuid, ${fx.orgId}::uuid, 'stripe', ${accountId}, ${spec.livemode === true}, ${spec.status},
+           ${active}, ${active}, ${open ? detailsSubmitted : true}, ${active}, ${active}, ${spec.requirementsDue === true},
+           ${spec.disabledReason ?? null},
+           ${attested ? new Date().toISOString() : null}::timestamptz,
+           ${spec.publicOn === true ? new Date().toISOString() : null}::timestamptz,
+           ${open ? null : new Date().toISOString()}::timestamptz,
+           ${open ? null : (spec.disconnectedReason ?? "treasurer")},
+           now()
+      from armed`;
+  for (let n = 0; n < (spec.schedules ?? 0); n += 1) {
+    await sql`
+      insert into giving_checkout_intents (id, organization_id, connection_id, fund_id, donor_id, frequency, method_choice,
+             cover_fees, gift_amount_cents, donor_covered_fee_cents, total_cents, livemode, idempotency_key, status,
+             subscription_id, expires_at, completed_at)
+      values (${id(70 + n)}::uuid, ${fx.orgId}::uuid, ${connId}::uuid, ${fx.funds.general}::uuid, ${fx.donors.imogen}::uuid, 'monthly',
+              'card', false, 2500, 0, 2500, ${spec.livemode === true}, ${id(80 + n)}, 'completed',
+              ${`sub_fixture_e2e_${connectionCounter}_${n}`}, now() + interval '1 day', now())`;
+  }
+  return connId;
+}
+
+/** Marks one fund as offered online (a go-live prerequisite). */
+export async function offerFundOnline(sql: Sql, fx: GivingFixture, on: boolean): Promise<void> {
+  await sql`
+    update giving_funds set offered_online = ${on}, online_display_name = ${on ? "Giving" : null}
+     where id = ${fx.funds.general}::uuid`;
+}
+
+/** An inbox event for the fixture org's connection in a given status (a dead letter for the requeue spec). */
+export async function addInboxEvent(
+  sql: Sql,
+  fx: GivingFixture,
+  connectionId: string,
+  event: { externalEventId: string; status: "received" | "parked" | "dead_letter" | "applied"; type?: string; attempts?: number; lastError?: string },
+): Promise<string> {
+  const rows = (await sql`
+    insert into giving_provider_events (organization_id, connection_id, provider, external_event_id, event_type, livemode,
+           raw_body, status, attempts, last_error, processed_at)
+    values (${fx.orgId}::uuid, ${connectionId}::uuid, 'stripe', ${event.externalEventId}, ${event.type ?? "charge.refunded"}, false,
+            '{"fixture":true}', ${event.status}, ${event.attempts ?? 0}, ${event.lastError ?? null},
+            ${event.status === "dead_letter" || event.status === "applied" ? new Date().toISOString() : null}::timestamptz)
+    returning id`) as { id: string }[];
+  return rows[0]!.id;
+}
+
 /** One verified-TOTP session for the mfa-enrolled user, in a fresh browser context (cookies live in the context). */
 export async function verifiedContext(browser: Browser, callbackPath = "/home"): Promise<BrowserContext> {
   const context = await browser.newContext({ storageState: storageStatePath("mfa-enrolled") });

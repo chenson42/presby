@@ -10,9 +10,11 @@ import {
 } from "lucide-react";
 import { OrgAccessError, withOrgContext } from "@/lib/authz";
 import { loadAttention, type Attention } from "@/lib/giving/attention";
+import { loadConnectionPanel, type ConnectionPanel } from "@/lib/giving/connection";
+import { CONNECT_NOTICES } from "@/lib/giving/giving-copy";
 import { TileGrid } from "@/components/shared/tile-grid";
 import { AttentionList } from "./attention-list";
-import { ConnectionPlaceholderCard } from "./connection-placeholder-card";
+import { ConnectionCard } from "./connection-card";
 import { GivingLoadError } from "./giving-admin-states";
 import { gateGivingPage, type GivingNeedKey } from "./giving-page-gate";
 
@@ -30,8 +32,11 @@ import { gateGivingPage, type GivingNeedKey } from "./giving-page-gate";
  *   - "Needs attention": `loadAttention()` is the ONE definition. A recorder
  *     (`giving.record` alone) is told one thing - donor link suggestions - and
  *     nothing else; they read no ledger, no totals, no provider state.
- *   - the "Online giving" card (`giving.manage`): a placeholder until Batch 3
- *     lands the Stripe connection panel. Said plainly, not hidden.
+ *   - the "Online giving" card (`giving.manage`): the Stripe connection - its
+ *     state, the next step, the go-live checklist, fee rates (Batch 3b:
+ *     `connection-card.tsx` server + `connect-panel.tsx` client). If the panel
+ *     cannot be loaded it says so in place; the rest of the page still renders.
+ *     `?connect=<code>` carries the notice the connect/refresh route sends back.
  *   - one tile per area the viewer's keys open: Record a gift, Gifts, Donors,
  *     Funds, Settings, Team. A tile is shown only when its destination will
  *     admit the viewer, so no tile leads to a Forbidden page.
@@ -122,10 +127,14 @@ const AREAS: readonly AreaTile[] = [
 
 export default async function GivingAdminPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ connect?: string | string[] }>;
 }) {
   const { slug } = await params;
+  const rawNotice = (await searchParams)?.connect;
+  const notice = typeof rawNotice === "string" ? CONNECT_NOTICES[rawNotice] : undefined;
   const path = `/o/${slug}/admin/giving`;
 
   const gate = await gateGivingPage({
@@ -144,6 +153,20 @@ export default async function GivingAdminPage({
   } catch (err) {
     if (err instanceof OrgAccessError) throw err;
     return <GivingLoadError slug={slug} />;
+  }
+
+  // The Stripe connection (manage only). A failure here must not hide the rest
+  // of the overview: it renders an honest in-place message instead.
+  let panel: ConnectionPanel | null = null;
+  let panelFailed = false;
+  if (gate.has.manage) {
+    try {
+      const loaded = await loadConnectionPanel(gate.org.personId, gate.org.organizationId);
+      if (loaded.kind === "ok") panel = loaded.panel;
+    } catch (err) {
+      if (err instanceof OrgAccessError) throw err;
+      panelFailed = true;
+    }
   }
 
   // "Your recent entries" duplicates "Gifts" for someone who holds both keys.
@@ -171,7 +194,27 @@ export default async function GivingAdminPage({
           <h2 id="giving-online" className="text-xl font-semibold">
             Online giving
           </h2>
-          <ConnectionPlaceholderCard />
+          {notice && (
+            <p
+              role="status"
+              data-testid="connect-notice"
+              className="rounded-lg border border-border bg-muted p-3 text-sm"
+            >
+              {notice.text}
+            </p>
+          )}
+          {panel ? (
+            <ConnectionCard slug={slug} panel={panel} />
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-4" data-testid="connection-load-error">
+              <p className="text-sm font-medium">We can&apos;t load your Stripe connection right now</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {panelFailed
+                  ? "Nothing has changed. Reload the page in a moment."
+                  : "Your account can't manage the Stripe connection."}
+              </p>
+            </div>
+          )}
         </section>
       )}
 

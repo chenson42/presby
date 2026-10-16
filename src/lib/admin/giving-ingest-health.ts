@@ -134,3 +134,22 @@ export async function requeueDeadLetter(eventId: string): Promise<RequeueResult>
   const outcome = String(rowsOf(result)[0]?.outcome ?? "not_found");
   return outcome === "requeued" || outcome === "not_dead_letter" ? outcome : "not_found";
 }
+
+/**
+ * Organization names for the platform pages' tables (docs/work-log/
+ * 2026-10-15-online-giving.md, Batch 3b). The health rows carry organization
+ * ids only; the NAME comes from the public `organizations` table (id and name,
+ * nothing else). Lives here so the platform pages read through this one module
+ * and `getPlatformDb()` stays in a single file. An id with no row is simply
+ * absent from the map (the caller falls back to "Unknown organization").
+ */
+export async function listOrganizationNames(organizationIds: readonly string[]): Promise<Map<string, string>> {
+  const ids = Array.from(new Set(organizationIds));
+  const names = new Map<string, string>();
+  if (ids.length === 0) return names;
+  const result = await getPlatformDb().execute(
+    sql`select id, name from organizations where id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`,
+  );
+  for (const r of rowsOf(result)) names.set(String(r.id), String(r.name));
+  return names;
+}

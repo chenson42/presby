@@ -153,4 +153,12 @@ describe.skipIf(!hasDb)("giving ingest health (Postgres-backed)", () => {
     expect((await h.functions.claimEvent(id!))!.attempts).toBe(1);
     await h.owner(sql`select 1`);
   });
+
+  it("listOrganizationNames maps ids to the public organization name, omits unknown ids, and tolerates none", async () => {
+    const o = await h.org("health-names");
+    const names = await health.listOrganizationNames([o.organizationId, o.organizationId, "00000000-0000-4000-8000-000000000000"]);
+    expect(names.size).toBe(1);
+    expect(names.get(o.organizationId)).toBe("Fixture health-names for ingest-health");
+    expect((await health.listOrganizationNames([])).size).toBe(0);
+  });
 });

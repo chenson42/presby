@@ -38,6 +38,13 @@ vi.mock("@/lib/giving/attention", () => ({
   loadAttention: (...args: unknown[]) => loadAttention(...args),
 }));
 
+const loadConnectionPanel = vi.fn();
+vi.mock("@/lib/giving/connection", () => ({
+  loadConnectionPanel: (...args: unknown[]) => loadConnectionPanel(...args),
+}));
+// The client panel is exercised in connect-panel.test.tsx; here it only needs to exist.
+vi.mock("./connect-panel", () => ({ ConnectPanel: () => <div data-testid="connect-panel-stub" /> }));
+
 const assertGivingSession = vi.fn();
 const loadGivingContext = vi.fn();
 vi.mock("@/lib/giving/access", () => ({
@@ -71,6 +78,7 @@ afterEach(() => {
   assertGivingSession.mockReset();
   loadGivingContext.mockReset();
   loadAttention.mockReset();
+  loadConnectionPanel.mockReset();
   isFlagEnabled.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
@@ -89,6 +97,16 @@ const OK_RESOLVED = {
 };
 
 const params = (slug = "alder-creek") => Promise.resolve({ slug });
+
+const PANEL_NONE = {
+  state: "none",
+  stripeConfigured: true,
+  platformMode: "test",
+  connection: null,
+  onlineFundCount: 0,
+  activeSchedules: 0,
+  readiness: { missing: ["connection_active", "online_fund", "payouts_attested"], canGoPublic: false },
+};
 
 const CLEAR = {
   scope: "full",
@@ -274,14 +292,17 @@ describe("GivingAdminPage — states", () => {
     arrangeSignedIn();
     loadGivingContext.mockResolvedValue({ kind: "ok", has: { view: true, record: true, manage: true } });
     loadAttention.mockResolvedValue(CLEAR);
+    loadConnectionPanel.mockResolvedValue({ kind: "ok", panel: PANEL_NONE });
     const { container } = render(await GivingAdminPage({ params: params() }));
     expect(screen.getByRole("heading", { level: 1, name: "Giving" })).toBeTruthy();
     expect(screen.getByText("Alder Creek Presbyterian Church")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Needs attention" })).toBeTruthy();
     expect(screen.getByText("Nothing needs attention")).toBeTruthy();
-    // the manage-only "Online giving" placeholder is honest that Stripe is not set up
+    // the manage-only "Online giving" section renders the Stripe connection card
     expect(screen.getByRole("heading", { name: "Online giving" })).toBeTruthy();
-    expect(screen.getByText("Not set up")).toBeTruthy();
+    expect(screen.getByTestId("connection-card").getAttribute("data-state")).toBe("not_started");
+    expect(screen.getByText("Not connected")).toBeTruthy();
+    expect(loadConnectionPanel).toHaveBeenCalledWith("person-1", "org-1");
     const hrefs = Array.from(container.querySelectorAll("a")).map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual(
       expect.arrayContaining([
@@ -366,9 +387,55 @@ describe("GivingAdminPage — states", () => {
       arrangeSignedIn();
       loadGivingContext.mockResolvedValue(ctx);
       loadAttention.mockResolvedValue(CLEAR);
+      loadConnectionPanel.mockResolvedValue({ kind: "ok", panel: PANEL_NONE });
       const { container, unmount } = render(await GivingAdminPage({ params: params() }));
       expect(container.querySelectorAll("h1").length).toBe(1);
       unmount();
     }
   });
 });
+
+describe("GivingAdminPage - the Stripe connection section (Batch 3b)", () => {
+  const manager = { kind: "ok", has: { view: true, record: true, manage: true } };
+
+  it("loads the panel only for a giving.manage holder", async () => {
+    arrangeSignedIn();
+    loadGivingContext.mockResolvedValue({ kind: "ok", has: { view: true, record: false, manage: false } });
+    loadAttention.mockResolvedValue(CLEAR);
+    render(await GivingAdminPage({ params: params() }));
+    expect(loadConnectionPanel).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("connection-card")).toBeNull();
+  });
+
+  it("a failed panel read is an honest in-place message and the rest of the overview still renders", async () => {
+    arrangeSignedIn();
+    loadGivingContext.mockResolvedValue(manager);
+    loadAttention.mockResolvedValue(CLEAR);
+    loadConnectionPanel.mockRejectedValue(new Error("connection reset"));
+    render(await GivingAdminPage({ params: params() }));
+    expect(screen.getByTestId("connection-load-error").textContent).toMatch(/can.t load your Stripe connection right now/);
+    expect(screen.getByText("Nothing needs attention")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Giving tools" })).toBeTruthy();
+  });
+
+  it("an OrgAccessError from the panel read is rethrown, not swallowed", async () => {
+    arrangeSignedIn();
+    loadGivingContext.mockResolvedValue(manager);
+    loadAttention.mockResolvedValue(CLEAR);
+    loadConnectionPanel.mockRejectedValue(new OrgAccessError("gone"));
+    await expect(GivingAdminPage({ params: params() })).rejects.toBeInstanceOf(OrgAccessError);
+  });
+
+  it("renders the notice the connect/refresh route sends back via ?connect=, and ignores an unknown code", async () => {
+    arrangeSignedIn();
+    loadGivingContext.mockResolvedValue(manager);
+    loadAttention.mockResolvedValue(CLEAR);
+    loadConnectionPanel.mockResolvedValue({ kind: "ok", panel: PANEL_NONE });
+    render(await GivingAdminPage({ params: params(), searchParams: Promise.resolve({ connect: "refresh_failed" }) }));
+    expect(screen.getByTestId("connect-notice").textContent).toMatch(/setup link had expired/);
+    cleanup();
+    render(await GivingAdminPage({ params: params(), searchParams: Promise.resolve({ connect: "<script>" }) }));
+    expect(screen.queryByTestId("connect-notice")).toBeNull();
+  });
+});
+

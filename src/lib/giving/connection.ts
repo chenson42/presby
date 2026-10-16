@@ -202,6 +202,31 @@ export async function loadConnectionPanel(
   });
 }
 
+/**
+ * Is the congregation's OPEN connection a Stripe test-mode account? The test-
+ * mode badge on every admin giving page reads this (docs/work-log/2026-10-15-
+ * online-giving.md, G14). `"none"` means no open connection (a disconnected
+ * test connection no longer takes gifts, so it shows no badge). The CALLER has
+ * already passed the giving gate (any giving key); RLS scopes the row to the
+ * organization. A database failure throws - the badge's slot swallows it,
+ * because a missing badge must never take a page down.
+ */
+export async function readOpenConnectionMode(
+  personId: string,
+  organizationId: string,
+): Promise<"test" | "live" | "none"> {
+  return withOrgContext(personId, organizationId, async (tx) => {
+    const row = rowsOf(
+      await tx.execute(sql`
+        select livemode from giving_provider_connections
+         where organization_id = ${organizationId}::uuid and status <> 'disconnected'
+         limit 1`),
+    )[0];
+    if (!row) return "none" as const;
+    return row.livemode === true ? ("live" as const) : ("test" as const);
+  });
+}
+
 /** What stops a public give page: an `active` connection, one fund offered online, the payouts attestation (Q8). */
 export function goLiveBlockers(
   connection: Pick<ConnectionView, "status" | "payoutsAttestedAt"> | null,

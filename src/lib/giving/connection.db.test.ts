@@ -160,6 +160,33 @@ describe.skipIf(!hasDb)("connection.ts (Postgres-backed)", () => {
     });
   });
 
+  describe("readOpenConnectionMode: the test-mode badge's one read", () => {
+    it("none before a connection, test for an open test-mode connection, none again once it is disconnected", async () => {
+      const s = await scene();
+      expect(await conn.readOpenConnectionMode(s.manager.personId, s.organizationId)).toBe("none");
+      await conn.startConnect(s.manager, s.slug); // the mocked account is test mode (livemode false)
+      expect(await conn.readOpenConnectionMode(s.manager.personId, s.organizationId)).toBe("test");
+      await conn.disconnectConnection(s.manager);
+      // a disconnected test connection no longer takes gifts, so it shows no badge
+      expect(await conn.readOpenConnectionMode(s.manager.personId, s.organizationId)).toBe("none");
+    });
+
+    it("reports live for a live-mode open connection", async () => {
+      const s = await scene();
+      await fx.makeConnection(s.organizationId, { livemode: true });
+      expect(await conn.readOpenConnectionMode(s.manager.personId, s.organizationId)).toBe("live");
+    });
+
+    it("is tenant-scoped: org A's actor reading org B's id is refused before any row is read", async () => {
+      const a = await scene();
+      const b = await scene();
+      await fx.makeConnection(b.organizationId, { livemode: false });
+      await expect(conn.readOpenConnectionMode(a.manager.personId, b.organizationId)).rejects.toThrow();
+      // and A's own answer is not B's
+      expect(await conn.readOpenConnectionMode(a.manager.personId, a.organizationId)).toBe("none");
+    });
+  });
+
   describe("startConnect", () => {
     it("creates the Stripe account and the row (born onboarding, mode from Stripe, creator recorded) and returns the origin-asserted URL", async () => {
       const s = await scene();

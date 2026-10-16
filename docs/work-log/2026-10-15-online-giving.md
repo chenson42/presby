@@ -16,7 +16,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-15 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
-| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3a complete (+fix, +addendum); 3b pending (ux-developer) | — | 2026-10-16 |
+| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3 complete; Batch 4 pending (api-developer + ux-developer) | — | 2026-10-16 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3306,6 +3306,56 @@ requeueDeadLetter(eventId: string): Promise<"requeued" | "not_dead_letter" | "no
 ### Handoff
 
 Next agent: **ux-developer (Batch 3b)** with the contract above (connect panel, `connect/return`, platform health page including the dead-letter list and requeue control). QA follows 3b. The 3a-fix and this addendum are uncommitted on `pipeline/online-giving`; the orchestrator commits.
+
+
+## Batch 3b — connect panel, return page, platform health (ux-developer)
+
+**Date:** 2026-10-16. Built only against the 3a contract, fix and addendum. Nothing committed. No live Stripe account exists: every state was exercised through fixture rows and mocked actions; nothing called Stripe.
+
+### Files
+
+New, org side (`src/app/(org)/o/[slug]/admin/giving/`): `connection-card.tsx` (server: state badge, facts, go-live checklist, rates summary, G15 disclosure), `connect-panel.tsx` (client: one primary action per state, AlertDialogs for disconnect / take-offline / attest, `isOnboardingUrl` re-assertion before `window.location.assign`), `rates-form.tsx` (percent and dollars in, bps and cents out), `connect/return/page.tsx` (server; retrieves via `refreshConnection`, then `loadConnectionPanel`; no `loading.tsx`), `layout.tsx` + `test-mode-slot.tsx` (badge on every giving admin page without touching the nine pages), `connect-fixtures.ts` (test-only builders). Deleted `connection-placeholder-card.tsx`. `page.tsx` now loads the panel for `giving.manage` holders (failure renders in place; the rest of the page survives) and renders the `?connect=<code>` notices.
+New, shared: `src/components/giving/test-mode-badge.tsx`; `src/lib/giving/{giving-copy,connection-display,rates-format}.ts` with tests.
+New, platform: `(admin)/admin/giving/{page,ingest-health-table,dead-letters-table,actions}` (+ tests), `(admin)/admin/organizations/[id]/ingest-health-section.tsx` (+ test), `src/lib/admin/format-age.ts`; "Giving health" link in the admin nav (`(admin)/admin/layout.tsx`).
+Edited server-side files (small, additive): `src/lib/giving/connection.ts` (+`readOpenConnectionMode`), `src/lib/admin/giving-ingest-health.ts` (+`listOrganizationNames`), `(admin)/admin/organizations/[id]/page.tsx` (section, same applicability as the treasurer section), `e2e/support/giving-fixture.ts` (+`setConnection`, `clearConnections`, `offerFundOnline`, `addInboxEvent`). Tests: `giving-copy.test.ts`, `connection-card.test.tsx` (all six states), `connect-panel.test.tsx` (redirects incl. look-alike hosts, dialogs, not_ready, 2FA bounce), `rates-form.test.tsx`, `connect/return/page.test.tsx`, `test-mode-slot.test.tsx`, the platform page/tables/action/section tests, `page.test.tsx` updates (overview, org detail), DB tests in `connection.db.test.ts` and `giving-ingest-health.db.test.ts`, `e2e/giving-connect.spec.ts` (16 tests).
+
+### Commands and results
+
+| Command | Result |
+|---|---|
+| `npm run typecheck`; `npm run lint -- --max-warnings=0` | clean |
+| `npm run check` (all seven incl. `check:audit`, `check:hydration-gate`, `check:giving-boundaries`) | all passed |
+| `npm run test` | 379 files passed, 53 skipped; 5358 tests passed, 1514 skipped |
+| DB lane: `connection.db.test.ts` + `giving-ingest-health.db.test.ts` (serial, `.env.local`) | all passed (this caught a real bug: an array parameter in `listOrganizationNames` expanded to a record list; fixed with an `in (...)` of casts) |
+| `npm run build` | exit 0 |
+| `E2E_BASE_URL=http://localhost:3100 npx playwright test e2e/giving-connect.spec.ts` | 16 passed |
+| Whole suite on 3100 | **248 passed** (an earlier full run failed `giving-admin.spec.ts:259`, see deviation 2) |
+| Browser at 360 px | screenshots in `test-results/giving-connect-360/` (01-11) read: not started, details due, pending, active, restricted, disconnected, badge, return page x2, platform page, organization section; no horizontal scroll, controls at least 40 px |
+
+Hygiene: no `e2e-giving*` organization remains; my 3100 server is stopped; the port 3000 server was never touched.
+
+### Deviations (with reasons)
+
+1. **`listOrganizationNames()` added to `giving-ingest-health.ts`.** The brief says the platform page reads only through that module and takes names from the public join; one module keeps `getPlatformDb()` in a single file.
+2. **The test-mode badge is shown to `giving.view` and `giving.manage` holders, never to a record-only holder.** First version showed it to everyone passing the gate; the existing S4 test (`giving-admin.spec.ts:259`, recorder sees no provider state) caught it. The slot is silent for every other non-ok case, and for any failure.
+3. **Badge wiring is a layout plus an async slot**, not the gate: a gate result cannot reach the nine pages without editing them. The slot repeats the gate's cheap reads (session claim, resolve, toggle and keys); it is not a gate, and every page still runs `gateGivingPage()`.
+4. **Onboarding splits into "details due" and "waiting for Stripe"** on `detailsSubmitted && !requirementsDue` (the panel's own `state` has one `onboarding` value); the primary action differs (Continue vs Refresh).
+5. **Platform tables are real `<table>`s in the shared scroll container**, not collapsing cards: operator-only pages; the page itself never scrolls sideways, and the scroll cue shows.
+6. **No `STRIPE_SECRET_KEY` in the Playwright server env** (Batch 4's e2e needs it unset), so the spec's "not started" step asserts whichever the page truthfully shows (installation notice, or Connect button when the server has a key). I ran it once with a dummy key set to exercise the Connect-button branch; CI exercises the notice branch.
+7. **Attestation also uses an AlertDialog** (it is an audited statement of fact), beyond the plan's list.
+
+### Operator smoke still needed (once a Stripe test account exists)
+
+Click **Connect Stripe** and confirm the redirect lands on `accounts.stripe.com` and back on `connect/return` showing the real status; **Continue setup** after abandoning onboarding; the **refresh** route after an expired link; **Refresh status** with a v2 account (payouts-enabled and requirements shapes); then attest, go live and the give page. The Start/Continue buttons were tested only with mocked actions and a re-asserted origin.
+
+### What Batch 4 must know
+
+- `<TestModeBadge>` exists in `src/components/giving/`; the public give page and `GiveForm` can reuse it (a test-mode banner when `livemode` is false).
+- `giving-copy.ts` already holds `STRIPE_RECEIPT_NOTE` and `MONTHLY_STOP_NOTE` for the return panels; its test forbids "acknowledgment" next to "receipt" and walks every exported string, so add new copy to `allGivingCopy()`.
+- The overview does not link to the public give page (Batch 4's route does not exist); add the link to the card's give-page section.
+- Do not set `STRIPE_SECRET_KEY` globally in the Playwright config.
+- `e2e/support/giving-fixture.ts` now has `setConnection(sql, fx, spec)` (any connection state, schedules, armed write marker), `offerFundOnline`, and `addInboxEvent`; reuse them for public-giving states.
+- The admin nav has a "Giving health" link; the org detail page's section is read-only counts.
 
 
 # Phase 5 — Verification (qa)

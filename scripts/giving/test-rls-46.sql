@@ -73,10 +73,10 @@ begin;
       where tablename like 'giving\_%' and policyname = 'tenant_isolation'
         and qual = '(organization_id = presby_current_org())'
         and with_check = '(organization_id = presby_current_org())'),
-    12, '46a: every giving table carries tenant_isolation with BOTH using and with check');
+    15, '46a: every giving table (twelve from 0055, three statement tables from 0056) carries tenant_isolation with BOTH using and with check');
   select assert_eq(
     (select count(*) from pg_policies where tablename like 'giving\_%'),
-    12, '46a: and no other policy on any giving table');
+    15, '46a: and no other policy on any giving table');
   select assert_eq(
     (select count(*) from pg_constraint c join pg_class t on t.oid = c.conrelid
       where t.relname like 'giving\_%' and c.contype = 'u'
@@ -85,14 +85,14 @@ begin;
                from unnest(c.conkey) with ordinality k(attnum, ord)
                join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum)
             = array['id','organization_id']),
-    11, '46a: unique (id, organization_id) on every giving table but giving_settings (F2)');
+    14, '46a: unique (id, organization_id) on every giving table but giving_settings (F2; 0055 eleven + 0056 three)');
   -- Every FK from a giving table to another giving table or to memberships.
   select assert_eq(
     (select count(*) from pg_constraint c
        join pg_class t on t.oid = c.conrelid join pg_class r on r.oid = c.confrelid
       where c.contype = 'f' and t.relname like 'giving\_%'
         and (r.relname like 'giving\_%' or r.relname = 'memberships')),
-    23, '46a: 23 foreign keys between giving tables and to memberships');
+    28, '46a: 28 foreign keys between giving tables and to memberships (0055: 23; 0056: statement->donor, statement->predecessor, line->statement, line->gift, delivery->statement)');
   select assert_eq(
     (select count(*) from pg_constraint c
        join pg_class t on t.oid = c.conrelid join pg_class r on r.oid = c.confrelid
@@ -103,13 +103,13 @@ begin;
         and (select attname from pg_attribute where attrelid = c.confrelid and attnum = c.confkey[2]) = 'organization_id'
         and (select attname from pg_attribute where attrelid = c.confrelid and attnum = c.confkey[1]) = 'id'
         and c.confdeltype = 'a'),
-    23, '46a: every one of them is COMPOSITE (x_id, organization_id) -> (id, organization_id) and NO ACTION (F2, DECISION-161)');
+    28, '46a: every one of them is COMPOSITE (x_id, organization_id) -> (id, organization_id) and NO ACTION (F2, DECISION-161)');
   select assert_eq(
     (select count(*) from pg_constraint c
        join pg_class t on t.oid = c.conrelid
       where c.contype = 'f' and t.relname like 'giving\_%'
         and c.confrelid = 'organizations'::regclass and c.confdeltype = 'c'),
-    12, '46a: every giving table''s organization_id FK cascades from organizations');
+    15, '46a: every giving table''s organization_id FK cascades from organizations');
   select assert_eq(
     (select count(*) from information_schema.columns
       where table_name like 'giving\_%' and column_name in ('person_id', 'about_org_id')),
@@ -130,7 +130,12 @@ begin;
     ('giving_donor_link_decisions','SELECT'), ('giving_donor_link_decisions','INSERT'),
     ('giving_checkout_intents','SELECT'),
     ('giving_gifts','SELECT'), ('giving_gift_reversals','SELECT'),
-    ('giving_settlements','SELECT'), ('giving_settlement_lines','SELECT')),
+    ('giving_settlements','SELECT'), ('giving_settlement_lines','SELECT'),
+    -- drizzle/0056: issuing is a tenant act, bounded by the insert guards and
+    -- the deferred consistency triggers; never UPDATE, never DELETE.
+    ('giving_statements','SELECT'), ('giving_statements','INSERT'),
+    ('giving_statement_lines','SELECT'), ('giving_statement_lines','INSERT'),
+    ('giving_statement_deliveries','SELECT'), ('giving_statement_deliveries','INSERT')),
   actual as (
     select c.relname::text as tbl, a.privilege_type::text as priv, a.grantee
       from pg_class c, aclexplode(c.relacl) a
@@ -204,7 +209,7 @@ rollback;
 
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  select assert_eq((select count(*) from giving_gifts), 10, '46c: alder sees its own ten gifts');
+  select assert_eq((select count(*) from giving_gifts), 12, '46c: alder sees its own twelve gifts (G12/G13 added for statements, Batch 5a)');
   select assert_eq((select count(*) from giving_donors), 7, '46c: alder sees its own seven donors');
   select assert_eq((select count(*) from giving_funds), 3, '46c: alder sees its own three funds');
   select assert_eq((select count(*) from giving_provider_connections), 2, '46c: alder sees its two connections');
@@ -300,8 +305,10 @@ begin;
     + (select count(*) from giving_donor_identities) + (select count(*) from giving_donor_link_decisions)
     + (select count(*) from giving_checkout_intents) + (select count(*) from giving_gifts)
     + (select count(*) from giving_gift_reversals) + (select count(*) from giving_settlements)
-    + (select count(*) from giving_settlement_lines),
-    0, '46d(1): ...and reads ZERO rows of any giving table - no member congregation''s giving');
+    + (select count(*) from giving_settlement_lines)
+    + (select count(*) from giving_statements) + (select count(*) from giving_statement_lines)
+    + (select count(*) from giving_statement_deliveries),
+    0, '46d(1): ...and reads ZERO rows of any giving table (statements included) - no member congregation''s giving');
   do $$
   begin
     perform presby_has_permission('c0000000-0000-0000-0000-00000000000a', '22222222-2222-2222-2222-222222222222', 'giving.view');
@@ -327,7 +334,7 @@ begin;
     (select count(*) from pg_proc p
       where p.proname in ('presby_org_affiliated','presby_transfer_affiliation','presby_publish_sasr_snapshot',
                           'presby_list_published_returns_to_me','presby_effective_permissions')
-        and p.prosrc ~ '\mgiving_(settings|provider_connections|funds|donors|donor_identities|donor_link_decisions|checkout_intents|provider_events|gifts|gift_reversals|settlements|settlement_lines)\M'),
+        and p.prosrc ~ '\mgiving_(settings|provider_connections|funds|donors|donor_identities|donor_link_decisions|checkout_intents|provider_events|gifts|gift_reversals|settlements|settlement_lines|statements|statement_lines|statement_deliveries)\M'),
     0, '46d(3): no cross-council function (nor the resolver) reads a giving relation (by relation name: the SASR''s p_potential_giving_units is not one)');
 rollback;
 
@@ -1252,12 +1259,452 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  select assert_eq((select count(*) from giving_gifts g where g.status = 'succeeded'), 8,
-                   '46n: alder has eight succeeded gifts in all');
-  select assert_eq((select count(*) from giving_gifts g where g.status = 'succeeded' and g.livemode), 7,
+  select assert_eq((select count(*) from giving_gifts g where g.status = 'succeeded'), 10,
+                   '46n: alder has ten succeeded gifts in all');
+  select assert_eq((select count(*) from giving_gifts g where g.status = 'succeeded' and g.livemode), 9,
                    '46n: the live predicate excludes the one test-mode gift');
   select assert_eq((select count(*) from giving_gifts g where g.id = 'd9100000-0000-0000-0000-000000000088' and not g.livemode), 1,
                    '46n: ...which is the fixture''s test-mode gift (G9)');
+rollback;
+
+-- ===========================================================================
+-- (o) Statements, structure (drizzle/0056_presby_giving_statements.sql).
+--     FORCE RLS and the tenant policy, composite keys, the blob FK, the
+--     version/chain keys, the grant matrix, and every 0056 guard installed.
+--     The OWNER-path proofs (frozen rows refuse UPDATE/DELETE on
+--     getPlatformDb(), deletable_until permits, the teardown cascade, the blob
+--     FK and the blob guard binding the owner, concurrency) are in
+--     src/lib/db/domain/giving-statements.db.test.ts - presby_app cannot even
+--     attempt them.
+-- ===========================================================================
+\set G_DONOR_HALLIE '\'d9100000-0000-0000-0000-000000000041\''
+\set G_DONOR_MERGED '\'d9100000-0000-0000-0000-000000000044\''
+\set G_DONOR_ODETTE '\'d9100000-0000-0000-0000-000000000046\''
+\set G_DONOR_BRAMBLE '\'d9100000-0000-0000-0000-000000000050\''
+\set G_GIFT_HALLIE_PRIOR '\'d9100000-0000-0000-0000-000000000087\''
+\set G_GIFT_TESTMODE '\'d9100000-0000-0000-0000-000000000088\''
+\set G_GIFT_BRAMBLE '\'d9100000-0000-0000-0000-00000000008a\''
+\set G_GIFT_MERGED_PRIOR '\'d9100000-0000-0000-0000-00000000008b\''
+\set G_GIFT_LINDEN_PRIOR '\'d9100000-0000-0000-0000-00000000008c\''
+\set U_CLERK '\'e0000000-0000-0000-0000-0000000000f3\''
+begin;
+  select assert_eq(
+    (select count(*) from pg_class
+      where relname in ('giving_statements', 'giving_statement_lines', 'giving_statement_deliveries')
+        and relkind = 'r' and relrowsecurity and relforcerowsecurity),
+    3, '46o: the three statement tables have row level security ENABLED and FORCED (F1)');
+  select assert_eq(
+    (select count(*) from pg_policies
+      where tablename in ('giving_statements', 'giving_statement_lines', 'giving_statement_deliveries')
+        and policyname = 'tenant_isolation' and cmd = 'ALL' and permissive = 'PERMISSIVE'
+        and qual = '(organization_id = presby_current_org())'
+        and with_check = '(organization_id = presby_current_org())'),
+    3, '46o: each carries tenant_isolation (ALL, permissive) with BOTH using and with check');
+  select assert_eq(
+    (select count(*) from pg_constraint c
+       join pg_class t on t.oid = c.conrelid
+      where c.contype = 'f' and c.conname = 'giving_statements_blob_fk'
+        and t.relname = 'giving_statements' and c.confrelid = 'blob_assets'::regclass
+        and c.confdeltype = 'a' and c.confupdtype = 'a'
+        and (select array_agg(a.attname::text order by k.ord) from unnest(c.conkey) with ordinality k(attnum, ord)
+               join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum) = array['blob_asset_id', 'organization_id']
+        and (select array_agg(a.attname::text order by k.ord) from unnest(c.confkey) with ordinality k(attnum, ord)
+               join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum) = array['id', 'organization_id']),
+    1, '46o: the PDF is referenced by a COMPOSITE, NO ACTION FK into blob_assets (undeletable while referenced, F44)');
+  select assert_eq(
+    (select count(*) from pg_constraint c
+      where c.conname = 'giving_statements_version_key' and c.contype = 'u'
+        and (select array_agg(a.attname::text order by k.ord) from unnest(c.conkey) with ordinality k(attnum, ord)
+               join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum)
+            = array['organization_id', 'donor_id', 'tax_year', 'version']),
+    1, '46o: one statement per (organization, donor, tax year, version) - the race-safe already_issued');
+  select assert_eq(
+    (select count(*) from pg_index i join pg_class c on c.oid = i.indexrelid
+      where c.relname = 'giving_statements_supersedes_once_idx' and i.indisunique
+        and pg_get_expr(i.indpred, i.indrelid) = '(supersedes_id IS NOT NULL)'),
+    1, '46o: a statement is superseded at most once - the chain cannot fork (unique partial index)');
+  -- The grant matrix: presby_app SELECT + INSERT and nothing else; nobody else anything.
+  select assert_eq(
+    (select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('giving_statements', 'giving_statement_lines', 'giving_statement_deliveries')
+        and a.grantee = 'presby_app'::regrole and a.privilege_type in ('SELECT', 'INSERT')),
+    6, '46o: presby_app holds SELECT and INSERT on each statement table');
+  select assert_eq(
+    (select count(*) from (values ('giving_statements'), ('giving_statement_lines'), ('giving_statement_deliveries')) v(t),
+            (values ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) p(priv)
+      where has_table_privilege('presby_app', v.t, p.priv) or has_table_privilege('presby_platform', v.t, p.priv)
+         or has_any_column_privilege('presby_app', v.t, 'UPDATE')),
+    0, '46o: NO UPDATE (table or column), DELETE or TRUNCATE on any statement table, for presby_app or presby_platform');
+  select assert_eq(
+    (select count(*) from pg_trigger
+      where not tgisinternal and tgenabled = 'O'
+        and tgname in ('giving_statements_insert_guard', 'giving_statements_freeze', 'giving_statement_lines_freeze',
+                       'giving_statement_deliveries_freeze', 'giving_statement_deliveries_insert_guard',
+                       'blob_assets_giving_statement_guard')),
+    6, '46o: the insert guards, the three freezes and the blob guard are installed and ENABLED');
+  select assert_eq(
+    (select count(*) from pg_trigger
+      where not tgisinternal and tgenabled = 'O' and tgconstraint <> 0 and tgdeferrable and tginitdeferred
+        and tgname in ('giving_statements_consistency', 'giving_statement_lines_consistency')),
+    2, '46o: both consistency triggers are CONSTRAINT triggers, DEFERRABLE INITIALLY DEFERRED (checked at commit)');
+  select assert_eq(
+    (select count(*) from pg_proc p
+      where p.proname in ('presby_giving__actor_holds', 'presby_giving__check_statement',
+                          'presby_giving_guard_statement_insert', 'presby_giving_guard_statement_freeze',
+                          'presby_giving_check_statement_consistency', 'presby_giving_guard_statement_delivery',
+                          'presby_giving_guard_statement_blob')
+        and p.prosecdef and p.proconfig @> array['search_path=public, pg_temp']
+        and p.proacl is not null
+        and not exists (select 1 from aclexplode(p.proacl) a where a.grantee <> p.proowner)),
+    7, '46o: the seven 0056 functions are SECURITY DEFINER, pin search_path, and are executable by their owner ALONE');
+rollback;
+
+-- ===========================================================================
+-- (p) Issuing, as presby_app, through the harness (scripts/giving/
+--     test-rls-46-issue.sql): the issuer is the fixture treasurer (Priya,
+--     giving.view/record/manage) linked to founding.fixture's user for the
+--     block. Tenancy and the composite FKs on the new tables.
+-- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  select set_config('rls_test.s_org', :ALDER, true);
+  select set_config('rls_test.s_issuer', :U_FOUNDING, true);
+  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
+  select set_config('rls_test.s_label', '46p: the treasurer issues Linden Marsh''s statement for last year', true);
+\ir test-rls-46-issue.sql
+  select current_setting('rls_test.s_statement') as s_prior \gset
+  select assert_eq(
+    (select count(*) from giving_statements s
+      where s.id = :'s_prior' and s.version = 1 and s.supersedes_id is null
+        and s.gift_count = 2 and s.non_cash_count = 0 and s.cash_total_cents = 10500
+        and s.issued_at = now() and s.donee_legal_name = 'Alder Creek Presbyterian Church'),
+    1, '46p: ...version 1, two gifts, $105.00, issued_at STAMPED by the guard (the harness passed 2000-01-01; 0056 S2)');
+  select assert_eq(
+    (select count(*) from giving_statement_lines
+      where statement_id = :'s_prior' and gift_id in (:G_GIFT_MERGED_PRIOR, :G_GIFT_LINDEN_PRIOR)),
+    2, '46p: ...counting her own gift AND the gift recorded to the donor later merged into her (the donor-root group)');
+
+  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+  select set_config('rls_test.s_label', '46p: ...and this year''s, with a stock gift, a covered fee and a test-mode gift', true);
+\ir test-rls-46-issue.sql
+  select current_setting('rls_test.s_statement') as s_current \gset
+  select assert_eq(
+    (select count(*) from giving_statements s
+      where s.id = :'s_current' and s.gift_count = 2 and s.non_cash_count = 1 and s.cash_total_cents = 5181),
+    1, '46p: ...this year: two lines, one NON-CASH (stock), cash $51.81 (the covered fee counted, G10 policy)');
+  select assert_eq(
+    (select count(*) from giving_statement_lines l
+      where l.statement_id = :'s_current'
+        and ((l.kind = 'non_cash' and l.amount_cents is null and l.gift_id = 'd9100000-0000-0000-0000-000000000082')
+          or (l.kind = 'cash' and l.amount_cents = 5181 and l.covered_fee_cents = 181 and l.gift_id = :G_GIFT_ONLINE))),
+    2, '46p: ...the stock line carries no amount; the online line carries its covered fee');
+  select assert_eq((select count(*) from giving_statement_lines where gift_id = :G_GIFT_TESTMODE), 0,
+                   '46p: ...and the test-mode gift (G9) is on no statement (P3-17)');
+
+  -- Tenancy: bramblewood sees none of it, and cannot write into alder's.
+  select set_config('app.current_org_id', :BRAMBLE, true);
+  select assert_eq((select count(*) from giving_statements) + (select count(*) from giving_statement_lines)
+                   + (select count(*) from giving_statement_deliveries), 0,
+                   '46p: bramblewood sees no statement, line or delivery of alder''s');
+  select assert_eq((select count(*) from giving_statements where id = :'s_prior'), 0,
+                   '46p: ...not even by known id');
+  select set_config('rls_test.s_prior', :'s_prior', true);
+  do $$
+  begin
+    insert into giving_statement_lines (organization_id, statement_id, gift_id, line_no, occurred_on, fund_label,
+           description, kind, amount_cents, gross_cents)
+    values ('22222222-2222-2222-2222-222222222222', current_setting('rls_test.s_prior')::uuid,
+            'd9100000-0000-0000-0000-000000000087', 3, current_date - 400, 'General Fund', 'Hijack', 'cash', 100, 100);
+    raise exception 'FAIL - bramblewood wrote a line into alder''s statement';
+  exception when insufficient_privilege then
+    raise notice 'pass  46p: tenant_isolation WITH CHECK refuses a cross-org line insert';
+  end $$;
+  do $$
+  begin
+    insert into giving_statements (organization_id, donor_id, tax_year, donee_legal_name, donee_address_line1,
+           donee_city, donee_region, donee_postal_code, greeting_text, closing_text, wording_version, donor_name,
+           period_start, period_end, cash_total_cents, gift_count, covered_fee_counted, blob_asset_id, pdf_sha256,
+           issued_by)
+    values ('22222222-2222-2222-2222-222222222222', 'd9100000-0000-0000-0000-000000000040', 2024, 'X', 'X', 'X',
+            'OH', '00000', 'X', 'X', 1, 'X', '2024-01-01', '2024-12-31', 1, 1, true, gen_random_uuid(),
+            repeat('0', 64), 'e0000000-0000-0000-0000-0000000000f5');
+    raise exception 'FAIL - bramblewood wrote a statement for alder';
+  exception when insufficient_privilege then
+    raise notice 'pass  46p: a statement naming another org is refused from this org''s context';
+  end $$;
+  -- The composite FK, not RLS, is what refuses a same-org line naming ANOTHER org's gift.
+  select set_config('app.current_org_id', :ALDER, true);
+  do $$
+  begin
+    insert into giving_statement_lines (organization_id, statement_id, gift_id, line_no, occurred_on, fund_label,
+           description, kind, amount_cents, gross_cents)
+    values ('22222222-2222-2222-2222-222222222222', current_setting('rls_test.s_prior')::uuid,
+            'd9100000-0000-0000-0000-00000000008a', 3, current_date - 400, 'General Fund', 'Cross org', 'cash', 3300, 3300);
+    raise exception 'FAIL - an alder statement line named bramblewood''s gift';
+  exception when foreign_key_violation then
+    raise notice 'pass  46p: giving_statement_lines_gift_fk is composite - another org''s gift is refused (F2)';
+  end $$;
+  do $$
+  begin
+    insert into giving_statement_deliveries (organization_id, statement_id, channel, recorded_by)
+    values ('22222222-2222-2222-2222-222222222222', gen_random_uuid(), 'print_mailed', 'e0000000-0000-0000-0000-0000000000f5');
+    raise exception 'FAIL - a delivery named a statement that is not this org''s';
+  exception when foreign_key_violation then
+    raise notice 'pass  46p: giving_statement_deliveries_statement_fk refuses a statement this org does not hold';
+  end $$;
+rollback;
+
+-- ===========================================================================
+-- (q) The insert guard (0056 section 6a; deviation S1 the issuer, S3 the bytes).
+-- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  select set_config('rls_test.s_org', :ALDER, true);
+  select set_config('rls_test.s_issuer', :U_FOUNDING, true);
+  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+
+  select set_config('rls_test.s_donor', :G_DONOR_PLATE, true);
+  select set_config('rls_test.s_expect', 'giving_statement: donor_unidentified', true);
+  select set_config('rls_test.s_label', '46q: plate cash (the unidentified donor) never receives a statement', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_donor', :G_DONOR_MERGED, true);
+  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_expect', 'giving_statement: donor_unavailable', true);
+  select set_config('rls_test.s_label', '46q: a MERGED donor receives none - the statement goes to the root', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
+  select set_config('rls_test.s_blob', 'badhash', true);
+  select set_config('rls_test.s_expect', 'giving_statement: blob_invalid', true);
+  select set_config('rls_test.s_label', '46q: pdf_sha256 must equal the stored blob''s content hash (S3)', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_blob', 'json', true);
+  select set_config('rls_test.s_expect', 'giving_statement: blob_invalid', true);
+  select set_config('rls_test.s_label', '46q: ...and the blob must be application/pdf (S3)', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_donor', :G_DONOR_HALLIE, true);
+  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+  select set_config('rls_test.s_expect', 'giving_statements_totals_shape', true);
+  select set_config('rls_test.s_label', '46q: a year with nothing to count (her one gift fully refunded) cannot be issued', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
+  select set_config('rls_test.s_issuer', :U_CLERK, true);
+  select set_config('rls_test.s_expect', 'giving_statement: not permitted', true);
+  select set_config('rls_test.s_label', '46q: an active member without the giving keys (clerk.fixture) may not issue (S1)', true);
+\ir test-rls-46-issue.sql
+  select assert_eq((select count(*) from giving_statements), 0,
+                   '46q: ...and none of the refused attempts left a statement behind');
+rollback;
+
+begin;
+  -- giving.record alone is not enough: issuing needs giving.manage AND giving.view.
+  select set_config('app.current_org_id', :ALDER, true);
+  update people set user_id = :U_FOUNDING where id = :DESMOND;
+  select set_config('rls_test.s_org', :ALDER, true);
+  select set_config('rls_test.s_issuer', :U_FOUNDING, true);
+  select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
+  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_expect', 'giving_statement: not permitted', true);
+  select set_config('rls_test.s_label', '46q: the giving recorder (giving.record only) may not issue (S1)', true);
+\ir test-rls-46-issue.sql
+rollback;
+
+-- ===========================================================================
+-- (r) The deferred consistency check (0056 section 6c; deviation S4): the
+--     header equals its lines, the lines equal the gift rows, and none is
+--     missing. Each refusal surfaces at SET CONSTRAINTS ... IMMEDIATE (at
+--     COMMIT in the application).
+-- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  select set_config('rls_test.s_org', :ALDER, true);
+  select set_config('rls_test.s_issuer', :U_FOUNDING, true);
+  select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
+  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+
+  select set_config('rls_test.s_total_delta', '1', true);
+  select set_config('rls_test.s_expect', 'inconsistent: totals_mismatch', true);
+  select set_config('rls_test.s_label', '46r: a TAMPERED total (one cent more than the lines) is refused', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_no_lines', 'true', true);
+  select set_config('rls_test.s_expect', 'inconsistent: totals_mismatch', true);
+  select set_config('rls_test.s_label', '46r: a header with no lines is refused (the header''s own deferred trigger)', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_skip_last', 'true', true);
+  select set_config('rls_test.s_expect', 'inconsistent: incomplete', true);
+  select set_config('rls_test.s_label', '46r: a statement that OMITS a counting gift is refused, even with self-consistent totals', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_gross_delta', '1', true);
+  select set_config('rls_test.s_expect', 'inconsistent: line_mismatch', true);
+  select set_config('rls_test.s_label', '46r: a line whose gross differs from its gift row is refused', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_extra_gift', :G_GIFT_HALLIE_PRIOR, true);
+  select set_config('rls_test.s_expect', 'inconsistent: line_mismatch', true);
+  select set_config('rls_test.s_label', '46r: another donor''s gift on the statement is refused (not in the donor-root group)', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+  select set_config('rls_test.s_extra_gift', :G_GIFT_TESTMODE, true);
+  select set_config('rls_test.s_expect', 'inconsistent: line_mismatch', true);
+  select set_config('rls_test.s_label', '46r: a Stripe TEST-MODE gift on the statement is refused (P3-17)', true);
+\ir test-rls-46-issue.sql
+  select assert_eq((select count(*) from giving_statements), 0,
+                   '46r: ...and every refused statement was rolled back with its lines');
+
+  -- A good statement, then a line added AFTER it was checked: re-checked and refused.
+  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_label', '46r: (setup) a consistent statement is issued', true);
+\ir test-rls-46-issue.sql
+  do $$
+  declare
+    v_constraint text;
+  begin
+    insert into giving_statement_lines (organization_id, statement_id, gift_id, line_no, occurred_on, fund_label,
+           description, kind, amount_cents, gross_cents)
+    select '22222222-2222-2222-2222-222222222222', current_setting('rls_test.s_statement')::uuid, g.id, 3,
+           g.occurred_on, 'General Fund', 'Late addition', 'cash', g.amount_cents, g.amount_cents
+      from giving_gifts g where g.id = 'd9100000-0000-0000-0000-000000000087';
+    raise exception 'FAIL - a line was added to an already-checked statement';
+  exception when check_violation then
+    get stacked diagnostics v_constraint = constraint_name;
+    if v_constraint <> 'giving_statements_consistency' then raise; end if;
+    raise notice 'pass  46r: a line added to an issued statement is re-checked and refused (%)', v_constraint;
+  end $$;
+rollback;
+
+-- ===========================================================================
+-- (s) The version chain: v2 supersedes v1 and v1 is retained; the chain
+--     cannot fork, skip, or cross donors or years.
+-- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  select set_config('rls_test.s_org', :ALDER, true);
+  select set_config('rls_test.s_issuer', :U_FOUNDING, true);
+  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_donor', :G_DONOR_HALLIE, true);
+  select set_config('rls_test.s_label', '46s: (setup) Hallie''s v1 for last year', true);
+\ir test-rls-46-issue.sql
+  select current_setting('rls_test.s_statement') as s_hallie \gset
+  select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
+  select set_config('rls_test.s_label', '46s: (setup) Linden''s v1 for last year', true);
+\ir test-rls-46-issue.sql
+  select current_setting('rls_test.s_statement') as s_v1 \gset
+
+  select set_config('rls_test.s_version', '1', true);
+  select set_config('rls_test.s_expect', 'giving_statements_version_key', true);
+  select set_config('rls_test.s_label', '46s: a second version 1 for the same donor and year is refused (the app''s already_issued)', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_version', '2', true);
+  select set_config('rls_test.s_expect', 'giving_statements_version_chain', true);
+  select set_config('rls_test.s_label', '46s: version 2 must name what it supersedes', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_version', '2', true);
+  select set_config('rls_test.s_supersedes', :'s_hallie', true);
+  select set_config('rls_test.s_expect', 'giving_statement: supersedes_invalid', true);
+  select set_config('rls_test.s_label', '46s: a correction cannot supersede ANOTHER donor''s statement', true);
+\ir test-rls-46-issue.sql
+  select set_config('rls_test.s_version', '3', true);
+  select set_config('rls_test.s_supersedes', :'s_v1', true);
+  select set_config('rls_test.s_expect', 'giving_statement: supersedes_invalid', true);
+  select set_config('rls_test.s_label', '46s: a correction cannot skip a version (v3 superseding v1)', true);
+\ir test-rls-46-issue.sql
+
+  select set_config('rls_test.s_version', '2', true);
+  select set_config('rls_test.s_supersedes', :'s_v1', true);
+  select set_config('rls_test.s_label', '46s: version 2 supersedes version 1', true);
+\ir test-rls-46-issue.sql
+  select current_setting('rls_test.s_statement') as s_v2 \gset
+  select assert_eq(
+    (select count(*) from giving_statements s
+      where s.donor_id = :G_DONOR_LINDEN and s.tax_year = extract(year from current_date)::int - 1
+        and not exists (select 1 from giving_statements n where n.supersedes_id = s.id)),
+    1, '46s: ...exactly one LATEST version remains');
+  select assert_eq((select count(*) from giving_statements where id in (:'s_v1', :'s_v2')), 2,
+                   '46s: ...and the original is retained, never replaced');
+
+  select set_config('rls_test.s_version', '2', true);
+  select set_config('rls_test.s_supersedes', :'s_v1', true);
+  select set_config('rls_test.s_expect', 'giving_statement: already_superseded', true);
+  select set_config('rls_test.s_label', '46s: a second version 2 superseding version 1 is refused - the chain cannot fork', true);
+\ir test-rls-46-issue.sql
+rollback;
+
+-- ===========================================================================
+-- (t) Frozen and insert-only, as presby_app; the delivery log.
+-- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :ALDER, true);
+  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  select set_config('rls_test.s_org', :ALDER, true);
+  select set_config('rls_test.s_issuer', :U_FOUNDING, true);
+  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_donor', :G_DONOR_ODETTE, true);
+  select set_config('rls_test.s_label', '46t: (setup) Odette Brask''s statement for last year (no address: a print exception)', true);
+\ir test-rls-46-issue.sql
+  do $$
+  begin
+    update giving_statements set cash_total_cents = cash_total_cents + 1;
+    raise exception 'FAIL - presby_app updated a statement';
+  exception when insufficient_privilege then
+    raise notice 'pass  46t: presby_app UPDATE on giving_statements refused';
+  end $$;
+  do $$
+  begin
+    update giving_statement_lines set amount_cents = amount_cents;
+    raise exception 'FAIL - presby_app updated a statement line';
+  exception when insufficient_privilege then
+    raise notice 'pass  46t: presby_app UPDATE on giving_statement_lines refused';
+  end $$;
+  do $$
+  begin
+    delete from giving_statements;
+    raise exception 'FAIL - presby_app deleted a statement';
+  exception when insufficient_privilege then
+    raise notice 'pass  46t: presby_app DELETE on giving_statements refused';
+  end $$;
+  do $$
+  begin
+    delete from blob_assets b where b.id = (select s.blob_asset_id from giving_statements s
+                                            where s.id = current_setting('rls_test.s_statement')::uuid);
+    raise exception 'FAIL - presby_app deleted a statement''s PDF';
+  exception when insufficient_privilege then
+    raise notice 'pass  46t: presby_app DELETE on blob_assets refused (the FK binds the owner: giving-statements.db.test.ts)';
+  end $$;
+
+  insert into giving_statement_deliveries (organization_id, statement_id, channel, recorded_by, occurred_at)
+  values (:ALDER, current_setting('rls_test.s_statement')::uuid, 'print_mailed', :U_FOUNDING, '2000-01-01');
+  select assert_eq((select count(*) from giving_statement_deliveries
+                     where statement_id = current_setting('rls_test.s_statement')::uuid
+                       and channel = 'print_mailed' and occurred_at = now()),
+                   1, '46t: the treasurer records the print run (occurred_at stamped by the guard, S2)');
+  do $$
+  begin
+    insert into giving_statement_deliveries (organization_id, statement_id, channel, recorded_by)
+    values ('22222222-2222-2222-2222-222222222222', current_setting('rls_test.s_statement')::uuid,
+            'email_notice', 'e0000000-0000-0000-0000-0000000000f5');
+    raise exception 'FAIL - an email notice without its queue row';
+  exception when check_violation then
+    raise notice 'pass  46t: an email_notice delivery must carry its email_queue_id (S7)';
+  end $$;
+  do $$
+  begin
+    insert into giving_statement_deliveries (organization_id, statement_id, channel, recorded_by)
+    values ('22222222-2222-2222-2222-222222222222', current_setting('rls_test.s_statement')::uuid,
+            'print_mailed', 'e0000000-0000-0000-0000-0000000000f3');
+    raise exception 'FAIL - a member without giving.manage recorded a delivery';
+  exception when insufficient_privilege then
+    raise notice 'pass  46t: a member without giving.manage (clerk.fixture) may not record a delivery (S1)';
+  end $$;
+  do $$
+  begin
+    update giving_statement_deliveries set channel = 'print_mailed';
+    raise exception 'FAIL - presby_app updated a delivery';
+  exception when insufficient_privilege then
+    raise notice 'pass  46t: presby_app UPDATE on giving_statement_deliveries refused (insert-only)';
+  end $$;
 rollback;
 
 \echo ''

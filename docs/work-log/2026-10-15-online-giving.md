@@ -16,7 +16,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-15 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
-| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; Batch 5 pending (database-admin → full-stack-developer) | — | 2026-10-16 |
+| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; 5a complete, 5b pending (full-stack-developer) | — | 2026-10-16 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3628,6 +3628,232 @@ A real redirect to Hosted Checkout and back (docs/deployment.md, "Operator test-
 ### Handoff
 Next: **Batch 5, database-admin (5a: `0056`) then full-stack-developer (5b)**, per the Implementation Order. Phase 5 (qa) follows Batch 6 for the whole pipeline, or per batch if the orchestrator runs it that way; QA for Batch 4 should run `e2e/giving-public.spec.ts` and `e2e/hydration/giving-give-form.spec.ts` (both lanes) and re-read the negative control above.
 
+## Integration checklist (orchestrator, running — Rule 16 shared files edited only at integration) — online giving pipeline (edit shared files only at integration, Rule 16)
+
+### docs/TODO.md lines to add
+- giving: manual donor→member link for directory-hidden people (G24; Batch 2 ruling 2)
+- giving: `presby_giving_local_today()` granted helper to replace the org-local-today SQL restated in `gifts.ts` (Batch 2 ruling 3)
+- giving: harden `check:giving-boundaries` B7 (CSP directive scan) with a real tokenizer — a single-quoted literal elsewhere in next.config.ts can blind it (Batch 4a)
+- giving: S2 — tier-3 keys get `requires_two_factor` when the first tier-3 UI ships (Phase 2 S2)
+- giving: statement token download link for donors without an account (Phase 3 ruling; no real run before Jan 2028)
+- giving: void by a manage-only holder requires `giving.record` (1a D2) — relax in place if a real need appears
+- giving: `presby_giving_dead_letters` has no supporting index (3a-fix accepted gap)
+- giving: a retry of a failed intent with the same key can leave one unused Checkout session (expires in 31 min; 4a note)
+- retrospective: Phase 3 reads the pinned SDK's changelog before marking an API fact confirmed (two misses: account-link `configurations`, Checkout `payment_method_types`) → `.claude/agents/tech-lead.md`
+- operator: Stripe test-mode platform account (Connect) → run the smoke in docs/deployment.md; CPA review of statement wording + four accounting questions before any real statement; Upstash + Turnstile before go-live
+
+### Shared-file edits (from Batch 1a "Integration edits")
+- scripts/seed-dev.sql: `\ir giving/seed-dev-giving.sql` after final `commit;` (~line 1942)
+- scripts/test-rls.sql: `\ir giving/test-rls-46.sql` after §45; §15 lines 822–824 and 834–836 add `and organization_id is not null`; §41 lines 7847–7849 count 4 → 6 (message in work-log 1a)
+- drizzle/meta/_journal.json: idx 55, when 1787014253186, tag 0055_presby_giving
+- src/lib/db/domain/index.ts: `export * from "./giving";` + fix header; then `npm run docs:erd`
+- docs/decisions.md: DECISION-168–175 (drafts in work-log Phase 2/3)
+- docs/schema-design-2.md: F138–F143
+- docs/STATE.md, docs/reviews/log.md (if reviews run), functionality map, release notes (MINOR bump), architecture.md (new subsystem: giving provider ingest — yes, genuinely architectural)
+- Expected test-rls total after integration: 865 passes (664 stock + 201 §46)
+
+### Phase 6 reading notes (deviations the analyst should weigh)
+- Batch 4b: a toggle-off org with a live site renders the `unavailable` notice, not `absent` (the function returns `absent` only with no live site); the slot shows the notice rather than nothing; return pages carry no org name or phone (`ReturnState` has neither); the "gift only" line says "no goods or services in return" — the "intangible religious benefits" wording is the CPA question (Operator Q6).
+- Batch 3b: the test-mode badge is shown only to `giving.view`/`giving.manage` holders (a recorder must see no provider state).
+- Batch 2: void requires `giving.record` even for a manage-only holder (1a D2).
+
+Batches 1–4 committed: 591f6a1, e880147, 05e3636, 70cab12, 682ef86, 158be83, 3c86287, f3b6921.
+
+## Batch 5a — statements schema 0056 and pdfkit (database-admin)
+
+*2026-10-16, database-admin, worktree `presby-giving` on `pipeline/online-giving` (HEAD `f3b6921`), Neon branch `br-winter-band-axb6tzax`. Nothing committed. No Rule 16 shared file edited. No server started or stopped (the demo server on :3000 runs from the main checkout and was not touched; builds ran in this worktree and in a `/private/tmp` scratch copy, since removed).*
+
+### Files Created
+
+- `drizzle/0056_presby_giving_statements.sql` — the three statement tables, ENABLE + FORCE RLS + `tenant_isolation` on each, the grant matrix (presby_app SELECT + INSERT only), the insert guards, the deferred consistency constraint triggers, the freeze/delete guards, a guard on `blob_assets` that keeps a referenced PDF's bytes immutable, and comments. Seven new functions, all SECURITY DEFINER, `search_path = public, pg_temp`, granted to nobody. Header lists deviations S1–S8 and the residuals.
+- `src/lib/giving/statement-staleness.ts` — the ONE definition of derived staleness and "latest version" (DECISION-173), as SQL fragments over `giving_statements s` (`STATEMENT_IS_STALE` / `statementIsStale`, `STATEMENT_IS_LATEST` / `statementIsLatest`), in `live-predicate.ts`'s shape. The DB test exercises exactly these strings; 5b imports them rather than restating the query.
+- `src/lib/db/domain/giving-statements.db.test.ts` — 25 DB-backed tests (the Batch 5 list; see below).
+- `scripts/giving/test-rls-46-issue.sql` — the §46 statement harness, `\ir`'d by `test-rls-46.sql` (relative path, so integration needs no extra line). It issues one statement as presby_app the way the app will (blob INSERT, then header + lines in one statement), forces the deferred triggers with `SET CONSTRAINTS ... IMMEDIATE` (every §46 block rolls back, and a deferred trigger never fires on a rollback), and asserts success or a named refusal. Parameters are transaction-local GUCs because psql does not interpolate `:vars` inside a DO body. No temp objects (test-rls §39.2 keeps a TEMP revoke on the table).
+- `src/lib/giving/statements/fonts/NotoSans-Regular.ttf`, `NotoSans-Bold.ttf`, `OFL.txt`, `FONT-SOURCE.txt` — DECISION-174 obligation 3 (provenance below).
+
+### Files Modified
+
+- `src/lib/db/domain/giving.ts` — `givingStatements`, `givingStatementLines`, `givingStatementDeliveries`, every constraint/index under 0056's own name; `smallint` import. Block comment says what Drizzle cannot express and points at 0056 line ranges. The blob FK is deliberately NOT declared (below).
+- `src/lib/db/domain/giving.schema.test.ts` — reads 0055 + 0056; 15 tables, 28 composite FKs; a `DDL_ONLY` set holding exactly `giving_statements_blob_fk`, with three tests (0056 creates it composite; `giving.ts` neither declares it nor imports `./assets`; `check-schema-parity.ts` allowlists that exact signature as `architectural`); bigint/integer and "no `updated_at` on a frozen table" pins. 28 tests (was 20).
+- `scripts/check-schema-parity.ts` — one `architectural` `extra_fk` row: `giving_statements: (blob_asset_id,organization_id) -> blob_assets(id,organization_id)`. The design called these "missing_fk"/"three-row"; the checker's vocabulary for a DDL-only FK is `extra_fk`, and 0056 has one blob FK, not three.
+- `scripts/giving/test-rls-46.sql` — counts 0056 legitimately moves (46a policies 12→15, `(id, organization_id)` keys 11→14, composite FKs 23→28 twice, org cascades 12→15; 46b matrix +6 rows; 46d(1) sums the three new tables; 46d(3)'s relation regex names them; 46c gifts 10→12 and 46n 8→10 / 7→9 for the two seed gifts) and the new blocks **46o–46t**.
+- `scripts/giving/seed-dev-giving.sql` — G12 (`…008b`, last year, check $75.00 to **L. Marsh, the donor merged into Linden Marsh**) and G13 (`…008c`, last year, cash $30.00 to Linden). A last-year statement for Linden is now a donor-ROOT group of two (the merged-donor fixture 5b's e2e and Batch 6 need). `on conflict (id) do nothing` is safe here (gifts' BEFORE trigger only checks the marker; F143 is about the reversal bound). Re-applied twice: exit 0, gifts 11→13→13.
+- `src/lib/testing/giving-fixture.ts` — `makeOnlineGift(..., { donorCoveredFeeCents })`; `makeGivingSettings(org)`; module-level `issueStatement(tx, params)` + `IssueStatementParams` (the reference composer: unique fake-PDF blob, header + lines in one statement, knobs for a tampered total, a disagreeing covered-fee policy, a supplied `issued_at`, `deletable_until`).
+- `next.config.ts` — `serverExternalPackages: ["pdfkit"]`; `outputFileTracingIncludes: { "/o/*/admin/giving/statements": ["./src/lib/giving/statements/fonts/**/*", "./node_modules/pdfkit/js/data/**/*"] }` (picomatch with `contains`, so it covers the statements page's server actions and every route beneath it).
+- `package.json`, `package-lock.json` — `pdfkit` `0.20.2` (dependencies, exact); `@types/pdfkit` `0.17.6` (devDependencies, exact). One deviation from the literal `npm i --save-exact pdfkit@0.20.2 @types/pdfkit`: the types went to devDependencies, where every other `@types/*` in this repo lives.
+
+### Schema Changes
+
+**Mode: hand-written** (`drizzle/0056_presby_giving_statements.sql`), for the same reasons as 0055: `db:generate` is broken repo-wide and Drizzle Kit emits none of the RLS, triggers, functions or grants. Unreleased; applied to the pipeline branch only.
+
+**Tables (what 5b builds on).**
+
+- `giving_statements` — `id`, `organization_id`, `donor_id`, `tax_year smallint`, `version smallint default 1`, `supersedes_id`; donee snapshot `donee_legal_name`, `donee_address_line1`, `donee_address_line2`, `donee_city`, `donee_region`, `donee_postal_code`, `donee_ein`, `signatory_name`, `signatory_title`, `greeting_text`, `closing_text` (NOT NULL: donee name, line1, city, region, postal, greeting, closing); `wording_version smallint`; donor snapshot `donor_name`, `delivery_line1/line2/city/region/postal_code/country/email` (all nullable); `period_start`, `period_end` (= Jan 1 / Dec 31 of `tax_year`, CHECK); `cash_total_cents bigint`, `gift_count int ≥ 1`, `non_cash_count int`; `covered_fee_counted boolean`; `blob_asset_id`, `pdf_sha256` (`^[0-9a-f]{64}$`); `issued_by` (users), `issued_at` (STAMPED), `deletable_until`. Keys: `(id, organization_id)`; `giving_statements_version_key (organization_id, donor_id, tax_year, version)`; `giving_statements_supersedes_once_idx` unique on `supersedes_id` where not null; composite NO ACTION FKs to donors, to itself (supersedes), and to `blob_assets` (DDL-only).
+- `giving_statement_lines` — `statement_id`, `gift_id`, `line_no smallint ≥ 1` (1..n contiguous, enforced), `occurred_on`, `fund_label` (1–80), `description` (1–300), `kind` (`cash` | `non_cash`), `amount_cents` (the COUNTED amount; NULL iff `non_cash`), `gross_cents`, `reversed_cents`, `covered_fee_cents`. Unique `(statement_id, gift_id)`, `(statement_id, line_no)`; composite FKs to the statement and to the gift.
+- `giving_statement_deliveries` — `statement_id`, `channel` (`print_mailed` | `email_notice`), `recorded_by` (users), `occurred_at` (STAMPED), `email_queue_id` (plain uuid; NOT NULL iff `email_notice`). Insert-only.
+
+**The counting rule the database enforces (deviation S4)** — for the donor-ROOT group (the donor plus every donor merged into it), every gift that is `livemode`, `succeeded` and has `occurred_on` in the period: `remaining = amount_cents − net reversed − (donor_covered_fee_cents unless covered_fee_counted)`. `remaining ≤ 0` → no line. `method = 'stock'` → `non_cash` (amount NULL); every other method → `cash` with `amount_cents = remaining`. Line `gross_cents = amount_cents`, `reversed_cents` = net reversed now (reinstatements subtract), `covered_fee_cents = donor_covered_fee_cents`, `occurred_on` = the gift's. Header: `gift_count` = lines, `non_cash_count` = non-cash lines, `cash_total_cents` = Σ cash `amount_cents`. **And every counting gift must be present.**
+
+**Functions (all granted to nobody; 5b calls none of them directly).**
+
+```sql
+presby_giving__actor_holds(p_org uuid, p_user_id uuid, p_keys text[]) returns boolean   -- internal
+presby_giving__check_statement(p_statement uuid) returns void                          -- internal; the S4 check
+presby_giving_guard_statement_insert()        -- BEFORE INSERT giving_statements     (giving_statements_insert_guard)
+presby_giving_guard_statement_freeze()        -- BEFORE UPDATE OR DELETE on all three (giving_*_freeze)
+presby_giving_check_statement_consistency()   -- CONSTRAINT TRIGGER, AFTER INSERT, DEFERRABLE INITIALLY DEFERRED,
+                                              --   on giving_statements and giving_statement_lines (*_consistency)
+presby_giving_guard_statement_delivery()      -- BEFORE INSERT giving_statement_deliveries (…_insert_guard)
+presby_giving_guard_statement_blob()          -- BEFORE UPDATE blob_assets (blob_assets_giving_statement_guard)
+```
+
+No callable function: the design assigns none to 0056 (issue is a tenant INSERT under `withOrgContext()`; staleness is a query), and none was needed.
+
+**Error vocabulary 5b maps** (all on the presby_app connection; the consistency ones surface at COMMIT, i.e. as a rejection of the `db.transaction(...)` promise):
+
+| Postgres | Message / constraint | Meaning → suggested result |
+|---|---|---|
+| `insufficient_privilege` | `giving_statement: not permitted` | issuer lacks `giving.manage` AND `giving.view` at the org, or no/other org context → `forbidden` (the action gate should have caught it) |
+| `check_violation` | `giving_statement: donor_unavailable` | donor absent from this org, or merged → `failed` reason `donor_unavailable` |
+| `check_violation` | `giving_statement: donor_unidentified` | plate cash → never selected; `failed` if it happens |
+| `check_violation` | `giving_statement: supersedes_invalid` / `already_superseded` | wrong predecessor / a correction already exists → `already_reissued` |
+| `check_violation` | `giving_statement: blob_invalid` | blob not this org's `application/pdf`, or `pdf_sha256` ≠ its content hash |
+| `unique_violation` | `giving_statements_version_key` (or `giving_statements_supersedes_once_idx`) | a concurrent issue/re-issue won → `already_issued` |
+| `check_violation`, constraint `giving_statements_consistency` | `inconsistent: totals_mismatch` / `line_mismatch` / `incomplete` | the composer disagrees with the database's counting rule — a bug; log ids only |
+| `check_violation` | `giving_statements_totals_shape` | nothing to count (e.g. every gift fully refunded) → `skipped` (check before rendering) |
+| `insufficient_privilege` | `giving_statement_delivery: not permitted` | recorder lacks `giving.manage` |
+
+**Apply (local, pipeline branch), after 0055:**
+
+```bash
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0056_presby_giving_statements.sql   # owner, direct endpoint
+psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/giving/seed-dev-giving.sql            # G12/G13
+psql "$APP_DATABASE_URL"     -v ON_ERROR_STOP=1 -f scripts/giving/test-rls-46.sql                # MUST be presby_app
+```
+
+**Whole-file idempotence.** Snapshot (owner): table/column ACL entries, constraints, indexes, policies, triggers, functions, function ACLs, md5 of every giving function definition + ACL + OID, md5 of every giving/blob trigger definition + enabled flag (by name — trigger OIDs change on every apply by design, the 0055 drop-then-create idiom), md5 of every giving constraint definition, FORCE-RLS count, and row counts of every giving table, `blob_assets`, `permissions`, `app_roles`, `app_role_permissions`, `feature_flags`, toggles, orgs and the three statement tables. Final pair on the finished file (md5 `dbc22b5cc4f8e83a3336fde4b6ec45f7`): **apply A exit 0, apply B exit 0, 0 ERRORs, snapshots byte-identical**:
+`acl=145 blob_acl=14 colacl=9 constraints=346 indexes=68 policies=15 triggers=21 fns=58 fnacl=85 … rls=15 tables=15`. Against the pre-0056 baseline (`acl=115 constraints=262 indexes=54 policies=12 triggers=13 fns=51 fnacl=78 rls=12 tables=12`) every delta is 0056's own objects; no row count moved (0056 writes no rows).
+
+**`scripts/giving/test-rls-46.sql` as `presby_app`: 260 passes, exit 0** (was 201; +59). After integration the integrated `test-rls.sql` count on `development`-shaped data becomes **924** (664 + 260), with the Batch 1a §15/§41 edits.
+
+**From scratch (`docs/testing.md`).** `create database presby_scratch_giving5a` on the pipeline branch; `drizzle-kit migrate` from a scratch copy of `drizzle/` whose journal carries idx 55 and idx 56 (the shared file is untouched):
+- migrate: **57/57 applied**; 15 giving tables.
+- `install-test-helpers.sql`, `seed.ts`, `seed-dev.sql`, `seed-dev-giving.sql`: all exit 0; `org_portal.giving` absent from `feature_flags`.
+- stock `test-rls.sql` as presby_app: 670 passes and exactly the three Batch 1a template-count FAILs (identical to Batch 1a's from-scratch run).
+- integrated (the Batch 1a §15/§41 edits + `\ir giving/test-rls-46.sql`): **exit 0, 938 passes (678 + 260)**.
+- `giving.db`, `giving.schema`, `giving-statements.db`, `two-factor-agreement` against the scratch DB: **4 files, 75/75**.
+- `check:schema-parity` with `giving.ts` merged through a temporary checker copy (deleted): **83 tables, 7 allowlisted (the new blob row among them), 0 failing**.
+- resolver md5 `4c79e30535229f6fd44730c38add28d0` (the F140 pin holds). Dropped with `drop database … with (force)`; confirmed gone.
+
+**Failing-first.** Each mechanism broken as owner on the pipeline branch, §46 run no-stop as presby_app and (where the owner path or concurrency is the proof) `giving-statements.db.test.ts`, then restored by re-applying 0056 (plus an explicit re-add for a dropped constraint, which `create table if not exists` does not restore) and re-confirmed green. Line numbers are `test-rls-46.sql` as it stands; harness-raised refusals are named by their label.
+
+| Mechanism broken | Fails |
+|---|---|
+| M1 `no force row level security` on `giving_statements` | `:1295` 46o FORCE 2≠3 |
+| M2 statements policy → `using (true) with check (true)` | `:76` 46a policy shape 14≠15; `:1302` 46o 2≠3; `:1410` 46p bramblewood sees 2 rows |
+| M3 `grant update on giving_statements to presby_app` | `:149` 46b matrix; `:1337` 46o "no UPDATE" got 5; 46t's UPDATE reached the freeze trigger instead of a privilege error |
+| M4 `grant delete on giving_statement_lines to presby_app` | `:149` 46b; `:1337` 46o |
+| M5 `giving_statements_insert_guard` disabled | `:1344` 46o 5≠6; `:1383` 46p issued_at not stamped; 46q plate cash, recorder-only and 46s cross-donor supersedes all *issued*; Vitest ×4 (S1 manage/view, unidentified + merged, re-issue chain, blob guard) |
+| M6 header `giving_statements_consistency` disabled | `:1349` 46o 1≠2; 46r "a header with no lines" issued (the tampered total is still caught, by the line triggers) |
+| M7 `giving_statement_lines_consistency` disabled | `:1349` 46o; `:1574` 46r "a line was added to an already-checked statement" |
+| M8 both consistency triggers disabled | `:1349` 46o 0≠2; 46r tampered total issued; Vitest ×2 (tampered total at COMMIT; covered-fee policy) |
+| M9 the three freezes disabled | `:1344` 46o 3≠6; Vitest ×4 (issued_at frozen; UPDATE/DELETE on the owner path; deletable_until; the teardown test's "permanent" pre-check) |
+| M10 `giving_statements_blob_fk` dropped | `:1313` 46o blob FK 0≠1; Vitest ×2 (owner-path blob delete; teardown pre-check) |
+| M11 `blob_assets_giving_statement_guard` disabled | `:1344` 46o 5≠6; Vitest "the blob guard refuses changing it" |
+| M12 `giving_statements_supersedes_once_idx` dropped | `:1325` 46o 0≠1. Vitest stays green: `giving_statements_version_key` already refuses every fork the guard's `version = n+1` rule lets reach the table, so the index is defence in depth and the catalog assertion is its proof |
+| M13 completeness check removed from `presby_giving__check_statement` | 46r "a statement that OMITS a counting gift" issued |
+| M14 `giving_statement_lines_gift_fk` made single-column | `:106` 46a composite 27≠28; 46p's cross-org line no longer `foreign_key_violation` (the consistency check caught it instead, `:1448` totals_mismatch — a second line of defence, not the FK); Vitest "a cross-org line is refused by the composite FK" |
+| M15 insert guard without the S1 issuer check | 46q clerk and recorder-only issuers *issued*; Vitest "manage AND view - neither alone" |
+| M16 `giving_statements_version_key` dropped | `:1320` 46o; 46s "a second version 1" issued; Vitest concurrency "one wins, one already_issued" |
+| M17 insert guard without the `issued_at` stamp | `:1383` 46p issued_at not stamped; Vitest "stamps issued_at itself" — **this proof found a weak test**: the fixture never supplied `issued_at`, so the Vitest case passed under M17 on its first run. Fixed (`IssueStatementParams.issuedAt`, the test now supplies 2099-01-01), re-run: red under M17, green restored |
+
+**Vitest.** `npx dotenv -e .env.local -- vitest run --no-file-parallelism …`:
+- `giving-statements.db.test.ts` **25 passed**: issue for the donor root (own + merged donor's gifts; test-mode, pending and next-year excluded; stock non-cash; covered fee on the line); `issued_at` stamped over a supplied 2099 value; manage-only and view-only issuers refused; plate cash and a merged donor refused; a tampered total refused **at COMMIT** with nothing left behind; lines must follow the header's covered-fee policy (and a consistent "not counted" statement counts the gift alone); **concurrency** — two parallel issues: one wins, one `giving_statements_version_key`; two parallel re-issues: one v2; the chain (v2 supersedes v1, original retained, latest flips, fork / skip / cross-donor refused); **staleness** through `statement-staleness.ts` — fresh: no; late-dated gift: yes; gift dated outside the year: no; pending→succeeded: yes; pending→failed: no; later refund: yes; later **test-mode** gift: no; donor merged in after issue: yes (and v2 counts the merged gift); owner path — UPDATE/DELETE raise on statement, lines and deliveries; `deletable_until` permits lines→deliveries→statement→PDF; one `delete from organizations` removes statements, lines, deliveries and the PDF (P3-8); the blob FK refuses deleting a referenced PDF and the blob guard refuses changing its bytes or type, while an unreferenced blob is untouched; a blob with the wrong hash or a non-PDF type refused; tenancy (another org sees nothing; a cross-org line refused by the composite FK); a statement issued to a donor later merged into a member's linked donor appears under the ROOT in the self-read shape, and a stranger's membership sees nothing.
+- `giving.schema.test.ts` 28, `giving.db.test.ts` 19: 72/72 together on the pipeline branch.
+- Every giving suite (`src/lib/db/domain/giving*`, `src/lib/giving/`, `src/lib/admin/giving-ingest-health`): **47 files, 964 tests, all passed** on the pipeline branch (the seed's two extra gifts break nothing).
+- Fixture hygiene: afterwards 0 `giving-*` fixture orgs, users or deletable people; 0 statements; `blob_assets` back to 111.
+
+**Commands** (worktree):
+
+| Command | Result |
+|---|---|
+| `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0056_presby_giving_statements.sql` ×2 | exit 0 / exit 0, identical snapshots |
+| `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/giving/test-rls-46.sql` | exit 0, **260 passes** |
+| stock `scripts/test-rls.sql` as presby_app (no-stop) | 657 passes; the same FAIL set as Batch 1a after 0055 (four branch-data deltas at :127/:153/:184/:472, the three template-count assertions at :825/:837/:7849 queued for integration). No regression |
+| `npm run typecheck` / `npm run lint -- --max-warnings=0` / `npm run check` | 0 / 0 / 0 (all seven tripwires) |
+| `npx dotenv -e .env.local -- npm run check:schema-parity` | 68 tables, 6 allowlisted, 0 failing (giving not yet exported, integration step 4); merged copy: 83 tables, 7 allowlisted, 0 failing |
+| `npm run test` | 395 files passed, 55 skipped (DB-backed without env); 5641 tests |
+| `check:secrets`' `checkSecretsPii()` over the 15 new/changed text files (it scans tracked files only) | 0 findings; the `.ttf` files are binary-exempt, as in the real check |
+| `npm run build` (worktree) | exit 0 with `serverExternalPackages` + `outputFileTracingIncludes` |
+| scratch-copy build with a temporary `/o/[slug]/admin/giving/statements/print/route.ts` rendering through pdfkit (never in the worktree) | exit 0; that route's `.nft.json` lists `NotoSans-Regular.ttf`, `NotoSans-Bold.ttf`, `OFL.txt`, `FONT-SOURCE.txt`, all 14 pdfkit AFM files + the ICC profile, and `node_modules/pdfkit/js/pdfkit.js` (external, not bundled). Scratch copy deleted |
+
+**DECISION-174 obligations.**
+1. **Version and licence**, from the installed package: `pdfkit` 0.20.2 (npm `latest` is 0.20.2), `"license": "MIT"`, `LICENSE` MIT (Devon Govett). Transitives: `fontkit` 2.0.4, `linebreak` 1.1.0, `fflate` 0.8.3, `png-js` 2.0.0, `@noble/hashes` 1.8.0, `@noble/ciphers` 1.3.0, `restructure`, `unicode-trie`, `brotli`, `dfa`, `tiny-inflate`, `unicode-properties`, `clone`, `base64-js` — all MIT. **Correction to the Phase 2 note "all transitive dependencies MIT":** `fontkit` depends on `@swc/helpers` 0.5.23, which is **Apache-2.0** (permissive, compatible, and already in the tree via `next`, deduped). `@types/pdfkit` is 0.17.6 (the types lag the runtime's minor; typecheck is clean). `npm audit --omit=dev` lists nothing pdfkit-related (its five findings are the pre-existing katex/mermaid/next/sharp/source-map-js set).
+2. **`serverExternalPackages: ["pdfkit"]` + tracing**: in `next.config.ts`; proven by the scratch build's `.nft.json` above.
+3. **Font**: committed (provenance below).
+
+**Font provenance.** Noto Sans Regular and Bold, Version 2.015, unhinted TrueType, SIL Open Font License 1.1, unmodified.
+- Source, pinned to commit `5c3913063bb189df4edc94b766584dfb4c04a187` of `github.com/notofonts/notofonts.github.io`:
+  `https://github.com/notofonts/notofonts.github.io/raw/5c3913063bb189df4edc94b766584dfb4c04a187/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf` (and `…/NotoSans-Bold.ttf`); licence `https://raw.githubusercontent.com/notofonts/latin-greek-cyrillic/main/OFL.txt`.
+- SHA-256: `f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8` NotoSans-Regular.ttf · `87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9` NotoSans-Bold.ttf · `cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a` OFL.txt.
+- Coverage verified glyph by glyph with `fontkit`: Latin-1, Latin Extended-A/-B, every Vietnamese precomposed letter (Latin Extended Additional), ₫, Greek and Cyrillic — 0 missing in both weights. A pdfkit render of a Vietnamese/Polish/Turkish line embeds the subset (`FontFile2`). 431 KB + 432 KB (unhinted; the hinted files are ~620 KB each and hinting is a screen-rasterizer aid).
+
+**Journal entry for integration** (`drizzle/meta/_journal.json`, after idx 55; `when` = 0055's + 30000):
+
+```json
+{ "idx": 56, "version": "7", "when": 1787014283186, "tag": "0056_presby_giving_statements", "breakpoints": true }
+```
+
+### Audit Events
+
+None. Schema only. `GIVING_STATEMENT_ISSUED` / `_REISSUED` / `_NOTICE_SENT` / `_DELIVERY_RECORDED` / `_DOWNLOADED` / `_BULK_DOWNLOADED` are 5b's, written by the callers after commit (keys declared in Batch 1b).
+
+### Implementer Notes
+
+**Deviations from the Phase 3 DDL text** (each named in 0056's header, each strictly tighter or a completion of stated intent; none changes a user verb):
+
+- **S1 the issuer is checked.** The insert guard requires `presby_current_org() = organization_id` and that `issued_by` is the user of a live person with an active membership there holding **both** `giving.manage` and `giving.view` (the Phase 3 gate). Deliveries require `giving.manage`. Same shape as 0055 D2.
+- **S2 `issued_at` and `occurred_at` are stamped** by the guards. Staleness is derived from `issued_at`; a forward-dated one would make a statement that never goes stale.
+- **S3 the bytes are checked and frozen.** The blob must be this org's `application/pdf` and its `content_hash` (the sha256 `store()` computes) must equal `pdf_sha256`; `blob_assets_giving_statement_guard` refuses an UPDATE of any blob a statement references (the owner and `presby_platform` hold UPDATE on `blob_assets`; only a trigger binds them). This is the one object 0056 puts on a non-giving table. Rows no statement references are untouched.
+- **S4 the consistency check is complete, not only consistent** (the counting rule above). The design's clause alone would let a statement silently omit a gift. Consequence for 5b: the TS composer must implement exactly this rule (it is also what `issueStatement()` in the fixture and the §46 harness do).
+- **S5 `delivery_country`** on the header snapshot — a mailed statement to a non-US address must print the country.
+- **S6 version key leads with `organization_id`** — equivalent (donor ids are global) and serves the per-org reads.
+- **S7 `email_notice` ⇔ `email_queue_id`** (CHECK).
+- **S8 lines and deliveries take their delete exemption from the parent statement's `deletable_until`** (they have none of their own), so a test-stamped statement can be removed on the owner path.
+
+**Design notes resolved during build:**
+- The deferred check would otherwise run once per header plus once per line at commit; a transaction-local marker records `<statement id>:<line count>;` per statement already proven. Lines are insert-only, so an unchanged count is an unchanged statement, and a line added later (even after `SET CONSTRAINTS … IMMEDIATE`) changes the count and is re-checked — 46r proves that case.
+- The design's "consistency constraint trigger (AFTER INSERT on lines)" alone would never check a header with no lines; the header carries its own deferred trigger (46r "a header with no lines", M6).
+- The design's staleness sentence ("created_at > issued_at, or status_changed_at > issued_at, or a reversal …") is refined in the fragment: only a gift that is **succeeded now** counts (a pending gift that fails changes nothing on the statement; when one succeeds, `status_changed_at` fires), and a donor **merged into the root after issue** makes it stale (its gifts joined the group, and their `created_at` precedes `issued_at`).
+- `email_queue_id` stays a plain uuid, as designed: no tenant table has an FK into the platform shell's `email_queue`.
+
+**Residuals (accepted; recorded in 0056's header):** TRUNCATE fires no row trigger and the owner can disable triggers (the 0055 class); the consistency check reads gift rows at COMMIT, so a gift committed by a concurrent transaction in the microseconds between the check and the commit is neither on the statement nor stale (its `created_at` precedes `issued_at`).
+
+**Open edges for the orchestrator (not decided here):**
+1. **Two donors who each hold a statement for the same year, then merge.** The guard requires a correction to name the same donor, so the merged donor's statement stays "latest" for that donor (and not stale — its own gifts did not change), while the root's statement goes stale through the merge and its v2 counts both. The member self-read then shows two statements for one year under the root. Correct as records, possibly confusing as a list; 5b/Batch 6 should label or group by donor. A DB-level "retire by merge" would be a design change.
+2. Other `blob_assets` consumers (ticket attachments, site bundles, logos) remain mutable on the owner path; S3 protects statement PDFs only. A TODO line if the operator wants the general rule.
+3. **Candidate findings** (unnumbered; the orchestrator assigns F-numbers): (a) a deferred consistency trigger on a header/lines pair needs a trigger on the HEADER too, or a header with no lines is never checked; (b) a failing-first run can pass for the wrong reason when the fixture never exercises the input the mechanism guards (M17: the stamp was unproven in Vitest because nothing supplied `issued_at`).
+4. TODO candidates: "giving: statements residual — TRUNCATE/disable-trigger on the statement tables (0055 class)"; "giving: same-year statements of two donors who later merge (open edge 1)"; "giving: `blob_assets` immutability for non-statement consumers (open edge 2)".
+5. DECISION-174's entry, at integration, gains the `@swc/helpers` Apache-2.0 correction and the `@types/pdfkit` devDependency placement.
+
+### What 5b must know
+
+1. **Issue order.** `store()` runs in its OWN transaction on its own pooled connection (`blob-store.ts` opens `db.transaction`), so it commits before the statement transaction; a statement failure after it leaves an unreferenced blob (the design's accepted note). Then, in one `withOrgContext()` transaction per donor: (optionally) `select … from giving_donors where id = $1 for update` (presby_app holds UPDATE on donors, so FOR UPDATE is allowed); check for an existing version-1 row → `already_issued`; compose; insert the header, then the lines (or one statement with a data-modifying CTE, as the fixture does); commit. **The consistency errors arrive at COMMIT**, as the rejection of the transaction promise — catch there, not around the INSERT.
+2. **`pdf_sha256` must be the sha256 hex of the exact Buffer passed to `store()`** — the guard compares it with `blob_assets.content_hash`, which `store()` computes over the same bytes. `store()` dedups identical bytes to one blob; two statements may share one (the FK allows it).
+3. **Never pass `issued_at` or `occurred_at`**; they are stamped. Pass `issued_by` / `recorded_by` = the session user's id; the database re-checks manage+view (issue) and manage (delivery) at the context org.
+4. **Snapshot shapes the CHECKs enforce:** donee name trimmed 1–200; line1/city trimmed 1–120; region `^[A-Z]{2}$`; postal `^[0-9]{5}(-[0-9]{4})?$`; EIN null or `^[0-9]{2}-[0-9]{7}$`; greeting/closing non-blank ≤ 500 (supply the default text when `giving_settings` leaves them null — the snapshot stores what was printed); `donor_name` = the donor's display name (trimmed 1–120); delivery fields ≤ 120, `delivery_country` alpha-2, email lowercased; `fund_label` 1–80; `description` 1–300; `wording_version` = `STATEMENT_WORDING_VERSION`; `covered_fee_counted` = `COUNT_DONOR_COVERED_FEE_AS_CONTRIBUTION`. `previewStatementRun`'s `donee_name` / `donee_address` blockers are exactly the snapshot NOT NULL/shape set.
+5. **Compose with the database's counting rule** (Schema Changes above), not a variant: root group (flat merges), `g.livemode` (import `liveSucceededGift`), `occurred_on` in the year, net reversals as of now, `remaining ≤ 0` skipped, stock = non-cash, `line_no` 1..n. A donor whose year counts nothing must be `skipped` before rendering (the header's `gift_count ≥ 1` CHECK refuses it anyway).
+6. **Staleness and "latest":** `import { statementIsStale, statementIsLatest } from "@/lib/giving/statement-staleness"` and apply them to `giving_statements s` (`where ${statementIsLatest} and ${statementIsStale}`). The database does not refuse re-issuing a statement that is not stale; the "latest, stale only" rule for `reissueStatement` is the app's. Re-issue: `version = n + 1`, `supersedes_id` = version n's id, same donor and year.
+7. **Deliveries:** `print_mailed` with `email_queue_id` NULL; `email_notice` MUST carry the `email_queue` row's id (enqueue first, then insert the delivery in the same tenant transaction).
+8. **Fonts at runtime:** register with `path.join(process.cwd(), "src/lib/giving/statements/fonts/NotoSans-Regular.ttf")` (and `-Bold`). Tracing covers routes matching `/o/*/admin/giving/statements` and below; a renderer reached from any other route (e.g. a member route that re-renders) must add its own `outputFileTracingIncludes` key. Import pdfkit only from Node-runtime, `server-only` modules (`import PDFDocument from "pdfkit"`). Pin `info.CreationDate`/`ModDate` for byte-stable output.
+9. **Fixtures:** `issueStatement(tx, params)` and `makeGivingSettings(org)` in `src/lib/testing/giving-fixture.ts`; the §46 harness `scripts/giving/test-rls-46-issue.sql`. Seed last-year statement candidates on Alder: **Linden Marsh** (G13 $30.00 + G12 $75.00 recorded to the merged L. Marsh = $105.00, two lines), **Hallie Vandermeer** (G8 $200.00), **Odette Brask** (G10 $40.00; no email and no address — the print exception). G10 was created at seed time, so a statement issued after seeding is NOT stale from it; the e2e "becomes stale" step needs its own post-issue change (the planned replayed refund does that). This year: Linden has a stock gift (non-cash) and the live G4 with a $1.81 covered fee; the test-mode G9 is excluded; Hallie's only gift (G7) is fully refunded, so her current-year statement is `skipped`.
+10. Batch 4b's warning still holds: a spec that seeds gifts must remove its fixture organization, never `setConnection(null)`.
+
+### Handoff
+
+Next: **full-stack-developer (5b)** — renderer, `statements.ts`, pages, routes, notice email, the `GIVING_STATEMENTS_ENABLED` production gate, on top of the tables, fragments and fixtures above. Integration (orchestrator): the journal entry above; nothing new in `scripts/test-rls.sql` beyond Batch 1a's `\ir giving/test-rls-46.sql` (it includes the harness itself); expected integrated count 924 on `development`, 938 from scratch.
+
+---
 
 # Phase 5 — Verification (qa)
 

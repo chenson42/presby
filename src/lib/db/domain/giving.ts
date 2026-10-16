@@ -6,6 +6,7 @@ import {
   uuid,
   boolean,
   integer,
+  smallint,
   bigint,
   numeric,
   date,
@@ -828,6 +829,248 @@ export const givingSettlementLines = pgTable(
     check(
       "giving_settlement_lines_ids_shape",
       sql`char_length(${t.externalBalanceTransactionId}) between 1 and 255 and (${t.paymentIntentId} is null or ${t.paymentIntentId} ~ '^pi_[A-Za-z0-9_]{8,64}$')`,
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Statements - drizzle/0056_presby_giving_statements.sql (Batch 5a).
+//
+// TYPES AND QUERIES ONLY; 0056 is the ground truth (deviations S1-S8 in its
+// header). Not expressible here, and
+// enforced there:
+//   - ENABLE + FORCE RLS and tenant_isolation on all three tables; presby_app
+//     holds SELECT and INSERT only - no UPDATE, no DELETE for anyone
+//     (0056 section 4, ~line 305).
+//   - giving_statements_insert_guard (section 6a, ~line 472): the issuer holds
+//     giving.manage AND giving.view at presby_current_org(); the donor is
+//     identified and unmerged; supersedes_id names the same donor and year at
+//     version n-1 with no successor; the blob is this org's application/pdf
+//     whose sha256 equals pdf_sha256. It STAMPS issued_at (a value passed in
+//     is overwritten).
+//   - giving_statements_consistency / giving_statement_lines_consistency
+//     (section 6c, ~line 586): DEFERRED constraint triggers - at COMMIT the
+//     header must equal its lines and the lines must equal, and cover, the
+//     counting gift rows (presby_giving__check_statement, section 5, ~line 372).
+//   - giving_*_freeze (section 6b, ~line 540): UPDATE always raises; DELETE only within
+//     the statement's deletable_until or an org teardown cascade (P3-8).
+//   - giving_statement_deliveries_insert_guard (6d, ~line 615): recorder holds
+//     giving.manage; occurred_at stamped.
+//   - giving_statements_blob_fk (blob_asset_id, organization_id) ->
+//     blob_assets (id, organization_id), NO ACTION - DDL-ONLY. assets.ts is
+//     imported by the storage adapter alone (DECISION-058; its header), so this
+//     file does not import it; scripts/check-schema-parity.ts allowlists the
+//     FK. blob_assets_giving_statement_guard (6e, ~line 637) keeps the referenced bytes
+//     immutable.
+// Staleness is DERIVED, never stored: src/lib/giving/statement-staleness.ts.
+// ---------------------------------------------------------------------------
+
+/**
+ * An issued year-end statement (DECISION-173): a frozen snapshot plus the PDF
+ * bytes (blob_asset_id). Version n+1 supersedes version n; the chain never
+ * forks (giving_statements_supersedes_once_idx).
+ */
+export const givingStatements = pgTable(
+  "giving_statements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    donorId: uuid("donor_id").notNull(),
+    taxYear: smallint("tax_year").notNull(),
+    version: smallint("version").notNull().default(1),
+    supersedesId: uuid("supersedes_id"),
+    doneeLegalName: text("donee_legal_name").notNull(),
+    doneeAddressLine1: text("donee_address_line1").notNull(),
+    doneeAddressLine2: text("donee_address_line2"),
+    doneeCity: text("donee_city").notNull(),
+    doneeRegion: text("donee_region").notNull(),
+    doneePostalCode: text("donee_postal_code").notNull(),
+    doneeEin: text("donee_ein"),
+    signatoryName: text("signatory_name"),
+    signatoryTitle: text("signatory_title"),
+    greetingText: text("greeting_text").notNull(),
+    closingText: text("closing_text").notNull(),
+    wordingVersion: smallint("wording_version").notNull(),
+    donorName: text("donor_name").notNull(),
+    deliveryLine1: text("delivery_line1"),
+    deliveryLine2: text("delivery_line2"),
+    deliveryCity: text("delivery_city"),
+    deliveryRegion: text("delivery_region"),
+    deliveryPostalCode: text("delivery_postal_code"),
+    deliveryCountry: text("delivery_country"),
+    deliveryEmail: text("delivery_email"),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    cashTotalCents: bigint("cash_total_cents", { mode: "number" }).notNull(),
+    giftCount: integer("gift_count").notNull(),
+    nonCashCount: integer("non_cash_count").notNull().default(0),
+    coveredFeeCounted: boolean("covered_fee_counted").notNull(),
+    // DDL-only composite FK to blob_assets (see the block comment above).
+    blobAssetId: uuid("blob_asset_id").notNull(),
+    pdfSha256: text("pdf_sha256").notNull(),
+    issuedBy: uuid("issued_by")
+      .notNull()
+      .references(() => users.id),
+    // Stamped by giving_statements_insert_guard; never supply it.
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+    deletableUntil: timestamp("deletable_until", { withTimezone: true }),
+  },
+  (t) => [
+    unique("giving_statements_id_org_key").on(t.id, t.organizationId),
+    unique("giving_statements_version_key").on(t.organizationId, t.donorId, t.taxYear, t.version),
+    foreignKey({
+      columns: [t.donorId, t.organizationId],
+      foreignColumns: [givingDonors.id, givingDonors.organizationId],
+      name: "giving_statements_donor_fk",
+    }),
+    foreignKey({
+      columns: [t.supersedesId, t.organizationId],
+      foreignColumns: [t.id, t.organizationId],
+      name: "giving_statements_supersedes_fk",
+    }),
+    uniqueIndex("giving_statements_supersedes_once_idx")
+      .on(t.supersedesId)
+      .where(sql`${t.supersedesId} is not null`),
+    index("giving_statements_org_year_idx").on(t.organizationId, t.taxYear),
+    index("giving_statements_blob_idx").on(t.organizationId, t.blobAssetId),
+    check("giving_statements_tax_year_range", sql`${t.taxYear} between 2000 and 2100`),
+    check(
+      "giving_statements_version_chain",
+      sql`${t.version} between 1 and 1000 and (${t.version} = 1) = (${t.supersedesId} is null) and ${t.supersedesId} is distinct from ${t.id}`,
+    ),
+    check(
+      "giving_statements_period_shape",
+      sql`${t.periodStart} = make_date(${t.taxYear}, 1, 1) and ${t.periodEnd} = make_date(${t.taxYear}, 12, 31)`,
+    ),
+    check(
+      "giving_statements_totals_shape",
+      sql`${t.cashTotalCents} >= 0 and ${t.giftCount} >= 1 and ${t.nonCashCount} between 0 and ${t.giftCount} and (${t.cashTotalCents} = 0) = (${t.nonCashCount} = ${t.giftCount})`,
+    ),
+    check("giving_statements_wording_version_positive", sql`${t.wordingVersion} >= 1`),
+    check("giving_statements_pdf_sha256_shape", sql`${t.pdfSha256} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "giving_statements_donee_name_shape",
+      sql`${t.doneeLegalName} = btrim(${t.doneeLegalName}) and char_length(${t.doneeLegalName}) between 1 and 200`,
+    ),
+    check(
+      "giving_statements_donee_address_shape",
+      sql`${t.doneeAddressLine1} = btrim(${t.doneeAddressLine1}) and char_length(${t.doneeAddressLine1}) between 1 and 120 and ${t.doneeCity} = btrim(${t.doneeCity}) and char_length(${t.doneeCity}) between 1 and 120 and coalesce(char_length(${t.doneeAddressLine2}), 0) <= 120 and ${t.doneeRegion} ~ '^[A-Z]{2}$' and ${t.doneePostalCode} ~ '^[0-9]{5}(-[0-9]{4})?$'`,
+    ),
+    check(
+      "giving_statements_donee_ein_shape",
+      sql`${t.doneeEin} is null or ${t.doneeEin} ~ '^[0-9]{2}-[0-9]{7}$'`,
+    ),
+    check(
+      "giving_statements_text_bounds",
+      sql`coalesce(char_length(${t.signatoryName}), 0) <= 120 and coalesce(char_length(${t.signatoryTitle}), 0) <= 120 and char_length(btrim(${t.greetingText})) between 1 and 500 and char_length(btrim(${t.closingText})) between 1 and 500`,
+    ),
+    check(
+      "giving_statements_donor_name_shape",
+      sql`${t.donorName} = btrim(${t.donorName}) and char_length(${t.donorName}) between 1 and 120`,
+    ),
+    check(
+      "giving_statements_delivery_shape",
+      sql`coalesce(char_length(${t.deliveryLine1}), 0) <= 120 and coalesce(char_length(${t.deliveryLine2}), 0) <= 120 and coalesce(char_length(${t.deliveryCity}), 0) <= 120 and coalesce(char_length(${t.deliveryRegion}), 0) <= 120 and coalesce(char_length(${t.deliveryPostalCode}), 0) <= 120 and (${t.deliveryCountry} is null or ${t.deliveryCountry} ~ '^[A-Z]{2}$') and (${t.deliveryEmail} is null or (${t.deliveryEmail} = lower(btrim(${t.deliveryEmail})) and char_length(${t.deliveryEmail}) <= 254 and ${t.deliveryEmail} ~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'))`,
+    ),
+  ],
+);
+
+/**
+ * The gifts a statement counts, frozen with it. kind `non_cash` is a stock
+ * gift (amount_cents null; its value is never printed); `cash` carries the
+ * COUNTED amount: gross - reversed - (covered fee unless the header's
+ * covered_fee_counted). 0056's deferred consistency check enforces all of it.
+ */
+export const givingStatementLines = pgTable(
+  "giving_statement_lines",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    statementId: uuid("statement_id").notNull(),
+    giftId: uuid("gift_id").notNull(),
+    lineNo: smallint("line_no").notNull(),
+    occurredOn: date("occurred_on").notNull(),
+    fundLabel: text("fund_label").notNull(),
+    description: text("description").notNull(),
+    kind: text("kind").notNull(),
+    amountCents: integer("amount_cents"),
+    grossCents: integer("gross_cents").notNull(),
+    reversedCents: integer("reversed_cents").notNull().default(0),
+    coveredFeeCents: integer("covered_fee_cents").notNull().default(0),
+  },
+  (t) => [
+    unique("giving_statement_lines_id_org_key").on(t.id, t.organizationId),
+    unique("giving_statement_lines_gift_key").on(t.statementId, t.giftId),
+    unique("giving_statement_lines_no_key").on(t.statementId, t.lineNo),
+    foreignKey({
+      columns: [t.statementId, t.organizationId],
+      foreignColumns: [givingStatements.id, givingStatements.organizationId],
+      name: "giving_statement_lines_statement_fk",
+    }),
+    foreignKey({
+      columns: [t.giftId, t.organizationId],
+      foreignColumns: [givingGifts.id, givingGifts.organizationId],
+      name: "giving_statement_lines_gift_fk",
+    }),
+    index("giving_statement_lines_gift_idx").on(t.organizationId, t.giftId),
+    check("giving_statement_lines_kind_allowed", sql`${t.kind} in ('cash', 'non_cash')`),
+    check(
+      "giving_statement_lines_amount_shape",
+      sql`(${t.kind} = 'cash') = (${t.amountCents} is not null and ${t.amountCents} > 0)`,
+    ),
+    check(
+      "giving_statement_lines_money_shape",
+      sql`${t.grossCents} between 1 and 100000000 and ${t.reversedCents} between 0 and ${t.grossCents} and ${t.coveredFeeCents} >= 0 and ${t.coveredFeeCents} < ${t.grossCents} and (${t.amountCents} is null or ${t.amountCents} <= ${t.grossCents} - ${t.reversedCents})`,
+    ),
+    check("giving_statement_lines_line_no_positive", sql`${t.lineNo} >= 1`),
+    check(
+      "giving_statement_lines_text_shape",
+      sql`char_length(${t.fundLabel}) between 1 and 80 and char_length(${t.description}) between 1 and 300`,
+    ),
+    check("giving_statement_lines_occurred_on_floor", sql`${t.occurredOn} >= date '2000-01-01'`),
+  ],
+);
+
+/**
+ * Insert-only delivery log: `print_mailed` or `email_notice` (a no-amounts
+ * portal notice, P3-1; email_queue_id is a plain uuid joining email_queue for
+ * bounces - no FK: email_queue is a platform table with no tenant key).
+ */
+export const givingStatementDeliveries = pgTable(
+  "giving_statement_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    statementId: uuid("statement_id").notNull(),
+    channel: text("channel").notNull(),
+    recordedBy: uuid("recorded_by")
+      .notNull()
+      .references(() => users.id),
+    // Stamped by giving_statement_deliveries_insert_guard.
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    emailQueueId: uuid("email_queue_id"),
+  },
+  (t) => [
+    unique("giving_statement_deliveries_id_org_key").on(t.id, t.organizationId),
+    foreignKey({
+      columns: [t.statementId, t.organizationId],
+      foreignColumns: [givingStatements.id, givingStatements.organizationId],
+      name: "giving_statement_deliveries_statement_fk",
+    }),
+    index("giving_statement_deliveries_statement_idx").on(t.organizationId, t.statementId, t.occurredAt),
+    check(
+      "giving_statement_deliveries_channel_allowed",
+      sql`${t.channel} in ('print_mailed', 'email_notice')`,
+    ),
+    check(
+      "giving_statement_deliveries_email_shape",
+      sql`(${t.channel} = 'email_notice') = (${t.emailQueueId} is not null)`,
     ),
   ],
 );

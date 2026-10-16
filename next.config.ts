@@ -118,6 +118,22 @@ const nextConfig: NextConfig = {
       { source: "/o/:slug/giving/give/:path*", headers: giveRouteHeaders },
     ];
   },
+  // Year-end contribution statements (docs/work-log/2026-10-15-online-giving.md, Batch 5;
+  // DECISION-174). PDFKit is NOT in Next's built-in external list (only @react-pdf/renderer
+  // is), and it reads its standard-14 AFM metrics with __dirname-relative fs calls, which a
+  // bundled copy cannot resolve. Kept external, it is required from node_modules at runtime.
+  serverExternalPackages: ["pdfkit"],
+  // ...and its data files, plus the committed OFL font (src/lib/giving/statements/fonts/,
+  // FONT-SOURCE.txt), are copied into every function that renders a statement. Keys are
+  // picomatch route globs with `contains`, so this one covers the treasurer statements page
+  // (issue / re-issue server actions) and every route beneath it (download, print run).
+  // A renderer reached from any other route must add its own key here.
+  outputFileTracingIncludes: {
+    "/o/*/admin/giving/statements": [
+      "./src/lib/giving/statements/fonts/**/*",
+      "./node_modules/pdfkit/js/data/**/*",
+    ],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "lh3.googleusercontent.com" },

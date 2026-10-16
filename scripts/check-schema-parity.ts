@@ -142,6 +142,22 @@ const ALLOWLIST: Array<{
       "DDL-only composite FK into blob_assets; same cycle-avoidance as organization_brands — assets.ts:63-78.",
     since: "2026-09-26",
   },
+  // The statement PDF (online giving, Batch 5a). giving.ts does not import
+  // assets.ts: assets.ts is imported by the storage adapter alone
+  // (DECISION-058, its header), and the blob FK shape is the one above. The
+  // constraint is composite and NO ACTION in the database, which is what keeps
+  // an issued statement's PDF undeletable on every connection (F44).
+  // Enforced at drizzle/0056_presby_giving_statements.sql section 1
+  // (giving_statements_blob_fk); giving.ts's statements block comment says so.
+  {
+    table: "giving_statements",
+    kind: "extra_fk",
+    fk: "(blob_asset_id,organization_id) -> blob_assets(id,organization_id)",
+    category: "architectural",
+    reason:
+      "DDL-only composite FK into blob_assets (drizzle/0056_presby_giving_statements.sql section 1, giving_statements_blob_fk); giving.ts does not import assets.ts (DECISION-058; assets.ts:63-78).",
+    since: "2026-10-16",
+  },
   // --- The submission-grant STAMP (1 row) ------------------------------------
   // src/lib/db/domain/returns.ts:364 says so in the column's own docstring:
   // "THE STAMP. Composite FK to `statistical_returns` is 0049-only."

@@ -37,7 +37,9 @@
 --     (General online, Building restricted, Missions RETIRED with an
 --     in-flight intent); seven donors (Stripe identity, recorder-confirmed
 --     link, email-proposal, shared-email no-proposal, merged, unidentified
---     plate cash, no-contact); eleven gifts and one refund; two inbox rows
+--     plate cash, no-contact); thirteen gifts and one refund (G12/G13, added
+--     by Batch 5a, are last year's: one to the MERGED donor, one to its
+--     root - the statements fixture for a donor-root group); two inbox rows
 --     (one parked, one dead letter); intents (one open, one completed
 --     member-path subscription, and the ones behind the online gifts).
 --   Bramblewood (3333...): a connection, a fund, a donor, an intent with a
@@ -297,7 +299,7 @@ on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------
 -- Gifts (marker armed above). Dates are relative to today, clipped to the
--- current calendar year where they must stay in it; G8/G10 are LAST year.
+-- current calendar year where they must stay in it; G8/G10/G12/G13 are LAST year.
 -- recorded_by is clerk.fixture's user (seed-dev.sql e...f3).
 -- ---------------------------------------------------------------------------
 insert into giving_gifts (id, organization_id, donor_id, fund_id, source, provider, connection_id, intent_id,
@@ -340,6 +342,20 @@ select v.id::uuid, v.org::uuid, v.donor::uuid, v.fund::uuid, v.source, v.provide
      'd9100000-0000-0000-0000-000000000046', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
      null, null, null, 'cash', null, null, null, 'Found in the office safe', 4000, 0, null, null,
      'succeeded', null, make_date(extract(year from current_date)::int - 1, 12, 30), true,
+     'e0000000-0000-0000-0000-0000000000f3'),
+    -- G12 (Batch 5a): offline check dated LAST year, recorded to L. Marsh
+    -- before that donor was merged into Linden Marsh - a statement for Linden
+    -- (the donor ROOT) must count it (0056's consistency check, merged donors).
+    ('d9100000-0000-0000-0000-00000000008b', '22222222-2222-2222-2222-222222222222',
+     'd9100000-0000-0000-0000-000000000044', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
+     null, null, null, 'check', '1207', null, null, null, 7500, 0, null, null,
+     'succeeded', null, make_date(extract(year from current_date)::int - 1, 12, 1), true,
+     'e0000000-0000-0000-0000-0000000000f3'),
+    -- G13 (Batch 5a): offline cash dated LAST year, to Linden Marsh herself.
+    ('d9100000-0000-0000-0000-00000000008c', '22222222-2222-2222-2222-222222222222',
+     'd9100000-0000-0000-0000-000000000040', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
+     null, null, null, 'cash', null, null, null, 'Christmas offering envelope', 3000, 0, null, null,
+     'succeeded', null, make_date(extract(year from current_date)::int - 1, 12, 24), true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G11: Bramblewood's own offline gift (isolation).
     ('d9100000-0000-0000-0000-00000000008a', '33333333-3333-3333-3333-333333333333',

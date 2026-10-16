@@ -38,6 +38,8 @@ import { processInboxEvent } from "./process";
 
 const INBOX = "11111111-1111-4111-8111-111111111111";
 const CONNECTION = "22222222-2222-4222-8222-222222222222";
+const ORG = "33333333-3333-4333-8333-333333333333";
+const EVENT_ID = "evt_fixtureClaimedEvent01";
 
 function claim(fixture: FixtureName | null, overrides: Record<string, unknown> = {}, body?: string | null) {
   return {
@@ -48,6 +50,8 @@ function claim(fixture: FixtureName | null, overrides: Record<string, unknown> =
     connectionId: CONNECTION,
     accountId: FIXTURE_ACCOUNT,
     livemode: false,
+    externalEventId: EVENT_ID,
+    organizationId: ORG,
     ...overrides,
   };
 }
@@ -201,7 +205,10 @@ describe("processInboxEvent - verdicts", () => {
       actor: null,
       resourceType: "giving_provider_connection",
       resourceId: CONNECTION,
-      metadata: { connectionId: CONNECTION, inboxId: INBOX, eventType: "checkout.session.completed", reversalKind: "dispute", amountCents: 5000 },
+      metadata: {
+        connectionId: CONNECTION, inboxId: INBOX, organizationId: ORG, eventType: "checkout.session.completed",
+        reversalKind: "dispute", amountCents: 5000,
+      },
     });
   });
 
@@ -305,7 +312,7 @@ describe("processInboxEvent - it NEVER throws", () => {
 });
 
 describe("processInboxEvent - purged bodies", () => {
-  it("re-fetches through retrieveEvent when the claim can name the event", async () => {
+  it("re-fetches through retrieveEvent with the claim's external event id and the connection's account", async () => {
     fns.claimEvent.mockResolvedValue(claim(null, { bodyPurged: true, externalEventId: "evt_fixtureRefetch0001" }, null));
     stripe.retrieveEvent.mockResolvedValue(fixtureBody("checkout-session-expired"));
     fns.applyIntentExpired.mockResolvedValue("applied");
@@ -314,10 +321,49 @@ describe("processInboxEvent - purged bodies", () => {
     expect(result.verdict).toBe("applied");
   });
 
-  it("without an event id a purged body is dead with a code that says why", async () => {
+  it("a failed re-fetch is a retryable failure carrying the provider's code, never a lost event", async () => {
     fns.claimEvent.mockResolvedValue(claim(null, { bodyPurged: true }, null));
+    stripe.retrieveEvent.mockRejectedValue(new ProviderError("rate_limited"));
+    const result = await processInboxEvent(INBOX);
+    expect(result.verdict).toBe("failed");
+    expect(fns.finishEvent).toHaveBeenCalledWith(INBOX, "failed", "stripe_rate_limited");
+  });
+});
+
+describe("processInboxEvent - a purged body Stripe no longer has", () => {
+  it("not_found on the re-fetch is DEAD body_unavailable (audited as a dead letter), not eight retries", async () => {
+    fns.claimEvent.mockResolvedValue(claim(null, { bodyPurged: true, attempts: 1 }, null));
+    stripe.retrieveEvent.mockRejectedValue(new ProviderError("not_found"));
+    const result = await processInboxEvent(INBOX);
+    expect(result).toMatchObject({ verdict: "dead", status: "dead_letter" });
+    expect(fns.finishEvent).toHaveBeenCalledWith(INBOX, "dead", "body_unavailable");
+    expect(audit.recordAudit.mock.calls.map((c) => c[0].action)).toEqual([AUDIT_ACTIONS.GIVING_EVENT_DEAD_LETTERED]);
+    expect(audit.recordAudit.mock.calls[0]![0].metadata).toMatchObject({ lastError: "body_unavailable", organizationId: ORG });
+  });
+
+  it("other provider failures on the re-fetch stay retryable (only not_found is final)", async () => {
+    for (const code of ["rate_limited", "network", "unconfigured"] as const) {
+      fns.claimEvent.mockResolvedValue(claim(null, { bodyPurged: true }, null));
+      stripe.retrieveEvent.mockRejectedValue(new ProviderError(code));
+      await processInboxEvent(INBOX);
+      expect(fns.finishEvent).toHaveBeenLastCalledWith(INBOX, "failed", `stripe_${code}`);
+    }
+  });
+});
+
+describe("processInboxEvent - audit rows carry the organization", () => {
+  it("every audit row written after finish_event names organizationId (a dead letter, a reversal, a disconnect)", async () => {
+    fns.claimEvent.mockResolvedValue(claim(null, {}, fixtureBody("checkout-session-expired", { patch: (b) => void (b.api_version = "2020-08-27") })));
     await processInboxEvent(INBOX);
-    expect(stripe.retrieveEvent).not.toHaveBeenCalled();
-    expect(fns.finishEvent).toHaveBeenCalledWith(INBOX, "dead", "body_purged");
+    fns.claimEvent.mockResolvedValue(claim("refund-created"));
+    fns.applyReversal.mockResolvedValue("applied");
+    await processInboxEvent(INBOX);
+    fns.claimEvent.mockResolvedValue(claim("account-application-deauthorized"));
+    fns.applyConnectionStatus.mockResolvedValue("applied:disconnected");
+    await processInboxEvent(INBOX);
+    expect(audit.recordAudit).toHaveBeenCalledTimes(3);
+    for (const call of audit.recordAudit.mock.calls) {
+      expect(call[0].metadata, call[0].action).toMatchObject({ organizationId: ORG, connectionId: CONNECTION, inboxId: INBOX });
+    }
   });
 });

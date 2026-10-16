@@ -372,6 +372,12 @@ export const AUDIT_ACTIONS = {
   GIVING_CONNECTION_DISCONNECTED: "tenant.giving_connection.disconnected",
   GIVING_PUBLIC_PAGE_TOGGLED: "tenant.giving_connection.public_toggled",
   GIVING_CONNECTION_RATES_CHANGED: "tenant.giving_connection.rates_changed",
+  // Batch 3a addendum (2026-10-16, orchestrator ruling on open question 3): the
+  // treasurer's Q8 attestation that Stripe payouts are automatic, written from
+  // src/app/(org)/o/[slug]/admin/giving/connect/actions.ts when it changes the
+  // row. Metadata: { organizationId, connectionId }; the actor and time are the
+  // audit row's own.
+  GIVING_PAYOUTS_ATTESTED: "tenant.giving_connection.payouts_attested",
   GIVING_FUND_CREATED: "tenant.giving_fund.created",
   GIVING_FUND_UPDATED: "tenant.giving_fund.updated",
   GIVING_FUND_RETIRED: "tenant.giving_fund.retired",

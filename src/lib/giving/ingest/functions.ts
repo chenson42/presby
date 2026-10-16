@@ -64,19 +64,22 @@ export interface ClaimedEvent {
   connectionId: string;
   accountId: string;
   livemode: boolean;
-  /**
-   * Not returned by `presby_giving_claim_event()` today. Read if a future
-   * correction of 0055 adds them: `externalEventId` lets a purged body be
-   * re-fetched (`retrieveEvent`), `organizationId` completes the audit rows.
-   */
-  externalEventId?: string;
-  organizationId?: string;
+  /** The provider's `evt_...` id: what lets a purged body be re-fetched (`retrieveEvent`). */
+  externalEventId: string;
+  /** From the inbox row, never a parameter: completes the processor's audit rows. */
+  organizationId: string;
 }
 
 /** Claims one due event (sets a 2-minute lease), or `null` when it is not claimable. */
 export async function claimEvent(inboxId: string): Promise<ClaimedEvent | null> {
   const row = await first(sql`select * from presby_giving_claim_event(${inboxId}::uuid)`);
   if (!row) return null;
+  // `presby_giving_claim_event()` has returned both since the 0055 correction
+  // of 2026-10-16 (C1). A row without them is a database that has not had it
+  // applied: refuse loudly rather than process without an id to re-fetch by.
+  if (typeof row.external_event_id !== "string" || typeof row.organization_id !== "string") {
+    throw new Error("presby_giving_claim_event() did not return external_event_id and organization_id");
+  }
   return {
     rawBody: typeof row.raw_body === "string" ? row.raw_body : null,
     eventType: String(row.event_type),
@@ -85,8 +88,8 @@ export async function claimEvent(inboxId: string): Promise<ClaimedEvent | null> 
     connectionId: String(row.connection_id),
     accountId: String(row.external_account_id),
     livemode: row.livemode === true,
-    ...(typeof row.external_event_id === "string" ? { externalEventId: row.external_event_id } : {}),
-    ...(typeof row.organization_id === "string" ? { organizationId: row.organization_id } : {}),
+    externalEventId: row.external_event_id,
+    organizationId: row.organization_id,
   };
 }
 

@@ -39,6 +39,8 @@ export const FIXTURE_NAMES = [
   "charge-dispute-closed-won",
   "charge-dispute-created-ach",
   "charge-dispute-created",
+  "charge-dispute-funds-reinstated",
+  "charge-dispute-funds-withdrawn",
   "charge-succeeded",
   "checkout-session-async-payment-failed",
   "checkout-session-async-payment-succeeded",

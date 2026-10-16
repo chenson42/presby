@@ -67,15 +67,20 @@ describe.skipIf(!hasDb)("processInboxEvent (Postgres-backed, mocked Stripe)", ()
           },
         });
       },
-      /** Ingest (real) then process (real) a body. */
-      async deliver(body: string) {
+      /** Ingest (real) without processing. */
+      async deliverUnprocessed(body: string) {
         const parsed = JSON.parse(body) as { id: string; type: string; livemode: boolean };
         const ingested = await fns.ingestEvent({
           account: o.accountId, eventId: parsed.id, livemode: parsed.livemode, eventType: parsed.type, rawBody: body,
         });
         expect(ingested.outcome).toBe("accepted");
-        const result = await processInboxEvent(ingested.inboxId!);
-        return { inboxId: ingested.inboxId!, result };
+        return { inboxId: ingested.inboxId! };
+      },
+      /** Ingest (real) then process (real) a body. */
+      async deliver(body: string) {
+        const { inboxId } = await this.deliverUnprocessed(body);
+        const result = await processInboxEvent(inboxId);
+        return { inboxId, result };
       },
     };
   }
@@ -194,6 +199,102 @@ describe.skipIf(!hasDb)("processInboxEvent (Postgres-backed, mocked Stripe)", ()
     expect(await h.reversals(t.organizationId)).toHaveLength(1);
     expect(audit.recordAudit.mock.calls.map((c) => c[0].action)).toEqual(["GIVING_EVENT_DEAD_LETTERED"]);
     expect(audit.recordAudit.mock.calls[0]![0].metadata).toMatchObject({ lastError: "over_reversal", inboxId: dispute.inboxId });
+  });
+
+  describe("a dispute is ONE reversal whichever of its events arrives first (keyed on the dispute id)", () => {
+    /** A paid gift, plus the swaps that point both dispute fixtures at it. */
+    async function disputed(name: string) {
+      const t = await tenant(name);
+      const s = swaps();
+      await h.intent({ ...t, sessionId: s.session });
+      await t.deliver(t.body("checkout-session-completed-payment", s.map));
+      const dispute = ids.dispute();
+      audit.recordAudit.mockClear();
+      return { t, dispute, map: { pi_fixturePaid000001: s.pi, dp_fixtureDispute00001: dispute } };
+    }
+    const reversalActions = () => audit.recordAudit.mock.calls.map((c) => c[0].action);
+
+    it("created, then funds_withdrawn: one dispute row, the second delivery is a noop that audits nothing", async () => {
+      const { t, map } = await disputed("e2e-dispute-cw");
+      const first = await t.deliver(t.body("charge-dispute-created", map));
+      expect(first.result).toMatchObject({ verdict: "applied", parts: ["applied"] });
+      const second = await t.deliver(t.body("charge-dispute-funds-withdrawn", map));
+      expect(second.result).toMatchObject({ verdict: "applied", status: "applied", parts: ["noop"] });
+      const rows = await h.reversals(t.organizationId);
+      expect(rows.map((r) => r.kind)).toEqual(["dispute"]);
+      expect(reversalActions()).toEqual(["GIVING_REVERSAL_RECORDED"]);
+    });
+
+    it("funds_withdrawn, then created: the same single row, from the other direction", async () => {
+      const { t, map } = await disputed("e2e-dispute-wc");
+      const first = await t.deliver(t.body("charge-dispute-funds-withdrawn", map));
+      expect(first.result).toMatchObject({ verdict: "applied", parts: ["applied"] });
+      const second = await t.deliver(t.body("charge-dispute-created", map));
+      expect(second.result).toMatchObject({ verdict: "applied", status: "applied", parts: ["noop"] });
+      expect((await h.reversals(t.organizationId)).map((r) => r.kind)).toEqual(["dispute"]);
+      expect(reversalActions()).toEqual(["GIVING_REVERSAL_RECORDED"]);
+    });
+
+    it("an inquiry (warning_*) records nothing, and its escalation to funds_withdrawn records the reversal once", async () => {
+      const { t, map } = await disputed("e2e-dispute-inquiry");
+      const inquiry = await t.deliver(
+        t.body("charge-dispute-created", map, (b) => void ((b.data as { object: Record<string, unknown> }).object.status = "warning_needs_response")),
+      );
+      expect(inquiry.result).toMatchObject({ verdict: "ignored", status: "ignored" });
+      expect(await h.reversals(t.organizationId)).toHaveLength(0);
+      const withdrawn = await t.deliver(t.body("charge-dispute-funds-withdrawn", map));
+      expect(withdrawn.result.parts).toEqual(["applied"]);
+      expect(await h.reversals(t.organizationId)).toHaveLength(1);
+    });
+
+    it("an ACH return is one ach_return row whichever event lands first", async () => {
+      const t = await tenant("e2e-dispute-ach");
+      const session = ids.session();
+      const pi = ids.pi();
+      await h.intent({ ...t, sessionId: session, totalCents: 10000 });
+      const swap = { cs_fixtureAch00000001: session, pi_fixtureAch00000001: pi };
+      await t.deliver(t.body("checkout-session-completed-payment-unpaid", swap));
+      await t.deliver(t.body("checkout-session-async-payment-succeeded", swap));
+      const dispute = ids.dispute();
+      const map = { pi_fixtureAch00000001: pi, dp_fixtureReturn000001: dispute };
+      await t.deliver(t.body("charge-dispute-created-ach", map));
+      // funds_withdrawn for a bank debit: the same dispute, shaped from the card fixture
+      const second = await t.deliver(
+        t.body("charge-dispute-funds-withdrawn", { pi_fixturePaid000001: pi, dp_fixtureDispute00001: dispute }, (b) => {
+          const o = (b.data as { object: Record<string, unknown> }).object;
+          o.amount = 10000;
+          o.payment_method_details = { type: "us_bank_account" };
+        }),
+      );
+      expect(second.result.parts).toEqual(["noop"]);
+      expect((await h.reversals(t.organizationId)).map((r) => r.kind)).toEqual(["ach_return"]);
+    });
+
+    it("closed:won, then funds_reinstated: one reinstatement offsetting the dispute; the other order is the same", async () => {
+      const a = await disputed("e2e-reinstate-cr");
+      await a.t.deliver(a.t.body("charge-dispute-created", a.map));
+      expect((await a.t.deliver(a.t.body("charge-dispute-closed-won", a.map))).result.parts).toEqual(["applied"]);
+      expect((await a.t.deliver(a.t.body("charge-dispute-funds-reinstated", a.map))).result.parts).toEqual(["noop"]);
+      const rowsA = await h.reversals(a.t.organizationId);
+      expect(rowsA.map((r) => r.kind).sort()).toEqual(["dispute", "reinstatement"]);
+      expect(rowsA.find((r) => r.kind === "reinstatement")!.offsets_reversal_id).toBe(rowsA.find((r) => r.kind === "dispute")!.id);
+
+      const b = await disputed("e2e-reinstate-rc");
+      await b.t.deliver(b.t.body("charge-dispute-funds-withdrawn", b.map));
+      expect((await b.t.deliver(b.t.body("charge-dispute-funds-reinstated", b.map))).result.parts).toEqual(["applied"]);
+      expect((await b.t.deliver(b.t.body("charge-dispute-closed-won", b.map))).result.parts).toEqual(["noop"]);
+      expect((await h.reversals(b.t.organizationId)).map((r) => r.kind).sort()).toEqual(["dispute", "reinstatement"]);
+    });
+
+    it("a reinstatement that beats its withdrawal parks (no_reversal) and applies once the withdrawal lands", async () => {
+      const { t, map } = await disputed("e2e-reinstate-early");
+      const early = await t.deliver(t.body("charge-dispute-funds-reinstated", map));
+      expect(early.result).toMatchObject({ verdict: "parked", status: "parked" });
+      await t.deliver(t.body("charge-dispute-funds-withdrawn", map));
+      await h.owner(sql`update giving_provider_events set next_attempt_at = now() where id = ${early.inboxId}`);
+      expect((await processInboxEvent(early.inboxId)).parts).toEqual(["applied"]);
+      expect((await h.reversals(t.organizationId)).map((r) => r.kind).sort()).toEqual(["dispute", "reinstatement"]);
+    });
   });
 
   it("a refund that later FAILS is reinstated; one that never succeeded is parked then given up on", async () => {
@@ -338,6 +439,36 @@ describe.skipIf(!hasDb)("processInboxEvent (Postgres-backed, mocked Stripe)", ()
     const { result } = await t.deliver(t.body("payout-paid", { po_fixturePayout000001: po }));
     expect(result.verdict).toBe("applied");
     expect((await h.settlements(t.organizationId))[0]).toMatchObject({ external_settlement_id: po, status: "paid" });
+  });
+
+  it("a PURGED body is re-fetched through retrieveEvent with the inbox row's own event id, and the audit rows name the organization", async () => {
+    const t = await tenant("e2e-purged");
+    const session = ids.session();
+    const intentId = await h.intent({ ...t, sessionId: session, status: "open" });
+    const body = t.body("checkout-session-expired", { cs_fixtureExpired0001: session });
+    const parsed = JSON.parse(body) as { id: string };
+    const { inboxId } = await t.deliverUnprocessed(body);
+    // The cron's purge, done by hand: a stored body 90 days past a terminal state is nulled.
+    await h.owner(sql`update giving_provider_events set raw_body = null, body_purged_at = now() where id = ${inboxId}`);
+
+    stripe.retrieveEvent.mockResolvedValue(body);
+    const result = await processInboxEvent(inboxId);
+    expect(stripe.retrieveEvent).toHaveBeenCalledWith(t.accountId, parsed.id);
+    expect(result).toMatchObject({ verdict: "applied", status: "applied" });
+    expect((await h.intentRow(intentId)).status).toBe("expired");
+
+    // A re-fetched body that Stripe no longer serves in our shape dead-letters, and ITS audit row carries the org.
+    const bad = t.body("checkout-session-expired", {}, (b) => void (b.api_version = "2020-08-27"));
+    const second = await t.deliverUnprocessed(bad);
+    await h.owner(sql`update giving_provider_events set raw_body = null, body_purged_at = now() where id = ${second.inboxId}`);
+    stripe.retrieveEvent.mockResolvedValue(bad);
+    audit.recordAudit.mockClear();
+    await processInboxEvent(second.inboxId);
+    expect(audit.recordAudit).toHaveBeenCalledTimes(1);
+    expect(audit.recordAudit.mock.calls[0]![0]).toMatchObject({
+      action: "GIVING_EVENT_DEAD_LETTERED",
+      metadata: { organizationId: t.organizationId, connectionId: t.connectionId, inboxId: second.inboxId },
+    });
   });
 
   it("two simultaneous processors cannot both claim one event (the lease)", async () => {

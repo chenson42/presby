@@ -271,16 +271,16 @@ describe("B5 — a giving.statement email template and money never share a file"
 
 // ── B6 — the owner-only functions have one caller ───────────────────────────
 
-describe("B6 — presby_giving_ingest_health / presby_giving_requeue_event are called from one file", () => {
-  it.each(["presby_giving_ingest_health", "presby_giving_requeue_event"])("flags %s outside the health file", (fn) => {
+describe("B6 — presby_giving_ingest_health / presby_giving_dead_letters / presby_giving_requeue_event are called from one file", () => {
+  it.each(["presby_giving_ingest_health", "presby_giving_dead_letters", "presby_giving_requeue_event"])("flags %s outside the health file", (fn) => {
     const v = checkGivingBoundaries([f("src/app/(admin)/admin/giving/actions.ts", `await db.execute(sql\`select ${fn}()\`);`)]);
     expect(rules(v)).toEqual(["B6"]);
   });
 
-  it("allows both in the health file", () => {
+  it("allows all three in the health file", () => {
     expect(
       checkGivingBoundaries([
-        f(INGEST_HEALTH_FILE, "select * from presby_giving_ingest_health();\nselect presby_giving_requeue_event(id);"),
+        f(INGEST_HEALTH_FILE, "select * from presby_giving_ingest_health();\nselect * from presby_giving_dead_letters(100);\nselect presby_giving_requeue_event(id);"),
       ]),
     ).toEqual([]);
   });

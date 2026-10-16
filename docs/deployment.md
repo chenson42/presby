@@ -289,13 +289,15 @@ destination and a test/sandbox destination have different secrets):
    than parsed, because the field layouts differ.
 3. **URL:** `https://<canonical host>/api/webhooks/stripe` (the same host as
    `NEXT_PUBLIC_APP_URL`).
-4. **Events — exactly these sixteen, nothing else:**
+4. **Events — exactly these eighteen, nothing else:**
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    `checkout.session.async_payment_failed`, `checkout.session.expired`,
    `invoice_payment.paid`, `charge.succeeded`, `refund.created`,
-   `refund.updated`, `charge.dispute.created`, `charge.dispute.closed`,
-   `customer.subscription.deleted`, `invoice.payment_failed`, `payout.paid`,
-   `payout.failed`, `account.updated`, `account.application.deauthorized`.
+   `refund.updated`, `charge.dispute.created`,
+   `charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`,
+   `charge.dispute.closed`, `customer.subscription.deleted`,
+   `invoice.payment_failed`, `payout.paid`, `payout.failed`,
+   `account.updated`, `account.application.deauthorized`.
    Any other type is acknowledged and dropped before storage, so subscribing to
    more costs bandwidth for nothing. (`constants.test.ts` fails if this list and
    `HANDLED_EVENT_TYPES` ever differ.)
@@ -372,17 +374,22 @@ Run against `development` or a preview, never production data.
    `Stripe-Account` header. Record the result in the work-log. v1 builds no
    portal either way; if it works, a follow-up can add it for confirmed-linked
    members.
-7. **Dispute escalation:** `charge.dispute.created` fires for the *start* of a
-   dispute; presby records nothing for a `warning_*` inquiry (no funds move). If
-   an inquiry escalates and money is withdrawn, that is a different event the
-   endpoint is not subscribed to. Observe what Stripe sends and decide whether
-   to subscribe `charge.dispute.funds_withdrawn` (Batch 3a open question).
+7. **Disputes:** one dispute is one reversal, keyed on the dispute's id. Money
+   leaving is recorded by whichever of `charge.dispute.created` (any status but
+   a `warning_*` inquiry) or `charge.dispute.funds_withdrawn` arrives first; the
+   other changes nothing. An inquiry records nothing until it escalates and the
+   funds are withdrawn. Money coming back is recorded by whichever of
+   `charge.dispute.funds_reinstated` or `charge.dispute.closed` with status
+   `won` arrives first, the same way; a lost dispute leaves the reversal in
+   place. In the smoke, raise a test dispute, confirm exactly one reversal
+   appears whichever event lands first, then close it as won and confirm one
+   reinstatement.
 
 ### Go-live checklist (enforced by humans)
 
 - `STRIPE_SECRET_KEY` (restricted, per the table) and `STRIPE_WEBHOOK_SECRET`
   set in **production only**; the webhook destination is *Connected accounts*,
-  version `2026-09-30.endive`, the exact sixteen events.
+  version `2026-09-30.endive`, the exact eighteen events.
 - `NEXT_PUBLIC_APP_URL` is the canonical `https` origin; `CRON_SECRET` is set and
   the giving cron shows 200s in the Vercel cron dashboard.
 - Upstash (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and Turnstile configured: the

@@ -444,7 +444,7 @@ export async function refreshConnection(identity: ConnectIdentity): Promise<Refr
 // attestation, go-live, rates, disconnect (database-only)
 // ---------------------------------------------------------------------------
 
-export type AttestResult = { kind: "ok"; changed: boolean } | { kind: "forbidden" } | { kind: "no_connection" };
+export type AttestResult = { kind: "ok"; changed: boolean; connectionId: string } | { kind: "forbidden" } | { kind: "no_connection" };
 
 /** Q8: the treasurer states the congregation's Stripe payouts are automatic. Recorded with who and when. */
 export async function attestPayouts(identity: ConnectIdentity): Promise<AttestResult> {
@@ -459,13 +459,13 @@ export async function attestPayouts(identity: ConnectIdentity): Promise<AttestRe
            and payouts_attested_at is null
         returning id`),
     )[0];
-    if (updated) return { kind: "ok", changed: true } as const;
+    if (updated) return { kind: "ok", changed: true, connectionId: String(updated.id) } as const;
     const open = rowsOf(
       await tx.execute(sql`
-        select 1 as one from giving_provider_connections
+        select id from giving_provider_connections
          where organization_id = ${identity.organizationId}::uuid and status <> 'disconnected'`),
     )[0];
-    return open ? ({ kind: "ok", changed: false } as const) : ({ kind: "no_connection" } as const);
+    return open ? ({ kind: "ok", changed: false, connectionId: String(open.id) } as const) : ({ kind: "no_connection" } as const);
   });
 }
 

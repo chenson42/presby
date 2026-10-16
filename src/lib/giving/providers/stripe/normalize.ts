@@ -177,8 +177,12 @@ export function normalize(
       return refund(object, type, createdAt);
     case "charge.dispute.created":
       return disputeCreated(object);
+    case "charge.dispute.funds_withdrawn":
+      return disputeFundsWithdrawn(object, createdAt);
     case "charge.dispute.closed":
       return disputeClosed(object, createdAt);
+    case "charge.dispute.funds_reinstated":
+      return disputeReinstated(object, createdAt);
     case "customer.subscription.deleted":
       return subscriptionDeleted(object, requireDate(createdAt));
     case "invoice.payment_failed":
@@ -379,16 +383,30 @@ function refund(
   return [];
 }
 
-function disputeCreated(dispute: Json): NormalizedEvent[] {
+/**
+ * DISPUTES. One dispute is one reversal, keyed on the dispute's id, and four
+ * events speak about it (orchestrator ruling on the Batch 3a open questions, 2026-10-16):
+ *
+ *   `created` (a non-`warning_*` status)  \ whichever arrives first records
+ *   `funds_withdrawn` (always)            / the reversal; the other is a `noop`
+ *                                           at `presby_giving_apply_reversal`'s
+ *                                           existence check (F143)
+ *   `closed` with `won`                   \ both are the one reinstatement,
+ *   `funds_reinstated` (always)           / keyed `<dispute id>:won`, same way
+ *
+ * Why `funds_withdrawn` exists in the list at all: an inquiry (`warning_*`)
+ * moves no money and records nothing, but when it escalates into a chargeback
+ * the funds leave on `funds_withdrawn`, an event `created` never repeats. The
+ * event itself is the fact that money moved, so it records regardless of the
+ * status the embedded dispute object happens to carry, and at the EVENT's time
+ * (the dispute's own `created` may be the earlier inquiry).
+ */
+function disputeReversal(dispute: Json, occurredAt: Date): NormalizedEvent[] {
   const disputeId = str(dispute.id);
   if (!disputeId) throw new NormalizeError("bad_shape");
   const paymentIntentId = idOf(dispute.payment_intent);
   if (!paymentIntentId) return [];
   if (!isUsd(dispute.currency)) return [];
-  // A `warning_*` status is an inquiry: no funds have moved, so nothing is
-  // recorded. (If it escalates, the money movement is a separate event the
-  // endpoint is not subscribed to - tracked as an open question.)
-  if ((str(dispute.status) ?? "").startsWith("warning_")) return [];
   const method = str(rec(dispute.payment_method_details)?.type);
   return [
     {
@@ -397,16 +415,27 @@ function disputeCreated(dispute: Json): NormalizedEvent[] {
       reversalKind: method === "us_bank_account" ? "ach_return" : "dispute",
       externalReversalId: disputeId,
       amountCents: positive(dispute.amount),
-      occurredAt: requireDate(seconds(dispute.created)),
+      occurredAt,
       offsetsExternalReversalId: null,
     },
   ];
 }
 
-function disputeClosed(dispute: Json, eventAt: Date | null): NormalizedEvent[] {
+function disputeCreated(dispute: Json): NormalizedEvent[] {
+  if (!str(dispute.id)) throw new NormalizeError("bad_shape");
+  // A `warning_*` status is an inquiry: no funds have moved, so nothing is
+  // recorded. If it escalates, `funds_withdrawn` records it.
+  if ((str(dispute.status) ?? "").startsWith("warning_")) return [];
+  return disputeReversal(dispute, requireDate(seconds(dispute.created)));
+}
+
+function disputeFundsWithdrawn(dispute: Json, eventAt: Date | null): NormalizedEvent[] {
+  return disputeReversal(dispute, requireDate(eventAt));
+}
+
+function disputeReinstatement(dispute: Json, eventAt: Date | null): NormalizedEvent[] {
   const disputeId = str(dispute.id);
   if (!disputeId) throw new NormalizeError("bad_shape");
-  if (str(dispute.status) !== "won") return []; // lost: the reversal stands
   const paymentIntentId = idOf(dispute.payment_intent);
   if (!paymentIntentId) return [];
   if (!isUsd(dispute.currency)) return [];
@@ -422,6 +451,16 @@ function disputeClosed(dispute: Json, eventAt: Date | null): NormalizedEvent[] {
       offsetsExternalReversalId: disputeId,
     },
   ];
+}
+
+function disputeClosed(dispute: Json, eventAt: Date | null): NormalizedEvent[] {
+  if (!str(dispute.id)) throw new NormalizeError("bad_shape");
+  if (str(dispute.status) !== "won") return []; // lost: the reversal stands
+  return disputeReinstatement(dispute, eventAt);
+}
+
+function disputeReinstated(dispute: Json, eventAt: Date | null): NormalizedEvent[] {
+  return disputeReinstatement(dispute, eventAt);
 }
 
 function positive(value: unknown): number {

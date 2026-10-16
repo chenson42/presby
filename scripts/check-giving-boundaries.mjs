@@ -44,10 +44,11 @@
  *        builder into a file of its own. Exemption, with a mandatory reason:
  *        `// giving-amounts-ok: <reason>` on the line above the template
  *        reference.
- *   B6 — `presby_giving_ingest_health` and `presby_giving_requeue_event` are
- *        OWNER-ONLY functions (P3-6) called through `getPlatformDb()` from ONE
+ *   B6 — `presby_giving_ingest_health`, `presby_giving_dead_letters` and
+ *        `presby_giving_requeue_event` are OWNER-ONLY functions (P3-6; the
+ *        dead-letter list is 0055 C2) called through `getPlatformDb()` from ONE
  *        file, `src/lib/admin/giving-ingest-health.ts`. No other non-test file
- *        may name either.
+ *        may name any of them.
  *
  *   B7 — no Stripe origin in the CSP's navigation/script/frame directives
  *        (Batch 3; R7/G30). A donor reaches Checkout by a top-level REDIRECT, so
@@ -117,6 +118,7 @@ const CSP_NO_STRIPE_DIRECTIVES = [
 
 const OWNER_ONLY_FUNCTIONS = [
   "presby_giving_ingest_health",
+  "presby_giving_dead_letters",
   "presby_giving_requeue_event",
 ];
 

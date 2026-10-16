@@ -93,6 +93,22 @@ const TABLE: Record<FixtureName, NormalizedEvent[]> = {
       offsetsExternalReversalId: "dp_fixtureDispute00001",
     },
   ],
+  // The money-movement events (Batch 3a addendum). The dispute's own `created` is
+  // 1790800000 here (an inquiry that escalated), the event is 864000 s into the
+  // fixture clock: the funds moved when Stripe says they did.
+  "charge-dispute-funds-withdrawn": [
+    {
+      kind: "reversal", paymentIntentId: "pi_fixturePaid000001", reversalKind: "dispute", externalReversalId: "dp_fixtureDispute00001",
+      amountCents: 5000, occurredAt: at(864000), offsetsExternalReversalId: null,
+    },
+  ],
+  "charge-dispute-funds-reinstated": [
+    {
+      kind: "reversal", paymentIntentId: "pi_fixturePaid000001", reversalKind: "reinstatement",
+      externalReversalId: "dp_fixtureDispute00001:won", amountCents: 5000, occurredAt: at(4000000),
+      offsetsExternalReversalId: "dp_fixtureDispute00001",
+    },
+  ],
   "customer-subscription-deleted": [
     { kind: "subscription", action: "ended", sessionId: null, subscriptionId: "sub_fixtureMonthly0001", donor: null, at: at(7776000) },
   ],
@@ -365,6 +381,39 @@ describe("normalize - well-formed events that are simply not ours to record", ()
       patch: (b) => void ((b.data as { object: Record<string, unknown> }).object.status = "warning_needs_response"),
     });
     expect(normalize(body, EXPECTED)).toEqual([]);
+  });
+
+  it("funds_withdrawn records the same reversal as created, keyed on the dispute id, whatever the dispute status says", () => {
+    const created = normalize(fixtureBody("charge-dispute-created"), EXPECTED);
+    const withdrawn = normalize(fixtureBody("charge-dispute-funds-withdrawn"), EXPECTED);
+    expect(withdrawn).toEqual(created); // same id, kind, amount, time: whichever arrives first records it, the other is a noop
+    // An inquiry that escalates is withdrawn with its dispute object still carrying an early status: the event is the fact.
+    const inquiry = fixtureBody("charge-dispute-funds-withdrawn", {
+      patch: (b) => void ((b.data as { object: Record<string, unknown> }).object.status = "warning_needs_response"),
+    });
+    expect(normalize(inquiry, EXPECTED)).toEqual(created);
+  });
+
+  it("funds_withdrawn on a bank debit is an ach_return, like created", () => {
+    const body = fixtureBody("charge-dispute-funds-withdrawn", {
+      patch: (b) => void ((b.data as { object: Record<string, unknown> }).object.payment_method_details = { type: "us_bank_account" }),
+    });
+    expect(normalize(body, EXPECTED)).toMatchObject([{ reversalKind: "ach_return", externalReversalId: "dp_fixtureDispute00001" }]);
+  });
+
+  it("funds_reinstated and closed:won are the SAME reinstatement (one key, so the second delivery is a noop)", () => {
+    expect(normalize(fixtureBody("charge-dispute-funds-reinstated"), EXPECTED)).toEqual(
+      normalize(fixtureBody("charge-dispute-closed-won"), EXPECTED),
+    );
+  });
+
+  it("the dispute money events skip a non-USD dispute and refuse a zero amount", () => {
+    for (const name of ["charge-dispute-funds-withdrawn", "charge-dispute-funds-reinstated"] as const) {
+      const eur = fixtureBody(name, { patch: (b) => void ((b.data as { object: Record<string, unknown> }).object.currency = "eur") });
+      expect(normalize(eur, EXPECTED), name).toEqual([]);
+      const zero = fixtureBody(name, { patch: (b) => void ((b.data as { object: Record<string, unknown> }).object.amount = 0) });
+      expect(() => normalize(zero, EXPECTED), name).toThrow(NormalizeError);
+    }
   });
 
   it("a dispute closed as lost leaves the reversal in place", () => {

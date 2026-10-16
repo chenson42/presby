@@ -307,6 +307,39 @@ test.describe("reversals", () => {
     expect((await reversals()).length).toBe(1);
   });
 
+  test("a dispute is ONE reversal whichever event lands first: funds_withdrawn then created, then reinstated and closed:won", async ({ request }) => {
+    const sessionId = `cs_fixture${uniq()}`;
+    const pi = `pi_fixture${uniq()}`;
+    const dp = `dp_fixture${uniq()}`;
+    await addIntent({ sessionId });
+    const gift = body("checkout-session-completed-payment", { cs_fixturePaid000001: sessionId, pi_fixturePaid000001: pi });
+    await post(request, gift);
+    await waitForStatus(eventId(gift), "applied");
+    const before = (await reversals()).length;
+    const swaps = { pi_fixturePaid000001: pi, dp_fixtureDispute00001: dp };
+
+    const withdrawn = body("charge-dispute-funds-withdrawn", swaps);
+    expect((await post(request, withdrawn)).status()).toBe(200);
+    await waitForStatus(eventId(withdrawn), "applied");
+    const created = body("charge-dispute-created", swaps);
+    expect((await post(request, created)).status()).toBe(200);
+    await waitForStatus(eventId(created), "applied"); // a noop: the dispute id is already recorded
+    expect((await reversals()).slice(before)).toEqual([{ kind: "dispute", amount_cents: 5000 }]);
+
+    const reinstated = body("charge-dispute-funds-reinstated", swaps);
+    expect((await post(request, reinstated)).status()).toBe(200);
+    await waitForStatus(eventId(reinstated), "applied");
+    const closed = body("charge-dispute-closed-won", swaps);
+    expect((await post(request, closed)).status()).toBe(200);
+    await waitForStatus(eventId(closed), "applied");
+    expect((await reversals()).slice(before).map((r) => r.kind).sort()).toEqual(["dispute", "reinstatement"]);
+
+    // A redelivery of the first event is a byte-identical duplicate: nothing more is written.
+    expect((await post(request, withdrawn)).status()).toBe(200);
+    await new Promise((r) => setTimeout(r, 1000));
+    expect((await reversals()).length).toBe(before + 2);
+  });
+
   test("an OVER-REVERSAL dead-letters: no reversal row, and the congregation sees a COUNT on its giving overview", async ({ request, browser }) => {
     const sessionId = `cs_fixture${uniq()}`;
     const pi = `pi_fixture${uniq()}`;

@@ -363,12 +363,13 @@ describe.skipIf(!hasDb)("connection.ts (Postgres-backed)", () => {
       const empty = await scene();
       expect(await conn.attestPayouts(empty.manager)).toEqual({ kind: "no_connection" });
       const s = await activeConnection();
-      expect(await conn.attestPayouts(s.manager)).toEqual({ kind: "ok", changed: true });
       const row = (await connections(s.organizationId))[0]!;
+      expect(await conn.attestPayouts(s.manager)).toEqual({ kind: "ok", changed: true, connectionId: row.id });
+      Object.assign(row, (await connections(s.organizationId))[0]!);
       expect(row.payouts_attested_at).not.toBeNull();
       expect(row.payouts_attested_by).toBe(s.manager.userId);
       const stamp = row.payouts_attested_at;
-      expect(await conn.attestPayouts(s.manager)).toEqual({ kind: "ok", changed: false });
+      expect(await conn.attestPayouts(s.manager)).toEqual({ kind: "ok", changed: false, connectionId: row.id });
       expect((await connections(s.organizationId))[0]!.payouts_attested_at).toEqual(stamp);
     });
 

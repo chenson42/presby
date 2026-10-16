@@ -16,7 +16,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-15 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
-| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3a complete; 3a-fix complete; api-developer addendum and 3b pending | — | 2026-10-16 |
+| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3a complete (+fix, +addendum); 3b pending (ux-developer) | — | 2026-10-16 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3209,6 +3209,104 @@ None. Schema only. `presby_giving_requeue_event()` remains audited `ORG_GIVING_E
 **Next agent:** api-developer (3a addendum: ruling items 1–4 wiring, including the four points above), then ux-developer (3b) builds the requeue control against `listDeadLetters()`/`requeueDeadLetter()`.
 
 ---
+### Orchestrator ruling on the 3a-fix seed question (2026-10-16)
+
+Committed as `70cab12`. The seed's parked inbox row (`scripts/giving/seed-dev-giving.sql` `…0070`) gets a far-future `next_attempt_at` (`now() + interval '100 years'`) so it stays parked by design: §46e's "one parked, one dead letter" is a fixture assertion, not a liveness claim, and the giving cron on `development` (and the replay harness calling `/api/cron/giving`) must not be able to change it. The e2e spec keeps calling the real cron; its own assertions already scope to its fixture connection. `api-developer` addendum applies the seed change (a draft under `scripts/giving/`, not a Rule 16 file) and re-runs §46.
+
+---
+
+## Batch 3a addendum — rulings wired (api-developer)
+
+*2026-10-16, api-developer, worktree `presby-giving` on `pipeline/online-giving` (HEAD `70cab12`), Neon branch `br-winter-band-axb6tzax`. Nothing committed. No Rule 16 shared file edited. No schema change (0055 as corrected by 3a-fix). No live Stripe call. One dev server was started from the worktree on port 3100 (wrapper PID 92180 / listener PID 92197, both started by this addendum) for `e2e/giving-webhook.spec.ts` and stopped by PID afterwards; the demo server on port 3000 was never touched.*
+
+### Files Modified
+
+**1. Claim shape.**
+- `src/lib/giving/ingest/functions.ts`: `ClaimedEvent.externalEventId` and `organizationId` are required `string`s; the "not returned today" comment is replaced. `claimEvent()` throws if either column is missing from a claimed row (a database without the 0055 C1 correction) rather than process an event it could not re-fetch or attribute. The throw happens inside `processInboxEvent`'s claim `try`, so it still never throws out of the processor.
+- `src/lib/giving/ingest/process.ts`: stale comment at the purged-body branch replaced; the `if (!claim.externalEventId) return dead("body_purged")` guard is **dropped** (dead code for a real claim). A purged body is re-fetched through `retrieveEvent(claim.accountId, claim.externalEventId)`. `writeAudits` always includes `organizationId` in metadata (it was conditional). `resourceId` stays the connection (3a deviation 9 unchanged), the event id for the dead-letter row.
+- Tests: new `src/lib/giving/ingest/functions.test.ts` (3: both columns returned, null when unclaimable, refuses a row that lacks them); `process.test.ts` (the claim helper now carries both ids, the "without an event id" case is removed, a failed re-fetch is a `failed:stripe_*` retry, a new case proves all three audit kinds carry `organizationId`); `process.db.test.ts` (a purged inbox row goes through the REAL claim, `retrieveEvent` is called with the connection's account and the row's own `external_event_id`, the event applies; a re-fetched bad-version body dead-letters and its audit row names the organization).
+
+**2. Dead letters.**
+- `src/lib/admin/giving-ingest-health.ts`: `listDeadLetters(limit = 100): Promise<DeadLetterRow[]>` over `presby_giving_dead_letters` (owner connection; limit clamped 1..100 here as well as in SQL), exported `DeadLetterRow`; `requeueDeadLetter(eventId)` (parameter renamed from `inboxId`, same behaviour). File header updated: still the only `getPlatformDb()` user.
+- `scripts/check-giving-boundaries.mjs`: `presby_giving_dead_letters` added to `OWNER_ONLY_FUNCTIONS`; B6 header comment updated. `scripts/check-giving-boundaries.test.mjs`: B6 `it.each` and the allowed-in-health-file case cover all three names.
+- `src/lib/admin/giving-ingest-health.db.test.ts`: dead-letters a fixture event, lists it, asserts the exact row (equality, not subset), the closed key set (no body, amount, donor or payload field exists in the type, and none of the fixture's donor/amount strings appear in the values), parked and applied events are not listed, limit clamping, oldest-first, and that the returned `eventId` feeds `requeueDeadLetter` and the event then leaves the list.
+
+**3. Audit key.**
+- `src/lib/audit.ts`: `GIVING_PAYOUTS_ATTESTED: "tenant.giving_connection.payouts_attested"` (existing values untouched; value follows `GIVING_PUBLIC_PAGE_TOGGLED`'s `tenant.giving_connection.*` family, which the ruling left to me). `src/lib/audit.test.ts`: the snapshot entry and the giving-key count (31 to 32).
+- `src/lib/giving/connection.ts`: `AttestResult` ok-case now carries `connectionId` (both the changed and the already-attested branches; no SQL change beyond `returning id` / `select id`). `connection.db.test.ts` updated to match.
+- `src/app/(org)/o/[slug]/admin/giving/connect/actions.ts`: `attestPayoutsAction` writes `GIVING_PAYOUTS_ATTESTED` after the write, **only when `changed`** (a repeat writes nothing, like `setPublicPageAction`). Metadata `{ organizationId, connectionId }`; the actor, time, IP and user agent are `recordAudit`'s own. The old "AUDIT_ACTIONS has no key" docblock is replaced. `actions.test.ts`: three cases (change audited with the exact payload, repeat silent, no-connection silent). `npm run check:audit` still reports zero.
+
+**4. Disputes.**
+- `src/lib/giving/providers/stripe/constants.ts`: `HANDLED_EVENT_TYPES` is now **eighteen** (`charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated` added). `constants.test.ts` pins eighteen, and gains a test that parses the runbook's endpoint list and requires it to **equal** the code's set (the old test only checked the code's list was a subset of the doc, so a stale extra in the doc would have passed). `route.test.ts`: the "every handled type" title.
+- `src/lib/giving/providers/stripe/normalize.ts`: one block of dispute code. `created` (non-`warning_*`) and `funds_withdrawn` both produce the reversal keyed on the dispute id; `closed` with `won` and `funds_reinstated` both produce the reinstatement keyed `<dispute id>:won` offsetting the dispute id. `ach_return` vs `dispute` is by `payment_method_details.type` for both. Non-USD returns `[]`, a zero amount throws `bad_amount`.
+- Fixtures (sanitized, `acct_fixtureAccount0001`, `pi_fixturePaid000001`, `dp_fixtureDispute00001`, no key shapes): `charge-dispute-funds-withdrawn.json`, `charge-dispute-funds-reinstated.json`; both added to `FIXTURE_NAMES` in `testing/sign-event.ts`. `check:secrets` is clean on them (run over the untracked files through `checkSecretsPii()`; the script itself scans tracked files only).
+- Tests: `normalize.test.ts` (table rows for both fixtures; funds_withdrawn equals created; an inquiry-status object still records on funds_withdrawn; ACH kind; funds_reinstated equals closed:won; non-USD and zero amount), `process.db.test.ts` (six cases: created then withdrawn, withdrawn then created, inquiry then escalation, an ACH return, closed:won then reinstated and the reverse, and a reinstatement that beats its withdrawal parks then applies), `e2e/giving-webhook.spec.ts` (the replay harness: withdrawn, created, reinstated, closed:won through the real route and cron, plus a byte-identical redelivery).
+- `docs/deployment.md`: step 4 now lists exactly eighteen events (the two new ones between `charge.dispute.created` and `charge.dispute.closed`); go-live checklist says eighteen; smoke step 7 is rewritten from an open question into the dispute rule and what to confirm.
+
+**5. Seed.** `scripts/giving/seed-dev-giving.sql`: parked row `…0070` gets `now() + interval '100 years'` with a comment citing the ruling. The seed is `on conflict (id) do nothing`, so re-applying it (exit 0) cannot change a row that already exists; the pipeline branch's row was set with one owner-connection `update` (fixture data, branch only). A fresh database (and `development` at integration) gets the far-future value from the seed itself.
+
+### Deviations and judgment calls
+
+1. **`funds_withdrawn` always records; it does not apply the `warning_*` filter.** The ruling says `warning_*` records nothing; read as written for `created`. The reason an escalated inquiry needs `funds_withdrawn` at all is that the money has moved, and the embedded dispute object can still carry an early status. The event is the fact. Tested both ways in `normalize.test.ts`.
+2. **`funds_withdrawn` uses the event's time for `occurred_at`; `created` uses the dispute's own `created`.** For an ordinary dispute the two are the same instant. For an escalated inquiry the dispute's `created` is the earlier inquiry and the money moved at the event. Consequence: the row's `occurred_at` can differ by seconds between the two arrival orders, never the id, kind, or amount. Same convention `closed`/`funds_reinstated` already use.
+3. **The purged-body DB test passes against the pre-addendum processor** (the code path was already live and read the columns when present, as the 3a-fix note said). Failing-first was therefore shown by mutation: with the two `claimEvent()` column reads removed, the new DB case fails (`retrieveEvent` not called); against the original `functions.ts` the new strictness test fails (`claimEvent` resolves instead of rejecting). The six dispute DB cases all fail against the original `normalize.ts` and pass now. The B6 case fails with `presby_giving_dead_letters` removed from the tripwire list.
+4. `body_purged` is no longer a code the processor can produce. Nothing else referenced it.
+
+### Failing-first record
+
+| Change | Reverted to | Result |
+|---|---|---|
+| Strict claim | original `functions.ts` | `functions.test.ts` "refuses a row from a database that lacks the 0055 correction" fails |
+| Purged re-fetch | claim mapping without the two columns | `process.db.test.ts` PURGED case fails: `retrieveEvent` never called |
+| Dispute arrival orders | original `normalize.ts` | all six `process.db.test.ts` dispute cases fail |
+| B6 | tripwire list without the new name | "flags presby_giving_dead_letters outside the health file" fails |
+
+### Commands and results
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint -- --max-warnings=0` | exit 0 |
+| `npm run check` (seven tripwires, incl. `check:audit`, `check:giving-boundaries`, `check:secrets`) | exit 0, all passed |
+| `npm run test` | 364 files passed, 53 skipped; 5225 tests passed, 1510 skipped (DB-backed files skip without `.env.local`) |
+| DB lane: `npx dotenv -e .env.local -- vitest run --no-file-parallelism` over all 13 `*.db.test.ts` under `src/**/giving*`, plus `giving.schema.test.ts`, `two-factor-agreement.test.ts`, `access.test.ts` | **16 files, 323 tests, all passed** |
+| `npm run build` | exit 0 |
+| `E2E_BASE_URL=http://localhost:3100 npx playwright test e2e/giving-webhook.spec.ts` (server started with `STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret`, `CRON_SECRET=giving-e2e-cron-secret`, no `STRIPE_SECRET_KEY`) <!-- leak-ok: non-key-shaped test literals --> | **12 passed** (was 11; +1 dispute case) |
+| `psql "$APP_DATABASE_URL" -f scripts/giving/test-rls-46.sql` | **201 passes**, run twice: after the seed fix, and again after the e2e spec had called the real cron (row `…0070` still `parked`, attempts 1: the seed fix holds) |
+
+Fixture hygiene: no `e2e-giving*`, `giving-*test*` or `ingest-*` organizations remain; the two seed inbox rows are `parked` / `dead_letter` as seeded; the dev server on 3100 is stopped and port 3000 is untouched.
+
+### Contract for 3b (delta to the 3a contract above)
+
+```ts
+// src/lib/admin/giving-ingest-health.ts  (server-only; gate the caller on FEATURES.ADMIN_ORGANIZATIONS)
+listDeadLetters(limit?: number /* default and max 100, min 1 */): Promise<DeadLetterRow[]>
+DeadLetterRow = {
+  eventId: string;            // the INBOX row id; the argument requeueDeadLetter takes
+  connectionId: string; organizationId: string;
+  externalEventId: string;    // the provider's evt_... id
+  eventType: string;
+  receivedAt: string | null;  // ISO UTC; oldest first
+  attempts: number;
+  lastErrorClass: string | null; // a short code, e.g. "over_reversal", "normalize_api_version"; never free text
+}
+requeueDeadLetter(eventId: string): Promise<"requeued" | "not_dead_letter" | "not_found">
+```
+- **The requeue control can now be built.** The platform page calls `listIngestHealth()` and `listDeadLetters()`; organization names come from the `organizations` join on `organizationId`. `(admin)/admin/giving/actions.ts` calls `requeueDeadLetter(eventId)` and writes `ORG_GIVING_EVENT_REQUEUED` (the module does no audit of its own). `lastErrorClass` is safe to render; there is no body, amount or donor field in the row.
+- **`attestPayoutsAction(slug)`**: result unchanged (`{changed:boolean}`); a `changed: true` now writes `GIVING_PAYOUTS_ATTESTED` (`tenant.giving_connection.payouts_attested`), who/when/org on the audit row. A repeat attest is `changed: false` and silent. `AUDIT_ACTIONS` has the key; the tenant audit viewer, if it lists giving acts, should label it.
+- **Webhook endpoint event list is now eighteen** (`docs/deployment.md` step 4 is the copy-source). Operator Q1's smoke should confirm one reversal per dispute whichever event lands first.
+- No other 3a contract line changed. `connection.attestPayouts()`'s ok-result gained `connectionId` (internal to `src/lib/giving/`; 3b does not call it).
+
+### Open items
+
+- ~~A purged body older than Stripe's event retention would 404 on re-fetch and walk the retry ladder.~~ **Done on the coordinator's follow-up (2026-10-16):** `retrieveEvent` `not_found` on a purged body now finishes the event `dead:body_unavailable` (audited as a dead letter) in `process.ts`, with two unit tests in `process.test.ts` (`not_found` is final; `rate_limited`/`network`/`unconfigured` stay retryable). Other provider errors are unchanged.
+- **Accepted by the coordinator as built (2026-10-16):** deviation 1 (`funds_withdrawn` always records, no `warning_*` filter) and deviation 2 (`funds_withdrawn` uses the event's time for `occurred_at`).
+- The platform-page requeue control and health table are 3b (ux-developer). Nothing else is blocked.
+
+### Handoff
+
+Next agent: **ux-developer (Batch 3b)** with the contract above (connect panel, `connect/return`, platform health page including the dead-letter list and requeue control). QA follows 3b. The 3a-fix and this addendum are uncommitted on `pipeline/online-giving`; the orchestrator commits.
+
 
 # Phase 5 — Verification (qa)
 

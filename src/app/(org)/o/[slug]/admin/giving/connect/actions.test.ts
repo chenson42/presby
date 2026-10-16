@@ -166,14 +166,33 @@ describe("continueConnectAction / refreshConnectionAction", () => {
 });
 
 describe("attestPayoutsAction", () => {
-  it("reports whether it changed anything and revalidates", async () => {
+  it("a CHANGE is audited (GIVING_PAYOUTS_ATTESTED: ids only, after the write) and revalidates", async () => {
     gate.mockResolvedValue(IDENTITY);
-    lib.attestPayouts.mockResolvedValue({ kind: "ok", changed: true });
+    lib.attestPayouts.mockResolvedValue({ kind: "ok", changed: true, connectionId: "conn-1" });
     expect(await attestPayoutsAction("alder-creek")).toEqual({ ok: true, data: { changed: true } });
-    lib.attestPayouts.mockResolvedValue({ kind: "ok", changed: false });
+    expect(lib.attestPayouts).toHaveBeenCalledWith(CONN);
+    expect(recordAudit).toHaveBeenCalledTimes(1);
+    expect(recordAudit).toHaveBeenCalledWith({
+      action: "GIVING_PAYOUTS_ATTESTED",
+      resourceType: "giving_provider_connection",
+      resourceId: "conn-1",
+      metadata: { organizationId: "org-1", connectionId: "conn-1" },
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/o/alder-creek/admin/giving/connect");
+  });
+
+  it("a repeat attestation changes nothing and writes no audit row", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    lib.attestPayouts.mockResolvedValue({ kind: "ok", changed: false, connectionId: "conn-1" });
     expect(await attestPayoutsAction("alder-creek")).toEqual({ ok: true, data: { changed: false } });
+    expect(recordAudit).not.toHaveBeenCalled();
+  });
+
+  it("no connection writes nothing", async () => {
+    gate.mockResolvedValue(IDENTITY);
     lib.attestPayouts.mockResolvedValue({ kind: "no_connection" });
     expect(await attestPayoutsAction("alder-creek")).toMatchObject({ ok: false, kind: "no_connection" });
+    expect(recordAudit).not.toHaveBeenCalled();
   });
 });
 

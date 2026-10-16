@@ -103,6 +103,47 @@ describe.skipIf(!hasDb)("giving ingest health (Postgres-backed)", () => {
     expect(await h.functions.dueEvents(100)).toContain(deadId);
   });
 
+  it("listDeadLetters lists a dead-lettered event with identifiers and an error code ONLY, and feeds requeue", async () => {
+    const o = await h.org("health-deadletters");
+    const [deadId, parkedId, appliedId] = await send(o.accountId, 3);
+    for (const id of [deadId!, parkedId!, appliedId!]) await h.functions.claimEvent(id);
+    await h.functions.finishEvent(deadId!, "dead", "over_reversal");
+    await h.functions.finishEvent(parkedId!, "parked", "no_gift");
+    await h.functions.finishEvent(appliedId!, "applied", null);
+
+    const rows = await health.listDeadLetters(100);
+    const mine = rows.filter((r) => r.connectionId === o.connectionId);
+    expect(mine).toHaveLength(1); // parked and applied events are not dead letters
+    const row = mine[0]!;
+    const external = (await h.events(o.organizationId)).find((e) => e.id === deadId)!.external_event_id;
+    expect(row).toEqual({
+      eventId: deadId,
+      connectionId: o.connectionId,
+      organizationId: o.organizationId,
+      externalEventId: external,
+      eventType: "charge.succeeded",
+      receivedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/),
+      attempts: 1,
+      lastErrorClass: "over_reversal",
+    });
+    // The row type is closed: no body, no amount, no donor field can be in it, and none is in the values.
+    expect(Object.keys(row).sort()).toEqual(
+      ["attempts", "connectionId", "eventId", "eventType", "externalEventId", "lastErrorClass", "organizationId", "receivedAt"].sort(),
+    );
+    expect(JSON.stringify(row)).not.toMatch(/Fixture Donor|5000|raw_body|amount|donor@/i);
+
+    // Oldest first, and the limit is honoured (clamped to 1..100).
+    expect((await health.listDeadLetters(1)).length).toBeLessThanOrEqual(1);
+    expect((await health.listDeadLetters(0)).length).toBeLessThanOrEqual(1);
+    expect((await health.listDeadLetters(100_000)).length).toBeLessThanOrEqual(100);
+    const stamps = rows.map((r) => r.receivedAt!);
+    expect(stamps).toEqual([...stamps].sort());
+
+    // The id it returns is exactly what requeueDeadLetter takes; afterwards the event is no longer listed.
+    expect(await health.requeueDeadLetter(row.eventId)).toBe("requeued");
+    expect((await health.listDeadLetters(100)).some((r) => r.eventId === deadId)).toBe(false);
+  });
+
   it("the replayed event is processed again by the same claim path", async () => {
     const o = await h.org("health-replay");
     const [id] = await send(o.accountId, 1);

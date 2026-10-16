@@ -136,7 +136,7 @@ describe("POST /api/webhooks/stripe - what it hands to the database", () => {
     });
   });
 
-  it("accepts every one of the sixteen handled types", async () => {
+  it("accepts every one of the eighteen handled types", async () => {
     const { HANDLED_EVENT_TYPES } = await import("@/lib/giving/providers/stripe/constants");
     for (const type of HANDLED_EVENT_TYPES) {
       ingest.ingestEvent.mockClear();

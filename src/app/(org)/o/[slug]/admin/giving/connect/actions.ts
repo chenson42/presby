@@ -166,9 +166,9 @@ export async function refreshConnectionAction(
 /**
  * Q8: records that the treasurer confirms the congregation's Stripe payouts are
  * automatic (manual payouts cannot be reconciled). The row keeps who and when
- * (`payouts_attested_by` / `_at`); `AUDIT_ACTIONS` has no key of its own for
- * it and this batch adds none, so the attestation shows in the audit trail via
- * the go-live toggle's metadata, which refuses to enable without it.
+ * (`payouts_attested_by` / `_at`) and a CHANGE writes `GIVING_PAYOUTS_ATTESTED`
+ * (actor and time are the audit row's own; metadata is ids only). A repeat
+ * attestation is `changed: false` and writes nothing.
  */
 export async function attestPayoutsAction(slug: string): Promise<GivingActionResult<{ changed: boolean }>> {
   const gate = await gateGivingAction(slug, ["manage"]);
@@ -176,6 +176,14 @@ export async function attestPayoutsAction(slug: string): Promise<GivingActionRes
   const result = await attestPayouts(identityOf(gate));
   switch (result.kind) {
     case "ok":
+      if (result.changed) {
+        await recordAudit({
+          action: AUDIT_ACTIONS.GIVING_PAYOUTS_ATTESTED,
+          resourceType: "giving_provider_connection",
+          resourceId: result.connectionId,
+          metadata: { organizationId: gate.organizationId, connectionId: result.connectionId },
+        });
+      }
       revalidate(slug);
       return { ok: true, data: { changed: result.changed } };
     case "no_connection":

@@ -115,14 +115,17 @@ async function runClaimed(
 ): Promise<{ parts: PartResult[]; verdict: { outcome: FinishOutcome; code: string | null } }> {
   let body = claim.rawBody;
   if (body === null) {
-    // The stored body was purged (90 days after a terminal state). Re-fetch it
-    // if we know its id; today `presby_giving_claim_event()` does not return
-    // the id, so a purged event that is requeued cannot be re-read and is dead
-    // with a code that says why (open question for database-admin).
-    if (!claim.externalEventId) return dead("body_purged");
+    // The stored body was purged (90 days after a terminal state). The claim
+    // always names the event (`presby_giving_claim_event()` returns
+    // `external_event_id`), so it is re-read from Stripe, through the allowlisted
+    // `retrieveEvent`, using the id of a row we already hold.
     try {
       body = await retrieveEvent(claim.accountId, claim.externalEventId);
     } catch (err) {
+      // Stripe keeps events for about 30 days; presby purges at 90. A body that
+      // is gone from both places is final, not transient: dead-letter it with a
+      // code that says why instead of walking the retry ladder.
+      if (err instanceof ProviderError && err.code === "not_found") return dead("body_unavailable");
       return { parts: [], verdict: { outcome: "failed", code: failureCode(err) } };
     }
   }
@@ -258,7 +261,7 @@ async function writeAudits(
         connectionId: claim.connectionId,
         inboxId,
         eventType: claim.eventType,
-        ...(claim.organizationId ? { organizationId: claim.organizationId } : {}),
+        organizationId: claim.organizationId,
         ...audit.metadata,
       },
     });

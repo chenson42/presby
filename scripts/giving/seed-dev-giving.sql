@@ -275,6 +275,12 @@ on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------
 -- Inbox rows: one parked (an early refund with no gift yet), one dead letter
+--
+-- The parked row is parked BY DESIGN: next_attempt_at is a century away, so no
+-- giving cron (the e2e spec's, a deployment's) can ever sweep it, claim it and
+-- walk it to a dead letter. test-rls-46.sql 46e asserts "one parked, one dead
+-- letter" as a fixture fact, not a liveness claim (orchestrator ruling on the
+-- 3a-fix seed question, docs/work-log/2026-10-15-online-giving.md).
 -- ---------------------------------------------------------------------------
 insert into giving_provider_events (id, organization_id, connection_id, provider, external_event_id,
        event_type, livemode, raw_body, status, attempts, next_attempt_at, last_error, received_at, processed_at)
@@ -282,7 +288,7 @@ values
   ('d9100000-0000-0000-0000-000000000070', '22222222-2222-2222-2222-222222222222',
    'd9100000-0000-0000-0000-000000000010', 'stripe', 'evt_fixture0000000001', 'charge.refunded', false,
    '{"id":"evt_fixture0000000001","object":"event","type":"charge.refunded"}', 'parked', 1,
-   now() + interval '5 minutes', 'no_gift', now() - interval '10 minutes', null),
+   now() + interval '100 years', 'no_gift', now() - interval '10 minutes', null),
   ('d9100000-0000-0000-0000-000000000071', '22222222-2222-2222-2222-222222222222',
    'd9100000-0000-0000-0000-000000000010', 'stripe', 'evt_fixture0000000002', 'checkout.session.completed', false,
    '{"id":"evt_fixture0000000002","object":"event","type":"checkout.session.completed"}', 'dead_letter', 8,

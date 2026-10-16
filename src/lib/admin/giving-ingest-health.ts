@@ -6,18 +6,21 @@ import { getPlatformDb } from "@/lib/db";
  * Platform-side view of the giving webhook inbox - docs/work-log/
  * 2026-10-15-online-giving.md, P3-6 and DECISION-175 (4).
  *
- * THE ONE `getPlatformDb()` USER IN ALL OF GIVING. `presby_giving_ingest_health()`
- * and `presby_giving_requeue_event()` are OWNER-ONLY (EXECUTE revoked from
+ * THE ONE `getPlatformDb()` USER IN ALL OF GIVING. `presby_giving_ingest_health()`,
+ * `presby_giving_dead_letters()` and `presby_giving_requeue_event()` are OWNER-ONLY (EXECUTE revoked from
  * `presby_app`), because they are cross-organization by nature: a summary of
  * every congregation's inbox, and a replay of any congregation's dead letter.
  * There is therefore no tenant-reachable cross-org summary anywhere. This file
  * sits outside `src/lib/giving/` on purpose, and `check:giving-boundaries`
- * keeps both function names and `getPlatformDb()` out of everywhere else in the
+ * keeps all three function names and `getPlatformDb()` out of everywhere else in the
  * giving tree (B3, B6).
  *
- * WHAT IT RETURNS. Counts and timestamps per connection. No amounts, no donor
- * names, no event bodies, no event ids - the database function cannot return
- * them. The caller (a platform-axis page or action) gates on
+ * WHAT IT RETURNS. Counts and timestamps per connection from `listIngestHealth`
+ * (no event ids there by design), and, from `listDeadLetters`, one row per
+ * dead-lettered event: the inbox id (what `requeueDeadLetter` takes), the
+ * connection and organization ids, the provider's event id and type, when it
+ * arrived, how many attempts it had and a short error CODE. No amounts, no donor
+ * names, no event bodies - the database functions cannot return them. The caller (a platform-axis page or action) gates on
  * `FEATURES.ADMIN_ORGANIZATIONS`; this module does no authorization of its own
  * and must never be imported from a tenant route. Organization names, when a
  * page wants them, come from the public `organizations` table, not from here.
@@ -78,12 +81,55 @@ export async function listIngestHealth(): Promise<IngestHealthRow[]> {
   }));
 }
 
+/**
+ * One dead-lettered event, as `presby_giving_dead_letters()` returns it (0055,
+ * C2). Identifiers, a type, a time, a count and an error code - nothing a donor
+ * wrote, nothing about money. The caller's page joins `organizationId` to the
+ * public `organizations` table for a name.
+ */
+export interface DeadLetterRow {
+  /** The inbox row's id: the argument `requeueDeadLetter()` takes. */
+  eventId: string;
+  connectionId: string;
+  organizationId: string;
+  /** The provider's own id (`evt_...`). */
+  externalEventId: string;
+  eventType: string;
+  /** ISO-8601 UTC. */
+  receivedAt: string | null;
+  attempts: number;
+  /** A short code (`over_reversal`, `normalize_api_version`, ...), or null. */
+  lastErrorClass: string | null;
+}
+
+const DEAD_LETTER_LIMIT_MAX = 100;
+
+/** Dead-lettered events across every organization, oldest first. `limit` is clamped to 1..100 (the database clamps too). */
+export async function listDeadLetters(limit: number = DEAD_LETTER_LIMIT_MAX): Promise<DeadLetterRow[]> {
+  const bounded = Math.min(DEAD_LETTER_LIMIT_MAX, Math.max(1, Math.trunc(Number.isFinite(limit) ? limit : DEAD_LETTER_LIMIT_MAX)));
+  const result = await getPlatformDb().execute(sql`select * from presby_giving_dead_letters(${bounded}::integer)`);
+  return rowsOf(result).map((r) => ({
+    eventId: String(r.event_id),
+    connectionId: String(r.connection_id),
+    organizationId: String(r.organization_id),
+    externalEventId: String(r.external_event_id),
+    eventType: String(r.event_type),
+    receivedAt: toIso(r.received_at),
+    attempts: Number(r.attempts ?? 0),
+    lastErrorClass: typeof r.last_error_class === "string" ? r.last_error_class : null,
+  }));
+}
+
 export type RequeueResult = "requeued" | "not_dead_letter" | "not_found";
 
-/** Moves one dead-lettered event back to `received` (attempts reset) so the cron retries it. */
-export async function requeueDeadLetter(inboxId: string): Promise<RequeueResult> {
+/**
+ * Moves one dead-lettered event back to `received` (attempts reset) so the cron
+ * retries it. `eventId` is a `DeadLetterRow.eventId`. The caller writes the
+ * `ORG_GIVING_EVENT_REQUEUED` audit row (this module does no audit of its own).
+ */
+export async function requeueDeadLetter(eventId: string): Promise<RequeueResult> {
   const result = await getPlatformDb().execute(
-    sql`select presby_giving_requeue_event(${inboxId}::uuid) as outcome`,
+    sql`select presby_giving_requeue_event(${eventId}::uuid) as outcome`,
   );
   const outcome = String(rowsOf(result)[0]?.outcome ?? "not_found");
   return outcome === "requeued" || outcome === "not_dead_letter" ? outcome : "not_found";

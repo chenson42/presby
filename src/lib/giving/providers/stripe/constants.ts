@@ -18,7 +18,7 @@ export const STRIPE_API_VERSION = "2026-09-30.endive" as const;
  * The event types the webhook endpoint is subscribed to, and the only ones the
  * route stores. Anything else is acknowledged and dropped before the inbox
  * (Phase 3 "Event-type -> kind map"). The deployment runbook lists exactly
- * these sixteen; `constants.test.ts` pins the list against that runbook.
+ * these eighteen; `constants.test.ts` pins the list against that runbook.
  */
 export const HANDLED_EVENT_TYPES = [
   "checkout.session.completed",
@@ -30,6 +30,8 @@ export const HANDLED_EVENT_TYPES = [
   "refund.created",
   "refund.updated",
   "charge.dispute.created",
+  "charge.dispute.funds_withdrawn",
+  "charge.dispute.funds_reinstated",
   "charge.dispute.closed",
   "customer.subscription.deleted",
   "invoice.payment_failed",

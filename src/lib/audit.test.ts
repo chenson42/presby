@@ -204,6 +204,7 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   GIVING_CONNECTION_DISCONNECTED: "tenant.giving_connection.disconnected",
   GIVING_PUBLIC_PAGE_TOGGLED: "tenant.giving_connection.public_toggled",
   GIVING_CONNECTION_RATES_CHANGED: "tenant.giving_connection.rates_changed",
+  GIVING_PAYOUTS_ATTESTED: "tenant.giving_connection.payouts_attested",
   GIVING_FUND_CREATED: "tenant.giving_fund.created",
   GIVING_FUND_UPDATED: "tenant.giving_fund.updated",
   GIVING_FUND_RETIRED: "tenant.giving_fund.retired",
@@ -268,8 +269,8 @@ describe("AUDIT_ACTIONS — online-giving keys (Batch 1b)", () => {
     (k) => k.startsWith("GIVING_") || k === "ORG_TREASURER_DESIGNATED" || k === "ORG_GIVING_EVENT_REQUEUED",
   ) as Array<keyof typeof AUDIT_ACTIONS>;
 
-  it("declares all 31 giving keys up front", () => {
-    expect(givingKeys).toHaveLength(31);
+  it("declares all 32 giving keys (31 up front in Batch 1b, plus GIVING_PAYOUTS_ATTESTED in the Batch 3a addendum)", () => {
+    expect(givingKeys).toHaveLength(32);
   });
 
   it("keeps every string value unique across the whole catalog (a duplicate would make two acts indistinguishable in audit_events)", () => {

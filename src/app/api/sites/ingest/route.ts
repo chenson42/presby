@@ -9,6 +9,7 @@ import {
 } from "@/lib/sites";
 import { getBlobStore, BlobValidationError } from "@/lib/storage/blob-store";
 import { sniffTicketAttachmentContentType } from "@/lib/storage/sniff";
+import { reservedSitePath } from "@/lib/sites-reserved-paths";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 
 /**
@@ -99,6 +100,17 @@ function validateBundle(
       !("mdxAst" in (p as Record<string, unknown>))
     ) {
       return { ok: false, error: "Malformed entry in bundle.pages." };
+    }
+    // PresbyPortal serves its own giving page at /give (and /give/return); a
+    // static route segment beats the catch-all that renders bundle pages, so a
+    // bundle page there would be stored and never shown. Refuse it, by name.
+    const pagePath = (p as Record<string, unknown>).path as string;
+    const reserved = reservedSitePath(pagePath);
+    if (reserved.reserved) {
+      return {
+        ok: false,
+        error: `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} page for online giving. Rename or remove it.`,
+      };
     }
   }
 

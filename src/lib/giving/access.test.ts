@@ -105,10 +105,11 @@ describe("giving keys (pure)", () => {
 describe.skipIf(!hasDb)("loadGivingContext (Postgres-backed)", () => {
   let fx: Awaited<ReturnType<typeof import("@/lib/testing/giving-fixture").createGivingFixture>>;
   let loadGivingContext: typeof import("./access").loadGivingContext;
+  let loadGivingToggle: typeof import("./access").loadGivingToggle;
   let n = 0;
 
   beforeAll(async () => {
-    ({ loadGivingContext } = await import("./access"));
+    ({ loadGivingContext, loadGivingToggle } = await import("./access"));
     const { createGivingFixture } = await import("@/lib/testing/giving-fixture");
     fx = await createGivingFixture("giving-access");
   });
@@ -220,5 +221,44 @@ describe.skipIf(!hasDb)("loadGivingContext (Postgres-backed)", () => {
         organizationType: "congregation",
       }),
     ).rejects.toBeInstanceOf(OrgAccessError);
+  });
+
+  describe("loadGivingToggle (the member give gate: toggle only, no key)", () => {
+    it("`on` for a plain member with NO giving key - the case loadGivingContext calls forbidden", async () => {
+      const s = await scene({ toggle: true, keys: [] });
+      expect(await loadGivingContext(s)).toEqual({ kind: "forbidden" });
+      expect(await loadGivingToggle(s)).toBe("on");
+    });
+
+    it("`toggle_off` for a missing row and for an explicit false, whatever the member holds", async () => {
+      expect(await loadGivingToggle(await scene({ toggle: null, keys: [] }))).toBe("toggle_off");
+      expect(await loadGivingToggle(await scene({ toggle: false, keys: ["giving.manage"] }))).toBe("toggle_off");
+    });
+
+    it("`not_applicable` for a presbytery, without touching the database", async () => {
+      expect(
+        await loadGivingToggle({
+          personId: "00000000-0000-4000-8000-0000000000a1",
+          organizationId: "00000000-0000-4000-8000-0000000000a2",
+          organizationType: "presbytery",
+        }),
+      ).toBe("not_applicable");
+    });
+
+    it("works for a new worshiping community and does not leak across organizations", async () => {
+      const on = await scene({ type: "new_worshiping_community", toggle: true, keys: [] });
+      const off = await scene({ toggle: null, keys: [] });
+      expect(await loadGivingToggle(on)).toBe("on");
+      expect(await loadGivingToggle(off)).toBe("toggle_off");
+    });
+
+    it("a viewer with no membership is OrgAccessError, never a gate answer", async () => {
+      const { OrgAccessError } = await import("@/lib/authz");
+      const stranger = await fx.makePerson("Talbot", "Outsider2");
+      const s = await scene({ toggle: true, keys: [] });
+      await expect(
+        loadGivingToggle({ personId: stranger, organizationId: s.organizationId, organizationType: "congregation" }),
+      ).rejects.toBeInstanceOf(OrgAccessError);
+    });
   });
 });

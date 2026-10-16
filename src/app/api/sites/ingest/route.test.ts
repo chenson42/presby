@@ -571,6 +571,34 @@ describe.skipIf(!hasDb)(
         const body = await res.json();
         expect(body.error).toEqual(expect.stringContaining("bundle.images"));
       });
+
+      // Online giving (Batch 4): PresbyPortal serves its own /give and /give/return,
+      // and a static segment beats the catch-all that renders bundle pages - a bundle
+      // page there would be stored and never shown. Refused by name instead.
+      it.each(["/give", "/give/return", "/Give/", "/give/anything/deeper"])(
+        "a bundle page at %s is refused as reserved, naming the page, and nothing is stored",
+        async (reservedPath) => {
+          const token = signToken({ sha: `sha-reserved-${reservedPath.replace(/\W/g, "")}-${stamp}` });
+          const res = await POST(
+            ingestRequest(
+              `Bearer ${token}`,
+              validBundleBody({
+                pages: [
+                  { path: "/", frontMatter: { title: "Home" }, mdxAst: { type: "root", children: [] } },
+                  { path: reservedPath, frontMatter: { title: "Give" }, mdxAst: { type: "root", children: [] } },
+                ],
+              }),
+            ),
+          );
+          expect(res.status).toBe(422);
+          const body = await res.json();
+          expect(body.status).toBe("error");
+          expect(body.error).toEqual(expect.stringContaining("reserved"));
+          expect(body.error).toEqual(expect.stringContaining(reservedPath));
+          expect(body.error).toEqual(expect.stringContaining("/give"));
+          expect(mockRevalidatePath).not.toHaveBeenCalled();
+        },
+      );
     });
 
     // -----------------------------------------------------------------------

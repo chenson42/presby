@@ -2,6 +2,39 @@ import type { NextConfig } from "next";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+// The one policy string. Served REPORT-ONLY everywhere (the securityHeaders entry below) and
+// ENFORCED on the online-giving routes (giveRouteHeaders, below it): the same text, so what the
+// whole site reports is exactly what the money pages enforce.
+//
+// Why the give pages enforce (docs/work-log/2026-10-15-online-giving.md, Batch 4; R7/G30/SAQ-A):
+//   - NO Stripe origin appears anywhere. A donor reaches Checkout by a top-level REDIRECT
+//     (a server action returns a URL; the client re-asserts its origin and calls
+//     window.location.assign), which needs no CSP allowance. Stripe.js and Stripe iframes are
+//     never loaded on a presby page, and `check:giving-boundaries` B7 fails the build if a
+//     `stripe.com` ever appears in default-src / script-src / script-src-elem / frame-src /
+//     child-src / form-action.
+//   - `form-action 'self'` is unchanged: <HydrationGate> makes a native form POST impossible,
+//     and this directive would refuse a form that posted off-origin anyway.
+//   - `frame-ancestors 'none'` on an ENFORCED policy forbids framing the give page, which is
+//     what X-Frame-Options (SAMEORIGIN, below) approximates; the two do not conflict on a page
+//     nothing should embed.
+//   - DEVELOPMENT ONLY, `script-src` also gets 'unsafe-eval'. React's dev build evals to rebuild
+//     component call stacks (Next's own CSP guide says the same), and an ENFORCED policy turns that
+//     from report noise into a thrown EvalError. It is appended to the one shared string, so the
+//     report-only and enforced headers stay identical in every mode, and `next build` (NODE_ENV
+//     production) emits neither the keyword nor anything else different.
+const baseContentSecurityPolicy =
+  "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; font-src 'self'; connect-src 'self'; frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+// (Both literals below name `script-src` on purpose: check:giving-boundaries B7 finds a policy
+// string by its directive names, so a policy-shaped literal must carry one to be scanned.)
+const contentSecurityPolicy =
+  process.env.NODE_ENV === "production"
+    ? baseContentSecurityPolicy
+    : baseContentSecurityPolicy.replace(
+        "script-src 'self' 'unsafe-inline'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      );
+
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   // TODO: When moving to an enforced CSP, drop this header in favor of `frame-ancestors` in the
@@ -43,10 +76,14 @@ const securityHeaders = [
     // connect-src does NOT include Cloudflare: the Turnstile iframe's outbound
     // fetches are governed by the iframe's own CSP (set by Cloudflare), not the
     // parent page's connect-src. Parent JS does not XHR to Cloudflare directly.
-    value:
-      "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; font-src 'self'; connect-src 'self'; frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    value: contentSecurityPolicy,
   },
 ];
+
+// An ENFORCED Content-Security-Policy for the online-giving routes only (Batch 4). The
+// report-only header above still applies to them too (Next merges matching entries), so a
+// violation is both blocked and reported. Everything else on the site stays report-only.
+const giveRouteHeaders = [{ key: "Content-Security-Policy", value: contentSecurityPolicy }];
 
 const nextConfig: NextConfig = {
   // Widens Turbopack's project-root inference to this repo's own PARENT
@@ -72,7 +109,14 @@ const nextConfig: NextConfig = {
     return [{ source: "/orgs", destination: "/home", permanent: true }];
   },
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      // `:path*` matches zero or more segments, so these cover /site/<slug>/give itself AND
+      // /site/<slug>/give/return (and the member equivalents). Do not widen to /site/:slug/* -
+      // a congregation's own pages keep the report-only policy.
+      { source: "/site/:slug/give/:path*", headers: giveRouteHeaders },
+      { source: "/o/:slug/giving/give/:path*", headers: giveRouteHeaders },
+    ];
   },
   images: {
     remotePatterns: [

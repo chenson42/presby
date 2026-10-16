@@ -303,6 +303,22 @@ The rest of the batch is covered by layers that need no server:
 | Processor orchestration with mocked database and client; routes with mocked ingest | `ingest/process.test.ts`, `src/app/api/**/route.test.ts` | `npm run test` |
 | The SECURITY DEFINER apply functions, inbox lifecycle (back-off, ageing, dead letters), the processor against the real database with a mocked Stripe client, the connection library, the owner-only health reader | `ingest/*.db.test.ts`, `connection.db.test.ts`, `src/lib/admin/giving-ingest-health.db.test.ts` | `npm run test:db` |
 
+**Starting a gift (Batch 4a: the give actions).** Same rule, one layer up: nothing
+calls Stripe and `STRIPE_SECRET_KEY` stays **unset** in e2e.
+
+| Layer | Where | Run |
+|---|---|---|
+| Form contract: amount strings (`10.999`, `1e3`, `-5`, `٣٠`), every field's refusal, the first-wrong-field order | `src/lib/giving/give-input.test.ts` | `npm run test` |
+| The action orchestration with the limiter, Turnstile, database and Stripe allowlist mocked: honeypot spends no budget, the three limiter keys in order, every `GiveResult` arm, `Host`/`X-Forwarded-Host` spoofing cannot move `success_url`; the member gate order, the toggle-only check, the viewer's own `membership_id` | `src/app/(public)/site/[slug]/give/actions.test.ts`, `src/app/(org)/o/[slug]/giving/give/actions.test.ts`, `src/lib/giving/give-session.test.ts` | `npm run test` |
+| The real `presby_giving_create_intent_*`, `attach_session`, `fail_intent`, `presby_public_giving_config` and `presby_giving_return_state` behind the wrappers: the refusals as `GiveResult`s, a Stripe failure leaving a `failed` row, a repeat key never minting a second session, the flood cap, the five return panels, the byte-identical `absent` | `src/lib/giving/give-session.db.test.ts` (the TS/SQL gross-up grid is `money.db.test.ts`) | `npm run test:db` |
+| The enforced CSP on the give routes: `next.config.ts` `headers()` (unit) and over HTTP (present on `/site/<slug>/give[/...]` and `/o/<slug>/giving/give[/...]`, absent on every neighbour) | `src/lib/giving/csp.test.ts`, `e2e/security-headers.spec.ts` | `npm run test`; Playwright on a dev server |
+
+With Stripe unset the give action writes the intent, marks it `failed` and
+answers `unavailable` - that is the e2e path, and the persisted row is what a
+spec asserts. **Restart the dev server after any `next.config.ts` change**
+(including a temporary mutation to prove a test fails): Next reloads the config
+mid-run and a server left on a half-edited file serves the wrong headers.
+
 **Not covered, and why.** Nothing here calls Stripe: not the account create, the
 onboarding link, Checkout, the balance-transaction or invoice reads, or a real
 `account.updated` for a v2 account. Those need the operator's test-mode platform

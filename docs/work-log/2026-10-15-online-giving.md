@@ -16,7 +16,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-15 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
-| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3 complete; Batch 4 pending (api-developer + ux-developer) | — | 2026-10-16 |
+| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–3 complete; 4a complete, 4b pending (ux-developer) | — | 2026-10-16 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3356,6 +3356,191 @@ Click **Connect Stripe** and confirm the redirect lands on `accounts.stripe.com`
 - Do not set `STRIPE_SECRET_KEY` globally in the Playwright config.
 - `e2e/support/giving-fixture.ts` now has `setConnection(sql, fx, spec)` (any connection state, schedules, armed write marker), `offerFundOnline`, and `addInboxEvent`; reuse them for public-giving states.
 - The admin nav has a "Giving health" link; the org detail page's section is read-only counts.
+
+## Batch 4a — give actions, intents, rate limits, enforced CSP (api-developer)
+
+*2026-10-16, api-developer, worktree `presby-giving` on `pipeline/online-giving`, Neon branch `br-winter-band-axb6tzax`. Nothing committed. No Rule 16 shared file edited. No schema change. No live Stripe call and no Stripe key anywhere: Stripe is the mocked allowlist in unit and DB tests, and unset in e2e. One dev server on port 3100 (started and stopped by PID, three times: a `next.config.ts` change needs a restart) and one `next start` on 3100 to read the production headers; the demo server on 3000 (PID 15271) was never touched.*
+
+### Files Created
+
+**Library — `src/lib/giving/`**
+- `give-input.ts` — PURE (client-importable): the `GiveResult` union, `GIVE_FORM_FIELDS`, `parseGiveForm(formData)`, `isSlugShaped`. The first wrong field is named, in form order.
+- `give-session.ts` — server-only: `createPublicIntent`, `createMemberIntent`, `startGiveSession` (lifecycle steps 2 to 6), `checkoutReturnUrls`, `toIntentRow`.
+- `public-config.ts` — server-only page readers: `readPublicGivingConfig(slug)` and `readReturnState(slug, sessionId)` (+ the two row mappers, exported for tests).
+- Tests: `give-input.test.ts` (29), `give-session.test.ts` (24), `public-config.test.ts` (16), `give-session.db.test.ts` (23, DB), `csp.test.ts` (7).
+
+**Actions**
+- `src/app/(public)/site/[slug]/give/actions.ts` — `createPublicGiveSessionAction`; test `actions.test.ts` (32).
+- `src/app/(org)/o/[slug]/giving/give/actions.ts` — `createMemberGiveSessionAction`; test `actions.test.ts` (24).
+
+**Ingest validator** — `src/lib/sites-reserved-paths.ts` (pure `reservedSitePath()`; `RESERVED_SITE_SEGMENTS = ["give"]`) + `sites-reserved-paths.test.ts` (25).
+
+### Files Modified
+- `src/app/api/sites/ingest/route.ts` — `validateBundle` refuses a bundle page at `/give` or anywhere beneath it (case-, slash-, `.`-segment- and percent-encoding-insensitive) with a 422 naming the page; `route.test.ts` +4 cases (`/give`, `/give/return`, `/Give/`, `/give/anything/deeper`; asserts nothing is revalidated). The near-names (`/giving`, `/give-now`, `/about/give`) are pinned in the pure test, not the route test, because a 200 ingest there would pollute the shared fixture the happy-path test counts blobs on.
+- `next.config.ts` — the policy string hoisted to one constant; **two new `headers()` entries** (`/site/:slug/give/:path*`, `/o/:slug/giving/give/:path*`) carrying an **enforced** `Content-Security-Policy` identical to the report-only value. The report-only header still applies to those routes too. See "CSP" below for the dev-only `'unsafe-eval'`.
+- `src/lib/giving/access.ts` (+ `access.test.ts`, +5 DB cases) — additive `loadGivingToggle(viewer)` → `"not_applicable" | "toggle_off" | "on"`: applicability and the org toggle with **no key lookup** (the member give gate). `loadGivingContext` is unchanged.
+- `src/lib/giving/giving-copy.ts` (+ `giving-copy.test.ts`, +3) — `GIVE_MESSAGES` and `rateLimitedMessage()`, added to `allGivingCopy()` (so the forbidden-word walk covers them; the min/max wording is pinned to `AMOUNT_BOUNDS`).
+- `e2e/security-headers.spec.ts` — +18 tests (below).
+- `docs/deployment.md` (operator smoke step 8, the CSP go-live line), `docs/testing.md` (a "Starting a gift" table and the restart-after-config-change gotcha).
+
+### Schema Changes
+None. Every database interaction is an existing 0055 function on `db` (`presby_giving_create_intent_public/member`, `attach_session`, `fail_intent`, `presby_public_giving_config`, `presby_giving_return_state`); the member intent runs inside `withOrgContext`.
+
+### Audit Events
+None added. Both actions carry an `// audit-exempt:` annotation (a request to START a gift is not a security-sensitive mutation, and money moves only when Stripe's signed webhook is applied, which audits what it records). `checkRateLimit` writes its own `RATE_LIMIT_BLOCKED` row on a refusal, as everywhere. `npm run check:audit`: zero violations (the actions hold no `db.` call; the writes are in `give-session.ts`).
+
+### Endpoints and gates
+
+| Surface | Auth + gate | Request / response |
+|---|---|---|
+| `createPublicGiveSessionAction(slug: string, formData: FormData): Promise<GiveResult>` — `(public)/site/[slug]/give/actions.ts` | none (anonymous). honeypot → three limiter keys → Turnstile → parse → DB intent → Stripe. The org comes from `slug` only. | FormData and `GiveResult` below |
+| `createMemberGiveSessionAction(slug: string, formData: FormData): Promise<GiveResult>` — `(org)/o/[slug]/giving/give/actions.ts` | honeypot → `auth()` → Node-side 2FA claim → `resolveOrgContext()` → applicability + `org_portal.giving` toggle (**no giving key**) → own active membership → limiter → parse → intent → Stripe | same |
+| `readPublicGivingConfig(slug)` / `readReturnState(slug, sessionId)` — `@/lib/giving/public-config` | none (anonymous `db`, SECURITY DEFINER reads) | below |
+| `POST /api/sites/ingest` | unchanged (OIDC) | new 422: `Page "/give" is reserved: PresbyPortal serves its own /give page for online giving. Rename or remove it.` |
+| `Content-Security-Policy` response header | — | on `/site/<slug>/give[/...]` and `/o/<slug>/giving/give[/...]` only |
+
+No new `FEATURES` entry, no platform flag, no seed change, no new route handler.
+
+### Contract for 4b
+
+**Imports.**
+```ts
+import type { GiveResult, GiveField, ParsedGive } from "@/lib/giving/give-input"; // pure: client-safe
+import { GIVE_FORM_FIELDS } from "@/lib/giving/give-input";                          // pure: client-safe
+import { GIVE_MESSAGES, rateLimitedMessage } from "@/lib/giving/giving-copy";        // pure
+import { grossUp } from "@/lib/giving/money";                                        // pure, DISPLAY ONLY
+import { isCheckoutUrl } from "@/lib/giving/providers/stripe/urls";                  // pure (3a)
+import { readPublicGivingConfig, readReturnState } from "@/lib/giving/public-config"; // server-only
+import { loadGivingToggle } from "@/lib/giving/access";                              // server-only (member page)
+```
+
+**`GiveResult` — exactly as implemented** (`src/lib/giving/give-input.ts`):
+```ts
+export type GiveResult =
+  | { kind: "checkout"; url: string }          // re-assert isCheckoutUrl(url) [origin === https://checkout.stripe.com], then window.location.assign(url); if it fails, show GIVE_MESSAGES.error
+  | { kind: "invalid"; field: GiveField; message: string }   // message is display-ready; field = "amount"|"fund"|"frequency"|"method"|"form"
+  | { kind: "rate_limited"; retryAfterSeconds: number }      // show rateLimitedMessage(retryAfterSeconds)
+  | { kind: "unavailable" }                    // show GIVE_MESSAGES.unavailable (also what a bot gets from the honeypot)
+  | { kind: "already_started" }                // show GIVE_MESSAGES.alreadyStarted
+  | { kind: "error" };                         // show GIVE_MESSAGES.error
+```
+
+**FormData field names** (`GIVE_FORM_FIELDS`; the action ignores every other field, including any `membershipId`/`organizationId`):
+
+| Field | Value |
+|---|---|
+| `amount` | the typed string, e.g. `"37.50"` (never a float; server regex `^\d{1,5}(\.\d{1,2})?$` after trim; $1.00 to $25,000.00) |
+| `fundId` | the fund's uuid (send it even when the select is hidden for a single fund) |
+| `frequency` | `once` or `monthly` |
+| `coverFees` | `on` when checked, **absent** otherwise |
+| `method` | `card`, `bank` or `either`. `coverFees` with `either` is refused (`invalid`, field `method`): the fee depends on the method, so the form must require card/bank once "cover fees" is ticked |
+| `idempotencyKey` | the **server-minted** uuid in a hidden input (lowercase hex; the server lowercases) |
+| `_hp` | the honeypot: a hidden, `tabIndex={-1}`, `aria-hidden`, `autoComplete="off"` text input, empty. Non-empty → a fake `unavailable`, no budget spent |
+| `turnstileToken` | the Turnstile token, only when `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set (the widget's own `cf-turnstile-response` field is accepted too) |
+
+**Idempotency key rule (important).** The key identifies ONE attempt. Re-key with `crypto.randomUUID()` **in the result handler** (never during render) after every result except `checkout` and `already_started` - in particular after `error` and `unavailable`: when Stripe is unset or fails, presby has already written the intent as `failed`, and a retry with the same key finds that dead intent and answers `error` again. (`invalid` and `rate_limited` write nothing, so reusing the key is harmless, and re-keying is also harmless.)
+
+**Per-surface notes.** Public: `createPublicGiveSessionAction.bind(null, slug)` or a closure over `slug`; the page calls `readPublicGivingConfig(slug)`. Member: same action shape; the page must repeat the full `(org)` auth pattern (`auth()` → `resolveOrgContext()` → `loadGivingToggle()`: `not_applicable`/`toggle_off` render the honest states, `on` renders the form), then `readPublicGivingConfig(slug)` for the funds/rates (the same `live` predicate the intent function enforces). No giving key is needed to give; no 2FA force beyond the Edge's.
+
+**`readPublicGivingConfig(slug: string): Promise<PublicGivingConfig>`** — never throws; one try/catch; ids-only logging; a database failure or a non-slug is `absent`:
+```ts
+type PublicGivingConfig =
+  | { state: "absent" }                                  // page: notFound(); slot: null. Byte-identical for an unknown slug, a non-tenant slug and a toggle-off org: render the SAME markup
+  | { state: "unavailable"; organizationName: string; contactPhone: string | null }   // the notice, never the form
+  | { state: "live"; organizationName: string; livemode: boolean /* false => <TestModeBadge> */;
+      contactPhone: string | null; funds: { id: string; name: string }[] /* never empty */;
+      cardEnabled: boolean; achEnabled: boolean;
+      rates: { cardBps: number; cardFixedCents: number; achBps: number; achCapCents: number } /* for grossUp(amountCents, "card" | "bank", rates) */;
+      minAmountCents: number; maxAmountCents: number };   // 100 and 2_500_000
+```
+`unavailable` appears only for an organization with a LIVE published site (`organization_sites.status = 'live'`) and giving not live; without a live site it is `absent`.
+
+**`readReturnState(slug: string, sessionId: string): Promise<ReturnState>`** — never throws; a malformed id answers `unknown` without touching the database; pass `session_id` only when `typeof === "string"`:
+```ts
+type ReturnState =
+  | { state: "unknown" }     // absent, malformed, or another organization's session: ONE panel
+  | { state: "error" }       // a database failure: "We can't load this right now - your gift is not affected", never a guess
+  | { state: "confirming" | "received" | "bank_pending" | "failed";
+      giftAmountCents: number; coveredCents: number /* total = gift + covered */;
+      fundName: string; frequency: "once" | "monthly"; livemode: boolean /* false => <TestModeBadge> */ };
+```
+`confirming` is what `<ReturnPoller>` refreshes while it lasts. Nothing in `ReturnState` is a name, email, address or id.
+
+**The enforced CSP** (one string, production; development differs by `'unsafe-eval'` after `'unsafe-inline'` in `script-src`, nothing else):
+```
+default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; font-src 'self'; connect-src 'self'; frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+```
+What it means for the give pages: no Stripe.js and no Stripe iframe (the redirect needs neither); the Turnstile widget is the only third-party script/frame; `connect-src 'self'` (server actions are same-origin); images only from `'self'`, `data:` and the one Google host, so a give page must not embed a cross-origin image; `frame-ancestors 'none'`. `frame-src` includes YouTube/Vimeo only because the string is shared; do not embed video on a give page. **Browser-verify the CSP on the real pages** (a clean console): I could prove the header and a clean dev console on an existing give-path 404 page, but no give page existed to hydrate.
+
+**What the e2e paths do with Stripe unset** (`STRIPE_SECRET_KEY` is never set in the Playwright env; `STRIPE_WEBHOOK_SECRET` is, so the webhook spec runs; `isStripeConfigured()` needs both). The give action writes the intent (`created`), then `fail_intent`, and answers `{ kind: "unavailable" }`; the persisted row is `status = 'failed'` with `fund_id`, `gift_amount_cents`, `total_cents` (= gift unless covering fees), `frequency` — exactly the hydration spec's assertion. `RATE_LIMIT_DISABLED=true` in the Playwright server env bypasses the limiter. Page states for a spec: `live` needs the toggle on + an `active` + public connection (`setConnection`) + an online fund (`offerFundOnline`, 3b); `unavailable` needs additionally a live `organization_sites` row and no live connection; the five return panels are seeded with an intent row carrying a `checkout_session_id` matching `^cs_[A-Za-z0-9_]{8,255}$` (`received` = a succeeded gift for the intent, or `frequency = 'monthly'` with a `subscription_id`; `bank_pending` = a pending gift; `failed` = a failed gift or an intent `failed`/`expired`; otherwise `confirming`).
+
+**Requests that reach the server.** The page must not set any `Host`-derived URL: the return URLs are `NEXT_PUBLIC_APP_URL` + `/site/<slug>/give/return?session_id={CHECKOUT_SESSION_ID}` (member: `/o/<slug>/giving/give/return?...`), cancel `/site/<slug>/give` (member `/o/<slug>/giving/give`). In development with the variable unset the origin falls back to `http://localhost:3000`; in production an unset or non-`https` value makes giving `unavailable`.
+
+### Implementer Notes
+
+**Commands and results** (all in `/Users/cshenso/git/presby-platform/presby-giving`):
+
+| Command | Result |
+|---|---|
+| `npm run typecheck`; `npm run lint -- --max-warnings=0` | clean |
+| `npm run check` (all seven tripwires, incl. `check:audit` and `check:giving-boundaries` B7) | all passed |
+| `check:secrets` over every untracked and modified path (22 files, via the exported `checkSecretsPii()`) | 0 findings |
+| `npm run test` | 386 files passed, 54 skipped; 5518 tests passed, 1546 skipped |
+| DB lane, the files I touch: `give-session.db`, `access`, `sites/ingest/route`, `money.db` (the TS/SQL gross-up grid, unchanged), `giving.db` | 5 files, 96 tests, all passed |
+| `npm run test:db` (the whole suite, pipeline branch, serial) | **440 files, 7064 tests, all passed** (was 416 / 6711 after Batch 3a) |
+| `npm run build` | exit 0 (dev server stopped first) |
+| `next start -p 3100`, `curl -D -` the give paths | production emits `Content-Security-Policy` AND `-Report-Only` on `/site/zzz/give`, `/give/return`, `/o/zzz/giving/give`, and only report-only on `/site/zzz/giver`; **no** `'unsafe-eval'` |
+| `E2E_BASE_URL=http://localhost:3100 npx playwright test e2e/security-headers.spec.ts e2e/giving-webhook.spec.ts` (dev server, `STRIPE_SECRET_KEY` unset) | **32 passed** (the 11 replay cases and 21 header cases) |
+
+**e2e added to `security-headers.spec.ts` (18 new):** an enforced `Content-Security-Policy` is present and byte-identical to the report-only one on `/site/alder-creek/give`, `.../give/return`, `.../give/return?session_id=...`, an unknown slug's `/give`, `/o/alder-creek/giving/give` and `.../give/return`; ABSENT (with report-only still present) on `/`, `/signin`, `/site/alder-creek`, `/about`, `/about/give`, `/giving`, `/giver`, `/give-now`, `/o/alder-creek/giving`, `/giving/giveaway`, `/admin/giving`; and the enforced string keeps `form-action 'self'`, `frame-ancestors 'none'` and names no Stripe origin (nor does any other response header).
+
+**Failing-first proofs** (mutate one mechanism, run the owning test, record the failing assertion, restore from a backup, re-run green):
+
+| Mechanism broken | Fails |
+|---|---|
+| a give route dropped from `headers()` / the report-only key used for the give entries / the source widened to `/site/:slug/:path*` | `csp.test.ts` (1 / 2 / 1) |
+| a `stripe.com` origin added to `script-src` | `csp.test.ts` "names no Stripe origin" **and**, over HTTP, `security-headers.spec.ts:84` (found for real: my own mutation was still loaded by the dev server; see "Findings") and B7 |
+| `'unsafe-eval'` shipped in production | `csp.test.ts` |
+| honeypot checked after the limiter | public `actions.test.ts` "a filled honeypot ... spends NO budget" |
+| limiter keys swapped / Turnstile before the limiter | public `actions.test.ts` (2 / 4) |
+| total taken from the form instead of the database | `give-session.test.ts` (2) |
+| no `fail_intent` when Stripe is unset | `give-session.test.ts` |
+| repeat key not short-circuited to `already_started` | `give-session.test.ts` |
+| a URL handed out after a refused attach | `give-session.test.ts` "never a URL for a dead intent" |
+| the origin assertion dropped (a fallback used in production) | `give-session.test.ts` (2) |
+
+The amount cases (`"10.999"`, `"1e3"`, `"-5"`, `"٣٠"`) are asserted in `give-input.test.ts` and in both action tests; `parseAmountToCents` itself is Batch 1's.
+
+**Deviations from the Phase 3 design, each with its reason.**
+
+1. **Honeypot answer is `{ kind: "unavailable" }`.** The design said "fake `unavailable`-shaped success"; `GiveResult` has no success without a URL, so the one arm that reads as a normal refusal is used.
+2. **Member action: user + global limiter keys only; no per-site key; no Turnstile.** The brief said "rate-limited by user id". A per-site key shared with anonymous traffic would let a flood of visitors starve the congregation's own members; the global key is shared by necessity (one platform Stripe key). The member form should still carry `_hp` (honoured) and need not render Turnstile.
+3. **Member gate failures map to the fixed union.** Signed out or 2FA lapsed → `error` (the person only needs to sign in again; the Edge does it on the next navigation); not a member / ended / forbidden / wrong org type / toggle off → the one `unavailable`; a membership that ended between the resolve and the toggle read → `unavailable`; a database blip in the toggle read → `error`, never a silent "off".
+4. **`membership_id` comes from `userOrganizations()`, not `resolved.org`.** `OrgContext` carries no membership id (only `UserOrganization` does). Adding it to `OrgContext` would touch `authz.ts` and every test that `toEqual`s it, so the action reads the viewer's own active row with a second (cheap) query. Suggestion in the open questions.
+5. **A repeat key whose session is not attached CONTINUES** (design step 5) using the DATABASE's amounts, but the function's `existing` row does not repeat `frequency` or `method_choice`, so the continued session uses the repeat form's. A form that lied between the two submits could pair a monthly session with a once-intent; that is self-harm only (the donor's own gift) and the webhook still resolves fund and amount from the intent. The Checkout methods for that path come from `readPublicGivingConfig` (a second read on this rare path only).
+6. **Attach race returns the URL, not `already_started`.** If `attach_session` refuses because a concurrent submit of the same key attached the (Stripe-idempotent, so identical) session first, the second request already holds that URL and returns `checkout`. If the intent is dead (`failed`/`expired`/older than 15 min) it re-asks, sees no attached session, and answers `error`: a URL is never handed out for a dead intent. A retry after a Stripe failure can therefore create one orphan Checkout session at Stripe for a dead intent (nothing is chargeable until someone opens it, and it expires in 31 minutes).
+7. **The database flood cap's `retryAfterSeconds` is a fixed 300.** The function reports the refusal, not a window.
+8. **A non-slug-shaped `slug` is `unavailable` before any limiter key is minted** (the in-memory store is bounded but shared). The slug is the URL segment, and a DNS label is the only thing that can be a congregation.
+9. **`loadGivingToggle` added to `access.ts`** (additive). `loadGivingContext` returns `forbidden` for a member with no key, which is exactly who may give.
+10. **Dev-only `'unsafe-eval'` in the CSP.** Measured, not assumed: with the enforced policy on a give path in `next dev`, React's dev build threw (`eval() is not supported in this environment ... React requires eval() in development`) and Chromium logged some 66 `unsafe-eval` violations; Next's own CSP guide says the same. The keyword is appended in development to the one shared constant, so the report-only and enforced headers stay identical in every mode, and the production build emits neither (proved by `csp.test.ts` and by `next start`). After the change a give path's dev console is clean.
+11. **The ingest check lives in a pure module, not `sites.ts`.** `route.test.ts` is a DB-backed harness and other suites mock `@/lib/sites`; a pure `sites-reserved-paths.ts` is importable from the route and from a plain unit test. A bundle ingested BEFORE this change that already holds a `/give` page is unaffected (shadowed, as before); only new ingests are refused.
+
+**Findings.**
+- **`check:giving-boundaries` B7 can be blinded by an unrelated string literal.** B7 finds a CSP by pairing quote characters with a regex over `next.config.ts`. A bare string that contains a single quote and no directive name (my first draft's `" 'unsafe-eval'"`) desynchronised the pairing, so a `stripe.com` added to `script-src` was NOT reported (the committed file is correct; I proved it with a mutation before and after). `next.config.ts` is shaped around the defect now (both policy literals name `script-src`, with a comment saying why). A real tokenizer for B7 is a small follow-up worth taking (TODO line suggested; I did not edit the shared file).
+- **A dev server reloads `next.config.ts` mid-run.** A temporary mutation to prove a test fails was picked up by the running dev server and the next e2e run caught it (header test 84 red). Restart the server after any config edit (recorded in `docs/testing.md`).
+
+**What is blocked on the operator (Operator Q1: no test-mode Stripe platform account).** Unverified, not failing: that Checkout accepts the session as built (`allowed_payment_method_types`, the 31-minute `expires_at`, `{CHECKOUT_SESSION_ID}` in `success_url`), the real hosted-Checkout redirect, the return page's `confirming` → `received` transition on a real webhook, and the enforced CSP in a browser on real give pages. Runbook: `docs/deployment.md` → "Operator test-mode smoke" step 8 (new) and the go-live checklist.
+
+### Open questions for the orchestrator
+
+1. **`OrgContext` has no `membershipId`** (deviation 4). Optional follow-up: add it to `OrgContext` in `authz.ts` (and the tests that `toEqual` it) so member actions do not re-read `userOrganizations()`. Not needed for correctness.
+2. **Optional 0055 tightening (database-admin):** make `presby_giving__create_intent` return `frequency` and `method_choice` on an `existing` row (deviation 5), so a continued session can never differ from its intent. Self-harm only today.
+3. **B7 hardening** (Findings): replace the quote-pairing regex with a tokenizer, with a fixture for "a single-quote-bearing literal before the CSP". Suggest a `docs/TODO.md` line; the file is Rule 16's.
+4. **Go-live items already on the list and now load-bearing:** Upstash (the in-memory limiter is per serverless instance; the DB flood cap is the only infrastructure-independent backstop), `NEXT_PUBLIC_APP_URL`, and Turnstile keys for the public form.
+
+### Handoff
+
+Next agent: **ux-developer (Batch 4b)** — `GiveForm` (public and member), `/site/[slug]/give` and `give/return` pages, `/o/[slug]/giving/give` and `give/return`, the `giving` live slot, the return panels and `<ReturnPoller>`, `giving-unavailable-notice.tsx`, and the hydration/page-state/e2e specs, all from the "Contract for 4b" above. The CSP is already served; 4b's job is to browser-verify it on the real pages at 360 px.
 
 
 # Phase 5 — Verification (qa)

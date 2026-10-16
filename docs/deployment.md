@@ -385,6 +385,29 @@ Run against `development` or a preview, never production data.
    appears whichever event lands first, then close it as won and confirm one
    reinstatement.
 
+8. **Give (Batch 4):** with the connection `active`, one fund offered online,
+   payouts attested and the give page turned on, open `/site/<slug>/give` and,
+   signed in as a plain member with no giving key, `/o/<slug>/giving/give`.
+   - A one-time $25 card gift: the browser lands on `checkout.stripe.com` (the
+     client re-asserts the host); Checkout shows the fund's online name; the
+     return page reads *confirming* and then *received* once the webhook has
+     applied it. In the database the intent goes `created` → `open` →
+     `completed`.
+   - *Cover the fees* on a card gift: Checkout's line says it includes the fee,
+     and the total equals the page's preview to the cent (the TS and SQL
+     formulas are pinned together, but only Stripe's own number proves the
+     fee the congregation actually pays).
+   - A bank (ACH) gift ends on *bank pending* until Stripe reports the debit;
+     a monthly gift creates a subscription and the return page says so.
+   - Submit the same form twice quickly (or double-click): one intent, one
+     session; the second is told it was already started.
+   - **`NEXT_PUBLIC_APP_URL` decides where Checkout sends the donor back.** Set
+     it to the canonical origin and confirm the cancel link returns to the give
+     page. (A request's `Host` header is never used.)
+   - Look at the response headers on the give routes: `Content-Security-Policy`
+     (enforced) as well as the report-only one, with no console violation.
+     Production emits no `'unsafe-eval'`; development adds it for React.
+
 ### Go-live checklist (enforced by humans)
 
 - `STRIPE_SECRET_KEY` (restricted, per the table) and `STRIPE_WEBHOOK_SECRET`
@@ -397,7 +420,10 @@ Run against `development` or a preview, never production data.
   limits are only real with Upstash.
 - `auth.require_2fa` is on. (Holding any giving key already forces 2FA through
   the permission, but the platform flag is the backstop for everyone else.)
-- The enforced CSP header is verified in a browser on the give routes (Batch 4).
+- The enforced `Content-Security-Policy` header is verified **in a browser** on
+  `/site/<slug>/give`, `/site/<slug>/give/return` and the member equivalents,
+  with a clean console (Batch 4 ships it; `next.config.ts`, same string as the
+  report-only policy, no Stripe origin - `check:giving-boundaries` B7).
 - Each congregation's Stripe **payouts are automatic** (attested in-app; manual
   payouts cannot be reconciled), and its Stripe statement descriptor shows the
   congregation's name.

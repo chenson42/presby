@@ -192,6 +192,37 @@ export const RATES_COPY = {
   saved: "Fee rates saved.",
 } as const;
 
+/**
+ * What the give actions say back to a donor (Batch 4a). Plain, short, and
+ * honest about money: every failure says whether anything was charged. The
+ * minimum and maximum here are pinned to `AMOUNT_BOUNDS.online` by a test.
+ */
+export const GIVE_MESSAGES = {
+  amountEmpty: "Enter an amount.",
+  amountFormat: "Enter an amount in dollars, like 25 or 25.50.",
+  amountTooSmall: "The smallest online gift is $1.00.",
+  amountTooLarge: "The largest online gift is $25,000.00. To give more, please contact the church.",
+  fund: "Choose a fund to give to.",
+  fundUnavailable: "That fund isn't available for online giving right now. Please choose another.",
+  frequency: "Choose whether to give once or every month.",
+  method: "Choose card or bank account.",
+  methodForFees: "To add processing fees to your gift, choose card or bank account.",
+  methodUnavailable: "That way of paying isn't available right now. Please choose another.",
+  form: "We couldn't read that form. Reload the page and try again.",
+  captcha: "We couldn't confirm you're not a robot. Reload the page and try again.",
+  unavailable: "Online giving isn't available right now. You haven't been charged.",
+  alreadyStarted:
+    "This gift was already started. Check your other tabs or windows, or reload this page to start a new one.",
+  error: "We couldn't start your gift. You haven't been charged.",
+} as const;
+
+/** "Too many attempts. Please try again in 8 minutes." - minutes, rounded up, never "0 minutes". */
+export function rateLimitedMessage(retryAfterSeconds: number): string {
+  const seconds = Number.isFinite(retryAfterSeconds) ? Math.max(1, Math.ceil(retryAfterSeconds)) : 60;
+  const minutes = Math.ceil(seconds / 60);
+  return `Too many attempts. Please try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}. You haven't been charged.`;
+}
+
 /** Every exported string, flattened - what `giving-copy.test.ts` scans. */
 export function allGivingCopy(): string[] {
   const out: string[] = [];
@@ -217,7 +248,14 @@ export function allGivingCopy(): string[] {
     TAKE_OFFLINE_DIALOG,
     GIVE_PAGE_COPY,
     RATES_COPY,
+    GIVE_MESSAGES,
   ].forEach(walk);
-  out.push(disconnectDialogBody(0), disconnectDialogBody(1), disconnectDialogBody(3));
+  out.push(
+    disconnectDialogBody(0),
+    disconnectDialogBody(1),
+    disconnectDialogBody(3),
+    rateLimitedMessage(1),
+    rateLimitedMessage(61),
+  );
   return out;
 }

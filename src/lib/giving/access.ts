@@ -135,6 +135,28 @@ export async function loadGivingContext(viewer: GivingViewer): Promise<GivingCon
   });
 }
 
+/**
+ * The TOGGLE-ONLY gate for the member give surface (`/o/<slug>/giving/give`):
+ * applicability, then the org toggle, and NO giving key (the member self-view
+ * and member give need none - Phase 3 "Member give"). Same reads as
+ * `loadGivingContext`, minus the key lookup, so a plain member is never
+ * `forbidden`. Throws like `loadGivingContext` (`OrgAccessError`, a database
+ * failure); the caller maps those to its own error state, never to "off".
+ */
+export type GivingToggleState = "not_applicable" | "toggle_off" | "on";
+
+export async function loadGivingToggle(viewer: GivingViewer): Promise<GivingToggleState> {
+  const entry = ORG_FEATURE_CATALOG.find((e) => e.key === GIVING_TOGGLE_KEY);
+  if (!entry) throw new Error(`loadGivingToggle: ${GIVING_TOGGLE_KEY} is not in ORG_FEATURE_CATALOG`);
+  if (!orgTypeAdmitted(entry.orgTypes, viewer.organizationType)) return "not_applicable";
+
+  const categoryAxisOn = await isCategoryAxisOn();
+  return withOrgContext(viewer.personId, viewer.organizationId, async (tx) => {
+    const enabled = await orgFeatureEnabledInTx(tx, viewer.organizationId, GIVING_TOGGLE_KEY, categoryAxisOn);
+    return enabled ? "on" : "toggle_off";
+  });
+}
+
 // The data modules gate on this; it lives in ./keys so they need not import the
 // toggle machinery above. Re-exported for the one-import-site convention.
 export { givingKeysInTx } from "./keys";

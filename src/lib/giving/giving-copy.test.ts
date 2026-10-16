@@ -7,9 +7,12 @@ import {
   MONTHLY_STOP_NOTE,
   STATE_COPY,
   STRIPE_RECEIPT_NOTE,
+  GIVE_MESSAGES,
   allGivingCopy,
   disconnectDialogBody,
+  rateLimitedMessage,
 } from "./giving-copy";
+import { AMOUNT_BOUNDS, formatCents } from "./money";
 
 describe("giving-copy", () => {
   it("never calls a receipt an acknowledgment (G18): no string holds both words", () => {
@@ -58,5 +61,24 @@ describe("giving-copy", () => {
 
   it("the attest dialog asks about automatic payouts", () => {
     expect(ATTEST_DIALOG.body).toMatch(/automatic/);
+  });
+
+  it("the give messages state the real online bounds (pinned to AMOUNT_BOUNDS)", () => {
+    expect(GIVE_MESSAGES.amountTooSmall).toContain(formatCents(AMOUNT_BOUNDS.online.min));
+    expect(GIVE_MESSAGES.amountTooLarge).toContain(formatCents(AMOUNT_BOUNDS.online.max));
+  });
+
+  it("every failure a donor can see says whether they were charged (or is a field correction)", () => {
+    for (const text of [GIVE_MESSAGES.unavailable, GIVE_MESSAGES.error, rateLimitedMessage(30)]) {
+      expect(text).toMatch(/haven't been charged/);
+    }
+  });
+
+  it("rateLimitedMessage rounds up to whole minutes, never says 0 minutes, and agrees in number", () => {
+    expect(rateLimitedMessage(1)).toMatch(/in 1 minute\./);
+    expect(rateLimitedMessage(60)).toMatch(/in 1 minute\./);
+    expect(rateLimitedMessage(61)).toMatch(/in 2 minutes\./);
+    expect(rateLimitedMessage(0)).toMatch(/in 1 minute\./);
+    expect(rateLimitedMessage(Number.NaN)).toMatch(/in 1 minute\./);
   });
 });

@@ -205,7 +205,7 @@ so no row that predates the CI run can appear in a log or an uploaded trace.
 | `INITIAL_ADMIN_EMAILS` | The operator's own sign-in address. Deliberately **not** written down here — this repo is public, and `npm run check:secrets` treats a real address in a tracked file as a finding. Read it from the deployed environment. |
 | `CRON_SECRET` | generated; the email-queue worker needs it |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | **deferred** — see below |
-| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **deferred** — see below |
+| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **set 2026-10-19** (Production). The key belongs to PresbyPortal's **own Resend team** (its own Pro subscription), where `presbyportal.org` is the verified sending domain — never a team shared with other products, because the key is full-access (the Track F mail increment provisions church domains with it) and full access reaches every domain in its team. From: `PresbyPortal <noreply@presbyportal.org>`. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **deliberately unset.** `.env.example` says this credentials-login bypass is not suitable for production |
 | `SITES_INGEST_OIDC_AUDIENCE` / `GITHUB_SITES_ORG` | needed before a real `site-fpcw` content ingest can authenticate |
 
@@ -223,8 +223,6 @@ These are **not** oversights.
   bypass deliberately unseeded, **nobody can sign in to production, including the
   operator.** Accepted for now; production serves public pages only. Redirect URI
   when it happens: `https://<canonical host>/api/auth/callback/google`.
-- **Resend** — deferred until go-live. Password-reset and verification mail will
-  queue and not deliver until `RESEND_API_KEY` is set.
 - **First real `site-fpcw` ingest** — `organization_sites.last_ingested_commit_sha`
   for `fpcw` is still a scratch placeholder, and the two OIDC variables above are
   unset, so an ingest would fail auth.

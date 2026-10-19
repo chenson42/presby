@@ -37,7 +37,10 @@ const DECISIONS = join(projectRoot, "docs", "decisions.md");
 
 /** Highest DECISION-NNN recorded in the decisions log. */
 function highestDecision(text) {
-  const nums = [...text.matchAll(/^## DECISION-(\d+):/gm)].map((m) =>
+  // Two heading styles coexist: `## DECISION-NNN:` (through 121) and the
+  // bold paragraph `**DECISION-NNN` (122 onward). Count both, or the
+  // decision half of the staleness signal goes silent.
+  const nums = [...text.matchAll(/^(?:## |\*\*)DECISION-(\d+)/gm)].map((m) =>
     Number(m[1]),
   );
   return nums.length ? Math.max(...nums) : 0;

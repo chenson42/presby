@@ -55,6 +55,12 @@
 \set IDRIS    '\'c0000000-0000-0000-0000-00000000000a\''
 \set U_FOUNDING '\'e0000000-0000-0000-0000-0000000000f5\''
 \set ALDER_SESSION_GROUP '\'b0000000-0000-0000-0000-000000000001\''
+-- The statement fixture's tax years. FIXED, never derived from current_date:
+-- the seed's gift dates are fixed in these two years (seed-dev-giving.sql
+-- header), so "last year" / "this year" in the 46p-46t labels mean these, and
+-- the suite reads the same on any day (Phase 5 loop-back, 2026-10-19).
+\set G_YEAR_PRIOR   2025
+\set G_YEAR_CURRENT 2026
 
 -- ===========================================================================
 -- (a) Structure: FORCE RLS, tenant_isolation, composite keys, NO ACTION FKs.
@@ -1179,7 +1185,27 @@ begin;
                    1, '46l: ANOTHER ORG''S session id is byte-identical');
   select assert_eq((select count(*) from presby_giving_return_state('alder-creek', 'cs_test_fixture0000000002') r
                      where r.state = 'bank_pending' and r.gift_amount_cents = 7500), 1, '46l: alder''s own pending ACH session reads bank_pending');
-  select assert_eq((select count(*) from presby_giving_return_state('alder-creek', 'cs_test_fixture0000000006') r
+  -- The in-flight intent against a RETIRED fund is built HERE, inside this
+  -- rolled-back block, never read from the seed: a seeded `open` intent lapses
+  -- after its 24-hour expires_at and the giving cron's
+  -- presby_giving_expire_intents() turns it `expired` (QA run 1 FAIL, seeded
+  -- I6). The production order: Missions is offered online, a gift is started
+  -- against it, the treasurer retires the fund (the UPDATE retireFund() in
+  -- src/lib/giving/funds.ts issues), and a cron sweep runs.
+  select set_config('app.current_org_id', :ALDER, true);
+  update giving_funds set is_active = true, retired_at = null, offered_online = true where id = :G_MISSIONS;
+  select intent_id::text as inflight
+    from presby_giving_create_intent_public('alder-creek', :G_MISSIONS, 4000, false, 'card', 'once',
+                                            '46000000-0000-4000-8000-0000000000cc')
+   where outcome = 'created' \gset
+  select assert_eq((select count(*) where presby_giving_attach_session(:'inflight', 'cs_test_rls46inflight001')), 1,
+                   '46l: (setup) a gift is started against Missions while it is offered online - the intent is open');
+  update giving_funds set is_active = false, retired_at = now(), offered_online = false where id = :G_MISSIONS;
+  select presby_giving_expire_intents() as swept \gset
+  select assert_eq((select count(*) from giving_checkout_intents i join giving_funds f on f.id = i.fund_id
+                     where i.id = :'inflight' and i.status = 'open' and not f.is_active and f.retired_at is not null),
+                   1, '46l: ...the fund is then retired and a giving-cron sweep runs - the intent is still open (inside its 24 hours)');
+  select assert_eq((select count(*) from presby_giving_return_state('alder-creek', 'cs_test_rls46inflight001') r
                      where r.state = 'confirming' and r.fund_name = 'Missions'), 1,
                    '46l: the in-flight intent against the retired fund still resolves (confirming)');
 rollback;
@@ -1368,9 +1394,22 @@ rollback;
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- Premise: every fixture gift (and the refund) sits in its FIXED fixture
+  -- year, so 46p-46t never depend on today's date or on the day the seed ran.
+  select assert_eq(
+    (select count(*) from giving_gifts g
+      where g.id::text like 'd9100000-%'
+        and extract(year from g.occurred_on)::int
+            <> case when g.id in ('d9100000-0000-0000-0000-000000000087', 'd9100000-0000-0000-0000-000000000089',
+                                  'd9100000-0000-0000-0000-00000000008b', 'd9100000-0000-0000-0000-00000000008c')
+                    then :G_YEAR_PRIOR else :G_YEAR_CURRENT end)
+    + (select count(*) from giving_gift_reversals r
+        where r.id = 'd9100000-0000-0000-0000-000000000090' and extract(year from r.occurred_on)::int <> :G_YEAR_CURRENT)
+    + abs((select count(*) from giving_gifts g where g.id::text like 'd9100000-%') - 12),
+    0, '46p: (premise) alder''s twelve fixture gifts and the refund sit in the fixed fixture years 2025 / 2026, not relative to today');
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
-  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
   select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
   select set_config('rls_test.s_label', '46p: the treasurer issues Linden Marsh''s statement for last year', true);
 \ir test-rls-46-issue.sql
@@ -1386,7 +1425,7 @@ begin;
       where statement_id = :'s_prior' and gift_id in (:G_GIFT_MERGED_PRIOR, :G_GIFT_LINDEN_PRIOR)),
     2, '46p: ...counting her own gift AND the gift recorded to the donor later merged into her (the donor-root group)');
 
-  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_CURRENT', true);
   select set_config('rls_test.s_label', '46p: ...and this year''s, with a stock gift, a covered fee and a test-mode gift', true);
 \ir test-rls-46-issue.sql
   select current_setting('rls_test.s_statement') as s_current \gset
@@ -1464,14 +1503,14 @@ begin;
   update people set user_id = :U_FOUNDING where id = :PRIYA;
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
-  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_CURRENT', true);
 
   select set_config('rls_test.s_donor', :G_DONOR_PLATE, true);
   select set_config('rls_test.s_expect', 'giving_statement: donor_unidentified', true);
   select set_config('rls_test.s_label', '46q: plate cash (the unidentified donor) never receives a statement', true);
 \ir test-rls-46-issue.sql
   select set_config('rls_test.s_donor', :G_DONOR_MERGED, true);
-  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
   select set_config('rls_test.s_expect', 'giving_statement: donor_unavailable', true);
   select set_config('rls_test.s_label', '46q: a MERGED donor receives none - the statement goes to the root', true);
 \ir test-rls-46-issue.sql
@@ -1485,7 +1524,7 @@ begin;
   select set_config('rls_test.s_label', '46q: ...and the blob must be application/pdf (S3)', true);
 \ir test-rls-46-issue.sql
   select set_config('rls_test.s_donor', :G_DONOR_HALLIE, true);
-  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_CURRENT', true);
   select set_config('rls_test.s_expect', 'giving_statements_totals_shape', true);
   select set_config('rls_test.s_label', '46q: a year with nothing to count (her one gift fully refunded) cannot be issued', true);
 \ir test-rls-46-issue.sql
@@ -1505,7 +1544,7 @@ begin;
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
-  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
   select set_config('rls_test.s_expect', 'giving_statement: not permitted', true);
   select set_config('rls_test.s_label', '46q: the giving recorder (giving.record only) may not issue (S1)', true);
 \ir test-rls-46-issue.sql
@@ -1523,7 +1562,7 @@ begin;
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
-  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
 
   select set_config('rls_test.s_total_delta', '1', true);
   select set_config('rls_test.s_expect', 'inconsistent: totals_mismatch', true);
@@ -1545,7 +1584,7 @@ begin;
   select set_config('rls_test.s_expect', 'inconsistent: line_mismatch', true);
   select set_config('rls_test.s_label', '46r: another donor''s gift on the statement is refused (not in the donor-root group)', true);
 \ir test-rls-46-issue.sql
-  select set_config('rls_test.s_year', extract(year from current_date)::int::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_CURRENT', true);
   select set_config('rls_test.s_extra_gift', :G_GIFT_TESTMODE, true);
   select set_config('rls_test.s_expect', 'inconsistent: line_mismatch', true);
   select set_config('rls_test.s_label', '46r: a Stripe TEST-MODE gift on the statement is refused (P3-17)', true);
@@ -1554,7 +1593,7 @@ begin;
                    '46r: ...and every refused statement was rolled back with its lines');
 
   -- A good statement, then a line added AFTER it was checked: re-checked and refused.
-  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
   select set_config('rls_test.s_label', '46r: (setup) a consistent statement is issued', true);
 \ir test-rls-46-issue.sql
   do $$
@@ -1583,7 +1622,7 @@ begin;
   update people set user_id = :U_FOUNDING where id = :PRIYA;
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
-  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
   select set_config('rls_test.s_donor', :G_DONOR_HALLIE, true);
   select set_config('rls_test.s_label', '46s: (setup) Hallie''s v1 for last year', true);
 \ir test-rls-46-issue.sql
@@ -1619,7 +1658,7 @@ begin;
   select current_setting('rls_test.s_statement') as s_v2 \gset
   select assert_eq(
     (select count(*) from giving_statements s
-      where s.donor_id = :G_DONOR_LINDEN and s.tax_year = extract(year from current_date)::int - 1
+      where s.donor_id = :G_DONOR_LINDEN and s.tax_year = :G_YEAR_PRIOR
         and not exists (select 1 from giving_statements n where n.supersedes_id = s.id)),
     1, '46s: ...exactly one LATEST version remains');
   select assert_eq((select count(*) from giving_statements where id in (:'s_v1', :'s_v2')), 2,
@@ -1640,7 +1679,7 @@ begin;
   update people set user_id = :U_FOUNDING where id = :PRIYA;
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
-  select set_config('rls_test.s_year', (extract(year from current_date)::int - 1)::text, true);
+  select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
   select set_config('rls_test.s_donor', :G_DONOR_ODETTE, true);
   select set_config('rls_test.s_label', '46t: (setup) Odette Brask''s statement for last year (no address: a print exception)', true);
 \ir test-rls-46-issue.sql

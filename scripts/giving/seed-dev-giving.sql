@@ -40,8 +40,21 @@
 --     plate cash, no-contact); thirteen gifts and one refund (G12/G13, added
 --     by Batch 5a, are last year's: one to the MERGED donor, one to its
 --     root - the statements fixture for a donor-root group); two inbox rows
---     (one parked, one dead letter); intents (one open, one completed
---     member-path subscription, and the ones behind the online gifts).
+--     (one parked, one dead letter); intents (one seeded open - see I6 -
+--     one completed member-path subscription, and the ones behind the online
+--     gifts).
+--
+--   NO ASSERTION MAY DEPEND ON WALL-CLOCK TIME OR ON CRON STATE (Phase 5
+--   loop-back, 2026-10-19). Every date a test-rls-46.sql assertion reads is
+--   FIXED: the statement fixture's gifts sit in the fixture years 2025
+--   ("prior") and 2026 ("current"), matched by test-rls-46.sql's
+--   G_YEAR_PRIOR / G_YEAR_CURRENT, so the suite reads the same in any year and
+--   against a seed applied on any day. Every fixed instant is on or before
+--   2026-10-16, so a fresh seed never writes a future-dated gift. Rows still
+--   stamped relative to now() (connections, the merge, the open intents I6/I8,
+--   I7, the inbox) are read by no assertion for their time or for a status
+--   that time changes - except the parked inbox row, which is parked for a
+--   century on purpose (see below).
 --   Bramblewood (3333...): a connection, a fund, a donor, an intent with a
 --     Checkout session and an offline gift - isolation fixtures only. Its
 --     toggle is NOT turned on.
@@ -200,6 +213,19 @@ on conflict (id) do nothing;
 -- ---------------------------------------------------------------------------
 -- Checkout intents (I1-I7 Alder, I8 Bramblewood). Covered fees are computed
 -- by the same SQL gross-up the create functions use.
+--
+-- I1-I5 carry FIXED instants (16:00 UTC = noon in America/New_York, so the
+-- org-local occurred_on of the online gift is the same calendar day): the
+-- online gifts below take their dates from these, and the statements
+-- assertions count them by year. `now() - interval '90 days'` put G4/G7 in
+-- the PRIOR year for any seed applied before April (Phase 5 loop-back).
+--
+-- I6 and I8 stay relative and `open`, and lapse by design: expires_at is
+-- created + 24 hours, so the giving cron's presby_giving_expire_intents()
+-- turns them `expired` a day after seeding. No assertion reads their status:
+-- 46f uses I8's session id only as another org's id (status-blind), and 46l
+-- builds its own in-flight intent against the retired fund inside its
+-- rolled-back block instead of reading I6 (QA run 1 FAIL at 46l).
 -- ---------------------------------------------------------------------------
 insert into giving_checkout_intents (id, organization_id, connection_id, fund_id, membership_id, donor_id,
        frequency, method_choice, cover_fees, gift_amount_cents, donor_covered_fee_cents, total_cents,
@@ -218,32 +244,33 @@ select v.id::uuid, v.org::uuid, v.conn::uuid, v.fund::uuid, v.membership, v.dono
      'd9100000-0000-0000-0000-000000000011', 'd9100000-0000-0000-0000-000000000020', null::uuid,
      'd9100000-0000-0000-0000-000000000040', 'once', 'card', true, 5000, true,
      'd9100000-0000-4000-8000-000000000060', 'completed', 'cs_live_fixture0000000001',
-     'pi_fixture0000000001', null, 'cus_fixture00000001', now() - interval '90 days'),
+     'pi_fixture0000000001', null, 'cus_fixture00000001', timestamptz '2026-07-17 16:00:00+00'),
     -- I2: test-mode bank, still pending (G5).
     ('d9100000-0000-0000-0000-000000000061', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000010', 'd9100000-0000-0000-0000-000000000020', null,
      'd9100000-0000-0000-0000-000000000042', 'once', 'bank', false, 7500, false,
      'd9100000-0000-4000-8000-000000000061', 'completed', 'cs_test_fixture0000000002',
-     'pi_fixture0000000002', null, null, now() - interval '3 days'),
+     'pi_fixture0000000002', null, null, timestamptz '2026-10-12 16:00:00+00'),
     -- I3: test-mode bank, failed first ACH (G6).
     ('d9100000-0000-0000-0000-000000000062', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000010', 'd9100000-0000-0000-0000-000000000020', null,
      'd9100000-0000-0000-0000-000000000043', 'once', 'bank', false, 2000, false,
      'd9100000-0000-4000-8000-000000000062', 'completed', 'cs_test_fixture0000000003',
-     'pi_fixture0000000003', null, null, now() - interval '9 days'),
+     'pi_fixture0000000003', null, null, timestamptz '2026-10-06 16:00:00+00'),
     -- I4: the live card gift that was refunded (G7).
     ('d9100000-0000-0000-0000-000000000063', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000011', 'd9100000-0000-0000-0000-000000000020', null,
      'd9100000-0000-0000-0000-000000000041', 'once', 'card', false, 3000, true,
      'd9100000-0000-4000-8000-000000000063', 'completed', 'cs_live_fixture0000000004',
-     'pi_fixture0000000004', null, null, now() - interval '80 days'),
+     'pi_fixture0000000004', null, null, timestamptz '2026-07-27 16:00:00+00'),
     -- I5: the test-mode succeeded gift (G9) - excluded from every total.
     ('d9100000-0000-0000-0000-000000000064', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000010', 'd9100000-0000-0000-0000-000000000020', null,
      'd9100000-0000-0000-0000-000000000040', 'once', 'card', false, 1000, false,
      'd9100000-0000-4000-8000-000000000064', 'completed', 'cs_test_fixture0000000005',
-     'pi_fixture0000000005', null, null, now() - interval '2 days'),
-    -- I6: OPEN, against the now-retired Missions fund (in flight).
+     'pi_fixture0000000005', null, null, timestamptz '2026-10-13 16:00:00+00'),
+    -- I6: OPEN when seeded, against the now-retired Missions fund (a demo of
+    -- the in-flight case). Lapses to `expired` a day later; no assertion reads it.
     ('d9100000-0000-0000-0000-000000000065', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000010', 'd9100000-0000-0000-0000-000000000022', null,
      null, 'once', 'card', false, 4000, false,
@@ -298,8 +325,9 @@ values
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------
--- Gifts (marker armed above). Dates are relative to today, clipped to the
--- current calendar year where they must stay in it; G8/G10/G12/G13 are LAST year.
+-- Gifts (marker armed above). Dates are FIXED (see the header): G1-G7, G9 and
+-- G11 are in the current fixture year 2026, G8/G10/G12/G13 in the prior
+-- fixture year 2025. No date here moves with today (Phase 5 loop-back).
 -- recorded_by is clerk.fixture's user (seed-dev.sql e...f3).
 -- ---------------------------------------------------------------------------
 insert into giving_gifts (id, organization_id, donor_id, fund_id, source, provider, connection_id, intent_id,
@@ -316,32 +344,32 @@ select v.id::uuid, v.org::uuid, v.donor::uuid, v.fund::uuid, v.source, v.provide
     ('d9100000-0000-0000-0000-000000000080', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000045', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
      null, null, null, 'cash', null, null, null::numeric, 'Sunday plate', 2500, 0, null::integer, null::integer,
-     'succeeded', null, greatest(current_date - 7, date_trunc('year', current_date)::date), true,
+     'succeeded', null, date '2026-10-09', true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G2: offline check, with a number.
     ('d9100000-0000-0000-0000-000000000081', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000046', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
      null, null, null, 'check', '1042', null, null, null, 10000, 0, null, null,
-     'succeeded', null, greatest(current_date - 14, date_trunc('year', current_date)::date), true,
+     'succeeded', null, date '2026-10-02', true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G3: offline stock (non-cash; amount is the books value, never printed).
     ('d9100000-0000-0000-0000-000000000082', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000040', 'd9100000-0000-0000-0000-000000000021', 'offline', null,
      null, null, null, 'stock', null, '10 shares of an index fund', 10, null, 150000, 0, null, null,
-     'succeeded', null, greatest(current_date - 21, date_trunc('year', current_date)::date), true,
+     'succeeded', null, date '2026-09-25', true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G8: offline check dated LAST calendar year (statements).
     ('d9100000-0000-0000-0000-000000000087', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000041', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
      null, null, null, 'check', '881', null, null, null, 20000, 0, null, null,
-     'succeeded', null, make_date(extract(year from current_date)::int - 1, 12, 15), true,
+     'succeeded', null, make_date(2025, 12, 15), true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G10: LATE-DATED - last year's date, but created now, after any fixture
     -- "issued" instant (Batch 5's staleness fixture).
     ('d9100000-0000-0000-0000-000000000089', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000046', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
      null, null, null, 'cash', null, null, null, 'Found in the office safe', 4000, 0, null, null,
-     'succeeded', null, make_date(extract(year from current_date)::int - 1, 12, 30), true,
+     'succeeded', null, make_date(2025, 12, 30), true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G12 (Batch 5a): offline check dated LAST year, recorded to L. Marsh
     -- before that donor was merged into Linden Marsh - a statement for Linden
@@ -349,19 +377,19 @@ select v.id::uuid, v.org::uuid, v.donor::uuid, v.fund::uuid, v.source, v.provide
     ('d9100000-0000-0000-0000-00000000008b', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000044', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
      null, null, null, 'check', '1207', null, null, null, 7500, 0, null, null,
-     'succeeded', null, make_date(extract(year from current_date)::int - 1, 12, 1), true,
+     'succeeded', null, make_date(2025, 12, 1), true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G13 (Batch 5a): offline cash dated LAST year, to Linden Marsh herself.
     ('d9100000-0000-0000-0000-00000000008c', '22222222-2222-2222-2222-222222222222',
      'd9100000-0000-0000-0000-000000000040', 'd9100000-0000-0000-0000-000000000020', 'offline', null,
      null, null, null, 'cash', null, null, null, 'Christmas offering envelope', 3000, 0, null, null,
-     'succeeded', null, make_date(extract(year from current_date)::int - 1, 12, 24), true,
+     'succeeded', null, make_date(2025, 12, 24), true,
      'e0000000-0000-0000-0000-0000000000f3'),
     -- G11: Bramblewood's own offline gift (isolation).
     ('d9100000-0000-0000-0000-00000000008a', '33333333-3333-3333-3333-333333333333',
      'd9100000-0000-0000-0000-000000000050', 'd9100000-0000-0000-0000-000000000030', 'offline', null,
      null, null, null, 'cash', null, null, null, null, 3300, 0, null, null,
-     'succeeded', null, greatest(current_date - 3, date_trunc('year', current_date)::date), true,
+     'succeeded', null, date '2026-10-13', true,
      'e0000000-0000-0000-0000-0000000000f3')
   ) as v(id, org, donor, fund, source, provider, conn, intent, pi, method, check_number, stock, qty, memo,
          amount, covered, fee, net, status, failure, on_date, livemode, recorded_by)

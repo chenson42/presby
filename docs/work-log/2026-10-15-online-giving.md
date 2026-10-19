@@ -17,8 +17,8 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
 | 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; 5a complete; 5b complete (full-stack-developer, 2026-10-18); Batch 6 complete (full-stack-developer, 2026-10-18) - Phase 4 ready for QA | — | 2026-10-18 |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete — run 1 FAIL (§46l fixture), loop-back by database-admin, run 2 scoped re-verification green (§46 263/263; integrated 927; webhook e2e 12/12 then §46 263/263) | PASS (run 2) | 2026-10-19 |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-19 |
 
 ---
 
@@ -4083,81 +4083,393 @@ Run, against a dev server started in the worktree (`STRIPE_WEBHOOK_SECRET`, `CRO
 3. **Stuck payout state:** agreed; TODO line in the Integration checklist (not built in this pipeline).
 4. **Test-mode empty history / internal fund names:** accepted as residuals; TODO line in the Integration checklist.
 
-# Phase 5 — Verification (qa)
+## Phase 5 loop-back — §46l fixture (database-admin)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+*2026-10-19, database-admin, worktree `presby-giving` on `pipeline/online-giving` (HEAD `6d1fd0a`), Neon branch `pipeline-online-giving` (endpoint `ep-wispy-mode-axymely1`; all three `.env.local` URLs checked against it before any statement ran). Nothing committed. No Rule 16 shared file edited (`scripts/test-rls.sql` was built only as a scratchpad copy for the integrated count). **No DDL change**: `drizzle/0055`/`0056` and `_journal.json` are untouched. Test fixtures and the seed draft only; no product defect found. One dev server was started from the worktree on port 3100 (wrapper PID 15943 → 15962 → listener PID 15963, all started here) for `e2e/giving-webhook.spec.ts` and stopped by those PIDs; nothing else was touched.*
+
+### Files Modified
+
+- `scripts/giving/test-rls-46.sql`
+  - **§46l (return_state block):** the "in-flight intent against the retired fund" no longer reads seeded I6. The block builds its own intent inside its rolled-back transaction, in production order. As `presby_app` under Alder, it reinstates Missions online, then calls `presby_giving_create_intent_public` (idempotency key `…00cc`) and `presby_giving_attach_session` (`cs_test_rls46inflight001`), so the intent is `open`. It then retires the fund with the same UPDATE `retireFund()` issues (`src/lib/giving/funds.ts:264`), runs `presby_giving_expire_intents()`, asserts the intent is still `open` against the now-retired fund, and reads `presby_giving_return_state` → `confirming` / `Missions`. Before: 1 assertion. After: 3 (setup open, still open after the sweep, confirming).
+  - **Statements (46p–46t):** the tax years are now fixed psql variables, `\set G_YEAR_PRIOR 2025` and `\set G_YEAR_CURRENT 2026` in the header. They replace all 12 `extract(year from current_date)` expressions. `grep -c "extract(year from current_date)"` now returns 0.
+  - **46p:** a new premise assertion. All 12 of Alder's fixture gifts and refund R1 must sit in their fixed fixture year, so a seed/suite drift fails here with a clear message rather than as a totals mismatch.
+- `scripts/giving/seed-dev-giving.sql`
+  - The header now states the rule: no assertion may depend on wall-clock time or on cron state.
+  - I1–I5 `created_at` are fixed instants: `2026-07-17`, `10-12`, `10-06`, `07-27`, `10-13`, each at 16:00 UTC = noon New York. The online gifts G4–G7 and G9, and R1, take their dates from these.
+  - Offline G1–G3 and G11 are fixed dates in 2026. G8, G10, G12 and G13 use `make_date(2025, …)`.
+  - I6 and I8 stay relative and `open`, and are documented as lapsing by design after 24 h; no assertion reads their status.
+  - The chosen days equal the dates the pipeline branch already held, so asserted dates and years are unchanged. Every fixed instant is on or before 2026-10-16, so a fresh seed never writes a future-dated gift.
+- `docs/work-log/2026-10-15-online-giving.md`: this section.
+
+### Root cause
+
+Two fixture time-bombs of the same class as the 3a-fix `…0070` finding. Both are fixture-only. The product behaved correctly in both cases: it expired a lapsed intent and counted gifts by the year they fall in.
+
+1. **§46l (QA's FAIL).** `seed-dev-giving.sql` gave every intent `expires_at = created + 24 hours` and seeded I6 `open`. The giving cron's `presby_giving_expire_intents()` (0055 :2517) expires it a day after seeding, and `e2e/giving-webhook.spec.ts` runs that cron. §46l then read I6 as `failed`, so the assertion got 0. Reproduced on arrival: exit 3, 182 passes, stop at `test-rls-46.sql:1184`.
+2. **Found by the audit, not yet failing: the statements block's tax years came from `current_date`, while the seed's gift dates were fixed at seed time.**
+   - **(a) Year rollover.** Any database seeded in year Y goes red in Y+1: "last year" moves onto the wrong gifts. `development` (seeded in 2026 at integration) would go red on 2027-01-01 even with §46l fixed.
+   - **(b) Q1 seeding.** The online gifts were `now() - 90/80 days` with no year clamp. Unlike the offline ones, a fresh seed between January and about April would put G4/G7 in the prior year and break 46p's "this year" statement.
+   - **Proof of (a), against the original file.** I ran a no-stop scratch copy of the HEAD `test-rls-46.sql` with only `extract(year from current_date)` shifted by +365 days, which simulates a 2027 run on this 2026-seeded branch. It produced 237 passes. It fails at `46p: ...version 1, two gifts, $105.00` and `46s: (setup) Hallie's v1 for last year` (`giving_statements_totals_shape`), and those failures mask the rest of both transactions.
+
+### The choice made, and why
+
+- **§46l: the robust form.** The suite creates its own `open` intent, so no seeded row has to stay open forever. The far-future `expires_at` used for `…0070` would have kept I6 open, but only as a fixture claim; a manual or future sweep with a different predicate could still break it. The self-contained block also tests more of the case it names. The intent is opened while the fund is offered online, then the fund is retired and a sweep runs. Every step goes through a product path `presby_app` really holds: a direct UPDATE on `giving_funds`, which has no user triggers, and the 0055 functions.
+- **Statements: fixed fixture years (the robust form for dates).** An alternative was to anchor §46's years on the seeded rows' own years. That fixes (a) but not (b). Fixed dates in the seed plus fixed year constants in the suite fix both.
+- **Cost:** in 2027 the dev UI will show the fixture gifts as "last year" rather than "this year". That is cosmetic, no assertion reads it, and it is the same as what the old seed would have shown in 2027.
+
+### Audit of time-dependent seeded giving rows
+
+| Seeded row / column | Time or cron dependence | Read by an assertion? | Action |
+|---|---|---|---|
+| I6 `…0065` `open`, `expires_at = created + 24h` | expired by the cron after 24 h | 46l did. Now no assertion does (46f uses its session id only for an unknown-inbox apply, which is status-blind) | §46l made self-contained; seed comment updated |
+| I8 `…0067` (Bramblewood) `open`, 24 h | expired by the cron (QA saw it) | 46f/46l use its session id only as another org's id. The lookups are `(connection_id, session)` and slug-joined, so status-blind | none (documented) |
+| I1–I5 `created_at` (→ G4–G7, G9 dates, R1) | `now() - N days`: wrong year for Q1 seeds and after a year rollover | yes: 46p–46t by tax year | **fixed instants in 2026** |
+| G1–G3, G11 `occurred_on` | clamped to `current_date`'s year at seed time | yes (G2, G3): 46p/46t current year | **fixed 2026 dates** |
+| G8, G10, G12, G13 | `make_date(current year - 1, …)` at seed time | yes: 46p/46q/46r/46s/46t prior year | **`make_date(2025, …)`** |
+| §46 statements years | `extract(year from current_date)`, 12 sites | n/a (the suite side of the same dependency) | **`G_YEAR_PRIOR` / `G_YEAR_CURRENT`** |
+| Inbox `…0070` parked, `next_attempt_at = now() + 100 years` | not due for a century (3a-fix ruling) | 46e counts | none: still `parked` after every sweep here |
+| Inbox `…0071` dead letter, `processed_at = now() - 1 day` | `presby_giving_purge_bodies()` nulls its body 90 days after processing | 46e reads counts only; `giving.db.test.ts` uses its own rows | none (documented in the seed header) |
+| Connections, Missions `retired_at`, donor link/merge stamps, I7 | `now() - N` | no time window in 0055/0056 reads them. Checked every `interval` predicate: 1 h flood cap (`created` intents only), 15 min attach, 2 min lease, 24 h parked→ignored (only when claimed), 90 d purge | none |
+| `role_grants` `starts_on '2026-01-01'` | fixed, past | 46j | none |
+
+Outside §46, no Vitest or e2e spec reads a seeded intent or gift by id. The only seed ids used in Vitest are role ids (`giving.db.test.ts:330`), and the e2e specs build their own `e2e-giving-*` orgs.
+
+### Commands and results
+
+All `presby_app` runs printed `current_user = presby_app`, `rolbypassrls = f`. "§46" is `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f test-rls-46.sql`, run from `scripts/giving/`.
+
+| # | Command | Result |
+|---|---|---|
+| 1 | §46 at HEAD (baseline) | **exit 3**, 182 passes, stop `:1184` 46l (QA's FAIL reproduced) |
+| 2 | HEAD §46, no-stop, `current_date` +365 in the year selection only (scratch) | 237 passes; FAIL 46p v1 and 46s setup (the rollover bomb, cause 2a) |
+| 3 | §46 corrected, on the branch as it stood (I6/I8 already `expired` by earlier crons) | **exit 0, 263/263** |
+| 4 | Fixture reset as `neondb_owner`, one transaction: gift and reversal user triggers disabled, then delete R1, G1–G13 and I1–I6/I8, then triggers re-enabled before COMMIT. Nothing referenced them: 0 settlement lines, 0 statement lines, 0 foreign reversals or gifts | exit 0; all 5 guard triggers `O` in the same transaction; 17 giving user triggers enabled afterwards |
+| 5 | `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/giving/seed-dev-giving.sql`, **whole file, twice** | apply 1: exit 0, 0 errors, inserted 7 intents + 8 offline gifts + 5 online gifts + 1 reversal. Apply 2: exit 0, 0 errors, every INSERT `0 0`. **Snapshots byte-identical** (row counts plus md5 of the intent, gift, reversal and inbox columns, and the enabled-trigger count) |
+| 6 | §46 on the freshly seeded rows | **exit 0, 263/263** |
+| 7 | `E2E_BASE_URL=http://localhost:3100 npx playwright test --config <scratch: repo config + test 180 s, expect 30 s> e2e/giving-webhook.spec.ts`, server `next dev -p 3100` with `RATE_LIMIT_DISABLED=true`, the spec's default non-key-shaped secrets, `STRIPE_SECRET_KEY` unset <!-- leak-ok: no secret values recorded --> | first attempt: globalSetup `fetch failed` (transient Neon DNS, as in QA run A). Retry: **12/12 passed, exit 0**, 1.8 min; server log shows 3 real `GET /api/cron/giving` sweeps |
+| 8 | §46 after the e2e cron sweeps | **exit 0, 263/263**. Afterwards: `…0070` parked, `…0071` dead_letter, 0 `e2e-giving-%` orgs |
+| 9 | Worst case, the state QA found: owner sets I6/I8 `expires_at = now() - 1 s` (what a day does); then **as `presby_app`** `select presby_giving_expire_intents()` → **2** (I6, I8 → `expired`); then §46 | **exit 0, 263/263** |
+| 10 | Failing-first on the new assertions (scratch copies, `ON_ERROR_STOP=1`): **M1** the final §46l read put back on seeded I6's session | exit 3 at `:1210` "46l: the in-flight intent … (confirming) — expected 1, got 0" (the pre-fix form fails on today's data) |
+| 11 | **M2** the retire UPDATE removed | exit 3 at `:1206` "46l: ...the fund is then retired and a giving-cron sweep runs … — expected 1, got 0" |
+| 12 | **M3** `G_YEAR_PRIOR` 2025 → 2024 | exit 3 at `:1409` "46p: (premise) … — expected 0, got 4" |
+| 13 | Integrated `scripts/test-rls.sql`, scratch copy only: Batch 1a's three edits (`:824`, `:836` `and organization_id is not null`; `:7849` 4 → 6), no-stop, plus `\ir giving/test-rls-46.sql` | exit 0 (no-stop), **927 passes**. The only FAILs are the five pre-existing branch-data deltas QA run 1 listed (`:127`, `:153`, `:184`, `:472`, `:7864`); **no §46 failure**. Run 1 had 923 + the 46l FAIL; 923 + 1 + 3 new = 927 |
+
+**Counts.**
+- §46 goes from 260 to **263** assertions (46l +2, 46p +1). On the pipeline branch it passes **263/263, exit 0**, before and after a real cron sweep and after a forced intent expiry.
+- Expected integrated `scripts/test-rls.sql` on `development`: **927** (664 stock-with-integration-edits + 263; was 924). The integration checklist's older "865" line was already superseded by Batch 5a's 924; replace it with 927 at integration.
+
+**State left on the pipeline branch.** The giving fixture is freshly seeded from the corrected file, except that I6/I8 are `expired` (step 9), which is the state any database reaches a day after seeding. `…0070` is parked and `…0071` is a dead letter.
+
+### Handoff to QA
+
+- **Re-verify (scoped, per QA run 1):**
+  - §46 standalone as `presby_app`: expect **263/263, exit 0**.
+  - The integrated scratch `test-rls.sql` on the branch: the same pre-existing branch-data deltas as run 1, and no §46 failure.
+  - `e2e/giving-webhook.spec.ts` (real cron), then §46 again: still 263.
+  - Optional, to exercise the sweep directly: `select presby_giving_expire_intents()` as `presby_app`, then §46.
+- **Nothing else changed:** no DDL, no TS, no other spec.
+- **For the orchestrator at integration:** apply the giving seed block fresh on `development` from this corrected draft; the `\ir` is unchanged. Expect 927. `Caught-By: agent-review`, `Discovered-In: Phase-5` for the `fix(test):` commit. The year-rollover half was found by this loop-back's audit, also in Phase 5. CI does not run §46 (no Neon secrets), so no automated gate would have caught either half.
+
+# Phase 5 — Verification (qa) — run 1
+
+**Date:** 2026-10-19
+**Verified by:** qa (read-only; recorded verbatim by the orchestrator)
+**Subject:** `pipeline/online-giving` at `6d1fd0a`, diffed against `main` (Batches 1–6). Worktree `/Users/cshenso/git/presby-platform/presby-giving`. Neon branch `pipeline-online-giving` (endpoint `ep-wispy-mode-axymely1`). All three connection URLs point at it, and nothing ran against `development` or production. The worktree is unchanged (`git status` is clean). Temporary configs, logs and reports are in the session scratchpad only.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS** (exit 0)
+
+Other static gates:
+- `npm run lint` (the script carries `--max-warnings=0`): **PASS** (exit 0).
+- `npm run check`: **PASS** (exit 0). All seven tripwires passed: audit-coverage, sql-date, deps-drift, brand-scope, secrets & PII, hydration-gate, giving-boundaries.
+- `npm run build`: **PASS** (exit 0). Every giving page and route builds as a dynamic route (ƒ).
+- **No native dialogs.** The only `alert(`/`confirm(` strings on added lines are hostile-input fixtures inside tests.
+- **No `console.log`.** Added production code only uses `console.info`/`console.error`, and they log ids, error classes and codes only. `treasurer-designation.ts` logs the raw `err` object, the same as the existing `founding-administrator.ts:677`.
+- **No `loading.tsx`** under `(org)/o/[slug]/giving`, `(org)/o/[slug]/admin/giving`, `(public)/site/[slug]/give` or `(admin)/admin/giving`.
+- **No real data.** Every added email address is `example.invalid` / `example.org`, or is an `evil.example` / `checkout.stripe.com@…` hostile-URL fixture. No phone number falls outside the 555-01xx convention. The EINs are placeholders (`00-0000000`, `12-3456789`).
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Plain lane, `npm run test` (no DB env):**
+- Total 7480 | Passed 5840 | Failed 0 | Skipped 1640 (58 DB-backed files plus parts of 6 others) | 21.1 s | exit 0.
+
+**DB-backed lane, serial:**
+- Command: `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism --testTimeout=90000 --hookTimeout=120000 <all 64 files that skipped above>`. That is a superset of the handoff's three directories: it adds every non-giving DB suite, because 0055 changes role templates and the 2FA predicate.
+- **64/64 files passed | 1671 tests passed | 0 failed | 1 skipped | 3275 s (54.6 min) | exit 0.** Clean on the first run: no timeouts and no dropped sockets.
+- The one skip is `render-pdf.test.ts:152`. It only runs when `STATEMENT_SAMPLE_DIR` is set and writes sample PDFs for a human to read; it is not a behaviour test.
+
+**Combined:** 7479 of 7480 passed, 0 failed, 1 opt-in skip.
+
+**`scripts/giving/test-rls-46.sql` as `presby_app`** (checked `current_user = presby_app` and `rolbypassrls = f`):
+- As written (`ON_ERROR_STOP=1`): **exit 3**, 182 passes, then the stop at **`scripts/giving/test-rls-46.sql:1184`**:
+  `FAIL 46l: the in-flight intent against the retired fund still resolves (confirming) — expected 1, got 0`
+- No-stop scratch copy: **259 passes, 1 FAIL (the same 1184), out of 260.** That is exactly Batch 5a's 260, and nothing is masked: 1184 is the last assertion in its transaction.
+- After all the e2e runs, both forms gave the same result again.
+
+**Root cause (fixture time-bomb, not a product defect):**
+- `scripts/giving/seed-dev-giving.sql:214` sets every seeded intent's `expires_at = created + 24 hours`.
+- Intent I6 (`…0065`, `cs_test_fixture0000000006`, at `:246-250`) is seeded `open` with `created = now() - 10 minutes`.
+- `presby_giving_expire_intents()` (`drizzle/0055_presby_giving.sql:2517-2528`) expires every org's lapsed `open` intents. The giving cron runs it, and `e2e/giving-webhook.spec.ts` calls the real cron.
+- On this branch I6 is now `status = expired` (seeded 2026-10-16 00:57 UTC, expired by 10-17). Section 46 was last recorded green in Batch 5a; neither the 5b nor the Batch 6 command table records a §46 run.
+- This is the same class as the 3a-fix finding about parked inbox row `…0070`. That one was fixed with `next_attempt_at = now() + 100 years`, and it still holds (`parked`). I6 got no such fix.
+- On `development`, §46l will go red the first time anything sweeps the giving cron 24 h after seeding.
+
+**Integrated `scripts/test-rls.sql`**, built only as a scratch copy: Batch 1a's three edits at `:824`, `:836`, `:7849`, plus the no-stop §46 at the end.
+- 923 passes. The failures are the five branch-data deltas that were already there before this pipeline (`:127`, `:153`, `:184`, `:472`, `:7864`, the same set Batch 1a recorded) plus §46l `:1184`.
+- Expected per Batch 5a: 924 = 664 + 260. The one missing pass is §46l.
+- Stock `test-rls.sql` as written stops at the pre-existing `:127` (exit 3, 3 passes). That matches the known baseline and is not a regression.
+
+**Live-catalog schema/RLS probes** (`pg_class`, `pg_policies`, `aclexplode`, `pg_trigger`, on both connections):
+- **Catalog.** All 15 `giving_*` tables have RLS and FORCE RLS with one policy each. No table grants DELETE to `presby_app`, `presby_platform` or PUBLIC. `giving_gifts`, `giving_gift_reversals`, `giving_settlements`, `giving_settlement_lines` and `giving_checkout_intents` are SELECT-only for `presby_app`. `giving_provider_events` has no `presby_app` grant at all. 17 enabled user triggers.
+- **Tenancy refusals (RLS).** Alder reads its 12 gifts and 0 from other orgs. Bramblewood reads 0 Alder gifts. The presbytery context reads 0 Alder gifts, donors and statements. With no org context, 0 rows.
+- **Grant refusals.** As `presby_app`, an INSERT into `giving_gifts` is "permission denied" (grant). DELETE on `giving_donors` and SELECT on `giving_provider_events` are also "permission denied" (grant).
+- **Owner-path refusals** (`neondb_owner`, `bypassrls = t`, every probe rolled back), refused by **trigger**: gift INSERT and UPDATE `presby_giving_guard_gift_write` ("gifts are written only by the giving functions"); gift and donor DELETE `presby_giving_guard_delete`; reversal UPDATE `presby_giving_guard_reversal_write`.
+- **Resolver pin.** `md5(prosrc)` of `presby_effective_permissions` is `4c79e30535229f6fd44730c38add28d0`, matching the F140 pin at `test-rls-46.sql:937`.
+- The branch has no issued statements, so statement freeze was not probed live; the owner-path freeze and blob-FK tests in `giving-statements.db.test.ts` passed (25/25).
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+All dev runs used QA's own dev server on port 3100, started with `RATE_LIMIT_DISABLED=true`, non-key-shaped `STRIPE_WEBHOOK_SECRET` and `CRON_SECRET` literals, and `STRIPE_SECRET_KEY` unset; stopped by recorded PIDs only. (A mistyped command briefly started a stray `playwright test` webServer on port 3000; those exact PIDs were killed within ~5 s, before any test ran.)
+
+| Run | Scope | Result |
+|---|---|---|
+| A — repo timeouts | whole suite, 316 tests | 273 passed, **7 failed**, 36 did not run (serial cascades), 25.4 min, exit 1 |
+| B — repo timeouts | the 6 files that failed in A | 55 passed, **3 failed**, 19 did not run, 9.6 min |
+| C — patient timeouts (test 180 s, expect 30 s, as Batch 6) | 8 giving specs, `hydration/`, header-controls, presbytery-oversight, admin-organizations, security-headers | 133 passed, **3 failed**, 28 did not run, 19.4 min |
+| D — patient | giving-member, giving-public, header-controls, presbytery-oversight | **60/60 passed**, 4.8 min, exit 0 |
+| E — `npm run test:e2e:prod` | production build on 3800 | **6/6 passed**, incl. `hydration/giving-give-form.spec.ts` and `hydration/giving-offline-gift-form.spec.ts`; 1.2 min, exit 0 |
+| F — `next start` on 3900 with `GIVING_STATEMENTS_ENABLED=1` | `giving-statements.spec.ts` minus the notice-email test | **10/10 passed**, 2.3 min. With the notice test it fails at `e2e/giving-statements.spec.ts:271` (no dev email intercept on a production server — excluded by the handoff); it passed in run C on the dev server. |
+
+**Giving e2e, patient timeouts (runs C and D): 98/98** — giving-shell 7, giving-admin 12, giving-connect 16, giving-public 22, giving-webhook 12, giving-statements 11, giving-member 10, giving-settlements 6, hydration give-form 1, hydration offline-gift-form 1. Also admin-organizations 14/14 and security-headers 20/20. Across A–D every one of the 169 tracked giving and blast-radius tests passed at least once; none failed in every run.
+
+**Failures in A–C, judged environmental noise** (a different test each time; each later passed):
+
+| Run | Failure | What happened |
+|---|---|---|
+| A | `giving-admin.spec.ts:169`, `giving-connect.spec.ts:273`, `giving-member.spec.ts:133`, `giving-statements.spec.ts:179` | 5 s expect timeouts; server actions took 5.5–7.3 s, one statements POST 60 s |
+| A | `header-controls.spec.ts:97,110`, `presbytery-oversight.spec.ts:64` | 30 s test timeouts while `GET /o/e2e-alpha` took 40 s; server logged `getaddrinfo ENOTFOUND ep-wispy-mode-…` |
+| B | `giving-admin.spec.ts:317`, `giving-connect.spec.ts:273` again, `giving-statements.spec.ts:301` | latency |
+| C | `giving-member.spec.ts:82` | `net::ERR_NETWORK_IO_SUSPENDED` |
+| C | `giving-public.spec.ts:120` | a 30 s DB poll |
+| C | `header-controls.spec.ts:64` | timeout |
+
+**At the repo's own 5 s expect timeout, the giving suite was not green in any run on this branch** — a branch-latency fact, not a pass.
+
+**Auth-touching determination.** `git diff main --stat` touches nothing under `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/`, `src/lib/auth/` or `src/proxy.ts`, so the stricter gate does not formally apply. The change does alter the SQL body of `presby_two_factor_required()`, which the jwt callback calls, so the login path was run anyway (run A, real dev server): `totp-full-login.spec.ts` 1/1 (MFA-enrolled seeded user, password → TOTP → landing); `totp-callback-bypass.spec.ts` 7/7; `post-login-routing.spec.ts` 12/12; `admin-login.spec.ts` 4/4; `branded-signin.spec.ts` 4/4.
+
+**Pre-existing server error (not in the diff).** After the ENOTFOUND failure on `/o/e2e-alpha`, the dev server logged "Only plain objects … can be passed to Client Components" on the portal home, which this pipeline does not change. Worth a separate look.
+
+**Fixture residue after all runs:** 0 `e2e-giving-%` organizations remain; the seed's parked row `…0070` is still `parked`.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+The branch has one `fix:` commit: `70cab12` (`fix(schema): claim_event returns event id and org; owner-only dead-letter list (0055 in place)`), with `Caught-By`, `Discovered-In` and `Work-Log` trailers.
+- C1: `claim_event returns external_event_id and organization_id, appended after the original seven (C1)` — `src/lib/db/domain/giving.db.test.ts:464`, plus §46e C1 at `scripts/giving/test-rls-46.sql:420+`.
+- C2: `dead_letters lists a dead-lettered event - ids, type, attempts, error code - never a body, and feeds requeue (C2)` — `giving.db.test.ts:483`, plus the owner-only check at `giving.db.test.ts:431` and §46e `:369`, `:391`, `:397`.
+- Failing-before-fix could not be confirmed; the work-log records mutation proofs instead (3a-fix M1–M5), consistent with the tests as read. None of the test names carries the "— regression for …" suffix.
+- Sampled Batch 6 mutation claims match the tests: M5 `route.test.ts:113` and `:144`; M6/M7 `process.test.ts:425,437` and `process.db.test.ts:483`; M1 `self.db.test.ts` 23/23.
+- The 2026-10-19 merge-source ruling is covered by `src/app/(org)/o/[slug]/giving/page.test.tsx:212` (failing-first claimed, not observed by QA).
+- Design Tests paragraphs spot-checked, each present: B1 money table, `audit.test.ts`, `check-giving-boundaries.test.mjs` 80/80, 2FA agreement matrix 3/3; B2 G2 self-grant and `not_giving_only` (`team.db.test.ts:109,153`); B3 replay harness's nine cases, look-alike and userinfo origins (`client.sdk.test.ts`), secret-unset 503; B4 Host / X-Forwarded-Host spoof (`actions.test.ts:307`), `10.999` / `1e3` / `-5` / `٣٠` amounts, absent-state parity; B5 parallel issue and re-issue, staleness incl. test-mode, tampered-total refusal, owner-path blob FK; B6 the four self-read conditions, 404 parity unit and e2e, automatic and manual payouts.
+- **Gap:** "the member giving page is not forced to 2FA" is proven only by unit tests (Batch 6 deviation 7, reasoned) — acceptable, noted.
+- **Gap (the FAIL below):** §46l assumes seeded state that time and the cron invalidate; no test proves §46 survives a giving-cron sweep 24 h after seeding.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+From `vitest run --coverage` (v8, plain lane):
+- `src/lib/permissions.ts`: 100% statements, 100% branches
+- `src/lib/two-factor.ts`: 91.3% statements, 100% branches
+- `src/lib/flags.ts`: 100% / 100%
+- Pure giving modules all ≥ 85% statements (lowest: `providers/stripe/normalize.ts` 86.3%, `providers/stripe/urls.ts` 86.7%, `attention-pure.ts` 85.7%, `statements/compose.ts` 93.2%); `money.ts`, `give-input.ts`, `csv.ts`, `origin.ts`, `public-config.ts`, `ingest/outcome.ts`, `ingest/settlement-lines.ts`, `statements/pure.ts` at 100%.
+- DB-backed modules read 0% here (coverage not collected in the DB lane); exercised by its 1671 passing tests. Whole tree, plain lane: 59.8% statements.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+Verified by reading each route and action body. Tenant surfaces check tenant-catalog keys through `presby_has_permission()` inside `loadGivingContext()`, after applicability and the `org_portal.giving` toggle (`src/lib/giving/access.ts`). Actions go through `gateGivingAction()` (`src/lib/giving/action-gate.ts`): `auth()` → Node-side 2FA check → `resolveOrgContext()` → applicability, toggle, keys. All 12 admin giving pages go through `gateGivingPage()`.
 
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| Route or action | `auth()` present? | Permission check present? | Correct key? |
+|---|---|---|---|
+| `GET /o/[slug]/admin/giving/gifts/export` | yes | yes (`context.has.view`) + audit `GIVING_GIFTS_EXPORTED` | `giving.view` |
+| `GET …/admin/giving/statements/[id]/download` | yes (`route-gate.ts`) | yes; audit `GIVING_STATEMENT_DOWNLOADED` | `giving.view` or `giving.manage` |
+| `GET …/admin/giving/statements/print` | yes (`route-gate.ts`) | yes; audit `GIVING_STATEMENTS_BULK_DOWNLOADED` | `giving.view` |
+| `GET …/admin/giving/connect/refresh` | yes | yes (`has.manage`); no audit (only mints a link; reasoned in the file) | `giving.manage` |
+| `GET /o/[slug]/giving/statements/[id]/download` (member) | yes | no key by design; ownership checked inside `findMyStatementForDownload`; audit `GIVING_STATEMENT_DOWNLOADED` with `self: true` | n/a (DECISION-162) |
+| `POST /api/webhooks/stripe` | n/a (signature; 503 when secret unset) | n/a; processor audits | n/a |
+| `GET /api/cron/giving` | n/a (`CRON_SECRET` bearer; 503 unset, 401 wrong) | n/a | n/a |
+| `POST /api/sites/ingest` (refuses a `/give` page) | unchanged | unchanged | n/a |
+| connect: start, continue, refresh, attest payouts, set public page, disconnect, update rates | yes | yes; audited on change | `giving.manage` |
+| donors: create, confirm/dismiss link / remove link, update contact, merge | yes | yes; audited | `giving.record` / `giving.manage` |
+| funds: create, update, retire, reactivate, create general fund | yes | yes; audited | `giving.manage` |
+| gifts: record offline, void / search donors (read) | yes | yes; audited | `giving.record` / `record` or `view` |
+| settings: update | yes | yes; audited | `giving.manage` |
+| statements: issue batch, reissue, record delivery, send notices | yes | yes; audited | `giving.manage` |
+| team: grant, revoke, ensure role | yes | yes; audited | `giving.manage` |
+| `createMemberGiveSessionAction` | yes (+ unverified-2FA refusal) | toggle only by design; membership read server-side | n/a |
+| `createPublicGiveSessionAction` | n/a (anonymous) | honeypot → 3 rate limits → Turnstile → DB flood cap; `audit-exempt` with reason | n/a |
+| `requeueDeadLetterAction` (platform) | yes | yes; audited `ORG_GIVING_EVENT_REQUEUED` | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `/admin/giving` page (platform) | yes | yes (inline Forbidden) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `designateTreasurerAction` (platform) | yes | yes; audited `ORG_TREASURER_DESIGNATED` | `FEATURES.ADMIN_ORGANIZATIONS` |
+
+`check:audit` passes for every `actions.ts`; the four route handlers outside its scan are audited by hand above. No missing or wrong gate found.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** `scripts/giving/test-rls-46.sql` as `presby_app` exits 3, 259/260 — `scripts/giving/test-rls-46.sql:1182-1184` (§46l). Fixture time-bomb: `scripts/giving/seed-dev-giving.sql:214` gives seeded intent I6 (`:246-250`) a 24-hour `expires_at`; the giving cron's `presby_giving_expire_intents()` (`drizzle/0055_presby_giving.sql:2517`) flips it to `expired`. The integrated `test-rls.sql` would go red on `development` at integration.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+**Fix (database-admin):** (1) make I6 immune to the sweep — far-future `expires_at` (mirroring the `…0070` ruling) or have §46l create its own `open` intent inside its rolled-back transaction; (2) restore I6 on the pipeline branch; (3) re-run §46 standalone (260/260, exit 0) and integrated (924 on development-shaped data); (4) run `e2e/giving-webhook.spec.ts` (real cron sweep), then §46 again; (5) check other seeded rows for time dependence (Bramblewood's I8 is also expired, no assertion depends on it).
+
+**Everything else passed.** Re-verification can be scoped to §46 standalone, the integrated `test-rls.sql`, and §46 after a cron sweep.
+
+**Operator prerequisites (outside this phase, not blocking):** Stripe test-mode Connect platform account + the `docs/deployment.md` smoke (incl. `balance_read`); CPA review before any real statement (`GIVING_STATEMENTS_ENABLED` unset); Upstash and Turnstile before go-live.
+
+**Handoff:** back to database-admin (Phase 4) for the §46l fixture fix; QA then re-runs the scoped checks; on PASS, analyst (Phase 6).
+
+---
+
+# Phase 5 — Verification (qa) — run 2 (scoped re-verification)
+
+**Date:** 2026-10-19
+**Verified by:** qa (read-only; recorded verbatim by the orchestrator)
+**Subject:** `pipeline/online-giving` at `6d1fd0a` plus the uncommitted loop-back changes to `scripts/giving/test-rls-46.sql`, `scripts/giving/seed-dev-giving.sql` and this work-log. Neon branch `pipeline-online-giving` (`ep-wispy-mode-axymely1`) only. `git status`/`git diff --stat` identical before and after (3 files, +342/−32). Scope: run 1's re-verification list; run 1's other results stand.
+
+## Type Check
+
+Not re-run: no TypeScript changed (`git diff HEAD -- drizzle src e2e` empty). `npm run lint` **PASS** (exit 0). `npm run check` **PASS** (exit 0, seven tripwires; the secrets/PII guard reads working-tree contents of tracked files, `scripts/check-secrets-pii.mjs:216,225`, so it covered the uncommitted SQL).
+
+## Unit Tests
+
+**1. Diff review.** Test and seed only — no DDL; `drizzle/`, `_journal.json`, `src/`, `e2e/` untouched. Seed: relative dates on I1–I5 and G1–G3/G11 became fixed 2026 instants; G8/G10/G12/G13 use `make_date(2025, …)`; header states the no-wall-clock/cron rule. Suite: all 12 `extract(year from current_date)` sites became `:G_YEAR_PRIOR`/`:G_YEAR_CURRENT` (2025/2026, `test-rls-46.sql:62-63`); remaining `current_date`/`now()` only stamp rows the test creates inside rolled-back blocks.
+§46l (`:1188-1210`, `begin` :1178 / `rollback` :1211) reinstates Missions online, creates an intent (`presby_giving_create_intent_public`) and opens it (`presby_giving_attach_session`), retires the fund with the same UPDATE as `retireFund()` (`src/lib/giving/funds.ts:262-266`, minus `updated_by`/`updated_at`), runs the real `presby_giving_expire_intents()` (0055 :2517), asserts still `open` against a fund with `is_active = false` and `retired_at` set, and reads `presby_giving_return_state` → `confirming`/`Missions` (`expired` would map to `failed`, 0055 :2450-2451).
+Not vacuous: `:inflight` is set only at `:1197` (an empty result is a syntax error → exit 3 under `ON_ERROR_STOP`); the 46p premise (`:1397-1409`) adds `abs(count(fixture gifts) − 12)` under Alder's context.
+Failing-first **observed by QA** from scratch copies: HEAD §46 on today's data → exit 3, 182 passes, `:1184` "FAIL 46l … expected 1, got 0"; `G_YEAR_PRIOR` 2025 → 2024 → exit 3 at `:1409` "FAIL 46p: (premise) … expected 0, got 4". Loop-back M2 (retire UPDATE removed) not re-observed.
+
+**2. §46 standalone** (`psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f test-rls-46.sql` from `scripts/giving/`; `current_user = presby_app`, `rolbypassrls = f`): **263 passes, 0 FAIL, exit 0.**
+
+**3. Integrated `scripts/test-rls.sql`** (scratch copy with Batch 1a's edits at `:824`, `:836`, `:7849`; `ON_ERROR_STOP` off; `\ir giving/test-rls-46.sql` appended; as `presby_app`). Attempt 1 void: `connection to server was lost` at `giving/test-rls-46.sql:1640` after 824 s / 911 passes (exit 2; transport drop, no §46 assertion had failed). **Attempt 2: exit 0, 332 s, 927 passes** (664 + 238 + 25 from `test-rls-46-issue.sql` = 664 + 263). Only FAILs are the five pre-existing branch-data deltas: `:127` (alder memberships 9 vs 10), `:153` (alder people 9 vs 10), `:184` (presbytery members 2 vs 3), `:472` (2fa definer 1 vs 0), `:7864` (DECISION-152 single statistics.publish role). No §46 failure.
+
+**5. DB-backed Vitest, serial** (`--no-file-parallelism --testTimeout=90000 --hookTimeout=120000`). Grep found no Vitest/e2e file reading a seeded giving intent, gift or date (giving DB suites build their own orgs via `src/lib/testing/giving-fixture.ts`; `giving.db.test.ts:330` reads only seeded role ids). Re-ran the six closest anyway — `statements.db`, `self.db`, `attention.db`, `statements-consistency.db`, `domain/giving-statements.db`, `domain/giving.db`: **6/6 files, 102/102, 0 failed, 0 skipped, 478 s, exit 0.**
+
+## End-to-End Tests
+
+**4. `e2e/giving-webhook.spec.ts`** on QA's own `next dev -p 3100` (`RATE_LIMIT_DISABLED=true`, the spec's non-key-shaped default secrets, `STRIPE_SECRET_KEY` unset, `AUTH_URL=http://localhost:3100`), patient scratch config (test 180 s, expect 30 s): **12/12, 58.6 s, exit 0**; server log shows 3 `GET /api/cron/giving 200`. Afterwards: seeded I6 `…0065` and I8 `…0067` `expired` (the run-1 failing state), `…0070` `parked`, `…0071` `dead_letter`, 0 `e2e-giving-%` orgs. **§46 again: 263 passes, 0 FAIL, exit 0.** Server stopped by recorded PIDs (21470 → 21489 → 21491); port 3100 free.
+Auth-touching gate: no auth path touched; run 1's determination and login-path runs stand.
+
+## Regression Tests Added
+
+- `46l: (setup) a gift is started against Missions while it is offered online - the intent is open` — `scripts/giving/test-rls-46.sql:1201-1202`
+- `46l: ...the fund is then retired and a giving-cron sweep runs - the intent is still open (inside its 24 hours)` — `:1205-1207` — guards against a seeded `open` intent lapsing to `expired` under the cron (run 1 FAIL)
+- `46l: the in-flight intent against the retired fund still resolves (confirming)` — `:1208-1210`, now on the block's own session
+- `46p: (premise) alder's twelve fixture gifts and the refund sit in the fixed fixture years 2025 / 2026, not relative to today` — `:1397-1409` — guards against seed/suite year drift (2027 rollover; Q1 seeding)
+- Failing-first observed by QA for pre-fix 46l and the premise; M2 not re-observed. Naming gap carried from run 1 (no "— regression for …" suffix).
+
+## Coverage on Critical Modules
+
+Not re-run (no TypeScript changed). Run 1 stands: `permissions.ts` 100%, `two-factor.ts` 91.3%, `flags.ts` 100%.
+
+## Feature-Gate Audit
+
+No protected routes touched in this loop-back (two SQL fixture files). Run 1's table stands.
+
+## Verdict
+
+**PASS.** §46 standalone 263/263 exit 0 before and after a real giving-cron sweep; integrated `test-rls.sql` 927 with only the five pre-existing branch-data failures; `giving-webhook.spec.ts` 12/12; DB-backed Vitest 102/102; lint and `check` green. Run 1's single FAIL (`scripts/giving/test-rls-46.sql:1182-1184`) is resolved; run 1's other results stand.
+
+**Notes for the orchestrator:** (1) integrated attempt 1 lost its Neon connection at `giving/test-rls-46.sql:1640` — if it recurs at integration on `development`, rerun before reading it as a failure; (2) the loop-back's seed re-apply and idempotence snapshot were not re-done by QA (writes); the 46p premise passing shows the seeded gifts sit in the fixed years; (3) at integration apply the corrected seed block fresh on `development`, expect 927; commit as `fix(test):` with `Caught-By: agent-review`, `Discovered-In: Phase-5`.
+
+**Operator prerequisites (unchanged, not blocking):** Stripe test-mode Connect account + `docs/deployment.md` smoke; CPA review before any real statement (`GIVING_STATEMENTS_ENABLED` unset); Upstash and Turnstile before go-live.
+
+**Handoff:** analyst, Phase 6.
+
+---
+
 
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Date:** 2026-10-19 · **By:** analyst (read-only; recorded by the orchestrator)
+**Subject:** `pipeline/online-giving` at `6d1fd0a` plus the uncommitted, QA-verified fixture fix to `scripts/giving/test-rls-46.sql` and `scripts/giving/seed-dev-giving.sql`, against `main`. The analyst read the work-log and confirmed specific claims in the shipped code; ran no suites and opened no browser (test results are QA runs 1 and 2; 360 px findings come from the implementers' screenshots plus QA's e2e assertions).
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.** The pipeline closes. Every note becomes a `docs/TODO.md` line, and the production deploy is gated on Gate A below.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> Everything Phase 1 promised is built, tested against signed fixtures, and fails closed — the per-congregation Stripe flow, the offline-gift desk, treasurer designation and delegation, 2FA for giving-key holders, member self-view, payouts and PDF statements — but it has never talked to a real Stripe account, so "online giving" is verified against replayed fixtures only; with no keys set it honestly renders "unavailable", and it is not ready to take money until the operator smoke, the CPA review and the enforced-CSP browser check are done.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Tenancy and authority match Phase 1's hardest findings.** G1/F138: the operator designates the first treasurer (DECISION-155 shape); a `giving.manage` holder then delegates giving-only roles on the person arm, `assertPermissionSubset()` untouched. G2: self-grant and the role-edit delta pinned by tests. G4: arm B of the 2FA predicate plus the Node-side session check. G28: the inbox has no `presby_app` grant. The seven presbytery-invariant tests are present (46d: a presbytery holding `giving.view` still reads zero rows). `check:giving-boundaries` (B1–B9) pins no `getPlatformDb()` under `src/lib/giving/`, a single `stripe` runtime importer, the CSP and the retired flag. QA's live probes: all 15 giving tables FORCE RLS, no DELETE grant, owner-path refusals by trigger.
+- **R9 holds structurally.** A Stripe payment with no presby intent is ignored — G7's "pure contribution only" is true for online money and the crafted-metadata cross-org vector is closed.
+- **Honest with no Stripe configured** (confirmed in code): treasurer panel `UNCONFIGURED_MESSAGE` "Online giving isn't enabled on this installation." with offline gifts, funds, donors and statement setup still working; public and member give forms structurally unreachable (`presby_public_giving_config` returns `live` only with an active connection and an online fund, and a connection can only be created through Stripe) — "Online giving isn't available right now."; webhook 503 when the secret is unset; `statementIssuingEnabled()` false in production unless `GIVING_STATEMENTS_ENABLED === "1"`, page says "Issuing statements is switched off on this site." with no issue control. Nothing claims money can move.
+- **Money, compliance and copy rules:** integer cents, server-recomputed gross-up, strict amount grammar; redirects via `givingOrigin()`, never `Host`; CSV cells formula-prefixed; wording code-generated and golden-tested; receipt vs acknowledgment copy separated under the forbidden-word walk; the offline form carries "Dinners, raffles and purchases are not gifts."; statement content never enters `email_queue`.
+- **Verification depth:** QA's full battery (7,479/7,480, the skip opt-in), §46 263/263, integrated RLS 927, giving e2e 98/98 at patient timeouts, production-build statements and hydration lanes, login-path specs after the `presby_two_factor_required()` change. Both time-bombs (§46l and year rollover) found and fixed in Phase 5.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Flows 1–3, 5–8, 10–13** (connect, one-time gift, fee cover, ACH, webhook ingest, offline recording, refund and dispute, statements, member self-view, operator health) — shipped as described, with failure paths and uniform webhook responses. **Matches.**
+- **Flow 4 (failed renewal).** Phase 1: a failed recurring charge becomes a failed gift. Shipped (P3-16): `last_payment_failed_at` on the schedule, surfaced in "needs attention". **Acceptable drift** (avoids an illegal `failed → succeeded` transition; still reaches the treasurer).
+- **G17 (recurring management).** Portal session dropped (unconfirmed for direct-charge customers); donor path is "contact the church"; treasurer sees a count (disconnect dialog) plus failed-renewal attention, no schedule list. **Acceptable drift on the donor path; small gap on the treasurer list** (tracked).
+- **G24 (manual link for directory-hidden members).** No manual-link UI (Batch 2 orchestrator ruling); a hidden member's offline gifts never reach their own giving page (the statement still goes to the donor's address). **Gap, deferred and tracked.**
+- **G11 (stale statements).** Version n+1 works, but a stale statement whose every gift was refunded cannot be corrected. **Gap, tracked** ("withdraw a stale, fully refunded statement").
+- **G7/G18 wording.** The intangible-religious-benefits clause omitted from v1, gated behind the CPA review and `GIVING_STATEMENTS_ENABLED`. **Matches intent.**
+- **G13 and G27 (privacy copy).** Required privacy copy (erasure vs retention; the platform key's technical reach at Stripe). The go-live checklist lists it, but no privacy page or notice exists anywhere and no TODO owned creating one. **Gap, untracked until this section.**
+- **R13 absent-state wording.** The page header and SQL comment say a toggle-off org is byte-identical to an unknown slug; the function returns `unavailable` for any active org with a live site, whatever its toggle or type (Batch 4b note). Leaks nothing (the site is public) and matches R13. **Acceptable drift; the comment is stale.** Presbytery and synod sites with a live site also show "isn't taking online gifts at the moment."
+- **Return pages (Flow 3).** Failure copy says "contact the church" with no name or phone (`presby_giving_return_state` returns neither). **Minor drift.**
+- **G14 (test-mode badge).** Shown only to `giving.view`/`giving.manage` holders. **Acceptable.**
+- **F-numbers and DECISIONs.** DECISION-168–175 and F138–F145 drafted in the work-log, not yet in the shared files. **Pending integration.**
+- **Phase 1 miss: the `/give` shadow.** The static `give` segment beats the site catch-all `[[...path]]`. The ingest validator rejects new bundles with a `/give` page, but an already-ingested bundle with one is silently replaced by the platform give page after deploy (Batch 4a note 11). Phase 1's Pass 5 should have caught it. A deploy-time regression risk for real sites — Gate A item 1.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: **pass** (one-click "Create General Fund"; Flow 12's sentence on member history; honest empty states on payouts, statements, overview). Caveat: the member Statements empty body "Your congregation issues a giving statement after the year ends." overpromises while issuing is production-gated (tracked).
+- Failure microcopy: **pass** (a DB error never reads as an empty list; unconfigured/unavailable/section-forbidden/toggle-off/not-applicable all distinct; one identical 404 on downloads).
+- Permission gate: **pass** (QA's hand-read audit; Edge → `auth()` → four-way miss → Node 2FA → applicability → toggle → key; `check:audit` green; a non-member platform admin gets the four-way miss).
+- Audit event: **pass** (keys declared up front; handlers outside `check:audit`'s scan audited by hand and pinned by route tests; ids and counts only).
+- Mobile (360px): **pass**, by implementer screenshots and QA's e2e assertions (the analyst opened no browser).
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Residuals before the production deploy (giving ON, no Stripe keys, `GIVING_STATEMENTS_ENABLED` unset, real organizations)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+**Gate A — must check, blocks the deploy**
+1. **Existing site bundles with a `/give` page** are shadowed by the platform give page on every org's `/site/<slug>/give` (even with the toggle off — the route is static). Before deploy, check each live site (its `site-<slug>` repo, or request `/site/<slug>/give` on the current production build); rename/remove any hit or hold the deploy until the fall-through fix ships.
+2. **Migration order and journal.** 0055/0056 apply only once the orchestrator adds the journal entries at integration. Production needs 0054 first, with the F133 pre-ship count. Integrate on `development` first (`test-rls.sql` 927). 0055 deletes the `org_portal.giving` `feature_flags` row (ON in production behind the inert placeholder), so the placeholder tile disappears for everyone at deploy — intended.
+3. **What "giving toggled ON" can mean.** No platform switch remains; only the per-org toggle, congregations and NWCs only (a presbytery/synod row is ignored). Q3 (OFF by default) is unchanged; turning it on for real orgs is a deliberate per-org act, and every member of a toggled-on org gets a Giving tile leading to an honest, empty page.
+
+**Gate B — state it to whoever turns it on; not blocking**
+4. A member sees "X isn't taking online gifts at the moment. Nothing has been charged.", an empty gifts list, and the overpromising statements sentence. Nothing claims money can move.
+5. Admin dead end: until the operator designates a treasurer, nobody holds a giving key; "ask your treasurer or another administrator" is circular. Designate the treasurer as part of turning giving on.
+6. Offline recording is fully live: once a treasurer exists, real donor names, addresses, emails and amounts go into tier-2 tables (CSV export audited); no privacy notice exists. Real 2026 gifts cannot yield presby statements unless `GIVING_STATEMENTS_ENABLED=1` is set after the CPA review and before January 2027 — tell any treasurer recording real gifts.
+7. Never exercised against real Stripe. Unconfirmed: the Accounts v2 "payouts enabled" path, `account.updated` delivery on the Connect endpoint for a v2 account, restricted-key acceptance on v2 endpoints, portal behaviour (not built). Operator smoke not run; Q1 open. Add test-mode keys first; no live key until the enforced-CSP browser check, Upstash and Turnstile, the privacy notice and the CPA are done.
+8. Sign-in cost: arm B makes `presby_two_factor_required()` ~2.5–3.4 ms per call (15-org branch), in the jwt callback for every user. Watch p95 after deploy.
+9. The give page's "unavailable" state is indexable on every live site (tracked).
+
+## Follow-Ups (SHIP WITH NOTES)
+
+New from Phase 6 (each a `docs/TODO.md` line at integration):
+- giving: pre-deploy check and fix for the `/give` shadow (check every live site before deploy; longer term, fall through to the bundle's own `/give` page when giving is not live, plus a bundle audit query) — Batch 4a note 11
+- giving: member Statements empty-state copy overpromises while `GIVING_STATEMENTS_ENABLED` is unset; recheck `giftsHelp` for orgs with no treasurer — `MEMBER_GIVING` in `src/lib/giving/giving-copy.ts`
+- giving: `GivingForbidden` is a dead end when nobody holds a giving key — say a treasurer must be designated by PresbyPortal and point a founding administrator to a support ticket — G1 usability
+- giving: no privacy notice page exists (G27 platform-key reach, G13 erasure vs 7-year retention, the 90-day raw-body purge, donor data held); go-live gate for live money, owed now for offline donor PII; the `docs/deployment.md` checklist item has no owner
+- giving: `/site/<slug>/give` indexable "unavailable" page — `robots: { index: false }` when not `live`; fix the stale byte-identical comment in `give/page.tsx` and `presby_public_giving_config`; decide copy for presbytery/synod sites
+- giving: treasurer cannot list active monthly gifts (G17) — read-only schedule list on the overview
+- giving: return pages name no church and show no phone — extend `presby_giving_return_state` with org name and public-profile phone — Batch 4b
+- giving: measure `presby_two_factor_required()` p95 on production after 0055 (budget 5 ms) — F140
+- giving: operator pre-deploy runbook line (0054, then 0055/0056 with journal entries; turn giving on per org only where wanted, designating a treasurer in the same step)
+
+Already on the integration checklist (move verbatim): G24 manual link; `presby_giving_local_today()`; B7 tokenizer; S2 tier-3 `requires_two_factor`; statement token download; void by manage-only holder; dead-letters index; unused Checkout session on retry; platform-wide `blob_assets` immutability; the three Batch 5a lines; the stuck-payout state (Batch 6 ruling 3); test-mode empty history and internal fund names (Batch 6 ruling 4); the 5b open questions; retrospective items (Phase 3 reads the pinned SDK changelog before marking an API fact confirmed → `tech-lead.md`; Phase 1 Pass 5 asks what a new static segment shadows); the operator prerequisites (Stripe test-mode Connect smoke incl. `balance_read` and a sanitized `GET /v2/core/accounts` capture; CPA; Upstash and Turnstile; enforced CSP in a browser; restricted key on v2 endpoints).
+
+Integration housekeeping: journal entries, `domain/index.ts`, the `\ir` lines, DECISION-168–175, F138–F145, STATE, release notes (MINOR, v0.34.0), TODO Done; replace the checklist's old total with 927; commit the §46/seed fix as `fix(test):` (`Caught-By: agent-review`, `Discovered-In: Phase-5`); no Source block, so no feedback row (Rule 12).
+
+**Rule 13 (what's-new):** do not publish now — no member can give or receive a statement in the deployed state. Publish when the first congregation goes live: "You can now give to your congregation online, once or monthly, and see your gifts and year-end statements here."
+
+**Rule 15 (`docs/architecture.md`):** yes, a small stable change — line 31's "not yet built" becomes false; add a short "Money in: online giving" subsection (provider-neutral core with a Stripe adapter at the edge; the checkout intent as the only path from payment to gift; a signed webhook into an inbox the app role cannot read, written only by SECURITY DEFINER functions that derive the org from the connection; append-only gifts and reversals; statements as frozen snapshots plus stored PDF bytes; the platform key as a wildcard credential behind a named-call allowlist; redirect-only SAQ-A); one §8 clause that `/site/<slug>/give` is platform-owned; mention Stripe and `pdfkit` in §10.
+
+**Functionality map:** Index "NOT built — ledger/giving" → "ledger", plus the giving Index and full-map bullets drafted by the analyst (applied at integration).
 
 ## Red Flags (if NEEDS REWORK)
 
-- [Specific. What has to change before this ships.]
+- None.
+
+**Per-Phase Status:** | 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-19 |
+

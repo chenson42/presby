@@ -18,7 +18,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
 | 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; 5a complete; 5b complete (full-stack-developer, 2026-10-18); Batch 6 complete (full-stack-developer, 2026-10-18) - Phase 4 ready for QA | — | 2026-10-18 |
 | 5 — Verification | qa | Complete — run 3 (/give fall-through) PASS 2026-10-19; run 1 FAIL (§46l fixture), loop-back by database-admin, run 2 scoped re-verification green (§46 263/263; integrated 927; webhook e2e 12/12 then §46 263/263) | PASS (run 2) | 2026-10-19 |
-| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-19 |
+| 6 — Shipped vs intent | analyst | Complete — Gate A item 1 (/give shadow) re-checked and CLOSED at fc25d0e; remaining notes tracked | SHIP WITH NOTES | 2026-10-19 |
 
 ---
 
@@ -4582,3 +4582,26 @@ No protected routes touched: no route handler or server action changed; the two 
 
 ## Verdict
 **PASS.** Notes: (1) optional presbytery full-body hardening above; (2) the stale `presby_public_giving_config` comments in 0055 stay open → TODO at integration; (3) rerun DB suites with `--testTimeout=90000` if wanted.
+
+---
+
+# Phase 6 re-check (bug-fix variant): `/give` shadow, Gate A item 1 — analyst
+
+**Date:** 2026-10-19 · **By:** analyst (read-only; recorded by the orchestrator) · **Subject:** `fc25d0e`.
+
+**Verdict: SHIP WITH NOTES** — Gate A item 1 is **closed**; the pipeline verdict stays SHIP WITH NOTES (other follow-ups, Gate A items 2–3 and the operator prerequisites remain). Nothing reopens an earlier phase.
+
+1. **An already-ingested site keeps its own `/give` page while giving is not live — confirmed.** `give/page.tsx` serves the platform form only when `config.state === "live"`; otherwise `renderSitePage(slug, "/give", { presbyteryFallback: false })` returns the bundle page through the catch-all's render path (same nav, brand, footer, metadata; `generateMetadata` uses the bundle's). With no Stripe connection giving can never be `live`, so the production case (a bundle `/give` page linking to an external provider) renders; toggle-off likewise; a failed config read returns `absent` → bundle page or the single 404, never a wrong notice. Evidence: e2e `giving-public.spec.ts:512`, `:534` (dev and prod, 55/55); 8 cases in `fall-through.test.tsx`; 10 in `page.test.tsx` (seen failing against HEAD). Edges: `/give/<x>` was never shadowed; `/give/return` stays the platform's (Stripe return URL; ingest already refuses it).
+2. **The not-live platform notice is noindex — confirmed** (`robots: { index: false }`; unit plus e2e `:568`, `:581`). A bundle's own page keeps the author's indexing.
+3. **Residual accepted and stated:** when a congregation goes live, the platform page replaces its own `/give` page (restored if giving goes offline). Deliberate: going live is per-congregation and attested, and the `giving` live slot lets an author place the form on their own page. Added to the operator runbook line below.
+4. **The loosened absent-state test does not change the view** — QA's measurements (one body and header set per equal-length group, all 404; variation only by slug length at the 19-char `next-size-adjust` boundary; timing AUC 0.498–0.513; no new tenancy-dependent read). QA's padded-presbytery suggestion is polish, not a note.
+
+**Closed:** the `/give` shadow pre-deploy check/fix line; the noindex half of the indexable-"unavailable" line; Gate B item 9.
+
+**Still open (TODO text):**
+- giving: stale "absent is byte-identical for a toggle-off org" comments — `drizzle/0055_presby_giving.sql` (~2373 header and ~2645 `COMMENT ON FUNCTION`, `presby_public_giving_config`) and `src/lib/giving/public-config.ts` header (~23). The function returns `unavailable` for any org with a live site, whatever its toggle or type; `absent` is only no-such-org or no live site. Fix the SQL at the next in-place 0055 correction (unreleased); fix the TS comment now.
+- giving: decide the "unavailable" copy for presbytery/synod sites with a live site ("isn't taking online gifts at the moment" is wrong for a council that cannot take gifts).
+- giving: operator pre-deploy runbook — 0054, then 0055/0056 with journal entries; turn giving on per org only where wanted, designating a treasurer in the same step; before turning giving on for a congregation, check whether its published site has its own `/give` page — going live replaces it with the platform page (restored if giving goes offline), so tell the church and, if wanted, move that content to a `/give/<x>` page or the giving live slot.
+- (optional) giving: absent-state e2e — compare the seeded presbytery to an unknown slug padded to its length as a full-body check (QA run 3).
+
+**Per-Phase Status:** | 6 — Shipped vs intent | analyst | Complete — Gate A item 1 (/give shadow) re-checked and CLOSED at fc25d0e; remaining notes tracked | SHIP WITH NOTES | 2026-10-19 |

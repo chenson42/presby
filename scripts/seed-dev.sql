@@ -1940,3 +1940,8 @@ select v.id::uuid, '22222222-2222-2222-2222-222222222222'::uuid,
          is_public, cancelled, type_name);
 
 commit;
+
+-- Online giving fixture (drizzle/0055/0056). Its own file and its own
+-- transaction (the write marker is transaction-local), so it runs AFTER the
+-- final commit above, never inside it.
+\ir giving/seed-dev-giving.sql

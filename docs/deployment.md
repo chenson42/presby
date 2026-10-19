@@ -408,6 +408,41 @@ Run against `development` or a preview, never production data.
      (enforced) as well as the report-only one, with no console violation.
      Production emits no `'unsafe-eval'`; development adds it for React.
 
+### Pre-deploy runbook: the giving migrations and turning giving on
+
+Added at integration (v0.34.0). Production is at `0053` as of 2026-10-07.
+
+1. **Order.** `0054` first (the calendar migration, with its F133 pre-ship
+   count), then `0055_presby_giving` and `0056_presby_giving_statements`, each
+   hand-applied with the `psql ... -1` form in "Migrations" above, strictly in
+   journal order. The journal entries for 55 and 56 are in the branch.
+   Integrate on `development` first and run `scripts/test-rls.sql` there as
+   `presby_app` (expect **927** passes). Snapshot production before applying.
+2. **What `0055` does to existing data.** It deletes the `org_portal.giving`
+   `feature_flags` row (ON in production behind an inert placeholder), so the
+   placeholder tile disappears for everyone at deploy. That is intended; giving
+   is now a per-organization toggle, congregations and new worshiping
+   communities only, off by default.
+3. **Turn giving on per organization, only where wanted**, from
+   `/o/<slug>/admin/features`, and **designate the treasurer in the same step**
+   (`/admin/organizations/[id]`): until the operator designates one, nobody holds
+   a giving key and the admin pages are a dead end. Once a treasurer exists,
+   offline gift recording is fully live and real donor data goes into tier-2
+   tables, so tell the treasurer that no statement can be issued in production
+   until `GIVING_STATEMENTS_ENABLED=1` is set after the CPA review (and before
+   January 2027 for 2026 gifts).
+4. **The `/give` go-live residual.** Before turning giving on for a congregation,
+   check whether its published site already has its own page at `/give`. While
+   giving is not live that page renders exactly as before. The moment giving
+   goes live, the platform's give page replaces it (and it comes back if giving
+   is taken offline). Tell the congregation, and move that content to a
+   `/give/<x>` page or to the giving live slot if they want to keep it. A bundle
+   page at exactly `/give/return` is always the platform's.
+5. **Nothing takes money without keys.** With `STRIPE_SECRET_KEY` unset, the
+   treasurer panel says online giving is not enabled on this installation and the
+   public and member give forms are unreachable; with `STRIPE_WEBHOOK_SECRET`
+   unset the webhook answers 503.
+
 ### Go-live checklist (enforced by humans)
 
 - `STRIPE_SECRET_KEY` (restricted, per the table) and `STRIPE_WEBHOOK_SECRET`
@@ -432,7 +467,7 @@ Run against `development` or a preview, never production data.
   payouts cannot be reconciled), and its Stripe statement descriptor shows the
   congregation's name.
 - `GIVING_STATEMENTS_ENABLED` is **unset** until the CPA has ruled on statement
-  wording (Batch 5).
+  wording (Batch 5). Nothing issues a statement in production without it.
 - Privacy copy discloses the platform account's technical reach at Stripe.
 - This section's key-rotation procedure has been read by whoever holds the key.
 

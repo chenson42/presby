@@ -3655,7 +3655,7 @@ Next: **Batch 5, database-admin (5a: `0056`) then full-stack-developer (5b)**, p
 - docs/decisions.md: DECISION-168–175 (drafts in work-log Phase 2/3)
 - docs/schema-design-2.md: F138–F143
 - docs/STATE.md, docs/reviews/log.md (if reviews run), functionality map, release notes (MINOR bump), architecture.md (new subsystem: giving provider ingest — yes, genuinely architectural)
-- Expected test-rls total after integration: 865 passes (664 stock + 201 §46)
+- Expected test-rls total after integration: **927** passes on `development` (664 stock-with-integration-edits + 263 §46; supersedes the earlier 865, 871 and 924 figures)
 
 ### Phase 6 reading notes (deviations the analyst should weigh)
 - Batch 4b: a toggle-off org with a live site renders the `unavailable` notice, not `absent` (the function returns `absent` only with no live site); the slot shows the notice rather than nothing; return pages carry no org name or phone (`ReturnState` has neither); the "gift only" line says "no goods or services in return" — the "intangible religious benefits" wording is the CPA question (Operator Q6).
@@ -3663,6 +3663,33 @@ Next: **Batch 5, database-admin (5a: `0056`) then full-stack-developer (5b)**, p
 - Batch 2: void requires `giving.record` even for a manage-only holder (1a D2).
 
 Batches 1–4 committed: 591f6a1, e880147, 05e3636, 70cab12, 682ef86, 158be83, 3c86287, f3b6921; 5a committed next (see git log).
+
+### Integration — done 2026-10-19 (orchestrator's delegate; nothing committed, no database touched)
+
+Ticked against the checklist above and the Phase 6 "Integration housekeeping" line:
+
+- [x] `scripts/seed-dev.sql`: `\ir giving/seed-dev-giving.sql` appended after the final `commit;`.
+- [x] `scripts/test-rls.sql`: `\ir giving/test-rls-46.sql` after section 45; section 15 (alder and bramblewood) gained `and organization_id is not null`; section 41 count 4 → 6 with the SIX-template-roles message. Located by content, not line number.
+- [x] `drizzle/meta/_journal.json`: idx 55 (`when` 1787014253186) and idx 56 (`when` 1787014283186).
+- [x] `src/lib/db/domain/index.ts`: `export * from "./giving";` (statements live in the same file) and the header corrected.
+- [x] `npm run docs:erd`: ran (with placeholder connection strings, no database contact); **it changed nothing** — `src/lib/dev-docs.ts`'s `MODULES` map has no giving entry (nor events, sites, support, staff or calendar), so those tables fall under "platform (from starter)", which the generator skips. Filed in `docs/TODO.md`.
+- [x] `docs/decisions.md`: DECISION-168–175 (174 gained the `@swc/helpers` Apache-2.0 correction, the `@types/pdfkit` devDependency and an "as shipped" bullet; 175's "may split" note replaced by "eight numbered sub-rulings").
+- [x] `docs/schema-design-2.md`: new section 2p, F138–F145 (F142–F145 from the kickoff block, Batch 1a candidates and 5a's two candidates, plus the Phase 5 time-bomb class folded into F145).
+- [x] `docs/TODO.md` (Rule 10): every checklist line, the Phase 6 "New from Phase 6" lines minus those the re-check closed (pre-deploy `/give` check, the noindex half of the indexable-unavailable line), the re-check's still-open lines, the portal-home "Only plain objects" server error, the 0055 SQL stale-comment line (the TS half fixed), the Next.js `<16.3.8` advisory, the dev-docs module-map gap, a `docs/testing.md` line; Track E, the go-live flag line and the Backlog "Ledger and giving" line updated; giving moved to Done (2026-10-19).
+- [x] `docs/product/functionality-map.md` (Rule 14): version stamp 0.34.0, "NOT built — ledger/giving" → "ledger", a giving Index line, the full-map bullet, the give-page bullet (with the fall-through), the webhook and cron bullets, the retired flag. The analyst's Index and bullet text was not actually drafted in the work-log (Phase 6 only says "drafted by the analyst"), so it was written from the shipped code and the Phase 6 text.
+- [x] `docs/architecture.md` (Rule 15): the "Not yet built" sentence fixed, a short Online giving paragraph in section 2, one clause in section 8, new section 8a "Money in: online giving", Stripe and `pdfkit` in section 10.
+- [x] `docs/deployment.md`: "Pre-deploy runbook: the giving migrations and turning giving on" (0054 → 0055/0056, per-org enablement with treasurer designation, the `/give` go-live residual) before the go-live checklist.
+- [x] Release notes: `docs/release-notes/v0.34.md`, `package.json` 0.33.0 → 0.34.0, v0.33's nav link. `package-lock.json` left at 0.33.0, matching the 0.33.0 release commit.
+- [x] `docs/STATE.md`: new RESUME block for 2026-10-19; the 2026-10-07 block retitled "Previous handoff".
+- [x] `src/lib/giving/public-config.ts` header: the stale "absent is byte-identical for a toggle-off organization" comment corrected. **Not done on purpose:** the same comment in `drizzle/0055_presby_giving.sql` (~2373, ~2645), left as a TODO because 0055 is not edited at integration.
+- [x] The "865" expectation replaced by **927** (Integration checklist line); the Batch 3a-fix sentence that quotes 865 is a dated historical record and was left.
+
+**Not done / for the orchestrator:**
+- The `fix(test):` commit for the §46l fixture fix (`Caught-By: agent-review`, `Discovered-In: Phase-5`) — no commit made (instruction). The `scripts/giving/*` fixture changes from the Phase 5 loop-back were already in the tree at `f1b5bd3`.
+- `docs/reviews/log.md` untouched (no review ran). No what's-new entry (Phase 6 Rule 13: publish when the first congregation goes live).
+- Migrations are not applied anywhere and `scripts/test-rls.sql` was not run (the orchestrator applies 0055/0056 and the seed to `development`, then expects **927**).
+- `docs/schema-design.md` ERD unchanged (see `docs:erd` above).
+- Verification of this integration (worktree, no database): `npm run typecheck` 0, `npm run lint` 0, `npm run check` 0 (all seven tripwires incl. secrets), `npm run test` 0 (413 files passed / 58 skipped; 5,858 passed / 1,640 skipped), `npm run build` 0.
 
 ## Batch 5a — statements schema 0056 and pdfkit (database-admin)
 
@@ -4605,3 +4632,12 @@ No protected routes touched: no route handler or server action changed; the two 
 - (optional) giving: absent-state e2e — compare the seeded presbytery to an unknown slug padded to its length as a full-body check (QA run 3).
 
 **Per-Phase Status:** | 6 — Shipped vs intent | analyst | Complete — Gate A item 1 (/give shadow) re-checked and CLOSED at fc25d0e; remaining notes tracked | SHIP WITH NOTES | 2026-10-19 |
+
+---
+
+### Integration verification on `development` (orchestrator, 2026-10-19)
+
+- `drizzle/0055_presby_giving.sql` and `0056_presby_giving_statements.sql` applied to `development` (`ep-lingering-meadow-…`) as `neondb_owner` with `ON_ERROR_STOP=1`, each **twice** (idempotence): all four runs exit 0. 15 `giving_*` tables; the `org_portal.giving` flag row is gone.
+- `scripts/giving/seed-dev-giving.sql` applied twice: both exit 0.
+- `scripts/test-rls.sql` as `presby_app` (`rolbypassrls = f`): as written it stops at `:127` (alder memberships 9 vs 10) — **`main`'s unmodified script stops at the same line on `development`**, so this is pre-existing data drift, not the integration. No-stop copy: stock **664 passes** with exactly the five known drifts (`:127`, `:153`, `:184`, `:472`, `:7866`); the run then lost its connection inside §46 (`giving/test-rls-46.sql:511`, local "Can't assign requested address" — transport, not an assertion). §46 standalone with `ON_ERROR_STOP=1`: **263/263, exit 0**. 664 + 263 = **927**, the expected integrated total.
+- TODO line added for the five development drifts.

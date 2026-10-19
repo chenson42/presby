@@ -21,8 +21,11 @@ import type { FeeRates } from "./money";
  *
  * The two answers are deliberately hard to tell apart from a miss:
  *   - config `absent` is byte-identical for an unknown slug, a non-tenant slug,
- *     and a toggle-off organization (the database guarantees it; the page must
- *     render the SAME markup for all three);
+ *     and an organization with no live published site (the database guarantees
+ *     it; the page must render the SAME markup for all three). A toggle-off or
+ *     non-giving-type organization WITH a live site is `unavailable`, not
+ *     `absent`: its site is public, so the answer leaks nothing, and the give
+ *     page falls through to the site's own `/give` page when it has one;
  *   - return `unknown` is identical for an absent, foreign-organization or
  *     malformed session id (and this module never touches the database for a
  *     malformed one).

@@ -1676,6 +1676,42 @@ deliberately ships no writer. What I did, and deliberately did not do:
 
 **Fixed** in two legs. Legs (2) and (3) by `fix(directory):` (v0.31.1, `2026-10-14-directory-ended-memberships`: the predicate gains `and m.ended_on is null`; find-person consumes it through `findDirectoryPersonIds`; failing-first regression tests in `directory.test.ts` and `find-person.test.ts`, including a find-person-versus-directory equivalence guard). Leg (1) by `2026-10-14-portal-home-alignment` (v0.33.0): the home household count goes through `countHouseholdDirectoryMembers`, built on the directory's own query, so the home page and the household page cannot disagree. Closes the 2026-08-24 portal-home-directory Phase 6 follow-up on the hand-copied predicate. **Residual, accepted:** `children.ts` and `role-grants.ts` keep their own member queries without the ended term (not directory readers; `docs/TODO.md`), and find-person still matches any email or phone contact row where the directory search matches only the primary one.
 
+## 2p. Online giving — findings from the giving pipeline (F138–F145)
+
+*(2026-10-15 → 2026-10-19, `docs/work-log/2026-10-15-online-giving.md` Phases 2–4; migrations `0055_presby_giving` and `0056_presby_giving_statements`, DECISION-168–175; recorded by the orchestrator at integration.)*
+
+### F138 — a platform-designated treasurer can never delegate giving
+
+**F138 — after the operator designates the first treasurer, `giving_recorder` cannot be adopted or granted, and the treasurer role cannot be re-granted to a successor, by anyone.** `adoptTemplate()` requires `roles.manage` and `grantRole()` requires `role_grants.manage`, and both also require the subset check over the giving keys. The founding administrator holds the first two and no giving key; the treasurer holds the giving keys and neither role key. No single person satisfies both. This is F111's ceiling showing up across two holders instead of one. **Resolved** by module-scoped delegation (DECISION-170): a `giving.manage` holder may grant and revoke giving-only roles on the person arm, with `assertPermissionSubset()` called unchanged. F111 itself stays open.
+
+### F139 — the resolver's commission and delegation arms accept any role, so a giving role could carry per-member giving to a parent council
+
+**F139 — `presby_effective_permissions()` allows any role as an administrative-commission or delegation role.** A role carrying a giving key, used that way, would let a parent council's commission members read a congregation's per-member giving. **Closed** by three 0055 triggers (DECISION-175 (1)) that refuse a role carrying a `permissions.module = 'giving'` key as a commission or delegation role, and refuse binding such a key to a role already so used. Not reachable today because `withOrgContext()` needs an active membership at the target. Cost: a presbytery commission cannot be granted treasury powers; lifting that is a deliberate future pipeline.
+
+### F140 — the giving 2FA arm duplicates the resolver's four arms
+
+**F140 — `presby_two_factor_required()` reproduces the resolver's four arms inline** (it cannot call `presby_effective_permissions()`, which needs an org context sign-in does not have, and whose file the design pins as unchanged). An edit to the resolver that is not mirrored would silently under-require 2FA for giving holders. **Mitigated** by a DB agreement matrix over the real resolver and an `md5(prosrc)` tripwire on the resolver (`4c79e30535229f6fd44730c38add28d0`). The durable fix is a shared core function in a future resolver pipeline. **Residual, accepted:** the predicate costs about 2.4–3.4 ms per warm call and 7.4–8.3 ms on a brand-new pooled connection (relation-cache warm-up), against a 5 ms steady-state budget; measure the production p95 after deploy (`docs/TODO.md`).
+
+### F141 — the Stripe allowlist, as ruled, could not complete a recurring-gift path
+
+**F141 — recent-API-version Invoices no longer carry their PaymentIntent, and `invoice_payment.paid` carries no subscription or customer,** so a monthly gift needs one event-anchored invoice retrieve that the Phase 2 allowlist did not contain. Phase 3 confirmed the linkage and amended the allowlist (`retrieveInvoiceForPayment`, DECISION-175 (7)). **Process finding:** Phase 2 should confirm a provider's linkage facts before it fixes an allowlist, and Phase 3 should read the pinned SDK's changelog before marking an API fact confirmed (two further misses: account-link `configurations`, Checkout `payment_method_types`).
+
+### F142 — a SECURITY DEFINER `language sql` function is never inlined, so planning sets the cost of a many-join predicate
+
+**F142 — the 2FA arm joins eight relations; as a `SECURITY DEFINER` `language sql` function it is planned on every call (about 12 ms to plan against about 1 ms to execute).** Inlining is unavailable to a SECURITY DEFINER function, so on a hot path the plan, not the execution, dominates. Mitigated with `set join_collapse_limit = 1, from_collapse_limit = 1` and an explicit join order, which brought the steady-state call to 2.4–3.4 ms. Generalisation: measure planning time separately for any many-join SECURITY DEFINER predicate that runs on a hot path.
+
+### F143 — BEFORE INSERT guards fire before ON CONFLICT is checked
+
+**F143 — on a table with a BEFORE INSERT guard, `insert … on conflict do nothing` is not an idempotence tool:** the guard runs on the proposed row before the conflict is detected. The seed's reversal, written that way, was bound-checked as a second refund on re-run and raised; the whole-file re-apply proof found it. **Fixed** with `where not exists`; `presby_giving_apply_reversal()` already tests existence first. Any idempotent insert into a guarded table (`giving_gift_reversals`, and the statement tables) tests existence first.
+
+### F144 — a deferred consistency trigger on a header and lines pair needs a trigger on the header too
+
+**F144 — a constraint trigger that runs `AFTER INSERT` on the lines alone never checks a header that has no lines,** so a statement that silently omitted every gift would commit. 0056 therefore also puts the deferred consistency trigger on `giving_statements` itself; §46r "a header with no lines" proves it. A transaction-local marker records `<statement id>:<line count>;` for each statement already proven, so the check runs once per statement rather than once per row, and a line added later changes the count and is re-checked.
+
+### F145 — a failing-first run can pass for the wrong reason when the fixture never exercises the input the mechanism guards
+
+**F145 — a mutation test is only evidence if the fixture supplies the input the mechanism acts on.** Batch 5a's stamp of `issued_at` was unproven in Vitest because nothing supplied `issued_at` (mutation M17): removing the stamp changed nothing, so the "failing" run failed for another reason. Generalisation: when a guard overwrites a caller-supplied value, the test must supply a hostile value and assert it was replaced. Related time-bomb class (Phase 5 run 1): a seeded row whose validity depends on the clock and on a sweeper (`presby_giving_expire_intents()` expired the seeded open intent 24 hours after seeding) fails an assertion days later with no code change; seeded rows that a sweeper can touch must be immune to it, or the assertion must create its own.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

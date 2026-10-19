@@ -21,8 +21,11 @@
  * any script, frame or response header; the five return panels from seeded
  * intents and the single `unknown` panel; no name or email on a return page;
  * the live slot (placed by a staged bundle, validated `filter.fund`, gone when
- * giving is off); and a 360 px pass (no sideways scroll, screenshots under
- * test-results/giving-public-360/ for a human to read).
+ * giving is off); a 360 px pass (no sideways scroll, screenshots under
+ * test-results/giving-public-360/ for a human to read); and the /give
+ * fall-through (Phase 6 follow-up): a site bundle that already has its own
+ * `/give` page is shown whenever giving is not live, the platform page wins
+ * only when it is live, and `/give/<other>` is untouched.
  */
 
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
@@ -56,9 +59,23 @@ async function noHorizontalScroll(page: Page, label: string) {
   expect(overflow, `${label} scrolls sideways`).toBeLessThanOrEqual(1);
 }
 
-/** Next stamps each response with a random request id (`__next_r`) and an `_rsc` token; nothing else may differ. */
+/**
+ * Next stamps each response with a random request id (`__next_r`) and an `_rsc` token; nothing else may differ.
+ *
+ * The DEV server also streams React's debug-info rows (`ab:D"$cd"`) inside the Flight payload, and how many
+ * rows there are, and so every later row id and `$`-reference, depends on I/O timing. A page that awaits more
+ * than one database read (the give page's not-live path now also reads the site bundle, as the catch-all does)
+ * makes that numbering vary from request to request, with identical visible markup. Those rows and the numeric
+ * references are masked; every string the page renders, and the whole document outside the Flight script, still
+ * has to match byte for byte. (`npm run build && next start` emits no such rows at all.)
+ */
 function maskPerRequest(html: string): string {
-  return html.replace(/__next_r="[^"]*"/g, "R").replace(/_rsc=[A-Za-z0-9]+/g, "RSC");
+  return html
+    .replace(/__next_r="[^"]*"/g, "R")
+    .replace(/_rsc=[A-Za-z0-9]+/g, "RSC")
+    .replace(/(?:\\n[0-9a-f]+:D\\"\$[0-9a-f]+\\")+/g, () => "\\nD*")
+    .replace(/\\n[0-9a-f]+:(?=null|\[|I\[)/g, () => "\\n#:")
+    .replace(/\$L?[0-9a-f]{1,4}\b/g, () => "$#");
 }
 
 /** Collects console errors and CSP violation reports for a page. */
@@ -175,16 +192,27 @@ test.describe("the give page states", () => {
     await removeSite(sql, fx);
     await setGivingToggle(sql, fx, false);
     try {
-      const probes = ["e2e-giving-no-such-church", nonTenant!, fx.slug];
-      const results: { status: number; body: string; csp: string | undefined }[] = [];
+      // Only the slug may differ, so the unknown probe is the fixture's own slug with one word changed:
+      // the SAME LENGTH. The slug appears several times in the response, and where React's streaming
+      // flush boundary falls moves with the total byte size, so two slugs of different lengths can
+      // legitimately serialize the same markup into differently-chunked Flight rows (true of the
+      // pre-follow-up page too, at a longer slug). The seeded presbytery's slug length is not ours to
+      // choose, so it is held to the document itself (everything outside the Flight script) and the
+      // status and CSP; the two equal-length probes are compared whole.
+      const unknownSlug = fx.slug.replace(/^e2e-giving-/, "e2e-nobody-");
+      expect(unknownSlug).toHaveLength(fx.slug.length);
+      const probes = [unknownSlug, nonTenant!, fx.slug];
+      const results: { status: number; body: string; doc: string; csp: string | undefined }[] = [];
       for (const slug of probes) {
         const res = await request.get(`/site/${slug}/give`, { maxRedirects: 0 });
+        const body = maskPerRequest((await res.text()).split(slug).join("SLUG"));
         // Only the slug itself may differ in the markup; mask it.
-        results.push({ status: res.status(), body: maskPerRequest((await res.text()).split(slug).join("SLUG")), csp: res.headers()["content-security-policy"] });
+        results.push({ status: res.status(), body, doc: body.replace(/<script>self\.__next_f\.push\([\s\S]*?\)<\/script>/g, ""), csp: res.headers()["content-security-policy"] });
       }
       expect(results.map((r) => r.status)).toEqual([404, 404, 404]);
-      expect(results[1]!.body).toBe(results[0]!.body);
       expect(results[2]!.body).toBe(results[0]!.body);
+      expect(results[1]!.doc).toBe(results[0]!.doc);
+      expect(results[2]!.doc.length, "the document outside the Flight payload is not empty").toBeGreaterThan(1000);
       expect(results[1]!.csp).toBe(results[0]!.csp);
       expect(results[2]!.csp).toBe(results[0]!.csp);
     } finally {
@@ -441,5 +469,120 @@ test.describe("on a phone (360 px)", () => {
     } finally {
       await sql`update giving_provider_connections set public_enabled_at = now() where id = ${connId}::uuid`;
     }
+  });
+});
+
+/**
+ * Phase 6 follow-up (docs/work-log/2026-10-15-online-giving.md, "/give fall-through"). The static
+ * `give` segment beats the site catch-all, so an ALREADY-INGESTED bundle with a `/give` page was
+ * silently replaced by the platform page. Fixture: a bundle with `/`, `/give` (an external
+ * "Give online" link, the shape a real site has), `/give/ways`, and `/give/return`, on an
+ * invented `.invalid` host. Must run last: it replaces the staged bundle the slot test left.
+ */
+test.describe("the /give fall-through to a site bundle's own page", () => {
+  test.use({ viewport: { width: 360, height: 800 } });
+
+  const GIVE_HEADING = "Ways to give (fixture bundle)";
+  const EXTERNAL = "https://giving.example.invalid/fixture-church";
+  const bundlePage = (path: string, heading: string, extra: unknown[] = []) => ({
+    path,
+    frontMatter: { title: heading, navLabel: heading },
+    mdxAst: { blocks: [{ type: "hero", props: { heading } }, ...extra] },
+  });
+  const robots = (page: Page) => page.locator('meta[name="robots"]');
+
+  async function setLive(on: boolean) {
+    await sql`update giving_provider_connections set public_enabled_at = ${on ? new Date().toISOString() : null}::timestamptz where id = ${connId}::uuid`;
+  }
+
+  test.beforeAll(async () => {
+    await addLiveSite(sql, fx, {
+      pages: [
+        bundlePage("/", "Welcome (fixture bundle)"),
+        bundlePage("/give", GIVE_HEADING, [{ type: "donateLink", props: { label: "Give online", href: EXTERNAL } }]),
+        bundlePage("/give/ways", "More ways (fixture bundle)"),
+        bundlePage("/give/return", "Bundle return page (must stay shadowed)"),
+      ],
+    });
+  });
+  test.afterEach(async () => {
+    await setLive(true);
+  });
+
+  test("NOT live: the bundle's own /give page renders - same nav and brand chrome, its external link, no platform notice", async ({ page }) => {
+    await setLive(false);
+    const response = await page.goto(give());
+    expect(response!.status()).toBe(200);
+    await expect(page.getByRole("heading", { level: 1, name: GIVE_HEADING })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Give online" })).toHaveAttribute("href", EXTERNAL);
+    await expect(page.getByTestId("giving-unavailable")).toHaveCount(0);
+    await expect(page.locator("form")).toHaveCount(0);
+    await expect(page).toHaveTitle(new RegExp(GIVE_HEADING.replace(/[()]/g, "\\$&")));
+    await expect(robots(page)).not.toHaveAttribute("content", /noindex/); // the author's page keeps the catch-all's own robots (indexable)
+    // the same shell the catch-all renders at /site/<slug>: a nav that links the bundle's pages
+    const nav = page.getByRole("navigation").first();
+    await expect(nav).toBeVisible();
+    await noHorizontalScroll(page, "bundle give");
+    await shot(page, "bundle-give-fall-through");
+
+    // identical to what the catch-all renders for another bundle page (same chrome)
+    await page.goto(`/site/${fx.slug}/give/ways`);
+    await expect(page.getByRole("heading", { level: 1, name: "More ways (fixture bundle)" })).toBeVisible();
+    await expect(page.getByRole("navigation").first()).toBeVisible();
+  });
+
+  test("NOT live because the toggle is off: still the bundle's page (the site is public regardless)", async ({ page }) => {
+    await setGivingToggle(sql, fx, false);
+    try {
+      const response = await page.goto(give());
+      expect(response!.status()).toBe(200);
+      await expect(page.getByRole("heading", { level: 1, name: GIVE_HEADING })).toBeVisible();
+      await expect(page.getByTestId("giving-unavailable")).toHaveCount(0);
+    } finally {
+      await setGivingToggle(sql, fx, true);
+    }
+  });
+
+  test("LIVE: the platform give page wins, by design - the bundle's /give page is shadowed", async ({ page }) => {
+    await setLive(true);
+    const response = await page.goto(give());
+    expect(response!.status()).toBe(200);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Give to ${fx.name}`);
+    await expect(page.getByTestId("give-form")).toBeVisible();
+    await expect(page.getByText(GIVE_HEADING)).toHaveCount(0);
+    await expect(page).toHaveTitle(`Give to ${fx.name}`);
+  });
+
+  test("/give/<other> is the bundle's own page whether or not giving is live; /give/return stays the platform's", async ({ page }) => {
+    for (const on of [true, false]) {
+      await setLive(on);
+      const other = await page.goto(`/site/${fx.slug}/give/ways`);
+      expect(other!.status()).toBe(200);
+      await expect(page.getByRole("heading", { level: 1, name: "More ways (fixture bundle)" })).toBeVisible();
+      await page.goto(ret("cs_test_nothing_here_0001"));
+      await expect(page.getByTestId("give-return-unknown")).toBeVisible();
+      await expect(page.getByText("Bundle return page (must stay shadowed)")).toHaveCount(0);
+    }
+  });
+
+  test("NOT live + a published bundle with NO /give page: the platform notice, and it is kept out of search indexes", async ({ page }) => {
+    await addLiveSite(sql, fx, { pages: [bundlePage("/", "Welcome (fixture bundle)")] });
+    await setLive(false);
+    const response = await page.goto(give());
+    expect(response!.status()).toBe(200);
+    await expect(page.getByTestId("giving-unavailable")).toBeVisible();
+    await expect(page.locator("form")).toHaveCount(0);
+    await expect(robots(page)).toHaveAttribute("content", /noindex/);
+    await expect(page).toHaveTitle(`Give to ${fx.name}`);
+    await noHorizontalScroll(page, "unavailable (no bundle give page)");
+    await shot(page, "unavailable-no-bundle-give");
+  });
+
+  test("NOT live + a site with no bundle at all: the platform notice, noindex", async ({ page }) => {
+    await addLiveSite(sql, fx);
+    await setLive(false);
+    await page.goto(give());
+    await expect(page.getByTestId("giving-unavailable")).toBeVisible();
+    await expect(robots(page)).toHaveAttribute("content", /noindex/);
   });
 });

@@ -17,7 +17,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
 | 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; 5a complete; 5b complete (full-stack-developer, 2026-10-18); Batch 6 complete (full-stack-developer, 2026-10-18) - Phase 4 ready for QA | — | 2026-10-18 |
-| 5 — Verification | qa | Complete — run 1 FAIL (§46l fixture), loop-back by database-admin, run 2 scoped re-verification green (§46 263/263; integrated 927; webhook e2e 12/12 then §46 263/263) | PASS (run 2) | 2026-10-19 |
+| 5 — Verification | qa | Complete — run 3 (/give fall-through) PASS 2026-10-19; run 1 FAIL (§46l fixture), loop-back by database-admin, run 2 scoped re-verification green (§46 263/263; integrated 927; webhook e2e 12/12 then §46 263/263) | PASS (run 2) | 2026-10-19 |
 | 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-19 |
 
 ---
@@ -4473,3 +4473,112 @@ Integration housekeeping: journal entries, `domain/index.ts`, the `\ir` lines, D
 
 **Per-Phase Status:** | 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-19 |
 
+
+## Phase 6 follow-up — /give fall-through (full-stack-developer)
+
+**Date:** 2026-10-19 · **Branch:** `pipeline/online-giving` (HEAD `aca0030` plus uncommitted working-tree changes; nothing committed). **Closes:** Phase 6 "Phase 1 miss: the `/give` shadow" and Gate A item 1. **No DDL, no Rule-16 shared file, no `src/lib/audit.ts` touched.**
+
+### What changed
+
+The static `give` segment beats the site catch-all `[[...path]]`, so an already-ingested bundle with a `/give` page was replaced by the platform page. `/site/<slug>/give` now renders the bundle's own `/give` page, through the catch-all's own render path, whenever giving is not `live`.
+
+**Files**
+- `src/app/(public)/site/[slug]/render-site-page.tsx` (new). The catch-all's render logic moved here unchanged in behaviour: `renderSitePage(slug, currentPath, { presbyteryFallback? })` returns `{ kind: "page" | "fallback" | "miss" }` (the caller applies `notFound()`), `siteBundleMetadata(slug, currentPath)` (the old `generateMetadata` body) and `siteBundleHasPage(slug, currentPath)` (exact `path ===` equality, the same test `renderSiteBundle` uses; `getPublishedSite` is `cache()`d, so it costs no extra read). The long comments came with it. While moving, the two comment mentions of a real congregation and a sibling repo's abbreviation were reworded to neutral text (they were in `page.tsx` at HEAD; the count in the repo went down, not up).
+- `src/app/(public)/site/[slug]/[[...path]]/page.tsx`. Now a thin route adapter: `toCurrentPath`, `generateMetadata` -> `siteBundleMetadata`, default export -> `renderSitePage`, `miss` -> `notFound()`. Its existing test file is unchanged and passes unchanged.
+- `src/app/(public)/site/[slug]/give/page.tsx`. The branch described below; `robots: { index: false }` on the platform "unavailable" state; the header comment rewritten (the stale "byte-identical to an unknown slug" claim is gone; it now has the behaviour table, the `/give/return` and `/give/<x>` findings, and the CSP note). `force-dynamic` kept, no `loading.tsx`, no `generateStaticParams`.
+- `src/app/(public)/site/[slug]/give/page.test.tsx` (extended), `give/fall-through.test.tsx` (new, runs the REAL helper against the catch-all test's boundary mocks).
+- `e2e/giving-public.spec.ts` (new describe at the end; one existing test adapted, see Deviations).
+
+### Behaviour
+
+| Giving state (`readPublicGivingConfig`) | Bundle has a page at exactly `/give` | Bundle has no `/give` page |
+|---|---|---|
+| `live` | **Platform give page** (the bundle page is shadowed, by design; the bundle is not read at all) | Platform give page |
+| `unavailable` (any non-live state with a published site) | **The bundle's page**: same nav, brand, footer, metadata as the catch-all; indexable as authored | Platform "unavailable" notice, title `Give to <org>`, `robots: noindex` |
+| `absent` (unknown slug, non-tenant slug, toggle-off org without a site) | The bundle's page (cannot co-occur in practice: `absent` means no public site) | The one `notFound()`, unchanged; the catch-all's presbytery sign-in fallback is deliberately NOT served here (`presbyteryFallback: false`), so a seeded presbytery slug stays a byte-for-byte 404 like an unknown slug |
+
+**Decision, live + bundle `/give`:** the platform page wins. Going live is a per-congregation, attested, deliberate act, and the ingest validator already refuses a new bundle page at `/give`; keeping the platform page authoritative is what makes "give" mean the same thing on every live site, and the `giving` live slot remains the way a site author places the form on a page of their own. Consequence the operator should know at go-live, stated without any congregation: a congregation whose existing site already has its own "Give online" page loses that page to the platform's the moment its giving goes live, and gets it back if giving is taken offline.
+
+**Router finding (`/give/<x>`).** Verified in e2e, not assumed. Next compiles each route to its own pattern: only `/site/<slug>/give` and `/site/<slug>/give/return` are static. Any other `/give/<x>` matches neither and falls to `[[...path]]` untouched, so a bundle page at `/give/ways` renders whether giving is live or not (e2e asserts both). `/give/return` is the one subpath the platform always owns: a bundle page at exactly `/give/return` stays shadowed (e2e puts one in the fixture and asserts the platform's `unknown` return panel renders). I did not make the return page fall through: it is the Stripe `success_url` target, it has no config read of its own, and a bundle author has no reason for that path. The ingest validator (`sites-reserved-paths.ts`) still refuses everything under `/give`, which is stricter than necessary (`/give/ways` would have been fine) and is left as is.
+
+**CSP note.** `next.config.ts` serves the ENFORCED policy on `/site/:slug/give/:path*` by path, so a fall-through bundle page at `/give` (and any `/give/<x>` bundle page) is held to the enforced policy, where the rest of a site gets the same text report-only: `img-src 'self' data: https://lh3.googleusercontent.com`, `frame-src` limited to Turnstile, YouTube-nocookie and Vimeo, `frame-ancestors 'none'`. Site-kit images are same-origin, so a normal bundle page is unaffected; a page embedding some other cross-origin resource would be blocked on `/give` only. Not changed (a header cannot depend on which page renders).
+
+**Timing/parity note.** The `absent` path used to do one read; it now does the config read plus `getPublishedSite` (the same read the catch-all does for any slug). All three absent cases do the same work, so no tenancy signal is added; a published site is public at `/site/<slug>` anyway.
+
+**Left alone (DDL):** the stale comment on `presby_public_giving_config` at `drizzle/0055_presby_giving.sql:2645` (and the header comment near line 2372) still says `absent` is byte-identical for a toggle-off org; the function returns `unavailable` for any org with a live site. Fix when 0055 is next corrected in place (it is unreleased).
+
+### Tests
+
+Failing first (before `render-site-page.tsx` and the page change existed): `give/page.test.tsx` and `fall-through.test.tsx` ran with 10 failed (the new fall-through, noindex and metadata cases); after the change all green. For the e2e, the new describe was also run against HEAD's `give/page.tsx` swapped back in: it failed on the first test (the bundle's heading not visible, the platform notice shown instead), then the new page was restored.
+
+Unit cases: not-live + bundle `/give` -> the bundle node (identity), `renderSiteBundle` called once with `currentPath: "/give"`, the bundle's `pages` and `brand`; its metadata is `buildPageMetadata`'s for `/give`; not-live + no `/give` -> platform notice, no form, `robots: { index: false }`, title; no site at all -> notice; a bundle page at `/give/ways` does not count; `absent` with and without a bundle page, and a presbytery slug neither reads the org summary nor serves the fallback; `live` -> the form, `getPublishedSite` and `renderSiteBundle` never called, no robots override.
+
+E2E (`e2e/giving-public.spec.ts`, last describe, 360 px viewport, fixture bundle `/`, `/give` (external "Give online" link on an invented `.invalid` host), `/give/ways`, `/give/return`): not live -> the bundle page with its link, chrome, title and indexable robots, no notice, no form; toggle off -> the bundle page; live -> the platform form and title; `/give/ways` bundle page both live and not, `/give/return` stays the platform's both ways; not live + a bundle with no `/give` -> notice + `noindex` meta; not live + a site with no bundle -> notice + `noindex`.
+
+### Commands and results (worktree, own Neon branch; branch latency is high, timeouts were raised to 180-240 s and the e2e runs took 1.4-1.5 min per 55 tests)
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 (one `react/no-unescaped-entities` in my test, fixed) |
+| `npm run check` (all tripwires incl. giving-boundaries, brand-scope, secrets, hydration-gate, audit, sql-date, deps-drift) | exit 0 |
+| `npx vitest run "src/app/(public)/site"` | 13 files, 153 tests passed |
+| `npm run test` (full unit run) | exit 0: 413 files passed / 58 skipped, 5,858 tests passed / 1,640 skipped (DB-backed subsets skip) |
+| `npm run build` (final tree) | exit 0; `/site/[slug]/give`, `/give/return`, `/site/[slug]/[[...path]]` all `ƒ` dynamic |
+| e2e, dev server (own, port 3000): `e2e/giving-public.spec.ts e2e/public-sites.spec.ts e2e/security-headers.spec.ts --project=chromium` | exit 0, 55 passed (6 new) |
+| the same three specs against `next build && next start` on port 3801 (`E2E_BASE_URL`, `AUTH_URL` set) | exit 0, 55 passed |
+| `-g "absent: an unknown" --repeat-each=8` on dev | 8 passed |
+| `e2e/hydration/giving-give-form.spec.ts` dev lane | 1 passed |
+| `PW_PROD_BUILD=1 npx playwright test e2e/hydration/giving-give-form.spec.ts` (prod lane, builds and serves itself) | exit 0, 1 passed |
+
+Screenshots read at 360 px: `test-results/giving-public-360/bundle-give-fall-through.png` (the bundle's page with the site's header, hero, link and footer; no sideways scroll asserted) and `unavailable-no-bundle-give.png` (the platform notice). In the fixture the external link renders as a small pill flush to the left edge: that is how site-kit lays out a bare top-level `donateLink` block, identical to the catch-all at `/give/ways`, not something this route adds. My dev server and the prod server on 3801 are stopped; the `next start` server for the prod hydration lane is owned and stopped by Playwright.
+
+### Deviations and things QA should know
+
+1. **Extracted `render-site-page.tsx` instead of exporting from the catch-all's `page.tsx`** (Next allows only specific exports from a route file). Behaviour of the catch-all is unchanged; its own test file passes unmodified.
+2. **`absent` also falls through** (the brief said "anything other than live"). In practice it can only matter for a toggle-off organization with a site, which is `unavailable`, so the `absent` arm only ever yields a 404; it is wired anyway so the rule is one rule.
+3. **One existing e2e test was changed: "absent: an unknown slug, a non-tenant slug and a toggle-off organization get the very same response".** Cause, measured: the new not-live path awaits more reads, and (a) the DEV server's Flight debug rows (`ab:D"$cd"`) and the `$`-reference numbering then vary run to run with identical visible markup (7 of 10 comparisons differed in dev, versus 1 of 10 at HEAD), and (b) in a production build the same response flips between inlining and outlining the `next-size-adjust` meta row as the slug's length moves the payload across a React flush boundary (flip at a 19-character slug on this tree; at HEAD the flip is at about 60). Both are serialization differences only; the document outside the Flight script is byte-identical across all three probes, and equal-length slugs are identical whole. The test now (i) masks the dev-only debug rows and numeric references in `maskPerRequest`, (ii) uses an unknown slug of the SAME length as the fixture's (`e2e-nobody-<stamp>`) and compares those two whole, and (iii) holds the seeded presbytery (length not ours to choose) to the document, status and CSP. It passed 8 of 8 repeats on dev and in the production-build run. A reviewer may prefer to keep the old strictness and shorten the payload instead; I could not find a cheap way (a dynamic import of the helper left the byte count identical, so it was reverted).
+4. A short slug of one character or any non-slug-shaped string takes the config reader's early `absent` return and a slightly different (shorter) 404 stream than a shaped slug; that is the pre-existing `isSlugShaped` short-circuit, unchanged, and not part of this test.
+5. No `docs/TODO.md` edit (Rule 16). For integration: the two TODO lines "pre-deploy check and fix for the `/give` shadow" and "`/site/<slug>/give` indexable unavailable page" are done by this follow-up except the DDL comment above; add one line "fix the stale `presby_public_giving_config` comment in 0055 when it is next corrected in place". Gate A item 1 is satisfied by the code now; no per-site check is needed for the not-live case, and the operator note about go-live (above) replaces it for the live case.
+
+### Handoff to QA
+
+Run, against a dev server with the pipeline branch's `.env.local`: `npx playwright test e2e/giving-public.spec.ts e2e/public-sites.spec.ts e2e/security-headers.spec.ts --project=chromium` (expect 55 passed), the same with `E2E_BASE_URL` at a `next start` build, `npx playwright test e2e/giving-public.spec.ts -g "fall-through"` (6), `-g "absent: an unknown" --repeat-each=8` (8), and `npx vitest run "src/app/(public)/site"` (153). Verify failing-first by swapping `give/page.tsx` back to HEAD (`git show HEAD:"src/app/(public)/site/[slug]/give/page.tsx"`) and running `-g "fall-through"` (the first test must fail). Check by reading: the catch-all page is only an adapter, `render-site-page.tsx` is the one render path, no `getPlatformDb` was added under `give/` (the helper's brand-mark lookup is the catch-all's own, dynamic-imported, already present), no `loading.tsx`, `check:giving-boundaries` green. Then Phase 6 re-check by the analyst on Gate A item 1. Next agent: qa.
+
+---
+
+# Phase 5 — Verification (qa) — run 3 (scoped: Phase 6 follow-up, /give fall-through)
+
+**Date:** 2026-10-19 · **Verified by:** qa (read-only; recorded by the orchestrator) · **Subject:** `aca0030` plus the uncommitted follow-up (`render-site-page.tsx` new, `[[...path]]/page.tsx`, `give/page.tsx`, `give/page.test.tsx`, `give/fall-through.test.tsx` new, `e2e/giving-public.spec.ts`). Pipeline Neon branch only; QA wrote nothing outside the scratchpad; servers stopped by PID.
+
+## Type Check
+typecheck, lint, `npm run check` (seven tripwires), `npm run build`: all **PASS** (exit 0). `/site/[slug]/give`, `/give/return`, `/site/[slug]/[[...path]]` are dynamic.
+
+## Unit Tests
+`npx vitest run "src/app/(public)/site"`: 13 files, **153/153**, exit 0. `npm run test`: **5,858 passed, 0 failed, 1,640 skipped** (the DB-backed set; this diff touches no DB-backed module or SQL — a started `test:db` was stopped after ~10 min to keep it from skewing the timing probe, and counts for nothing).
+**Diff review:** the catch-all's behaviour is unchanged by the extraction — `FALLBACK_ORG_TYPES`, `siteOrigin`, portal nav constants, `resolveLogoUrl`, `toRenderProfile`, the metadata body (`render-site-page.tsx:215-260`) and the render body (`:269-400`) are identical to HEAD; the presbytery sign-in fallback still runs on `not_found` unless `read_failed` (`:296-303`, default on `:274`); both 404 paths return `miss` → `notFound()` (`[[...path]]/page.tsx:38`); the catch-all's own `page.test.tsx` (33 cases) is unmodified and passes. The give page matches the stated table (`give/page.tsx:69-92`): `live` → platform form, bundle never read; not-live → `renderSitePage(slug, "/give", { presbyteryFallback: false })`, bundle page on `kind: "page"`; `absent` without a bundle page → the single `notFound()`; `unavailable` without one → notice with `robots: { index: false }` (bundle metadata when it has `/give`, `:75`). No `loading.tsx`, no `generateStaticParams`, `force-dynamic` kept, no `auth()`/`headers()`/`cookies()`. No DDL; no real names (two pre-existing mentions removed from comments).
+
+## End-to-End Tests
+Patient timeout `--timeout=240000`.
+
+| Run | Server | Result |
+|---|---|---|
+| `giving-public` + `public-sites` + `security-headers` | QA's `next start -p 3801` | **55/55**, 0 flaky, exit 0 |
+| same three | QA's `next dev -p 3000` | **55/55**, 0 flaky, exit 0 |
+| `giving-public -g "fall-through"` | dev | **6/6** |
+| `giving-public -g "absent: an unknown" --repeat-each=8` | dev | **8/8** |
+| `hydration/giving-give-form.spec.ts` | dev / prod lane | **1/1** / **1/1** |
+
+**Ruling on the loosened absent-state test (`e2e/giving-public.spec.ts:187`): the invariant holds in the product; the loosening is acceptable.** Measured directly on QA's prod build, read-only GETs to `absent` orgs plus same-length unknown slugs, 25 interleaved requests each, masking only `__next_r`, `_rsc` and the slug. Six equal-length groups (8: two managed congregations; 9: managed presbytery, unmanaged and managed congregations; 10: invited and unmanaged congregations; 11: managed congregation holding a provider connection, toggle off; 14: two managed presbyteries incl. `e2e-presbytery`; 19: the managed synod), each with an unknown slug: **every group produced exactly one distinct body and one header set (CSP included); every request 404; deterministic.** The only variation is between lengths (at 19 chars `next-size-adjust` moves to its own Flight row and renumbers `$L…` refs — synod and unknown flip together), so it carries no tenant signal. DB work: no new tenancy-dependent reads (`getPublishedSite` is `cache()`d and the layout already called it at HEAD); the pre-existing asymmetry in `presby_public_giving_config` (lookups for any existing slug) never reads `platform_status`, and org existence is public. Timing (prod, 100 interleaved randomised requests, rank test vs unknown `nowhere-q`): tidewater p50 187.5 / p90 219.5 ms AUC 0.498; e2e-gamma 185.6 / 240.7 AUC 0.513; e2e-alpha 185.5 / 236.6 AUC 0.498; unknown 186.0 / 225.8 — no separation. Suggestion (non-blocking): hold the seeded presbytery to a full-body comparison against an unknown slug padded to its length.
+
+## Regression Tests Added
+`e2e/giving-public.spec.ts:482` fall-through describe — `:512` NOT live → bundle `/give` page (guards against the shadow); `:534` toggle off → bundle page; `:546` LIVE → platform page; `:556` `/give/<other>` is the bundle's, `/give/return` the platform's; `:568` bundle without `/give` → notice, noindex; `:581` no bundle → notice, noindex. Unit: 8 cases `give/fall-through.test.tsx:78-157`, 10 new in `give/page.test.tsx:119-187`. Failing-first **observed by QA at the unit level** (HEAD's `give/page.tsx` in a scratch copy: 10 failed / 17 passed, the 10 new cases); e2e failing-first taken from the implementer.
+
+## Coverage on Critical Modules
+Not re-run (unchanged). Run 1 stands.
+
+## Feature-Gate Audit
+No protected routes touched: no route handler or server action changed; the two pages are `(public)` and anonymous by contract (DECISION-041), gaining no `auth()`, session, cookie or `dangerouslySetInnerHTML`. The fall-through reaches the catch-all's existing read-only brand-mark lookup (`render-site-page.tsx:94-106`), outside `(org)` and `src/lib/giving/`; `check:giving-boundaries` green.
+
+## Verdict
+**PASS.** Notes: (1) optional presbytery full-body hardening above; (2) the stale `presby_public_giving_config` comments in 0055 stay open → TODO at integration; (3) rerun DB suites with `--testTimeout=90000` if wanted.

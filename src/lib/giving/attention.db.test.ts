@@ -10,6 +10,8 @@ import { sql } from "drizzle-orm";
 import type { GivingFixture } from "@/lib/testing/giving-fixture";
 
 vi.mock("server-only", () => ({}));
+// statements.ts (imported for the parity check) pulls the mail queue, and with it next-auth, which Vitest cannot load.
+vi.mock("@/lib/email", () => ({ enqueueEmail: vi.fn() }));
 
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL);
 
@@ -142,6 +144,31 @@ describe.skipIf(!hasDb)("attention.ts (Postgres-backed)", () => {
     const dupes = await donors.listPossibleDuplicates(actor.personId, dOrg);
     expect(panel.kind === "ok" && panel.suggestions.length).toBe(a.linkProposals);
     expect(dupes.kind === "ok" && dupes.pairs.length).toBe(a.possibleDuplicateDonors);
+  });
+
+  it("counts latest statements a later gift has made out of date - the same derived fragments the statements page reads", async () => {
+    const sOrg = await fx.makeOrg("stale-count", { givingToggle: true });
+    await fx.makeGivingSettings(sOrg);
+    const sFund = await fx.makeFund(sOrg, "General");
+    const actor = await fx.makeActor(sOrg, "Sal", "Statementer", ["giving.view", "giving.record", "giving.manage"]);
+    const sDonor = await fx.makeDonor(sOrg, "Stale Stella");
+    const year = new Date().getUTCFullYear() - 1;
+    await fx.makeOfflineGift(sOrg, sDonor, sFund, 4_000, { occurredOn: `${year}-03-03` });
+    const { issueStatement } = await import("@/lib/testing/giving-fixture");
+    await fx.platform.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.current_org_id', ${sOrg}, true)`);
+      await issueStatement(tx, { organizationId: sOrg, donorId: sDonor, taxYear: year, issuedBy: actor.userId });
+    });
+    const load2 = () => withOrgContext(actor.personId, sOrg, (tx) => attention.loadAttention(tx, { organizationId: sOrg, has: { view: true, record: true, manage: true } }));
+    expect((await load2()).staleStatements).toBe(0);
+    await fx.makeOfflineGift(sOrg, sDonor, sFund, 1_000, { occurredOn: `${year}-04-04` }); // a late entry into the issued year
+    const a = await load2();
+    expect(a.staleStatements).toBe(1);
+    expect(attention.attentionIsClear(a)).toBe(false);
+    // The statements module's own definition agrees with the overview's count.
+    const statements = await import("./statements");
+    const stale = await statements.getStale(actor.personId, sOrg);
+    expect(stale.kind === "ok" && stale.statements).toHaveLength(1);
   });
 
   it("S4: a recorder sees ONE number (link proposals); everything else is null - and no provider/ledger query runs for them", async () => {

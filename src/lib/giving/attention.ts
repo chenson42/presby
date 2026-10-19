@@ -4,6 +4,7 @@ import type { OrgTx } from "@/lib/authz";
 import { rowsOf } from "./db-util";
 import { DUPLICATE_PAIRS } from "./donors";
 import { countLinkProposals } from "./link-proposals";
+import { statementIsLatest, statementIsStale } from "./statement-staleness";
 import type { Attention, AttentionConnection, AttentionConnectionState, AttentionContext } from "./attention-pure";
 
 /**
@@ -27,7 +28,9 @@ import type { Attention, AttentionConnection, AttentionConnectionState, Attentio
  *   connection              the open (or latest) provider connection's state
  *   parkedEvents/deadLetters provider events waiting on something / given up
  *                           on (`presby_giving_attention_events()`, counts only)
- *   staleStatements         always 0 until statements exist (Batch 5)
+ *   staleStatements         latest statements a later gift or reversal has made out
+ *                           of date - the derived fragments of statement-staleness.ts,
+ *                           the same ones the statements page and getStale() read
  *   possibleDuplicateDonors pairs of donors that look like one giver
  *   linkProposals           donors with a waiting member-link proposal
  *
@@ -100,6 +103,13 @@ export async function loadAttention(tx: OrgTx, ctx: AttentionContext): Promise<A
 
   const events = rowsOf(await tx.execute(sql`select * from presby_giving_attention_events()`))[0];
 
+  const stale = rowsOf(
+    await tx.execute(sql`
+      select count(*)::int as n from giving_statements s
+       where s.organization_id = ${organizationId}::uuid and ${statementIsLatest} and ${statementIsStale}
+    `),
+  )[0];
+
   const duplicates = rowsOf(
     await tx.execute(sql`select count(*)::int as n from (${DUPLICATE_PAIRS(organizationId)}) x`),
   )[0];
@@ -112,7 +122,7 @@ export async function loadAttention(tx: OrgTx, ctx: AttentionContext): Promise<A
     connection,
     parkedEvents: Number(events?.parked_count ?? 0),
     deadLetters: Number(events?.dead_letter_count ?? 0),
-    staleStatements: 0, // Batch 5 replaces this with the derived stale-statement count.
+    staleStatements: Number(stale?.n ?? 0),
     possibleDuplicateDonors: Number(duplicates?.n ?? 0),
     linkProposals,
   };

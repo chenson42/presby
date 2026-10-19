@@ -88,7 +88,7 @@ test.describe("Giving admin (treasurer, recorder, manager)", () => {
     await setGivingToggle(sql, fx, null);
     await setGivingRole(sql, fx, "treasurer");
     const [gift] = [fx.funds.general]; // any uuid shape works: the gate answers before the id is read
-    const routes = ["", "/funds", "/gifts", "/gifts/new", `/gifts/${gift}`, "/donors", `/donors/${fx.donors.imogen}`, "/settings", "/team"];
+    const routes = ["", "/funds", "/gifts", "/gifts/new", `/gifts/${gift}`, "/donors", `/donors/${fx.donors.imogen}`, "/settings", "/team", "/statements"];
     const page = await ctx.newPage();
     for (const route of routes) {
       const response = await page.goto(`${base()}${route}`);
@@ -97,6 +97,9 @@ test.describe("Giving admin (treasurer, recorder, manager)", () => {
     }
     const csv = await page.request.get(`${base()}/gifts/export`);
     expect(csv.status()).toBe(403);
+    // The statement routes answer 403 too (never a PDF) while Giving is off.
+    expect((await page.request.get(`${base()}/statements/print?year=2027`)).status()).toBe(403);
+    expect((await page.request.get(`${base()}/statements/${fx.funds.general}/download`)).status()).toBe(403);
     await page.close();
   });
 
@@ -456,7 +459,7 @@ test.describe("Giving admin (treasurer, recorder, manager)", () => {
 test.describe("Giving admin - the 2FA gate (R4) and the four-way miss", () => {
   test.setTimeout(60_000);
   const routes = (f: GivingFixture) => [
-    "", "/funds", "/gifts", "/gifts/new", `/gifts/${f.funds.general}`, "/donors", `/donors/${f.donors.imogen}`, "/settings", "/team",
+    "", "/funds", "/gifts", "/gifts/new", `/gifts/${f.funds.general}`, "/donors", `/donors/${f.donors.imogen}`, "/settings", "/team", "/statements",
   ];
 
   test.beforeAll(async () => {
@@ -483,6 +486,12 @@ test.describe("Giving admin - the 2FA gate (R4) and the four-way miss", () => {
       const csv = await page.request.get(`/o/${fx.slug}/admin/giving/gifts/export`, { maxRedirects: 0 });
       expect([307, 308, 302]).toContain(csv.status());
       expect(csv.headers()["content-type"] ?? "").not.toContain("text/csv");
+      // ...nor does a statement PDF
+      for (const route of ["/statements/print?year=2027", `/statements/${fx.funds.general}/download`]) {
+        const res = await page.request.get(`/o/${fx.slug}/admin/giving${route}`, { maxRedirects: 0 });
+        expect([307, 308, 302], route).toContain(res.status());
+        expect(res.headers()["content-type"] ?? "", route).not.toContain("application/pdf");
+      }
     });
   });
 
@@ -499,6 +508,9 @@ test.describe("Giving admin - the 2FA gate (R4) and the four-way miss", () => {
         await expect(page.getByTestId("gifts-list"), path).toHaveCount(0);
       }
       expect((await page.request.get(`/o/${fx.slug}/admin/giving/gifts/export`)).status()).toBe(403);
+      // no platform branch on the statement routes either: not a member, no PDF
+      expect((await page.request.get(`/o/${fx.slug}/admin/giving/statements/print?year=2027`)).status()).toBe(403);
+      expect((await page.request.get(`/o/${fx.slug}/admin/giving/statements/${fx.funds.general}/download`)).status()).toBe(403);
     });
   });
 });

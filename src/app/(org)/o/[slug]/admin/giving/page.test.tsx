@@ -309,6 +309,7 @@ describe("GivingAdminPage — states", () => {
         "/o/alder-creek/admin/giving/gifts/new",
         "/o/alder-creek/admin/giving/gifts",
         "/o/alder-creek/admin/giving/donors",
+        "/o/alder-creek/admin/giving/statements",
         "/o/alder-creek/admin/giving/funds",
         "/o/alder-creek/admin/giving/settings",
         "/o/alder-creek/admin/giving/team",
@@ -343,6 +344,7 @@ describe("GivingAdminPage — states", () => {
     expect(screen.getByText("Your recent entries")).toBeTruthy();
     expect(screen.queryByText("Funds")).toBeNull();
     expect(screen.queryByText("Statement details")).toBeNull();
+    expect(screen.queryByText("Year-end statements")).toBeNull();
     expect(screen.queryByText("Giving team")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Online giving" })).toBeNull();
     // the one thing they are told: donor suggestions
@@ -356,6 +358,7 @@ describe("GivingAdminPage — states", () => {
     loadAttention.mockResolvedValue(CLEAR);
     const first = render(await GivingAdminPage({ params: params() }));
     expect(screen.getByText("Gifts")).toBeTruthy();
+    expect(screen.getByText("Year-end statements")).toBeTruthy(); // statements open to giving.view
     expect(screen.queryByText("Record a gift")).toBeNull();
     expect(screen.queryByText("Funds")).toBeNull();
     first.unmount();
@@ -365,6 +368,7 @@ describe("GivingAdminPage — states", () => {
     expect(screen.getByText("Funds")).toBeTruthy();
     expect(screen.getByText("Statement details")).toBeTruthy();
     expect(screen.getByText("Giving team")).toBeTruthy();
+    expect(screen.queryByText("Year-end statements")).toBeNull(); // the page needs giving.view, so no tile leads to a Forbidden page
     expect(screen.queryByText("Record a gift")).toBeNull();
   });
 

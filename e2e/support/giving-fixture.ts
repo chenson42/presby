@@ -402,6 +402,88 @@ export async function seedReturnIntent(
   return sessionId;
 }
 
+/**
+ * The donee identity statements snapshot (`giving_settings`), invented: without
+ * a legal name and address the statements run is blocked. One row per org.
+ */
+export async function addGivingSettings(sql: Sql, fx: GivingFixture): Promise<void> {
+  assertFixtureSlug(fx.slug);
+  await sql`
+    insert into giving_settings (organization_id, donee_legal_name, donee_address_line1, donee_city, donee_region,
+           donee_postal_code, donee_ein, signatory_name, signatory_title, greeting_text, closing_text)
+    values (${fx.orgId}::uuid, 'E2E Fixture Presbyterian Church', '1 Fixture Way', 'Fixtureville', 'OH', '00000',
+            '00-0000000', 'Octavia Marchetti', 'Treasurer', 'Dear {donor_name},', 'With gratitude for your generosity,')
+    on conflict (organization_id) do nothing`;
+}
+
+/** An identified donor with no email and no address (the "can't be sent" exception), or a plate-cash donor. */
+export async function addDonor(
+  sql: Sql,
+  fx: GivingFixture,
+  name: string,
+  options: { kind?: "identified" | "unidentified"; email?: string | null } = {},
+): Promise<string> {
+  const rows = (await sql`
+    insert into giving_donors (organization_id, kind, display_name, email)
+    values (${fx.orgId}::uuid, ${options.kind ?? "identified"}, ${name}, ${options.email ?? null})
+    returning id`) as { id: string }[];
+  return rows[0]!.id;
+}
+
+/** Links a donor to a member's membership (what a confirmed proposal does), so the notice email has someone to go to. */
+export async function linkDonorToMember(sql: Sql, fx: GivingFixture, donorId: string, personId: string): Promise<void> {
+  await sql`
+    update giving_donors
+       set linked_membership_id = (select id from memberships where organization_id = ${fx.orgId}::uuid and person_id = ${personId}::uuid),
+           link_source = 'recorder_confirmed', linked_at = now()
+     where id = ${donorId}::uuid and organization_id = ${fx.orgId}::uuid`;
+}
+
+/** A succeeded offline gift of `amountCents` on `occurredOn` (the write marker armed in the same statement). */
+export async function addOfflineGift(
+  sql: Sql,
+  fx: GivingFixture,
+  p: { donorId: string; amountCents: number; occurredOn: string; method?: "cash" | "check"; fundId?: string },
+): Promise<void> {
+  await sql`
+    with armed as (select set_config('presby.giving_write_active', 'true', true))
+    insert into giving_gifts (organization_id, donor_id, fund_id, source, method, amount_cents, status, occurred_on, livemode, recorded_by)
+    select ${fx.orgId}::uuid, ${p.donorId}::uuid, ${p.fundId ?? fx.funds.general}::uuid, 'offline', ${p.method ?? "cash"}, ${p.amountCents},
+           'succeeded', ${p.occurredOn}::date, true, ${fx.actingUserId}::uuid
+      from armed`;
+}
+
+/**
+ * A LIVE-mode succeeded online gift behind `connectionId` (which must itself be
+ * livemode), with the checkout intent it requires, so a signed `refund-created`
+ * event replayed at the webhook can reverse it. `paymentIntentId` is the id the
+ * event names. Statements count live gifts only (P3-17).
+ */
+export async function addLiveOnlineGift(
+  sql: Sql,
+  fx: GivingFixture,
+  connectionId: string,
+  p: { donorId: string; amountCents: number; occurredOn: string; paymentIntentId: string },
+): Promise<string> {
+  const intentId = crypto.randomUUID();
+  await sql`
+    insert into giving_checkout_intents (id, organization_id, connection_id, fund_id, donor_id, frequency, method_choice,
+           cover_fees, gift_amount_cents, donor_covered_fee_cents, total_cents, livemode, idempotency_key, status,
+           checkout_session_id, payment_intent_id, expires_at, completed_at)
+    values (${intentId}::uuid, ${fx.orgId}::uuid, ${connectionId}::uuid, ${fx.funds.general}::uuid, ${p.donorId}::uuid, 'once', 'card',
+            false, ${p.amountCents}, 0, ${p.amountCents}, true, ${crypto.randomUUID()}, 'completed',
+            ${`cs_live_${p.paymentIntentId.slice(-12)}`}, ${p.paymentIntentId}, now() + interval '1 day', now())`;
+  const rows = (await sql`
+    with armed as (select set_config('presby.giving_write_active', 'true', true))
+    insert into giving_gifts (organization_id, donor_id, fund_id, source, provider, connection_id, intent_id,
+           external_transaction_id, method, amount_cents, status, occurred_on, occurred_at, livemode)
+    select ${fx.orgId}::uuid, ${p.donorId}::uuid, ${fx.funds.general}::uuid, 'online', 'stripe', ${connectionId}::uuid, ${intentId}::uuid,
+           ${p.paymentIntentId}, 'card', ${p.amountCents}, 'succeeded', ${p.occurredOn}::date, ${`${p.occurredOn}T15:00:00Z`}::timestamptz, true
+      from armed
+    returning id`) as { id: string }[];
+  return rows[0]!.id;
+}
+
 /** The newest checkout intent the fixture org has (what the hydration spec asserts persisted). */
 export async function latestIntents(sql: Sql, fx: GivingFixture) {
   return (await sql`

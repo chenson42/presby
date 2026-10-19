@@ -393,6 +393,88 @@ describe.skipIf(!hasDb)("ingest lifecycle (Postgres-backed)", () => {
     });
   });
 
+  describe("apply_settlement_lines (Batch 6)", () => {
+    const header = (po: string, automatic = true) => ({
+      kind: "settlement" as const, externalSettlementId: po, status: "paid" as const, arrivalDate: "2026-10-20", grossCents: 4825, automatic,
+    });
+    const L = (n: string, over: Partial<import("@/lib/giving/ingest/functions").SettlementLineInput> = {}) => ({
+      balanceTransactionId: `txn_fixture${n}`, kind: "charge", grossCents: 5000, feeCents: 175, netCents: 4825, paymentIntentId: null, ...over,
+    });
+    const lineRows = async (organizationId: string) =>
+      h.rowsOf(await h.owner(sql`
+        select l.external_balance_transaction_id as txn, l.kind, l.gross_cents::int as gross, l.fee_cents::int as fee,
+               l.net_cents::int as net, l.payment_intent_id as pi, l.gift_id::text as gift_id
+          from giving_settlement_lines l where l.organization_id = ${organizationId}
+         order by l.external_balance_transaction_id`));
+
+    it("is PARKED until the payout header exists, writes nothing, and then lands once the header does", async () => {
+      const o = await h.org("lines-parked");
+      const po = ids.payout();
+      expect(await fns.applySettlementLines(await h.inbox(o.accountId), po, [L("parked1")])).toBe("parked:no_settlement");
+      expect(await lineRows(o.organizationId)).toHaveLength(0);
+      await fns.applySettlement(await h.inbox(o.accountId), header(po));
+      expect(await fns.applySettlementLines(await h.inbox(o.accountId), po, [L("parked1")])).toBe("applied");
+      expect(await lineRows(o.organizationId)).toHaveLength(1);
+    });
+
+    it("stores signed lines through typed arrays, is idempotent per balance transaction, and stamps lines_loaded_at", async () => {
+      const o = await h.org("lines-store");
+      const po = ids.payout();
+      await fns.applySettlement(await h.inbox(o.accountId), header(po));
+      const lines = [
+        L("aaa"),
+        L("bbb", { kind: "refund", grossCents: -1000, feeCents: 0, netCents: -1000, paymentIntentId: "pi_fixtureRefunded01" }),
+        L("ccc", { kind: "adjustment", grossCents: 0, feeCents: 15, netCents: -15 }),
+      ];
+      expect(await fns.applySettlementLines(await h.inbox(o.accountId), po, lines)).toBe("applied");
+      expect(await fns.applySettlementLines(await h.inbox(o.accountId), po, lines)).toBe("applied"); // again: no duplicates
+      const rows = await lineRows(o.organizationId);
+      expect(rows.map((r) => [r.txn, r.kind, r.gross, r.fee, r.net, r.pi])).toEqual([
+        ["txn_fixtureaaa", "charge", 5000, 175, 4825, null],
+        ["txn_fixturebbb", "refund", -1000, 0, -1000, "pi_fixtureRefunded01"],
+        ["txn_fixtureccc", "adjustment", 0, 15, -15, null],
+      ]);
+      const loaded = h.rowsOf(await h.owner(sql`select lines_loaded_at is not null as loaded from giving_settlements where organization_id = ${o.organizationId}`));
+      expect(loaded[0]!.loaded).toBe(true);
+    });
+
+    it("an EMPTY payout (no lines) is accepted and marks the payout loaded", async () => {
+      const o = await h.org("lines-empty");
+      const po = ids.payout();
+      await fns.applySettlement(await h.inbox(o.accountId), header(po));
+      expect(await fns.applySettlementLines(await h.inbox(o.accountId), po, [])).toBe("applied");
+      const loaded = h.rowsOf(await h.owner(sql`select lines_loaded_at is not null as loaded from giving_settlements where organization_id = ${o.organizationId}`));
+      expect(loaded[0]!.loaded).toBe(true);
+    });
+
+    it("an inbox event of one connection can only fill THAT connection's payout", async () => {
+      const a = await h.org("lines-a");
+      const b = await h.org("lines-b");
+      const po = ids.payout();
+      await fns.applySettlement(await h.inbox(a.accountId), header(po));
+      // b's claimed event names a's payout id: b has no such payout, so it parks and a's payout is untouched.
+      expect(await fns.applySettlementLines(await h.inbox(b.accountId), po, [L("cross")])).toBe("parked:no_settlement");
+      expect(await lineRows(a.organizationId)).toHaveLength(0);
+      expect(await lineRows(b.organizationId)).toHaveLength(0);
+    });
+
+    it("rejects a line shape the table forbids (a malformed payment intent id) - nothing is stored", async () => {
+      const o = await h.org("lines-bad");
+      const po = ids.payout();
+      await fns.applySettlement(await h.inbox(o.accountId), header(po));
+      await expect(fns.applySettlementLines(await h.inbox(o.accountId), po, [L("bad", { paymentIntentId: "not-a-pi" })])).rejects.toThrow();
+      expect(await lineRows(o.organizationId)).toHaveLength(0);
+    });
+
+    it("text that carries a NUL is stripped on its way in, not thrown at the database", async () => {
+      const o = await h.org("lines-nul");
+      const po = ids.payout();
+      await fns.applySettlement(await h.inbox(o.accountId), header(po));
+      expect(await fns.applySettlementLines(await h.inbox(o.accountId), po, [L("nul\u0000ok")])).toBe("applied");
+      expect((await lineRows(o.organizationId))[0]!.txn).toBe("txn_fixturenulok");
+    });
+  });
+
   describe("the presby_app connection cannot reach the inbox or the owner-only functions", () => {
     it("has no privilege on giving_provider_events and cannot execute health / requeue", async () => {
       const { db } = await import("@/lib/db");

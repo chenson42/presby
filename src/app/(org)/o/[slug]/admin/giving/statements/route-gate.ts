@@ -1,6 +1,11 @@
 import { auth } from "@/auth";
 import { OrgAccessError, resolveOrgContext, type OrganizationType } from "@/lib/authz";
 import { assertGivingSession, givingTotpRedirectUrl, loadGivingContext } from "@/lib/giving/access";
+import { notFound, pdfHeaders, plain } from "@/lib/giving/pdf-response";
+
+// Re-exported: the print and download routes import them from here (and the member
+// download route from `@/lib/giving/pdf-response` directly, with no admin gate).
+export { notFound, pdfHeaders, plain };
 
 /**
  * The gate the two statement route handlers (`[statementId]/download`,
@@ -20,17 +25,6 @@ import { assertGivingSession, givingTotpRedirectUrl, loadGivingContext } from "@
  * download route, for "no such statement" - so nothing in a response says
  * which of the two it was.
  */
-
-export function plain(status: number, body: string): Response {
-  return new Response(body, {
-    status,
-    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
-
-export function notFound(): Response {
-  return plain(404, "Not found");
-}
 
 export interface StatementRouteOk {
   ok: true;
@@ -96,16 +90,5 @@ export async function gateStatementRoute(
       slug: resolved.org.slug,
     },
     has: context.has,
-  };
-}
-
-/** Headers every PDF answer carries: a private, uncacheable attachment the browser may not sniff. */
-export function pdfHeaders(filename: string, byteLength: number): HeadersInit {
-  return {
-    "Content-Type": "application/pdf",
-    "Content-Disposition": `attachment; filename="${filename}"`,
-    "Content-Length": String(byteLength),
-    "Cache-Control": "private, no-store",
-    "X-Content-Type-Options": "nosniff",
   };
 }

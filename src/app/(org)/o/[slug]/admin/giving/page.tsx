@@ -1,4 +1,5 @@
 import {
+  Banknote,
   FileText,
   HandCoins,
   Landmark,
@@ -39,7 +40,7 @@ import { gateGivingPage, type GivingNeedKey } from "./giving-page-gate";
  *     cannot be loaded it says so in place; the rest of the page still renders.
  *     `?connect=<code>` carries the notice the connect/refresh route sends back.
  *   - one tile per area the viewer's keys open: Record a gift, Gifts, Donors,
- *     Year-end statements, Funds, Settings, Team. A tile is shown only when its destination will
+ *     Year-end statements, Payouts, Funds, Settings, Team. A tile is shown only when its destination will
  *     admit the viewer, so no tile leads to a Forbidden page.
  *
  * NO `loading.tsx` on this segment, by design: every `(org)` page can
@@ -105,6 +106,15 @@ const AREAS: readonly AreaTile[] = [
     path: "statements",
     anyOf: ["view"],
     icon: FileText,
+  },
+  {
+    key: "settlements",
+    label: "Payouts",
+    description: "What Stripe has paid out to your bank, and what each deposit contained.",
+    domain: "giving",
+    path: "settlements",
+    anyOf: ["view"],
+    icon: Banknote,
   },
   {
     key: "funds",

@@ -484,6 +484,101 @@ export async function addLiveOnlineGift(
   return rows[0]!.id;
 }
 
+/**
+ * A provider refund (kind `refund`) of `amountCents` against a gift, written the
+ * way the ingest path writes one (marker armed in the same statement; the http
+ * driver has no multi-statement transaction). The reversal keeps the gift's
+ * `livemode`. For a spec that needs a partly refunded gift without replaying a
+ * signed webhook.
+ */
+export async function addRefund(
+  sql: Sql,
+  fx: GivingFixture,
+  p: { giftId: string; connectionId: string; amountCents: number },
+): Promise<void> {
+  await sql`
+    with armed as (select set_config('presby.giving_write_active', 'true', true))
+    insert into giving_gift_reversals (organization_id, gift_id, connection_id, kind, amount_cents, external_reversal_id, occurred_on, occurred_at, livemode)
+    select ${fx.orgId}::uuid, g.id, ${p.connectionId}::uuid, 'refund', ${p.amountCents}, ${`re_fixture${Date.now().toString(36)}${Math.floor(Math.random() * 1e6)}`},
+           current_date, now(), g.livemode
+      from armed, giving_gifts g
+     where g.id = ${p.giftId}::uuid and g.organization_id = ${fx.orgId}::uuid`;
+}
+
+/** A PENDING or FAILED live online gift (an ACH still clearing, a declined card) with the intent it requires. */
+export async function addUnsettledOnlineGift(
+  sql: Sql,
+  fx: GivingFixture,
+  connectionId: string,
+  p: { donorId: string; amountCents: number; occurredOn: string; status: "pending" | "failed" },
+): Promise<string> {
+  const intentId = crypto.randomUUID();
+  const pi = `pi_fixture${p.status}${Date.now().toString(36)}${Math.floor(Math.random() * 1e6)}`;
+  await sql`
+    insert into giving_checkout_intents (id, organization_id, connection_id, fund_id, donor_id, frequency, method_choice,
+           cover_fees, gift_amount_cents, donor_covered_fee_cents, total_cents, livemode, idempotency_key, status,
+           checkout_session_id, payment_intent_id, expires_at, completed_at)
+    values (${intentId}::uuid, ${fx.orgId}::uuid, ${connectionId}::uuid, ${fx.funds.general}::uuid, ${p.donorId}::uuid, 'once', 'bank',
+            false, ${p.amountCents}, 0, ${p.amountCents}, true, ${crypto.randomUUID()}, 'completed',
+            ${`cs_live_${pi.slice(-12)}`}, ${pi}, now() + interval '1 day', now())`;
+  const rows = (await sql`
+    with armed as (select set_config('presby.giving_write_active', 'true', true))
+    insert into giving_gifts (organization_id, donor_id, fund_id, source, provider, connection_id, intent_id,
+           external_transaction_id, method, amount_cents, status, failure_code, occurred_on, occurred_at, livemode)
+    select ${fx.orgId}::uuid, ${p.donorId}::uuid, ${fx.funds.general}::uuid, 'online', 'stripe', ${connectionId}::uuid, ${intentId}::uuid,
+           ${pi}, 'us_bank_account', ${p.amountCents}, ${p.status}, ${p.status === "failed" ? "async_payment_failed" : null},
+           ${p.occurredOn}::date, ${`${p.occurredOn}T15:00:00Z`}::timestamptz, true
+      from armed
+    returning id`) as { id: string }[];
+  return rows[0]!.id;
+}
+
+export interface SettlementSpec {
+  connectionId: string;
+  arrivalDate: string | null;
+  grossCents: number;
+  status?: "paid" | "failed";
+  /** False = a MANUAL payout: no contents are ever loaded. */
+  automatic?: boolean;
+  livemode?: boolean;
+  /** Lines to store; omit (and leave `loaded` false) for an automatic payout whose contents have not arrived. */
+  lines?: Array<{ kind: "charge" | "refund" | "dispute" | "fee" | "adjustment" | "other"; grossCents: number; feeCents?: number; giftId?: string | null; paymentIntent?: string | null }>;
+  loaded?: boolean;
+}
+
+let settlementCounter = 0;
+
+/**
+ * A payout (and its lines) as the ingest path would have stored it, inserted on
+ * the owner path: neither table has a write-marker guard, and the e2e server
+ * has no Stripe key to fetch real balance transactions with. Removed with the
+ * organization.
+ */
+export async function addSettlement(sql: Sql, fx: GivingFixture, spec: SettlementSpec): Promise<{ id: string; payoutId: string }> {
+  assertFixtureSlug(fx.slug);
+  settlementCounter += 1;
+  const payoutId = `po_e2e${Date.now().toString(36)}${settlementCounter}`;
+  const rows = (await sql`
+    insert into giving_settlements (organization_id, connection_id, external_settlement_id, arrival_date, status, automatic,
+           gross_cents, livemode, lines_loaded_at)
+    values (${fx.orgId}::uuid, ${spec.connectionId}::uuid, ${payoutId}, ${spec.arrivalDate}::date, ${spec.status ?? "paid"},
+            ${spec.automatic !== false}, ${spec.grossCents}, ${spec.livemode !== false},
+            ${spec.loaded || spec.lines ? new Date().toISOString() : null}::timestamptz)
+    returning id`) as { id: string }[];
+  const settlementId = rows[0]!.id;
+  let n = 0;
+  for (const line of spec.lines ?? []) {
+    n += 1;
+    const fee = line.feeCents ?? 0;
+    await sql`
+      insert into giving_settlement_lines (organization_id, settlement_id, gift_id, external_balance_transaction_id, payment_intent_id,
+             kind, gross_cents, fee_cents, net_cents)
+      values (${fx.orgId}::uuid, ${settlementId}::uuid, ${line.giftId ?? null}::uuid, ${`txn_e2e${settlementCounter}x${n}`}, ${line.paymentIntent ?? null},
+              ${line.kind}, ${line.grossCents}, ${fee}, ${line.grossCents - fee})`;
+  }
+  return { id: settlementId, payoutId };
+}
+
 /** The newest checkout intent the fixture org has (what the hydration spec asserts persisted). */
 export async function latestIntents(sql: Sql, fx: GivingFixture) {
   return (await sql`

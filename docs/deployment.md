@@ -413,6 +413,10 @@ Run against `development` or a preview, never production data.
 - `STRIPE_SECRET_KEY` (restricted, per the table) and `STRIPE_WEBHOOK_SECRET`
   set in **production only**; the webhook destination is *Connected accounts*,
   version `2026-09-30.endive`, the exact eighteen events.
+- The restricted key carries **`balance_read` with the "when accessing connected
+  accounts" choice set**. Payout reconciliation (Batch 6) reads balance
+  transactions on the congregation's account; without the scope every automatic
+  payout retries and then dead-letters, and its Payouts row never fills.
 - `NEXT_PUBLIC_APP_URL` is the canonical `https` origin; `CRON_SECRET` is set and
   the giving cron shows 200s in the Vercel cron dashboard.
 - Upstash (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and Turnstile configured: the

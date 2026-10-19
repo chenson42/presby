@@ -16,7 +16,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-15 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-15 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (Batch 1: database-admin) | 2026-10-15 |
-| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; 5a complete; 5b complete (full-stack-developer, 2026-10-18); Batch 6 pending | — | 2026-10-18 |
+| 4 — Implementation | Batch 1 database-admin → full-stack-developer; B2 full-stack-developer; B3 api-developer → ux-developer; B4 api-developer + ux-developer; B5 database-admin → full-stack-developer; B6 full-stack-developer | Batches 1–4 complete; 5a complete; 5b complete (full-stack-developer, 2026-10-18); Batch 6 complete (full-stack-developer, 2026-10-18) - Phase 4 ready for QA | — | 2026-10-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -3642,6 +3642,9 @@ Next: **Batch 5, database-admin (5a: `0056`) then full-stack-developer (5b)**, p
 - retrospective: Phase 3 reads the pinned SDK's changelog before marking an API fact confirmed (two misses: account-link `configurations`, Checkout `payment_method_types`) → `.claude/agents/tech-lead.md`
 - giving: platform-wide `blob_assets` immutability (statement PDFs only are frozen today; 5a ruling 2)
 - giving: the three Batch 5a suggested TODO lines (see 5a section)
+- giving (Batch 6 ruling 3, 2026-10-19): a payout whose lines never load stays "waiting" after it dead-letters; give it a clear "reconciliation failed" state on the Payouts page
+- giving (Batch 6 ruling 4, accepted residuals): members of a congregation still in Stripe test mode see an empty history; offline-only funds show their internal name on the member page
+- giving (Batch 5b, open for operator ruling): withdraw a stale, fully refunded statement; bulk mark-as-mailed; wording v2 with the intangible-religious-benefits clause after the CPA review; non-Latin script font fallback; notice re-send window
 - operator: Stripe test-mode platform account (Connect) → run the smoke in docs/deployment.md; CPA review of statement wording + four accounting questions before any real statement; Upstash + Turnstile before go-live
 
 ### Shared-file edits (from Batch 1a "Integration edits")
@@ -3975,7 +3978,110 @@ Chromium via Playwright against the dev server and the production build, at 360�
 
 Next: **Batch 6, full-stack-developer** (member surface and settlements). Phase 5 (qa) follows Batch 6 for the whole pipeline: it should run `e2e/giving-statements.spec.ts` on a dev server (and, ideally, the production build with `GIVING_STATEMENTS_ENABLED=1`), read the route handlers for the hand-audited events (`download/route.ts`, `print/route.ts`), and re-read the mutation list above. What to test in a browser: issue a year at 360 px and watch the dialog's progress; download a statement and open it; replay a refund and issue the correction; confirm the overview's "out of date" line appears and clears.
 
+## Batch 6 — member surface and settlements (full-stack-developer)
+
+*2026-10-18, full-stack-developer, worktree `presby-giving` on `pipeline/online-giving` (HEAD `902522a`), Neon branch `br-winter-band-axb6tzax`. Nothing committed. No Rule 16 shared file and not `src/lib/audit.ts` edited; **no schema change** (0055/0056 as shipped: `presby_giving_apply_settlement_lines` already existed); no new dependency. Servers: two dev servers from the worktree on port 3100 (first: wrapper 45301 / listener 45318; second: wrapper 50539 / listener 50556), all mine, stopped by those PIDs; no `pkill` by pattern. **Settlements were built, not dropped.***
+
+### Files Created
+
+- `src/lib/giving/self.ts` (+ `self.db.test.ts`, 23 DB-backed) - `getMyGiving(viewerPersonId, organizationId)` and `findMyStatementForDownload(viewerPersonId, organizationId, statementId)`. Header states DECISION-162's four conditions and what ownership means.
+- `src/app/(org)/o/[slug]/giving/{page,giving-states,history-list,statements-list}.tsx` (+ `page.test.tsx`, 18).
+- `src/app/(org)/o/[slug]/giving/statements/[statementId]/download/route.ts` (+ `route.test.ts`, 11).
+- `src/lib/giving/pdf-response.ts` - `plain()`, `notFound()`, `pdfHeaders()` extracted from the admin `route-gate.ts` (see Deviations 2).
+- Settlements: `src/lib/giving/settlements.ts` (+ `settlements.db.test.ts`, 11 + 1 pure), `src/lib/giving/settlement-display.ts` (row type and `reconciliationOf`, pure), `src/lib/giving/ingest/settlement-lines.ts` (+ `settlement-lines.test.ts`, 21), `src/app/(org)/o/[slug]/admin/giving/settlements/{page,settlements-list}.tsx` (+ `page.test.tsx`, 14).
+- e2e: `e2e/giving-member.spec.ts` (10), `e2e/giving-settlements.spec.ts` (6).
+
+### Files Modified
+
+- `src/lib/giving/ingest/functions.ts` - `applySettlementLines(inboxId, payoutId, lines)` (the DB door for `presby_giving_apply_settlement_lines`, typed parallel arrays built as `array[$1::text, ...]`, NULs stripped like every provider string) and the `SettlementLineInput` type.
+- `src/lib/giving/ingest/process.ts` - `case "settlement"`: after the header is applied, a **paid, automatic** payout has its lines read and stored in the same claim. Header comment now says four allowlisted reads.
+- `src/lib/giving/giving-copy.ts` (+ test) - `MEMBER_GIVING`, `giftStatusLabel`, `SETTLEMENTS_COPY`, all in `allGivingCopy()` so the forbidden-word walk covers them.
+- `src/app/(org)/o/[slug]/admin/giving/page.tsx` (+ `page.test.tsx`) - a **Payouts** tile (`giving.view`), like Batch 5b's statements tile.
+- `src/app/(org)/o/[slug]/admin/giving/statements/route-gate.ts` - imports and re-exports `plain/notFound/pdfHeaders` from `pdf-response.ts`; behaviour unchanged (its 75 tests still pass).
+- Tests that had to follow: `ingest/process.test.ts` (+7, mock for the new Stripe read and the lines function), `ingest/process.db.test.ts` (payout test rewritten + 2 new), `ingest/lifecycle.db.test.ts` (+6 `apply_settlement_lines`).
+- `e2e/support/giving-fixture.ts` - `addRefund`, `addUnsettledOnlineGift`, `addSettlement`; `e2e/giving-admin.spec.ts` - `/settlements` joins the toggle-off, 2FA and four-way-miss route lists.
+- Not modified: the Giving tile (`tiles.ts` already pointed at `/o/<slug>/giving` with `orgFeatureKey: "org_portal.giving"`, so it is absent when the toggle is off - proven in the e2e), `next.config.ts` (the member route streams the stored blob; it renders nothing, so no `outputFileTracingIncludes` key), `.env.example`.
+
+### Endpoints and gates
+
+| Surface | Gate (in order) | Notes |
+|---|---|---|
+| page `/o/<slug>/giving` | `cachedAuth` -> `resolveOrgContext` four-way miss -> `assertOrgAccess` -> `getMyGiving` (applicability, then the org toggle, in the same transaction as the rows) | **No giving key, no 2FA force.** not-applicable and toggle-off are 200 pages (no Features link); a thrown DB error is "We can't load your giving history right now." (never an empty list); `OrgAccessError` rethrown to the segment boundary. "Give online" is a link to `giving/give` when `readPublicGivingConfig` says `live`, else the unavailable notice (history still shown). No `loading.tsx`. |
+| `GET /o/<slug>/giving/statements/[statementId]/download` | `auth()` -> 307 `/signin` ; four-way miss: 404 no org / 403 one body ; `findMyStatementForDownload` | Stored blob via `getBlobStore().resolve`; `application/pdf`, `attachment`, `private, no-store`, `nosniff`. **Absent, malformed, someone else's, another org's slug, and Giving-off are one 404** (same status, body `Not found`, headers). Audited `GIVING_STATEMENT_DOWNLOADED` in the handler, `{organizationId, statementId, taxYear, version, self: true}` - no donor id, name or amount; refusals write nothing. 503 on a database failure (never a 404 that reads as "not yours"). |
+| page `/o/<slug>/admin/giving/settlements` | `gateGivingPage` (sign-in, four-way miss, 2FA R4, applicability, toggle, `giving.view`) | Read-only; no action. Four states; section-forbidden for a recorder / manage-only holder. |
+| `listSettlements(personId, orgId)` | `giving.view` re-checked in its own transaction | Newest arrival first, 100 max with a stated cap. |
+| cron / webhook `processInboxEvent` | claimed inbox row only | `payout.paid` + `automatic` -> `listBalanceTransactionsForPayout` (pages of 100, up to 10 pages) -> ONE `apply_settlement_lines` call. Manual or failed payouts are header-only. |
+
+### Audit Events
+
+No new key. `GIVING_STATEMENT_DOWNLOADED` is now written from a second hand-audited place (the member route); the settlements path writes none (a system read of Stripe by claimed event, as the fee read already is). `check:audit` passes.
+
+### Commands and results (worktree)
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint -- --max-warnings=0` | exit 0 |
+| `npm run check` (all seven tripwires) / `npm run check:audit` | exit 0 / passed |
+| `checkSecretsPii()` over the 32 new or changed text files (the real check scans tracked files only) | 0 findings |
+| `npm run test` | 412 files passed, 58 skipped (DB-backed without env); **5839 tests passed**, 1640 skipped (5b: 5763 / 1599) |
+| New non-DB tests this batch | page 18, member route 11, settlement-lines 21, settlements page 14, process +7, giving-copy +4 (20), overview page assertions |
+| DB-backed, serial, `--testTimeout=90000 --hookTimeout=120000` (`src/lib/db/domain/giving src/lib/giving src/lib/admin/giving-ingest-health`) | one run, 26 minutes (Neon latency spikes): **57 files; 56 passed, 1111 tests passed, 1 failed** - `funds.db.test.ts`, a file this batch did not touch, from an uncaught `Connection terminated unexpectedly` (a dropped WebSocket); re-run alone **9/9**. New DB tests this batch (all green in that run and individually): `self.db.test.ts` 23, `settlements.db.test.ts` 12, `lifecycle.db.test.ts` 38 (+6), `process.db.test.ts` 27 (+2 and a rewrite). The default 20 s timeout is not enough on this branch some afternoons; I raised it and say so. Earlier single runs also lost one test each to 90 s network stalls (an untouched `over-reversal` test, then my own `merge SOURCE` test); each passed alone in 11-15 s. |
+| `npm run build` | exit 0 (both download routes and `/o/[slug]/giving`, `/admin/giving/settlements` are dynamic routes in the output; no `next.config.ts` change was needed) |
+| `e2e/giving-member.spec.ts` + `e2e/giving-settlements.spec.ts` (dev server, port 3100) | **10 passed + 6 passed**, first run and again after the server restart |
+| existing giving specs (`shell`, `admin`, `connect`, `public`, `webhook`, `statements`) | **Not clean at the repo's own timeouts, clean with patient ones - stated plainly.** Three attempts at the default 5 s expect timeout each lost 1-5 tests to a stalled Neon branch (one dev-server response took 15.9 minutes, `net::ERR_NETWORK_IO_SUSPENDED`, `NeonDbError ... fetch failed` in globalSetup); a different test each time, the same untouched void flow twice (the 5b note records the same), and each cascade marked its serial file's remainder "did not run". I then ran them with a throwaway config (same config, `expect.timeout` 30 s, test timeout 180 s; deleted afterwards, not committed) on a freshly restarted dev server: **admin + connect + public + statements 61 passed (11.1 min); shell + webhook 19 passed**. Only my `/settlements` additions to `giving-admin.spec.ts`'s route lists are new in those files. QA should expect the same noise and re-run rather than trust a first red or a first green. |
+
+**Failing-first, honestly.** For behaviour code I wrote code and tests together, so the tests were not seen red before green. Instead, each mechanism was broken and the named test confirmed to fail, then restored byte-for-byte (diffed): M1 the self-read drops its `person_id` filter -> 7 `self.db` tests (another member, no-link, name/email lookalike, other org, household, Session/giving-key holder, directory-hidden); M2 `g.livemode` dropped -> `a test-mode gift is practice, not history`; M3 ownership taken from the merged source's own link instead of the root -> both merged-donor tests; M4 member route skips its audit -> `is audited once inside the handler...`; M5 route answers 403 for a not-found statement -> the parity test and the one-definition test; M6 a manual payout is read for lines -> `a MANUAL payout is a header only`; M7 a failed payout is read for lines -> `a FAILED payout is a header only`. Not mutation-proved: `pgArray`'s empty-array branch (covered by the `lifecycle.db` empty-payout test and the `settlement-lines` empty case, but I did not remove it); the 360 px assertions (screenshots read instead).
+
+### Browser verification
+
+Chromium via Playwright against the dev server at 360x740, screenshots read: `test-results/giving-360/member-giving.png`, `-open.png` (disclosure open), `-empty.png`, `settlements.png`. Single column, no horizontal scroll (asserted <= 1 px), every control >= 40 px (asserted; buttons are `min-h-11`, and the `<summary>`'s inner span), cards read date/fund/amount then the badge, the refunded gift shows "Partly refunded or reversed" and "$20.00 returned", the disclosure opens (native `<details>`, `<summary>` carries no `display` utility), the empty page shows Flow 12's sentence verbatim, and the payouts cards read amount, id, badges, then exactly one honest statement (the manual payout's dashed "Reconciliation unavailable" box, the mismatch in bold with both figures). The load-error state is unit-tested only (a DB failure cannot be forced from the browser). Four states exercised for the member page: populated, empty, toggle-off (200, tile gone from the portal), load-error (unit); signed-out redirect with the deep link.
+
+### Deviations from the design, each with its reason
+
+1. **`fillSettlementLines` lives in `ingest/settlement-lines.ts` and is called from `process.ts`, not `settlements.ts` and not a separate cron branch.** `presby_giving_apply_settlement_lines` (like every apply function) acts only on a CLAIMED inbox row, so the read has to happen inside the claim; `processInboxEvent` is the one code path both the webhook `after()` and the 5-minute cron run, so "the cron branch" is that. `settlements.ts` is the reader. A Stripe failure fails the event for the normal back-off (the header write is idempotent); at attempt 8 it dead-letters and the platform health page shows it.
+2. **`pdf-response.ts` extracted** from `route-gate.ts` so the treasurer's routes and the member route build "the identical 404" from one definition (and the member route does not import an admin gate). `route-gate.ts` re-exports; a test pins that neither route defines its own.
+3. **Ownership is read from the donor ROOT only.** A merged-away donor's own `linked_membership_id` is frozen at merge and never consulted, so a stale link on a source cannot show a third member the root member's gifts. This is slightly narrower than "or merged into one" if the root itself is unlinked while its source was linked (that case shows nothing); I judged a miss safer than a leak. Tested both ways (M3).
+4. **Member list details beyond the contract:** gifts include `pending` and `failed` with plain words (a failed gift shown as "Didn't go through" beats a gift that silently vanishes); the fund name is the online display name when there is one; the list is capped at 200 with a stated `giftsTruncated` flag (the contract named no cap); statements expose `superseded` and `mergedSource` flags, and the page groups both under "Earlier versions".
+5. **Payouts is a list, not a drill-down.** Per payout: totals by kind, fees, net, matched/unmatched charges, and balanced/mismatch; no per-line page. Named "Payouts" in the UI (the route is `settlements`, as designed). Added a tile on the overview (the design listed the route but no entry point, the same gap 5b fixed for statements).
+6. **A payout over ten pages (1,000 transactions) is left header-only** (`ignored:too_many_lines`, one id-only log line) rather than stored partially; `lines_loaded_at` means "every line is here".
+7. **The "no 2FA force" is proven by unit tests, not the browser:** the only fixture that can sign in with a giving role at a throwaway org (`mfa-enrolled`) has `users.two_factor_required`, so the Edge challenges it on every `/o/*` page whatever this page does. The page test feeds a session that is required-but-unverified and asserts no redirect; the route test asserts the same.
+
+### Open questions for the orchestrator
+
+1. **Merge-source statements are always under "Earlier versions"**, per Batch 5a ruling 1 as written. If the root has no statement for that year, a member's only statement for the year sits inside the disclosure (still listed, still downloadable). Option: treat a merge-source as "current" when the root has none for the same tax year. One-line change in `statements-list.tsx` plus the page test; needs a ruling because it departs from the literal text.
+2. **Stripe restricted key**: line reads need `balance_read` on Connect (the R8 table already lists it for `listBalanceTransactionsForPayout`). Nothing to change; operator should confirm the key's scope at go-live, because without it every automatic payout's lines fail and retry, then dead-letter.
+3. **A payout whose lines never load** stays "waiting" in the UI forever once the event dead-letters (the health page shows the dead letter; requeue replays it). Acceptable for v1; a "refresh this payout" control would need a tenant-side Stripe read, which the design deliberately keeps out of pages.
+4. **Test-mode member**: a congregation in Stripe test mode sees an empty history even after practice gifts (test gifts are excluded by P3-17). Correct, and the Give card says "practice only"; flagging because it reads as "my gift vanished" to a tester.
+5. Fund names: an offline-only fund (no online display name) shows its internal name to the member.
+
+### Handoff to QA
+
+Run, against a dev server started in the worktree (`STRIPE_WEBHOOK_SECRET`, `CRON_SECRET` set; the Playwright config sets them for a server it starts; `STRIPE_SECRET_KEY` unset), on a Neon branch, with `--testTimeout=90000` for the DB suites:
+
+- **Unit:** `npm run test`; `npm run typecheck`; `npm run lint -- --max-warnings=0`; `npm run check`.
+- **DB-backed, serial:** `npx dotenv -e .env.local -- vitest run --no-file-parallelism --testTimeout=90000 --hookTimeout=120000 src/lib/db/domain/giving src/lib/giving src/lib/admin/giving-ingest-health` (57 files); `scripts/giving/test-rls-46.sql` as `presby_app` (unchanged this batch).
+- **e2e for the whole pipeline:** `e2e/giving-shell.spec.ts`, `giving-admin.spec.ts`, `giving-connect.spec.ts`, `giving-public.spec.ts`, `giving-webhook.spec.ts`, `giving-statements.spec.ts` (ideally also against the production build with `GIVING_STATEMENTS_ENABLED=1`, minus the notice-email test), `giving-member.spec.ts`, `giving-settlements.spec.ts`; the hydration lane `npm run test:e2e:prod` (`e2e/hydration/giving-give-form.spec.ts`, `giving-offline-gift-form.spec.ts`).
+- **Read by hand (not scanned by `check:audit`):** `giving/statements/[statementId]/download/route.ts` (member) beside the admin `download/route.ts` and `print/route.ts`; `ingest/process.ts` and `ingest/settlement-lines.ts` (the system read of Stripe by claimed event); `src/lib/giving/self.ts`'s header against DECISION-162's four conditions; `statements-list.tsx` for the "Earlier versions" semantics.
+- **In a browser at 360 px:** `/o/<slug>/giving` (populated, empty, disclosure open), a statement download, `/o/<slug>/admin/giving/settlements`.
+- **Known environmental noise:** the Neon branch stalls requests for tens of seconds at times (80 s and a 15-minute server response were observed this batch); a first-run failure in an untouched spec that passes on its own is that, not a regression, but QA should re-run and say so rather than wave it through.
+
+### Integration edits for the orchestrator (Rule 16 files; none made here)
+
+- `docs/TODO.md`: Done - member self-view, member statement download, payouts (settlements); new lines from Open questions 1, 3 and 4 above; the 5b lines stay.
+- `docs/product/functionality-map.md` / release notes at integration: "Giving" tile and page (give online entry, own gift history, own statements with previous versions, download); Payouts page (automatic payouts itemized and matched to gifts, manual payouts marked unavailable); overview Payouts tile.
+- `docs/testing.md`: DB suites under `src/lib/giving` want `--testTimeout=90000` on a slow branch; `self.db.test.ts` mocks `@/lib/audit` (as `team.db.test.ts` does).
+- `scripts/seed-dev.sql` / `scripts/test-rls.sql`: nothing needed (no schema change).
+
 ---
+
+---
+### Orchestrator ruling on the Batch 6 questions (2026-10-19, operator)
+
+1. **Merge-source statements:** a merge-source statement is current (top level, with the "Issued before your records were combined" line) when the root holds no non-superseded statement for that tax year; otherwise it sits under "Earlier versions". Implemented by the orchestrator in `statements-list.tsx` with a failing-then-passing test in `giving/page.test.tsx`.
+2. **`balance_read`:** added to the go-live checklist in `docs/deployment.md`.
+3. **Stuck payout state:** agreed; TODO line in the Integration checklist (not built in this pipeline).
+4. **Test-mode empty history / internal fund names:** accepted as residuals; TODO line in the Integration checklist.
 
 # Phase 5 — Verification (qa)
 

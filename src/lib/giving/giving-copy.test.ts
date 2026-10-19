@@ -17,6 +17,8 @@ import {
   returnGiftLine,
   disconnectDialogBody,
   rateLimitedMessage,
+  MEMBER_GIVING,
+  giftStatusLabel,
 } from "./giving-copy";
 import { AMOUNT_BOUNDS, formatCents } from "./money";
 
@@ -130,5 +132,31 @@ describe("giving-copy", () => {
   it("the return gift line names the amount and fund, with 'every month' only for a monthly gift", () => {
     expect(returnGiftLine("$37.50", "General Fund", false)).toBe("$37.50 to General Fund");
     expect(returnGiftLine("$37.50", "General Fund", true)).toBe("$37.50 every month to General Fund");
+  });
+
+  it("the member's history: the load error is its own sentence, never the empty state's, and the empty state is Flow 12's", () => {
+    expect(MEMBER_GIVING.loadError).toBe("We can't load your giving history right now.");
+    expect(MEMBER_GIVING.loadErrorBody).toMatch(/not affected/);
+    expect(MEMBER_GIVING.loadError).not.toBe(MEMBER_GIVING.giftsEmptyTitle);
+    expect(`${MEMBER_GIVING.giftsEmptyTitle}. ${MEMBER_GIVING.giftsEmptyBody}`).toBe(
+      "No gifts are linked to you yet. Gifts you give while signed in, or that your church office links to you, will appear here.",
+    );
+  });
+
+  it("the statements help separates the year-end statement from Stripe's payment receipt", () => {
+    expect(MEMBER_GIVING.statementsHelp).toMatch(/separate from the payment receipt/);
+  });
+
+  it("a gift's status is a plain word: processing, didn't go through, received, and how much of it was reversed", () => {
+    expect(giftStatusLabel("succeeded", 5000, 0)).toBe("Received");
+    expect(giftStatusLabel("succeeded", 5000, 2000)).toBe("Partly refunded or reversed");
+    expect(giftStatusLabel("succeeded", 5000, 5000)).toBe("Refunded or reversed");
+    expect(giftStatusLabel("pending", 5000, 0)).toBe("Processing");
+    expect(giftStatusLabel("failed", 5000, 0)).toBe("Didn't go through");
+  });
+
+  it("the earlier-versions summary counts and the plural never reads wrong", () => {
+    expect(MEMBER_GIVING.previousSummary(1)).toBe("Earlier versions (1)");
+    expect(MEMBER_GIVING.previousSummary(3)).toBe("Earlier versions (3)");
   });
 });

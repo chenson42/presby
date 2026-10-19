@@ -13,6 +13,7 @@ const fns = vi.hoisted(() => ({
   applySubscription: vi.fn(),
   applyIntentExpired: vi.fn(),
   applySettlement: vi.fn(),
+  applySettlementLines: vi.fn(),
   applyConnectionStatus: vi.fn(),
 }));
 vi.mock("./functions", () => fns);
@@ -21,6 +22,7 @@ const stripe = vi.hoisted(() => ({
   retrieveBalanceTransaction: vi.fn(),
   retrieveInvoiceForPayment: vi.fn(),
   retrieveEvent: vi.fn(),
+  listBalanceTransactionsForPayout: vi.fn(),
 }));
 vi.mock("../providers/stripe/client", () => stripe);
 
@@ -59,6 +61,8 @@ function claim(fixture: FixtureName | null, overrides: Record<string, unknown> =
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
+  stripe.listBalanceTransactionsForPayout.mockResolvedValue({ rows: [], hasMore: false });
+  fns.applySettlementLines.mockResolvedValue("applied");
   fns.finishEvent.mockImplementation(async (_id: string, outcome: string) =>
     outcome === "dead" ? "dead_letter" : outcome === "failed" || outcome === "parked" ? "parked" : outcome,
   );
@@ -365,5 +369,104 @@ describe("processInboxEvent - audit rows carry the organization", () => {
     for (const call of audit.recordAudit.mock.calls) {
       expect(call[0].metadata, call[0].action).toMatchObject({ organizationId: ORG, connectionId: CONNECTION, inboxId: INBOX });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch 6: a paid, AUTOMATIC payout has contents; the lines are read in the same claim.
+// ---------------------------------------------------------------------------
+describe("processInboxEvent - payouts (settlement lines)", () => {
+  const PO = "po_fixturePayout000001";
+  const row = (id: string, over: Record<string, unknown> = {}) => ({
+    balanceTransactionId: id,
+    kind: "charge",
+    amountCents: 5000,
+    feeCents: 175,
+    netCents: 4825,
+    paymentIntentId: "pi_fixturePaid000001",
+    ...over,
+  });
+
+  it("an automatic paid payout: the header is applied, then its balance transactions are read for THIS payout on THIS account and stored", async () => {
+    fns.claimEvent.mockResolvedValue(claim("payout-paid"));
+    fns.applySettlement.mockResolvedValue("applied");
+    stripe.listBalanceTransactionsForPayout.mockResolvedValue({
+      rows: [
+        row("txn_fixtureLineCharge1"),
+        row("txn_fixtureLineRefund1", { kind: "refund", amountCents: -1000, feeCents: 0, netCents: -1000 }),
+        row("txn_fixtureLineOddity1", { kind: "payout_cancel", paymentIntentId: null }),
+      ],
+      hasMore: false,
+    });
+    const result = await processInboxEvent(INBOX);
+    expect(result).toMatchObject({ verdict: "applied", parts: ["applied"] });
+    expect(stripe.listBalanceTransactionsForPayout).toHaveBeenCalledTimes(1);
+    expect(stripe.listBalanceTransactionsForPayout).toHaveBeenCalledWith(FIXTURE_ACCOUNT, PO, undefined);
+    expect(fns.applySettlementLines).toHaveBeenCalledTimes(1);
+    expect(fns.applySettlementLines).toHaveBeenCalledWith(INBOX, PO, [
+      { balanceTransactionId: "txn_fixtureLineCharge1", kind: "charge", grossCents: 5000, feeCents: 175, netCents: 4825, paymentIntentId: "pi_fixturePaid000001" },
+      { balanceTransactionId: "txn_fixtureLineRefund1", kind: "refund", grossCents: -1000, feeCents: 0, netCents: -1000, paymentIntentId: "pi_fixturePaid000001" },
+      { balanceTransactionId: "txn_fixtureLineOddity1", kind: "other", grossCents: 5000, feeCents: 175, netCents: 4825, paymentIntentId: null },
+    ]);
+  });
+
+  it("pages through a large payout and stores the whole of it in ONE call", async () => {
+    fns.claimEvent.mockResolvedValue(claim("payout-paid"));
+    fns.applySettlement.mockResolvedValue("applied");
+    stripe.listBalanceTransactionsForPayout
+      .mockResolvedValueOnce({ rows: [row("txn_fixturePageOne0001")], hasMore: true })
+      .mockResolvedValueOnce({ rows: [row("txn_fixturePageTwo0001")], hasMore: false });
+    await processInboxEvent(INBOX);
+    expect(stripe.listBalanceTransactionsForPayout).toHaveBeenNthCalledWith(2, FIXTURE_ACCOUNT, PO, "txn_fixturePageOne0001");
+    expect(fns.applySettlementLines).toHaveBeenCalledTimes(1);
+    expect(fns.applySettlementLines.mock.calls[0]![2]).toHaveLength(2);
+  });
+
+  it("a MANUAL payout is a header only: Stripe is not asked for its contents (reconciliation unavailable)", async () => {
+    fns.claimEvent.mockResolvedValue(
+      claim(null, {}, fixtureBody("payout-paid", { patch: (b) => void ((b.data as { object: Record<string, unknown> }).object.automatic = false) })),
+    );
+    fns.applySettlement.mockResolvedValue("applied");
+    const result = await processInboxEvent(INBOX);
+    expect(result).toMatchObject({ verdict: "applied", parts: ["applied"] });
+    expect(fns.applySettlement.mock.calls[0]![1]).toMatchObject({ automatic: false, status: "paid" });
+    expect(stripe.listBalanceTransactionsForPayout).not.toHaveBeenCalled();
+    expect(fns.applySettlementLines).not.toHaveBeenCalled();
+  });
+
+  it("a FAILED payout is a header only", async () => {
+    fns.claimEvent.mockResolvedValue(claim("payout-failed"));
+    fns.applySettlement.mockResolvedValue("applied");
+    await processInboxEvent(INBOX);
+    expect(stripe.listBalanceTransactionsForPayout).not.toHaveBeenCalled();
+    expect(fns.applySettlementLines).not.toHaveBeenCalled();
+  });
+
+  it("a header that was refused is not followed by a read of Stripe", async () => {
+    fns.claimEvent.mockResolvedValue(claim("payout-paid"));
+    fns.applySettlement.mockResolvedValue("dead:bad_reference");
+    const result = await processInboxEvent(INBOX);
+    expect(result.verdict).toBe("dead");
+    expect(stripe.listBalanceTransactionsForPayout).not.toHaveBeenCalled();
+  });
+
+  it("a Stripe failure while listing retries the event (the header write is idempotent); nothing partial is stored", async () => {
+    fns.claimEvent.mockResolvedValue(claim("payout-paid"));
+    fns.applySettlement.mockResolvedValue("applied");
+    stripe.listBalanceTransactionsForPayout.mockRejectedValue(new ProviderError("network"));
+    const result = await processInboxEvent(INBOX);
+    expect(result.verdict).toBe("failed");
+    expect(result.parts).toEqual(["failed:stripe_network"]);
+    expect(fns.applySettlementLines).not.toHaveBeenCalled();
+  });
+
+  it("a payout over the page cap leaves the header standing and stores no partial list", async () => {
+    fns.claimEvent.mockResolvedValue(claim("payout-paid"));
+    fns.applySettlement.mockResolvedValue("applied");
+    stripe.listBalanceTransactionsForPayout.mockResolvedValue({ rows: [row("txn_fixtureEndlessPage1")], hasMore: true });
+    const result = await processInboxEvent(INBOX);
+    expect(stripe.listBalanceTransactionsForPayout).toHaveBeenCalledTimes(10);
+    expect(fns.applySettlementLines).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ verdict: "applied", parts: ["applied"] });
   });
 });

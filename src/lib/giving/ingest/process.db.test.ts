@@ -17,6 +17,7 @@ const stripe = vi.hoisted(() => ({
   retrieveBalanceTransaction: vi.fn(),
   retrieveInvoiceForPayment: vi.fn(),
   retrieveEvent: vi.fn(),
+  listBalanceTransactionsForPayout: vi.fn(),
 }));
 vi.mock("@/lib/giving/providers/stripe/client", () => stripe);
 
@@ -433,12 +434,87 @@ describe.skipIf(!hasDb)("processInboxEvent (Postgres-backed, mocked Stripe)", ()
     expect(await h.giftByPi(f.organizationId, fpi)).toMatchObject({ status: "failed", failure_code: "async_payment_failed" });
   });
 
-  it("a payout is recorded as a settlement", async () => {
+  it("a payout is recorded as a settlement, and an AUTOMATIC one has its lines stored, matched to gifts by payment intent", async () => {
     const t = await tenant("e2e-payout");
+    // The gift the payout pays out (a real payment-mode gift from the signed fixture).
+    const s = swaps();
+    await h.intent({ ...t, sessionId: s.session, totalCents: 5000 });
+    await t.deliver(t.body("checkout-session-completed-payment", s.map));
+    const gift = await h.giftByPi(t.organizationId, s.pi);
+
     const po = ids.payout();
+    stripe.listBalanceTransactionsForPayout.mockResolvedValue({
+      rows: [
+        { balanceTransactionId: `txn_${ids.payout().slice(3)}a`, kind: "charge", amountCents: 5000, feeCents: 175, netCents: 4825, paymentIntentId: s.pi },
+        { balanceTransactionId: `txn_${ids.payout().slice(3)}b`, kind: "charge", amountCents: 3000, feeCents: 117, netCents: 2883, paymentIntentId: "pi_notOurGift00001" },
+        { balanceTransactionId: `txn_${ids.payout().slice(3)}c`, kind: "adjustment", amountCents: -1000, feeCents: 0, netCents: -1000, paymentIntentId: null },
+      ],
+      hasMore: false,
+    });
     const { result } = await t.deliver(t.body("payout-paid", { po_fixturePayout000001: po }));
     expect(result.verdict).toBe("applied");
-    expect((await h.settlements(t.organizationId))[0]).toMatchObject({ external_settlement_id: po, status: "paid" });
+    expect(stripe.listBalanceTransactionsForPayout).toHaveBeenCalledWith(t.accountId, po, undefined);
+
+    const [settlement] = await h.settlements(t.organizationId);
+    expect(settlement).toMatchObject({ external_settlement_id: po, status: "paid" });
+    const lines = h.rowsOf(
+      await h.owner(sql`
+        select l.kind, l.gross_cents::int as gross, l.fee_cents::int as fee, l.net_cents::int as net, l.payment_intent_id, l.gift_id::text as gift_id
+          from giving_settlement_lines l join giving_settlements s on s.id = l.settlement_id
+         where s.organization_id = ${t.organizationId} and s.external_settlement_id = ${po}
+         order by l.external_balance_transaction_id`),
+    );
+    expect(lines.map((l) => [l.kind, l.gross, l.fee, l.net])).toEqual([
+      ["charge", 5000, 175, 4825],
+      ["charge", 3000, 117, 2883],
+      ["adjustment", -1000, 0, -1000],
+    ]);
+    // matched to OUR gift by payment intent; the foreign intent and the adjustment match nothing
+    expect(lines.map((l) => l.gift_id)).toEqual([String(gift!.id), null, null]);
+    const loaded = h.rowsOf(await h.owner(sql`select lines_loaded_at is not null as loaded from giving_settlements where organization_id = ${t.organizationId}`));
+    expect(loaded[0]!.loaded).toBe(true);
+
+    // The same payout delivered again (a new event id) stores nothing twice.
+    await t.deliver(t.body("payout-paid", { po_fixturePayout000001: po }));
+    const count = h.rowsOf(await h.owner(sql`select count(*)::int as n from giving_settlement_lines where organization_id = ${t.organizationId}`));
+    expect(count[0]!.n).toBe(3);
+  });
+
+  it("a MANUAL payout is a header only: automatic = false, no lines, never loaded, Stripe never asked", async () => {
+    const t = await tenant("e2e-payout-manual");
+    const po = ids.payout();
+    const { result } = await t.deliver(
+      t.body("payout-paid", { po_fixturePayout000001: po }, (b) => void ((b.data as { object: Record<string, unknown> }).object.automatic = false)),
+    );
+    expect(result.verdict).toBe("applied");
+    expect(stripe.listBalanceTransactionsForPayout).not.toHaveBeenCalled();
+    expect((await h.settlements(t.organizationId))[0]).toMatchObject({ external_settlement_id: po, status: "paid", automatic: false });
+    const n = h.rowsOf(await h.owner(sql`select count(*)::int as n from giving_settlement_lines where organization_id = ${t.organizationId}`));
+    expect(n[0]!.n).toBe(0);
+    const loaded = h.rowsOf(await h.owner(sql`select lines_loaded_at from giving_settlements where organization_id = ${t.organizationId}`));
+    expect(loaded[0]!.lines_loaded_at).toBeNull();
+  });
+
+  it("a Stripe failure listing a payout's lines retries the event; the header is already there and the retry completes it", async () => {
+    const t = await tenant("e2e-payout-retry");
+    const po = ids.payout();
+    stripe.listBalanceTransactionsForPayout.mockRejectedValueOnce(new ProviderError("network"));
+    const first = await t.deliver(t.body("payout-paid", { po_fixturePayout000001: po }));
+    expect(first.result.verdict).toBe("failed");
+    expect((await h.settlements(t.organizationId))[0]).toMatchObject({ external_settlement_id: po });
+    const unloaded = h.rowsOf(await h.owner(sql`select lines_loaded_at from giving_settlements where organization_id = ${t.organizationId}`));
+    expect(unloaded[0]!.lines_loaded_at).toBeNull();
+
+    // The event is parked with a back-off; make it due and let the cron's path take it again.
+    stripe.listBalanceTransactionsForPayout.mockResolvedValue({
+      rows: [{ balanceTransactionId: `txn_${ids.payout().slice(3)}z`, kind: "charge", amountCents: 2000, feeCents: 88, netCents: 1912, paymentIntentId: null }],
+      hasMore: false,
+    });
+    await h.owner(sql`update giving_provider_events set next_attempt_at = now() - interval '1 minute' where id = ${first.inboxId}`);
+    const again = await processInboxEvent(first.inboxId);
+    expect(again.verdict).toBe("applied");
+    const n = h.rowsOf(await h.owner(sql`select count(*)::int as n from giving_settlement_lines where organization_id = ${t.organizationId}`));
+    expect(n[0]!.n).toBe(1);
   });
 
   it("a PURGED body is re-fetched through retrieveEvent with the inbox row's own event id, and the audit rows name the organization", async () => {

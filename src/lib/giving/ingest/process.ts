@@ -22,6 +22,7 @@ import {
   type FinishOutcome,
 } from "./functions";
 import { aggregateOutcomes, finishCode, planAudits, type PartResult } from "./outcome";
+import { fillSettlementLines } from "./settlement-lines";
 
 /**
  * The ingest processor - docs/work-log/2026-10-15-online-giving.md, Phase 3
@@ -40,9 +41,10 @@ import { aggregateOutcomes, finishCode, planAudits, type PartResult } from "./ou
  * short code the operator can read on the health page.
  *
  * It uses `db` only (no session, no org context) and reaches Stripe only through
- * three allowlisted reads - a balance transaction (the fee), an invoice (which
- * subscription a renewal belongs to) and, for a purged body, an event - each
- * named by an id taken from a CLAIMED, signed event. A number read from the
+ * four allowlisted reads - a balance transaction (the fee), an invoice (which
+ * subscription a renewal belongs to), for a purged body an event, and (Batch 6)
+ * the balance transactions of an automatic payout - each named by an id taken
+ * from a CLAIMED, signed event. A number read from the
  * event body is never the source of fee data; a fund or membership read from
  * Stripe metadata is never used at all (R9).
  *
@@ -210,9 +212,20 @@ async function applyOne(inboxId: string, claim: ClaimedEvent, event: NormalizedE
       case "intent_expired":
         part.outcome = await applyIntentExpired(inboxId, event.sessionId);
         break;
-      case "settlement":
+      case "settlement": {
         part.outcome = await applySettlement(inboxId, event);
+        // Batch 6: an AUTOMATIC payout that was paid has contents to list, read
+        // in this same claim (the lines function acts only on a claimed row). A
+        // manual payout, or a failed one, stays a header: "reconciliation
+        // unavailable". A Stripe failure throws into the catch below, the event
+        // retries, and the header write is idempotent. A payout too large to
+        // list (`ignored:*`) leaves the header's own outcome standing.
+        if (part.outcome === "applied" && event.status === "paid" && event.automatic) {
+          const lines = await fillSettlementLines(inboxId, claim.accountId, event.externalSettlementId);
+          if (!lines.startsWith("ignored:")) part.outcome = lines;
+        }
         break;
+      }
       case "connection_status":
         part.outcome = await applyConnectionStatus(inboxId, event);
         break;

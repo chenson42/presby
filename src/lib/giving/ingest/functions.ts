@@ -198,6 +198,52 @@ export async function applySettlement(
       ${event.arrivalDate}::date, ${event.grossCents}::bigint, ${event.automatic}::boolean) as outcome`);
 }
 
+/** One balance transaction of an automatic payout, as `presby_giving_apply_settlement_lines` takes it. */
+export interface SettlementLineInput {
+  balanceTransactionId: string;
+  /** One of the settlement-line kinds: charge | refund | dispute | fee | adjustment | other. */
+  kind: string;
+  /** SIGNED cents (a refund is negative). */
+  grossCents: number;
+  feeCents: number;
+  netCents: number;
+  paymentIntentId: string | null;
+}
+
+/** A Postgres array literal built from bound, individually cast elements (no jsonb, no string-built SQL). */
+function pgArray(values: ReadonlyArray<string | number | null>, element: "text" | "bigint"): ReturnType<typeof sql> {
+  if (values.length === 0) return sql.raw(`'{}'::${element}[]`);
+  return sql`array[${sql.join(
+    values.map((v) => sql`${v}::${sql.raw(element)}`),
+    sql`, `,
+  )}]::${sql.raw(element)}[]`;
+}
+
+/**
+ * The lines of an automatic payout (Batch 6), through the typed-parallel-array
+ * form of `presby_giving_apply_settlement_lines`: the payout is named by its
+ * `po_` id, the organization and connection come from the CLAIMED inbox row, and
+ * a line's gift is matched in the database by (connection, payment intent), so
+ * nothing here names a gift or an organization. Idempotent: a line already
+ * stored is skipped. Returns the function's outcome (`applied`,
+ * `parked:no_settlement`, `dead:bad_lines`, ...).
+ */
+export async function applySettlementLines(
+  inboxId: string,
+  externalSettlementId: string,
+  lines: readonly SettlementLineInput[],
+): Promise<string> {
+  return outcomeOf(sql`
+    select presby_giving_apply_settlement_lines(
+      ${inboxId}::uuid, ${externalSettlementId}::text,
+      ${pgArray(lines.map((l) => t(l.balanceTransactionId)), "text")},
+      ${pgArray(lines.map((l) => l.kind), "text")},
+      ${pgArray(lines.map((l) => l.grossCents), "bigint")},
+      ${pgArray(lines.map((l) => l.feeCents), "bigint")},
+      ${pgArray(lines.map((l) => l.netCents), "bigint")},
+      ${pgArray(lines.map((l) => t(l.paymentIntentId)), "text")}) as outcome`);
+}
+
 export async function applyConnectionStatus(
   inboxId: string,
   event: Extract<NormalizedEvent, { kind: "connection_status" }>,

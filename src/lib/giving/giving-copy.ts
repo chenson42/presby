@@ -322,6 +322,95 @@ export function returnGiftLine(amount: string, fundName: string, monthly: boolea
   return `${amount}${monthly ? ` ${RETURN_COPY.monthlyEvery}` : ""} to ${fundName}`;
 }
 
+/**
+ * The member's own giving page, `/o/<slug>/giving` (Batch 6; Flow 12). Written
+ * for the person who gave. The empty state is Flow 12's, verbatim. The error is
+ * its own sentence on purpose: an empty list on a failure would read as lost
+ * money. A gift's statuses are plain words, never colour alone.
+ */
+export const MEMBER_GIVING = {
+  heading: "Giving",
+  giveHeading: "Give online",
+  giveBody: "Give once or every month, by card or bank account. You finish on Stripe's secure page, so your card or bank details never pass through this site.",
+  giveButton: "Give online",
+  giftsHeading: "Your gifts",
+  giftsHelp: "Gifts you gave while signed in, and gifts your church office has matched to you.",
+  giftsEmptyTitle: "No gifts are linked to you yet",
+  giftsEmptyBody:
+    "Gifts you give while signed in, or that your church office links to you, will appear here.",
+  giftsTruncated: (shown: number) =>
+    `Showing your ${shown} most recent gifts. A year-end statement lists every gift for a finished year.`,
+  pendingNote: "A gift that is still processing is not on a year-end statement until it completes.",
+  statementsHeading: "Year-end statements",
+  statementsHelp:
+    "Your congregation's written record of what you gave in a year, for your taxes. It is separate from the payment receipt Stripe emails you.",
+  statementsEmptyTitle: "No statements yet",
+  statementsEmptyBody:
+    "Your congregation issues a giving statement after the year ends. When one is ready for you, it appears here to download.",
+  download: "Download PDF",
+  correctedBadge: "Corrected statement",
+  previousSummary: (n: number) => `Earlier versions (${n})`,
+  previousHelp:
+    "Statements that a newer one replaced, or that were issued to another record of yours before the congregation combined them. They stay here so you can still download them.",
+  previousReplaced: "Replaced by a newer version",
+  previousCombined: "Issued before your records were combined",
+  loadError: "We can't load your giving history right now.",
+  loadErrorBody: "Your gifts are not affected. Try again in a moment.",
+  tryAgain: "Try again",
+} as const;
+
+export type MyGiftStatusKey = "succeeded" | "pending" | "failed";
+
+/** The words a gift's status and reversal wear on the member's list. */
+export function giftStatusLabel(status: MyGiftStatusKey, amountCents: number, reversedCents: number): string {
+  if (status === "pending") return "Processing";
+  if (status === "failed") return "Didn't go through";
+  if (reversedCents >= amountCents) return "Refunded or reversed";
+  if (reversedCents > 0) return "Partly refunded or reversed";
+  return "Received";
+}
+
+/**
+ * The payouts page, `/o/<slug>/admin/giving/settlements` (Batch 6). Written for
+ * the treasurer matching a bank-statement line to gifts. The three honest states
+ * of a payout's contents each get their own sentence: a MANUAL payout is
+ * "reconciliation unavailable" (never "no transactions"), a payout whose
+ * contents have not arrived is "waiting", and a mismatch is said, not hidden.
+ */
+export const SETTLEMENTS_COPY = {
+  heading: "Payouts",
+  intro: (organizationName: string) =>
+    `What Stripe has paid out to ${organizationName}'s bank, and what each deposit contained, so a line on your bank statement can be matched to gifts.`,
+  emptyTitle: "No payouts yet",
+  emptyBody:
+    "Stripe tells PresbyPortal each time it pays out to your bank. They appear here, with what each deposit contained, once there is a payout to show.",
+  noDate: "Date not given",
+  paid: "Paid",
+  failed: "Failed",
+  automatic: "Automatic",
+  manual: "Manual",
+  test: "Test",
+  manualTitle: "Reconciliation unavailable",
+  manualBody:
+    "This was a manual payout. Stripe doesn't list what a manual payout contains, so PresbyPortal can't match it to gifts. If your Stripe payouts are set to automatic, future deposits are itemized.",
+  waiting: "What this payout contained hasn't arrived yet. It usually appears within a few minutes.",
+  failedBody:
+    "This payout failed. Stripe returns the money to your Stripe balance, so there is nothing to match to your bank.",
+  balanced: "The transactions below add up to the payout.",
+  mismatch: (listed: string, payout: string) =>
+    `The transactions listed total ${listed}, but the payout was ${payout}. Open this payout in your Stripe dashboard to see the difference.`,
+  allMatched: "Every charge matches a gift recorded here.",
+  unmatched: (n: number) =>
+    `${n} ${n === 1 ? "charge doesn't" : "charges don't"} match a gift recorded here, for example a payment taken in Stripe directly or one not recorded yet.`,
+  truncated: (n: number) => `Showing the ${n} most recent payouts.`,
+  loadErrorBody: "Your payouts and gifts are not affected. Try again in a moment.",
+  charges: "Charges",
+  returns: "Refunds and disputes",
+  fees: "Stripe fees",
+  net: "Net deposited",
+  testNote: "A payout from a Stripe test account is practice only.",
+} as const;
+
 /** Every exported string, flattened - what `giving-copy.test.ts` scans. */
 export function allGivingCopy(): string[] {
   const out: string[] = [];
@@ -353,6 +442,8 @@ export function allGivingCopy(): string[] {
     GIVING_UNAVAILABLE,
     RETURN_PANELS,
     RETURN_COPY,
+    MEMBER_GIVING,
+    SETTLEMENTS_COPY,
   ].forEach(walk);
   out.push(
     disconnectDialogBody(0),
@@ -364,6 +455,18 @@ export function allGivingCopy(): string[] {
     feePreviewText("$50.00", "$1.75", "$51.75"),
     returnGiftLine("$25.00", "General Fund", true),
     returnGiftLine("$25.00", "General Fund", false),
+    MEMBER_GIVING.giftsTruncated(200),
+    MEMBER_GIVING.previousSummary(2),
+    SETTLEMENTS_COPY.intro("Alder Creek"),
+    SETTLEMENTS_COPY.mismatch("$80.00", "$90.00"),
+    SETTLEMENTS_COPY.unmatched(1),
+    SETTLEMENTS_COPY.unmatched(2),
+    SETTLEMENTS_COPY.truncated(100),
+    giftStatusLabel("succeeded", 100, 0),
+    giftStatusLabel("succeeded", 100, 50),
+    giftStatusLabel("succeeded", 100, 100),
+    giftStatusLabel("pending", 100, 0),
+    giftStatusLabel("failed", 100, 0),
   );
   return out;
 }

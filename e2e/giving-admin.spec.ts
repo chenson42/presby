@@ -88,7 +88,7 @@ test.describe("Giving admin (treasurer, recorder, manager)", () => {
     await setGivingToggle(sql, fx, null);
     await setGivingRole(sql, fx, "treasurer");
     const [gift] = [fx.funds.general]; // any uuid shape works: the gate answers before the id is read
-    const routes = ["", "/funds", "/gifts", "/gifts/new", `/gifts/${gift}`, "/donors", `/donors/${fx.donors.imogen}`, "/settings", "/team", "/statements"];
+    const routes = ["", "/funds", "/gifts", "/gifts/new", `/gifts/${gift}`, "/donors", `/donors/${fx.donors.imogen}`, "/settings", "/team", "/statements", "/settlements"];
     const page = await ctx.newPage();
     for (const route of routes) {
       const response = await page.goto(`${base()}${route}`);
@@ -459,7 +459,7 @@ test.describe("Giving admin (treasurer, recorder, manager)", () => {
 test.describe("Giving admin - the 2FA gate (R4) and the four-way miss", () => {
   test.setTimeout(60_000);
   const routes = (f: GivingFixture) => [
-    "", "/funds", "/gifts", "/gifts/new", `/gifts/${f.funds.general}`, "/donors", `/donors/${f.donors.imogen}`, "/settings", "/team", "/statements",
+    "", "/funds", "/gifts", "/gifts/new", `/gifts/${f.funds.general}`, "/donors", `/donors/${f.donors.imogen}`, "/settings", "/team", "/statements", "/settlements",
   ];
 
   test.beforeAll(async () => {

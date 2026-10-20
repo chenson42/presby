@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactElement } from "react";
-import { getPublishedSite, type PublishedSite } from "@/lib/sites";
+import { resolveSite, type PublishedSite } from "@/lib/sites";
+import type { SiteUrls } from "@/lib/site-urls";
 import { publicOrgSummary } from "@/lib/authz";
 import {
   buildPageMetadata,
@@ -9,6 +10,7 @@ import {
   type SocialLink,
 } from "presby-site-kit";
 import { ContactForm } from "./contact-form";
+import { submitContactMessageAction } from "./actions";
 import { PresbyteryFallback } from "./presbytery-fallback";
 import { PublicStaffDirectory } from "./staff-directory";
 import { PublicCommitteeDirectory } from "./committee-directory";
@@ -26,19 +28,6 @@ import { PublicGivingSlot } from "./public-giving-slot";
  * doesn't already leak identically to every other congregation.
  */
 const FALLBACK_ORG_TYPES = new Set(["presbytery", "synod", "general_assembly"]);
-
-/**
- * Origin only (scheme + host, no trailing slash) — the same
- * `NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"` pattern already
- * established for email links (`src/lib/email/send.ts`) and password-reset/
- * account links, reused here for `presby-site-kit`'s `origin` input
- * (`buildPageMetadata`/the JSON-LD `buildOrganizationJsonLd` it composes
- * both need an absolute URL, which nothing else on this route otherwise
- * needs).
- */
-function siteOrigin(): string {
-  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-}
 
 /**
  * A member area reached the same way any other page is, from inside a nav
@@ -65,9 +54,10 @@ const PORTAL_NAV_ORDER = 23;
 
 /**
  * Resolves the organization's brand mark to a same-origin, content-
- * addressed URL through the existing `/site/<slug>/assets/[key]` route —
- * that route is generic (resolves any blob key for the org, not scoped to
- * the content bundle's own `imageKeys` map), so no new asset route is
+ * addressed URL through the existing `assets/[key]` route (`urls.asset()`:
+ * `/site/<slug>/assets/<key>` on a platform host, `/assets/<key>` on a custom
+ * one) — that route is generic (resolves any blob key for the org, not scoped
+ * to the content bundle's own `imageKeys` map), so no new asset route is
  * needed. `organizationBrands` has no public grant of its own, but
  * `markAssetKey` itself carries no sensitive information (the same
  * platform-set mark already renders on `(org)`'s own admin-facing pages)
@@ -91,7 +81,7 @@ const PORTAL_NAV_ORDER = 23;
  * two callers, both of which already need their own catch to attach a
  * distinct log line.
  */
-async function resolveLogoUrl(organizationId: string, slug: string): Promise<string | null> {
+async function resolveLogoUrl(organizationId: string, urls: SiteUrls): Promise<string | null> {
   const { getPlatformDb } = await import("@/lib/db");
   const { organizationBrands } = await import("@/lib/db/domain/org");
   const { eq } = await import("drizzle-orm");
@@ -102,7 +92,7 @@ async function resolveLogoUrl(organizationId: string, slug: string): Promise<str
     .where(eq(organizationBrands.organizationId, organizationId))
     .limit(1);
   if (!brand?.markAssetKey) return null;
-  return `/site/${slug}/assets/${brand.markAssetKey}`;
+  return urls.asset(brand.markAssetKey);
 }
 
 /**
@@ -157,16 +147,17 @@ export type SitePageResult =
 
 /**
  * True when the org's published bundle has a page at exactly `currentPath` - the same
- * equality `renderSiteBundle` uses to pick a page. Cheap: `getPublishedSite` is
+ * equality `renderSiteBundle` uses to pick a page. Cheap: `resolveSite` is
  * `cache()`d per request, so this and `renderSitePage` share one read. Used by
- * `/site/<slug>/give`'s `generateMetadata`, which must choose between the bundle's
- * metadata and the platform's without rendering anything.
+ * `/site/<key>/give`'s `generateMetadata`, which must choose between the bundle's
+ * metadata and the platform's without rendering anything. `key` is the route
+ * segment (a slug, or a verified host on a custom domain).
  */
 export async function siteBundleHasPage(
-  slug: string,
+  key: string,
   currentPath: string,
 ): Promise<boolean> {
-  const result = await getPublishedSite(slug);
+  const result = await resolveSite(key);
   if (result.kind === "not_found") return false;
   return result.site.pages.some((p) => p.path === currentPath);
 }
@@ -174,7 +165,7 @@ export async function siteBundleHasPage(
 /**
  * The public site render path, shared by `/site/<slug>/<...path>` (the `[[...path]]`
  * catch-all) and `/site/<slug>/give`'s fall-through. Extracted verbatim from the
- * catch-all's page.tsx so there is ONE render path: the same `getPublishedSite`,
+ * catch-all's page.tsx so there is ONE render path: the same `resolveSite`,
  * brand, logo, nav and live slots, whichever route asked. Original description of
  * `/site/<slug>` and `/site/<slug>/<...path>`: see
  * docs/work-log/2026-08-20-public-sites.md Phase 3, "Component / Page Plan",
@@ -183,7 +174,7 @@ export async function siteBundleHasPage(
  * `[[...path]]`) — Phase 3 originally scoped this to a single top-level page
  * per slug and named the catch-all as a deferred follow-on; this is it.
  *
- * `getPublishedSite()` ALREADY checks `sites.public_render` internally and
+ * `resolveSite()` ALREADY checks `sites.public_render` internally and
  * collapses the flag being off into the same `{ kind: "not_found" }` as
  * every other miss case — this page does not re-check the flag itself, it
  * simply trusts that result, matching the enumeration-safety property
@@ -203,8 +194,9 @@ export async function siteBundleHasPage(
  * blob id — a broken image, never a crash.
  *
  * `pageUrl` is the same closure discipline as `imageUrl` — `site-kit`'s
- * `Nav` never assumes a `/site/<slug>` prefix, this route is the one place
- * that knows it. `portalUrl` points at `/o/<slug>` — the `(org)` route
+ * `Nav` never assumes a URL prefix, `SiteUrls` (src/lib/site-urls.ts) is the
+ * one place that knows it. `portalUrl` is the ABSOLUTE `<platform>/o/<slug>`
+ * (always the platform host, where sign-in lives) — the `(org)` route
  * group's own Edge gate (`src/proxy.ts`) already redirects an
  * unauthenticated visit there to `/signin` with the right `callbackUrl`, so
  * this route needs no auth-awareness of its own to wire the link correctly
@@ -213,16 +205,14 @@ export async function siteBundleHasPage(
  * rendering it as `Nav`'s own separate flat link.
  */
 export async function siteBundleMetadata(
-  slug: string,
+  key: string,
   currentPath: string,
 ): Promise<Metadata> {
-  const result = await getPublishedSite(slug);
+  const result = await resolveSite(key);
   if (result.kind === "not_found") return {};
 
-  const { site } = result;
-  const pageUrl = (bundlePath: string): string =>
-    bundlePath === "/" ? `/site/${slug}` : `/site/${slug}${bundlePath}`;
-  const logoUrl = await resolveLogoUrl(site.organizationId, slug).catch(
+  const { site, urls, slug } = result;
+  const logoUrl = await resolveLogoUrl(site.organizationId, urls).catch(
     () => {
       // A mid-request DB blip here must not take metadata generation down —
       // OrgMark/buildPageMetadata already treat `null` as "no logo" (same
@@ -237,12 +227,15 @@ export async function siteBundleMetadata(
     },
   );
 
+  // `origin` and `pageUrl` come from the resolved site's `SiteUrls`, built from
+  // the database row: on a custom host the canonical URL and the Open Graph URL
+  // name the canonical host, on a platform host the slug URL (DECISION-181).
   const meta = buildPageMetadata({
     pages: site.pages,
     currentPath,
     organizationName: site.organizationName,
-    origin: siteOrigin(),
-    pageUrl,
+    origin: urls.origin,
+    pageUrl: urls.page,
     logoUrl,
   });
 
@@ -267,17 +260,21 @@ export async function siteBundleMetadata(
  * comment above for the long-form rationale (it is the same function family).
  */
 export async function renderSitePage(
-  slug: string,
+  key: string,
   currentPath: string,
   options: { presbyteryFallback?: boolean } = {},
 ): Promise<SitePageResult> {
   const { presbyteryFallback = true } = options;
-  const result = await getPublishedSite(slug);
+  const result = await resolveSite(key);
   if (result.kind === "not_found") {
-    // `/site/<slug>/give` opts out (`presbyteryFallback: false`): its `absent` answer is the one
+    // `/site/<key>/give` opts out (`presbyteryFallback: false`): its `absent` answer is the one
     // 404, byte-identical for an unknown slug, a presbytery slug and a toggle-off organization,
     // so it must neither read the org summary nor ever build the fallback.
     if (!presbyteryFallback) return { kind: "miss" };
+    // HOST MODE NEVER RENDERS THE FALLBACK (Track F): a miss on a custom host has no slug to
+    // name, and the fallback is a sign-in link into the platform - exactly what a church's
+    // domain must not show. `slug` is non-null only for a slug-mode key.
+    if (result.mode !== "slug" || result.slug === null) return { kind: "miss" };
     // DECISION-121: one extra narrow, public read on the miss path only —
     // never on the ok path above, and never able to distinguish a
     // congregation's "never provisioned" from "suspended" from "nonexistent
@@ -294,25 +291,28 @@ export async function renderSitePage(
     // the ONLY legal reference to `result.reason` in this file; see the
     // type's own doc comment before adding a second one.
     const summary =
-      result.reason === "read_failed" ? null : await publicOrgSummary(slug);
+      result.reason === "read_failed" ? null : await publicOrgSummary(result.slug);
     if (summary && FALLBACK_ORG_TYPES.has(summary.organizationType)) {
       return {
         kind: "fallback",
-        node: <PresbyteryFallback name={summary.name} slug={slug} />,
+        node: <PresbyteryFallback name={summary.name} slug={result.slug} />,
       };
     }
     return { kind: "miss" };
   }
 
-  const { site } = result;
+  // `slug` is what the DATABASE returned for this key (host mode) or the key
+  // itself (slug mode); every slug-keyed read below uses it, never the segment.
+  const { site, urls, slug } = result;
 
+  // Same closure discipline as before: `imageUrl` and `pageUrl` are site-kit's
+  // only way to learn this site's URL space, and they now come from `SiteUrls`,
+  // so a custom host gets clean `/assets/<k>` and `/about` paths and a platform
+  // host gets today's `/site/<slug>/...` ones (DECISION-181).
   const imageUrl = (manifestKey: string): string =>
-    `/site/${slug}/assets/${site.imageKeys[manifestKey] ?? manifestKey}`;
+    urls.asset(site.imageKeys[manifestKey] ?? manifestKey);
 
-  const pageUrl = (bundlePath: string): string =>
-    bundlePath === "/" ? `/site/${slug}` : `/site/${slug}${bundlePath}`;
-
-  const logoUrl = await resolveLogoUrl(site.organizationId, slug).catch(
+  const logoUrl = await resolveLogoUrl(site.organizationId, urls).catch(
     () => {
       // Same degrade-to-no-logo discipline as generateMetadata()'s own call
       // site above — never let a mid-request DB blip take the whole page
@@ -333,6 +333,11 @@ export async function renderSitePage(
   // and whichever content page authors a `{"type": "contactForm"}` block
   // renders it exactly there. Content with no such block gets no form.
   //
+  // THE FORM'S ACTION IS BOUND TO THE SITE KEY ON THE SERVER (Track F, R5): the
+  // old client hidden field `__slug` is gone, so nothing the visitor controls
+  // names the organization. The action re-resolves the key and, in host mode,
+  // requires the request Host to equal it.
+  //
   // `liveSlots` (docs/work-log/2026-08-27-public-staff-directory.md) is
   // site-kit's generic named-slot mechanism — unlike `contactForm`'s own
   // bespoke prop, ANY content page can pick up ANY named live element by
@@ -347,37 +352,38 @@ export async function renderSitePage(
   // so the SAME slot name can render a different filtered subset per marker
   // instance (a hand-curated "leadership" block and a per-committee page
   // both use `staffDirectory`/`committeeDirectory`, each with its own
-  // `filter`). Each closure below MAY ONLY CLOSE OVER `slug` (or another
-  // URL-path-derived value already in scope on this page) — NEVER `request`,
-  // `headers()`, or `cookies()` (Phase 2's enumeration-safety redline). A
-  // marker with no `filter` key resolves to `{}`, reproducing today's exact
-  // unfiltered behavior for any content already using `staffDirectory` with
-  // no filter.
+  // `filter`). Each closure below MAY ONLY CLOSE OVER values derived from the
+  // resolved site (`slug`, `urls`, `key`) — NEVER `request`, `headers()`, or
+  // `cookies()` (Phase 2's enumeration-safety redline). A marker with no
+  // `filter` key resolves to `{}`, reproducing today's exact unfiltered
+  // behavior for any content already using `staffDirectory` with no filter.
   const rendered = renderSiteBundle({
     organizationName: site.organizationName,
-    origin: siteOrigin(),
+    origin: urls.origin,
     pages: site.pages,
     currentPath,
     brand: site.brand,
     profile: toRenderProfile(site),
     imageUrl,
-    pageUrl,
+    pageUrl: urls.page,
     logoUrl,
-    portalUrl: `/o/${slug}`,
+    // Absolute and fixed: the member portal lives on the PLATFORM host, where sign-in does.
+    portalUrl: urls.portal(),
     portalNavGroup: PORTAL_NAV_GROUP,
     portalLabel: PORTAL_LABEL,
     portalNavOrder: PORTAL_NAV_ORDER,
-    contactForm: <ContactForm slug={slug} />,
+    contactForm: <ContactForm action={submitContactMessageAction.bind(null, key)} />,
     liveSlots: {
       staffDirectory: (filter) => (
-        <PublicStaffDirectory slug={slug} filter={filter} />
+        <PublicStaffDirectory slug={slug} urls={urls} filter={filter} />
       ),
       committeeDirectory: (filter) => (
-        <PublicCommitteeDirectory slug={slug} filter={filter} />
+        <PublicCommitteeDirectory slug={slug} urls={urls} filter={filter} />
       ),
-      // Closes over `slug` only; the marker's `filter.fund` is validated
-      // against the organization's online funds inside the slot.
-      giving: (filter) => <PublicGivingSlot slug={slug} filter={filter} />,
+      // Closes over the DB slug (reads) and the site key (the bound action) only; the
+      // marker's `filter.fund` is validated against the organization's online funds inside
+      // the slot.
+      giving: (filter) => <PublicGivingSlot slug={slug} siteKey={key} filter={filter} />,
     },
   });
 
@@ -387,7 +393,7 @@ export async function renderSitePage(
   if (!rendered) return { kind: "miss" };
 
   // No separate flag re-check here: reaching this point already means
-  // getPublishedSite() found the flag on (it's one of the reasons a
+  // resolveSite() found the flag on (it's one of the reasons a
   // not_found collapse happens above) — re-checking would be a second,
   // redundant call for a fact already established.
   // No wrapping max-width either: `{rendered}` is presby-site-kit's own

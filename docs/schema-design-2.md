@@ -1712,6 +1712,38 @@ deliberately ships no writer. What I did, and deliberately did not do:
 
 **F145 — a mutation test is only evidence if the fixture supplies the input the mechanism acts on.** Batch 5a's stamp of `issued_at` was unproven in Vitest because nothing supplied `issued_at` (mutation M17): removing the stamp changed nothing, so the "failing" run failed for another reason. Generalisation: when a guard overwrites a caller-supplied value, the test must supply a hostile value and assert it was replaced. Related time-bomb class (Phase 5 run 1): a seeded row whose validity depends on the clock and on a sweeper (`presby_giving_expire_intents()` expired the seeded open intent 24 hours after seeding) fails an assertion days later with no code change; seeded rows that a sweeper can touch must be immune to it, or the assertion must create its own.
 
+## 2q. Custom domains — findings from the Track F Increment 1 pipeline (F146–F152)
+
+*(2026-10-19 → 2026-10-20, `docs/work-log/2026-10-19-custom-domains.md` Phases 2–5; migration `0057_presby_org_domains`, DECISION-176–182; recorded by the orchestrator at integration. F146 to F151 are Phase 2 findings; F152 is Phase 2 with a Phase 3 amendment.)*
+
+### F146 — the proxy is not an Edge function
+
+**F146 — Next 16 runs `src/proxy.ts` on Node.js.** The documented behaviour is in the installed Next's proxy reference (v16.3.6, `proxy.md`), and the built `.next/server/functions-config-manifest.json` shows `"/_middleware": {"runtime": "nodejs"}` with an empty edge middleware manifest. `CLAUDE.md`'s premise for "The Edge Gate Cannot Reach the Database" — that importing `@/lib/db` breaks the build or the runtime — no longer holds, so the invariant was unenforced. **Resolved** (DECISION-177): the rule is kept as a design rule, retitled "The Proxy Does Not Reach the Database", and enforced by `npm run check:proxy-imports`, whose allow-list is `edgeAuth`, the permission constants, `src/lib/domains/host.ts`, `probe.ts` and `cron-passthrough.ts`. Generalisation: an invariant whose stated reason is a runtime fact needs the runtime fact re-checked on every major framework upgrade, or its enforcement is a belief.
+
+### F147 — HSTS would pin a church's whole domain
+
+**F147 — `next.config.ts` sent `max-age=63072000; includeSubDomains` on every response.** On a church whose canonical host is the apex, that pins HTTPS for *all* of the church's subdomains for two years and outlives the church's departure from the platform. Vercel's own default for custom domains omits `includeSubDomains`. **Resolved** by the host split (DECISION-178): `includeSubDomains` is sent on platform hosts only (including `*.vercel.app`, unchanged), and a church host gets HSTS without it. Pinned by tests.
+
+### F148 — Vercel's production-URL variable can name a church domain
+
+**F148 — `VERCEL_PROJECT_PRODUCTION_URL` is "the shortest production custom domain".** Once church domains attach to the same project, a short church apex can become its value; fed into the platform-host set it would serve `/signin` and `/admin` on that church's domain. **Resolved:** it is forbidden as a host-set or origin source, source-scan pinned. *Related, handled by construction rather than by finding out:* whether the same ambiguity affects the host Vercel uses to invoke crons is unknown, so DECISION-176's exact-path, bearer-keyed cron pass-through (four paths) is built in Batch 1c, and the real host class is recorded in the real-domain acceptance pass.
+
+### F149 — one church can pause everyone's sign-in mail
+
+**F149 — Resend's limits (bounce under 4%, spam under 0.08%) are enforced on the whole account and pause sending for the whole team, sign-in and password-reset mail included.** The pre-verification fallback would send church mail through the same account, and a per-domain breaker trips after webhook latency, too late for a single bad batch. **Open, Increment 2:** the mitigation is sending pools and the breaker (DECISION-182); the remedy is a second Resend team (operator question Q13, decided before real church mail). Nothing in Increment 1 sends church mail.
+
+### F150 — the new permission is unreachable under F111
+
+**F150 — no organization holds `domains.manage`,** so `assertPermissionSubset()` makes it ungrantable unless the founding-administrator bundle delivers it; the backfill measured 0 rows in production (2026-10-19) and the platform admin's on-behalf web claim (operator Q2) covers a slipped designation. *Neighbouring residual (T4/A3):* `organization_domains` state columns are writable by `presby_app` in the tenant's own transaction, so an app bug on the tenant path can move its own org's rows along legal edges, and, because `organization_domains_hostname_holding_uq` is global, entering a holding state without real proof denies that name to other orgs (the earlier wording, "it cannot reach another org," was wrong). Bounded by the edge trigger, the ungranted timestamps and grace (A1), the `release_cause` evidence rules (A2) and the single-writer scan (A4); cured by the platform's `disputed` hold plus `force_release`.
+
+### F151 — some responses bypass the proxy's host branch
+
+**F151 — `redirects()` (the `/orgs` 308), `headers()` and the matcher's static exclusions (`favicon.ico`, `*.svg|png|…`, `public/brand/*`, the app icon routes, `_next/*`) answer on any attached host.** Resolved for `/orgs` (scoped to platform hosts) and enumerated for the static paths (a test lists exactly which ones answer on a custom host); and the enforced give CSP is matched on the *incoming* path, so a custom host's clean `/give` needed its own entry. **Accepted residual:** `/favicon.ico`, `/icon.svg`, `/apple-icon.png` and `public/brand/*` serve the platform's bytes on a church host, so a church's browser tab shows the platform's icon. Tracked: derive per-site icons from the site's brand (DECISION-049).
+
+### F152 — widening the published-site function resets its grants; two tenant-readable tables with no RLS
+
+**F152 — `DROP`/`CREATE` of `presby_published_site(text)` resets its ACL and the `search_path` pin from `0048`** (the same drift as F38). `0057` re-applies and asserts both (owner plus `presby_app`, no `PUBLIC`; `search_path = public, pg_temp`), inside a top-level `begin; … commit;`, so **`0057` must be applied without `psql -1`** (the inner `commit` would otherwise end the outer transaction early). Separately, `email_queue` has no RLS and `presby_app` holds full DML, so org-attributed mail (Increment 2) is readable across orgs on a tenant-connection bug. Accepted on two conditions: tenant reads reach it only by joining from their own RLS-filtered rows (as `giving_statement_deliveries` does), and `test-rls` asserts both ACLs. **The same condition governs `audit_events`:** a tenant-connection read of it must be anchored by `resource_type` plus `resource_id in (select id::text from <the org's own RLS table>)`, never by an application-written metadata field alone. Increment 1's "Recent activity" read began as a named violation of that condition and **Batch 1e (2026-10-20) closed it for the row set** (DECISION-180 (iii)); the row *content* being service-written is accepted, and the `mail_domain.*` reader must be anchored from its first line (Batch 2c).
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

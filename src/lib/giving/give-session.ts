@@ -5,6 +5,8 @@ import { withOrgContext } from "@/lib/authz";
 import { rowsOf } from "./db-util";
 import { GIVE_MESSAGES } from "./giving-copy";
 import type { GiveField, GiveResult, ParsedGive } from "./give-input";
+import { slugSitePath } from "@/lib/site-urls";
+import { donorOrigin } from "./donor-origin";
 import { givingOrigin } from "./origin";
 import { readPublicGivingConfig } from "./public-config";
 import { checkoutExpiresAt } from "./providers/stripe/checkout";
@@ -30,10 +32,12 @@ import { ProviderError } from "./providers/stripe/errors";
  * ended by the time we reach the network), so a Stripe outage leaves a visible
  * `failed` row, never a vanished attempt.
  *
- * REDIRECT TARGETS come from `givingOrigin()` (the `NEXT_PUBLIC_APP_URL`
- * environment variable) and nowhere else: never the request `Host` or
- * `X-Forwarded-Host`, never a form field. This file does not read request
- * headers at all.
+ * REDIRECT TARGETS never come from the request: not the `Host` or
+ * `X-Forwarded-Host`, not a form field. This file does not read request headers
+ * at all. The PUBLIC surface's origin is `donorOrigin(slug)` (the organization's
+ * SERVING canonical custom host from the database, else the platform origin from
+ * `NEXT_PUBLIC_APP_URL`); the MEMBER surface's is `givingOrigin()` (the platform
+ * origin, always: members give on the platform host).
  *
  * NO DONOR DATA is stored or logged here: the form carries an amount, a fund id
  * and choices. A failure is logged with the intent id and a fixed stage only.
@@ -140,13 +144,22 @@ export type GiveSurface = "public" | "member";
  * `success_url` and `cancel_url`, built from the canonical origin and the slug
  * and from nothing else. `{CHECKOUT_SESSION_ID}` is Stripe's own placeholder and
  * must reach Stripe literally. The slug has already been checked slug-shaped.
+ *
+ * `customHost` (public surface only) says `origin` is a church's own domain,
+ * whose site lives at CLEAN paths: the donor returns to `<host>/give/return`, not
+ * to `<platform>/site/<slug>/give/return` (Track F, DECISION-181). The platform
+ * form is built by `slugSitePath`, the one builder of a slug URL.
  */
 export function checkoutReturnUrls(
   origin: string,
   slug: string,
   surface: GiveSurface,
+  customHost: boolean = false,
 ): { successUrl: string; cancelUrl: string } {
-  const base = surface === "public" ? `${origin}/site/${slug}/give` : `${origin}/o/${slug}/giving/give`;
+  const base =
+    surface === "public"
+      ? `${origin}${customHost ? "/give" : slugSitePath(slug, "/give")}`
+      : `${origin}/o/${slug}/giving/give`;
   return {
     successUrl: `${base}/return?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: base,
@@ -237,9 +250,17 @@ export async function startGiveSession(args: {
       await failIntent(intent.intentId);
       return { kind: "unavailable" };
     }
-    // No safe public origin (production without an https NEXT_PUBLIC_APP_URL) -> same.
-    const origin = givingOrigin();
-    if (!origin) {
+    // No safe public origin (production without an https NEXT_PUBLIC_APP_URL and no serving
+    // custom host) -> same. The PUBLIC donor returns to the organization's serving custom host
+    // when it has one (from the DATABASE, by slug); the member always returns to the platform.
+    const target =
+      surface === "public"
+        ? await donorOrigin(slug)
+        : (() => {
+            const platform = givingOrigin();
+            return platform ? { origin: platform, custom: false } : null;
+          })();
+    if (!target) {
       await failIntent(intent.intentId);
       return { kind: "unavailable" };
     }
@@ -250,7 +271,7 @@ export async function startGiveSession(args: {
       return { kind: "unavailable" };
     }
 
-    const { successUrl, cancelUrl } = checkoutReturnUrls(origin, slug, surface);
+    const { successUrl, cancelUrl } = checkoutReturnUrls(target.origin, slug, surface, target.custom);
     let session: { sessionId: string; url: string };
     try {
       session = await createCheckoutSession({

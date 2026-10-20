@@ -403,6 +403,43 @@ export const AUDIT_ACTIONS = {
   GIVING_STATEMENT_DOWNLOADED: "tenant.giving_statement.downloaded",
   GIVING_STATEMENTS_BULK_DOWNLOADED: "tenant.giving_statements.bulk_downloaded",
   // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/custom-domains, 2026-10-19 (docs/work-log/
+  // 2026-10-19-custom-domains.md, Phase 3 section 8). ONE explicit key per
+  // organization_domains edge, mapped by src/lib/domains/state.ts
+  // `auditKeyNameFor()` and written by `transitionDomain()` in
+  // src/lib/domains/service.ts - in the SAME transaction as the state change
+  // (R8), via `tx.insert(auditEvents)`, never `recordAudit()` (which opens its
+  // own connection and swallows failures). Because the writes live in a
+  // library file and not an actions.ts, `check:audit` cannot see them; the
+  // per-transition DB test (service.db.test.ts) is the proof of coverage.
+  // One `domain.*` family with `metadata.actorKind` ("tenant" | "platform" |
+  // "machine") rather than the `org.*` / `tenant.*` actor-axis split, because a
+  // single choke point serves all three actor kinds. Metadata is ids,
+  // hostnames and states only - NEVER the proof token. Machine transitions
+  // carry a null actor and `metadata.trigger`.
+  //   Metadata: { organizationId, hostname, purpose, claimName, from, to,
+  //               event, actorKind, trigger?, via? }.
+  DOMAIN_CLAIMED: "domain.claimed",
+  DOMAIN_PROOF_VERIFIED: "domain.proof_verified",
+  DOMAIN_ATTACH_REQUESTED: "domain.attach_requested",
+  DOMAIN_ATTACHED: "domain.attached",
+  DOMAIN_LIVE: "domain.live",
+  DOMAIN_LIVE_LOST: "domain.live_lost",
+  DOMAIN_LAPSED: "domain.lapsed",
+  // lapsed -> verified: the proof reappeared.
+  DOMAIN_RECOVERED: "domain.recovered",
+  DOMAIN_PARKED: "domain.parked",
+  // parked -> verified.
+  DOMAIN_RECONNECTED: "domain.reconnected",
+  DOMAIN_RELEASE_REQUESTED: "domain.release_requested",
+  DOMAIN_RELEASED: "domain.released",
+  DOMAIN_EXPIRED: "domain.expired",
+  // Not a state edge: the canonical/alias roles swapped. Metadata adds
+  // { fromHostname, toHostname }.
+  DOMAIN_CANONICAL_CHANGED: "domain.canonical_changed",
+  DOMAIN_HOLD_SET: "domain.hold_set",
+  DOMAIN_HOLD_CLEARED: "domain.hold_cleared",
+  // ---------------------------------------------------------------------------
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

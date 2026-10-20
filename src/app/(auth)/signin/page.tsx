@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { SignInCredentialsForm } from "./signin-credentials-form";
 import { parseOrgSlugFromCallbackUrl } from "./parse-org-slug";
+import { slugSitePath } from "@/lib/site-urls";
 
 /**
  * `/signin` — the THIRD `<BrandTokens>` emitter (DECISION-047's amendment;
@@ -81,7 +82,7 @@ export default async function SignInPage({
         // sitting next to other chrome; here the logo IS the page's own
         // identity, so it renders at its natural size with no card around it.
         <Link
-          href={`/site/${orgSlug}`}
+          href={slugSitePath(orgSlug)}
           className="mb-4 inline-block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           aria-label={`${siteBrand.organizationName} public site`}
         >

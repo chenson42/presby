@@ -599,6 +599,35 @@ describe.skipIf(!hasDb)(
           expect(mockRevalidatePath).not.toHaveBeenCalled();
         },
       );
+
+      // Track F (T15): a church's own domain serves the asset route, robots.txt and
+      // sitemap.xml at the ROOT, where each is a static route that shadows a bundle page.
+      it.each([
+        ["/assets/hero", "assets"],
+        ["/robots.txt", "robots.txt"],
+        ["/sitemap.xml", "sitemap.xml"],
+      ])(
+        "a bundle page at %s is refused as reserved (/%s), and nothing is stored",
+        async (reservedPath, segment) => {
+          const token = signToken({ sha: `sha-reserved-t15-${segment.replace(/\W/g, "")}-${stamp}` });
+          const res = await POST(
+            ingestRequest(
+              `Bearer ${token}`,
+              validBundleBody({
+                pages: [
+                  { path: "/", frontMatter: { title: "Home" }, mdxAst: { type: "root", children: [] } },
+                  { path: reservedPath, frontMatter: { title: "X" }, mdxAst: { type: "root", children: [] } },
+                ],
+              }),
+            ),
+          );
+          expect(res.status).toBe(422);
+          const body = await res.json();
+          expect(body.error).toEqual(expect.stringContaining("reserved"));
+          expect(body.error).toEqual(expect.stringContaining(`/${segment}`));
+          expect(mockRevalidatePath).not.toHaveBeenCalled();
+        },
+      );
     });
 
     // -----------------------------------------------------------------------

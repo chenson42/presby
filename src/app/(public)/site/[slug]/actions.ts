@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { getRequestIp } from "@/lib/request-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { submitSiteContactMessage } from "@/lib/sites";
+import { resolveSiteOrganization, submitSiteContactMessage } from "@/lib/sites";
 import type { ActionResult } from "@/types/actions";
 
 /**
@@ -14,25 +14,36 @@ import type { ActionResult } from "@/types/actions";
  * No `auth()` anywhere in this file — every caller is an anonymous visitor
  * by construction, and `src/proxy.ts`'s `/site/*` bypass (commit 3,
  * DECISION-085) means this route never reaches the Edge auth check either.
+ * On a custom host the proxy's rewrite reaches the same action with the same
+ * absence of a session (and `Set-Cookie`).
  */
 
 /**
- * Submits a `ContactForm` message for the public site at `slug`.
+ * Submits a `ContactForm` message for the public site named by `siteKey`.
+ *
+ * `siteKey` is BOUND ON THE SERVER by render-site-page.tsx (`.bind(null, key)`):
+ * a slug on a platform host, or the verified host on a church's own domain. It
+ * is never a form field (Track F, R5). The action re-resolves it with
+ * `resolveSiteOrganization()` - which, in host mode, refuses unless the request
+ * Host EQUALS the key and is not a platform host, and in slug mode unless it IS
+ * a platform host - and then uses the slug THE DATABASE RETURNED for the rate
+ * limit key and the write. Writing into another org's inbox this way is no more
+ * than visiting that org's page, so a tampered key gets the same generic
+ * "not accepting messages" a suspended site gets.
  *
  * Order, deliberately: honeypot check first (free — costs nothing to reject
  * a bot before it can consume rate-limit budget), then the IP-keyed rate
  * limit (mirrors `(password-reset)/actions.ts`'s identical precedent, scoped
  * per-site so one bad IP can't exhaust every congregation's shared budget at
  * once), then the query-layer call, which re-derives `organizationId` from
- * `slug` itself — never trusts anything from the client but the slug already
- * baked into the URL.
+ * the slug itself.
  *
  * No audit event — an anonymous, low-stakes content submission is not a
  * security-sensitive mutation, matching `replyToTicket`'s own "a reply is
  * conversation, not a security-sensitive mutation" precedent.
  */
 export async function submitContactMessageAction(
-  slug: string,
+  siteKey: string,
   formData: FormData,
 ): Promise<ActionResult> {
   // Honeypot: a hidden field real visitors never fill. Non-empty -> fake
@@ -42,6 +53,16 @@ export async function submitContactMessageAction(
   if (honeypot.trim().length > 0) {
     return { ok: true };
   }
+
+  const NOT_LIVE: ActionResult = {
+    ok: false,
+    error: "This site isn't accepting messages right now.",
+  };
+
+  // The key is re-resolved against THIS request before anything is spent or written.
+  const org = await resolveSiteOrganization(siteKey);
+  if (org.kind !== "ok") return NOT_LIVE;
+  const slug = org.slug;
 
   const hdrs = await headers();
   const ip = getRequestIp(hdrs);
@@ -67,10 +88,7 @@ export async function submitContactMessageAction(
 
   switch (result.kind) {
     case "not_live":
-      return {
-        ok: false,
-        error: "This site isn't accepting messages right now.",
-      };
+      return NOT_LIVE;
     case "invalid_input":
       return { ok: false, error: result.error };
     case "ok":

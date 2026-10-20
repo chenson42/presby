@@ -31,3 +31,4 @@ export * from "./presbytery";
 export * from "./staff";
 export * from "./imports";
 export * from "./giving";
+export * from "./domains";

@@ -9,6 +9,31 @@ describe("reservedSitePath", () => {
     },
   );
 
+  it.each([
+    ["/assets", "assets"],
+    ["/assets/abc", "assets"],
+    ["/Assets/abc", "assets"],
+    ["/%61ssets", "assets"],
+    ["/robots.txt", "robots.txt"],
+    ["/ROBOTS.txt", "robots.txt"],
+    ["/robots.txt/", "robots.txt"],
+    ["/sitemap.xml", "sitemap.xml"],
+    ["sitemap.xml", "sitemap.xml"],
+    ["/./sitemap.xml", "sitemap.xml"],
+  ])(
+    "%j is reserved as %j (a church's own domain serves it at the root - T15)",
+    (path, segment) => {
+      expect(reservedSitePath(path)).toEqual({ reserved: true, segment });
+    },
+  );
+
+  it.each(["/assets-gallery", "/about/assets", "/robots", "/robots.txt.html", "/sitemap", "/sitemap.xml.bak", "/xsitemap.xml", "/about/sitemap.xml"])(
+    "%j is not reserved (only the exact reserved segment shadows)",
+    (path) => {
+      expect(reservedSitePath(path)).toEqual({ reserved: false });
+    },
+  );
+
   it.each(["/", "", "/about", "/giving", "/give-now", "/forgive", "/about/give", "/ways-to-give", "/gift", "/giveaway", "/g/ive"])(
     "%j is not reserved (only the exact segment `give` is shadowed)",
     (path) => {

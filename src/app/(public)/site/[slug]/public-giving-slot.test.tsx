@@ -12,6 +12,7 @@ const readPublicGivingConfig = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: (...a: unknown[]) => readPublicGivingConfig(...a) }));
 vi.mock("./give/actions", () => ({ createPublicGiveSessionAction: Object.assign(vi.fn(), { bind: vi.fn(() => vi.fn()) }) }));
 
+import { createPublicGiveSessionAction } from "./give/actions";
 import { PublicGivingSlot } from "./public-giving-slot";
 
 const FUND_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -37,12 +38,12 @@ afterEach(() => {
   readPublicGivingConfig.mockReset();
 });
 
-const slot = async (filter: Record<string, unknown>) => render((await PublicGivingSlot({ slug: "alder-creek", filter })) as React.ReactElement);
+const slot = async (filter: Record<string, unknown>) => render((await PublicGivingSlot({ slug: "alder-creek", siteKey: "alder-creek", filter })) as React.ReactElement);
 
 describe("PublicGivingSlot", () => {
   it("absent renders nothing - a slot must not announce that giving exists", async () => {
     readPublicGivingConfig.mockResolvedValue({ state: "absent" });
-    const result = await PublicGivingSlot({ slug: "alder-creek", filter: {} });
+    const result = await PublicGivingSlot({ slug: "alder-creek", siteKey: "alder-creek", filter: {} });
     expect(result).toBeNull();
   });
 
@@ -91,5 +92,19 @@ describe("PublicGivingSlot", () => {
     const { container } = await slot({});
     expect(container.querySelector("#slot-give-amount")).toBeTruthy();
     expect(container.querySelector("#give-amount")).toBeNull();
+  });
+});
+
+describe("PublicGivingSlot - the site key (Track F)", () => {
+  it("reads giving for the DB-returned slug but binds the give action to the page's site KEY", async () => {
+    readPublicGivingConfig.mockResolvedValue(LIVE);
+    vi.mocked(createPublicGiveSessionAction.bind).mockClear();
+
+    render((await PublicGivingSlot({ slug: "alder-creek", siteKey: "church-one.invalid", filter: {} })) as React.ReactElement);
+
+    expect(readPublicGivingConfig).toHaveBeenCalledWith("alder-creek");
+    expect(readPublicGivingConfig).not.toHaveBeenCalledWith("church-one.invalid");
+    // `.bind(null, key)`: the server re-resolves this key (Host === key on a custom host).
+    expect(createPublicGiveSessionAction.bind).toHaveBeenCalledWith(null, "church-one.invalid");
   });
 });

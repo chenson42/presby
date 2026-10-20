@@ -8528,3 +8528,11 @@ rollback;
 --     section 46 first, renumber at integration.
 -- ===========================================================================
 \ir giving/test-rls-46.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/custom-domains (integration).
+-- 47. Custom domains (drizzle/0057_presby_org_domains.sql).
+--     Its own file, as 46 above; \ir resolves relative to this script. It
+--     needs the test helpers, so it is never run against production.
+-- ===========================================================================
+\ir domains/test-rls-47.sql

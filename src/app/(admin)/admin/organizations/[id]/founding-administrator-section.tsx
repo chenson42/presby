@@ -42,6 +42,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   "org_features.manage": "feature toggles",
   "tickets.file": "support tickets",
   "staff.manage": "staff",
+  "domains.manage": "website domains",
   "congregation_oversight.manage": "congregation oversight",
 };
 

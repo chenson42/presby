@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db, getPlatformDb } from "@/lib/db";
+import { hostClass } from "@/lib/domains/host";
 
 // Vercel cron invokes via GET. See vercel.json for the schedule (0 3 * * *).
 // Runs daily at 03:00 UTC to prune expired tokens from three tables:
@@ -103,7 +104,9 @@ export async function GET(req: Request) {
   };
 
   // Structured log for ops observability (Vercel Function logs / Datadog).
-  console.log("[cron/maintenance]", JSON.stringify(summary));
+  // hostClass: which host class Vercel invoked the cron on (T6 / A6; read by the
+  // real-domain acceptance pass). A label only, no behaviour.
+  console.log("[cron/maintenance]", JSON.stringify({ hostClass: hostClass(req.headers), ...summary }));
 
   return Response.json({ ok: true, ...summary });
 }

@@ -11,6 +11,10 @@
  *   3. Turnstile, then the amount parse, then the database, then Stripe;
  *   4. every `GiveResult` arm;
  *   5. `Host` / `X-Forwarded-Host` cannot change where Stripe sends the donor back to.
+ *   6. (Track F) the first argument is a SITE KEY bound on the server: shape-checked
+ *      before anything is spent, re-resolved after the cheap defences, and the slug THE
+ *      DATABASE returned names the intent. A donor on a church's own domain returns to
+ *      that domain, from the database's serving host - never from the request.
  */
 vi.mock("server-only", () => ({}));
 
@@ -32,6 +36,13 @@ vi.mock("@/lib/turnstile", () => ({
 const mockExecute = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/db", () => ({ db: { execute: (...args: unknown[]) => mockExecute(...args) } }));
 vi.mock("@/lib/authz", () => ({ withOrgContext: vi.fn() }));
+
+// `resolveGiveSite` is covered by sites.ts's own tests. Here it is the seam where "the DB-returned
+// slug" enters: slug mode resolves to the key itself, host mode to whatever the test arranges.
+const mockResolveGiveSite = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/sites", () => ({
+  resolveGiveSite: (...args: unknown[]) => mockResolveGiveSite(...args),
+}));
 
 const mockCreateSession = vi.hoisted(() => vi.fn());
 const mockConfigured = vi.hoisted(() => vi.fn());
@@ -94,6 +105,7 @@ const createdRow = (overrides: IntentRowFixture = {}): IntentRowFixture => ({
 });
 
 let intentRow: IntentRowFixture;
+let servingHost: string | null;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -114,8 +126,17 @@ beforeEach(() => {
     return { sessionId: SESSION, url: CHECKOUT_URL };
   });
   intentRow = createdRow();
+  servingHost = null;
+  mockResolveGiveSite.mockImplementation(async (key: string) => {
+    callLog.entries.push("resolve");
+    return { slug: key, urls: {}, redirectHost: null };
+  });
   mockExecute.mockImplementation(async (q: unknown) => {
     const text = sqlText(q);
+    if (text.includes("serving_host")) {
+      // donorOrigin(): the DATABASE's serving canonical host for the slug, or none.
+      return { rows: [{ serving_host: servingHost }] };
+    }
     if (text.includes("create_intent_public")) {
       callLog.entries.push("db:create_intent");
       return { rows: [intentRow] };
@@ -154,13 +175,14 @@ describe("honeypot", () => {
   });
 });
 
-describe("a slug that is not a slug", () => {
+describe("a key that is neither a slug nor a hostname", () => {
   it("is `unavailable` and mints no limiter key", async () => {
     for (const slug of ["", "Alder Creek", "../etc", "a".repeat(100), "a:b"]) {
       expect(await createPublicGiveSessionAction(slug, giveForm())).toEqual({ kind: "unavailable" });
     }
     expect(mockRateLimit).not.toHaveBeenCalled();
     expect(mockExecute).not.toHaveBeenCalled();
+    expect(mockResolveGiveSite).not.toHaveBeenCalled();
   });
 });
 
@@ -172,11 +194,14 @@ describe("rate limits", () => {
       ["giving_session_site:alder-creek", { max: 120, windowSeconds: 3600 }],
       ["giving_session_global", { max: 2000, windowSeconds: 3600 }],
     ]);
-    expect(callLog.entries.slice(0, 5)).toEqual([
+    // The site key is resolved AFTER the limiter and Turnstile (the cheapest defences first),
+    // and before the database is asked to create an intent.
+    expect(callLog.entries.slice(0, 6)).toEqual([
       "limit:giving_session:alder-creek:203.0.113.7",
       "limit:giving_session_site:alder-creek",
       "limit:giving_session_global",
       "turnstile",
+      "resolve",
       "db:create_intent",
     ]);
   });
@@ -339,5 +364,87 @@ describe("no session, no audit", () => {
     expect(source).not.toMatch(/from\s+["']@\/auth["']/);
     expect(source).not.toMatch(/recordAudit|auditEvents/);
     expect(source).toMatch(/audit-exempt:/);
+  });
+});
+
+describe("Track F: the site key is bound on the server and re-resolved (R5, A10, A11)", () => {
+  const HOST = "church-one.invalid";
+
+  it("a host key creates the intent for the DB-returned slug, with limiter buckets keyed by the host", async () => {
+    mockResolveGiveSite.mockImplementation(async () => ({ slug: "alder-creek", urls: {}, redirectHost: null }));
+
+    const result = await createPublicGiveSessionAction(HOST, giveForm());
+
+    expect(result.kind).toBe("checkout");
+    expect(mockResolveGiveSite).toHaveBeenCalledWith(HOST);
+    expect(mockRateLimit.mock.calls.map((c) => c[0])).toEqual([
+      `giving_session:${HOST}:203.0.113.7`,
+      `giving_session_site:${HOST}`,
+      "giving_session_global",
+    ]);
+    const create = mockExecute.mock.calls.find(([q]) => sqlText(q).includes("create_intent_public"))![0];
+    expect(sqlParams(create)[0]).toBe("alder-creek");
+  });
+
+  it("an unresolvable key is `unavailable`: no intent, no Stripe, no database write", async () => {
+    mockResolveGiveSite.mockResolvedValue(null);
+
+    expect(await createPublicGiveSessionAction(HOST, giveForm())).toEqual({ kind: "unavailable" });
+
+    expect(mockExecute).not.toHaveBeenCalled();
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("a donor on a church's own domain returns to that domain: the DATABASE's serving host, at clean paths", async () => {
+    mockResolveGiveSite.mockImplementation(async () => ({ slug: "alder-creek", urls: {}, redirectHost: null }));
+    servingHost = HOST;
+
+    await createPublicGiveSessionAction(HOST, giveForm());
+
+    const input = mockCreateSession.mock.calls[0]![0];
+    expect(input.successUrl).toBe(`https://${HOST}/give/return?session_id={CHECKOUT_SESSION_ID}`);
+    expect(input.cancelUrl).toBe(`https://${HOST}/give`);
+  });
+
+  it("the same org gives from its slug URL while a custom host serves: the donor still returns to the serving host", async () => {
+    servingHost = HOST;
+
+    await createPublicGiveSessionAction("alder-creek", giveForm());
+
+    const input = mockCreateSession.mock.calls[0]![0];
+    expect(input.successUrl).toBe(`https://${HOST}/give/return?session_id={CHECKOUT_SESSION_ID}`);
+  });
+
+  it("with no serving host the donor returns to the platform's slug URL, exactly as before", async () => {
+    mockResolveGiveSite.mockImplementation(async () => ({ slug: "alder-creek", urls: {}, redirectHost: null }));
+    servingHost = null;
+    await createPublicGiveSessionAction(HOST, giveForm());
+    const input = mockCreateSession.mock.calls[0]![0];
+    expect(input.successUrl).toBe("https://app.example.invalid/site/alder-creek/give/return?session_id={CHECKOUT_SESSION_ID}");
+    expect(input.cancelUrl).toBe("https://app.example.invalid/site/alder-creek/give");
+  });
+
+  // regression for the Host-spoofing row of the adversarial table, now that a custom host is a legal origin
+  it("however Host / X-Forwarded-Host / Origin / Referer lie, success_url and cancel_url never contain the request's host", async () => {
+    mockResolveGiveSite.mockImplementation(async () => ({ slug: "alder-creek", urls: {}, redirectHost: null }));
+    for (const serving of [null, HOST]) {
+      servingHost = serving;
+      mockCreateSession.mockClear();
+      mockHeaders.mockResolvedValue(
+        new Headers({
+          host: "attacker.invalid",
+          "x-forwarded-host": "attacker.invalid",
+          forwarded: "host=attacker.invalid;proto=https",
+          origin: "https://attacker.invalid",
+          referer: "https://attacker.invalid/give",
+          "x-real-ip": "203.0.113.7",
+        }),
+      );
+
+      await createPublicGiveSessionAction(HOST, giveForm());
+
+      const input = mockCreateSession.mock.calls[0]![0];
+      expect(JSON.stringify(input), String(serving)).not.toContain("attacker");
+    }
   });
 });

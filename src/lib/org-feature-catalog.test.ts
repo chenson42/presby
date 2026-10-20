@@ -62,11 +62,13 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar and org_portal.giving the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
+  it("makes org_portal.calendar, org_portal.giving and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.domains",
       "org_portal.giving",
+      "org_portal.mail_domain",
     ]);
 
     const provisioned = ORG_FEATURE_CATALOG.filter((e) => e.provisionedOn);
@@ -111,6 +113,26 @@ describe("ORG_FEATURE_CATALOG", () => {
     for (const entry of ORG_FEATURE_CATALOG) {
       if (entry.key === "org_portal.giving") continue;
       expect(entry.orgTypes, entry.key).toBeNull();
+    }
+  });
+
+  it("operatorEnabled is a boolean on every entry and true for EXACTLY org_portal.domains and org_portal.mail_domain (Q1: platform admin only, for now)", () => {
+    for (const entry of ORG_FEATURE_CATALOG) {
+      expect(typeof entry.operatorEnabled, `${entry.key}.operatorEnabled`).toBe("boolean");
+    }
+    expect(
+      ORG_FEATURE_CATALOG.filter((e) => e.operatorEnabled).map((e) => e.key).sort(),
+    ).toEqual(["org_portal.domains", "org_portal.mail_domain"]);
+  });
+
+  it("the two domain toggles are provisioned OFF, unscoped by organization type (G32), in the communications category, with NO platform flag (no new global flag pre-live)", () => {
+    for (const key of ["org_portal.domains", "org_portal.mail_domain"]) {
+      const entry = ORG_FEATURE_CATALOG.find((e) => e.key === key);
+      expect(entry, key).toBeDefined();
+      expect(entry!.flag, key).toBeNull();
+      expect(entry!.provisionedOn, key).toBe(false);
+      expect(entry!.orgTypes, key).toBeNull();
+      expect(entry!.category, key).toBe("communications");
     }
   });
 

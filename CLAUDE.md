@@ -109,8 +109,25 @@ src/components/org-portal/ — tenant-portal-specific composition (tile grid,
                          Distinct from src/components/shared/ because these
                          compose org-portal-only concepts platform-shell
                          pages never use
-src/proxy.ts           — Edge gate (admin + 2FA on /admin and /o/*). Edge
-                         runtime: never import @/lib/db here
+src/proxy.ts           — The proxy (admin + 2FA on /admin and /o/*, and the
+                         custom-host branch that rewrites any non-platform host
+                         to /site/<host>). Runs on Node.js (Next 16) but never
+                         reaches the database — see The Proxy Does Not Reach
+                         the Database. Imports only edgeAuth, the permission
+                         constants, and domains/{host,probe,cron-passthrough}.ts
+src/lib/domains/       — custom domains (Track F): hostname rules, the state
+                         table, the proof/attach/probe service (service.ts is
+                         the ONLY writer of organization_domains), the Vercel
+                         and DNS adapters behind interfaces with fakes, and the
+                         three pure files the proxy may import. See A Custom
+                         Host Is a Key, Not an Identity
+src/lib/site-urls.ts   — SiteUrls: the only place a same-host public URL is
+                         built (a source-scan test bans hand-built /site/${…}
+                         elsewhere); pure, safe for the proxy and next.config.ts
+src/app/api/cron/domains/ — the 5-minute domains sweep (proof re-check, attach,
+                         probe, lapse/grace); one of four crons in vercel.json
+scripts/domains/       — test-rls-47.sql, seed-dev-domains.sql, reattach.ts
+                         (the bulk Vercel re-attach for a project move)
 src/app/launch/        — the post-login router. destination.ts holds the matrix
                          as a pure function; the page gathers inputs and
                          redirects. See Post-Login Landing below
@@ -212,7 +229,7 @@ Phases run 1 → 2 → 3 → 4 → 5 → 6. Loop-backs are expected, and a loop-
 | React components, pages, forms | **ux-developer** |
 | Spans server + client and is small | **full-stack-developer** |
 
-**Gate:** Tests for the change are written *by the implementer* (QA runs them, and does not write them). Typecheck and build pass. `npm run check:audit` reports zero violations. No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
+**Gate:** Tests for the change are written *by the implementer* (QA runs them, and does not write them). Typecheck and build pass. `npm run check:audit` reports zero violations. No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
 **Loop-back:** Design unbuildable returns to Phase 3. Architectural problem discovered returns to Phase 2.
 
 ### Phase 5 — Test Verification (qa)
@@ -403,7 +420,12 @@ npm run check:secrets # Tripwire: scans every git-tracked file (the repo is publ
                        # (soft findings — annotate a real false positive with `// leak-ok: <reason>`)
 npm run check:hydration-gate # Tripwire: every useForm root renders <HydrationGate> (DECISION-159);
                               # exemption `// hydration-gate-ok: <reason>`
-npm run check        # All six tripwires in sequence
+npm run check:giving-boundaries # Tripwire: the giving "appears nowhere else" properties (Stripe SDK
+                       # imported by one file, no owner connection inside src/lib/giving, ...)
+npm run check:proxy-imports # Tripwire: src/proxy.ts's import graph never reaches the database, a
+                       # server-only module, or any src/lib/domains file but host.ts, probe.ts
+                       # and cron-passthrough.ts (DECISION-177)
+npm run check        # All eight tripwires in sequence
 npm run test:e2e:prod # Hydration specs (e2e/hydration/) against `next build && next start` on
                        # port 3800 (PW_PROD_BUILD=1); a dev server can never satisfy this lane
 npm run ui:add -- <component…>  # The ONLY supported way to generate a shadcn primitive.
@@ -519,12 +541,38 @@ permission never stages a rollout. A gated feature asks both questions.
 toggle, wrong for a flag that gates an auth path, where `false` means "deny
 every sign-in during a DB blip." Auth-critical flags (`auth.local_login`, `auth.require_2fa`) go through named helpers in `src/lib/auth/` that do their own read and their own `catch`, never through the bare helper — `auth.local_login` fails **open** (a DB blip must not lock everyone out of sign-in), `auth.require_2fa` fails to **the already-resolved requirement** (a DB blip must not silently drop enforcement, and must not impose a challenge on someone who never enrolled). Neither behaviour is expressible once the shared helper has collapsed a DB error into `false` (DECISION-026).
 
-### The Edge Gate Cannot Reach the Database
+### The Proxy Does Not Reach the Database
 
-`src/proxy.ts` runs on the Edge runtime. It imports `edgeAuth` and the
-permission constants and nothing else — importing `@/lib/db` (or anything that
-transitively pulls the Neon pool) breaks the build or the runtime, and the
-failure surfaces at request time, not at `tsc`.
+`src/proxy.ts` runs on **Node.js** (Next 16; F146), so the old runtime reason —
+importing `@/lib/db` breaks the build — no longer holds, but the rule stands
+(DECISION-177): the proxy runs on every matched request, a tenant decision there
+would be a second enumeration-sensitive path (DECISION-040), and it must stay a
+pure function of host, path and session claims. It imports `edgeAuth`, the
+permission constants, and `src/lib/domains/host.ts`, `probe.ts` and
+`cron-passthrough.ts` — nothing else. `npm run check:proxy-imports` enforces it.
+
+### A Custom Host Is a Key, Not an Identity
+
+A church's own domain (Track F) is a **lookup key** into the one public-site
+tree, never an identity, an origin, or a redirect target (DECISIONS 176/178/181).
+
+- **The platform-host set is closed and build-asserted.** `NEXT_PUBLIC_PLATFORM_HOSTS`
+  (build time) names the hosts that are the platform; a production build fails
+  without an https `NEXT_PUBLIC_APP_URL` whose host is in the set.
+  `VERCEL_PROJECT_PRODUCTION_URL` is **never** read — it can name a church's domain
+  (F148).
+- **Classification is the proxy's first branch.** A host outside the set is
+  rewritten to `/site/<host>` inside `(public)/site/[slug]`; there is no parallel
+  route tree. Host mode requires `Host === key`, a key that is not a platform
+  host, and one `SECURITY DEFINER` read that collapses every non-serving state to
+  the same neutral 404 — one code path and one read count (DECISION-040).
+- **`live` is the only serving state.** Proof comes before any provider call.
+- **A custom host has no session, no cookies and no platform routes.** `/signin`,
+  `/admin`, `/o/*`, `/home`, `/launch`, `/api/*` (bar the four cron paths, exact
+  and bearer-keyed) are a neutral 404 there.
+- **Absolute URLs come only from the database row or the validated platform
+  origin** (`SiteUrls`), never from the request. Every host-level redirect is a
+  **307 with `no-store`**; HSTS `includeSubDomains` is platform-hosts-only (F147).
 
 ### Composite Tenant Keys
 
@@ -568,7 +616,9 @@ The emitter is `<BrandTokens>` and it **is** the `<style>` element, so
 grep-presence and behaviour-presence are one fact (DECISION-052). It appears in
 exactly the two layouts listed in `scripts/check-brand-scope.mjs`.
 
-`(org)` and `(public)/site/<slug>` are the only brandable route groups.
+`(org)` and `(public)/site/<slug>` are the only brandable route groups. A
+church's custom domain renders through that same `(public)/site/[slug]` tree —
+there is no third group, and `check:brand-scope` is unchanged.
 Everything else — `(auth)`, `(account)`, `(member)`, `(admin)`, `(statistics-submit)`,
 `(email-verify)`, `(password-reset)`, `access-pending`, `/launch`,
 `/no-organization`, `/developer` — renders in the platform palette. A branded
@@ -626,14 +676,14 @@ through a browser.
 | everything else | | | `/home` |
 
 Absent from the table on purpose, because they are enforced elsewhere: an
-unverified 2FA challenge fires at the Edge on the **destination** (`/admin`,
+unverified 2FA challenge fires in the proxy on the **destination** (`/admin`,
 `/o/*`), and a deactivated account is bounced by `src/proxy.ts` before `/launch`
 renders. A database failure is not a destination either — `/launch` renders "we
 can't reach your congregations" rather than redirecting, because a fall-through
 to a zero-card chooser or to `/home` reads to the user as revoked access.
 
 **Two platform predicates, never one** (DECISION-044). `canAccessAdmin` is a
-session claim (`ADMIN_ROLE` or `FEATURES.ADMIN_DASHBOARD`) and is what the Edge
+session claim (`ADMIN_ROLE` or `FEATURES.ADMIN_DASHBOARD`) and is what the proxy
 enforces on `/admin`; `isPlatformAdmin` is `users.is_platform_admin`, read live,
 and gates the Developer portal. Routing on either alone ships a bug in opposite
 directions.
@@ -646,6 +696,10 @@ language** (DECISION-039): organization name and type only. `/orgs` no longer
 exists as a page — it is a permanent `next.config.ts` redirect to `/home`
 (DECISION-124/125) — so a deep link or bookmark to `/orgs` still lands correctly,
 one 308 hop later.
+
+**`/launch`, `/home` and every platform route exist only on platform hosts.** A
+custom host (A Custom Host Is a Key, Not an Identity) answers a neutral 404 on
+them.
 
 **`/` never redirects a signed-in user** (DECISION-034). They are entitled to
 read the front page, P2 wants it static, and P5 makes the meaning of `/`
@@ -662,11 +716,11 @@ data.
 > `(org)` — auth-only **and** org-scoped. Every page resolves its `[slug]`
 > through `resolveOrgContext()` and reads exclusively through `withOrgContext()`
 > on the RLS-enforced `db` connection. **`getPlatformDb()` is forbidden in this
-> subtree.** No page may assume the user arrived via the chooser. The Edge
+> subtree.** No page may assume the user arrived via the chooser. The proxy
 > enforces authentication, active status, and 2FA for `/o/*`; it does **not**
 > enforce membership, and it cannot — `FEATURES.*` is the platform axis, org
-> membership is the tenant axis, and the Edge cannot reach the database
-> (DECISION-035).
+> membership is the tenant axis, and the proxy does not reach the database
+> (DECISION-035, DECISION-177).
 
 The auth check lives in the **page**, not the layout: a layout cannot see the
 pathname, so it has to guess a `callbackUrl` and loses the deep link.

@@ -41,6 +41,12 @@ vi.mock("@/lib/sites", () => ({
 }));
 
 import { PublicStaffDirectory } from "./staff-directory";
+import { buildSiteUrls } from "@/lib/site-urls";
+
+/** Slug-mode url builder (a platform host): photo URLs keep today's /site/<slug>/assets/<key> shape. */
+const SLUG_URLS = buildSiteUrls({ mode: "slug", slug: "alder-creek", platformOrigin: "http://localhost:3000" });
+/** Host-mode url builder (a church's own domain): photo URLs are CLEAN, with no slug anywhere. */
+const HOST_URLS = buildSiteUrls({ mode: "host", host: "church-one.invalid", slug: "alder-creek", platformOrigin: "http://localhost:3000" });
 
 afterEach(() => {
   cleanup();
@@ -51,7 +57,7 @@ describe("PublicStaffDirectory — empty roster", () => {
   it("renders an explicit 'no one listed yet' message, never a silent blank", async () => {
     getPublicStaffRoster.mockResolvedValue([]);
 
-    const el = await PublicStaffDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicStaffDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     render(el);
 
     expect(
@@ -78,7 +84,7 @@ describe("PublicStaffDirectory — a non-empty roster", () => {
       },
     ]);
 
-    const el = await PublicStaffDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicStaffDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     render(el);
 
     expect(screen.getByText("Wren Halloway")).toBeTruthy();
@@ -103,7 +109,7 @@ describe("PublicStaffDirectory — a non-empty roster", () => {
       },
     ]);
 
-    const el = await PublicStaffDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicStaffDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     render(el);
 
     const images = screen.getAllByRole("img");
@@ -124,7 +130,7 @@ describe("PublicStaffDirectory — a non-empty roster", () => {
       },
     ]);
 
-    const el = await PublicStaffDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicStaffDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     const { container } = render(el);
 
     expect(container.querySelector("a[href^='mailto:']")).toBeNull();
@@ -138,6 +144,7 @@ describe("PublicStaffDirectory — a filter that narrows to zero currently-publi
 
     const el = await PublicStaffDirectory({
       slug: "alder-creek",
+      urls: SLUG_URLS,
       filter: { department: "Nonexistent Department" },
     });
     render(el);
@@ -154,6 +161,7 @@ describe("PublicStaffDirectory — filter narrowing (parseStaffRosterFilter)", (
 
     await PublicStaffDirectory({
       slug: "alder-creek",
+      urls: SLUG_URLS,
       filter: { kind: "officer", department: "Finance", office: "clerk_of_session", hasPriority: true },
     });
 
@@ -170,6 +178,7 @@ describe("PublicStaffDirectory — filter narrowing (parseStaffRosterFilter)", (
 
     await PublicStaffDirectory({
       slug: "alder-creek",
+      urls: SLUG_URLS,
       filter: {
         kind: "not-a-real-kind",
         department: 12345,
@@ -184,8 +193,25 @@ describe("PublicStaffDirectory — filter narrowing (parseStaffRosterFilter)", (
   it("an empty filter object (the shipped feature's own unfiltered marker, with no content-repo migration needed) narrows to nothing", async () => {
     getPublicStaffRoster.mockResolvedValue([]);
 
-    await PublicStaffDirectory({ slug: "alder-creek", filter: {} });
+    await PublicStaffDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
 
     expect(getPublicStaffRoster).toHaveBeenCalledWith("alder-creek", {});
+  });
+});
+
+describe("PublicStaffDirectory - host mode (Track F)", () => {
+  it("builds CLEAN photo URLs on a church's own domain: /assets/<key>, no /site/ and no slug", async () => {
+    getPublicStaffRoster.mockResolvedValue([
+      { displayName: "Corwin Aldridge", roleLabel: "Clerk of Session", department: null, photoKey: "blob-key-1" },
+    ]);
+
+    render(await PublicStaffDirectory({ slug: "alder-creek", urls: HOST_URLS, filter: {} }));
+
+    const src = screen.getByRole("img").getAttribute("src");
+    expect(src).toBe("/assets/blob-key-1");
+    expect(src).not.toContain("/site/");
+    expect(src).not.toContain("alder-creek");
+    // The roster itself is still read by the DB-returned slug.
+    expect(getPublicStaffRoster).toHaveBeenCalledWith("alder-creek", expect.anything());
   });
 });

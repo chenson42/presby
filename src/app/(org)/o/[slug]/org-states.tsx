@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { OrganizationType } from "@/lib/authz";
 import { organizationTypeLabel } from "@/lib/org-display";
+import { slugSitePath } from "@/lib/site-urls";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,7 +73,7 @@ export function OrgAccessDenied({
           <Link href="/orgs">Back to your organizations</Link>
         </Button>
         <Button asChild variant="outline" className="min-h-11">
-          <Link href={`/site/${slug}`}>Visit the public site</Link>
+          <Link href={slugSitePath(slug)}>Visit the public site</Link>
         </Button>
       </div>
     </section>
@@ -110,7 +111,7 @@ export function OrgAccessEnded({
           <Link href="/orgs">Back to your organizations</Link>
         </Button>
         <Button asChild variant="outline" className="min-h-11">
-          <Link href={`/site/${slug}`}>Visit the public site</Link>
+          <Link href={slugSitePath(slug)}>Visit the public site</Link>
         </Button>
       </div>
     </section>

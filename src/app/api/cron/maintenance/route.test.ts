@@ -148,3 +148,30 @@ describe("GET /api/cron/maintenance — auth", () => {
     expect(platformSql).not.toContain("user_totp_pending_enrollments");
   });
 });
+
+describe("GET /api/cron/maintenance - the host-class log line (T6 / A6)", () => {
+  it("logs which class of host the invocation arrived on", async () => {
+    vi.stubEnv("CRON_SECRET", "maint-secret");
+    vi.stubEnv("NEXT_PUBLIC_PLATFORM_HOSTS", "app.example.invalid");
+    mockExecute.mockResolvedValue({ rows: [] });
+    mockPlatformExecute.mockResolvedValue({ rows: [{ fixed: 0 }] });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    for (const [host, expected] of [
+      ["app.example.invalid", "platform"],
+      ["church-one.invalid", "custom"],
+      ["bad host", "invalid"],
+    ] as const) {
+      const res = await GET(
+        new Request("http://localhost/api/cron/maintenance", {
+          headers: { authorization: "Bearer maint-secret", host },
+        }),
+      );
+      expect(res.status, host).toBe(200);
+      const line = JSON.parse(log.mock.calls.at(-1)![1] as string) as Record<string, unknown>;
+      expect(line.hostClass, host).toBe(expected);
+      expect(line).toHaveProperty("deletedPwdReset");
+    }
+    log.mockRestore();
+  });
+});

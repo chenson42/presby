@@ -13,8 +13,9 @@ import { createPublicGiveSessionAction } from "./give/actions";
  * either way; the slot just lets a congregation's own page hold the form.
  *
  * Same live-slot discipline as the staff and committee directories: a plain
- * async Server Component, the closure in `page.tsx` closes over `slug` ONLY
- * (never a request, header or cookie), and the marker's `filter` is lower-trust,
+ * async Server Component, the closure in `render-site-page.tsx` closes over the
+ * resolved site's `slug` and the page's site key ONLY (never a request, header
+ * or cookie), and the marker's `filter` is lower-trust,
  * author-typed JSON. The one key honoured is `fund`: a fund id that must be one
  * of THIS organization's active, online funds (read from the same public config
  * the form uses), otherwise it is silently ignored and the first fund is the
@@ -28,7 +29,17 @@ import { createPublicGiveSessionAction } from "./give/actions";
  * minted per render, and the host page is `force-dynamic` via the site layout,
  * so it is never shared between visitors.
  */
-export async function PublicGivingSlot({ slug, filter }: { slug: string; filter: Record<string, unknown> }) {
+export async function PublicGivingSlot({
+  slug,
+  siteKey,
+  filter,
+}: {
+  /** The organization's slug AS THE DATABASE RETURNED IT: the giving reads use it. */
+  slug: string;
+  /** The page's site key (a slug, or a verified host): the give action's server-bound argument. */
+  siteKey: string;
+  filter: Record<string, unknown>;
+}) {
   const config = await readPublicGivingConfig(slug);
   if (config.state === "absent") return null;
 
@@ -55,7 +66,7 @@ export async function PublicGivingSlot({ slug, filter }: { slug: string; filter:
       <GiveForm
         mode="public"
         idPrefix="slot-give"
-        action={createPublicGiveSessionAction.bind(null, slug)}
+        action={createPublicGiveSessionAction.bind(null, siteKey)}
         initialKey={randomUUID()}
         funds={config.funds}
         defaultFundId={defaultFundId}

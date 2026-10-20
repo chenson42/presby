@@ -20,6 +20,7 @@
  * none. Hand-audited here: `check:audit` does not scan route handlers.
  */
 
+import { hostClass } from "@/lib/domains/host";
 import { dueEvents, expireIntents, purgeBodies } from "@/lib/giving/ingest/functions";
 import { processInboxEvent } from "@/lib/giving/ingest/process";
 
@@ -52,7 +53,8 @@ export async function GET(req: Request) {
     const expired = await expireIntents();
 
     const summary = { processed, purged, expired };
-    console.info("[cron/giving]", JSON.stringify(summary));
+    // hostClass: which host class Vercel invoked the cron on (T6 / A6; read by the acceptance pass).
+    console.info("[cron/giving]", JSON.stringify({ hostClass: hostClass(req.headers), ...summary }));
     return Response.json({ ok: true, ...summary });
   } catch {
     console.error("[cron/giving] failed");

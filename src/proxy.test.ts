@@ -34,8 +34,17 @@ function signedIn(user: SessionUser = {}) {
   } as unknown as Awaited<ReturnType<typeof edgeAuth>>);
 }
 
-function request(pathname: string) {
-  return new NextRequest(new URL(pathname, "https://presby.example.invalid"));
+// The synthetic platform host. Since Track F the proxy's FIRST decision is the
+// request Host (src/lib/domains/host.ts), so the fixtures' origin must be in the
+// platform-host set - otherwise every request below would be a custom-host
+// rewrite. `NEXT_PUBLIC_PLATFORM_HOSTS` is how production declares the same.
+const PLATFORM_HOST = "presby.example.invalid";
+process.env.NEXT_PUBLIC_PLATFORM_HOSTS = PLATFORM_HOST;
+
+function request(pathname: string, host: string = PLATFORM_HOST, headers: Record<string, string> = {}) {
+  return new NextRequest(new URL(pathname, `https://${host}`), {
+    headers: { host, ...headers },
+  });
 }
 
 beforeEach(() => {
@@ -254,5 +263,311 @@ describe("proxy — /file-statistics (submission grants, D16/DECISION-147)", () 
     expect(res.status).toBe(307);
     const location = new URL(res.headers.get("location") as string);
     expect(location.pathname).toBe("/signin");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Track F: the custom-host first branch (DECISION-176, Phase 2 R1-R4, A6, T1)
+// ---------------------------------------------------------------------------
+
+import { afterEach } from "vitest";
+import { makeProbe } from "@/lib/domains/probe";
+
+const CUSTOM = "church-one.invalid";
+
+/** A rewrite carries `x-middleware-rewrite`; a pass-through carries `x-middleware-next`. */
+function rewriteTarget(res: Response): URL | null {
+  const raw = res.headers.get("x-middleware-rewrite");
+  return raw === null ? null : new URL(raw);
+}
+const passedThrough = (res: Response) => res.headers.get("x-middleware-next") === "1";
+
+function expectNoCookies(res: Response) {
+  expect(res.headers.get("set-cookie")).toBeNull();
+}
+
+describe("proxy - a custom host is rewritten to /site/<host><path> (R1)", () => {
+  it("rewrites the home page and keeps the query string", async () => {
+    const res = await proxy(request("/", CUSTOM));
+    expect(rewriteTarget(res)?.pathname).toBe(`/site/${CUSTOM}`);
+
+    const withQuery = await proxy(request("/about?tab=2&x=%20y", CUSTOM));
+    const target = rewriteTarget(withQuery);
+    expect(target?.pathname).toBe(`/site/${CUSTOM}/about`);
+    expect(target?.search).toBe("?tab=2&x=%20y");
+  });
+
+  it("never consults edgeAuth() and sets no cookie, for any path", async () => {
+    for (const p of ["/", "/about", "/sitemap.xml", "/robots.txt", "/give", "/give/return?session_id=cs_x"]) {
+      const res = await proxy(request(p, CUSTOM));
+      expect(rewriteTarget(res), p).not.toBeNull();
+      expectNoCookies(res);
+    }
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("rewrites every platform route into bundle-path space instead of serving it", async () => {
+    // These are the platform's own routes. On a church's domain each one is
+    // just a path the church's bundle has no page for, so it lands on the same
+    // neutral 404 as any other. None may reach /api, /signin or the gates.
+    const platformPaths = [
+      "/api/auth/csrf",
+      "/api/auth/callback/credentials",
+      "/api/webhooks/stripe",
+      "/api/sites/ingest",
+      "/api/cron/email-queue",
+      "/signin",
+      "/totp",
+      "/forgot-password",
+      "/reset-password",
+      "/file-statistics",
+      "/access-pending",
+      "/home",
+      "/launch",
+      "/orgs",
+      "/account/verify-email/abc",
+      "/o/alder-creek",
+      "/admin",
+      "/account",
+      "/site/alder-creek",
+      `/site/${CUSTOM}`,
+    ];
+    for (const p of platformPaths) {
+      const res = await proxy(request(p, CUSTOM));
+      const target = rewriteTarget(res);
+      expect(target?.pathname, p).toBe(`/site/${CUSTOM}${p}`);
+      expect(passedThrough(res), p).toBe(false);
+      expect(res.headers.get("location"), p).toBeNull();
+    }
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("is a lookup key, not an identity: forwarded headers change nothing (R3, A2)", async () => {
+    const spoof = {
+      "x-forwarded-host": PLATFORM_HOST,
+      forwarded: `host=${PLATFORM_HOST}`,
+      "x-original-host": PLATFORM_HOST,
+      "x-forwarded-proto": "https",
+    };
+    // A custom host claiming to be the platform stays a custom host.
+    const asCustom = await proxy(request("/signin", CUSTOM, spoof));
+    expect(rewriteTarget(asCustom)?.pathname).toBe(`/site/${CUSTOM}/signin`);
+
+    // The platform host claiming to be a church stays the platform: /home still
+    // asks edgeAuth() (unauthenticated -> /signin), and /signin is still public.
+    auth.mockResolvedValueOnce(null as unknown as Awaited<ReturnType<typeof edgeAuth>>);
+    const asPlatform = await proxy(
+      request("/home", PLATFORM_HOST, {
+        "x-forwarded-host": CUSTOM,
+        forwarded: `host=${CUSTOM}`,
+        "x-original-host": CUSTOM,
+      }),
+    );
+    expect(rewriteTarget(asPlatform)).toBeNull();
+    expect(new URL(asPlatform.headers.get("location") as string).pathname).toBe("/signin");
+  });
+
+  it("matches the Host header case-insensitively and ignores the port and a trailing dot", async () => {
+    for (const host of ["CHURCH-ONE.INVALID", `${CUSTOM}:3000`, `${CUSTOM}.`]) {
+      const res = await proxy(request("/about", host));
+      expect(rewriteTarget(res)?.pathname, host).toBe(`/site/${CUSTOM}/about`);
+    }
+  });
+
+  it("answers an unusable Host with a bare 404 and no rewrite, no auth, no cookie", async () => {
+    for (const host of ["", "exa mple.invalid", "-bad.invalid", "a..b.invalid", "bad_host.invalid", "ex@mple.invalid"]) {
+      const req = new NextRequest(new URL("/", "https://x.invalid"), { headers: { host } });
+      const res = await proxy(req);
+      expect(res.status, JSON.stringify(host)).toBe(404);
+      expect(rewriteTarget(res)).toBeNull();
+      expectNoCookies(res);
+    }
+    // No Host header at all.
+    const missing = await proxy(new NextRequest(new URL("/", "https://x.invalid")));
+    expect(missing.status).toBe(404);
+    expect(auth).not.toHaveBeenCalled();
+  });
+});
+
+describe("proxy - the platform-host set (R2)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("treats *.vercel.app as the platform", async () => {
+    auth.mockResolvedValueOnce(null as unknown as Awaited<ReturnType<typeof edgeAuth>>);
+    const res = await proxy(request("/home", "presby-git-branch-team.vercel.app"));
+    expect(rewriteTarget(res)).toBeNull();
+    expect(res.status).toBe(307);
+  });
+
+  it("treats loopback as the platform outside a production deployment, and as nothing in one", async () => {
+    const dev = await proxy(request("/signin", "localhost:3000"));
+    expect(passedThrough(dev)).toBe(true);
+
+    vi.stubEnv("VERCEL_ENV", "production");
+    const prod = await proxy(request("/signin", "localhost:3000"));
+    expect(rewriteTarget(prod)?.pathname).toBe("/site/localhost/signin");
+    // An IP literal is refused outright in production.
+    const ip = await proxy(request("/signin", "203.0.113.9"));
+    expect(ip.status).toBe(404);
+    expect(rewriteTarget(ip)).toBeNull();
+  });
+
+  it("does not let a church host that merely ends in a platform host's name through", async () => {
+    for (const host of [`${PLATFORM_HOST}.evil.invalid`, `evil-${PLATFORM_HOST}`, `x.${PLATFORM_HOST}`]) {
+      const res = await proxy(request("/signin", host));
+      expect(rewriteTarget(res)?.pathname, host).toBe(`/site/${host}/signin`);
+    }
+  });
+});
+
+describe("proxy - /site/<dotted> is not addressable from a platform host (R1, A3)", () => {
+  it("404s the internal rewrite target, with no auth and no body", async () => {
+    for (const p of [
+      `/site/${CUSTOM}`,
+      `/site/${CUSTOM}/about`,
+      "/site/a.b",
+      "/site/a%2eb",
+      "/site/a%2Eb/about",
+      "/site/.hidden",
+    ]) {
+      const res = await proxy(request(p));
+      expect(res.status, p).toBe(404);
+      expect(passedThrough(res), p).toBe(false);
+    }
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("still admits a normal slug and a dot deeper in the path", async () => {
+    for (const p of ["/site/alder-creek", "/site/alder-creek/assets/some.key", "/site/alder-creek/about.html"]) {
+      const res = await proxy(request(p));
+      expect(res.status, p).toBe(200);
+      expect(passedThrough(res), p).toBe(true);
+    }
+  });
+});
+
+describe("proxy - the live-ness probe (T1)", () => {
+  const SECRET = "probe-secret-fixture";
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("answers a valid probe for exactly this host with a bodiless 204, the ack, and no cookie", async () => {
+    vi.stubEnv("AUTH_SECRET", SECRET);
+    const probe = makeProbe(CUSTOM, SECRET);
+    const res = await proxy(request("/", CUSTOM, { "x-presby-probe": probe.header }));
+    expect(res.status).toBe(204);
+    expect(res.headers.get("x-presby-probe-ack")).toBe(probe.expectedAck);
+    expectNoCookies(res);
+    expect(await res.text()).toBe("");
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("answers on any path and method, since the sweeper probes GET /", async () => {
+    vi.stubEnv("AUTH_SECRET", SECRET);
+    const probe = makeProbe(CUSTOM, SECRET);
+    const res = await proxy(request("/anything/at/all?x=1", CUSTOM, { "x-presby-probe": probe.header }));
+    expect(res.status).toBe(204);
+  });
+
+  it("does not answer a probe minted for another host, a forged MAC, or a malformed header", async () => {
+    vi.stubEnv("AUTH_SECRET", SECRET);
+    const other = makeProbe("church-two.invalid", SECRET);
+    const wrongHost = await proxy(request("/", CUSTOM, { "x-presby-probe": other.header }));
+    expect(wrongHost.status).not.toBe(204);
+    expect(wrongHost.headers.get("x-presby-probe-ack")).toBeNull();
+    expect(rewriteTarget(wrongHost)?.pathname).toBe(`/site/${CUSTOM}`);
+
+    for (const bad of ["", "garbage", `${"0".repeat(32)}.forged`, "a.b.c"]) {
+      const res = await proxy(request("/", CUSTOM, { "x-presby-probe": bad }));
+      expect(res.headers.get("x-presby-probe-ack"), bad).toBeNull();
+    }
+  });
+
+  it("does not answer when AUTH_SECRET is unset (a guessable key would forge 'live')", async () => {
+    vi.stubEnv("AUTH_SECRET", "");
+    const probe = makeProbe(CUSTOM, SECRET);
+    const res = await proxy(request("/", CUSTOM, { "x-presby-probe": probe.header }));
+    expect(res.headers.get("x-presby-probe-ack")).toBeNull();
+  });
+
+  it("ignores the probe header on a platform host", async () => {
+    vi.stubEnv("AUTH_SECRET", SECRET);
+    const probe = makeProbe(PLATFORM_HOST, SECRET);
+    const res = await proxy(request("/signin", PLATFORM_HOST, { "x-presby-probe": probe.header }));
+    expect(res.headers.get("x-presby-probe-ack")).toBeNull();
+    expect(passedThrough(res)).toBe(true);
+  });
+});
+
+describe("proxy - the cron pass-through on a custom host (A6)", () => {
+  const SECRET = "cron-secret-fixture-value";
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes an exact cron path with the exact bearer straight through, with no cookie and no auth", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    for (const p of ["/api/cron/email-queue", "/api/cron/maintenance", "/api/cron/giving", "/api/cron/domains"]) {
+      const res = await proxy(request(p, CUSTOM, { authorization: `Bearer ${SECRET}` }));
+      expect(passedThrough(res), p).toBe(true);
+      expect(rewriteTarget(res), p).toBeNull();
+      expectNoCookies(res);
+    }
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("keeps the query string reachable (the handlers read ?limit=)", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    const res = await proxy(request("/api/cron/email-queue?limit=1", CUSTOM, { authorization: `Bearer ${SECRET}` }));
+    expect(passedThrough(res)).toBe(true);
+  });
+
+  it("rewrites (the neutral 404 path) for a missing, wrong, empty or wrong-length bearer", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    const p = "/api/cron/email-queue";
+    const baseline = rewriteTarget(await proxy(request("/api/auth/csrf", CUSTOM)));
+    expect(baseline).not.toBeNull();
+    for (const headers of [
+      {},
+      { authorization: "" },
+      { authorization: "Bearer " },
+      { authorization: "Bearer wrong" },
+      { authorization: `Bearer ${SECRET}x` },
+      { authorization: SECRET },
+    ] as Array<Record<string, string>>) {
+      const res = await proxy(request(p, CUSTOM, headers));
+      expect(passedThrough(res), JSON.stringify(headers)).toBe(false);
+      expect(rewriteTarget(res)?.pathname, JSON.stringify(headers)).toBe(`/site/${CUSTOM}${p}`);
+    }
+  });
+
+  it("rewrites when CRON_SECRET is unset, whatever the header says", async () => {
+    vi.stubEnv("CRON_SECRET", "");
+    for (const authorization of ["Bearer ", "Bearer undefined", "Bearer"]) {
+      const res = await proxy(request("/api/cron/email-queue", CUSTOM, { authorization }));
+      expect(passedThrough(res), authorization).toBe(false);
+      expect(rewriteTarget(res)).not.toBeNull();
+    }
+  });
+
+  it("does not match encoded, dot-segment, trailing-slash or upper-case variants", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    const authorization = `Bearer ${SECRET}`;
+    for (const p of [
+      "/api/cron/email-queue/",
+      "/api/cron/%65mail-queue",
+      "/api/cron%2Femail-queue",
+      "/API/cron/email-queue",
+      "/api/cron/Email-Queue",
+      "/api/cron/email-queue/extra",
+      "/api/cron/unknown",
+    ]) {
+      const res = await proxy(request(p, CUSTOM, { authorization }));
+      expect(passedThrough(res), p).toBe(false);
+      expect(rewriteTarget(res), p).not.toBeNull();
+    }
   });
 });

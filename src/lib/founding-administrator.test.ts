@@ -217,9 +217,10 @@ describe.skipIf(!hasDb)(
         "org_features.manage",
         "tickets.file",
         "staff.manage",
+        "domains.manage",
       ];
 
-      it("congregation: the base eight keys (F118 — staff.manage joins the bundle), congregation_stated_clerk office, no congregation_oversight.manage", () => {
+      it("congregation: the base nine keys (F118 — staff.manage joins the bundle; F150 — domains.manage joins it), congregation_stated_clerk office, no congregation_oversight.manage", () => {
         const plan = foundingAdministratorPlan("congregation");
         expect(plan.administration.key).toBe("founding_administrator");
         expect(plan.administration.permissionKeys.sort()).toEqual(
@@ -231,7 +232,7 @@ describe.skipIf(!hasDb)(
         expect(plan.officeTemplateKey).toBe("congregation_stated_clerk");
       });
 
-      it("presbytery: base eight PLUS congregation_oversight.manage (9 total), presbytery_stated_clerk office", () => {
+      it("presbytery: base nine PLUS congregation_oversight.manage (10 total), presbytery_stated_clerk office", () => {
         const plan = foundingAdministratorPlan("presbytery");
         expect(plan.administration.permissionKeys.sort()).toEqual(
           [...BASE, "congregation_oversight.manage"].sort(),
@@ -280,6 +281,33 @@ describe.skipIf(!hasDb)(
             expect(plan.administration.permissionKeys).not.toContain(key);
           }
         }
+      });
+    });
+
+    describe("foundingAdministratorPlan() — domains.manage (custom domains, F150)", () => {
+      it.each([
+        "congregation",
+        "presbytery",
+        "synod",
+        "general_assembly",
+        "new_worshiping_community",
+      ] as const)(
+        "%s: the administration half carries domains.manage (under assertPermissionSubset a key nobody at the org holds is ungrantable, so the bundle is the only door)",
+        (organizationType) => {
+          expect(
+            foundingAdministratorPlan(organizationType).administration.permissionKeys,
+          ).toContain("domains.manage");
+        },
+      );
+
+      it("domains.manage is NOT bound to the stated-clerk office template (DECISION-101 brand_admin precedent: software administration is not a constitutional duty)", () => {
+        // The office half is a template reference, not a key list, so the
+        // assertion is on the plan's shape: the key lives on the enumerated
+        // administration role only.
+        const plan = foundingAdministratorPlan("congregation");
+        expect(plan.administration.key).toBe("founding_administrator");
+        expect(plan.officeTemplateKey).toBe("congregation_stated_clerk");
+        expect(plan.administration.permissionKeys.filter((k) => k === "domains.manage")).toHaveLength(1);
       });
     });
 
@@ -461,6 +489,7 @@ describe.skipIf(!hasDb)(
             "org_features.manage",
             "tickets.file",
             "staff.manage",
+            "domains.manage",
             "statistics.publish",
           ].sort(),
         );
@@ -542,6 +571,7 @@ describe.skipIf(!hasDb)(
             "org_features.manage",
             "tickets.file",
             "staff.manage",
+            "domains.manage",
           ].sort(),
         );
       });

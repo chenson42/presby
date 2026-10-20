@@ -9,8 +9,8 @@
  * stored, and then silently never shown. The ingest route refuses such a bundle
  * up front, with a message the site author can act on, instead.
  *
- * `/giving`, `/give-now` and `/forgive` are NOT reserved: only the exact
- * segment `give` (and its descendants) is shadowed.
+ * `/giving`, `/give-now`, `/forgive` and `/assets-gallery` are NOT reserved: only
+ * the exact segments named below (and their descendants) are shadowed.
  *
  * The comparison is deliberately forgiving about SHAPE (a missing leading
  * slash, repeated or trailing slashes, `.` segments, case, a percent-encoded
@@ -18,8 +18,20 @@
  * reading is refused, rather than the check being defeated by punctuation.
  */
 
-/** Segment names the platform serves itself under `/site/<slug>/`. */
-export const RESERVED_SITE_SEGMENTS = ["give"] as const;
+/**
+ * Segment names the platform serves itself under `/site/<slug>/` - and, since
+ * Track F, at the root of a church's own domain, where the same routes live at
+ * CLEAN paths (`/give`, `/assets/<key>`, `/robots.txt`, `/sitemap.xml`). Each is a
+ * static route that beats the bundle catch-all, so a bundle page authored at one
+ * would be ingested, stored and never shown (T15).
+ *
+ * The three added to `give` are exactly the ones that actually shadow a bundle
+ * page: `assets` (the blob route), `robots.txt` (host-mode robots) and
+ * `sitemap.xml`. Nothing else is reserved: `/api`, `/_next` and `/site` need no
+ * entry here - on a custom host they are rewritten into bundle-path space and
+ * simply 404, and a bundle page at one of them is just unreachable, not shadowed.
+ */
+export const RESERVED_SITE_SEGMENTS = ["give", "assets", "robots.txt", "sitemap.xml"] as const;
 
 function decodeOnce(path: string): string {
   try {

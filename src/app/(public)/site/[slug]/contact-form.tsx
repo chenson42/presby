@@ -6,13 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { submitContactMessageAction } from "./actions";
 import type { ActionResult } from "@/types/actions";
 
 /**
- * `/site/<slug>`'s one client island (Phase 2's own ruling) — the anonymous
+ * `/site/<key>`'s one client island (Phase 2's own ruling) — the anonymous
  * visitor's contact form. See docs/work-log/2026-08-20-public-sites.md
  * Phase 3, DECISION-083.
+ *
+ * THE ORGANIZATION IS NOT A FORM FIELD (Track F, R5, adversarial A10). This
+ * island used to carry a hidden `__slug` input the client posted back, which
+ * meant a visitor could name any organization's inbox. It now receives its
+ * `action` ALREADY BOUND, on the server, to the page's site key
+ * (`submitContactMessageAction.bind(null, key)` in render-site-page.tsx); the
+ * action re-resolves that key and, on a custom host, requires the request Host
+ * to equal it. Nothing the browser sends decides whose inbox gets the message.
  *
  * The hidden `_hp` field is a honeypot: real visitors never see or fill it
  * (`aria-hidden`, off-screen, `tabIndex={-1}`, `autoComplete="off"`) — a bot
@@ -25,17 +32,12 @@ import type { ActionResult } from "@/types/actions";
  * `BrandForm` already established for this codebase.
  */
 
-async function submit(
-  _prev: ActionResult | null,
-  formData: FormData,
-): Promise<ActionResult> {
-  const slug = String(formData.get("__slug") ?? "");
-  return submitContactMessageAction(slug, formData);
-}
+type ContactAction = (formData: FormData) => Promise<ActionResult>;
 
-export function ContactForm({ slug }: { slug: string }) {
+export function ContactForm({ action }: { action: ContactAction }) {
   const [result, formAction, isPending] = useActionState(
-    submit,
+    async (_prev: ActionResult | null, formData: FormData): Promise<ActionResult> =>
+      action(formData),
     null as ActionResult | null,
   );
 
@@ -61,8 +63,6 @@ export function ContactForm({ slug }: { slug: string }) {
 
   return (
     <form action={formAction} className="space-y-4">
-      <input type="hidden" name="__slug" value={slug} />
-
       {/* Honeypot — never visible to, or reachable by, a real visitor. */}
       <div aria-hidden="true" className="absolute left-[-9999px]">
         <label htmlFor="_hp">Leave this field blank</label>

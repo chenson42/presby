@@ -47,6 +47,18 @@ alone until that port happens.
 
 ## ⚠️ Vercel — the account problem
 
+> **Update 2026-10-19 (supersedes the account story below).** Operator access to
+> the `community-collective` team was restored and the **legacy `presby-portal`
+> project was deleted**. The `presby` project is now connected to GitHub: it
+> **auto-deploys `main`** and serves `www.presbyportal.org`. **Preview builds are
+> skipped** by the project's *Ignored Build Step* setting (a dashboard setting,
+> not tracked in this repo), so no preview deployments are built and none exists
+> to receive the provider variables below. The table in this section is
+> **historical**. What the restoration does not resolve stays open in
+> `docs/TODO.md`'s Deployment & production section, notably rotating the
+> production `presby_app` password (still a dev-style string) and porting the
+> legacy Neon project's data.
+
 The operator has **lost reliable access to the `community-collective` Vercel
 team**, which holds every presby deployment to date. CLI read access still works;
 administration should not be relied on.
@@ -95,7 +107,7 @@ the live production database**, inside a team with impaired access.
 
 **Do not rotate first.** Rotation breaks whatever is currently serving
 `presbyportal.org`. That site is presently only a demo — FPCW's real site is still
-WordPress at `westervillefirstpresbyterian.org` — so the outage is acceptable, but
+WordPress at its own existing domain — so the outage is acceptable, but
 it should be deliberate rather than a surprise.
 
 ### ⏰ [YOU] Before 2026-10-01: set this project's Node.js version to 22.x
@@ -204,12 +216,16 @@ so no row that predates the CI run can appear in a log or an uploaded trace.
 | `NEXT_PUBLIC_APP_URL` | same as `AUTH_URL` |
 | `INITIAL_ADMIN_EMAILS` | The operator's own sign-in address. Deliberately **not** written down here — this repo is public, and `npm run check:secrets` treats a real address in a tracked file as a finding. Read it from the deployed environment. |
 | `CRON_SECRET` | generated; the email-queue worker, the daily maintenance job and the giving worker (`/api/cron/giving`) all need it — each answers 503 without it |
+| `NEXT_PUBLIC_PLATFORM_HOSTS` | **custom domains.** Comma list of the hosts that ARE the platform, e.g. `presbyportal.org,www.presbyportal.org`. **Build time** (`NEXT_PUBLIC_`, inlined into the proxy): set it in the Production scope **before** the build that ships custom domains; changing it needs a redeploy. `*.vercel.app` is always a platform host. Any other host the project serves is treated as a church's custom host and answers the neutral 404 until it is a verified, `live` domain. See "Custom domains" below. |
+| `DOMAINS_PROVIDER` | **custom domains.** Unset (the production default) = *unconfigured*: attaching is "temporarily unavailable" and nothing can reach `live`. `vercel` = the Vercel REST adapter. **Production scope only.** Never `fake` (see below). |
+| `VERCEL_API_TOKEN`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID` | **custom domains. PENDING: not created yet.** A token **scoped to the `presby` project only**, plus the project and team ids. Read only when `DOMAINS_PROVIDER=vercel` in Production; with the provider set and either of the first two missing, the sweep records a configuration error and alerts the operator (it does not fall back to "unconfigured"). Production scope only. |
 | `STRIPE_SECRET_KEY` | **online giving only**, production only — a *restricted* key, never a full-access one. See "Online giving (Stripe)" below |
 | `STRIPE_WEBHOOK_SECRET` | **online giving only** — the signing secret of the one webhook endpoint. See below |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | **deferred** — see below |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **set 2026-10-19** (Production). The key belongs to PresbyPortal's **own Resend team** (its own Pro subscription), where `presbyportal.org` is the verified sending domain — never a team shared with other products, because the key is full-access (the Track F mail increment provisions church domains with it) and full access reaches every domain in its team. From: `PresbyPortal <noreply@presbyportal.org>`. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **deliberately unset.** `.env.example` says this credentials-login bypass is not suitable for production |
 | `SITES_INGEST_OIDC_AUDIENCE` / `GITHUB_SITES_ORG` | needed before a real `site-fpcw` content ingest can authenticate |
+| *test/dev only, never in Vercel (build-asserted in Production):* `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake` (`doh` is the default and the only production value), `DOMAINS_FAKE_STATE_FILE`, `DOMAINS_ALLOW_RESERVED_TLDS=1` | e2e and local development |
 
 Optional: `NEXT_PUBLIC_TURNSTILE_SITE_KEY`/`TURNSTILE_SECRET_KEY`,
 `UPSTASH_REDIS_REST_URL`/`_TOKEN` (falls back to in-memory rate limiting).
@@ -487,6 +503,109 @@ Added at integration (v0.34.0). Production is at `0053` as of 2026-10-07.
 
 ---
 
+## Custom domains (Track F, Increment 1: web)
+
+A congregation proves it controls a domain with a TXT record, and the platform
+serves its public site there. **Increment 1 ships the mechanism, not the
+cutover**, and church email domains (Increment 2) are not built. Design:
+`docs/work-log/2026-10-19-custom-domains.md`; decisions 176-182.
+
+### Configuration (Production scope only)
+
+- **Build-time assertion.** A production build **fails loudly** (leaving the
+  previous deployment serving) unless `NEXT_PUBLIC_APP_URL` is an `https` URL
+  whose host is in the platform-host set, every `NEXT_PUBLIC_PLATFORM_HOSTS` entry
+  is a hostname, and none of `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake`,
+  `DOMAINS_FAKE_STATE_FILE` or `DOMAINS_ALLOW_RESERVED_TLDS` is set.
+- **`DOMAINS_PROVIDER` semantics.** Unset or any other value: *unconfigured*. A
+  church can claim a domain and prove it, but attach waits as "Connecting is
+  temporarily unavailable. Your DNS changes are safe to make." and nothing reaches
+  `live`. `vercel`: honoured only in the Production environment (a Preview
+  deployment can never attach production domains with the shared token) and never
+  under `NODE_ENV=test`. **Leave it unset until the acceptance pass below.**
+- **Provider variables are Production-only.** Never add `DOMAINS_PROVIDER`,
+  `VERCEL_API_TOKEN`, `VERCEL_PROJECT_ID` or `VERCEL_TEAM_ID` to the Preview or
+  Development scopes. Also keep "Expose system environment variables" on, so
+  `VERCEL_ENV` is available.
+- **No new secret for the liveness probe:** its HMAC is derived from `AUTH_SECRET`.
+- **`CRON_SECRET` must be set.** A fourth cron, `/api/cron/domains`, runs every five
+  minutes (`vercel.json`); it is trivial on an empty table.
+- **Nothing else may be attached to the `presby` project.** Any domain on the
+  project other than `presbyportal.org`, `www.presbyportal.org` and the
+  `*.vercel.app` URL is a custom host and returns the neutral 404 until verified.
+  List the project's domains before the merge deploy.
+
+### The cron host-class log
+
+Each cron (`email-queue`, `maintenance`, `giving`, `domains`) logs one line per run
+with `hostClass: platform | custom | invalid` for the host Vercel invoked it on
+(the `domains` line is `[cron/domains] {"hostClass": ...}`). Vercel's docs do not say
+whether a cron can arrive on a custom domain; the proxy has an exact-path,
+bearer-keyed pass-through for the four cron paths so one cannot silently 404, and
+the acceptance pass records the class for at least two scheduled runs of each.
+
+### Reattach runbook (the platform moves to a different Vercel project)
+
+Set `VERCEL_API_TOKEN` (scoped to the new project), `VERCEL_PROJECT_ID` and
+`VERCEL_TEAM_ID` for it, then run
+`npx dotenv -e .env.local -- tsx scripts/domains/reattach.ts` (a dry run that lists
+the hosts) and the same with `--apply`. It re-adds every attached, live, lapsed and
+parked host idempotently, writes nothing to the database, and stops if the provider
+refuses the credentials. Expect a short TLS gap per host; the sweep's probe
+re-confirms each within a few ticks. Confirm in `/admin/organizations/domains` that
+every host is `live` again.
+
+### Pre-deploy runbook: 0057
+
+Added at integration (v0.35.0). Production is at `0056` once the giving migrations
+have been applied; confirm that first (`select to_regclass('giving_funds'),
+to_regclass('giving_statements')` both non-null), else apply `0054`-`0056` first.
+
+1. **Apply 0057 before the merge deploys.** Old code tolerates the new column on
+   `sites`' published-site read; new code needs it.
+2. **Snapshot `production` first** (Neon).
+3. **Apply WITHOUT `-1`:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0057_presby_org_domains.sql`.
+   The file carries its own top-level `begin;` ... `commit;` (around the `DROP` and
+   `CREATE` of `presby_published_site`, as `0047` does); under `-1` the inner
+   `commit` would end the outer transaction early. It is idempotent, and a failed run
+   can simply be repeated.
+4. **Verify:** `organization_domains` has RLS **and** FORCE with one
+   `tenant_isolation` policy; `presby_published_site` has `search_path = public,
+   pg_temp` and an ACL of owner plus `presby_app` only (no PUBLIC);
+   `presby_org_serving_canonical_host` is not executable by `presby_app`;
+   `domains.manage` is a tier-1 key; existing row counts are unchanged. **Do not run
+   `scripts/domains/test-rls-47.sql` on production** (it needs the test helpers);
+   run it on `development` as `presby_app` after integration.
+5. **Vercel, before the merge build:** `NEXT_PUBLIC_PLATFORM_HOSTS` and an `https`
+   `NEXT_PUBLIC_APP_URL` set in Production; `CRON_SECRET` set; none of the
+   test-only variables present; the project's domain list checked (above);
+   `DOMAINS_PROVIDER` left unset.
+6. **After the deploy,** the regression smoke on the platform host: `/`, `/signin`,
+   an MFA login through `/launch`, `/home`; `Strict-Transport-Security` includes
+   `includeSubDomains` on `presbyportal.org`, `www.presbyportal.org` and the
+   `.vercel.app` URL; `/orgs` 308s to `/home`; a published site, a sub-page, an
+   image, the sitemap and the contact form still work and still name the platform
+   origin.
+7. **Org onboarding order** (everything is off per organization by default):
+   designate the founding administrator, then a platform admin turns on
+   `org_portal.domains` at `/admin/organizations/[id]`, then the claim. Production's
+   existing organizations have no founding administrator, so `0057` backfills the
+   `domains.manage` key to nobody; the platform admin's on-behalf web claim covers a
+   slipped designation.
+
+### Go-live gate (not satisfied)
+
+Increment 1 does **not** make a real church domain safe to point at the platform.
+Do not point any real A/CNAME record at Vercel until the acceptance pass has run:
+an unattached host would serve Vercel's own error page. The pass needs
+`DOMAINS_PROVIDER=vercel` and the project-scoped token above, and an
+operator-owned throwaway domain; the steps and what to record are the "Track F
+acceptance pass" line in `docs/TODO.md`. The legacy-URL redirect map for the first
+cutover is a separate, unbuilt pipeline.
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.
@@ -507,6 +626,7 @@ not be a general one — onboarding imports are ad-hoc per congregation. FPCW's 
 three-source merge (Church360, Vanco, fpcw-directory) scheduled for the cutover.
 See `docs/reviews/2026-09-23-fpcw-feature-match.md` Track K.
 
-**Custom domains.** FPCW's public site must live at
-`westervillefirstpresbyterian.org` from day one of cutover, and
-`organization_sites` has no custom-domain support. Track F of the same document.
+**Custom domains.** FPCW's public site must live at its own existing domain from
+day one of cutover. Increment 1 of Track F (the mechanism) is in "Custom domains"
+above; the cutover itself, and church email domains, are not built. Track F of
+`docs/reviews/2026-09-23-fpcw-feature-match.md`.

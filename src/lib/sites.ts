@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { headers } from "next/headers";
 import { and, eq, desc, sql } from "drizzle-orm";
 import { db, getPlatformDb } from "@/lib/db";
 import { OrgAccessError, withOrgContext } from "@/lib/authz";
@@ -16,6 +17,8 @@ import { generateBrandTokens, type BrandTokenSet } from "@/lib/brand/generate";
 import type { ResolvedTypePairing } from "@/lib/brand/fonts";
 import { TYPE_PAIRINGS, type TypePairingKey } from "@/lib/brand/contract";
 import { hasTicketsFile } from "@/lib/tickets";
+import { isPlatformHost, parseSiteKey, platformOrigin, requestHost } from "@/lib/domains/host";
+import { buildSiteUrls, slugSitePath, type SiteUrls } from "@/lib/site-urls";
 import type { OfficerOffice } from "@/lib/officers";
 
 /**
@@ -288,6 +291,12 @@ interface PublishedSiteRow {
   // hence `unknown` and the defensive parse below rather than trusting either.
   service_times: unknown;
   office_hours: unknown;
+  /** drizzle/0057: the live canonical custom host while one is serving, else null (the slug URL 307s to it). */
+  serving_host?: string | null;
+  /** Host mode only (`presby_published_site_by_host`): the DATABASE's slug for the matched host. */
+  slug?: string | null;
+  canonical_host?: string | null;
+  request_is_canonical?: boolean | null;
 }
 
 function isServiceTimeEntryShape(value: unknown): value is {
@@ -368,80 +377,8 @@ export const getPublishedSite = cache(async function getPublishedSite(
       sql`select * from presby_published_site(${slug})`,
     );
     const row = (result as unknown as { rows?: PublishedSiteRow[] }).rows?.[0];
-    if (!row || !row.content_bundle_key) return { kind: "not_found" };
-
-    const blob = await getBlobStore().resolve({
-      organizationId: row.organization_id,
-      key: row.content_bundle_key,
-    });
-    if (!blob) return { kind: "not_found" };
-
-    let bundle: unknown;
-    try {
-      bundle = JSON.parse(blob.bytes.toString("utf-8"));
-    } catch {
-      return { kind: "not_found" };
-    }
-    if (!isStoredSiteBundle(bundle)) return { kind: "not_found" };
-
-    let brand: PublishedSite["brand"] = null;
-    if (row.brand_seed_hex && (await isFlagEnabled("ui.brand_theming"))) {
-      try {
-        const { tokens } = generateBrandTokens(row.brand_seed_hex);
-        const pairingKey = isTypePairingKey(row.brand_type_pairing ?? "")
-          ? (row.brand_type_pairing as TypePairingKey)
-          : "classic";
-        // Dynamically imported, deliberately not a static top-level import:
-        // src/lib/brand/fonts.ts calls next/font/google at MODULE SCOPE, which
-        // only resolves correctly under Next's own compiler (webpack/SWC) —
-        // under plain Node (vitest, this module's own integration test) a
-        // static import crashes at MODULE LOAD time with "Lora is not a
-        // function", before any test body runs, regardless of whether the
-        // brand branch is ever exercised. A static import here would also
-        // force every OTHER consumer of this file (provisionSiteAction,
-        // setSiteStatusAction, markSiteContactMessageReadAction — none of
-        // which touch brand at all) to either mock `@/lib/sites` wholesale or
-        // pull in next/font/google transitively. Deferred to exactly the one
-        // call site that needs it; in the real Next.js server process this
-        // resolves through the same compiled module graph either way.
-        const { resolveTypePairing } = await import("@/lib/brand/fonts");
-        brand = {
-          tokens,
-          fontPairing: resolveTypePairing(pairingKey),
-          lightOnly: row.brand_light_only ?? false,
-        };
-      } catch {
-        // A stored seed that no longer parses degrades to the platform
-        // default rather than taking the page down — same posture as
-        // read-org-brand.ts's own Reason 3 fallback.
-        brand = null;
-      }
-    }
-
-    return {
-      kind: "ok",
-      site: {
-        organizationId: row.organization_id,
-        organizationName: row.organization_name,
-        organizationType: row.organization_type,
-        brand,
-        pages: bundle.pages,
-        imageKeys: bundle.imageKeys ?? {},
-        profile: {
-          address: row.profile_address,
-          phone: row.profile_phone,
-          social: {
-            facebook: row.profile_facebook_url,
-            instagram: row.profile_instagram_url,
-            xTwitter: row.profile_x_twitter_url,
-            youtube: row.profile_youtube_url,
-            other: row.profile_other_url,
-          },
-        },
-        serviceTimes: parseServiceTimeEntries(row.service_times),
-        officeHours: parseServiceTimeEntries(row.office_hours),
-      },
-    };
+    if (!row) return { kind: "not_found" };
+    return await hydratePublishedSite(row);
   } catch {
     // A DB blip (or anything else unforeseen) must collapse to the same
     // generic not-found the caller already treats every other miss as —
@@ -456,6 +393,338 @@ export const getPublishedSite = cache(async function getPublishedSite(
     );
     return { kind: "not_found", reason: "read_failed" };
   }
+});
+
+/**
+ * Turns the one `presby_published_site*` row into a `PublishedSite`: resolves
+ * the content bundle blob, parses it, and derives the brand. Shared by the
+ * slug-mode read above and host mode's `resolveSite()` below (Track F), so the
+ * projection is hydrated by exactly one piece of code whichever key found it.
+ *
+ * NOT wrapped in its own try/catch, on purpose: both callers own the one
+ * `try { ... } catch { not_found / read_failed }` of the whole read (house
+ * style, docs/work-log/2026-09-26-public-render-blip.md). Every
+ * `{ kind: "not_found" }` returned here is a confirmed-absent outcome reached
+ * without throwing (a missing content-bundle key, a missing blob, an
+ * unparseable bundle).
+ */
+async function hydratePublishedSite(
+  row: PublishedSiteRow,
+): Promise<GetPublishedSiteResult> {
+  if (!row.content_bundle_key) return { kind: "not_found" };
+
+  const blob = await getBlobStore().resolve({
+    organizationId: row.organization_id,
+    key: row.content_bundle_key,
+  });
+  if (!blob) return { kind: "not_found" };
+
+  let bundle: unknown;
+  try {
+    bundle = JSON.parse(blob.bytes.toString("utf-8"));
+  } catch {
+    return { kind: "not_found" };
+  }
+  if (!isStoredSiteBundle(bundle)) return { kind: "not_found" };
+
+  let brand: PublishedSite["brand"] = null;
+  if (row.brand_seed_hex && (await isFlagEnabled("ui.brand_theming"))) {
+    try {
+      const { tokens } = generateBrandTokens(row.brand_seed_hex);
+      const pairingKey = isTypePairingKey(row.brand_type_pairing ?? "")
+        ? (row.brand_type_pairing as TypePairingKey)
+        : "classic";
+      // Dynamically imported, deliberately not a static top-level import:
+      // src/lib/brand/fonts.ts calls next/font/google at MODULE SCOPE, which
+      // only resolves correctly under Next's own compiler (webpack/SWC) —
+      // under plain Node (vitest, this module's own integration test) a
+      // static import crashes at MODULE LOAD time with "Lora is not a
+      // function", before any test body runs, regardless of whether the
+      // brand branch is ever exercised. A static import here would also
+      // force every OTHER consumer of this file (provisionSiteAction,
+      // setSiteStatusAction, markSiteContactMessageReadAction — none of
+      // which touch brand at all) to either mock `@/lib/sites` wholesale or
+      // pull in next/font/google transitively. Deferred to exactly the one
+      // call site that needs it; in the real Next.js server process this
+      // resolves through the same compiled module graph either way.
+      const { resolveTypePairing } = await import("@/lib/brand/fonts");
+      brand = {
+        tokens,
+        fontPairing: resolveTypePairing(pairingKey),
+        lightOnly: row.brand_light_only ?? false,
+      };
+    } catch {
+      // A stored seed that no longer parses degrades to the platform
+      // default rather than taking the page down — same posture as
+      // read-org-brand.ts's own Reason 3 fallback.
+      brand = null;
+    }
+  }
+
+  return {
+    kind: "ok",
+    site: {
+      organizationId: row.organization_id,
+      organizationName: row.organization_name,
+      organizationType: row.organization_type,
+      brand,
+      pages: bundle.pages,
+      imageKeys: bundle.imageKeys ?? {},
+      profile: {
+        address: row.profile_address,
+        phone: row.profile_phone,
+        social: {
+          facebook: row.profile_facebook_url,
+          instagram: row.profile_instagram_url,
+          xTwitter: row.profile_x_twitter_url,
+          youtube: row.profile_youtube_url,
+          other: row.profile_other_url,
+        },
+      },
+      serviceTimes: parseServiceTimeEntries(row.service_times),
+      officeHours: parseServiceTimeEntries(row.office_hours),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Site-key resolution (Track F: DECISION-176, Phase 2 R1-R3, Phase 3 section 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the `[slug]` route segment resolved to. The segment is a SITE KEY: a
+ * slug on a platform host, or a verified host reached only through the
+ * proxy's custom-host rewrite (`parseSiteKey`).
+ *
+ * `slug` is ALWAYS the value the database returned (host mode) or the key
+ * itself (slug mode); staff, committee, giving and contact-message reads use
+ * it and never anything the visitor typed.
+ *
+ * `redirectHost` is the host a 307 must go to, or null. Host mode: this
+ * request's host is a non-canonical alias, so the canonical host. Slug mode:
+ * the org's canonical custom host is serving, so the slug URL hands off to it.
+ * Whether a particular response may redirect (HTML pages and the sitemap yes;
+ * assets, `give/return` and action POSTs never) is the CALLER's call.
+ */
+export type ResolvedSite =
+  | {
+      kind: "ok";
+      mode: "host" | "slug";
+      slug: string;
+      site: PublishedSite;
+      urls: SiteUrls;
+      redirectHost: string | null;
+    }
+  | {
+      kind: "not_found";
+      /** `invalid` = the segment is neither a slug nor a host. */
+      mode: "host" | "slug" | "invalid";
+      /** The slug-mode key itself (so DECISION-121's presbytery fallback can name it); null otherwise. */
+      slug: string | null;
+      /** Same hint as GetPublishedSiteResult: the one legal reader is the presbytery-fallback branch. */
+      reason?: "absent" | "read_failed";
+    };
+
+/** The light resolution: the organization and the urls, with no bundle blob fetch. */
+export type ResolvedSiteOrganization =
+  | {
+      kind: "ok";
+      mode: "host" | "slug";
+      slug: string;
+      organizationId: string;
+      urls: SiteUrls;
+      redirectHost: string | null;
+      /** The definer row, for `resolveSite()` to hydrate. Internal. */
+      row: PublishedSiteRow;
+    }
+  | {
+      kind: "not_found";
+      mode: "host" | "slug" | "invalid";
+      slug: string | null;
+      reason?: "absent" | "read_failed";
+    };
+
+/**
+ * The platform origin absolute URLs hang off. `platformOrigin()` is the one
+ * validator (T16). Where it returns null (a NODE_ENV=production process whose
+ * NEXT_PUBLIC_APP_URL is not https: a local `next start`; a Vercel Production
+ * deployment cannot get here, the build assertion refuses it) fall back to
+ * what this surface used before Track F: the env value's origin, else
+ * localhost. Still env-derived, never request-derived (R3).
+ */
+function sitePlatformOrigin(): string {
+  const validated = platformOrigin();
+  if (validated !== null) return validated;
+  try {
+    const raw = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
+    if (raw !== "") return new URL(raw).origin;
+  } catch {
+    // fall through
+  }
+  return "http://localhost:3000";
+}
+
+function validHostOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const parsed = parseSiteKey(value);
+  return parsed.kind === "host" ? parsed.host : null;
+}
+
+/**
+ * THE one definer read for a site key, plus the checks that make a host a
+ * lookup key and not an identity. `cache()`-wrapped (layout, page,
+ * generateMetadata and the slots share one read per request); the ENTIRE BODY
+ * is one try/catch (house style): every miss, a request-context failure and a
+ * DB blip collapse to the same `{ kind: "not_found" }`.
+ *
+ * Host mode refuses unless the request `Host` EQUALS the key AND is not a
+ * platform host - the proxy cannot guarantee that on paths its matcher
+ * excludes (`*.png` and similar) or on a self-hosted deployment, so the
+ * resolver is the backstop (R1). Slug mode refuses unless the request Host IS
+ * a platform host, so a slug URL cannot be served on a church's domain by a
+ * path that bypassed the rewrite. Both read `Host` through `requestHost()`
+ * and nothing else (R3). Exactly one flag read and one function call, in every
+ * branch, in the same order - the read count of a miss does not depend on why
+ * it missed (DECISION-040).
+ */
+export const resolveSiteOrganization = cache(async function resolveSiteOrganization(
+  key: string,
+): Promise<ResolvedSiteOrganization> {
+  const parsed = parseSiteKey(key);
+  if (parsed.kind === "invalid") {
+    return { kind: "not_found", mode: "invalid", slug: null };
+  }
+  const mode = parsed.kind;
+  const slugForLog = parsed.kind === "slug" ? parsed.slug : "(host)";
+  const miss = (reason?: "absent" | "read_failed"): ResolvedSiteOrganization => ({
+    kind: "not_found",
+    mode,
+    slug: parsed.kind === "slug" ? parsed.slug : null,
+    ...(reason ? { reason } : {}),
+  });
+
+  try {
+    const reqHost = requestHost(await headers());
+    if (reqHost === null) return miss();
+    if (parsed.kind === "host") {
+      if (reqHost !== parsed.host || isPlatformHost(reqHost)) return miss();
+    } else if (!isPlatformHost(reqHost)) {
+      return miss();
+    }
+
+    if (!(await isFlagEnabled("sites.public_render"))) return miss();
+
+    const result =
+      parsed.kind === "host"
+        ? await db.execute(sql`select * from presby_published_site_by_host(${parsed.host})`)
+        : await db.execute(sql`select * from presby_published_site(${parsed.slug})`);
+    const row = (result as unknown as { rows?: PublishedSiteRow[] }).rows?.[0];
+    if (!row) return miss();
+
+    const platform = sitePlatformOrigin();
+    if (parsed.kind === "host") {
+      const slug = row.slug;
+      const canonicalHost = validHostOrNull(row.canonical_host);
+      if (typeof slug !== "string" || parseSiteKey(slug).kind !== "slug" || canonicalHost === null) {
+        return miss();
+      }
+      return {
+        kind: "ok",
+        mode: "host",
+        slug,
+        organizationId: row.organization_id,
+        // Absolute URLs come from the VERIFIED ROW's canonical host, not the request's.
+        urls: buildSiteUrls({ mode: "host", host: canonicalHost, slug, platformOrigin: platform }),
+        // An alias hands off to the canonical host; the canonical host serves itself.
+        redirectHost: row.request_is_canonical === true ? null : canonicalHost,
+        row,
+      };
+    }
+    return {
+      kind: "ok",
+      mode: "slug",
+      slug: parsed.slug,
+      organizationId: row.organization_id,
+      urls: buildSiteUrls({ mode: "slug", slug: parsed.slug, platformOrigin: platform }),
+      // The slug URL hands off while the org's canonical custom host is serving.
+      redirectHost: validHostOrNull(row.serving_host),
+      row,
+    };
+  } catch {
+    // Never the caught error or its `.message` (it embeds the SQL and bound params).
+    console.error("[sites] resolveSite read failed; treating as not found", { mode, slug: slugForLog });
+    return miss("read_failed");
+  }
+});
+
+/**
+ * The full resolution: `resolveSiteOrganization()` plus the hydrated bundle.
+ * What the layout, the catch-all page, `generateMetadata`, the sitemap and the
+ * give page use. Same collapse: any failure is `{ kind: "not_found" }`.
+ */
+export const resolveSite = cache(async function resolveSite(key: string): Promise<ResolvedSite> {
+  const org = await resolveSiteOrganization(key);
+  if (org.kind === "not_found") return org;
+  try {
+    const hydrated = await hydratePublishedSite(org.row);
+    if (hydrated.kind === "not_found") {
+      return { kind: "not_found", mode: org.mode, slug: org.mode === "slug" ? org.slug : null, reason: "absent" };
+    }
+    return {
+      kind: "ok",
+      mode: org.mode,
+      slug: org.slug,
+      site: hydrated.site,
+      urls: org.urls,
+      redirectHost: org.redirectHost,
+    };
+  } catch {
+    console.error("[sites] resolveSite hydrate failed; treating as not found", {
+      mode: org.mode,
+      slug: org.slug,
+    });
+    return { kind: "not_found", mode: org.mode, slug: org.mode === "slug" ? org.slug : null, reason: "read_failed" };
+  }
+});
+
+/** What the online-giving surface needs of a site key: the organization's slug and the url builder. */
+export interface GiveSite {
+  slug: string;
+  urls: SiteUrls;
+  /** Set only when the page may 307 (slug URL -> serving host, alias -> canonical). */
+  redirectHost: string | null;
+}
+
+/**
+ * The give page, the `giving` live slot and the give action resolve their site
+ * key here. Host mode is strict: the key must resolve through
+ * `resolveSiteOrganization()` (Host equality and the one definer read), or it is
+ * `null` and the caller 404s - there is nothing else a host could mean.
+ *
+ * Slug mode keeps the give surface's PRE-Track-F behaviour: it never needed a
+ * live published SITE to run (the giving reads answer `absent` themselves, and
+ * answer it identically for a slug with no live site), so a slug that does not
+ * resolve as a site is still a usable slug key - with the URLs of a slug site,
+ * no redirect, and only on a platform host. Anything else (a slug on a church's
+ * domain, an unusable key) is `null`.
+ */
+export const resolveGiveSite = cache(async function resolveGiveSite(key: string): Promise<GiveSite | null> {
+  const org = await resolveSiteOrganization(key);
+  if (org.kind === "ok") {
+    return { slug: org.slug, urls: org.urls, redirectHost: org.redirectHost };
+  }
+  if (org.mode !== "slug" || org.slug === null) return null;
+  try {
+    const reqHost = requestHost(await headers());
+    if (reqHost === null || !isPlatformHost(reqHost)) return null;
+  } catch {
+    return null;
+  }
+  return {
+    slug: org.slug,
+    urls: buildSiteUrls({ mode: "slug", slug: org.slug, platformOrigin: sitePlatformOrigin() }),
+    redirectHost: null,
+  };
 });
 
 /**
@@ -499,7 +768,7 @@ export interface PublishedSiteBrandLite {
     fontPairing: ResolvedTypePairing;
     lightOnly: boolean;
   } | null;
-  /** `/site/<slug>/assets/<markAssetKey>`, or `null` if the org has no
+  /** `/site/<slug>/assets/<markAssetKey>` (via `slugSitePath`), or `null` if the org has no
    * uploaded mark. `OrgMark` already degrades to typographic initials when
    * this is `null` — no new fallback needed at any call site. */
   logoUrl: string | null;
@@ -562,8 +831,10 @@ export async function getPublishedSiteBrand(
       .from(organizationBrands)
       .where(eq(organizationBrands.organizationId, row.organization_id))
       .limit(1);
+    // slugSitePath(): the one builder of a slug URL (DECISION-181). /signin is a
+    // PLATFORM-host page, so the slug URL is right here.
     const logoUrl = brandRow?.markAssetKey
-      ? `/site/${slug}/assets/${brandRow.markAssetKey}`
+      ? slugSitePath(slug, `/assets/${encodeURIComponent(brandRow.markAssetKey)}`)
       : null;
 
     return {

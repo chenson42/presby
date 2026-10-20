@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * `/site/<slug>/give` falls through to the site bundle's own `/give` page when giving
+ * `/site/<key>/give` falls through to the site bundle's own `/give` page when giving
  * is not live (docs/work-log/2026-10-15-online-giving.md, Phase 6 "Phase 1 miss: the
  * /give shadow" and the follow-up section). Unlike page.test.tsx this runs the REAL
  * `render-site-page` helper - the same function the `[[...path]]` catch-all calls - with
@@ -16,8 +16,23 @@ const readPublicGivingConfig = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: (...a: unknown[]) => readPublicGivingConfig(...a) }));
 vi.mock("./actions", () => ({ createPublicGiveSessionAction: Object.assign(vi.fn(), { bind: vi.fn(() => vi.fn()) }) }));
 
+// `getPublishedSite` stays the test's one stub of "what the site read found" (keyed by the slug);
+// the mock of `@/lib/sites` adapts it to the Track F resolvers: `resolveSite` (the render path)
+// and `resolveGiveSite` (the give page's own key -> slug resolution). Slug mode throughout.
 const getPublishedSite = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/sites", () => ({ getPublishedSite: (...a: unknown[]) => getPublishedSite(...a) }));
+vi.mock("@/lib/sites", async () => {
+  const { buildSiteUrls } = await import("@/lib/site-urls");
+  const urlsFor = (slug: string) => buildSiteUrls({ mode: "slug", slug, platformOrigin: "http://localhost:3000" });
+  return {
+    resolveSite: async (key: string) => {
+      const r = (await getPublishedSite(key)) as { kind: "ok"; site: unknown } | { kind: "not_found"; reason?: string };
+      return r.kind === "ok"
+        ? { kind: "ok", mode: "slug", slug: key, site: r.site, urls: urlsFor(key), redirectHost: null }
+        : { kind: "not_found", mode: "slug", slug: key, ...(r.reason ? { reason: r.reason } : {}) };
+    },
+    resolveGiveSite: async (key: string) => ({ slug: key, urls: urlsFor(key), redirectHost: null }),
+  };
+});
 const publicOrgSummary = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/authz", () => ({ publicOrgSummary: (...a: unknown[]) => publicOrgSummary(...a) }));
 
@@ -36,12 +51,18 @@ vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
   },
+  redirect: (url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
+  },
 }));
 vi.mock("react", async (importOriginal) => ({ ...(await importOriginal<typeof import("react")>()), cache: <T,>(fn: T) => fn }));
 
-import PublicGivePage, { generateMetadata } from "./page";
+import PublicGivePageRaw, { generateMetadata } from "./page";
 
 const params = (slug: string) => Promise.resolve({ slug });
+/** The page also takes `searchParams` (to keep the query on a 307); none here. */
+const PublicGivePage = (args: { params: Promise<{ slug: string }> }) =>
+  PublicGivePageRaw({ params: args.params, searchParams: Promise.resolve({}) });
 const BRAND = { tokens: { light: {}, dark: {}, version: 1 }, fontPairing: { bodyClassName: "b", headingClassName: "h" } };
 const SOCIAL = { facebook: null, instagram: null, xTwitter: null, youtube: null, other: null };
 const site = (paths: string[]) => ({

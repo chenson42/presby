@@ -22,6 +22,7 @@ The canonical directory tree lives in `CLAUDE.md` → Project Layout (do not mai
 - `access-pending` — authenticated users with no roles; don't dump them on `/admin`.
 - `api/admin/*` — every handler checks session + the relevant `FEATURES.*` key.
 - `api/webhooks/<provider>` — webhook handlers verify their own signatures; the proxy bypasses them (DECISION-028).
+- `(public)/site/[slug]` — the segment is a *site key*: a slug on platform hosts, or a verified host reached only by the proxy's custom-host rewrite (DECISION-176). Host mode requires `Host === key` and resolves through the one definer read; every non-serving state is the same neutral 404; no session, cookies or platform routes on a custom host. See CLAUDE.md → A Custom Host Is a Key, Not an Identity.
 - **Brandable groups: `(org)` and `(public)/site/<slug>`, and nothing else.** Every other group above — including `access-pending` — renders in the platform palette; a branded 403 tells a prober the org is a configured tenant (DECISION-047). `npm run check:brand-scope` enforces it. Un-brandable does not mean logo-free: brand-as-chrome is scoped to two layouts, logo-as-content is legal wherever the caller is authorized.
 
 ## Component Rules

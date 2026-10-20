@@ -9,6 +9,11 @@
  *      consumption, no submitSiteContactMessage call at all.
  *   2. The rate limit is IP-and-slug-keyed and checked before
  *      submitSiteContactMessage is ever called.
+ *   2b. (Track F) The first argument is a SITE KEY bound on the server. It is
+ *      re-resolved with `resolveSiteOrganization()` (host mode: Host === key),
+ *      and the slug THE DATABASE returned - never the key itself - names the
+ *      rate-limit bucket and the write. An unresolvable key is the generic
+ *      "not accepting messages", spends no budget, and writes nothing.
  *   3. Every result kind maps to the correct ActionResult shape.
  *   4. No audit event anywhere in this file (an anonymous, low-stakes
  *      submission is not a security-sensitive mutation).
@@ -30,9 +35,11 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 const mockSubmitSiteContactMessage = vi.hoisted(() => vi.fn());
+const mockResolveSiteOrganization = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/sites", () => ({
   submitSiteContactMessage: (...args: unknown[]) =>
     mockSubmitSiteContactMessage(...args),
+  resolveSiteOrganization: (...args: unknown[]) => mockResolveSiteOrganization(...args),
 }));
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,6 +60,16 @@ beforeEach(() => {
   mockGetRequestIp.mockReturnValue("203.0.113.7");
   mockCheckRateLimit.mockResolvedValue({ allowed: true });
   mockSubmitSiteContactMessage.mockResolvedValue({ kind: "ok" });
+  // Default: the key resolves to the organization whose slug is the key (slug mode).
+  mockResolveSiteOrganization.mockImplementation(async (key: string) => ({
+    kind: "ok",
+    mode: "slug",
+    slug: key,
+    organizationId: "org-1",
+    urls: {},
+    redirectHost: null,
+    row: {},
+  }));
 });
 
 // ---------------------------------------------------------------------------
@@ -181,5 +198,80 @@ describe("submitContactMessageAction — result mapping", () => {
   it("ok → ok:true, no audit event anywhere in this file", async () => {
     const result = await submitContactMessageAction("alder-creek", contactFormData());
     expect(result).toEqual({ ok: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Track F: the key is bound on the server and re-resolved
+// ---------------------------------------------------------------------------
+
+describe("submitContactMessageAction - the site key is re-resolved, and the DB slug is what counts", () => {
+  const HOST = "church-one.invalid";
+
+  function hostResolves(dbSlug = "alder-creek") {
+    mockResolveSiteOrganization.mockImplementation(async (key: string) => ({
+      kind: "ok",
+      mode: "host",
+      slug: dbSlug,
+      organizationId: "org-1",
+      urls: {},
+      redirectHost: null,
+      row: { requested: key },
+    }));
+  }
+
+  it("a host key writes to the org the DATABASE resolved it to, with that slug's rate-limit bucket", async () => {
+    hostResolves("alder-creek");
+
+    const result = await submitContactMessageAction(HOST, contactFormData());
+
+    expect(result).toEqual({ ok: true });
+    expect(mockResolveSiteOrganization).toHaveBeenCalledWith(HOST);
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(
+      "site_contact:alder-creek:203.0.113.7",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mockSubmitSiteContactMessage).toHaveBeenCalledWith("alder-creek", expect.any(Object));
+    // The host itself never reaches the write or the limiter key.
+    expect(JSON.stringify(mockSubmitSiteContactMessage.mock.calls)).not.toContain(HOST);
+    expect(JSON.stringify(mockCheckRateLimit.mock.calls)).not.toContain(HOST);
+  });
+
+  it("an unresolvable key (unknown host, wrong Host header, flag off) is the generic not-live: no budget spent, nothing written", async () => {
+    mockResolveSiteOrganization.mockResolvedValue({ kind: "not_found", mode: "host", slug: null });
+
+    const result = await submitContactMessageAction(HOST, contactFormData());
+
+    expect(result).toEqual({ ok: false, error: "This site isn't accepting messages right now." });
+    expect(mockCheckRateLimit).not.toHaveBeenCalled();
+    expect(mockSubmitSiteContactMessage).not.toHaveBeenCalled();
+  });
+
+  it("answers an unresolvable key with exactly the text a suspended site gets from the query layer", async () => {
+    mockResolveSiteOrganization.mockResolvedValue({ kind: "not_found", mode: "host", slug: null });
+    const unresolvable = await submitContactMessageAction(HOST, contactFormData());
+
+    mockSubmitSiteContactMessage.mockResolvedValue({ kind: "not_live" });
+    const suspended = await submitContactMessageAction("alder-creek", contactFormData());
+
+    expect(unresolvable).toEqual(suspended);
+  });
+
+  it("a __slug field in the posted form changes nothing: only the bound key and the DB slug are used", async () => {
+    hostResolves("alder-creek");
+    const fd = contactFormData();
+    fd.set("__slug", "someone-elses-church");
+
+    await submitContactMessageAction(HOST, fd);
+
+    expect(mockSubmitSiteContactMessage).toHaveBeenCalledWith("alder-creek", expect.any(Object));
+    expect(JSON.stringify(mockSubmitSiteContactMessage.mock.calls)).not.toContain("someone-elses-church");
+    expect(JSON.stringify(mockCheckRateLimit.mock.calls)).not.toContain("someone-elses-church");
+  });
+
+  it("does not resolve for a bot: the honeypot answers first and spends nothing", async () => {
+    await submitContactMessageAction(HOST, contactFormData({ _hp: "bot" }));
+    expect(mockResolveSiteOrganization).not.toHaveBeenCalled();
   });
 });

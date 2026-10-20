@@ -28,6 +28,7 @@ import {
 } from "@/lib/treasurer-designation";
 import { listIngestHealth, type IngestHealthRow } from "@/lib/admin/giving-ingest-health";
 import { getOrganizationAffiliationAdminDetail } from "@/lib/org-provisioning";
+import { readOrgDomainsForPlatform } from "@/lib/domains/platform-read";
 import { BrandForm } from "./brand-form";
 import { NeutralizeDialog } from "./neutralize-dialog";
 import { SiteSection } from "./site-section";
@@ -37,6 +38,7 @@ import { FoundingAdministratorSection } from "./founding-administrator-section";
 import { TreasurerDesignationSection } from "./treasurer-designation-section";
 import { IngestHealthSection } from "./ingest-health-section";
 import { AffiliationSection } from "./affiliation-section";
+import { DomainsSection } from "./domains-section";
 
 // officeTemplateKey -> display name. Not exported by
 // `@/lib/founding-administrator` — that module returns the key only
@@ -92,6 +94,7 @@ export default async function OrganizationBrandDetailPage({
     .select({
       id: organizations.id,
       name: organizations.name,
+      slug: organizations.slug,
       organizationType: organizations.organizationType,
       platformStatus: organizations.platformStatus,
     })
@@ -135,6 +138,16 @@ export default async function OrganizationBrandDetailPage({
   }
 
   const affiliation = await getOrganizationAffiliationAdminDetail(id);
+
+  // Custom domains (Track F, Batch 1d). A failed read is `null`: the section
+  // says it can't load rather than rendering an empty, all-clear state, and
+  // never takes the page down.
+  let domainsData: Awaited<ReturnType<typeof readOrgDomainsForPlatform>> | null;
+  try {
+    domainsData = await readOrgDomainsForPlatform(id, org.slug);
+  } catch {
+    domainsData = null;
+  }
 
   const siteDetail = await getSiteAdminDetail(id);
   const profileDetail = await getOrganizationProfileAdminDetail(id);
@@ -296,6 +309,17 @@ export default async function OrganizationBrandDetailPage({
         organizationName={org.name}
         site={siteDetail}
       />
+
+      {domainsData ? (
+        <DomainsSection organizationId={id} organizationName={org.name} data={domainsData} />
+      ) : (
+        <section className="mt-10" data-testid="domains-section-unavailable">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Domains</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            We couldn&apos;t load this organization&apos;s domains right now. Reload to try again.
+          </p>
+        </section>
+      )}
     </div>
   );
 }

@@ -28,6 +28,7 @@ import { neon } from "@neondatabase/serverless";
 import { E2E_EMAILS, E2E_USER_LIST } from "./users";
 import { seedE2EUsers } from "./seed-users";
 import { seedE2EOrgs } from "./seed-orgs";
+import { sweepStaleDomainsUiFixtures } from "./domains-ui-fixture";
 
 const AUTH_DIR = path.resolve(__dirname, ".auth");
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -98,6 +99,19 @@ async function cleanupTestFeedback(dbUrl: string): Promise<void> {
       err
     );
   }
+}
+
+/**
+ * A custom-domains UI spec's teardown can lose to a Neon connection drop and leave its congregation behind
+ * (e2e/support/domains-ui-fixture.ts). That org holds a membership for the `mfa-enrolled` user, so the NEXT
+ * run's post-login landing for that user is `/home` rather than `/admin`, and the TOTP specs time out
+ * waiting for the wrong page (Phase 5 QA run 1, custom-domains). Sweep any such leftover before a session is
+ * acquired. A sweep failure is a thrown error, not a warning: running on past it reproduces the cascade.
+ */
+async function sweepStaleDomainsUiFixtureOrgs(platformDbUrl: string): Promise<void> {
+  if (!platformDbUrl) return; // seedE2EOrgs above has already thrown if the owner URL is missing where it matters
+  const removed = await sweepStaleDomainsUiFixtures(neon(platformDbUrl));
+  if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-domui-* organization(s) left by an earlier run`);
 }
 
 async function signInAndSave(
@@ -214,6 +228,35 @@ function assertRateLimiterDisabled(): void {
 }
 
 /**
+ * The custom-domain specs (e2e/custom-domains/, Track F) drive `/api/cron/*` with a bearer to prove
+ * the proxy's cron pass-through on a church's own domain, which only works if the SERVER has
+ * `CRON_SECRET` set. `playwright.config.ts` sets it (and the `DOMAINS_*` test fakes) for a server it
+ * starts itself, but - exactly like RATE_LIMIT_DISABLED - not for a dev server that was already
+ * running and got reused. Without it a cron answers 503 ("set CRON_SECRET to enable"), the
+ * pass-through never matches, and the failure reads as a proxy bug. This asks the server, with a
+ * deliberately WRONG bearer so nothing runs: 401 means a secret is set, 503 means it is not.
+ */
+async function assertCronSecretOnServer(baseURL: string): Promise<void> {
+  let status: number;
+  try {
+    const res = await fetch(`${baseURL}/api/cron/domains`, { headers: { authorization: "Bearer not-the-secret" } });
+    status = res.status;
+  } catch {
+    return; // not reachable: the CSRF fetch below fails with its own, better message
+  }
+  if (status === 503) {
+    throw new Error(
+      `[globalSetup] The server at ${baseURL} has no CRON_SECRET (GET /api/cron/domains answered 503).\n` +
+        "The custom-domain specs prove the cron pass-through on a church's own domain and need it, plus the\n" +
+        "test-only fakes DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake\n" +
+        "DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json. playwright.config.ts sets them for a server it\n" +
+        "starts; a dev server you started yourself needs them in ITS environment (CRON_SECRET must equal the\n" +
+        "value the specs use: $CRON_SECRET, default giving-e2e-cron-secret). Restart it with them set.",
+    );
+  }
+}
+
+/**
  * The production-build lane (PW_PROD_BUILD=1, DECISION-159) is worthless if a
  * dev server answers it: a Turbopack dev server's hydration window is far wider
  * than a real user's. playwright.config.ts already refuses E2E_BASE_URL and
@@ -249,6 +292,8 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     );
   }
 
+  await assertCronSecretOnServer(config.projects[0].use.baseURL ?? "http://localhost:3000");
+
   const dbUrl = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
   // Organizations, people and memberships need the OWNER connection: dbUrl
   // above is presby_app, which is NOBYPASSRLS and cannot write any of them.
@@ -261,6 +306,7 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   // The suite owns its users. Any failure here throws — see the file header.
   await seedE2EUsers(dbUrl);
   await seedE2EOrgs(platformDbUrl);
+  await sweepStaleDomainsUiFixtureOrgs(platformDbUrl);
   await cleanupTestFeedback(dbUrl);
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });

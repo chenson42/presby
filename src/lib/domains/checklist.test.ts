@@ -3,7 +3,7 @@
  * Pure.
  */
 import { describe, expect, it } from "vitest";
-import { buildChecklist, readObservation, type ChecklistRow } from "./checklist";
+import { buildChecklist, primaryAdvisory, readObservation, type ChecklistRow } from "./checklist";
 import type { DomainState } from "./state";
 
 const CTX = { siteStatus: "live" as string | null, platformSiteUrl: "platform.invalid/site/alder-creek" };
@@ -364,5 +364,86 @@ describe("Batch 1b: routing results live on each row; the provider's own challen
       CTX,
     );
     expect(g!.records.find((r) => r.kind === "proof")!.status).toBe("correct");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch 1d additions: host facts for the platform view, the generic-targets
+// qualifier (tech-lead ruling 3b), "View your site", and the
+// primary-address advisory (tech-lead follow-up A).
+// ---------------------------------------------------------------------------
+describe("host facts, target source and the live link (Batch 1d)", () => {
+  it("each host carries its hold, last check class and state age for the platform view", () => {
+    const [g] = buildChecklist(
+      pair("live", {
+        platformHold: "paused",
+        lastCheckClass: "ok",
+        lastCheckedAt: new Date("2030-01-02T03:04:05Z"),
+        stateChangedAt: new Date("2030-01-01T00:00:00Z"),
+      }),
+      CTX,
+    );
+    expect(g!.hosts[0]).toMatchObject({
+      hold: "paused",
+      lastCheckClass: "ok",
+      lastCheckedAt: "2030-01-02T03:04:05.000Z",
+      stateChangedAt: "2030-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("targetSource says where the shown targets came from, and is null before any are cached", () => {
+    const base = { cname: "cname.example.invalid", ipv4: ["203.0.113.10"] };
+    const [none] = buildChecklist(pair("attached"), CTX);
+    expect(none!.targetSource).toBeNull();
+    const [generic] = buildChecklist(pair("attached", { observation: { checkedAt: "2030-01-01T00:00:00Z", targets: { ...base, source: "generic" } } }), CTX);
+    expect(generic!.targetSource).toBe("generic");
+    const [provider] = buildChecklist(pair("attached", { observation: { checkedAt: "2030-01-01T00:00:00Z", targets: { ...base, source: "provider" } } }), CTX);
+    expect(provider!.targetSource).toBe("provider");
+  });
+
+  it("liveUrl is the canonical host only when it is live and not held", () => {
+    expect(buildChecklist(pair("live"), CTX)[0]!.liveUrl).toBe("https://www.church-one.invalid/");
+    expect(buildChecklist(pair("attached"), CTX)[0]!.liveUrl).toBeNull();
+    expect(buildChecklist(pair("live", { platformHold: "paused" }), CTX)[0]!.liveUrl).toBeNull();
+    // an alias-only group has no canonical, so no link
+    const [alias] = buildChecklist([row({ hostname: "x.invalid", claimName: "x.invalid", state: "live", webRole: "alias" })], CTX);
+    expect(alias!.liveUrl).toBeNull();
+  });
+});
+
+describe("primaryAdvisory (tech-lead follow-up A)", () => {
+  const groupsFor = (rows: ChecklistRow[]) => buildChecklist(rows, CTX);
+  const second = (state: DomainState, extra: Partial<ChecklistRow> = {}) =>
+    row({ hostname: "www.other.invalid", claimName: "other.invalid", state, webRole: "alias", ...extra });
+  const primary = (state: DomainState, extra: Partial<ChecklistRow> = {}) =>
+    row({ hostname: "www.church-one.invalid", state, webRole: "canonical", ...extra });
+
+  it("offers a live alias when the canonical is lapsed", () => {
+    const a = primaryAdvisory(groupsFor([primary("lapsed"), second("live")]));
+    expect(a?.primary.hostname).toBe("www.church-one.invalid");
+    expect(a?.candidate.hostname).toBe("www.other.invalid");
+  });
+
+  it("offers one when the canonical is only attached (still securing) or paused", () => {
+    expect(primaryAdvisory(groupsFor([primary("attached"), second("live")]))).not.toBeNull();
+    expect(primaryAdvisory(groupsFor([primary("live", { platformHold: "paused" }), second("live")]))).not.toBeNull();
+  });
+
+  it("says nothing when the canonical is live, or there is no live un-held alias to offer", () => {
+    expect(primaryAdvisory(groupsFor([primary("live"), second("live")]))).toBeNull();
+    expect(primaryAdvisory(groupsFor([primary("lapsed"), second("attached")]))).toBeNull();
+    expect(primaryAdvisory(groupsFor([primary("lapsed"), second("live", { platformHold: "disputed" })]))).toBeNull();
+  });
+
+  it("says nothing when there is no canonical at all (the sweep repairs that), and prefers www among candidates", () => {
+    expect(primaryAdvisory(groupsFor([second("live")]))).toBeNull();
+    const a = primaryAdvisory(
+      groupsFor([
+        primary("lapsed"),
+        row({ hostname: "other.invalid", claimName: "other.invalid", state: "live", webRole: "alias" }),
+        second("live"),
+      ]),
+    );
+    expect(a?.candidate.hostname).toBe("www.other.invalid");
   });
 });

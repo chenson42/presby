@@ -26,7 +26,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-19 |
 | 3 — Technical design | tech-lead | Complete (architect addendum A1–A6 folded 2026-10-19) | Design complete; implementers named; T1–T7 confirmed by the architect; Batch 1a-i ready for database-admin | 2026-10-19 |
-| 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); **Batch 1a-ii complete** (full-stack-developer; `src/lib/domains/` service, DNS adapter, tenant and platform actions, catalog/tile/bundle edits; typecheck, lint, `npm run check`, build green; test-rls-47 still 114/114); **Batch 1b complete** (full-stack-developer; Vercel adapter + fake, probe client, `/api/cron/domains` sweep, the full `observeAndAdvance` lifecycle, platform hold / force-release / check, reattach script; typecheck, lint, `npm run check`, unit, DB-backed suites, test-rls-47 114/114, build green); **Batch 1c complete** (full-stack-developer; proxy first branch + probe + A6 cron pass-through, `check:proxy-imports`, `next.config.ts` host split + boot assertion, `resolveSite`/`SiteUrls`, 307s, robots, neutral 404, `donorOrigin`; typecheck, lint, `npm run check` (eight tripwires), unit 6,697, DB-backed suites, test-rls-47 114/114, build, auth gate 101 passed incl. MFA-enrolled login, `custom-hosts` 68 passed on dev and on a production build, `npm run test:e2e:prod` 65 passed); 1d next | — | 2026-10-19 |
+| 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); **Batch 1a-ii complete** (full-stack-developer; `src/lib/domains/` service, DNS adapter, tenant and platform actions, catalog/tile/bundle edits; typecheck, lint, `npm run check`, build green; test-rls-47 still 114/114); **Batch 1b complete** (full-stack-developer; Vercel adapter + fake, probe client, `/api/cron/domains` sweep, the full `observeAndAdvance` lifecycle, platform hold / force-release / check, reattach script; typecheck, lint, `npm run check`, unit, DB-backed suites, test-rls-47 114/114, build green); **Batch 1c complete** (full-stack-developer; proxy first branch + probe + A6 cron pass-through, `check:proxy-imports`, `next.config.ts` host split + boot assertion, `resolveSite`/`SiteUrls`, 307s, robots, neutral 404, `donorOrigin`; typecheck, lint, `npm run check` (eight tripwires), unit 6,697, DB-backed suites, test-rls-47 114/114, build, auth gate 101 passed incl. MFA-enrolled login, `custom-hosts` 68 passed on dev and on a production build, `npm run test:e2e:prod` 65 passed); **Batch 1d complete** (ux-developer; org page, platform section and list, toggles UI, follow-ups A and B; typecheck, lint, `npm run check`, unit 6,876, DB-backed suites, test-rls-47 114/114, build, `custom-hosts` 98 passed on dev, `test:e2e:prod` 67 passed); QA next | — | 2026-10-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1916,6 +1916,78 @@ E2E: `e2e/support/custom-hosts.ts` (the world, `rawGet`, `snapshot`/`shape`) · 
 **Next: ux-developer, Batch 1d** (then QA, Phase 5). Nothing needs a browser in 1d's absence: the public site on a church's domain was driven in a real browser (canary, hydrating contact form and give form, a 360 px pass with screenshots under `test-results/custom-domains-360/`). What QA can run now: the unit suite, `serving.db.test.ts` and the other DB suites serially, `test-rls-47`, the auth gate (chromium project), the `custom-hosts` project on the dev server, and `npm run test:e2e:prod`. Start the dev server on a free port with `RATE_LIMIT_DISABLED=true CRON_SECRET=<x> DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json`, set `E2E_BASE_URL`, and **restart it after editing `next.config.ts`** (a stale dev server keeps the old `headers()` rules, which made the HSTS specs fail during this batch's own mutation checks).
 
 ---
+
+## Batch 1d — domains UI (ux-developer)
+
+*2026-10-20, ux-developer. Worktree `presby-domains`, branch `pipeline/custom-domains` (HEAD = the 1c commit). Neon branch `pipeline-custom-domains` (`ep-dry-tree-axyn61wx`, verified in `.env.local` before any write). Nothing committed. No Rule-16 shared file edited. No real Vercel, Resend or DNS call: every flow ran on the fake provider and fake DNS (state file). All hosts `*.invalid`. The dev server I started (port 3112) and the production-build servers were stopped by PID; port 3000 was never touched.*
+
+### Files
+
+**Org page** `src/app/(org)/o/[slug]/admin/domains/`: `page.tsx`, `domains-states.tsx`, `domains-empty.tsx`, `claim-form.tsx` (RHF in `<HydrationGate>`), `claim-input.ts`, `check-now-button.tsx`, `outcome-copy.ts`, `canonical-dialog.tsx`, `remove-dialog.tsx`, `reconnect-button.tsx`, `primary-advisory.tsx`, `activity-list.tsx` (+ a test beside each).
+
+**Shared presentational** `src/components/shared/` (flat, `domain-` prefix, because the platform page renders the same pieces): `domain-claim-card.tsx`, `domain-step-list.tsx`, `domain-status-chip.tsx`, `domain-record-row.tsx`, `domain-copy-button.tsx`, `domain-copy-all-button.tsx`, `domain-diagnosis-panel.tsx`, `domain-offboarding-card.tsx`, `domain-banners.tsx`.
+
+**Platform** `src/app/(admin)/admin/organizations/[id]/`: `domains-section.tsx`, `platform-domain-actions.tsx`, `domain-toggles-card.tsx`, `platform-claim-form.tsx`; `src/app/(admin)/admin/organizations/domains/page.tsx` (cross-org list); `[id]/page.tsx` mounts the section; `organizations/page.tsx` gains a "Domains" link.
+
+**Lib** `src/lib/domains/`: `activity.ts` (audit row to a plain line, apex+www merged), `hints.ts` (hint and troubleshooting copy), `records-text.ts` (copy-all text and `mailto:`), `site-address.ts`, `platform-read.ts` (platform read side: one org's data, the cross-org list), `checklist-fixtures.ts` (test support). **Edited:** `checklist.ts` (host hold / check class / state age, `targetSource`, `liveUrl`, `primaryAdvisory()`), `service.ts` (`ensureCanonical` notice; `readDomainsView` returns `activity`).
+
+**E2E** `e2e/custom-domains/domains-admin.spec.ts` (21), `e2e/custom-domains/domains-platform.spec.ts` (9), `e2e/hydration/domains-claim-form.spec.ts` (2), `e2e/support/domains-ui-fixture.ts`.
+
+### Contract consumed, and what was added
+Consumed as-is: `readDomainsView`, the five tenant actions, the five platform actions. **No new action was needed.** Added to existing modules: the audit read inside `readDomainsView` (see Deviations 3), and the `ensureCanonical` notice (tech-lead follow-up B).
+
+### Follow-ups from the 1b rulings
+- **A (hub remedy):** `primaryAdvisory()` + `PrimaryAdvisoryBanner`, wired to `changeCanonicalAction`; e2e proves the remedy swaps the roles. The platform section shows the same fact as text.
+- **B (notice):** `ensureCanonical` now `note(env, "canonical_changed", pick)` after the promotion commits (not on the idempotent no-op or the rival-promotion loser). Asserted in `sweep.db.test.ts` (sent once, then silent on the no-op; silent when a lapsed canonical is not replaced); mutation-checked (removing the line fails the first test). `no_canonical` audit rows render as "Primary address set automatically".
+- **Ruling 3b:** `targetSource = "generic"` shows "These are our hosting provider's standard values..." beside the routing records; absent when the provider's values are shown (unit-tested both ways; visible in screenshot 13).
+
+### States covered
+Org page: toggle off, no permission, DB blip (unavailable, never the empty screen), empty with Start, claim in progress (proof record, expiry), connecting, securing, live (View your site, Make primary), paused, disputed, lapsed, parked with the exit checklist, releasing, held-elsewhere, refused-by-host, provider-unavailable, lookup-failed, site-not-published pre-flight, primary-address advisory, add-another form, recent activity, remove / make-primary dialogs. Platform: section empty, toggle off, populated with support facts, history, advisory; list with every filter, empty, error, truncated; every dialog. Every async surface has loading (button pending labels; no `loading.tsx`, see Deviations 1), empty, error and data states.
+
+### Commands and results
+| Command | Result |
+|---|---|
+| `npm run typecheck` / `npm run lint` | exit 0 / exit 0 |
+| `npm run check` (eight tripwires) | exit 0. `check:brand-scope` C2 caught a hand-rolled button in the troubleshooting panel; now a `<Button>` |
+| `npm run test` | 465 files passed, 64 skipped; **6,876 passed**, 1,888 skipped (1c: 443 / 6,697) |
+| DB-backed, serial: `platform-read.db` (13), `serving.db`, `toggles.db`, `service-only-writes`, `domains.schema` | 56/56, exit 0 |
+| `service.db.test.ts`, serial | 97/97, exit 0 (includes the new recent-activity test) |
+| `sweep.db.test.ts`, serial | **71/71 passed**; the process exited 1 only on two post-run "Connection terminated unexpectedly" unhandled errors (the recorded Neon flake, as 1b). The three canonical-promotion tests also passed alone, exit 0, and the mutation run failed as intended |
+| `psql $APP_DATABASE_URL -f scripts/domains/test-rls-47.sql` (`rolbypassrls = f`) | exit 0, **114/114** |
+| `npm run build` | exit 0; `/o/[slug]/admin/domains` and `/admin/organizations/domains` in the route table |
+| `domains-admin.spec` + `domains-platform.spec`, dev server, `custom-hosts` | 21 + 9 passed |
+| `e2e/hydration/domains-claim-form.spec.ts` | dev (`chromium`): 2 passed; prod build (`prod-build`): 2 passed |
+| `npm run test:e2e:prod` | **67 passed**, exit 0 (65 + 2). A first attempt had 2 failures from Neon `fetch failed` mid-run (a lockdown cron spec; the same specs passed on the rerun) |
+| `e2e/custom-domains/` whole directory, dev, once | **98 passed**, exit 0 (1c's 68 + 30), nothing regressed |
+
+### Browser verification (360 x 740, then desktop)
+`domains-admin.spec.ts` drives a phone-width page through every state above and, for each, fails on: horizontal scroll, any enabled button under 44px, any browser console or page error, a page that never hydrated, and (for dialogs) content spilling out of the dialog. I read the screenshots (`.tmp/custom-domains-ui-360/`, gitignored) for empty, typed-apex, pending, generic targets, mixed record statuses with the troubleshooting list open, live, paused, parked/exit checklist, advisory, both dialogs. **Findings fixed from reading them** (none visible to the assertions): (1) a `test.use` viewport does not reach a hand-made browser context, so the first 360px "pass" was really 1280px; now `setViewportSize` plus an assertion that `innerWidth` is 360; (2) the "We see this" pill broke out of its card (now its own line); (3) the advisory's button label ran past the card (now "Make primary", full width on a phone); (4) the remove and make-primary dialogs spilled past the dialog at 360px because the confirm label held the hostname (now "Remove domain" / "Make primary", with `break-words`); (5) hostnames split mid-word (`break-words`, not `break-all`); (6) the activity list repeated each event for the apex and www twin (now merged). The platform admin pages were not given a 360px pass (a desktop operator surface, tables scroll inside their wrapper).
+
+### Deviations
+1. **No `loading.tsx`** (your brief and the (org) contract: the page calls `notFound()`/`redirect()`); Phase 3 said a skeleton "is fine". Pending states are button labels.
+2. **Shared pieces live in `src/components/shared/domain-*.tsx`, not the org route folder**, because the platform page renders the same claim card (G31, "exactly what the church sees"). Flat names, no new subdirectory.
+3. **"Recent activity" reads `audit_events` on the tenant connection inside `readDomainsView`.** The table has no organization column and no RLS (`presby_app` holds SELECT, 0048), so isolation is the `WHERE metadata->>'organizationId'` plus the `domain.%` filter, behind the membership and permission gate; `activity.ts` outputs hostnames and a who-category only (no email, id or IP, asserted). A definer function would make it a database property; that is a schema change, left for you to decide (TODO below).
+4. **Platform pause/dispute/force-release are per host**, as the 1b actions are; the platform section shows a control set per host rather than a group-wide pause.
+5. **The mail toggle is shown** on the platform toggles card ("no effect yet") so both operator toggles from the plan exist; the mail domain UI is 2c.
+6. **Confirm buttons in dialogs are plain `Button`s, not `AlertDialogAction`**, so a refusal keeps the dialog open with the reason.
+7. **Check now is two clicks from verified to connected** (1b Deviation 10), so the e2e and the copy reflect "found your record" then "connected".
+8. **Platform list** has no "mail state" column (2c) and "days attached with no live" is whole days from `attached_at` (trigger-owned, not backdatable in tests).
+
+### Residuals
+Activity isolation is application-enforced (Deviation 3). The `loading.tsx` absence means a cold navigation shows the previous page until the server answers. The dev-only Next indicator overlaps screenshots. A 360px pass of the platform pages was not done.
+
+### Handoff to QA (Phase 5), specs for the whole pipeline
+- Unit: `npm run test` (6,876), plus `npm run check`, `npm run lint`, `npm run typecheck`, `npm run build`.
+- DB-backed, serial (`npx dotenv -e .env.local -- vitest run --no-file-parallelism --testTimeout=180000 <file>`): `src/lib/domains/service.db.test.ts` (97), `sweep.db.test.ts` (71; report any retried test by name, ruling 4c), `serving.db.test.ts`, `platform-read.db.test.ts` (13), `toggles.db.test.ts`, `service-only-writes.test.ts`, `src/lib/db/domain/domains.db.test.ts`, `domains.schema.test.ts`, plus the 1b/1c giving and sites suites. Expect the Neon "Connection terminated" flake after a run; judge by test counts.
+- RLS: `psql "$APP_DATABASE_URL" -f scripts/domains/test-rls-47.sql` (114).
+- E2E (start a dev server with `RATE_LIMIT_DISABLED=true CRON_SECRET=giving-e2e-cron-secret STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=$PWD/.tmp/domains-fake-state.json`, set `E2E_BASE_URL`; the spec's state file path is that exact default): `--project=custom-hosts e2e/custom-domains` (98: `serving`, `lockdown`, `forms-and-giving`, `headers`, `domains-admin`, `domains-platform`); the auth gate `--project=chromium` `totp-full-login`, `totp-callback-bypass`, `post-login-routing`, `role-boundaries`, `admin-login`, `security-headers`, `public-sites`, `giving-public`, `branded-signin`, `giving-webhook`, `hydration/giving-give-form`, and `admin-organizations*` (the org page gained a section); `npm run test:e2e:prod` (67, stop any dev server first: it builds into `.next`).
+- Manual: the real-domain acceptance pass is still ahead of go-live.
+
+### Integration edits for the orchestrator (Rule 16 and neighbours)
+1. `docs/TODO.md` (add): a definer function for the tenant "recent activity" read so isolation is a database property (Deviation 3); a 360px pass of the platform pages; a group-wide pause if support wants it; consider a skeleton once the segment can safely have one; the e2e Neon `fetch failed` flake is now seen in the UI specs too.
+2. `docs/decisions.md`: DECISION-179's module map gains `activity.ts`, `hints.ts`, `records-text.ts`, `site-address.ts`, `platform-read.ts`; record the canonical-promotion notice (follow-up B) with the ruling.
+3. `docs/product/functionality-map.md` and release notes at ship: the church's Domains page, the platform Domains section and list, the operator toggles.
+
 
 ## Files Created
 

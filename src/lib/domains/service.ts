@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   and,
   asc,
+  desc,
   eq,
   getTableColumns,
   inArray,
@@ -16,7 +17,7 @@ import { getPlatformDb } from "@/lib/db";
 // The canonical entry point first, so the domain module cycle initialises from
 // schema.ts (events.schema.test.ts); ./domains is not re-exported from the
 // domain index until integration (Rule 16).
-import { organizations } from "@/lib/db/schema";
+import { auditEvents, organizations } from "@/lib/db/schema";
 import {
   organizationDomains,
   type OrganizationDomain,
@@ -36,6 +37,7 @@ import type {
   VerifyResult,
 } from "./adapters/hosting";
 import type { ProbeClient, ProbeOutcome } from "./adapters/probe";
+import { buildActivity, type ActivityItem } from "./activity";
 import { AUDIT_ACTIONS, insertAuditRow } from "./audit-tx";
 import {
   buildChecklist,
@@ -1520,6 +1522,12 @@ async function ensureCanonical(env: ApplyEnv, group: readonly GroupRow[]): Promi
         },
       });
     });
+    // An automatic re-point of where the slug URL redirects is as notice-worthy
+    // as the manual `changeCanonical` (tech-lead ruling on 1b Deviation 1,
+    // follow-up B). Only a promotion that COMMITTED reaches here: the idempotent
+    // no-op (a canonical already exists) and the rival-promotion loser return
+    // above or in the catch, so neither sends a notice.
+    note(env, "canonical_changed", pick);
   } catch (err) {
     if (classifyDomainDbError(err)?.kind !== "second_canonical") throw err;
   }
@@ -2005,7 +2013,7 @@ export async function reconnectClaim(
 // ---------------------------------------------------------------------------
 
 export type DomainsViewResult =
-  | { kind: "ok"; groups: ChecklistGroup[]; siteStatus: string | null }
+  | { kind: "ok"; groups: ChecklistGroup[]; siteStatus: string | null; activity: ActivityItem[] }
   | { kind: "forbidden" }
   | { kind: "feature_off" };
 
@@ -2058,11 +2066,33 @@ export async function readDomainsView(
         graceEndsAt: r.graceEndsAt,
         observation: r.observation,
         providerChallenge: r.providerChallenge,
+        createdAt: r.createdAt,
+        stateChangedAt: r.stateChangedAt,
       }));
+
+      // "Recent activity": this organization's own `domain.*` audit rows, newest
+      // first. audit_events carries no organization column and no RLS, so the
+      // filter is the WHERE below (metadata.organizationId, written by this
+      // service on every row) on a connection that has already verified the
+      // viewer's membership and permission. Only the `domain.` action family is
+      // selected, and activity.ts maps rows to hostnames and a who-category,
+      // never an email, id or IP.
+      const auditRows = await tx
+        .select({ id: auditEvents.id, action: auditEvents.action, createdAt: auditEvents.createdAt, metadata: auditEvents.metadata })
+        .from(auditEvents)
+        .where(
+          and(
+            sql`${auditEvents.action} like 'domain.%'`,
+            sql`${auditEvents.metadata}->>'organizationId' = ${organizationId}`,
+          ),
+        )
+        .orderBy(desc(auditEvents.createdAt))
+        .limit(25);
       return {
         kind: "ok",
         groups: buildChecklist(checklistRows, { siteStatus, platformSiteUrl: context.platformSiteUrl }),
         siteStatus,
+        activity: buildActivity(auditRows).slice(0, 10),
       };
     }),
   );

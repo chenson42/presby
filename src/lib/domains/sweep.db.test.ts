@@ -1435,17 +1435,23 @@ describe.skipIf(!hasDb)("the domain lifecycle past pending, via the sweep (Postg
       await tick(w, t.org);
       await tick(w, t.org);
       expect(await canonicalHosts(t.org)).toEqual([]); // attached is not live: nothing to promote yet
+      mockEnqueue.mockClear();
       await tick(w, t.org); // B goes live; the promotion happens in the same check
       expect((await domainRows(t.org, sql`claim_name = ${b.name}`)).map((r) => r.state)).toEqual(["live", "live"]);
       expect(await canonicalHosts(t.org)).toEqual([`www.${b.name}`]);
+      // Follow-up B: the automatic re-point is announced like a manual change (to every holder, once).
+      const announced = subjectsLike(/main web address changed/i);
+      expect(announced.length).toBeGreaterThan(0);
       expect((await domainRows(t.org, sql`hostname = ${b.name}`))[0]!.web_role).toBe("alias");
 
       const done = await promotions(t.org);
       expect(done).toHaveLength(1);
       expect(done[0]).toMatchObject({ reason: "no_canonical", fromHostname: null, toHostname: `www.${b.name}`, actorKind: "machine", trigger: "cron" });
 
+      mockEnqueue.mockClear();
       await tick(w, t.org, 2 * HOUR);
       expect(await promotions(t.org)).toHaveLength(1); // idempotent: nothing more to promote
+      expect(subjectsLike(/main web address changed/i)).toHaveLength(0); // and silent: the no-op sends no notice
     });
 
     it("a canonical that EXISTS but is not serving is never replaced (no surprise redirects): the aliases stay dark, fail-soft", async () => {
@@ -1459,6 +1465,7 @@ describe.skipIf(!hasDb)("the domain lifecycle past pending, via the sweep (Postg
       expect((await domainRows(t.org, sql`claim_name = ${b.name}`)).map((r) => r.state)).toEqual(["live", "live"]);
       expect(await canonicalHosts(t.org)).toEqual([a]);
       expect(await promotions(t.org)).toHaveLength(0);
+      expect(subjectsLike(/main web address changed/i)).toHaveLength(0); // nothing re-pointed, nothing announced
     });
 
     it("a held (paused) host is not promoted; clearing the hold lets the next check promote it", async () => {

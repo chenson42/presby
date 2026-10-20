@@ -108,6 +108,18 @@ vi.mock("@/lib/org-provisioning", () => ({
     mockGetAffiliation(...args),
 }));
 
+const mockReadDomains = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/domains/platform-read", () => ({
+  readOrgDomainsForPlatform: (...args: unknown[]) => mockReadDomains(...args),
+}));
+const domainsSectionSpy = vi.hoisted(() => vi.fn());
+vi.mock("./domains-section", () => ({
+  DomainsSection: (props: unknown) => {
+    domainsSectionSpy(props);
+    return <div data-testid="domains-section" />;
+  },
+}));
+
 vi.mock("./brand-form", () => ({ BrandForm: () => null }));
 vi.mock("./neutralize-dialog", () => ({ NeutralizeDialog: () => null }));
 vi.mock("./site-section", () => ({ SiteSection: () => null }));
@@ -137,6 +149,7 @@ import OrganizationBrandDetailPage from "./page";
 const ORG_ID = "e0000000-0000-0000-0000-000000000001";
 
 beforeEach(() => {
+  mockReadDomains.mockResolvedValue({ groups: [], siteStatus: null, toggles: {}, daysInState: {}, history: [] });
   mockGetAffiliation.mockResolvedValue(null);
   mockCountGiving.mockResolvedValue(0);
   mockListHealth.mockResolvedValue([]);
@@ -144,6 +157,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  mockReadDomains.mockReset();
+  domainsSectionSpy.mockReset();
   mockGetAffiliation.mockReset();
   mockAuth.mockReset();
   mockCountHolders.mockReset();
@@ -424,5 +439,48 @@ describe("OrganizationBrandDetailPage — council affiliation section", () => {
     expect(
       screen.getByText("This organization has no recorded parent council."),
     ).toBeTruthy();
+  });
+});
+
+
+describe("OrganizationBrandDetailPage - the Domains section (Track F, Batch 1d)", () => {
+  const arrange = () => {
+    mockAuth.mockResolvedValue({ user: { features: [FEATURES.ADMIN_ORGANIZATIONS] } });
+    orgRowRef.current = {
+      id: ORG_ID,
+      name: "Alder Creek Presbyterian Church",
+      slug: "alder-creek",
+      organizationType: "congregation",
+      platformStatus: "managed",
+    };
+    mockCountHolders.mockResolvedValue(0);
+    mockPlan.mockReturnValue({
+      administration: { key: "founding_administrator", name: "Founding Administrator", permissionKeys: [] },
+      officeTemplateKey: null,
+    });
+  };
+
+  it("reads this organization's domains by id and slug and hands them to the section", async () => {
+    arrange();
+    const data = { groups: [], siteStatus: "live", toggles: { "org_portal.domains": true }, daysInState: {}, history: [] };
+    mockReadDomains.mockResolvedValue(data);
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(mockReadDomains).toHaveBeenCalledWith(ORG_ID, "alder-creek");
+    expect(screen.getByTestId("domains-section")).toBeTruthy();
+    expect(domainsSectionSpy.mock.calls[0]![0]).toEqual({
+      organizationId: ORG_ID,
+      organizationName: "Alder Creek Presbyterian Church",
+      data,
+    });
+  });
+
+  it("a failed read is 'we couldn't load' - never an empty all-clear - and the rest of the page still renders", async () => {
+    arrange();
+    mockReadDomains.mockRejectedValue(new Error("connection terminated"));
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(screen.getByTestId("domains-section-unavailable").textContent).toMatch(/couldn.t load this organization.s domains/);
+    expect(screen.queryByTestId("domains-section")).toBeNull();
+    expect(foundingSectionSpy).toHaveBeenCalled();
+    expect(document.body.textContent).not.toMatch(/connection terminated/);
   });
 });

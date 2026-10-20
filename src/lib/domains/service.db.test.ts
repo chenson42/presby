@@ -1008,6 +1008,28 @@ describe.skipIf(!hasDb)("src/lib/domains/service.ts (Postgres-backed)", () => {
       expect(view).toMatchObject({ kind: "ok", groups: [] });
     });
 
+    it("returns this organization's recent activity: its own domain.* audit rows, newest first, naming no email, no token and no other organization's rows", async () => {
+      const a = await tenant();
+      const b = await tenant();
+      const name = claim("church");
+      const other = claim("elsewhere");
+      await claimOk(a, name);
+      await claimOk(b, other);
+      await svc.removeClaim(a.actor, a.org, name); // pending -> released: a second row
+      const view = await svc.readDomainsView(a.personId, a.org, { platformSiteUrl: "x" });
+      expect(view.kind).toBe("ok");
+      if (view.kind !== "ok") return;
+      const text = view.activity.map((i) => i.text).join("\n");
+      expect(view.activity.length).toBeGreaterThanOrEqual(2);
+      expect(text).toContain(name);
+      expect(text).not.toContain(other); // nothing from organization B
+      expect(text).not.toMatch(/@|presby-verify/); // no email, no proof token in the visible text
+      expect(Object.keys(view.activity[0]!).sort()).toEqual(["at", "id", "text", "who"]); // no actor id, email or IP rides along
+      expect(view.activity.every((i) => i.who === "team")).toBe(true);
+      const times = view.activity.map((i) => i.at);
+      expect([...times].sort().reverse()).toEqual(times); // newest first
+    });
+
     it("applies the same gate: forbidden, feature_off", async () => {
       const noPerm = await tenant({ holds: false });
       const off = await tenant({ toggle: false });

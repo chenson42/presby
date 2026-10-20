@@ -93,6 +93,9 @@ export interface ChecklistRow {
   observation: unknown;
   /** Vercel's own verification TXT, when the name lives in another account of theirs. */
   providerChallenge?: unknown;
+  /** When the claim was made / the host last changed state (the platform list's ages). */
+  createdAt?: Date;
+  stateChangedAt?: Date;
 }
 
 export interface ChecklistContext {
@@ -159,6 +162,12 @@ export interface ChecklistHost {
   displayHostname: string;
   role: "canonical" | "alias" | null;
   state: DomainState;
+  /** The platform's pause / dispute on this host (it darkens serving, not watching). */
+  hold: "paused" | "disputed" | null;
+  lastCheckClass: string | null;
+  lastCheckedAt: string | null;
+  /** ISO. When the host last changed state (age-in-state on the platform list). */
+  stateChangedAt: string | null;
 }
 
 export interface ChecklistGroup {
@@ -176,6 +185,14 @@ export interface ChecklistGroup {
   /** ISO. Set while the claim is still pending: it expires if never proven. */
   claimExpiresAt: string | null;
   graceEndsAt: string | null;
+  /**
+   * Where the routing targets shown came from. `generic` means the provider's own
+   * recommendation was never readable and Vercel's standard values are shown
+   * (tech-lead ruling 3b: the page says so).
+   */
+  targetSource: "provider" | "generic" | null;
+  /** `https://<host>/` when this group holds the canonical host and it is live and not held; the "View your site" link. */
+  liveUrl: string | null;
   /** The weekly "records still point at us" offboarding card applies. */
   offboarding: boolean;
   canCheck: boolean;
@@ -258,6 +275,15 @@ function providerChallengeRecords(rows: ChecklistRow[]): ChecklistRecord[] {
     }
   }
   return out;
+}
+
+function targetSourceOf(rows: ChecklistRow[]): "provider" | "generic" | null {
+  if (rows[0]?.purpose !== "web") return null;
+  const newest = [...rows]
+    .map((r) => readObservation(r.observation))
+    .sort((a, b) => (b.checkedAt ?? "").localeCompare(a.checkedAt ?? ""))
+    .find((o) => o.targets);
+  return newest?.targets?.source ?? (newest?.targets ? "provider" : null);
 }
 
 function routingRecords(rows: ChecklistRow[]): ChecklistRecord[] {
@@ -517,6 +543,10 @@ export function buildChecklist(
         displayHostname: domainToUnicode(r.hostname),
         role: r.webRole,
         state: r.state,
+        hold: r.platformHold,
+        lastCheckClass: r.lastCheckClass,
+        lastCheckedAt: r.lastCheckedAt ? r.lastCheckedAt.toISOString() : null,
+        stateChangedAt: r.stateChangedAt ? r.stateChangedAt.toISOString() : null,
       })),
       phase,
       step,
@@ -531,10 +561,47 @@ export function buildChecklist(
           .filter((d): d is Date => d !== null)
           .sort((a, b) => a.getTime() - b.getTime())[0]
           ?.toISOString() ?? null,
+      targetSource: targetSourceOf(group),
+      liveUrl: (() => {
+        const canonical = group.find((r) => r.webRole === "canonical");
+        return canonical && canonical.state === "live" && canonical.platformHold === null
+          ? `https://${canonical.hostname}/`
+          : null;
+      })(),
       offboarding: phase === "lapsed" || phase === "parked" || phase === "releasing",
       canCheck: group.some((r) => CHECKABLE.has(r.state)),
       canRemove: group.some((r) => r.state !== "parked" && r.state !== "release_pending"),
       canReconnect: group.some((r) => r.state === "parked"),
     };
   });
+}
+
+export interface PrimaryAdvisory {
+  /** The canonical host that is not serving. */
+  primary: ChecklistHost;
+  /** A live, un-held alias that could take over. */
+  candidate: ChecklistHost;
+}
+
+/**
+ * Tech-lead ruling on 1b Deviation 1, follow-up A. A canonical that EXISTS but is
+ * not serving (lapsed, attached, held, release-pending) is never replaced
+ * automatically; the live aliases stay dark. The remedy is `changeCanonical`, so
+ * the page must say so: "Your primary address isn't serving; make <alias>
+ * primary". Returns null when the canonical is fine, absent (the sweep repairs
+ * that), or there is no live alias to offer. `www.` is offered before the rest.
+ */
+export function primaryAdvisory(groups: readonly ChecklistGroup[]): PrimaryAdvisory | null {
+  const hosts = groups.filter((g) => g.purpose === "web").flatMap((g) => g.hosts);
+  const primary = hosts.find((h) => h.role === "canonical");
+  if (!primary) return null;
+  if (primary.state === "live" && primary.hold === null) return null;
+  const candidate = hosts
+    .filter((h) => h.id !== primary.id && h.state === "live" && h.hold === null)
+    .sort(
+      (a, b) =>
+        Number(b.hostname.startsWith("www.")) - Number(a.hostname.startsWith("www.")) ||
+        a.hostname.localeCompare(b.hostname),
+    )[0];
+  return candidate ? { primary, candidate } : null;
 }

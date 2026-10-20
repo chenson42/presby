@@ -119,9 +119,14 @@ export default async function OrganizationsListPage({
             </Link>
           </Button>
         </div>
-        <Button asChild size="sm">
-          <Link href="/admin/organizations/new">New organization</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/admin/organizations/domains">Domains</Link>
+          </Button>
+          <Button asChild size="sm">
+            <Link href="/admin/organizations/new">New organization</Link>
+          </Button>
+        </div>
       </div>
 
       <Table className="mt-4">

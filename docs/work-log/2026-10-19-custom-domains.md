@@ -27,8 +27,8 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-19 |
 | 3 — Technical design | tech-lead | Complete (architect addendum A1–A6 folded 2026-10-19) | Design complete; implementers named; T1–T7 confirmed by the architect; Batch 1a-i ready for database-admin | 2026-10-19 |
 | 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); **Batch 1a-ii complete** (full-stack-developer; `src/lib/domains/` service, DNS adapter, tenant and platform actions, catalog/tile/bundle edits; typecheck, lint, `npm run check`, build green; test-rls-47 still 114/114); **Batch 1b complete** (full-stack-developer; Vercel adapter + fake, probe client, `/api/cron/domains` sweep, the full `observeAndAdvance` lifecycle, platform hold / force-release / check, reattach script; typecheck, lint, `npm run check`, unit, DB-backed suites, test-rls-47 114/114, build green); **Batch 1c complete** (full-stack-developer; proxy first branch + probe + A6 cron pass-through, `check:proxy-imports`, `next.config.ts` host split + boot assertion, `resolveSite`/`SiteUrls`, 307s, robots, neutral 404, `donorOrigin`; typecheck, lint, `npm run check` (eight tripwires), unit 6,697, DB-backed suites, test-rls-47 114/114, build, auth gate 101 passed incl. MFA-enrolled login, `custom-hosts` 68 passed on dev and on a production build, `npm run test:e2e:prod` 65 passed); **Batch 1d complete** (ux-developer; org page, platform section and list, toggles UI, follow-ups A and B; typecheck, lint, `npm run check`, unit 6,876, DB-backed suites, test-rls-47 114/114, build, `custom-hosts` 98 passed on dev, `test:e2e:prod` 67 passed); QA next | — | 2026-10-19 |
-| 5 — Verification | qa | Run 2 complete; loop-back (F-3, F-4, a′ + Batch 1e) to full-stack | FAIL (run 2) | 2026-10-20 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete — run 1 FAIL (F-1, F-2), run 2 FAIL (F-3, F-4), run 3 PASS (scoped, incl. Batch 1e) | PASS (run 3) | 2026-10-20 |
+| 6 — Shipped vs intent | analyst | Complete (Increment 1, web; open for Increment 2) | SHIP WITH NOTES | 2026-10-20 |
 
 ---
 
@@ -2217,6 +2217,156 @@ Failures: [...]
 
 ---
 
+# Phase 6 — Shipped vs Intent (analyst) — Increment 1 (web)
+
+*2026-10-20, analyst (read-only; recorded by the orchestrator). Branch `pipeline/custom-domains` at `d642b46` vs `main`. Read the work-log in full where it matters and confirmed claims in code; nothing run, nothing written.*
+
+## VERDICT
+
+**SHIP WITH NOTES** (Increment 1, web). The pipeline stays open for Increment 2 (mail). Merge is gated on the pre-merge checklist below — most importantly the Rule 16 integration edits (not on the branch) and applying 0057 **without `-1`**.
+
+## ONE-LINE TAKE
+
+> A church admin or a platform admin can prove they own a domain by a TXT record, and the platform will serve that church's public site on it. Every unproven, paused or unattached host is a byte-identical 404, and nothing but the church's site and its give page exists on that host. In production today the flow stops, by design, at "Connecting is temporarily unavailable" because `DOMAINS_PROVIDER` is unset, so nothing can reach `live` yet.
+
+## What's Working
+
+- **Proof before provider:** zero fake-provider calls before `proof_ok`; claims capped at 3 web and 1 mail (race-safe trigger, 7-day expiry); a cross-org conflict surfaces only after proof and names no org (A12) — database-enforced.
+- **Enumeration safety, measured** on a production build: ~20 non-serving states byte-identical to a never-claimed host on `/` and `/about`; timing indistinguishable over 80 interleaved rounds.
+- **Lockdown:** no `Set-Cookie` on any response class; `/api/*`, `/signin`, `/admin`, `/o/*`, `/orgs`, `/home`, `/site/<other>` → neutral 404; forwarded-host spoofing changes nothing; the cron pass-through is exact-path and bearer-keyed; raw dot-segment paths covered and the F-3 self-check watched failing under mutation.
+- **Database-owned state machine:** 25 legal edges, trigger-stamped timestamps; grace deadline and `release_cause` evidence unforgeable from the tenant connection; the owner connection refused an illegal shortcut; one audit row per edge proven by 30 DB tests.
+- **One serving predicate** in both directions; 307 `no-store`; HSTS `includeSubDomains` platform-only; absolute URLs only from the DB row or validated platform origin; `donorOrigin()` immune to Host.
+- **Honest failure copy** ("Connecting is temporarily unavailable. Your DNS changes are safe to make"); provider text never shown; a DB blip renders "unavailable", not the empty state.
+- **Mobile:** the org page driven at 360px through every state (failing on horizontal scroll, sub-44px buttons, console errors); a claim-form hydration spec on both lanes.
+- **Batch 1e** anchors Recent activity on the org's own RLS-filtered domain ids, confirmed by an independent `presby_app` probe.
+- **Auth-touching gate:** full MFA-enrolled login on dev and production build (25/25).
+
+## Intent-vs-Shipped Diff
+
+- G1–G4: matches. G5–G8: matches (`SiteUrls` + source-scan; host-mode `robots.txt`). G9, G10: matches (lapse needs 6 definitive-absent observations over ≥ 10 h; lapse/removal end in a 30-day attached-and-dark grace; weekly "records still point at us" nudge; offboarding card).
+- G11: AAAA, CAA, Cloudflare proxy diagnosis, copy-all, `mailto:` shipped; DNSSEC only the "SERVFAIL with checking disabled" heuristic — acceptable drift; Cloudflare ranges and Vercel error wording hand-written — acceptable drift, to the acceptance pass.
+- G12: provider recommendation always wins; flagged "generic" display fallback — acceptable drift. G13: HMAC probe + skip when records point elsewhere (enforces Q7) — matches. G14, G15: matches. G24/Flow 11: matches (residual: mid-checkout lapse).
+- G26: HSTS split shipped and tested; the Server Action Origin check passed only on localhost — **open until the acceptance pass**. G27: matches. G28: no re-auth, covered by the `/o/*` gate + notifications (S3 tracked) — acceptable drift (T7). G29–G31: matches for the org page; platform pages got no 360px pass.
+- G16–G23 (mail): deferred to Increment 2 by design; the `org_portal.mail_domain` toggle exists, says "no effect yet", does nothing. G25: **not satisfied in production yet** — adapter built, unexercised against the real API.
+- Open questions: Q1 operator-only toggles shipped; Q2 on-behalf web claim shipped; Q3 `office_email` is Increment 2; Q8 legacy-URL redirects **not built** (separate pipeline, cutover dependency); Q9 throwaway-domain acceptance pass **not run**; Q13 later; Q14 `NEXT_PUBLIC_PLATFORM_HOSTS` set.
+- Adversarial A1–A18: confirmed by tests or measurement (A1–A5, A7–A17); A6 confirmed by construction (Vercel error wording pending the acceptance pass); A18 the webhook route 404s on custom hosts.
+- Accepted drifts: pause as a hold column; canonical auto-promotion with a notice plus "make primary" for a dark lapsed canonical; per-host platform actions; "Check now" two clicks from found to connected; no `loading.tsx`.
+- **On the record:** with `DOMAINS_PROVIDER` unset, `UnconfiguredHosting` returns `retryable`, so after 24 h `recordProviderFailure` emails the operators `attach_failing` once a day per row — noise when the provider is intentionally absent. Follow-up.
+- **Regressions: none found.**
+
+## Edge Cases
+
+Empty state **pass**; failure microcopy **pass**; permission gate **pass** (`domains.manage` + `org_portal.domains` on every tenant action; `FEATURES.ADMIN_ORGANIZATIONS` on every platform action; cron bearer; RLS/ACLs probed live); audit event **pass**; mobile **pass for the tenant page** (platform pages desktop-only, untested at 360px).
+
+## What changes for existing visitors on the platform host
+
+- **Proxy first branch:** an unparseable `Host` → bare 404; `/site/<segment with a dot>` → 404 on platform hosts; everything else is today's logic.
+- **HSTS** unchanged on platform hosts incl. `*.vercel.app` (still `includeSubDomains`).
+- **`/orgs`** still 308 → `/home` on the same hosts, now host-conditional.
+- **Slug → custom-host 307** impossible today (`serving_host` null until a host is `live`); `/site/fpcw` unchanged.
+- **Any other domain attached to the `presby` Vercel project** becomes a custom host and returns the neutral 404 — list the project's domains before merging.
+- **Public give/contact internals:** the contact form's hidden `__slug` is gone (server-bound key); `give/return` for an unresolvable key is now a 404 instead of the "unknown" panel; give rate-limiting keyed before the resolve — none should be visible for `fpcw`; smoke checks it.
+- **A fourth cron** `/api/cron/domains` every 5 minutes (trivial on an empty table).
+- **Rollback is safe:** old `sites.ts` uses `select *` and takes the extra `serving_host` column; Vercel instant rollback works; `sites.public_render` and the per-org toggle are the other valves.
+
+## What the operator can test in production now
+
+1. **Regression smoke on the platform host (first):** `/`, `/signin`, MFA login through `/launch` to the right destination, `/home`; on `presbyportal.org`, `www.presbyportal.org` and the `.vercel.app` URL — `Strict-Transport-Security` includes `includeSubDomains`, `/orgs` 308 → `/home`; `/site/fpcw`, a sub-page, an image, `/site/fpcw/sitemap.xml`, `/site/fpcw/robots.txt` (expect 404) — canonical/OG still name the platform origin, "Our Portal" works, the contact form submits into the org's tickets, `/site/fpcw/give` still renders its own page, `/site/anything.dotted` → 404, no redirect anywhere.
+2. **Platform admin:** the "Domain features" card on `/admin/organizations/[id]` (turn on `org_portal.domains`), the Domains section and `/admin/organizations/domains`; an on-behalf claim (Q2) — the one real new thing that runs in production, and the first run of the real DoH resolvers (Cloudflare and Google JSON): publish `_presby-challenge.<claim name>`, press Check now, expect "found your record" then `verified`, then `attach_pending` ("temporarily unavailable" — the expected end state); also the Check-now rate limit, pause/resume, force-release of a never-attached row; removing the TXT → lapse after 6 misses over ≥ 10 h, a lapsed notice, recovery when restored.
+3. **Tenant page:** needs a founding administrator (production's existing orgs have none; 0057 backfills zero) — designate one for the new customer org; then Start, the claim form, copy buttons at 360px on a real phone, forbidden and toggle-off states for a non-holder.
+4. **Crons:** `/api/cron/domains` in Vercel's cron view, logging `hostClass: platform`.
+5. **Optional (the throwaway domain, Q9):** attach it by hand in the Vercel dashboard (not through the app) so the app sees an unclaimed custom host on Vercel's real edge — neutral 404, lockdown paths, no cookies, HSTS without `includeSubDomains`, whether `x-middleware-rewrite` is forwarded, the cron host class over ≥ two scheduled runs each.
+
+**Cannot be tested until `DOMAINS_PROVIDER=vercel` and the project-scoped token exist:** attach, TLS, probe, `live`; serving a church site on its own host; alias and slug 307s; canonical switching and giving on a custom host; the Server Action Origin check behind Vercel; park and release against a real provider; real Vercel error strings and the Cloudflare proxy diagnosis.
+
+**Expect when testing:** a claim emails every `domains.manage` holder and the platform admins through real Resend (a real founding administrator gets mail); after 24 h an unattached `attach_pending` row sends the operator `attach_failing` once a day; a claim that reaches `attach_pending` and is then force-released waits in `release_pending` (detach needs the provider) and holds the hostname until the token exists; **do not point any real A/CNAME (the first customer or FPCW's domain) at Vercel yet** — unattached, visitors would get Vercel's own error page.
+
+## Residuals that must be stated before merge (release notes and operator briefing)
+
+1. Increment 1 is **not** the cutover: the first-customer go-live and the FPCW cutover remain gated on the Vercel token and env, the real-domain acceptance pass, and Q8 legacy-URL redirects.
+2. Dangling DNS after detach is only reduced by the 30-day grace; it cannot be removed.
+3. While a canonical host is lapsed, a live alias is dark until the church uses "make primary" (deliberate fail-soft).
+4. A gift in flight when its host lapses returns the donor to a 404.
+5. Church hosts show the platform's favicon and icons (F151).
+6. DNSSEC diagnosis is partial; the Cloudflare ranges and Vercel error wording are hand-written and not yet verified against the real providers — do not claim "verified against the real provider".
+7. Mail is not shipped; the mail toggle is inert.
+8. Recent activity's row content is written by the service, though the row set is now database-anchored.
+9. The proxy sends `x-middleware-rewrite` echoing the visitor's own host and path; whether Vercel forwards it is unknown (1c Deviation 10 corrected in the log, not in the release note).
+
+## Follow-Ups (exact `docs/TODO.md` lines)
+
+```
+- [ ] **Track F — real-domain acceptance pass before ANY real DNS flip or go-live (Increment 1 gate).** Set `DOMAINS_PROVIDER=vercel`, a `presby`-project-scoped `VERCEL_API_TOKEN`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID` in Production; run the 11-step pass on an operator-owned throwaway domain (name stays in private notes): proof then attach, routing/CAA/AAAA/proxied diagnosis, TLS and probe to `live`, alias and slug 307s, no cookies and HSTS on the church host, contact form and Server Action Origin, drift and lapse, exit and force-release, dispute. Also record: whether `getConfig` works with the project token (decides if the generic-targets fallback is ever used), the cron host class for two scheduled runs of each of the four crons, whether Vercel forwards `x-middleware-rewrite`, and the first real DoH answers. Pin the recorded Vercel `error.code` strings into `adapters/vercel.test.ts` and diff `adapters/cloudflare-ranges.ts` against Cloudflare's published list. — `docs/work-log/2026-10-19-custom-domains.md` Phase 6
+- [ ] **Track F — legacy-URL redirect map for the first cutover (Q8, separate pipeline).** The old external site's URLs 404 on cutover; SEO continuity needs a redirect mechanism (likely in `presby-site-kit` or ingest). Cutover dependency, not built. — Phase 6
+- [ ] **Track F Increment 2 (mail): start with the 1e reuse rule.** Batch 2a precondition: the `mail_domain.*` activity reader is written RLS-anchored from the first line (`resource_type = 'organization_mail_domain'`, `resource_id in (select id::text from organization_mail_domains)`) with a test that every `domain.*`/`mail_domain.*` writer sets `resourceType`/`resourceId`; decide Q13 (second Resend team) and Q4 thresholds before real church mail. — Phase 6
+- [ ] **Domains: suppress the 24-hour `attach_failing` operator alert when the hosting provider is deliberately unconfigured** (`UnconfiguredHosting` returns `retryable`, so every unattached claim emails the operators daily with "failing for a day"). Distinguish `unconfigured` from a failing provider in `recordProviderFailure` (`src/lib/domains/service.ts:~1099`), keep the alert for real failures, and say "hosting not configured" in the platform list. — Phase 6
+- [ ] **Domains: a force-release of an `attach_pending` row with the provider unconfigured parks in `release_pending` and holds the hostname.** If the provider never accepted the add, release should skip the detach (or treat a not-found as success) so the name is freed; add a test with `UnconfiguredHosting`. — Phase 6
+- [ ] **Domains: per-site favicon and icons on custom hosts (F151).** `/favicon.ico`, `/icon.svg`, `/apple-icon.png` and `public/brand/*` answer on any attached host with the platform's bytes; derive them from the site's brand (DECISION-049). — Phase 6
+- [ ] **Domains: S3 — extend `permissions.requires_two_factor` to `domains.manage`** (needs DECISION-175-style commission/delegation handling and a drift pin; currently covered by the `/o/*` 2FA gate plus notifications). — Phase 6
+- [ ] **Domains: DNSSEC "AD without DS" detection, the Cloudflare range refresh and the generic Vercel target constants join the monthly dependency review** (and the generic-targets fallback is deleted if the acceptance pass shows `getConfig` works with the project token). — Phase 6
+- [ ] **Domains: platform pages (`/admin/organizations/domains`, the org Domains section) have had no 360px pass;** add one, and a group-wide pause if support wants it. — Phase 6
+- [ ] **Domains: e2e/test infrastructure.** (a) a pool `connectionTimeoutMillis`/keepalive in `src/lib/db/index.ts` so a half-open Neon connection fails fast instead of stalling 15 minutes; (b) split `sweep.db.test.ts` (~10 to 13 min) and `service.db.test.ts` (~5 min) and consider relaxing the A4 scan to a `src/lib/domains/service/` directory (`service.ts` is ~2,300 lines); (c) `lockdown.spec.ts:61/68` skip the flag restore when `beforeAll` saved nothing (QA n1); (d) the `giving/access.test.ts` non-retrying `fx.cleanup()` that leaked 7 permanent people on the pipeline Neon branch (canary red there) — fix the teardown, then exempt or recreate the branch. — Phase 5 runs 1 to 3 / Phase 6
+- [ ] **Docs: rewrite the Track F line in this file** (`docs/TODO.md:39`) to point at `docs/work-log/2026-10-19-custom-domains.md`, drop the real domain it names (No Real Data), and record that Increment 1 shipped the mechanism, not the cutover. Add the domains module to `src/lib/dev-docs.ts` `MODULES` alongside the existing missing-modules line. — Phase 6
+- [ ] **Docs: `docs/architecture.md` §8 intro is stale** ("not yet turned on; no real congregation has a provisioned site") now that a congregation's site is live in production; reconcile when the custom-domains paragraph is added. — Phase 6
+```
+
+## Pre-merge checklist
+
+**A. On the branch (orchestrator, Rule 16 and neighbours) — none in the diff today.**
+1. `src/lib/db/domain/index.ts`: `export * from "./domains";`; then `npm run docs:erd` and `npm run check:schema-parity` against `development` with 0057 applied.
+2. `drizzle/meta/_journal.json`: `{ "idx": 57, "version": "7", "when": 1787014313186, "tag": "0057_presby_org_domains", "breakpoints": true }`.
+3. `scripts/test-rls.sql`: `\ir domains/test-rls-47.sql`; `scripts/seed-dev.sql`: `\ir domains/seed-dev-domains.sql`. Apply 0057 twice and the seed on `development`, then the full RLS suite there as `presby_app`.
+4. `docs/decisions.md`: DECISION-176–182 (latest on `main` is 175), with the amendments — four cron paths; the canonical-promotion rule; 1a-i's mail force-release pair and `force_release_reason` written only on its edge; 1a-ii's raw-SQL tenant insert; the module-map additions; residual (iii) with its 1e closure.
+5. `docs/schema-design-2.md`: F146–F152.
+6. `CLAUDE.md`: replace "The Edge Gate Cannot Reach the Database" (its premise is false); add "A Custom Host Is a Key, Not an Identity" (and "Account Mail Stays on the Platform Domain" may follow with Increment 2); the brand-cascade line, Project Layout additions, `src/proxy.ts` in the auth-touching Phase 4 gate, `check:proxy-imports` in Common Commands (eight tripwires); `.claude/agents/architect.md`'s `(public)/site/[slug]` site-key line.
+7. `docs/deployment.md`: the env table, the dated Vercel-account sentence, the reattach runbook, and a "Pre-deploy runbook: 0057" in the giving runbook's style.
+8. `docs/TODO.md`: the lines above, in the same commit (Rule 10); move the Done items.
+9. `docs/release-notes/v0.35.md` and `package.json` (0.34.0 → 0.35.0): non-engineer voice, the residual list above; do not say mail ships or claim "verified against the real provider".
+10. `docs/product/functionality-map.md` (bullet below) and `docs/architecture.md`.
+11. Commit the work-log; `/pre-push`.
+12. Leak check: no real hostname in new files or docs.
+
+**B. Production database (by hand, not by deploy)**
+1. Confirm production is at 0056 (`to_regclass('giving_funds')` and `giving_statements` non-null); else 0054–0056 first.
+2. Neon snapshot of `production` first.
+3. Apply 0057 with `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0057_presby_org_domains.sql` **without `-1`** — the file has a top-level `begin;` … `commit;` at lines 708–771 around the `DROP`/`CREATE` of `presby_published_site` (as 0047); under `-1` the inner `commit` would end the outer transaction early. Idempotent; a failed run can be repeated.
+4. Verify: `organization_domains` RLS + FORCE with one `tenant_isolation` policy; `presby_published_site` `search_path=public, pg_temp`, ACL owner + `presby_app` only, no PUBLIC; `presby_org_serving_canonical_host` not executable by `presby_app`; `domains.manage` tier 1; existing row counts unchanged. Don't run test-rls-47 on production (needs the test helpers).
+5. Apply 0057 **before** the merge (old code tolerates the new column; new code needs it).
+
+**C. Vercel**
+1. `NEXT_PUBLIC_PLATFORM_HOSTS` in Production scope before the merge build (inlined at build time).
+2. `NEXT_PUBLIC_APP_URL` https with its host in the set (else the production build fails loudly, leaving the previous deployment serving).
+3. `CRON_SECRET` set; none of `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake`, `DOMAINS_FAKE_STATE_FILE`, `DOMAINS_ALLOW_RESERVED_TLDS` in Production; "Expose system environment variables" on (`VERCEL_ENV` available).
+4. List the domains attached to the `presby` project — anything other than `presbyportal.org`/`www.presbyportal.org` returns the neutral 404 after the deploy.
+5. Leave `DOMAINS_PROVIDER` unset.
+
+**D. After deploy:** the smoke list in "What the operator can test", item 1.
+
+## Rule 13 (what's-new)
+
+Not warranted at this merge — operator-enabled per org, hidden from the tenant toggle list, enabled for nobody. Consider an admin-audience entry when the toggle goes self-service or the first customer's domain goes live.
+
+## Rule 15 (`docs/architecture.md`)
+
+Yes — a new subsystem. §8: a paragraph on proof → attach → serve (a host is a lookup key, not an identity; the proxy rewrites any non-platform host into the existing site tree; one database predicate decides serving in both directions; only `live` serves; everything else one neutral 404; no session, cookie or platform route on a church's domain; 307 `no-store`), reconciling the stale "not yet turned on" intro. §10: a sentence that `src/proxy.ts` runs on Node.js under Next 16, never reaches the database as a design rule, enforced by `check:proxy-imports`. No mail pools until Increment 2.
+
+## Functionality-map bullet
+
+Index line (presby: public sites): **Custom domains (Track F Increment 1)** — a church proves a domain by TXT and its public site is served there; operator-enabled per org, provider not yet configured in production.
+
+Full map under "Public websites (P3)":
+
+```
+- Custom domains (Track F, Increment 1, web only; `docs/work-log/2026-10-19-custom-domains.md`) — a congregation, presbytery or synod proves control of a domain with a TXT record at `_presby-challenge.<name>` and its public site is then served on that host at clean paths (canonical + 307 aliases, `robots.txt`/sitemap/canonical naming the church host). Tenant page `/o/<slug>/admin/domains` (`domains.manage`, tier 1, delivered by the founding-administrator bundle; gated per org by `org_portal.domains`, which only a platform admin can flip) with a per-record DNS checklist, copy-all and `mailto:` for whoever runs DNS, "Check now", a diagnosis panel, make-primary, an offboarding checklist and a recent-activity list; platform Domains section and cross-org list at `/admin/organizations/[id]` and `/admin/organizations/domains` (`FEATURES.ADMIN_ORGANIZATIONS`: on-behalf web claim, check, pause/dispute hold, force-release with a reason). `organization_domains` (migration 0057): one row per host, 25 trigger-guarded edges, cross-org first-to-verify uniqueness, FORCE RLS, no delete. A proxy first branch classifies the request Host against an env-built platform-host set and rewrites any other host to `/site/<host>`, where one SECURITY DEFINER read collapses every non-serving state (only `live` serves) into the same neutral 404; custom hosts have no session, no cookies and no platform routes; the slug URL 307s to a serving host and otherwise serves itself. A 5-minute cron (`/api/cron/domains`, plus an exact-path bearer pass-through for the four crons on a custom host) re-checks the proof (DoH, two resolvers), attaches/detaches through a Vercel adapter, probes liveness, and walks lapse (6 misses over 10 h) to a 30-day dark grace to release. **Not live in production yet:** `DOMAINS_PROVIDER` is unset, so attach waits as "temporarily unavailable"; no real-provider acceptance pass has run; legacy-URL redirects and church email domains (Increment 2) are not built. `src/lib/domains/`, `src/lib/site-urls.ts`, `src/proxy.ts`, `src/app/(org)/o/[slug]/admin/domains/`.
+```
+
+**Per-Phase Status:** | 6 — Shipped vs intent | analyst | Complete (Increment 1, web; pipeline open for Increment 2) | SHIP WITH NOTES (merge gated on the pre-merge checklist; real-domain acceptance pass gates any DNS flip and the first go-live) | 2026-10-20 |
+
+**Handoff:** orchestrator — Rule 16 integration (A), then `/pre-push`; 0057 by hand on production (B) and the Vercel checks (C); then the smoke list. Rule 12 n/a (no feedback row). Next pipeline work: Increment 2, Batch 2a (database-admin), once Q13 and Q4 are decided and the 1e reuse rule is carried in.
+
+
+---
+
 # Phase 6 — Shipped vs Intent (analyst)
 
 ## VERDICT
@@ -2407,3 +2557,33 @@ State at the end: 0 `e2e-(domui|domains)-` organizations, `sites.public_render` 
 ### Handoff
 
 QA run 3 should: re-run `service.db.test.ts` and `npm run test:e2e:prod` in a quieter Neon window; confirm the `1e` tests by name and the self-check; re-read the Recent-activity panel at 360 px (`domains-admin.spec.ts` test 22 renders it). The 1e line in the integration TODO drafts moves to Done; the `mail_domain.*` reuse rule still binds Batch 2c. Next agent: qa.
+
+---
+
+# Phase 5 — Verification (qa) — run 3 (scoped, Increment 1, web)
+
+**Date:** 2026-10-20 · **Verified by:** qa (read-only; recorded by the orchestrator) · **Subject:** `d642b46` (Batch 1e), preceded by `63114f6` (F-3, F-4, a′). **Verdict: PASS.** Every red result came from a Neon connection drop and passed when re-run by name; nothing failed every time.
+
+- **Environment/end state:** pipeline branch only; QA's dev `:3115` stopped; Playwright owned `:3800`; port 3000 untouched. QA's only direct write: one `presby_app` probe transaction, rolled back (0 `qa3-*` rows). 0 stamped `e2e-*` orgs; `sites.public_render = t`; `group_memberships_reject_derived` enabled. All 440 `domain.*` audit rows carry `resource_type = 'organization_domain'` and a non-null `resource_id`, so the anchor drops nothing from today's feed.
+- **Scope:** `git diff --stat 9bc39e1..HEAD` = 7 files (work-log; `lockdown`/`domains-admin` specs; `hydration/domains-claim-form.spec.ts`; `domains-ui-fixture.ts`; `src/lib/domains/service.ts` — only the `auditRows` predicate and its comment; `service.db.test.ts`). No schema, migration, config or route file.
+- **Static:** typecheck, lint, `npm run check` (8 tripwires), build — exit 0. **Unit:** 6,876 passed. **Section 47** as `presby_app` (`rolbypassrls = f`): 114 pass, 0 fail.
+- **`service.db.test.ts`:** full file run 1 — 99 passed, 2 failed (`claimDomain > a second claim group can only be an alias`, 90 s timeout drop; `transitionDomain > attach_pending -force_release-> release_pending (web)`, `Client has encountered a connection error`), both passed re-run by name. `-t readDomainsView`: run 1 8/9 (arrange-step `Failed query: rollback` at `:1017`), runs 2 and 3 **9/9, 9/9**. All four `1e` tests passed in every run that reached them; the gate tests (`forbidden, feature_off`, other-org forbidden) passed every block run.
+
+| Lane | Result |
+|---|---|
+| Dev `custom-hosts` `lockdown.spec.ts` | Run 1 drop (`getPublicRenderFlag` `fetch failed` at `custom-hosts.ts:421`; `:144` 20 s POST timeout). Run 2 **30/30** |
+| F-3 self-check (`lockdown.spec.ts:466`) | Unmutated: pass. **Mutated** (a `NODE_OPTIONS` preload making `node:http.request` send the WHATWG-normalized path; no repo file touched): **fails at `:481`** — expected `["/api/cron/./email-queue"]`, received `["/api/cron/email-queue"]`. **F-3 closed** |
+| Dev `custom-hosts` `domains-admin.spec.ts` | Run 1 drop (500 from `read-org-brand.ts:120`, not `readDomainsView`). Run 2 **21/21** |
+| Dev `chromium` `hydration/domains-claim-form.spec.ts` | **2/2**; test 2 alone **1/1** |
+| Dev `chromium` auth gate (`totp-full-login` MFA user: password → `/totp` → wrong code rejected → real code; `totp-callback-bypass`; `post-login-routing`; `role-boundaries`) | **25/25** first attempt |
+| `npm run test:e2e:prod` | Run 1: `globalSetup` `fetch failed` at `seed-orgs.ts:403`. Run 2: 67 passed, 1 failed (`serving.spec.ts:340` after a stall-retry while the server logged `isFlagEnabled read failed … sites.public_render`), 4 did not run; `prod-custom-hosts` lockdown **30/30** incl. the self-check; `prod-build` `domains-claim-form` **2/2**. Re-run by name (`serving.spec.ts` + `domains-claim-form.spec.ts:95`): **27/27** |
+
+- **F-4 closed:** the header at `lockdown.spec.ts:20-30` matches measured behaviour and `:440-446`. **a′ closed:** `claim-card` waits on `ACTION_MS`; test 2 seeds its own claim (`retireAllDomains` + `addDomain`) and passes alone on both lanes; one `ACTION_MS` in `e2e/support/domains-ui-fixture.ts`.
+- **Recent activity at 360px:** the cropped `22-primary-advisory.png` lists only the org's own hostnames with "Your team" and a timestamp, wraps cleanly, no horizontal scroll; removed/parked claims' history still shows (no state filter on `tenant_isolation`, no DELETE grant).
+- **Batch 1e independent probe** (as `presby_app`, one rolled-back transaction; query rebuilt from the real schema via Drizzle `toSQL()` — predicate `"audit_events"."resource_id" in (select "organization_domains"."id"::text from "organization_domains")`, fully qualified, cast on the `organization_domains` side): own row and own platform-initiated `domain.hold_set` → **present**; `organizationId = A` with B's domain id → absent (refused by FORCE-RLS `tenant_isolation` on `organization_domains`); null / nonexistent `resource_id` → absent (`IN`); wrong / null `resource_type` → absent (equality); `organizationId = B` with A's own domain id → absent (the metadata clause, still load-bearing); **pre-1e predicate as A → 7 rows incl. all 5 forged**; shipped query as B → exactly B's own row; GUC unset → 0 rows (fails closed). Catalog: `organization_domains` RLS + FORCE, one `tenant_isolation` `ALL` policy; `audit_events` RLS off, `presby_app` INSERT/SELECT. Residual stands: row *content* is service-written.
+- **Retried/re-run by name:** `service.db` `a second claim group can only be an alias`, `attach_pending -force_release-> release_pending (web)`, `readDomainsView > returns this organization's recent activity …`; `lockdown.spec.ts` run 1 (`:144`, `:156`, 26 not run); `domains-admin.spec.ts` `12-held-elsewhere` (`:422`/`:427`, 10 not run); `serving.spec.ts:340` + 4 dependents; `test:e2e:prod` `globalSetup`. One `withOneRetry` stall-retry in prod run 2. None in the passing scoped runs.
+- **QA process error:** a failed zsh glob made the first auth-gate command run the whole `chromium` project (324 tests); stopped after 74. Three timeout-class failures there — `admin-login.spec.ts:111`, `branded-signin.spec.ts:285` (re-run by name: **passed**), `giving-admin.spec.ts:331` — the first and last out of scope and not re-run. No stamped leftovers. The scoped set was then run properly (25/25).
+- **Regression tests:** F-3 `lockdown.spec.ts:466` (watched fail under mutation); a′ `hydration/domains-claim-form.spec.ts:64`, `:95`; Batch 1e the four `1e` tests in `service.db.test.ts` (implementer reports failing-first; QA reproduced the equivalent with the probe). Coverage unchanged. Feature-gate: `readDomainsView` gate unchanged; no route or action added or changed.
+- **Non-blocking notes:** (n1) `lockdown.spec.ts:61`/`:68` — when `beforeAll`'s `getPublicRenderFlag` fails, `afterAll` still calls `setPublicRenderFlag` with the unset value (refused only by `feature_flags.enabled` NOT NULL); skip the restore when nothing was saved. (n2) the run-1 TODO on the 7 leaked giving fixture people stays open. (n3) `admin-login.spec.ts:111` and `giving-admin.spec.ts:331` each timed out once in the accidental full run, not re-run. Integration: the 1e TODO moves to Done; the `mail_domain.*` reuse rule still binds Batch 2c.
+
+**Per-Phase Status:** | 5 — Verification (run 3) | qa | Complete | PASS (F-3 closed — self-check fails under a normalizing mutation at `lockdown.spec.ts:481`, lockdown 30/30 dev and prod; F-4 closed; a′ closed both lanes; Batch 1e verified by tests and an independent `presby_app` probe; section 47 114/0; auth gate 25/25 dev with MFA user; `test:e2e:prod` 67 then 27/27 on re-run, all failures Neon drops) | 2026-10-20 |

@@ -30,6 +30,12 @@ import type { Sql } from "./db";
 import { E2E_TOTP_TEST_SECRET } from "./totp-fixture";
 import { E2E_USERS, storageStatePath } from "./users";
 
+/**
+ * Upper bound for an expectation that waits on a domain server-action POST (3-5.3 s on Neon, QA run 1). A ceiling,
+ * not a delay: a fast run waits no longer. Shared by `domains-admin.spec.ts` and the hydration spec.
+ */
+export const ACTION_MS = 20_000;
+
 export const DOMAINS_UI_NAMES = {
   org: "E2E Domains UI Church",
   first: "Marguerite",

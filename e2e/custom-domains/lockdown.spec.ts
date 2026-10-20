@@ -19,11 +19,20 @@
  *     nothing else does (T1);
  *   - the cron pass-through (A6): a valid bearer reaches ALL FOUR cron handlers on a custom
  *     host; a missing, wrong, empty or wrong-length bearer is byte-identical to the 404 of
- *     any other `/api/*` path; encoded, dot-segment and trailing-slash variants never reach a
- *     handler in one hop;
+ *     any other `/api/*` path; encoded, upper-case and extra-segment variants never reach a
+ *     handler even with the valid bearer; trailing-slash and doubled-slash variants never answer
+ *     with a handler's output in ONE hop (Next's 308 or the 404); dot-segment variants, sent
+ *     raw over node:http, are collapsed by Next BEFORE the proxy runs, so without the bearer they
+ *     are the neutral 404 and with it they reach the same handler the exact path does (A6
+ *     permits that: the bearer, not the spelling, is the credential), while a dot-segment that
+ *     climbs OUT of /api/cron reaches no handler at all, bearer or not;
+ *   - the raw-path helper is itself checked (an echo server asserts each dot-segment and
+ *     climb-out path arrives byte-for-byte), so the raw cases cannot pass vacuously;
  *   - the static exclusions (`favicon.ico`, `*.svg|png|...`, `_next/static`) are the ONLY
  *     platform files that answer on a custom host (F151, an enumerated residual).
  */
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { test, expect, type APIResponse } from "@playwright/test";
 import { platformSql, type Sql } from "../support/db";
 import { makeProbe } from "../../src/lib/domains/probe";
@@ -447,6 +456,44 @@ test.describe("the cron pass-through on a custom host (A6)", () => {
       "/api/cron/%2e%2e/cron/email-queue",
       "/api/cron/./giving",
     ];
+    // Paths whose dot-segments climb out of /api/cron (collapsing them yields a platform route).
+    const CLIMB_OUT = ["/api/cron/../auth/csrf", "/api/cron/%2e%2e/auth/csrf", "/api/cron/x/../../auth/session"];
+
+    // HARNESS SELF-CHECK (QA run 2, F-3). Every behavioural assertion below would pass unchanged if `rawPathGet`
+    // silently normalised the path client-side (measured: raw and WHATWG-normalised sends give identical
+    // responses), so the property "the request-target leaves the client verbatim" is asserted directly, against
+    // a local node:http server that records what it received.
+    test("harness self-check: rawPathGet puts every dot-segment and climb-out path on the wire verbatim (and a normalizing client would not)", async () => {
+      const received: string[] = [];
+      const server = http.createServer((req, res) => {
+        received.push(req.url ?? "");
+        res.writeHead(200, { "content-type": "text/plain" }).end("echo");
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      try {
+        const echoBase = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const all = [...DOT_VARIANTS, ...CLIMB_OUT];
+        for (const path of all) {
+          for (const target of [path, `${path}?limit=1`]) {
+            received.length = 0;
+            const res = await rawPathGet(echoBase, HOSTS.oneCanonical, target, bearer);
+            expect(res.status, target).toBe(200);
+            expect(received, target).toEqual([target]);
+          }
+        }
+        // Non-vacuity: a normalising client (the WHATWG URL parser Playwright's `request` and a browser use) would
+        // have sent something different for EVERY one of these forms, so the equality above can fail.
+        for (const path of all) {
+          expect(new URL(path, echoBase).pathname, path).not.toBe(path);
+        }
+        // And the instrument can fail: a normalised send is observably different on the same server.
+        received.length = 0;
+        await rawPathGet(echoBase, HOSTS.oneCanonical, new URL(DOT_VARIANTS[1]!, echoBase).pathname);
+        expect(received).not.toEqual([DOT_VARIANTS[1]]);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
 
     test("without the bearer each is byte-identical to the 404 of any other /api/* path", async ({ request, baseURL }) => {
       const reference = await shape(await rawGet(request, baseURL, HOSTS.oneCanonical, "/api/auth/csrf"), HOSTS.oneCanonical);
@@ -459,9 +506,9 @@ test.describe("the cron pass-through on a custom host (A6)", () => {
       }
     });
 
-    test("the raw path really is sent un-normalized: the same variants answer 404 on an UNCLAIMED host too, and a wrong bearer changes nothing", async ({ baseURL }) => {
-      // (A control: if the harness silently normalised, the no-bearer 404s above would still pass, so also pin the
-      // wrong-bearer and unclaimed-host shapes to one another.)
+    test("a wrong bearer is the same 404 as no bearer, and the same variants are 404 on an UNCLAIMED host too", async ({ baseURL }) => {
+      // Consistency of the 404 posture across credential and tenancy states. It does NOT prove the path went out
+      // un-normalized (it would pass if it had); that property is the harness self-check above.
       for (const path of DOT_VARIANTS) {
         const wrong = await rawPathGet(baseURL, HOSTS.oneCanonical, path, { authorization: "Bearer wrong" });
         const none = await rawPathGet(baseURL, HOSTS.oneCanonical, path);
@@ -491,7 +538,7 @@ test.describe("the cron pass-through on a custom host (A6)", () => {
 
     test("a dot-segment that climbs OUT of /api/cron is not a cron call: it never reaches a handler, bearer or not", async ({ baseURL }) => {
       // `/api/cron/../auth/csrf` collapses to a platform route, which a custom host answers with the neutral 404.
-      for (const path of ["/api/cron/../auth/csrf", "/api/cron/%2e%2e/auth/csrf", "/api/cron/x/../../auth/session"]) {
+      for (const path of CLIMB_OUT) {
         for (const headers of [{}, bearer]) {
           const res = await rawPathGet(baseURL, HOSTS.oneCanonical, path, headers);
           expect(res.status, `${path} ${JSON.stringify(headers)}`).toBe(404);

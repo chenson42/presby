@@ -27,6 +27,7 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { platformSql, type Sql } from "../support/db";
 import { addDomain, setHold, type WalkState } from "../support/custom-hosts";
 import {
+  ACTION_MS,
   removeDomainsUiFixture,
   retireAllDomains,
   setDomainsRole,
@@ -87,8 +88,7 @@ async function open(page: Page) {
 
 // A domain action is a server-action POST that takes 3-5.3 s on Neon (QA run 1, Increment 1); the default 5 s
 // expect timeout is inside that. Every expectation that waits on the POST (its toast, and the card state it
-// revalidates) gets this upper bound. It is a ceiling, not a delay: a fast run waits no longer.
-const ACTION_MS = 20_000;
+// revalidates) gets the shared `ACTION_MS` upper bound (e2e/support/domains-ui-fixture.ts).
 const toastText = (page: Page) => page.locator("[data-sonner-toast]");
 const card = (page: Page) => page.getByTestId("claim-card").first();
 

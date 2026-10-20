@@ -15,8 +15,11 @@
  */
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { platformSql, type Sql } from "../support/db";
+import { addDomain } from "../support/custom-hosts";
 import {
+  ACTION_MS,
   removeDomainsUiFixture,
+  retireAllDomains,
   setupDomainsUiFixture,
   verifiedContext,
   type DomainsUiFixture,
@@ -45,6 +48,9 @@ test.describe("Hydration - domain claim form (DECISION-159)", () => {
   const domain = `hydrate-${stamp}.invalid`;
 
   test.beforeAll(async ({ browser }) => {
+    // The fixture retries a dropped Neon connection (up to 4 times, with back-off) and then signs in with a real
+    // TOTP challenge; the default 30 s hook timeout is inside that worst case.
+    test.setTimeout(120_000);
     sql = platformSql("hydration/domains-claim-form.spec");
     fx = await setupDomainsUiFixture(sql, { stamp });
     ctx = await verifiedContext(browser, `/o/${fx.slug}/admin/domains`);
@@ -72,7 +78,9 @@ test.describe("Hydration - domain claim form (DECISION-159)", () => {
     await page.getByLabel("Your domain").fill(domain);
     await page.getByRole("radio", { name: "The address without www" }).check();
     await page.getByRole("button", { name: "Start" }).click();
-    await expect(page.getByTestId("claim-card")).toBeVisible();
+    // The claim is a server-action POST that takes 3-5.3 s on Neon (QA run 2, a'): the default 5 s expect timeout
+    // is inside that, so the card, which appears only after the POST revalidates, gets the shared ceiling.
+    await expect(page.getByTestId("claim-card")).toBeVisible({ timeout: ACTION_MS });
 
     const saved = (await sql`
       select hostname, web_role, state from organization_domains
@@ -85,6 +93,10 @@ test.describe("Hydration - domain claim form (DECISION-159)", () => {
   });
 
   test("the Copy and Check now controls are also inert before hydration, and enabled after", async () => {
+    // Independent of the first test (QA run 2, a'): it seeds its OWN claim after retiring whatever the first test left,
+    // so it neither fails nor depends on a claim existing because the first test happened to pass.
+    await retireAllDomains(sql, fx.orgId);
+    await addDomain(sql, { orgId: fx.orgId, hostname: `copy-${stamp}.invalid`, role: "canonical", state: "pending" });
     const page = await ctx.newPage();
     const release = await holdScripts(page);
     await page.goto(`/o/${fx.slug}/admin/domains`, { waitUntil: "domcontentloaded" });

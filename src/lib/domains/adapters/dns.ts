@@ -49,16 +49,28 @@ export type DnsAnswer =
     }
   | { kind: "error"; reason: DnsErrorReason };
 
+export interface DnsQueryOptions {
+  /**
+   * The DoH `cd` flag ("checking disabled"): the resolver answers without
+   * DNSSEC validation. Used for ONE purpose - telling a DNSSEC misconfiguration
+   * (SERVFAIL with validation, an answer without) from an ordinary outage, so
+   * the checklist can say "DNSSEC" instead of "couldn't check". Never used for
+   * the ownership proof.
+   */
+  checkingDisabled?: boolean;
+}
+
 export interface DnsResolver {
   /** A stable label for logs and the fake's per-resolver overrides; never shown to users. */
   readonly id: string;
-  query(name: string, type: DnsType): Promise<DnsAnswer>;
+  query(name: string, type: DnsType, options?: DnsQueryOptions): Promise<DnsAnswer>;
 }
 
 export type DnsObservation =
   | { kind: "present"; records: DnsRecord[] }
   | { kind: "absent"; records: DnsRecord[] }
-  | { kind: "unknown"; records: DnsRecord[] };
+  /** `reasons` is the error of each resolver that did not answer ok. */
+  | { kind: "unknown"; records: DnsRecord[]; reasons: DnsErrorReason[] };
 
 export interface DnsObserver {
   /**
@@ -71,6 +83,7 @@ export interface DnsObserver {
     name: string,
     type: DnsType,
     match?: (record: DnsRecord) => boolean,
+    options?: DnsQueryOptions,
   ): Promise<DnsObservation>;
 }
 
@@ -87,10 +100,11 @@ export class QuorumDnsObserver implements DnsObserver {
     name: string,
     type: DnsType,
     match: (record: DnsRecord) => boolean = () => true,
+    options?: DnsQueryOptions,
   ): Promise<DnsObservation> {
     const answers = await Promise.all(
       this.resolvers.map((resolver) =>
-        resolver.query(name, type).catch((): DnsAnswer => ({ kind: "error", reason: "http_error" })),
+        resolver.query(name, type, options).catch((): DnsAnswer => ({ kind: "error", reason: "http_error" })),
       ),
     );
     const ok = answers.filter(
@@ -99,7 +113,8 @@ export class QuorumDnsObserver implements DnsObserver {
     const records = ok.flatMap((a) => a.records);
     if (records.some(match)) return { kind: "present", records };
     if (ok.length === answers.length) return { kind: "absent", records };
-    return { kind: "unknown", records };
+    const reasons = answers.flatMap((a) => (a.kind === "error" ? [a.reason] : []));
+    return { kind: "unknown", records, reasons };
   }
 }
 
@@ -215,9 +230,9 @@ export class DohResolver implements DnsResolver {
     private readonly timeoutMs = 4000,
   ) {}
 
-  async query(name: string, type: DnsType): Promise<DnsAnswer> {
+  async query(name: string, type: DnsType, options: DnsQueryOptions = {}): Promise<DnsAnswer> {
     if (!isQueryableName(name)) return { kind: "error", reason: "malformed" };
-    const url = `${this.endpoint}?name=${encodeURIComponent(name)}&type=${type}`;
+    const url = `${this.endpoint}?name=${encodeURIComponent(name)}&type=${type}${options.checkingDisabled ? "&cd=1" : ""}`;
 
     let response: Response;
     try {

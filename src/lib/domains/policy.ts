@@ -55,6 +55,21 @@ export const DOMAIN_POLICY = {
   checkNowPerOrg: { max: 30, windowSeconds: 60 * 60 },
   /** New claims: 5 per 24 hours per organization. */
   claimsPerOrg: { max: 5, windowSeconds: 24 * 60 * 60 },
+
+  /** An operator alert for the same row and kind repeats no sooner than this. */
+  operatorAlertRepeatMs: 24 * HOUR,
+  /** An attach or detach that has failed continuously this long escalates to the operator. */
+  providerFailingAlertMs: 24 * HOUR,
+  /** The "records still point at us" reminder for a parked domain repeats no sooner than this. */
+  parkedReminderMs: 7 * DAY,
+
+  /**
+   * The cron sweep (T11). A row is leased by pushing its `next_check_at` out
+   * `leaseMs` at pick time, so a second sweep (or a retried invocation) cannot
+   * take it; if the sweep dies mid-row the lease simply expires and the row is
+   * due again. The default batch is what one 60 second invocation can chew.
+   */
+  sweep: { leaseMs: 10 * MINUTE, defaultLimit: 50, maxLimit: 200, concurrency: 5 },
 } as const;
 
 /**

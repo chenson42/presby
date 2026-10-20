@@ -26,7 +26,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-19 |
 | 3 — Technical design | tech-lead | Complete (architect addendum A1–A6 folded 2026-10-19) | Design complete; implementers named; T1–T7 confirmed by the architect; Batch 1a-i ready for database-admin | 2026-10-19 |
-| 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); **Batch 1a-ii complete** (full-stack-developer; `src/lib/domains/` service, DNS adapter, tenant and platform actions, catalog/tile/bundle edits; typecheck, lint, `npm run check`, build green; test-rls-47 still 114/114); 1b next | — | 2026-10-19 |
+| 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); **Batch 1a-ii complete** (full-stack-developer; `src/lib/domains/` service, DNS adapter, tenant and platform actions, catalog/tile/bundle edits; typecheck, lint, `npm run check`, build green; test-rls-47 still 114/114); **Batch 1b complete** (full-stack-developer; Vercel adapter + fake, probe client, `/api/cron/domains` sweep, the full `observeAndAdvance` lifecycle, platform hold / force-release / check, reattach script; typecheck, lint, `npm run check`, unit, DB-backed suites, test-rls-47 114/114, build green); 1c next | — | 2026-10-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1629,6 +1629,159 @@ None are new from this batch beyond 1a-i's list. For the drafts:
 **Next: full-stack-developer, Batch 1b** (Vercel adapter + fake; full `observeAndAdvance`; `/api/cron/domains` + `vercel.json`; the platform service functions and actions for check / pause / resume / force-release; `scripts/domains/reattach.ts`). QA (Phase 5) runs after 1d; it should read `service.db.test.ts` as the R8 evidence.
 
 **Nothing to test in a browser yet.** There is no page or form in this batch (1d). If `scripts/domains/seed-dev-domains.sql` has been applied to the branch, Alder Creek's admin hub now shows a "Website domain" tile that links to `/o/alder-creek/admin/domains`, which 404s until 1d. The actions can be exercised by the DB tests only.
+
+---
+
+## Batch 1b — Vercel adapter, cron and lifecycle (full-stack-developer)
+
+*2026-10-19, full-stack-developer. Worktree `presby-domains`, branch `pipeline/custom-domains` (HEAD = the 1a-ii commit), Neon branch `pipeline-custom-domains` (endpoint `ep-dry-tree-axyn61wx`; all four URLs in `.env.local` checked before any write). Nothing committed. No Rule-16 shared file edited (`src/lib/db/domain/index.ts`, the journal, `scripts/test-rls.sql`, `scripts/seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md` are all untouched). **No real Vercel, Resend or public-DNS call was made**: every test uses the fakes or a stubbed `fetch` with hand-written response bodies; the cron walk ran a dev server on port 3111 with `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake` and no `RESEND_API_KEY` (the mail layer logged instead of sending).*
+
+### Files Created
+
+Source (`src/lib/domains/` unless noted):
+
+- `adapters/hosting.ts`: the `HostingProvider` interface (`addDomain`, `getDomain`, `verifyDomain`, `getConfig`, `removeDomain`), the closed result unions, and the two stand-ins `UnconfiguredHosting` (every call "unavailable") and `MisconfiguredHosting` (every call `config_error`). Types and trivial classes only; no `server-only`, so the reattach script can use it.
+- `adapters/vercel.ts`: `VercelHosting`, REST over an injected `fetch`, 8 s timeout, `redirect: "error"`, host validated before it enters a path, `teamId` when configured. Status classes and message patterns per the error table in its header. No provider text, no token, no logging.
+- `adapters/probe.ts`: `HttpsProbe` (the sweeper's side of the live-ness probe) and the `ProbeClient` / `ProbeOutcome` (`ack | negative | unknown`) types.
+- `adapters/cloudflare-ranges.ts`: Cloudflare's published edge ranges (for the "orange cloud" diagnosis) and the non-public-address predicate for the probe's SSRF pre-check.
+- `probe.ts`: the HMAC handshake, `makeProbe` / `answerProbe` / `ackMatches`, `node:crypto` only (proxy-safe). See Deviation 2.
+- `debounce.ts`: PURE streak arithmetic (`stepProofStreak`, `stepProbeStreak`).
+- `reattach.ts`: the bulk re-attach logic (unit-tested); `scripts/domains/reattach.ts` is its command-line wrapper.
+- `src/app/api/cron/domains/route.ts`: `GET /api/cron/domains`.
+
+Tests: `probe.test.ts` (12), `debounce.test.ts` (19), `dns-checks.test.ts` (30), `reattach.test.ts` (7), `adapters/vercel.test.ts` (37), `adapters/probe.test.ts` (16), `adapters/cloudflare-ranges.test.ts` (36), `adapters/index.test.ts` (10), `adapters/fake.test.ts` (7), `src/app/api/cron/domains/route.test.ts` (10), and the DB-backed `sweep.db.test.ts` (71).
+
+### Files Modified
+
+- `service.ts`: the bulk of the batch (about +1,400 lines; it is now 2,300). `checkClaim` became a thin wrapper over the new `observeAndAdvance`; added `sweepDueDomains`, `leaseDueDomains`, the per-state apply functions, `ensureCanonical`, and the platform operations `checkDomainPlatform`, `setDomainHold`, `forceReleaseDomain`. A4 (only `service.ts` writes the table) is why it is one file; see "What 1c/1d must know" for the split I would make if the scan were relaxed.
+- `adapters/index.ts`: `getAdapters(env, overrides)` now returns `{ dns, hosting, probe }`; `resetAdaptersForTests()`.
+- `adapters/fake.ts`: `FakeHosting`, `FakeProbe`, the `hosting` and `probe` sections of the state file, and `breakDnssec`.
+- `adapters/dns.ts`: `DnsQueryOptions.checkingDisabled` (DoH `cd=1`) and an `unknown` observation now carries `reasons`.
+- `dns-checks.ts`: `checkRouting`, `checkCaa`, `parseCaaData`, `lookupNsFingerprint`, `GENERIC_HOSTING_TARGETS`.
+- `checklist.ts`: each row now carries its OWN routing result and the checklist merges the group; a `provider` record kind for the provider's challenge; `apex` decides A versus CNAME. Plus new `DomainObservation` fields.
+- `notify.ts`: events `proof_missing`, `records_still_pointing`, `ns_changed`; operator alerts (`collectOperatorContext`, `buildOperatorAlert`, `sendOperatorAlert`).
+- `policy.ts`: `operatorAlertRepeatMs`, `providerFailingAlertMs`, `parkedReminderMs`, `sweep`.
+- `vercel.json`: `{ "path": "/api/cron/domains", "schedule": "*/5 * * * *" }`.
+- `src/app/(admin)/admin/organizations/[id]/domains-actions.ts`: `checkDomainPlatformAction`, `setDomainHoldAction`, `forceReleaseDomainAction` (no UI).
+- Tests extended: `adapters/dns.test.ts` (+3), `notify.test.ts` (+4), `checklist.test.ts` (+7), `policy.test.ts` (+2), `domains-actions.test.ts` (+29). `service.db.test.ts`: one test retired (below).
+
+### Contracts
+
+**Provider selection** (`DOMAINS_PROVIDER`, default unconfigured). `vercel` is honoured only when `VERCEL_ENV` is unset or `production` **and `NODE_ENV` is not `test`**; it needs `VERCEL_API_TOKEN` and `VERCEL_PROJECT_ID` (`VERCEL_TEAM_ID` optional), and a missing token or project is a **config error the operator is alerted to**, not silent "unconfigured". `fake` only outside production. Anything else is unconfigured.
+
+**Unconfigured honesty.** Every hosting call answers `retryable: unavailable`. The row therefore sits in `attach_pending` with `last_check_class = provider_unavailable` (the checklist's "Connecting is temporarily unavailable. Your DNS changes are safe to make"), the records to publish are already shown (the generic targets, flagged `source: "generic"`), and the backoff is 1, 2, 5, 15, 60 minutes. Tested through the real default adapter selection.
+
+**`observeAndAdvance(actor, orgId, claimName, { forced, deps?, rowIds? })`** is the one check routine (cron, a church's "Check now", the platform's "Check now"). `checkClaim` is kept as an alias so the actions are unchanged. Per pass: read and gate; network with no transaction held; re-read `FOR UPDATE`, drop any row whose state moved, apply. Result `CheckOutcome` is now `verified | recovered | expired | held_elsewhere | attached | attach_waiting | live | live_lost | lapsed | release_requested | released | removed | unchanged | deferred`.
+
+| State | What a check does |
+|---|---|
+| `pending` | unchanged from 1a-ii |
+| `verified` (web) | proof `present` -> commit `attach_start`; a **second pass in the same call** then makes the provider call. Not present: debounce streak only |
+| `attach_pending` | proof `present` -> `addDomain` (+ `getConfig`, + `getDomain` to confirm) -> `attach_ok`, or a classified failure with backoff. Not present: **no provider call at all** |
+| `attached` | proof present -> `getDomain` (re-add if the provider forgot it; `verifyDomain` if unverified), `getConfig`, routing (CAA/DNSSEC diagnosed), probe. `probe = ack` -> `live_ok`. Otherwise stays "securing" |
+| `live` | same reads, no CAA/DNSSEC. Probe streak -> `live_lost` (2 scheduled negatives, 1 if forced). Proof streak -> `proof_lost` |
+| `lapsed` | proof back -> `proof_ok` (recovered); `grace_ends_at` passed -> `grace_elapsed`; else watch |
+| `parked` | grace passed -> `grace_elapsed`; else a weekly "records still point at us" email while DNS still points at the provider |
+| `release_pending` | `removeDomain` (a 404 is success) -> `detach_ok`; failure -> backoff 5 min, 15 min, 1 h, 6 h |
+
+The streak rules are pure (`debounce.ts`): `unknown` neither counts nor resets, a positive resets, a lapse needs 6 consecutive definitive misses spanning at least 10 h on the application clock, and a first miss is emailed once per episode.
+
+**The probe.** The sweeper sends `GET https://<host>/` with `x-presby-probe: <32-hex nonce>.<mac>`, `redirect: "manual"`, no body read. `ack` = the response carries `x-presby-probe-ack` equal to `HMAC(key, "ack\n<host>\n<nonce>")`; `negative` = an HTTP answer without it, or a name that resolves to nothing / to a non-public address (no request is made); `unknown` = timeout, connection or TLS failure, resolver error, no `AUTH_SECRET`. Only `negative` counts toward `live_lost`.
+
+**Cron** `GET /api/cron/domains`: 503 without `CRON_SECRET`, 401 on a wrong bearer (constant-time), `?limit=` 1..200 (default 50), 50 s budget, `maxDuration = 60`. Counts only in the body and the log, plus one host-class line (`platform | custom | invalid`) per invocation for the T6 acceptance observation.
+
+**`sweepDueDomains({ limit?, concurrency?, deadlineMs?, organizationIds?, deps? })`** leases with one statement (`update ... where id in (select ... for update skip locked)`, `next_check_at = now() + 10 min`; a non-terminal row with a null `next_check_at` counts as due), groups by claim, runs each group as `{ kind: "machine", trigger: "cron" }`, bounded concurrency 5. `organizationIds` is the test/per-org scope.
+
+**Platform operations** (platform actor only, `getPlatformDb()`, per row): `setDomainHold(actor, id, "paused" | "disputed" | null, reason)` (reason 10-500, owner-only columns, `domain.hold_set` / `domain.hold_cleared`, holders told), `forceReleaseDomain(actor, id, { reason, cause? })` (reason 10-500, `force_released` or `evicted`, demotes a canonical role first, holders told), `checkDomainPlatform(actor, id)`. The three actions in `domains-actions.ts` gate on `FEATURES.ADMIN_ORGANIZATIONS` and validate with zod.
+
+**Operator alerts** (account-class `domain_notification` to the platform admins only): `provider_config_error`, `provider_rejected`, `provider_blocked`, `attach_failing` / `release_failing` (24 h of continuous failure). Deduped per row and kind, 24 h, in `notify_state.alerted`.
+
+### Audit events
+
+Every state change is `transitionDomain()`: the new state plus **exactly one** `audit_events` row in the same transaction; the 30-row edge table in `service.db.test.ts` still proves that per edge. 1b drives these edges through the sweep, and `sweep.db.test.ts` asserts the trail per row with the machine actor (null user, `metadata.trigger = "cron"`): `proof_ok` (verified, recovered), `attach_start` (`domain.attach_requested`), `attach_ok` (`domain.attached`), `live_ok` (`domain.live`), `live_lost` (`domain.live_lost`), `proof_lost` from `verified`, `attach_pending`, `attached` and `live` (`domain.lapsed`), `grace_elapsed` from `lapsed` and from `parked` (`domain.release_requested`), `detach_ok` (`domain.released`), `remove` with cause `org_closed` from `live` and `pending` (`domain.parked`, `domain.released`), and `force_release` from `pending`, `live` and a lapsed mail row (platform actor, the reason on the row and the audit metadata).
+
+Two writes are not edges and carry their own row, in their own transaction: `domain.hold_set` / `domain.hold_cleared` (`setDomainHold`; metadata `hold`, `previousHold`, `reason`, `state`) and `domain.canonical_changed` with `metadata.reason = "no_canonical"` (canonical promotion). Observation-only checks write no audit row, by design. The proof token appears in no audit row, email or log line (asserted across a full lapse and release).
+
+### Commands and results
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` (`--max-warnings=0`) | exit 0 |
+| `npm run check` (seven tripwires) | all pass. `check:secrets` scans git-tracked files only, so I also ran `checkSecretsPii()` over all 37 new and modified files: 0 findings (three test-fixture secret constants carry `// leak-ok:`) |
+| `npm run test` (no DB env) | 434 files passed, 62 skipped; **6,481 passed**, 1,856 skipped (1a-ii: 424 files / 6,252). New this batch: 184 tests in 10 new files plus 45 added to existing ones (dns +3, notify +4, checklist +7, policy +2, platform actions +29) |
+| DB-backed, serial, `npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/domains src/lib/db/domain/domains` | **720/720 tests passed**, 22 files, 1,138 s: `sweep.db.test.ts` 71, `service.db.test.ts` 96, `toggles.db.test.ts` 8, `domains.db.test.ts` 35, `domains.schema.test.ts` 16, plus the pure files. The same command's file-level result was red on the last attempt only because the fixture's teardown hit a dropped Neon connection after the 720th test passed; the teardown is now retried (3 attempts, idempotent) |
+| `sweep.db.test.ts` stability | the first full runs (70-71 tests) failed 7, then 3, then 2 tests. All but the Neon drops were errors in MY test premises, fixed: a single down resolver is `present` when the other still shows the record; the claim's own "domain added" notice counts as an email; the proof token is a column of the row; the fixture's apex had no SOA; the provider calls made while arranging the state were still in the log; and one unit test assumed `AUTH_SECRET` is unset, which `.env.local` sets. The rest were Neon "Connection terminated unexpectedly" drops (a different test each time). The concurrent-sweeps test was re-run in isolation 4 times, green every time; the `skip locked` test passed in every full run |
+| Retired / changed 1a-ii assertions | one test ("states past the proof stage are deferred to Batch 1b") retired; `service.db.test.ts` is otherwise untouched and passes 96/96 |
+| `psql $APP_DATABASE_URL -f scripts/domains/test-rls-47.sql` (`rolbypassrls = f`, as `presby_app`) | exit 0, **114/114** passes, 0 FAIL |
+| `npm run build` | exit 0; `/api/cron/domains` is in the route table |
+| **Cron walk on a dev server** (port 3111, `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake`, `DOMAINS_FAKE_STATE_FILE`, `CRON_SECRET`, empty `RESEND_API_KEY`) | two walks over HTTP against the real route and the Neon branch, one fixture claim each in Alder Creek: **`pending -> verified -> attached -> live -> lapsed -> release_pending -> released`** and **`... live -> parked -> (grace running, unchanged) -> release_pending -> released`**. Each tick was one `GET /api/cron/domains` with the bearer; a missing or wrong bearer got 401. Audit trails were exactly one row per edge with no human actor on any cron edge, and no token anywhere. The server logged `[cron/domains] {"hostClass":"platform",...}` with counts only, and every notification went to the mail layer's log-instead-of-send path (no Resend call). To drive the lapse in one run I arranged the debounce's prior state with SQL (five earlier misses, the first 11 hours ago) and backdated the grace through the sanctioned trigger seam; the real debounce is proven in the DB tests. The parked walk wrote `live -> parked` as owner SQL (what `removeClaim` writes); the real `removeClaim` path is in `sweep.db.test.ts` |
+
+**Failing-first / mutation evidence.** This batch is new behaviour written test-alongside-code, so apart from one genuine fail-first (below) I mutation-checked: each mutation was applied, the named test run, the file restored. **All caught** except one that was dead code (fixed, see Deviation 12).
+
+| Mutation | Caught by |
+|---|---|
+| vercel: drop deployment-not-ready; drop 403 no-access; DELETE 404 not ok; config 403 not degraded; already-on-project not idempotent; retry-after ignored | `adapters/vercel.test.ts` (each by name) |
+| debounce: unknown counts; no 10 h span; a positive does not reset; forced probe needs 2; unknown probe counts | `debounce.test.ts` |
+| dns-checks: "missing" without a definitive answer; leftover AAAA ignored; proxied not detected; CAA allows any issuer; DNSSEC arm removed | `dns-checks.test.ts` |
+| cloudflare: wrong mask; probe: MAC not host-bound, ack not nonce-bound; probe client: no SSRF pre-check, follows redirects, error as negative | `cloudflare-ranges.test.ts`, `probe.test.ts`, `adapters/probe.test.ts` |
+| index: vercel honoured in preview/test; missing token silently unconfigured; fake honoured in production | `adapters/index.test.ts` |
+| route: bearer unchecked; `limit` unclamped; reattach: dry run applies; drops `parked` | `route.test.ts`, `reattach.test.ts` |
+| service: provider call without proof (D1); `ensureCanonical` disabled (D2); lease without `skip locked` (D3); operator alert not deduped (D4); proxied probe gate (D5, first dead, then fixed and caught); `org_closed` ignored (D6); retry-after ignored (D7); lapsed notice dropped (D8); first-miss notice dropped (D11); parked reminder not deduped (D12); non-leased group-mates processed (D13); held host promoted (D14); force-release keeps canonical role (D15); hold no-op re-audited (D16) | `sweep.db.test.ts`, by name |
+
+The one fail-first: the first full `sweep.db.test.ts` run failed 7 of 70 before I corrected them, including a real finding - the routing check for `attach_pending` judged a church's correct custom A record against the generic fallback before the provider's recommendation had been read ("wrong value" for a right answer). The fix (read the recommendation, then judge) is `gatherEvidence`'s `attach_pending` branch; the test is "each row stores ITS OWN routing result".
+
+**Timeouts raised, and why.** `sweep.db.test.ts` and `service.db.test.ts` each set `vi.setConfig({ testTimeout: 90-120 s, hookTimeout: 120 s })` for their own file only; they make hundreds of round trips to a remote Neon branch (`sweep.db.test.ts` takes about 13 minutes, `service.db.test.ts` about 6). `org-features.test.ts` and `calendar.test.ts` (not touched here) still need `--testTimeout=180000`, as 1a-i and 1a-ii recorded.
+
+### Deviations
+
+1. **Canonical promotion ruling (1a-ii deviation 6), for tech-lead.** *Decision:* `ensureCanonical` runs after every group check by any actor. If the organization has **no non-terminal web row with `web_role = 'canonical'` at all**, it promotes the first host of the group just checked that is `live` and not held (`www.` preferred, then alphabetical), writing one `domain.canonical_changed` row (`reason: "no_canonical"`, `fromHostname: null`, machine actor and trigger). *It never replaces a canonical that exists but is not serving* (lapsed, attached, held, release-pending): that would be a surprise redirect, and the predicate already darkens the aliases rather than redirect them nowhere (Phase 3 "Canonical safety", fail-soft). *Why this is consistent with Phase 3:* the absence of any canonical is exactly the state a first-ever claim starts from, and that claim's host already becomes canonical and redirects the slug URL with no admin step beyond DNS; promoting on `live` is the same event. `removeClaim`'s "needs a replacement when live aliases would be stranded" and `changeCanonical` (needs a live target, demote-then-promote) are unchanged. `forceReleaseDomain` hands the canonical role back (alias) first, as a removal already does, so the org is canonical-less and a live alias can take over. A rival promotion from another group loses to `organization_domains_one_canonical_uq` and is skipped; the candidate set is limited to the group already locked, so two groups of one org never take each other's locks (deadlock avoided). *Residual:* a canonical-less org whose only live alias belongs to a group the sweep has not yet checked waits for that group's next check (at most 2 h for `live`). Proven by three DB tests (promotion + idempotence, no replacement of a lapsed canonical, no promotion of a held host) and the `D2`/`D14` mutations.
+2. **`probe.ts` carries both halves of the handshake**, including the proxy-side `answerProbe`, although wiring it into `src/proxy.ts` is Batch 1c. They are specified together (T1) and are tested against each other; the file stays `node:crypto`-only so 1c can import it (the `check:proxy-imports` allow-list in 1c is `host.ts`, `probe.ts`, `cron-passthrough.ts`).
+3. **Generic Vercel targets are accepted as correct, and used as the DISPLAY fallback** when the provider's recommendation has never been readable (a project-scoped token refused on `/v6/…/config`). G12 says targets are never hardcoded; this is the documented degraded mode (Vercel's long-standing generic values keep working), the provider's own recommendation always wins when readable, and the observation records `targets.source = "generic" | "provider"` so 1d can say which. A later denial keeps the cached provider values rather than regressing to generic (tested).
+4. **The nameserver fingerprint is recorded at the first check that carries the proof for a `verified` row**, not at the `pending -> verified` edge. This keeps the pending path at one DNS lookup per claim group (an existing 1a-ii assertion). Later differences notify once and re-baseline; they never enforce.
+5. **The Vercel error `code` strings and message wording are hand-written, not recorded.** Classification leans on the HTTP status and, only where one status carries two meanings (400, 403, 404), on a message pattern. `adapters/vercel.test.ts` pins the table; the real wording is to be pinned in the acceptance pass (unchanged from Phase 3).
+6. **The Cloudflare ranges were written from the published list, not re-fetched** (no public-network call is allowed in this pipeline). A stale list can only miss a new range, never accuse a correct record. Flagged in the file header for the monthly dependency review and the acceptance pass.
+7. **DNSSEC detection is "SERVFAIL when validated, a clean answer with checking disabled"** (DoH `cd=1`). The Phase 3 "AD without a matching DS" arm is not implemented (it needs a DS walk). Named residual.
+8. **Operator-alert dedupe is per row and kind in `notify_state.alerted` (24 h), not `checkRateLimit`**, because `checkRateLimit` writes a `RATE_LIMIT_BLOCKED` audit row on every blocked call: a failing host would add one per tick.
+9. **`getAdapters(env, overrides)`**: the probe is built on whichever DNS observer is in force, so a test that injects a fake resolver can never fall back to real DoH. `vercel` is never honoured under `NODE_ENV=test`, so no test reaches the real API however `.env.local` reads.
+10. **A "Check now" click is two clicks from `pending` to `attached`** (`pending -> verified`, then `verified -> attach_pending -> attached`); the sweep does both within one tick. I kept the 1a-ii behaviour (and its tests) rather than chain them in one call.
+11. **The routing check also runs for `attach_pending`** (judged against the provider's recommendation once readable), so the church sees "Correct / Wrong value / Missing" while a host waits to attach. Not in the Phase 3 table, but it is the feedback loop when the provider is slow.
+12. **Operator Q7 (a Cloudflare-proxied record may not go live) is enforced by not probing a host whose records definitively point elsewhere**, which is what a proxied record is. My first draft also had an explicit `hint !== "proxied"` gate; the mutation run showed it was unreachable dead code, so I removed it and made the real gate (the probe skip) the tested one.
+13. **The retired 1a-ii test** "states past the proof stage are deferred to Batch 1b: no DNS query, no write" was true only for the previous batch; `sweep.db.test.ts` replaces it for every state past `pending`.
+14. **`sweep.db.test.ts` runs with `{ retry: 1 }`** (and `retry: 0` on the two race tests: concurrent sweeps and the `skip locked` row). The Neon websocket pool intermittently drops a connection ("Connection terminated unexpectedly", recorded by 1a-i, 1a-ii and the giving pipeline); it failed a different test in each of my full runs and never the same one twice. Every test builds its own organizations and hosts, so the retry starts clean, and a real defect fails both attempts. Its timeouts are also raised (120 s) for the same reason as `service.db.test.ts`.
+15. **Mail rows get the proof-persistence check** (a `verified` mail row can lapse) but never attach; mail claims do not exist until 2b, so nothing exercises it beyond the force-release of a lapsed mail row.
+16. **Tooling debris I left and cleaned on the pipeline branch**: my dev-server walk wrote two `released` rows into Alder Creek, which made `test-rls-47` fail at 47b ("expected 1, got 3"); I removed them with the delete guard disabled inside one transaction (re-enabled and verified `O`). A crashed full run had also left three fixture organizations; removed with the same teardown the fixture uses. Both are branch-only; the production invariant (never hard-delete) is untouched.
+
+### What 1c must know
+
+- **`vercel.json` crons are now four**: `/api/cron/email-queue`, `/api/cron/maintenance`, `/api/cron/giving` (from PR #31) and `/api/cron/domains`. Phase 3's A6 allow-list text lists three; `CRON_PATHS` must be the set-equal of the file (the pin test says so), so it must include `giving` and `domains` too.
+- **PR #31 is already an ancestor of this branch** (`112d91f`); the "wait for #31, rebase" step is moot. 1c can start.
+- **The proxy's probe responder**: for a non-platform host, `answerProbe(host, req.headers.get(PROBE_REQUEST_HEADER))`; when it returns a string, answer `204` with `x-presby-probe-ack: <ack>` and **no `Set-Cookie`**, before the cron pass-through and before the rewrite. Our probe is `GET /` with `redirect: "manual"`, so any path and method must be answered, and a `next.config.ts` redirect or header rule that fires first on `/` would turn a probe into a 3xx (a `negative`).
+- **`live` is the only serving state** and the probe is its definition; until 1c ships the responder, nothing ever acks, so no real host can become `live` (and with `DOMAINS_PROVIDER` unset nothing attaches anyway).
+- **Canonical roles can be absent** (Deviation 1): `presby_org_serving_canonical_host` already returns null then, and the sweep repairs it.
+- **Host class log**: the cron logs `hostClass` (`platform | custom | invalid`) via `requestHost` + `isPlatformHost`; the acceptance pass reads it for two scheduled runs of each cron.
+- **Hostnames in paths**: `adapters/vercel.ts` and `adapters/probe.ts` both refuse a host that is not plain lowercase-ASCII hostname shape; a host with a Unicode label is stored as punycode already.
+- `src/lib/domains/probe.ts` and `reattach.ts` must stay out of `next.config.ts` and Client Components (the module rule from Phase 3 section 1).
+
+### What 1d must know
+
+- The checklist reads each row's own observation: `routing.records[0]` for the row's host (`status`, `hint`, `apex`), `targets` (`cname`, `ipv4`, `source`), `probe.status`, `attempts`, `failingSince`, `proofMissSince`. `providerChallenge` is rendered as a `provider` record (`keep: true`). Banners use `last_check_class`; `provider_unavailable` and `config_error` both read "Connecting is temporarily unavailable. Your DNS changes are safe to make."
+- `CheckOutcome` values for "Check now" copy are listed under Contracts; `attach_waiting` means "committed, provider not done yet".
+- The platform page can call `checkDomainPlatformAction`, `setDomainHoldAction(domainId, "paused" | "disputed" | null, reason)`, `forceReleaseDomainAction(domainId, { reason, cause? })`. They are per row; a group-wide pause is a loop. Reason is 10-500 characters, and the codes `invalid_reason | terminal | already_final | already_releasing` need copy.
+- A paused host is still checked: the hold darkens serving, not watching.
+
+### Integration edits for the orchestrator (Rule 16 and neighbours)
+
+1. `docs/decisions.md`: amend **DECISION-179**'s module map (`probe.ts`, `debounce.ts`, `reattach.ts`, `adapters/{hosting,probe,cloudflare-ranges}.ts`); record **Deviation 1** as the canonical-promotion ruling once tech-lead confirms; amend **DECISION-176**'s A6 allow-list to the four paths above.
+2. `docs/TODO.md` (add): re-fetch and review the Cloudflare ranges (monthly dependency review); pin the Vercel `error.code` strings from recorded responses (acceptance pass); DNSSEC "AD without DS" detection; `service.ts` is 2,300 lines because of A4 - consider relaxing the scan to a `src/lib/domains/service/` directory; consider a cheaper path than a full group re-check for the canonical repair; the probe's DNS-rebinding window (the pre-check and `fetch` resolve separately); `sweep.db.test.ts` takes about 10 minutes (split if CI minutes matter); Neon connection-drop flake is now the fourth pipeline to record it.
+3. `docs/deployment.md`: `DOMAINS_PROVIDER` semantics (above); `VERCEL_API_TOKEN` / `VERCEL_PROJECT_ID` / `VERCEL_TEAM_ID` are read only when `DOMAINS_PROVIDER=vercel` in Production; a missing token or project is a config error alerting the operator, not "unconfigured"; the cron's host-class log line; and the **reattach runbook paragraph**: *"When the platform moves to a different Vercel project, set `VERCEL_API_TOKEN` (scoped to the new project), `VERCEL_PROJECT_ID` and `VERCEL_TEAM_ID` for it, then run `npx dotenv -e .env.local -- tsx scripts/domains/reattach.ts` (a dry run that lists the hosts) and `... --apply`. It re-adds every attached, live, lapsed and parked host idempotently, writes nothing to the database, and stops if the provider refuses the credentials. Expect a short TLS gap per host; the sweep's probe re-confirms each within a few ticks."*
+4. No journal, `test-rls.sql`, `seed-dev.sql` or `index.ts` change from this batch.
+
+### Handoff
+
+**Next: full-stack-developer, Batch 1c** (proxy first branch with the probe responder and the A6 cron pass-through, `check:proxy-imports`, `next.config.ts` host split, `resolveSite` / `SiteUrls`, redirects, `robots.txt`, `not-found.tsx`, `donorOrigin`, reserved paths, the Playwright `custom-hosts` project). The branch already contains PR #31.
+
+**Nothing to test in a browser yet** (no page or form in this batch). What QA can run now: the unit suite, `sweep.db.test.ts` and `service.db.test.ts` serially, `test-rls-47`, and the cron walk (start a dev server on a free port with `DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=<file> DOMAINS_ALLOW_RESERVED_TLDS=1 CRON_SECRET=<x>` and an empty `RESEND_API_KEY`; the state file's `dns.zone`, `hosting` and `probe` sections drive it).
 
 ---
 

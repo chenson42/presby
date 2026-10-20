@@ -42,7 +42,13 @@ export type DomainNotificationEvent =
   | "released"
   | "force_released"
   | "hold_set"
-  | "hold_cleared";
+  | "hold_cleared"
+  /** The first definitive miss of the ownership record in a streak (G9: emailed once per episode). */
+  | "proof_missing"
+  /** A removed (parked) domain's DNS still points at our hosting: the weekly offboarding nudge. */
+  | "records_still_pointing"
+  /** The domain's nameservers changed since it was first verified (notify-only tripwire). */
+  | "ns_changed";
 
 export interface NotificationContext {
   organizationId: string;
@@ -186,6 +192,18 @@ const EVENT_COPY: Record<DomainNotificationEvent, { subject: string; line: strin
     subject: "A domain was resumed",
     line: "PresbyPortal support resumed a paused website domain.",
   },
+  proof_missing: {
+    subject: "We can't find a domain's ownership record",
+    line: "We could not find the ownership record for a website domain on our latest check. This may be temporary. If the record was removed on purpose, ignore this; otherwise please restore it so your site stays connected.",
+  },
+  records_still_pointing: {
+    subject: "A removed domain still points at PresbyPortal",
+    line: "A website domain was removed from your organization, but its DNS records still point at PresbyPortal hosting. Please delete those records from your DNS before the domain is released.",
+  },
+  ns_changed: {
+    subject: "A domain's nameservers changed",
+    line: "The nameservers for a website domain are different from when it was first verified. If you moved your DNS on purpose, no action is needed; if not, please check your domain registrar.",
+  },
 };
 
 const ACTOR_COPY: Record<DomainNotification["actorKind"], string> = {
@@ -260,6 +278,130 @@ export async function sendDomainNotification(
       console.error(
         `[domains-notify] enqueue failed (organization ${ctx.organizationId}, event ${n.event})`,
       );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Operator alerts
+// ---------------------------------------------------------------------------
+
+/**
+ * Things only the operator can fix and a church cannot even see: the hosting
+ * provider rejecting OUR credentials, a request it refuses for a reason we do
+ * not recognise, a name that lives in another hosting account (the church is
+ * told to contact support; this is how support finds out), and an attach or a
+ * detach that has been failing for a day.
+ */
+export type OperatorAlertKind =
+  | "provider_config_error"
+  | "provider_rejected"
+  | "provider_blocked"
+  | "attach_failing"
+  | "release_failing";
+
+const OPERATOR_COPY: Record<OperatorAlertKind, { subject: string; line: string }> = {
+  provider_config_error: {
+    subject: "Domains: the hosting provider refused our credentials",
+    line: "The hosting provider rejected the platform's API credentials or project settings (token, project or billing). Domains cannot connect or disconnect until this is fixed. Check the hosting API token, project id and account.",
+  },
+  provider_rejected: {
+    subject: "Domains: the hosting provider refused a request",
+    line: "The hosting provider refused a domain request for a reason the platform does not recognise. The domain is waiting and will keep retrying; it may need a person to look at it.",
+  },
+  provider_blocked: {
+    subject: "Domains: a domain is held by another hosting account",
+    line: "A church's domain could not be connected because the hosting provider says it belongs to another account or project. The church was told to contact support.",
+  },
+  attach_failing: {
+    subject: "Domains: connecting a domain has been failing for a day",
+    line: "A domain has been waiting to connect for more than 24 hours because the hosting provider keeps failing the request.",
+  },
+  release_failing: {
+    subject: "Domains: releasing a domain has been failing for a day",
+    line: "A domain has been waiting to be released for more than 24 hours because the hosting provider keeps failing the request.",
+  },
+};
+
+/** Active platform admins, collected on the caller's transaction in a savepoint. Never throws; `null` on failure. */
+export async function collectOperatorContext(
+  tx: OrgTx,
+  organizationId: string,
+): Promise<NotificationContext | null> {
+  try {
+    return await tx.transaction(async (sp) => {
+      const org = rowsOf<OrgRow>(
+        await sp.execute(sql`select name, slug from organizations where id = ${organizationId}::uuid`),
+      )[0];
+      if (!org) return null;
+      const admins = rowsOf<RecipientRow>(
+        await sp.execute(sql`select lower(email) as email from users where is_platform_admin and is_active`),
+      );
+      return {
+        organizationId,
+        organizationName: org.name,
+        slug: org.slug,
+        recipients: [...new Set(admins.map((r) => r.email))].sort(),
+      };
+    });
+  } catch {
+    console.error(`[domains-notify] operator lookup failed (organization ${organizationId})`);
+    return null;
+  }
+}
+
+/** Builds an operator alert. Names the organization and host (the operator sees both anyway) and never provider text. */
+export function buildOperatorAlert(
+  ctx: NotificationContext,
+  kind: OperatorAlertKind,
+  hostnames: string[],
+): { subject: string; html: string; text: string } {
+  const copy = OPERATOR_COPY[kind];
+  const origin = platformOrigin();
+  const link = origin ? `${origin}/admin/organizations` : null;
+  const hosts = hostnames.map((h) => `- ${h}`).join("\n");
+  const text = [
+    copy.line,
+    "",
+    `Organization: ${ctx.organizationName}`,
+    "Domain(s):",
+    hosts,
+    link ? `\nPlatform admin: ${link}` : "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  const html = [
+    `<p>${escapeHtml(copy.line)}</p>`,
+    `<p><strong>Organization:</strong> ${escapeHtml(ctx.organizationName)}</p>`,
+    `<ul>${hostnames.map((h) => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`,
+    link ? `<p><a href="${escapeHtml(link)}">Open platform admin &rarr;</a></p>` : "",
+  ].join("\n");
+  return { subject: copy.subject, html, text };
+}
+
+/** Sends an operator alert to the collected platform admins. Never throws. */
+export async function sendOperatorAlert(
+  ctx: NotificationContext | null,
+  kind: OperatorAlertKind,
+  hostnames: string[],
+): Promise<void> {
+  if (ctx === null) return;
+  if (ctx.recipients.length === 0) {
+    console.warn(`[domains-notify] no platform admins to alert (${kind}, organization ${ctx.organizationId})`);
+    return;
+  }
+  const message = buildOperatorAlert(ctx, kind, hostnames);
+  for (const to of ctx.recipients) {
+    try {
+      await enqueueEmail({
+        to,
+        subject: message.subject,
+        html: message.html,
+        text: message.text,
+        templateKey: "domain_notification",
+      });
+    } catch {
+      console.error(`[domains-notify] operator alert enqueue failed (${kind}, organization ${ctx.organizationId})`);
     }
   }
 }

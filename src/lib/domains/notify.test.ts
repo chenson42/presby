@@ -12,10 +12,14 @@ vi.mock("@/lib/email", () => ({ enqueueEmail: mockEnqueue }));
 
 import {
   buildDomainNotification,
+  buildOperatorAlert,
   collectNotificationContext,
+  collectOperatorContext,
   sendDomainNotification,
+  sendOperatorAlert,
   type DomainNotification,
   type NotificationContext,
+  type OperatorAlertKind,
 } from "./notify";
 
 const CTX: NotificationContext = {
@@ -80,6 +84,7 @@ describe("buildDomainNotification", () => {
   it("every event has its own subject, and none mentions a proof token or a provider", () => {
     const events = [
       "claimed", "canonical_changed", "removed", "reconnected", "lapsed", "parked", "released", "force_released", "hold_set", "hold_cleared",
+      "proof_missing", "records_still_pointing", "ns_changed",
     ] as const;
     const subjects = new Set<string>();
     for (const event of events) {
@@ -173,3 +178,85 @@ describe("collectNotificationContext", () => {
   });
 });
 
+
+describe("operator alerts (Batch 1b)", () => {
+  const KINDS: OperatorAlertKind[] = [
+    "provider_config_error",
+    "provider_rejected",
+    "provider_blocked",
+    "attach_failing",
+    "release_failing",
+  ];
+
+  it("every kind has its own subject, names the organization and host, and escapes them", () => {
+    const subjects = new Set<string>();
+    for (const kind of KINDS) {
+      const m = buildOperatorAlert({ ...CTX, organizationName: "<b>Alder</b> & Co" }, kind, ["<i>a</i>.invalid"]);
+      subjects.add(m.subject);
+      expect(m.text).toContain("<i>a</i>.invalid");
+      expect(m.html).not.toContain("<b>Alder</b>");
+      expect(m.html).toContain("&lt;b&gt;Alder&lt;/b&gt;");
+      expect(m.html).not.toContain("<i>a</i>");
+      expect(m.subject + m.html + m.text).not.toMatch(/presby-verify|bearer|authorization/i);
+    }
+    expect(subjects.size).toBe(KINDS.length);
+  });
+
+  it("goes to the platform admins as ACCOUNT-class mail (never a church sender), one message each", async () => {
+    await sendOperatorAlert({ ...CTX, recipients: ["ops-a@example.invalid", "ops-b@example.invalid"] }, "provider_config_error", ["a.invalid"]);
+    expect(mockEnqueue).toHaveBeenCalledTimes(2);
+    for (const c of mockEnqueue.mock.calls.map((x) => x[0] as Record<string, unknown>)) {
+      expect(c.templateKey).toBe("domain_notification");
+      expect(c).not.toHaveProperty("from");
+      expect(c).not.toHaveProperty("replyTo");
+    }
+  });
+
+  it("a null context or no admins is a quiet no-op; an enqueue failure never throws and logs ids only", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await sendOperatorAlert(null, "attach_failing", ["a.invalid"]);
+    await sendOperatorAlert({ ...CTX, recipients: [] }, "attach_failing", ["a.invalid"]);
+    expect(mockEnqueue).not.toHaveBeenCalled();
+    mockEnqueue.mockRejectedValueOnce(new Error("smtp down for ops@example.invalid"));
+    await expect(sendOperatorAlert(CTX, "attach_failing", ["a.invalid"])).resolves.toBeUndefined();
+    expect(err.mock.calls.flat().join(" ")).not.toContain("ops@example.invalid");
+    warn.mockRestore();
+    err.mockRestore();
+  });
+
+  it("collectOperatorContext collects PLATFORM ADMINS ONLY (never the organization's holders), and returns null on failure", async () => {
+    const queries: string[] = [];
+    let call = 0;
+    const tx = {
+      transaction: async (fn: (sp: unknown) => Promise<unknown>) =>
+        fn({
+          execute: async (q: { queryChunks?: unknown[] }) => {
+            queries.push(JSON.stringify(q).toLowerCase());
+            call += 1;
+            return call === 1
+              ? { rows: [{ name: "Alder Creek", slug: "alder-creek" }] }
+              : { rows: [{ email: "b@example.invalid" }, { email: "a@example.invalid" }, { email: "a@example.invalid" }] };
+          },
+        }),
+    } as never;
+    expect(await collectOperatorContext(tx, CTX.organizationId)).toEqual({
+      organizationId: CTX.organizationId,
+      organizationName: "Alder Creek",
+      slug: "alder-creek",
+      recipients: ["a@example.invalid", "b@example.invalid"],
+    });
+    expect(queries.join(" ")).toContain("is_platform_admin");
+    expect(queries.join(" ")).not.toContain("domains.manage");
+
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failing = {
+      transaction: async () => {
+        throw new Error("boom with secrets");
+      },
+    } as never;
+    await expect(collectOperatorContext(failing, CTX.organizationId)).resolves.toBeNull();
+    expect(err.mock.calls.flat().join(" ")).not.toContain("secrets");
+    err.mockRestore();
+  });
+});

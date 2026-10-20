@@ -34,20 +34,40 @@ export type RecordHint =
   | "caa"
   | "dnssec";
 
-/** What the service stores in `organization_domains.observation` (jsonb). Every field optional: a row may never have been checked. */
+/**
+ * What the service stores in `organization_domains.observation` (jsonb). Every
+ * field optional: a row may never have been checked. Each ROW stores its own
+ * view (its own routing result, its own streaks); the checklist merges the
+ * group's rows, so a sweep that checks only the rows that were due never leaves
+ * another row's result stale or missing.
+ */
 export interface DomainObservation {
   checkedAt?: string;
   proof?: { status?: "present" | "absent" | "wrong_value" | "unknown" };
-  /** Batch 1b: Vercel's recommendation, cached so the checklist never needs the provider to render. */
-  targets?: { cname?: string; ipv4?: string[] };
-  /** Batch 1b: per-record routing results. */
+  /**
+   * The provider's recommended DNS targets, cached so the checklist never needs
+   * the provider to render. `source: "generic"` marks the fallback used when
+   * the provider's recommendation has never been readable.
+   */
+  targets?: { cname?: string | null; ipv4?: string[]; source?: "provider" | "generic" };
+  /** This row's routing result (written for its own hostname). */
   routing?: {
     records?: Array<{
       hostname: string;
       status: RecordStatus;
-      hint?: RecordHint;
+      hint?: RecordHint | null;
+      /** The host is a zone apex: instruct A / ALIAS, never CNAME. */
+      apex?: boolean | null;
     }>;
   };
+  /** The last live-ness probe outcome. */
+  probe?: { status?: "ack" | "negative" | "unknown"; at?: string };
+  /** ISO time of the first miss of the current proof streak (debounce.ts). */
+  proofMissSince?: string;
+  /** Consecutive failed provider attempts in the current state (drives the backoff). */
+  attempts?: number;
+  /** ISO time the current run of provider failures began (the 24 hour operator alert). */
+  failingSince?: string;
 }
 
 /** Reads the stored jsonb defensively: anything unexpected is "no observation". */
@@ -71,6 +91,8 @@ export interface ChecklistRow {
   expiresAt: Date;
   graceEndsAt: Date | null;
   observation: unknown;
+  /** Vercel's own verification TXT, when the name lives in another account of theirs. */
+  providerChallenge?: unknown;
 }
 
 export interface ChecklistContext {
@@ -103,7 +125,8 @@ export interface ChecklistBanner {
 }
 
 export interface ChecklistRecord {
-  kind: "proof" | "routing";
+  /** `provider` is the hosting provider's own ownership challenge (a name already in another of its accounts). */
+  kind: "proof" | "routing" | "provider";
   type: "TXT" | "A" | "CNAME";
   /** The DNS name to create the record at. */
   name: string;
@@ -202,16 +225,59 @@ function proofStatus(obs: DomainObservation): RecordStatus {
   }
 }
 
-function routingRecords(rows: ChecklistRow[], obs: DomainObservation): ChecklistRecord[] {
-  const targets = obs.targets;
-  if (!targets || rows[0]?.purpose !== "web") return [];
-  const results = new Map((obs.routing?.records ?? []).map((r) => [r.hostname, r]));
+/** The newest observation among a group's rows: the group shares one proof, but each row is checked on its own schedule. */
+function newestObservation(rows: ChecklistRow[]): DomainObservation {
+  const observations = rows.map((r) => readObservation(r.observation));
+  return (
+    [...observations].sort((a, b) => (b.checkedAt ?? "").localeCompare(a.checkedAt ?? ""))[0] ?? {}
+  );
+}
+
+function providerChallengeRecords(rows: ChecklistRow[]): ChecklistRecord[] {
+  const seen = new Set<string>();
+  const out: ChecklistRecord[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row.providerChallenge)) continue;
+    for (const raw of row.providerChallenge) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const c = raw as { type?: unknown; domain?: unknown; value?: unknown };
+      if (typeof c.domain !== "string" || typeof c.value !== "string") continue;
+      const type = typeof c.type === "string" ? c.type.toUpperCase() : "TXT";
+      const key = `${type} ${c.domain} ${c.value}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        kind: "provider",
+        type: type === "A" || type === "CNAME" ? type : "TXT",
+        name: c.domain,
+        value: c.value,
+        status: "unknown",
+        hint: null,
+        keep: true,
+      });
+    }
+  }
+  return out;
+}
+
+function routingRecords(rows: ChecklistRow[]): ChecklistRecord[] {
+  if (rows[0]?.purpose !== "web") return [];
+  // The recommendation is the same for the whole group; take the newest that has one.
+  const targets = [...rows]
+    .map((r) => readObservation(r.observation))
+    .sort((a, b) => (b.checkedAt ?? "").localeCompare(a.checkedAt ?? ""))
+    .find((o) => o.targets)?.targets;
+  if (!targets) return [];
   const out: ChecklistRecord[] = [];
   for (const row of rows) {
     if (row.state === "pending" || row.state === "verified") continue;
-    const result = results.get(row.hostname);
+    // A row's routing result lives on the row itself.
+    const result = readObservation(row.observation).routing?.records?.find((r) => r.hostname === row.hostname);
     const isWww = row.hostname.startsWith("www.");
-    if (isWww) {
+    // A zone apex cannot hold a CNAME; a subdomain should. The SOA check says
+    // which; until it has run, `www.` is the subdomain and the rest are apexes.
+    const wantsAddress = result?.apex ?? !isWww;
+    if (!wantsAddress) {
       if (!targets.cname) continue;
       out.push({
         kind: "routing",
@@ -263,7 +329,7 @@ export function buildChecklist(
       return role(a) - role(b) || a.hostname.length - b.hostname.length;
     });
     const head = group[0];
-    const obs = readObservation(head.observation);
+    const obs = newestObservation(group);
     const states = group.map((r) => r.state);
 
     const lowest = Math.min(...states.map((s) => PROGRESS[s] ?? 0));
@@ -304,7 +370,8 @@ export function buildChecklist(
         hint: "keep_record",
         keep: step >= 2 || phase === "lapsed" || phase === "parked",
       },
-      ...routingRecords(group, obs),
+      ...routingRecords(group),
+      ...providerChallengeRecords(group),
     ];
 
     const banners: ChecklistBanner[] = [];

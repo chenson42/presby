@@ -290,3 +290,79 @@ describe("capabilities", () => {
     expect(g.hosts[0].displayHostname).toBe("münchen-kirche.invalid");
   });
 });
+
+describe("Batch 1b: routing results live on each row; the provider's own challenge is a record", () => {
+  const targets = { cname: "cname-a.vercel-dns.invalid", ipv4: ["192.0.2.10"], source: "provider" as const };
+  const obs = (extra: Record<string, unknown>) => ({ checkedAt: "2030-01-01T00:00:00.000Z", ...extra });
+
+  it("merges the group's rows: each host's status comes from ITS OWN observation, so a sweep that checked only one row never leaves the other unrendered", () => {
+    const [apex, www] = pair("attached");
+    const groups = buildChecklist(
+      [
+        {
+          ...apex!,
+          observation: obs({ targets, routing: { records: [{ hostname: "church-one.invalid", status: "wrong_value", hint: "proxied", apex: true }] } }),
+        },
+        {
+          ...www!,
+          observation: obs({ checkedAt: "2029-01-01T00:00:00.000Z", routing: { records: [{ hostname: "www.church-one.invalid", status: "correct", apex: false }] } }),
+        },
+      ],
+      CTX,
+    );
+    const routing = groups[0]!.records.filter((r) => r.kind === "routing");
+    expect(routing.find((r) => r.type === "A")).toMatchObject({ name: "church-one.invalid", value: "192.0.2.10", status: "wrong_value", hint: "proxied" });
+    expect(routing.find((r) => r.type === "CNAME")).toMatchObject({ name: "www.church-one.invalid", value: "cname-a.vercel-dns.invalid", status: "correct" });
+  });
+
+  it("the SOA verdict decides A versus CNAME: a single non-www host that is NOT an apex is told to CNAME", () => {
+    const sub = row({ hostname: "app.church-one.invalid", claimName: "app.church-one.invalid", state: "attached", webRole: "canonical",
+      observation: obs({ targets, routing: { records: [{ hostname: "app.church-one.invalid", status: "missing", apex: false }] } }) });
+    const [g] = buildChecklist([sub], CTX);
+    const routing = g!.records.filter((r) => r.kind === "routing");
+    expect(routing).toHaveLength(1);
+    expect(routing[0]).toMatchObject({ type: "CNAME", name: "app.church-one.invalid", value: "cname-a.vercel-dns.invalid" });
+  });
+
+  it("before the SOA check has run, the www / non-www heuristic still applies", () => {
+    const [apex, www] = pair("attached", { observation: obs({ targets }) });
+    const [g] = buildChecklist([apex!, www!], CTX);
+    const routing = g!.records.filter((r) => r.kind === "routing");
+    expect(routing.map((r) => r.type).sort()).toEqual(["A", "CNAME"]);
+  });
+
+  it("targets learned by one row render for the whole group", () => {
+    const [apex, www] = pair("attached");
+    const [g] = buildChecklist([apex!, { ...www!, observation: obs({ targets }) }], CTX);
+    expect(g!.records.filter((r) => r.kind === "routing")).toHaveLength(2);
+  });
+
+  it("surfaces the provider's own verification TXT as a record that must be kept", () => {
+    const challenge = [{ type: "TXT", domain: "_vercel.church-one.invalid", value: "vc-domain-verify=abc", reason: "pending_domain_verification" }];
+    const [apex, www] = pair("attached", { observation: obs({ targets }), providerChallenge: challenge });
+    const [g] = buildChecklist([apex!, www!], CTX);
+    const provider = g!.records.filter((r) => r.kind === "provider");
+    expect(provider).toEqual([
+      { kind: "provider", type: "TXT", name: "_vercel.church-one.invalid", value: "vc-domain-verify=abc", status: "unknown", hint: null, keep: true },
+    ]);
+  });
+
+  it("ignores a malformed or empty provider challenge", () => {
+    for (const bad of [null, undefined, "x", 3, {}, [], [null, 1, "s", { type: "TXT" }, { domain: "d" }]]) {
+      const [g] = buildChecklist(pair("attached", { providerChallenge: bad as never }), CTX);
+      expect(g!.records.filter((r) => r.kind === "provider"), JSON.stringify(bad)).toEqual([]);
+    }
+  });
+
+  it("the proof status shown is the NEWEST observation in the group", () => {
+    const [apex, www] = pair("verified");
+    const [g] = buildChecklist(
+      [
+        { ...apex!, observation: obs({ checkedAt: "2030-01-01T00:00:00.000Z", proof: { status: "absent" } }) },
+        { ...www!, observation: obs({ checkedAt: "2030-01-02T00:00:00.000Z", proof: { status: "present" } }) },
+      ],
+      CTX,
+    );
+    expect(g!.records.find((r) => r.kind === "proof")!.status).toBe("correct");
+  });
+});

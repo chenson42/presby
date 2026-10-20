@@ -27,6 +27,15 @@ import { orgFeatureEnabledInTx } from "@/lib/org-features";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { getAdapters } from "./adapters";
 import type { DnsObserver } from "./adapters/dns";
+import type {
+  AddResult,
+  ConfigResult,
+  GetResult,
+  HostingProvider,
+  RemoveResult as HostingRemoveResult,
+  VerifyResult,
+} from "./adapters/hosting";
+import type { ProbeClient, ProbeOutcome } from "./adapters/probe";
 import { AUDIT_ACTIONS, insertAuditRow } from "./audit-tx";
 import {
   buildChecklist,
@@ -34,20 +43,34 @@ import {
   type ChecklistGroup,
   type ChecklistRow,
 } from "./checklist";
-import { checkProof, type ProofCheck } from "./dns-checks";
+import { stepProbeStreak, stepProofStreak, type ProofObservation } from "./debounce";
+import {
+  checkProof,
+  checkRouting,
+  GENERIC_HOSTING_TARGETS,
+  lookupNsFingerprint,
+  type NsFingerprint,
+  type ProofCheck,
+  type RoutingCheck,
+  type RoutingTargets,
+} from "./dns-checks";
 import { normalizeClaimInput, type ClaimRefusal } from "./hostname-rules";
 import {
   collectNotificationContext,
+  collectOperatorContext,
   sendDomainNotification,
+  sendOperatorAlert,
   type DomainNotification,
   type DomainNotificationEvent,
   type NotificationContext,
+  type OperatorAlertKind,
 } from "./notify";
-import { cadenceMs, DOMAIN_POLICY } from "./policy";
+import { cadenceMs, DOMAIN_POLICY, nextCheckCapMs } from "./policy";
 import { proofRecordName, proofRecordValue } from "./proof";
 import {
   TERMINAL_STATES,
   auditKeyNameFor,
+  isTerminal,
   nextState,
   type DomainEvent,
   type DomainState,
@@ -76,22 +99,30 @@ import {
  *     `withOrgContext` on the RLS-enforced `presby_app` connection (the (org)
  *     contract), a platform or machine actor on the platform connection.
  *     They return a closed `kind` union; expected outcomes are never thrown.
- *   - Network I/O (DNS) happens with NO transaction held. A check is three
- *     steps: read the rows; look the proof up; re-read FOR UPDATE, confirm the
- *     state has not moved, and apply. If it moved, the check is dropped.
+ *   - Network I/O (DNS, the hosting provider, the live-ness probe) happens with
+ *     NO transaction held. A check is three steps: read the rows; do the
+ *     network work; re-read FOR UPDATE, confirm the state has not moved, and
+ *     apply (`observeAndAdvance`). If a row moved, its result is dropped.
  *
  * TENANT WRITES ARE COLUMN-LIMITED BY THE DATABASE (T4/A1). `presby_app` can
  * write state and observation columns only; it cannot touch the hold columns,
  * `force_release_reason`, the identity columns or the six trigger-owned
  * timestamps. So a tenant actor can never `force_release` (refused here before
  * the round trip, and by the grant), and nothing here ever `.set()`s a
- * trigger-owned column.
+ * trigger-owned column. The platform-only operations (`setDomainHold`,
+ * `forceReleaseDomain`) run on the platform connection because the columns they
+ * write are owner-only.
  *
- * NO PROVIDER CALL BEFORE PROOF (G1). In this batch there is no provider call
- * at all: DNS is read-only. The Vercel adapter, `attach_*`, `live_*` and the
- * debounced lapse arrive in Batch 1b on the seams marked below.
+ * NO PROVIDER CALL WITHOUT PROOF (G1). A row's provider calls (attach, the
+ * config / verification reads, the probe) are made only when the SAME check saw
+ * the ownership proof present; absent, wrong or unknown proof makes none. DNS
+ * is the only thing read for a row that has not proven control. Intent is
+ * committed before the provider call (`verified -> attach_pending`, then the
+ * call), and `attach_pending` / `release_pending` rows are simply due rows the
+ * sweep retries - the provider's add and remove are idempotent - so a crash
+ * leaves a retryable state, never a half-attached host.
  *
- * AUDIT. Library and cron paths are invisible to `check:audit` (it scans only
+ *  * AUDIT. Library and cron paths are invisible to `check:audit` (it scans only
  * actions.ts), so coverage is proven by `service.db.test.ts`: one test per
  * edge that asserts exactly one audit row, and none for an observation-only
  * check. The proof TOKEN never enters an audit row, a notification or a log.
@@ -115,6 +146,12 @@ export type DomainExec = <T>(fn: (tx: DomainTx) => Promise<T>) => Promise<T>;
 
 export interface DomainServiceDeps {
   dns?: DnsObserver;
+  /** The hosting provider; defaults to `DOMAINS_PROVIDER` (unset = unconfigured). */
+  hosting?: HostingProvider;
+  /** The live-ness probe client. */
+  probe?: ProbeClient;
+  /** The application clock, for streak spans and timestamps written into jsonb. The database clock still owns grace and expiry. */
+  now?: () => Date;
 }
 
 /** A row as the service hands it back to callers: no token, no internals. */
@@ -435,6 +472,9 @@ async function groupRows(tx: DomainTx, organizationId: string, claimName: string
     .select({
       ...getTableColumns(organizationDomains),
       dbExpired: sql<boolean>`${organizationDomains.expiresAt} <= now()`.as("db_expired"),
+      dbGraceElapsed: sql<boolean>`(${organizationDomains.graceEndsAt} is not null and ${organizationDomains.graceEndsAt} <= now())`.as(
+        "db_grace_elapsed",
+      ),
     })
     .from(organizationDomains)
     .where(
@@ -669,7 +709,7 @@ export async function claimDomain(
 }
 
 // ---------------------------------------------------------------------------
-// checkClaim ("Check now" and the cron's per-claim work)
+// observeAndAdvance (the one check routine) and checkClaim
 // ---------------------------------------------------------------------------
 
 export type CheckOutcome =
@@ -677,6 +717,14 @@ export type CheckOutcome =
   | "recovered"
   | "expired"
   | "held_elsewhere"
+  | "attached"
+  | "attach_waiting"
+  | "live"
+  | "live_lost"
+  | "lapsed"
+  | "release_requested"
+  | "released"
+  | "removed"
   | "unchanged"
   | "deferred";
 
@@ -687,36 +735,863 @@ export type CheckResult =
   | { kind: "feature_off" }
   | { kind: "not_found" };
 
+/** The most significant outcome wins when a claim group's rows disagree. */
+const OUTCOME_PRIORITY: readonly CheckOutcome[] = [
+  "lapsed",
+  "live_lost",
+  "released",
+  "release_requested",
+  "removed",
+  "expired",
+  "held_elsewhere",
+  "live",
+  "attached",
+  "attach_waiting",
+  "verified",
+  "recovered",
+  "unchanged",
+  "deferred",
+];
+
 type GroupRow = Awaited<ReturnType<typeof groupRows>>[number];
 
+/** The states whose check begins with the ownership-proof lookup. */
+const PROOF_STATES: ReadonlySet<DomainState> = new Set([
+  "pending",
+  "verified",
+  "attach_pending",
+  "attached",
+  "live",
+  "lapsed",
+]);
+
+interface ResolvedDeps {
+  dns: DnsObserver;
+  hosting: HostingProvider;
+  probe: ProbeClient;
+  now: () => Date;
+}
+
+function resolveDeps(deps: DomainServiceDeps | undefined): ResolvedDeps {
+  const adapters = getAdapters(process.env, { dns: deps?.dns, hosting: deps?.hosting, probe: deps?.probe });
+  return { ...adapters, now: deps?.now ?? (() => new Date()) };
+}
+
+/** What the network told us about one row, gathered with NO transaction held. */
+interface RowEvidence {
+  proof: ProofObservation | null;
+  add?: AddResult;
+  domain?: GetResult;
+  verify?: VerifyResult;
+  config?: ConfigResult;
+  routing?: RoutingCheck;
+  probe?: ProbeOutcome;
+  remove?: HostingRemoveResult;
+  ns?: NsFingerprint;
+  /** `attached`/`live` rows the provider no longer knew about, re-added (reconciliation). */
+  readded?: AddResult;
+  /** The provider's targets as resolved for this row (fresh config, else cached, else generic). */
+  targets?: { value: RoutingTargets; source: "provider" | "generic" };
+}
+
+function cachedTargets(observation: unknown): { value: RoutingTargets; source: "provider" | "generic" } | null {
+  const t = readObservation(observation).targets;
+  if (!t || (!t.cname && !(t.ipv4 && t.ipv4.length > 0))) return null;
+  return { value: { cname: t.cname ?? null, ipv4: t.ipv4 ?? [] }, source: t.source ?? "provider" };
+}
+
+/** Fresh provider config wins; otherwise the cached recommendation; otherwise Vercel's generic targets (displayed, flagged `generic`). */
+function resolveTargets(
+  config: ConfigResult | undefined,
+  observation: unknown,
+): { value: RoutingTargets; source: "provider" | "generic" } {
+  if (config?.kind === "ok" && (config.recommendedCname || config.recommendedIpv4.length > 0)) {
+    return {
+      value: { cname: config.recommendedCname, ipv4: config.recommendedIpv4 },
+      source: "provider",
+    };
+  }
+  return cachedTargets(observation) ?? { value: GENERIC_HOSTING_TARGETS, source: "generic" };
+}
+
+interface NotifyState {
+  proofMissing?: boolean;
+  alerted?: Record<string, string>;
+  parkedReminderAt?: string;
+}
+
+function readNotifyState(value: unknown): NotifyState {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? { ...(value as NotifyState) } : {};
+}
+
+function reminderDue(ns: NotifyState, now: Date): boolean {
+  return !ns.parkedReminderAt || now.getTime() - Date.parse(ns.parkedReminderAt) >= DOMAIN_POLICY.parkedReminderMs;
+}
+
 /**
- * Batch 1a-ii checks two states: `pending` (the proof appears -> `verified`;
- * a past-expiry claim with no proof -> `expired`) and `lapsed` (the proof
- * reappears -> `verified`, recorded as a recovery). Every other state is
- * `deferred`: Batch 1b extends this routine (attach, the routing checks, the
- * HTTPS probe, the debounced lapse, grace) on the `PROOF_STATES` seam below
- * without changing its shape.
- *
- * `forced` is a person pressing "Check now": it is rate-limited (6 per 10
- * minutes per claim, 30 per hour per organization, G14) because it triggers
- * outbound lookups. The cron passes `forced: false`.
+ * Network I/O for a claim group, in the order Phase 3 fixes: the proof first
+ * (one lookup per distinct token), then - ONLY for a row whose proof is
+ * present - the provider calls that row's state calls for. A row whose proof is
+ * absent, wrong or unknown makes NO provider call (G1: no provider call
+ * without proof), and `unknown` is never treated as a verdict.
  */
-export async function checkClaim(
+async function gatherEvidence(
+  rows: readonly GroupRow[],
+  claimName: string,
+  proofSeen: Map<string, ProofObservation>,
+  d: ResolvedDeps,
+): Promise<Map<string, RowEvidence>> {
+  for (const token of new Set(rows.filter((r) => PROOF_STATES.has(r.state)).map((r) => r.proofToken))) {
+    if (!proofSeen.has(token)) proofSeen.set(token, (await checkProof(d.dns, claimName, token)).status);
+  }
+
+  let ns: NsFingerprint | undefined;
+  const nsOnce = async () => (ns ??= await lookupNsFingerprint(d.dns, claimName));
+
+  const out = new Map<string, RowEvidence>();
+  for (const row of rows) {
+    const ev: RowEvidence = { proof: PROOF_STATES.has(row.state) ? (proofSeen.get(row.proofToken) ?? null) : null };
+    out.set(row.id, ev);
+    const host = row.hostname;
+
+    switch (row.state) {
+      case "verified":
+        if (ev.proof === "present" && row.nsFingerprint === null) ev.ns = await nsOnce();
+        break;
+
+      case "attach_pending": {
+        // The records the church must publish are shown whether or not the
+        // provider can be reached ("your DNS changes are safe to make").
+        ev.targets = resolveTargets(undefined, row.observation);
+        if (ev.proof === "present") {
+          ev.add = await d.hosting.addDomain(host);
+          ev.config = await d.hosting.getConfig(host);
+          ev.targets = resolveTargets(ev.config, row.observation);
+          if (ev.add.kind === "ok" || ev.add.kind === "already_on_project") {
+            ev.domain = await d.hosting.getDomain(host);
+          }
+        }
+        // ...and so is whether the church has published them yet: routing is
+        // read-only DNS, independent of the provider, and it is the feedback
+        // loop while a host waits to attach. Judged against the provider's own
+        // recommendation when we could read it, so a custom target is not
+        // called "wrong".
+        ev.routing = await checkRouting(d.dns, host, ev.targets.value, { diagnose: false });
+        break;
+      }
+
+      case "attached":
+      case "live": {
+        if (ev.proof !== "present") break;
+        ev.domain = await d.hosting.getDomain(host);
+        if (ev.domain.kind === "not_found") {
+          // Reconciliation: we believe it is attached and the provider has no
+          // record of it. add is idempotent, so just put it back.
+          ev.readded = await d.hosting.addDomain(host);
+        } else if (ev.domain.kind === "ok" && !ev.domain.verified) {
+          ev.verify = await d.hosting.verifyDomain(host);
+        }
+        ev.config = await d.hosting.getConfig(host);
+        ev.targets = resolveTargets(ev.config, row.observation);
+        ev.routing = await checkRouting(d.dns, host, ev.targets.value, { diagnose: row.state === "attached" });
+        // A live host is probed whatever DNS says (the probe IS the verdict). An
+        // attached one is probed unless DNS definitively points elsewhere.
+        if (row.state === "live" || ev.routing.pointsAtProvider !== false) ev.probe = await d.probe.probe(host);
+        ev.ns = await nsOnce();
+        break;
+      }
+
+      case "parked": {
+        if (row.dbGraceElapsed) break;
+        if (!reminderDue(readNotifyState(row.notifyState), d.now())) break;
+        const targets = resolveTargets(undefined, row.observation);
+        ev.targets = targets;
+        ev.routing = await checkRouting(d.dns, host, targets.value, { diagnose: false });
+        break;
+      }
+
+      case "release_pending":
+        ev.remove = await d.hosting.removeDomain(host);
+        break;
+
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+/** Everything the apply step accumulates besides the writes themselves. */
+interface ApplyEnv {
+  tx: DomainTx;
+  actor: DomainActor;
+  trigger: string | undefined;
+  now: Date;
+  forced: boolean;
+  organizationId: string;
+  notifications: Map<DomainNotificationEvent, string[]>;
+  alerts: Map<OperatorAlertKind, string[]>;
+  /** Rows that just entered `attach_pending`: the second pass makes their provider call. */
+  followUp: string[];
+}
+
+function note(env: ApplyEnv, event: DomainNotificationEvent, row: Pick<OrganizationDomain, "hostname">) {
+  const list = env.notifications.get(event) ?? [];
+  if (!list.includes(row.hostname)) list.push(row.hostname);
+  env.notifications.set(event, list);
+}
+
+/** Queues an operator alert for the row, at most once per `operatorAlertRepeatMs` per kind. Returns the notify state to persist. */
+function alertOperator(
+  env: ApplyEnv,
+  row: Pick<OrganizationDomain, "hostname">,
+  ns: NotifyState,
+  kind: OperatorAlertKind,
+): NotifyState {
+  const last = ns.alerted?.[kind];
+  if (last && env.now.getTime() - Date.parse(last) < DOMAIN_POLICY.operatorAlertRepeatMs) return ns;
+  const list = env.alerts.get(kind) ?? [];
+  if (!list.includes(row.hostname)) list.push(row.hostname);
+  env.alerts.set(kind, list);
+  return { ...ns, alerted: { ...(ns.alerted ?? {}), [kind]: env.now.toISOString() } };
+}
+
+/** The proof streak for the rows that must keep their ownership proof (G9). */
+function proofPersistence(env: ApplyEnv, row: GroupRow, ev: RowEvidence) {
+  const prev = readObservation(row.observation);
+  const observed: ProofObservation = ev.proof ?? "unknown";
+  const step = stepProofStreak({ count: row.proofMissCount, since: prev.proofMissSince ?? null }, observed, env.now);
+  let ns = readNotifyState(row.notifyState);
+  if (step.firstMiss && !ns.proofMissing) {
+    note(env, "proof_missing", row);
+    ns = { ...ns, proofMissing: true };
+  }
+  if (observed === "present" && ns.proofMissing) {
+    const { proofMissing: _cleared, ...rest } = ns;
+    void _cleared;
+    ns = rest;
+  }
+  const observation: Record<string, unknown> = {
+    ...prev,
+    checkedAt: env.now.toISOString(),
+    ...(ev.proof ? { proof: { status: ev.proof } } : {}),
+  };
+  if (step.next.since) observation.proofMissSince = step.next.since;
+  else delete observation.proofMissSince;
+  const checkClass: OrganizationDomainCheckClass =
+    observed === "present" ? "ok" : observed === "unknown" ? "dns_unknown" : "proof_absent";
+  return {
+    present: observed === "present",
+    lost: step.lost,
+    proofMissCount: step.next.count,
+    observation,
+    notifyState: ns,
+    checkClass,
+  };
+}
+
+type Persistence = ReturnType<typeof proofPersistence>;
+
+interface CheckWrite {
+  checkClass: OrganizationDomainCheckClass;
+  observation: Record<string, unknown>;
+  nextInMs: number;
+  proofMissCount?: number;
+  probeMissCount?: number;
+  notifyState?: NotifyState;
+  nsFingerprint?: string | null;
+  providerChallenge?: unknown;
+  proofSeenOk?: boolean;
+}
+
+/** An observation-only write: no state change, so no audit row (high-volume, not security-sensitive). */
+async function writeCheck(env: ApplyEnv, row: GroupRow, w: CheckWrite): Promise<void> {
+  const set: PgUpdateSetSource<typeof organizationDomains> = {
+    observation: w.observation,
+    lastCheckedAt: dbNow(),
+    lastCheckClass: w.checkClass,
+    nextCheckAt: dbNowPlus(Math.min(w.nextInMs, nextCheckCapMs(row.state))),
+  };
+  if (w.proofMissCount !== undefined) set.proofMissCount = w.proofMissCount;
+  if (w.probeMissCount !== undefined) set.probeMissCount = w.probeMissCount;
+  if (w.notifyState !== undefined) set.notifyState = w.notifyState as Record<string, unknown>;
+  if (w.nsFingerprint !== undefined) set.nsFingerprint = w.nsFingerprint;
+  if (w.providerChallenge !== undefined) set.providerChallenge = w.providerChallenge;
+  if (w.proofSeenOk) set.proofLastOkAt = dbNow();
+  await env.tx
+    .update(organizationDomains)
+    .set(set)
+    .where(and(eq(organizationDomains.id, row.id), eq(organizationDomains.state, row.state)));
+}
+
+function patchFrom(
+  p: Persistence,
+  extra: Partial<DomainPatch> & { observation?: Record<string, unknown> } = {},
+): DomainPatch {
+  return {
+    proofMissCount: p.proofMissCount,
+    lastCheckedAt: dbNow(),
+    lastCheckClass: p.checkClass,
+    observation: p.observation,
+    notifyState: p.notifyState as Record<string, unknown>,
+    ...(p.present ? { proofLastOkAt: dbNow() } : {}),
+    ...extra,
+  };
+}
+
+/** `proof_lost`: enough consecutive definitive misses over enough time. */
+async function loseProof(env: ApplyEnv, row: GroupRow, p: Persistence): Promise<CheckOutcome> {
+  await transitionDomain(env.tx, row, "proof_lost", env.actor, {
+    trigger: env.trigger,
+    patch: patchFrom(p, { lastCheckClass: "proof_absent" }),
+  });
+  note(env, "lapsed", row);
+  return "lapsed";
+}
+
+function rowAgeMs(row: GroupRow, now: Date): number {
+  return Math.max(0, now.getTime() - row.stateChangedAt.getTime());
+}
+
+function failureClass(r: { kind: string; reason?: string }): OrganizationDomainCheckClass {
+  switch (r.kind) {
+    case "retryable":
+      return r.reason === "rate_limited" ? "rate_limited" : "provider_unavailable";
+    case "config_error":
+      return "config_error";
+    case "blocked":
+    case "rejected":
+      return "provider_rejected";
+    default:
+      return "provider_unavailable";
+  }
+}
+
+/**
+ * A provider failure on `attach_pending` or `release_pending`: the row stays
+ * where it is, the backoff grows with the consecutive failures, a rate limit's
+ * `retry-after` is honoured (capped by the trigger's 6 hour ceiling), and the
+ * operator hears about anything only they can fix - once per day per kind.
+ */
+async function recordProviderFailure(
+  env: ApplyEnv,
+  row: GroupRow,
+  p: Persistence | null,
+  baseObservation: Record<string, unknown>,
+  result: AddResult | HostingRemoveResult,
+  which: "attach" | "release",
+): Promise<void> {
+  const prev = readObservation(row.observation);
+  const attempts = (prev.attempts ?? 0) + 1;
+  const failingSince = prev.failingSince ?? env.now.toISOString();
+  const state = which === "attach" ? "attach_pending" : "release_pending";
+  const retryAfterMs = (result.kind === "retryable" ? (result.retryAfterSeconds ?? 0) : 0) * 1000;
+  const nextInMs = Math.max(cadenceMs(state, { attempt: attempts - 1 }) ?? 0, retryAfterMs);
+
+  let ns = p?.notifyState ?? readNotifyState(row.notifyState);
+  if (result.kind === "config_error") ns = alertOperator(env, row, ns, "provider_config_error");
+  else if (result.kind === "rejected") ns = alertOperator(env, row, ns, "provider_rejected");
+  else if (result.kind === "blocked") ns = alertOperator(env, row, ns, "provider_blocked");
+  if (env.now.getTime() - Date.parse(failingSince) >= DOMAIN_POLICY.providerFailingAlertMs) {
+    ns = alertOperator(env, row, ns, which === "attach" ? "attach_failing" : "release_failing");
+  }
+
+  await writeCheck(env, row, {
+    checkClass: failureClass(result),
+    observation: { ...baseObservation, checkedAt: env.now.toISOString(), attempts, failingSince },
+    nextInMs,
+    proofMissCount: p?.proofMissCount,
+    notifyState: ns,
+  });
+}
+
+/** The observation a successful provider step leaves behind: the failure run is over. */
+function clearedFailures(observation: Record<string, unknown>): Record<string, unknown> {
+  const { attempts: _a, failingSince: _f, ...rest } = observation as Record<string, unknown> & {
+    attempts?: unknown;
+    failingSince?: unknown;
+  };
+  void _a;
+  void _f;
+  return rest;
+}
+
+/** What to persist about routing, targets and the probe after a serving-state check. */
+function servingObservation(
+  base: Record<string, unknown>,
+  row: GroupRow,
+  ev: RowEvidence,
+  now: Date,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  if (ev.targets) {
+    out.targets = { cname: ev.targets.value.cname, ipv4: ev.targets.value.ipv4, source: ev.targets.source };
+  }
+  if (ev.routing) {
+    out.routing = {
+      records: [
+        { hostname: row.hostname, status: ev.routing.status, hint: ev.routing.hint, apex: ev.routing.apex },
+      ],
+    };
+  }
+  if (ev.probe) out.probe = { status: ev.probe, at: now.toISOString() };
+  return out;
+}
+
+/** Vercel's own challenge, as the provider currently reports it (null once verified or when we could not read it). */
+function challengeFrom(ev: RowEvidence): unknown {
+  const verified = ev.verify?.kind === "ok" ? ev.verify : ev.domain?.kind === "ok" ? ev.domain : null;
+  if (verified === null) return undefined; // not readable this round: leave what we have
+  return verified.verified || verified.verification.length === 0 ? null : verified.verification;
+}
+
+/** The nameserver tripwire: first sight is recorded silently; a later difference notifies once and re-baselines. */
+function nsDecision(env: ApplyEnv, row: GroupRow, ev: RowEvidence): string | null | undefined {
+  if (ev.ns?.kind !== "ok") return undefined;
+  if (row.nsFingerprint === null) return ev.ns.fingerprint;
+  if (row.nsFingerprint !== ev.ns.fingerprint) {
+    note(env, "ns_changed", row);
+    return ev.ns.fingerprint;
+  }
+  return undefined;
+}
+
+// ---- per-state apply ------------------------------------------------------
+
+async function applyPending(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  const proof = ev.proof ?? "unknown";
+  const checkClass: OrganizationDomainCheckClass =
+    proof === "present" ? "ok" : proof === "unknown" ? "dns_unknown" : "proof_absent";
+  const observation = {
+    ...readObservation(row.observation),
+    checkedAt: env.now.toISOString(),
+    proof: { status: proof },
+  };
+
+  if (proof === "present") {
+    try {
+      // A SAVEPOINT: a unique violation here (another organization verified
+      // this name first) must not abort the whole check.
+      await env.tx.transaction((sp) =>
+        transitionDomain(sp, row, "proof_ok", env.actor, {
+          trigger: env.trigger,
+          patch: {
+            proofLastOkAt: dbNow(),
+            proofMissCount: 0,
+            lastCheckedAt: dbNow(),
+            lastCheckClass: "ok",
+            observation,
+          },
+        }),
+      );
+      return "verified";
+    } catch (err) {
+      if (classifyDomainDbError(err)?.kind !== "held_elsewhere") throw err;
+      await writeCheck(env, row, { checkClass: "held_elsewhere", observation, nextInMs: cadenceMs("pending")! });
+      return "held_elsewhere";
+    }
+  }
+  // Absent or wrong value, on a claim past its expiry: it expires. An
+  // `unknown` lookup never expires a claim (the proof may be there).
+  if (row.dbExpired && (proof === "absent" || proof === "wrong_value")) {
+    await transitionDomain(env.tx, row, "expire", env.actor, {
+      trigger: env.trigger,
+      patch: { lastCheckedAt: dbNow(), lastCheckClass: checkClass, observation },
+    });
+    return "expired";
+  }
+  await writeCheck(env, row, { checkClass, observation, nextInMs: cadenceMs("pending")! });
+  return "unchanged";
+}
+
+async function applyVerified(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  const p = proofPersistence(env, row, ev);
+  if (p.lost) return loseProof(env, row, p);
+  if (!p.present || row.purpose !== "web") {
+    await writeCheck(env, row, {
+      checkClass: p.checkClass,
+      observation: p.observation,
+      nextInMs: cadenceMs("verified")!,
+      proofMissCount: p.proofMissCount,
+      notifyState: p.notifyState,
+      nsFingerprint: nsDecision(env, row, ev),
+      proofSeenOk: p.present,
+    });
+    return "unchanged";
+  }
+  // Intent first: commit `attach_pending` BEFORE the provider call, so a crash
+  // between the two leaves a retryable state, never a half-attached host.
+  await transitionDomain(env.tx, row, "attach_start", env.actor, {
+    trigger: env.trigger,
+    patch: patchFrom(p, { nsFingerprint: nsDecision(env, row, ev) }),
+  });
+  env.followUp.push(row.id);
+  return "attach_waiting";
+}
+
+async function applyAttachPending(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  const p = proofPersistence(env, row, ev);
+  if (p.lost) return loseProof(env, row, p);
+  const prev = readObservation(row.observation);
+  if (!p.present || !ev.add) {
+    // No proof, no provider call. The backoff does not advance on a round we did not try.
+    await writeCheck(env, row, {
+      checkClass: p.checkClass,
+      observation: servingObservation(p.observation, row, ev, env.now),
+      nextInMs: cadenceMs("attach_pending", { attempt: Math.max(0, (prev.attempts ?? 1) - 1) })!,
+      proofMissCount: p.proofMissCount,
+      notifyState: p.notifyState,
+    });
+    return "attach_waiting";
+  }
+
+  if (ev.add.kind === "ok" || ev.add.kind === "already_on_project") {
+    const challenge =
+      ev.add.kind === "ok"
+        ? ev.add.verified
+          ? null
+          : ev.add.verification
+        : ev.domain?.kind === "ok" && !ev.domain.verified
+          ? ev.domain.verification
+          : null;
+    await transitionDomain(env.tx, row, "attach_ok", env.actor, {
+      trigger: env.trigger,
+      patch: patchFrom(p, {
+        providerChallenge: challenge,
+        observation: servingObservation(clearedFailures(p.observation), row, ev, env.now),
+      }),
+    });
+    return "attached";
+  }
+
+  await recordProviderFailure(env, row, p, servingObservation(p.observation, row, ev, env.now), ev.add, "attach");
+  return "attach_waiting";
+}
+
+async function applyServing(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  const p = proofPersistence(env, row, ev);
+  if (p.lost) return loseProof(env, row, p);
+
+  if (!p.present) {
+    await writeCheck(env, row, {
+      checkClass: p.checkClass,
+      observation: p.observation,
+      nextInMs: cadenceMs(row.state, { sinceStateChangedMs: rowAgeMs(row, env.now) })!,
+      proofMissCount: p.proofMissCount,
+      notifyState: p.notifyState,
+    });
+    return "unchanged";
+  }
+
+  const observation = servingObservation(p.observation, row, ev, env.now);
+  const providerChallenge = challengeFrom(ev);
+  const nsFingerprint = nsDecision(env, row, ev);
+  const routingBad =
+    ev.routing !== undefined &&
+    (ev.routing.hint === "proxied" ||
+      ev.routing.status === "wrong_value" ||
+      ev.routing.status === "missing" ||
+      ev.routing.status === "conflicting");
+  const providerFailing = [ev.domain, ev.verify].some(
+    (r) => r !== undefined && (r.kind === "config_error" || r.kind === "rejected"),
+  );
+  let ns = p.notifyState;
+  if (providerFailing) ns = alertOperator(env, row, ns, "provider_config_error");
+
+  if (row.state === "attached") {
+    // `live` means: proof valid and the probe came back from THIS deployment.
+    // Operator Q7 (a Cloudflare-proxied record may not go live) is enforced one
+    // step earlier, in gatherEvidence: a host whose records definitively point
+    // somewhere else - which is what a proxied record is - is never probed, so
+    // it cannot be acknowledged.
+    if (ev.probe === "ack") {
+      await transitionDomain(env.tx, row, "live_ok", env.actor, {
+        trigger: env.trigger,
+        patch: patchFrom(p, {
+          probeMissCount: 0,
+          lastCheckClass: "ok",
+          observation: clearedFailures(observation),
+          providerChallenge,
+          nsFingerprint,
+          notifyState: ns as Record<string, unknown>,
+        }),
+      });
+      return "live";
+    }
+    await writeCheck(env, row, {
+      checkClass: routingBad ? "routing_wrong" : providerFailing ? "config_error" : "ok",
+      observation,
+      nextInMs: cadenceMs("attached", { sinceStateChangedMs: rowAgeMs(row, env.now) })!,
+      proofMissCount: p.proofMissCount,
+      notifyState: ns,
+      nsFingerprint,
+      providerChallenge,
+      proofSeenOk: true,
+    });
+    return "unchanged";
+  }
+
+  // live
+  const probeStep = stepProbeStreak(row.probeMissCount, ev.probe ?? "unknown", env.forced);
+  if (probeStep.lost) {
+    await transitionDomain(env.tx, row, "live_lost", env.actor, {
+      trigger: env.trigger,
+      patch: patchFrom(p, {
+        probeMissCount: 0,
+        lastCheckClass: "routing_wrong",
+        observation,
+        providerChallenge,
+        nsFingerprint,
+        notifyState: ns as Record<string, unknown>,
+      }),
+    });
+    return "live_lost";
+  }
+  await writeCheck(env, row, {
+    checkClass: routingBad || ev.probe === "negative" ? "routing_wrong" : providerFailing ? "config_error" : "ok",
+    observation,
+    nextInMs: cadenceMs("live")!,
+    proofMissCount: p.proofMissCount,
+    probeMissCount: probeStep.count,
+    notifyState: ns,
+    nsFingerprint,
+    providerChallenge,
+    proofSeenOk: true,
+  });
+  return "unchanged";
+}
+
+async function applyLapsed(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  const proof = ev.proof ?? "unknown";
+  const checkClass: OrganizationDomainCheckClass =
+    proof === "present" ? "ok" : proof === "unknown" ? "dns_unknown" : "proof_absent";
+  const observation = {
+    ...readObservation(row.observation),
+    checkedAt: env.now.toISOString(),
+    proof: { status: proof },
+  };
+  delete (observation as { proofMissSince?: string }).proofMissSince;
+
+  if (proof === "present") {
+    await transitionDomain(env.tx, row, "proof_ok", env.actor, {
+      trigger: env.trigger,
+      patch: {
+        proofLastOkAt: dbNow(),
+        proofMissCount: 0,
+        lastCheckedAt: dbNow(),
+        lastCheckClass: "ok",
+        observation,
+      },
+    });
+    return "recovered";
+  }
+  if (row.dbGraceElapsed && row.purpose === "web") {
+    await transitionDomain(env.tx, row, "grace_elapsed", env.actor, {
+      trigger: env.trigger,
+      patch: { lastCheckedAt: dbNow(), lastCheckClass: checkClass, observation },
+    });
+    return "release_requested";
+  }
+  await writeCheck(env, row, { checkClass, observation, nextInMs: cadenceMs("lapsed")! });
+  return "unchanged";
+}
+
+async function applyParked(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  const observation = { ...readObservation(row.observation), checkedAt: env.now.toISOString() };
+  if (row.dbGraceElapsed) {
+    await transitionDomain(env.tx, row, "grace_elapsed", env.actor, {
+      trigger: env.trigger,
+      patch: { lastCheckedAt: dbNow(), lastCheckClass: "ok", observation },
+    });
+    return "release_requested";
+  }
+  let ns = readNotifyState(row.notifyState);
+  if (ev.routing?.pointsAtProvider === true && reminderDue(ns, env.now)) {
+    note(env, "records_still_pointing", row);
+    ns = { ...ns, parkedReminderAt: env.now.toISOString() };
+  }
+  await writeCheck(env, row, {
+    checkClass: "ok",
+    observation,
+    nextInMs: cadenceMs("parked")!,
+    notifyState: ns,
+  });
+  return "unchanged";
+}
+
+async function applyReleasePending(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  const prev = readObservation(row.observation);
+  const observation = { ...prev, checkedAt: env.now.toISOString() };
+  if (!ev.remove) return "deferred";
+  if (ev.remove.kind === "ok") {
+    await transitionDomain(env.tx, row, "detach_ok", env.actor, {
+      trigger: env.trigger,
+      patch: { lastCheckedAt: dbNow(), lastCheckClass: "ok", observation: clearedFailures(observation) },
+    });
+    note(env, "released", row);
+    return "released";
+  }
+  await recordProviderFailure(env, row, null, observation, ev.remove, "release");
+  return "unchanged";
+}
+
+async function applyRow(env: ApplyEnv, row: GroupRow, ev: RowEvidence): Promise<CheckOutcome> {
+  switch (row.state) {
+    case "pending":
+      return applyPending(env, row, ev);
+    case "verified":
+      return applyVerified(env, row, ev);
+    case "attach_pending":
+      return applyAttachPending(env, row, ev);
+    case "attached":
+    case "live":
+      return applyServing(env, row, ev);
+    case "lapsed":
+      return applyLapsed(env, row, ev);
+    case "parked":
+      return applyParked(env, row, ev);
+    case "release_pending":
+      return applyReleasePending(env, row, ev);
+    default:
+      return "deferred";
+  }
+}
+
+/**
+ * Canonical promotion (Batch 1a-ii deviation 6, ruled in 1b): an organization
+ * with NO canonical web host at all (its canonical claim was removed, and the
+ * hosts that remain were claimed as aliases) promotes the first host of THIS
+ * group that is `live` and not held. Self-healing and idempotent: it runs after
+ * every group check, so it does not matter which transition made a host live.
+ *
+ * It does NOT replace a canonical that exists but is not serving (lapsed,
+ * attached, held): that would be a surprise redirect, and the predicate already
+ * darkens the aliases rather than redirect them nowhere. Only the absence of
+ * any canonical is repaired - the same thing that makes a first-ever claim's
+ * host canonical. The group is already locked; a rival promotion from another
+ * group loses to `organization_domains_one_canonical_uq` and is simply skipped.
+ */
+async function ensureCanonical(env: ApplyEnv, group: readonly GroupRow[]): Promise<void> {
+  const web = group.filter((r) => r.purpose === "web");
+  if (web.length === 0) return;
+  const org = await env.tx
+    .select({ id: organizationDomains.id })
+    .from(organizationDomains)
+    .where(
+      and(
+        eq(organizationDomains.organizationId, env.organizationId),
+        eq(organizationDomains.purpose, "web"),
+        eq(organizationDomains.webRole, "canonical"),
+        notInArray(organizationDomains.state, TERMINAL),
+      ),
+    )
+    .limit(1);
+  if (org.length > 0) return;
+
+  // Re-read the group's rows as they are NOW (this check may have just made one live).
+  const fresh = await env.tx
+    .select()
+    .from(organizationDomains)
+    .where(inArray(organizationDomains.id, web.map((r) => r.id)));
+  const candidates = fresh
+    .filter((r) => r.state === "live" && r.platformHold === null)
+    .sort((a, b) => Number(b.hostname.startsWith("www.")) - Number(a.hostname.startsWith("www.")) || a.hostname.localeCompare(b.hostname));
+  const pick = candidates[0];
+  if (!pick) return;
+
+  try {
+    await env.tx.transaction(async (sp) => {
+      await sp.update(organizationDomains).set({ webRole: "canonical" }).where(eq(organizationDomains.id, pick.id));
+      await insertAuditRow(sp, {
+        action: AUDIT_ACTIONS.DOMAIN_CANONICAL_CHANGED,
+        actor: actorAudit(env.actor),
+        resourceType: "organization_domain",
+        resourceId: pick.id,
+        metadata: {
+          organizationId: env.organizationId,
+          hostname: pick.hostname,
+          claimName: pick.claimName,
+          purpose: pick.purpose,
+          fromHostname: null,
+          toHostname: pick.hostname,
+          actorKind: env.actor.kind,
+          ...(env.actor.kind === "machine" ? { trigger: env.actor.trigger } : {}),
+          reason: "no_canonical",
+        },
+      });
+    });
+  } catch (err) {
+    if (classifyDomainDbError(err)?.kind !== "second_canonical") throw err;
+  }
+}
+
+async function orgIsClosed(tx: DomainTx, organizationId: string): Promise<boolean> {
+  const row = rowsOf<{ lifecycle_status: string }>(
+    await tx.execute(sql`select lifecycle_status from organizations where id = ${organizationId}::uuid`),
+  )[0];
+  return row !== undefined && row.lifecycle_status !== "active";
+}
+
+export interface ObserveOptions {
+  /** A person pressed "Check now" (rate-limited; a single negative probe is enough to demote a live host). The cron passes false. */
+  forced: boolean;
+  deps?: DomainServiceDeps;
+  /** Restrict the check to these rows of the claim (the sweep passes the rows it leased). */
+  rowIds?: ReadonlySet<string>;
+}
+
+interface ApplyResult {
+  kind: "ok";
+  outcomes: Map<string, CheckOutcome>;
+  followUp: string[];
+  notifications: Array<{ event: DomainNotificationEvent; hostnames: string[] }>;
+  alerts: Array<{ kind: OperatorAlertKind; hostnames: string[] }>;
+  ctx: NotificationContext | null;
+  operatorCtx: NotificationContext | null;
+}
+
+/**
+ * THE one check routine (Phase 3 section 6): the cron, a church's "Check now"
+ * and the platform's "Check now" all land here. Three steps per pass, so no
+ * transaction is ever held across the network:
+ *
+ *   1. READ the claim group (and gate it).
+ *   2. NETWORK: the proof lookup, then the provider calls each row's state
+ *      calls for (gatherEvidence). No transaction is open.
+ *   3. APPLY: re-read the group FOR UPDATE, drop any row whose state moved
+ *      while we were out, and advance each row through `transitionDomain` (one
+ *      audit row per edge) or an observation-only write.
+ *
+ * INTENT FIRST. `verified -> attach_pending` commits in pass one; pass two
+ * (same call) makes the provider call for exactly those rows. A crash between
+ * the commit and the call leaves `attach_pending`, which the sweep retries
+ * idempotently - the provider's add is idempotent - so there is never a
+ * half-attached host and never an attached host we have no row for.
+ *
+ * Notifications and operator alerts are collected inside the transaction (on
+ * the caller's own connection) and SENT only after it commits.
+ */
+export async function observeAndAdvance(
   actor: DomainActor,
   organizationId: string,
   claimName: string,
-  opts: { forced: boolean; deps?: DomainServiceDeps },
+  opts: ObserveOptions,
 ): Promise<CheckResult> {
-  const dns = opts.deps?.dns ?? getAdapters().dns;
+  const d = resolveDeps(opts.deps);
   const exec = domainExec(actor, organizationId);
+  const trigger = opts.forced ? "check_now" : undefined;
 
   // Step 1: read (and gate), no lock held past this transaction.
   const snapshot = await guarded(() =>
     exec(async (tx) => {
       const refused = await gate(tx, actor, organizationId);
       if (refused) return { kind: refused } as const;
-      const rows = await groupRows(tx, organizationId, claimName, false);
-      return rows.length === 0 ? ({ kind: "not_found" } as const) : ({ kind: "ok", rows } as const);
+      const all = await groupRows(tx, organizationId, claimName, false);
+      if (all.length === 0) return { kind: "not_found" } as const;
+      const rows = opts.rowIds ? all.filter((r) => opts.rowIds!.has(r.id)) : all;
+      // Only the sweep removes a closed organization's domains.
+      const closed = actor.kind === "machine" ? await orgIsClosed(tx, organizationId) : false;
+      return { kind: "ok", rows, closed } as const;
     }),
   );
   if (snapshot.kind !== "ok") return snapshot;
@@ -738,138 +1613,105 @@ export async function checkClaim(
     if (perOrg !== null) return { kind: "rate_limited", retryAfterSeconds: perOrg };
   }
 
-  // Step 2: network, no transaction. One lookup per distinct token in the group.
-  const proofStates = snapshot.rows.filter((r) => PROOF_STATES.has(r.state));
-  const proofByToken = new Map<string, ProofCheck["status"]>();
-  for (const token of new Set(proofStates.map((r) => r.proofToken))) {
-    proofByToken.set(token, (await checkProof(dns, claimName, token)).status);
-  }
+  const proofSeen = new Map<string, ProofObservation>();
+  const outcomes = new Map<string, CheckOutcome>();
+  let rows: GroupRow[] = snapshot.rows;
 
-  // Step 3: re-read FOR UPDATE, confirm nothing moved, apply.
-  const trigger = opts.forced ? "check_now" : undefined;
-  const outcomes: CheckOutcome[] = [];
-  const result = await guarded(() =>
-    exec(async (tx) => {
-      const locked = await groupRows(tx, organizationId, claimName, true);
-      for (const row of locked) {
-        const seen = snapshot.rows.find((r) => r.id === row.id);
-        if (!seen || seen.state !== row.state) continue; // moved under us: drop it
-        const status = proofByToken.get(row.proofToken) ?? null;
-        if (status === null) {
-          outcomes.push("deferred");
-          continue;
+  for (let pass = 0; pass < 2 && rows.length > 0; pass += 1) {
+    // A closed organization's rows are removed without looking at the network;
+    // rows already parked or releasing keep going through the normal checks.
+    const evidenceRows = snapshot.closed ? rows.filter((r) => r.state === "parked" || r.state === "release_pending") : rows;
+    const evidence = await gatherEvidence(evidenceRows, claimName, proofSeen, d);
+
+    const seenState = new Map(rows.map((r) => [r.id, r.state] as const));
+    const applied = await guarded(() =>
+      exec(async (tx): Promise<ApplyResult> => {
+        const env: ApplyEnv = {
+          tx,
+          actor,
+          trigger,
+          now: d.now(),
+          forced: opts.forced,
+          organizationId,
+          notifications: new Map(),
+          alerts: new Map(),
+          followUp: [],
+        };
+        const locked = await groupRows(tx, organizationId, claimName, true);
+        const out = new Map<string, CheckOutcome>();
+        for (const row of locked) {
+          if (seenState.get(row.id) !== row.state) continue; // moved under us (or not ours this pass): drop it
+          if (snapshot.closed && row.state !== "parked" && row.state !== "release_pending") {
+            await transitionDomain(tx, row, "remove", actor, {
+              cause: "org_closed",
+              trigger: "org_closed",
+              patch: row.webRole === "canonical" ? { webRole: "alias" } : undefined,
+            });
+            note(env, "removed", row);
+            out.set(row.id, "removed");
+            continue;
+          }
+          const ev = evidence.get(row.id);
+          if (!ev) continue;
+          out.set(row.id, await applyRow(env, row, ev));
         }
-        outcomes.push(await applyProof(tx, row, status, actor, trigger));
-      }
-      // Notifications for a check (lapse, park, release) arrive with the 1b
-      // sweeper; a verification is the church's own good news, visible on the
-      // page and in the audit trail.
-      return { kind: "ok" } as const;
-    }),
-  );
-  if (result.kind !== "ok") return result;
+        await ensureCanonical(env, locked.filter((r) => seenState.has(r.id)));
 
-  const order: CheckOutcome[] = ["verified", "recovered", "expired", "held_elsewhere", "unchanged", "deferred"];
-  const outcome = order.find((o) => outcomes.includes(o)) ?? "deferred";
-  const statuses = [...proofByToken.values()];
-  return {
-    kind: "ok",
-    outcome,
-    proof: statuses[0] ?? null,
-    checkedAt: new Date().toISOString(),
-  };
-}
+        const ctx = env.notifications.size > 0 ? await collectNotificationContext(tx, organizationId) : null;
+        const operatorCtx = env.alerts.size > 0 ? await collectOperatorContext(tx, organizationId) : null;
+        return {
+          kind: "ok",
+          outcomes: out,
+          followUp: env.followUp,
+          notifications: [...env.notifications].map(([event, hostnames]) => ({ event, hostnames })),
+          alerts: [...env.alerts].map(([kind, hostnames]) => ({ kind, hostnames })),
+          ctx,
+          operatorCtx,
+        };
+      }),
+    );
+    if (applied.kind !== "ok") return applied;
 
-/** The states whose check is a proof lookup in this batch (1b adds the rest). */
-const PROOF_STATES: ReadonlySet<DomainState> = new Set(["pending", "lapsed"]);
-
-async function applyProof(
-  tx: DomainTx,
-  row: GroupRow,
-  proof: ProofCheck["status"],
-  actor: DomainActor,
-  trigger: string | undefined,
-): Promise<CheckOutcome> {
-  const checkClass: OrganizationDomainCheckClass =
-    proof === "present" ? "ok" : proof === "unknown" ? "dns_unknown" : "proof_absent";
-  const observation = {
-    ...readObservation(row.observation),
-    checkedAt: new Date().toISOString(),
-    proof: { status: proof },
-  };
-
-  if (row.state === "pending") {
-    if (proof === "present") {
+    for (const [id, outcome] of applied.outcomes) outcomes.set(id, outcome);
+    for (const n of applied.notifications) await notifyAfterCommit(applied.ctx, n.event, n.hostnames, actor);
+    for (const a of applied.alerts) {
       try {
-        // A SAVEPOINT: a unique violation here (another organization verified
-        // this name first) must not abort the whole check.
-        await tx.transaction((sp) =>
-          transitionDomain(sp, row, "proof_ok", actor, {
-            trigger,
-            patch: {
-              proofLastOkAt: dbNow(),
-              proofMissCount: 0,
-              lastCheckedAt: dbNow(),
-              lastCheckClass: "ok",
-              observation,
-            },
-          }),
-        );
-        return "verified";
-      } catch (err) {
-        if (classifyDomainDbError(err)?.kind !== "held_elsewhere") throw err;
-        await writeObservation(tx, row, observation, "held_elsewhere", cadenceMs("pending")!);
-        return "held_elsewhere";
+        await sendOperatorAlert(applied.operatorCtx, a.kind, a.hostnames);
+      } catch {
+        console.error(`[domains] operator alert failed (${a.kind})`);
       }
     }
-    // Absent or wrong value, on a claim past its expiry: it expires. An
-    // `unknown` lookup never expires a claim (the proof may be there).
-    if (row.dbExpired && (proof === "absent" || proof === "wrong_value")) {
-      await transitionDomain(tx, row, "expire", actor, {
-        trigger,
-        patch: { lastCheckedAt: dbNow(), lastCheckClass: checkClass, observation },
-      });
-      return "expired";
-    }
-    await writeObservation(tx, row, observation, checkClass, cadenceMs("pending")!);
-    return "unchanged";
+
+    if (applied.followUp.length === 0) break;
+    // Pass two: the rows that just committed `attach_pending` now make their provider call.
+    const ids = new Set(applied.followUp);
+    const reread = await guarded(() =>
+      exec(async (tx) => ({
+        kind: "ok" as const,
+        rows: (await groupRows(tx, organizationId, claimName, false)).filter((r) => ids.has(r.id)),
+      })),
+    );
+    if (reread.kind !== "ok") return reread;
+    rows = reread.rows;
   }
 
-  // lapsed
-  if (proof === "present") {
-    await transitionDomain(tx, row, "proof_ok", actor, {
-      trigger,
-      patch: {
-        proofLastOkAt: dbNow(),
-        proofMissCount: 0,
-        lastCheckedAt: dbNow(),
-        lastCheckClass: "ok",
-        observation,
-      },
-    });
-    return "recovered";
-  }
-  await writeObservation(tx, row, observation, checkClass, cadenceMs("lapsed")!);
-  return "unchanged";
+  const found = [...outcomes.values()];
+  const outcome = OUTCOME_PRIORITY.find((o) => found.includes(o)) ?? "deferred";
+  const statuses = [...proofSeen.values()];
+  return { kind: "ok", outcome, proof: statuses[0] ?? null, checkedAt: new Date().toISOString() };
 }
 
-/** An observation-only write: no state change, so no audit row (high-volume, not security-sensitive). */
-async function writeObservation(
-  tx: DomainTx,
-  row: Pick<OrganizationDomain, "id">,
-  observation: Record<string, unknown>,
-  checkClass: OrganizationDomainCheckClass,
-  nextInMs: number,
-): Promise<void> {
-  await tx
-    .update(organizationDomains)
-    .set({
-      observation,
-      lastCheckedAt: dbNow(),
-      lastCheckClass: checkClass,
-      nextCheckAt: dbNowPlus(nextInMs),
-    })
-    .where(eq(organizationDomains.id, row.id));
+/**
+ * "Check now" and the cron's per-claim work. Kept under its Batch 1a-ii name so
+ * the actions and their tests are untouched; it IS `observeAndAdvance`.
+ */
+export async function checkClaim(
+  actor: DomainActor,
+  organizationId: string,
+  claimName: string,
+  opts: { forced: boolean; deps?: DomainServiceDeps },
+): Promise<CheckResult> {
+  return observeAndAdvance(actor, organizationId, claimName, opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -1215,6 +2057,7 @@ export async function readDomainsView(
         expiresAt: r.expiresAt,
         graceEndsAt: r.graceEndsAt,
         observation: r.observation,
+        providerChallenge: r.providerChallenge,
       }));
       return {
         kind: "ok",
@@ -1223,4 +2066,263 @@ export async function readDomainsView(
       };
     }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// The sweep (the cron's whole job)
+// ---------------------------------------------------------------------------
+
+export interface SweepOptions {
+  /** Most rows to lease in this invocation (default 50, max 200). */
+  limit?: number;
+  /** Claim groups processed at once (default 5). */
+  concurrency?: number;
+  /** Epoch ms after which no NEW group is started (the invocation's time budget). */
+  deadlineMs?: number;
+  /** Restrict the sweep to these organizations (used by tests and a future per-org "sweep now"). */
+  organizationIds?: readonly string[];
+  deps?: DomainServiceDeps;
+}
+
+/** Counts only: never a hostname, an error message or a provider string. */
+export interface SweepSummary {
+  picked: number;
+  groups: number;
+  advanced: number;
+  failed: number;
+  outcomes: Record<string, number>;
+}
+
+interface LeasedRow {
+  id: string;
+  organization_id: string;
+  claim_name: string;
+}
+
+/**
+ * Leases the rows that are due. ONE statement: it picks `limit` due rows
+ * `FOR UPDATE SKIP LOCKED` and pushes their `next_check_at` out by the lease,
+ * so two overlapping sweeps (a retried invocation, a slow run still going when
+ * the next tick fires) can never take the same row - the second sees the rows
+ * the first locked, skips them, and takes the next. A row whose processing dies
+ * is simply due again when its lease runs out. A non-terminal row with no
+ * `next_check_at` at all (one created out of band) is treated as due.
+ */
+export async function leaseDueDomains(limit: number, organizationIds?: readonly string[]): Promise<LeasedRow[]> {
+  const scope =
+    organizationIds && organizationIds.length > 0
+      ? sql`and organization_id in (${sql.join(organizationIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+      : sql``;
+  const leaseSeconds = DOMAIN_POLICY.sweep.leaseMs / 1000;
+  const result = await getPlatformDb().execute(sql`
+    update organization_domains d
+       set next_check_at = now() + (${leaseSeconds}::double precision * interval '1 second')
+     where d.id in (
+       select id
+         from organization_domains
+        where state not in ('expired', 'released')
+          and (next_check_at is null or next_check_at <= now())
+          ${scope}
+        order by next_check_at nulls first, id
+        limit ${limit}
+          for update skip locked
+     )
+    returning d.id, d.organization_id, d.claim_name
+  `);
+  return rowsOf<LeasedRow>(result);
+}
+
+/**
+ * One cron tick: lease the due rows, group them by claim, and run each group
+ * through `observeAndAdvance` as the machine actor. Idempotent by
+ * construction - every step is a function of stored state plus what the
+ * network says now, and every transition is optimistic (`where state = from`) -
+ * so a duplicated or missed invocation costs nothing. Reconciliation of
+ * `attach_pending` and `release_pending` is not a separate pass: they are
+ * simply due rows whose check retries the idempotent provider call.
+ */
+export async function sweepDueDomains(opts: SweepOptions = {}): Promise<SweepSummary> {
+  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? DOMAIN_POLICY.sweep.defaultLimit)), DOMAIN_POLICY.sweep.maxLimit);
+  const concurrency = Math.max(1, Math.floor(opts.concurrency ?? DOMAIN_POLICY.sweep.concurrency));
+  const leased = await leaseDueDomains(limit, opts.organizationIds);
+
+  const groups = new Map<string, { organizationId: string; claimName: string; ids: Set<string> }>();
+  for (const r of leased) {
+    const key = `${r.organization_id}\u0000${r.claim_name}`;
+    const g = groups.get(key) ?? { organizationId: r.organization_id, claimName: r.claim_name, ids: new Set<string>() };
+    g.ids.add(r.id);
+    groups.set(key, g);
+  }
+
+  const summary: SweepSummary = { picked: leased.length, groups: groups.size, advanced: 0, failed: 0, outcomes: {} };
+  const queue = [...groups.values()];
+  const machine: DomainActor = { kind: "machine", trigger: "cron" };
+
+  const worker = async () => {
+    for (let g = queue.shift(); g !== undefined; g = queue.shift()) {
+      if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) return;
+      try {
+        const r = await observeAndAdvance(machine, g.organizationId, g.claimName, {
+          forced: false,
+          deps: opts.deps,
+          rowIds: g.ids,
+        });
+        const label = r.kind === "ok" ? r.outcome : r.kind;
+        summary.outcomes[label] = (summary.outcomes[label] ?? 0) + 1;
+        if (r.kind === "ok" && r.outcome !== "unchanged" && r.outcome !== "deferred") summary.advanced += 1;
+      } catch {
+        summary.failed += 1;
+        console.error(`[domains] sweep group failed (organization ${g.organizationId})`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+  return summary;
+}
+
+// ---------------------------------------------------------------------------
+// Platform operations: check now, pause / resume, force-release
+// ---------------------------------------------------------------------------
+
+type PlatformActor = Extract<DomainActor, { kind: "platform" }>;
+const isPlatform = (actor: DomainActor): actor is PlatformActor => actor.kind === "platform";
+
+/** "Check now" from the platform admin page: finds the claim from the row, then the same routine as everyone else. */
+export async function checkDomainPlatform(
+  actor: DomainActor,
+  domainId: string,
+  opts: { deps?: DomainServiceDeps } = {},
+): Promise<CheckResult> {
+  if (!isPlatform(actor)) return { kind: "forbidden" };
+  const [row] = await getPlatformDb()
+    .select({ organizationId: organizationDomains.organizationId, claimName: organizationDomains.claimName })
+    .from(organizationDomains)
+    .where(eq(organizationDomains.id, domainId))
+    .limit(1);
+  if (!row) return { kind: "not_found" };
+  return observeAndAdvance(actor, row.organizationId, row.claimName, { forced: true, deps: opts.deps });
+}
+
+export type HoldResult =
+  | { kind: "ok"; changed: boolean; domain: DomainSummary }
+  | { kind: "invalid_reason" }
+  | { kind: "not_found" }
+  | { kind: "terminal" }
+  | { kind: "forbidden" };
+
+const REASON_MIN = 10;
+const REASON_MAX = 500;
+
+/**
+ * Pauses (`paused`), puts in dispute (`disputed`), or resumes (`null`) one
+ * host. `platform_hold` is an owner-only column (T2): the serving predicate
+ * requires it null, so a hold darkens the host immediately with no DNS change,
+ * and the tenant connection cannot clear it. Platform actors only. Audited
+ * (`domain.hold_set` / `domain.hold_cleared`) in the same transaction; the
+ * organization's holders and the platform admins are told after commit.
+ */
+export async function setDomainHold(
+  actor: DomainActor,
+  domainId: string,
+  hold: "paused" | "disputed" | null,
+  reason: string | null,
+): Promise<HoldResult> {
+  if (!isPlatform(actor)) return { kind: "forbidden" };
+  const text = (reason ?? "").trim();
+  if (hold !== null && (text.length < REASON_MIN || text.length > REASON_MAX)) return { kind: "invalid_reason" };
+
+  let ctx: NotificationContext | null = null;
+  const result = await getPlatformDb().transaction(async (tx): Promise<HoldResult> => {
+    const [row] = await tx
+      .select()
+      .from(organizationDomains)
+      .where(eq(organizationDomains.id, domainId))
+      .for("update")
+      .limit(1);
+    if (!row) return { kind: "not_found" };
+    if (isTerminal(row.state)) return { kind: "terminal" };
+    if ((row.platformHold ?? null) === hold) return { kind: "ok", changed: false, domain: summarize(row) };
+
+    const [updated] = await tx
+      .update(organizationDomains)
+      .set({ platformHold: hold, holdReason: hold === null ? null : text })
+      .where(eq(organizationDomains.id, row.id))
+      .returning();
+    await insertAuditRow(tx as DomainTx, {
+      action: hold === null ? AUDIT_ACTIONS.DOMAIN_HOLD_CLEARED : AUDIT_ACTIONS.DOMAIN_HOLD_SET,
+      actor: actorAudit(actor),
+      resourceType: "organization_domain",
+      resourceId: row.id,
+      metadata: {
+        organizationId: row.organizationId,
+        hostname: row.hostname,
+        claimName: row.claimName,
+        purpose: row.purpose,
+        state: row.state,
+        previousHold: row.platformHold,
+        hold,
+        ...(hold === null ? {} : { reason: text }),
+        actorKind: actor.kind,
+      },
+    });
+    ctx = await collectNotificationContext(tx as DomainTx, row.organizationId);
+    return { kind: "ok", changed: true, domain: summarize(updated!) };
+  });
+
+  if (result.kind === "ok" && result.changed) {
+    await notifyAfterCommit(ctx, hold === null ? "hold_cleared" : "hold_set", [result.domain.hostname], actor);
+  }
+  return result;
+}
+
+export type ForceReleaseResult =
+  | { kind: "ok"; domain: DomainSummary }
+  | { kind: "invalid_reason" }
+  | { kind: "not_found" }
+  | { kind: "already_final" }
+  | { kind: "already_releasing" }
+  | { kind: "forbidden" };
+
+/**
+ * Force-releases one host (also the eviction and dispute-resolution path):
+ * skips the grace, records the platform's reason in the owner-only
+ * `force_release_reason` evidence column, and moves the row to `released`
+ * (nothing was attached) or `release_pending` (the sweep detaches it). The
+ * canonical role is handed back first, as a removal does, so a live alias can
+ * take over. Platform actors only; the reason is required (10-500 characters).
+ */
+export async function forceReleaseDomain(
+  actor: DomainActor,
+  domainId: string,
+  input: { reason: string; cause?: "force_released" | "evicted" },
+): Promise<ForceReleaseResult> {
+  if (!isPlatform(actor)) return { kind: "forbidden" };
+  const reason = input.reason.trim();
+  if (reason.length < REASON_MIN || reason.length > REASON_MAX) return { kind: "invalid_reason" };
+
+  let ctx: NotificationContext | null = null;
+  const result = await getPlatformDb().transaction(async (tx): Promise<ForceReleaseResult> => {
+    const [row] = await tx
+      .select()
+      .from(organizationDomains)
+      .where(eq(organizationDomains.id, domainId))
+      .for("update")
+      .limit(1);
+    if (!row) return { kind: "not_found" };
+    if (isTerminal(row.state)) return { kind: "already_final" };
+    if (row.state === "release_pending") return { kind: "already_releasing" };
+
+    const updated = await transitionDomain(tx as DomainTx, row, "force_release", actor, {
+      cause: input.cause ?? "force_released",
+      forceReleaseReason: reason,
+      patch: row.webRole === "canonical" ? { webRole: "alias" } : undefined,
+    });
+    ctx = await collectNotificationContext(tx as DomainTx, row.organizationId);
+    return { kind: "ok", domain: summarize(updated) };
+  });
+
+  if (result.kind === "ok") {
+    await notifyAfterCommit(ctx, "force_released", [result.domain.hostname], actor);
+  }
+  return result;
 }

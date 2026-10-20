@@ -655,17 +655,9 @@ describe.skipIf(!hasDb)("src/lib/domains/service.ts (Postgres-backed)", () => {
       expect((await auditFor(r.created.map((c) => c.id))).filter((a) => a.action === AUDIT_ACTIONS.DOMAIN_RECOVERED)).toHaveLength(0);
     });
 
-    it("states past the proof stage are deferred to Batch 1b: no DNS query, no write, no audit row", async () => {
-      const t = await tenant();
-      const name = claim("church");
-      const r = await claimOk(t, name);
-      for (const c of r.created) await walkTo(c.id, "verified");
-      const d = dnsWith();
-      const res = await svc.checkClaim(t.actor, t.org, name, { forced: false, deps: { dns: d.observer } });
-      expect(res).toMatchObject({ kind: "ok", outcome: "deferred", proof: null });
-      expect(d.queryCount()).toBe(0);
-      expect((await auditFor(r.created.map((c) => c.id))).filter((a) => a.action !== AUDIT_ACTIONS.DOMAIN_CLAIMED)).toHaveLength(0);
-    });
+    // Batch 1a-ii pinned "states past the proof stage are deferred: no DNS
+    // query, no write". Batch 1b makes them real, so that test is retired here;
+    // the replacement coverage is sweep.db.test.ts (every state past `pending`).
 
     it("drops a row that moved between the lookup and the write (re-read FOR UPDATE, confirm state)", async () => {
       const t = await tenant();

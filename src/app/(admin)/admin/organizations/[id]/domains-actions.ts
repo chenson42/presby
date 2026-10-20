@@ -4,14 +4,22 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { FEATURES, hasFeature } from "@/lib/permissions";
-import { claimDomain, type ProofRecord } from "@/lib/domains/service";
+import {
+  checkDomainPlatform,
+  claimDomain,
+  forceReleaseDomain,
+  setDomainHold,
+  type CheckOutcome,
+  type ProofRecord,
+} from "@/lib/domains/service";
 import { claimRefusalMessage } from "@/lib/domains/messages";
 import { OPERATOR_TOGGLE_KEYS, setOperatorOrgToggle } from "@/lib/domains/toggles";
 
 /**
  * Platform-admin domain actions at `/admin/organizations/<id>` (Batch 1a-ii:
- * the Q2 on-behalf web claim and the two operator-enabled org toggles; the
- * check / pause / force-release actions and the page are Batches 1b and 1d).
+ * the Q2 on-behalf web claim and the two operator-enabled org toggles; Batch
+ * 1b: check now, pause / dispute / resume, and force-release; the page that
+ * calls them is Batch 1d).
  * docs/work-log/2026-10-19-custom-domains.md Phase 3 API Contract section 6,
  * operator rulings Q1 and Q2, R9.
  *
@@ -20,8 +28,10 @@ import { OPERATOR_TOGGLE_KEYS, setOperatorOrgToggle } from "@/lib/domains/toggle
  * transaction, as the PLATFORM actor (`metadata.actorKind = "platform"`,
  * `via = "platform"`); the toggle is audited in the same transaction by
  * `setOperatorOrgToggle()` with the existing `tenant.org_feature.toggled` key
- * and `via = "platform"`. Neither is visible to `npm run check:audit`; the DB
- * tests prove both.
+ * and `via = "platform"`; a hold is audited (`domain.hold_set` /
+ * `domain.hold_cleared`) and a force-release is a `transitionDomain()` edge
+ * with its reason on the audit row, each in the writing transaction. None is
+ * visible to `npm run check:audit`; the DB tests prove them all.
  *
  * GATE. `auth()` -> `hasFeature(session.user.features, ADMIN_ORGANIZATIONS)`
  * (R9: reuse, no new platform key). The platform admin never holds
@@ -39,7 +49,21 @@ export type PlatformDomainActionResult<T = void> =
   | {
       ok: false;
       error: string;
-      code: "unauthorized" | "forbidden" | "invalid" | "exists" | "cap_reached" | "conflict" | "rate_limited" | "feature_off" | "not_found" | "invalid_key";
+      code:
+        | "unauthorized"
+        | "forbidden"
+        | "invalid"
+        | "exists"
+        | "cap_reached"
+        | "conflict"
+        | "rate_limited"
+        | "feature_off"
+        | "not_found"
+        | "invalid_key"
+        | "invalid_reason"
+        | "terminal"
+        | "already_final"
+        | "already_releasing";
       field?: "domain";
       retryAfterSeconds?: number;
     };
@@ -162,5 +186,123 @@ export async function setOrgDomainFeatureAction(
     case "ok":
       revalidatePath(`/admin/organizations/${organizationId}`);
       return { ok: true, data: { changed: result.changed } };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Batch 1b: check now, pause / dispute / resume, force-release
+// ---------------------------------------------------------------------------
+
+const holdSchema = z.enum(["paused", "disputed"]).nullable();
+const reasonSchema = z.string().max(1000).nullable();
+const forceReleaseSchema = z.object({
+  reason: z.string().max(1000),
+  cause: z.enum(["force_released", "evicted"]).optional(),
+});
+
+const REASON_COPY = "Give a reason of 10 to 500 characters. It is recorded and shown to the organization's administrators.";
+
+/**
+ * "Check now" from the platform admin page: the same routine the cron and the
+ * church's own button run, as the platform actor (a forced check: rate-limited,
+ * and a single negative probe is enough to take a live host out of service).
+ */
+export async function checkDomainPlatformAction(
+  domainId: string,
+): Promise<PlatformDomainActionResult<{ outcome: CheckOutcome; checkedAt: string }>> {
+  const who = await platformSession();
+  if (!who.ok) return who.result;
+  if (!UUID_RE.test(domainId)) return fail("not_found", "That domain doesn't exist.");
+
+  const result = await checkDomainPlatform({ kind: "platform", userId: who.userId, email: who.email }, domainId);
+  switch (result.kind) {
+    case "rate_limited":
+      return fail("rate_limited", "Too many checks just now. Try again shortly.", {
+        retryAfterSeconds: result.retryAfterSeconds,
+      });
+    case "feature_off":
+      return fail("feature_off", "Turn on Website domain for this organization first.");
+    case "forbidden":
+      return fail("forbidden", "Forbidden.");
+    case "not_found":
+      return fail("not_found", "That domain doesn't exist.");
+    case "ok":
+      revalidatePath("/admin/organizations", "layout");
+      return { ok: true, data: { outcome: result.outcome, checkedAt: result.checkedAt } };
+  }
+}
+
+/**
+ * Pauses, disputes or resumes one host. A hold darkens the host at once with no
+ * DNS change and cannot be cleared from the tenant side (the columns are
+ * owner-only). `hold = null` resumes; setting a hold needs a real reason.
+ */
+export async function setDomainHoldAction(
+  domainId: string,
+  hold: "paused" | "disputed" | null,
+  reason: string | null,
+): Promise<PlatformDomainActionResult<{ changed: boolean }>> {
+  const who = await platformSession();
+  if (!who.ok) return who.result;
+  if (!UUID_RE.test(domainId)) return fail("not_found", "That domain doesn't exist.");
+  const parsed = z.object({ hold: holdSchema, reason: reasonSchema }).safeParse({ hold, reason });
+  if (!parsed.success) return fail("invalid", "That isn't a valid hold.");
+
+  const result = await setDomainHold(
+    { kind: "platform", userId: who.userId, email: who.email },
+    domainId,
+    parsed.data.hold,
+    parsed.data.reason,
+  );
+  switch (result.kind) {
+    case "invalid_reason":
+      return fail("invalid_reason", REASON_COPY);
+    case "terminal":
+      return fail("terminal", "That domain has already been released.");
+    case "forbidden":
+      return fail("forbidden", "Forbidden.");
+    case "not_found":
+      return fail("not_found", "That domain doesn't exist.");
+    case "ok":
+      revalidatePath("/admin/organizations", "layout");
+      return { ok: true, data: { changed: result.changed } };
+  }
+}
+
+/**
+ * Force-releases one host, skipping the 30-day grace: also the eviction and
+ * dispute-resolution path. The reason is required and recorded; the
+ * organization's administrators are told. A host that was attached is handed to
+ * the cron to detach.
+ */
+export async function forceReleaseDomainAction(
+  domainId: string,
+  input: { reason: string; cause?: "force_released" | "evicted" },
+): Promise<PlatformDomainActionResult<{ state: string }>> {
+  const who = await platformSession();
+  if (!who.ok) return who.result;
+  if (!UUID_RE.test(domainId)) return fail("not_found", "That domain doesn't exist.");
+  const parsed = forceReleaseSchema.safeParse(input);
+  if (!parsed.success) return fail("invalid_reason", REASON_COPY);
+
+  const result = await forceReleaseDomain(
+    { kind: "platform", userId: who.userId, email: who.email },
+    domainId,
+    parsed.data,
+  );
+  switch (result.kind) {
+    case "invalid_reason":
+      return fail("invalid_reason", REASON_COPY);
+    case "already_final":
+      return fail("already_final", "That domain has already been released.");
+    case "already_releasing":
+      return fail("already_releasing", "That domain is already being released.");
+    case "forbidden":
+      return fail("forbidden", "Forbidden.");
+    case "not_found":
+      return fail("not_found", "That domain doesn't exist.");
+    case "ok":
+      revalidatePath("/admin/organizations", "layout");
+      return { ok: true, data: { state: result.domain.state } };
   }
 }

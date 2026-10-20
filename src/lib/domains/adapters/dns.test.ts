@@ -342,3 +342,37 @@ describe("provider selection and the fake's state file", () => {
     }
   });
 });
+
+describe("Batch 1b additions: checking-disabled queries and unknown reasons", () => {
+  it("the DoH resolver adds cd=1 only when asked, and only the fixed endpoint is ever contacted", async () => {
+    const urls: string[] = [];
+    const f = vi.fn(async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ Status: 0, Answer: [] }), { status: 200 });
+    });
+    const resolver = new DohResolver("cloudflare", CLOUDFLARE_DOH, f as unknown as typeof fetch);
+    await resolver.query("church-one.invalid", "A");
+    await resolver.query("church-one.invalid", "A", { checkingDisabled: true });
+    expect(urls[0]).toBe(`${CLOUDFLARE_DOH}?name=church-one.invalid&type=A`);
+    expect(urls[1]).toBe(`${CLOUDFLARE_DOH}?name=church-one.invalid&type=A&cd=1`);
+  });
+
+  it("an unknown observation names why each failing resolver failed", async () => {
+    const d = createFakeDns();
+    d.google.failWith("servfail");
+    expect(await d.observer.lookup("church-one.invalid", "A")).toMatchObject({ kind: "unknown", reasons: ["servfail"] });
+    d.cloudflare.failWith("timeout");
+    expect(await d.observer.lookup("church-one.invalid", "A")).toMatchObject({
+      kind: "unknown",
+      reasons: ["timeout", "servfail"],
+    });
+  });
+
+  it("the fake's broken DNSSEC chain SERVFAILs a validated query and answers with checking disabled", async () => {
+    const d = createFakeDns();
+    d.setRecord("A", "church-one.invalid", "192.0.2.10");
+    d.breakDnssec("church-one.invalid");
+    expect(await d.observer.lookup("church-one.invalid", "A")).toMatchObject({ kind: "unknown", reasons: ["servfail", "servfail"] });
+    expect(await d.observer.lookup("church-one.invalid", "A", undefined, { checkingDisabled: true })).toMatchObject({ kind: "present" });
+  });
+});

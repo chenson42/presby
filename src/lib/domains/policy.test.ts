@@ -128,4 +128,16 @@ describe("cadence (Phase 3 policy.ts defaults)", () => {
     expect(DOMAIN_POLICY.proofLostMisses).toBe(6);
     expect(DOMAIN_POLICY.proofLostMinSpanMs).toBe(10 * 3_600_000);
   });
+
+  it("Batch 1b: the sweep, the alert and the reminder constants are the design's", () => {
+    expect(DOMAIN_POLICY.sweep).toEqual({ leaseMs: 10 * 60_000, defaultLimit: 50, maxLimit: 200, concurrency: 5 });
+    expect(DOMAIN_POLICY.operatorAlertRepeatMs).toBe(24 * 3_600_000);
+    expect(DOMAIN_POLICY.providerFailingAlertMs).toBe(24 * 3_600_000);
+    expect(DOMAIN_POLICY.parkedReminderMs).toBe(7 * 86_400_000);
+  });
+
+  it("a lease outlasts one cron tick (a slow run cannot be re-taken mid-flight) yet is far inside the trigger's cap", () => {
+    expect(DOMAIN_POLICY.sweep.leaseMs).toBeGreaterThan(5 * 60_000);
+    expect(DOMAIN_POLICY.sweep.leaseMs).toBeLessThanOrEqual(NEXT_CHECK_CAP_MS.default);
+  });
 });

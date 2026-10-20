@@ -254,6 +254,23 @@ If the build ever flakes anyway, `rm -rf "$SCRATCH/app/.next"` and retry. A nega
 
 ---
 
+## Custom domains: real hosts without real domains (Track F)
+
+`e2e/custom-domains/` proves that a church's own domain serves that church and nothing else, with no real domain, DNS or Vercel call. The Playwright project **`custom-hosts`** launches Chromium with `--host-resolver-rules=MAP *.invalid 127.0.0.1`, so `http://www.church-one.invalid:<port>/` is a real page load with that name in `Host` (`.invalid` is reserved by RFC 2606: it can never resolve publicly, and No Real Data holds). A test that needs a request that *lies* about its `Host` sets the header explicitly on the `request` fixture (`rawGet` in `e2e/support/custom-hosts.ts`). Non-production treats loopback as a platform host and `*.invalid` as a custom host; `next.config.ts` allows `**.invalid` in `allowedDevOrigins` so the dev server hydrates there.
+
+```bash
+E2E_BASE_URL=http://localhost:3111 npx playwright test --project=custom-hosts     # all five specs, dev server
+npm run test:e2e:prod     # now ALSO runs project prod-custom-hosts (headers, lockdown, serving) on the production build
+```
+
+- **The first test of `serving.spec.ts` is a canary**: an unknown `*.invalid` host must reach OUR server and get OUR neutral 404 (not a DNS error), so a later failure is a real defect and not a mis-mapped host.
+- **The server must have the test fakes.** `playwright.config.ts` sets `CRON_SECRET`, `DOMAINS_ALLOW_RESERVED_TLDS=1`, `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake` and `DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json` for a server *it* starts. A dev server you started yourself (port 3000 may belong to another checkout; start yours on another port and set `E2E_BASE_URL`) needs the same in its own environment; `globalSetup` fails with instructions when `CRON_SECRET` is missing. These variables are refused by a Vercel production build (`assertPlatformHostConfig`).
+- **Fixtures are SQL on the owner connection, by walking legal edges** (`e2e/support/custom-hosts.ts`, `buildWorld`): three throwaway congregations (`e2e-domains-*`, `deletable_until`), each with a live site and bundle, and domain rows walked `pending -> verified -> attach_pending -> attached -> live`. Domain rows are never deleted by name; deleting the fixture organization is the one thing the delete guard allows, and teardown confirms by SELECT. Rows get `next_check_at` five hours out so the cron sweep specs never lease them.
+- **Comparing "byte-identical" 404s.** Next echoes the requested host and path into the streamed payload (and, in dev, into an error template and the `x-middleware-rewrite` header). `snapshot(res, host)` replaces the requested host and normalizes that header, so two states of one host compare exactly (status, body, every non-volatile header); `shape()` compares what a visitor *sees* when the paths differ.
+- The specs flip the global `sites.public_render` flag; each restores it in `afterAll` and asserts the restoration. Do not run them concurrently with `sites.test.ts`, which does the same.
+
+---
+
 ## Online giving: the signed-event replay harness
 
 Online giving's riskiest code is the webhook, and there is no Stripe account in

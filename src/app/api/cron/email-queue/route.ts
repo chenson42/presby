@@ -1,3 +1,4 @@
+import { hostClass } from "@/lib/domains/host";
 import { processQueueBatch } from "@/lib/email/queue";
 
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -29,5 +30,8 @@ export async function GET(req: Request) {
 
   const result = await processQueueBatch(limit);
 
+  // One line per invocation (T6 / A6): which host class Vercel invoked the cron
+  // on. The real-domain acceptance pass reads it. A label only, no behaviour.
+  console.info("[cron/email-queue]", JSON.stringify({ hostClass: hostClass(req.headers) }));
   return Response.json({ ok: true, ...result });
 }

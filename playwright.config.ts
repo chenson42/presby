@@ -73,6 +73,32 @@ const baseURL = isProdBuildRun
   ? PROD_BASE_URL
   : (process.env.E2E_BASE_URL ?? "http://localhost:3000");
 
+/**
+ * Custom domains (Track F, docs/work-log/2026-10-19-custom-domains.md, Phase 3 "E2E approach").
+ *
+ * A church's own domain is exercised WITHOUT a real domain: Chromium is told to resolve every
+ * `*.invalid` name to loopback (`--host-resolver-rules`), so `http://church-one.invalid:<port>/`
+ * reaches the dev (or production-build) server with that name in `Host`. `.invalid` is reserved by
+ * RFC 2606 and can never resolve on the public internet, and a test that needs the opposite - a
+ * request that LIES about its Host - sets the header explicitly on the `request` fixture instead.
+ * Non-production treats loopback as a platform host and `*.invalid` as a custom host.
+ *
+ * The `DOMAINS_*` variables below are test-only fakes (a Vercel production deployment refuses them
+ * at build time, `assertPlatformHostConfig`). Like `RATE_LIMIT_DISABLED`, they reach only a server
+ * THIS config starts; a reused dev server needs them in its own environment, and globalSetup says so.
+ * The fake state file lives under the gitignored `.tmp/`.
+ */
+const HOST_RESOLVER_ARGS = ["--host-resolver-rules=MAP *.invalid 127.0.0.1"];
+const DOMAINS_TEST_ENV = {
+  DOMAINS_ALLOW_RESERVED_TLDS: "1",
+  DOMAINS_PROVIDER: "fake",
+  DOMAINS_DNS_PROVIDER: "fake",
+  DOMAINS_FAKE_STATE_FILE: path.resolve(__dirname, ".tmp", "domains-fake-state.json"),
+  // The cron pass-through specs drive /api/cron/* with this bearer (already set for the giving
+  // webhook harness; a value already in the environment wins, as there).
+  CRON_SECRET: process.env.CRON_SECRET ?? "giving-e2e-cron-secret",
+};
+
 export default defineConfig({
   globalSetup: "./e2e/support/global-setup.ts",
   testDir: "./e2e",
@@ -106,6 +132,7 @@ export default defineConfig({
           // Overrides the AUTH_URL=http://localhost:3000 that CI writes to
           // .env.local; Auth.js rewrites request origins to AUTH_URL.
           AUTH_URL: PROD_BASE_URL,
+          ...DOMAINS_TEST_ENV,
         },
       }
     : {
@@ -130,8 +157,9 @@ export default defineConfig({
           // finding. A value already in the environment wins, so a developer can
           // point the spec at a server started with its own.
           STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET ?? "giving-e2e-signing-secret",
-          // The same spec drives GET /api/cron/giving to retry a parked event.
-          CRON_SECRET: process.env.CRON_SECRET ?? "giving-e2e-cron-secret",
+          // CRON_SECRET (in DOMAINS_TEST_ENV): the same spec drives GET /api/cron/giving to retry a
+          // parked event, and the custom-domain specs drive the proxy's cron pass-through.
+          ...DOMAINS_TEST_ENV,
         },
       },
   use: {
@@ -146,6 +174,14 @@ export default defineConfig({
           use: { ...devices["Desktop Chrome"] },
           testMatch: /hydration\/.*\.spec\.ts$/,
         },
+        // The custom-domain specs that must hold on a PRODUCTION build too: the HSTS host split
+        // (`headers()` is baked into the routes manifest at build time), the lockdown / no-cookie
+        // matrix and the serving matrix. `npm run test:e2e:prod` runs both projects.
+        {
+          name: "prod-custom-hosts",
+          use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
+          testMatch: /custom-domains\/(headers|lockdown|serving)\.spec\.ts$/,
+        },
       ]
     : [
         {
@@ -154,7 +190,14 @@ export default defineConfig({
           // The visual project owns visual-parity.spec.ts's per-route viewport /
           // colorScheme matrix via test.use(); running it here too would collide
           // with that spec's own storageState/viewport overrides for no benefit.
-          testIgnore: /visual-parity\.spec\.ts$/,
+          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//],
+        },
+        // Custom domains (see HOST_RESOLVER_ARGS above). The first test of the first spec is a
+        // CANARY proving the `*.invalid` mapping works, so every later failure is real.
+        {
+          name: "custom-hosts",
+          use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
+          testMatch: /custom-domains\/.*\.spec\.ts$/,
         },
         ...(isVisualRun
           ? [

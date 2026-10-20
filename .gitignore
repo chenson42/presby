@@ -46,3 +46,6 @@ e2e/.visual/
 # because .gitignore is bypassable with `git add -f`.
 private/
 scratch/
+
+# Custom-domain e2e: the fake provider state file (playwright.config.ts DOMAINS_FAKE_STATE_FILE)
+.tmp/

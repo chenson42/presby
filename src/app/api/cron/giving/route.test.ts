@@ -99,3 +99,29 @@ describe("GET /api/cron/giving", () => {
     expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain("secret-looking-inbox-id");
   });
 });
+
+describe("GET /api/cron/giving - the host-class log line (T6 / A6)", () => {
+  const withHost = (host: string | null) =>
+    new Request("http://localhost/api/cron/giving", {
+      headers: { authorization: "Bearer giving-e2e-cron-secret", ...(host ? { host } : {}) },
+    });
+  const logged = () => JSON.parse(vi.mocked(console.info).mock.calls.at(-1)![1] as string) as Record<string, unknown>;
+
+  it("logs which class of host the invocation arrived on, beside the counts - and nothing else varies", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PLATFORM_HOSTS", "app.example.invalid");
+    const bodies: unknown[] = [];
+    for (const [host, expected] of [
+      ["app.example.invalid", "platform"],
+      ["church-one.invalid", "custom"],
+      ["bad host", "invalid"],
+      [null, "invalid"],
+    ] as const) {
+      const res = await GET(withHost(host));
+      expect(res.status, String(host)).toBe(200);
+      bodies.push(await res.json());
+      expect(logged().hostClass, String(host)).toBe(expected);
+    }
+    // The response body never names the host class: only the log does.
+    expect(new Set(bodies.map((b) => JSON.stringify(b))).size).toBe(1);
+  });
+});

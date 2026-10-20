@@ -11,6 +11,7 @@ import { AvatarMenu } from "@/components/shared/avatar-menu";
 import { OrgSwitcher } from "@/components/shared/org-switcher";
 import { OrgWordmark } from "@/components/brand/org-mark";
 import { PlatformWordmark } from "@/components/brand/platform-mark";
+import { slugSitePath } from "@/lib/site-urls";
 
 /**
  * The signed-in header: brand, organization switcher, avatar menu.
@@ -124,7 +125,7 @@ export async function GlobalNav({
             // stays one click away via the account/nav surfaces already on
             // the page.
             <Link
-              href={`/site/${currentOrgSlug}`}
+              href={slugSitePath(currentOrgSlug)}
               className={cn(WORDMARK_LINK_CLASS, "px-0 py-0")}
               aria-label={`${orgMark.name} public site`}
             >

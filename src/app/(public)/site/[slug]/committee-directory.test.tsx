@@ -50,6 +50,12 @@ vi.mock("@/lib/sites", () => ({
 // file exercises real prop-to-DOM mapping (name/title/photoUrl), not a test
 // double standing in for it.
 import { PublicCommitteeDirectory } from "./committee-directory";
+import { buildSiteUrls } from "@/lib/site-urls";
+
+/** Slug-mode url builder (a platform host): photo URLs keep today's /site/<slug>/assets/<key> shape. */
+const SLUG_URLS = buildSiteUrls({ mode: "slug", slug: "alder-creek", platformOrigin: "http://localhost:3000" });
+/** Host-mode url builder (a church's own domain): photo URLs are CLEAN, with no slug anywhere. */
+const HOST_URLS = buildSiteUrls({ mode: "host", host: "church-one.invalid", slug: "alder-creek", platformOrigin: "http://localhost:3000" });
 
 afterEach(() => {
   cleanup();
@@ -60,7 +66,7 @@ describe("PublicCommitteeDirectory — empty result", () => {
   it("renders an explicit 'no committees listed yet' message, never a silent blank", async () => {
     getPublicCommitteeRoster.mockResolvedValue([]);
 
-    const el = await PublicCommitteeDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicCommitteeDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     render(el);
 
     expect(
@@ -73,6 +79,7 @@ describe("PublicCommitteeDirectory — empty result", () => {
 
     const el = await PublicCommitteeDirectory({
       slug: "alder-creek",
+      urls: SLUG_URLS,
       filter: { committee: "Nonexistent Committee" },
     });
     render(el);
@@ -91,7 +98,7 @@ describe("PublicCommitteeDirectory — grouping (all-committees case)", () => {
       { groupName: "Worship Committee", groupRole: "leader", displayName: "Iris Bramblewood", photoKey: null },
     ]);
 
-    const el = await PublicCommitteeDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicCommitteeDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     render(el);
 
     expect(screen.getByRole("heading", { name: "Missions Committee" })).toBeTruthy();
@@ -109,6 +116,7 @@ describe("PublicCommitteeDirectory — grouping (all-committees case)", () => {
 
     const el = await PublicCommitteeDirectory({
       slug: "alder-creek",
+      urls: SLUG_URLS,
       filter: { committee: "Missions Committee" },
     });
     render(el);
@@ -126,7 +134,7 @@ describe("PublicCommitteeDirectory — groupRole -> subtitle mapping", () => {
       { groupName: "Missions Committee", groupRole: "member", displayName: "Corwin Aldridge", photoKey: null },
     ]);
 
-    const el = await PublicCommitteeDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicCommitteeDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     const { container } = render(el);
 
     expect(screen.getByText("Chair")).toBeTruthy();
@@ -144,7 +152,7 @@ describe("PublicCommitteeDirectory — photoUrl and field scope", () => {
       { groupName: "Missions Committee", groupRole: "member", displayName: "Corwin Aldridge", photoKey: null },
     ]);
 
-    const el = await PublicCommitteeDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicCommitteeDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     render(el);
 
     const images = screen.getAllByRole("img");
@@ -158,7 +166,7 @@ describe("PublicCommitteeDirectory — photoUrl and field scope", () => {
       { groupName: "Missions Committee", groupRole: "chair", displayName: "Wren Halloway", photoKey: null },
     ]);
 
-    const el = await PublicCommitteeDirectory({ slug: "alder-creek", filter: {} });
+    const el = await PublicCommitteeDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
     const { container } = render(el);
 
     expect(container.querySelector("a[href^='mailto:']")).toBeNull();
@@ -172,6 +180,7 @@ describe("PublicCommitteeDirectory — filter narrowing (parseCommitteeRosterFil
 
     await PublicCommitteeDirectory({
       slug: "alder-creek",
+      urls: SLUG_URLS,
       filter: { committee: "Missions Committee", hasPriority: true },
     });
 
@@ -186,6 +195,7 @@ describe("PublicCommitteeDirectory — filter narrowing (parseCommitteeRosterFil
 
     await PublicCommitteeDirectory({
       slug: "alder-creek",
+      urls: SLUG_URLS,
       filter: { committee: 12345, hasPriority: "yes" },
     });
 
@@ -195,8 +205,24 @@ describe("PublicCommitteeDirectory — filter narrowing (parseCommitteeRosterFil
   it("an empty filter object narrows to nothing", async () => {
     getPublicCommitteeRoster.mockResolvedValue([]);
 
-    await PublicCommitteeDirectory({ slug: "alder-creek", filter: {} });
+    await PublicCommitteeDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
 
     expect(getPublicCommitteeRoster).toHaveBeenCalledWith("alder-creek", {});
+  });
+});
+
+describe("PublicCommitteeDirectory - host mode (Track F)", () => {
+  it("builds CLEAN photo URLs on a church's own domain: /assets/<key>, no /site/ and no slug", async () => {
+    getPublicCommitteeRoster.mockResolvedValue([
+      { groupName: "Missions Committee", groupRole: "chair", displayName: "Wren Halloway", photoKey: "blob-key-1" },
+    ]);
+
+    render(await PublicCommitteeDirectory({ slug: "alder-creek", urls: HOST_URLS, filter: {} }));
+
+    const src = screen.getByRole("img").getAttribute("src");
+    expect(src).toBe("/assets/blob-key-1");
+    expect(src).not.toContain("/site/");
+    expect(src).not.toContain("alder-creek");
+    expect(getPublicCommitteeRoster).toHaveBeenCalledWith("alder-creek", expect.anything());
   });
 });

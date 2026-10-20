@@ -8,14 +8,17 @@ import { GiveForm } from "@/components/giving/give-form";
 import { GivingUnavailableNotice } from "@/components/giving/giving-unavailable-notice";
 import { giveHeading } from "@/lib/giving/giving-copy";
 import { readPublicGivingConfig } from "@/lib/giving/public-config";
+import { resolveGiveSite } from "@/lib/sites";
 import { createPublicGiveSessionAction } from "./actions";
 import { renderSitePage, siteBundleHasPage, siteBundleMetadata } from "../render-site-page";
+import { redirectIfNeeded, toSearchString } from "../site-redirect";
 
 const GIVE_PATH = "/give";
 
 
 /**
- * `/site/<slug>/give` - the page a visitor gives from. docs/work-log/2026-10-15-
+ * `/site/<key>/give` (and `/give` on a church's own domain, which the proxy
+ * rewrites here) - the page a visitor gives from. docs/work-log/2026-10-15-
  * online-giving.md, Flow 3 and the Component / Page Plan. A PLATFORM-owned route:
  * the static `give` segment beats the site's `[[...path]]` catch-all, so a
  * congregation with no site editor still has a give page whenever giving is
@@ -36,6 +39,15 @@ const GIVE_PATH = "/give";
  * ALWAYS the platform's (a bundle page at exactly `/give/return` stays shadowed; the
  * ingest validator refuses it). Any OTHER `/give/<x>` matches no static route and falls
  * to the catch-all untouched (verified by e2e).
+ *
+ * THE SEGMENT IS A SITE KEY (Track F, DECISION-176). `resolveGiveSite(key)`
+ * turns it into the organization's slug AS THE DATABASE RETURNED IT (host mode)
+ * and the `SiteUrls`; the giving reads below use that slug and nothing the
+ * visitor typed. Like the catch-all, the slug URL of an org whose custom host is
+ * serving, and a non-canonical alias, 307 to the canonical host's `/give`
+ * (`no-store`, DECISION-178). `/give/return` never redirects (Stripe's
+ * `success_url` was fixed when the session was created). A host key that does
+ * not resolve is the page's one `notFound()`.
  *
  * THE (public) CONTRACT (DECISION-041): fully anonymous - no `auth()`, no session
  * or cookie read, no `getPlatformDb()` (the shared render path's one brand-mark
@@ -63,30 +75,45 @@ const GIVE_PATH = "/give";
  */
 export const dynamic = "force-dynamic";
 
-// One read per request, shared by generateMetadata and the page.
+// One read per request, shared by generateMetadata and the page. Keyed by the DB-returned slug.
 const loadConfig = cache((slug: string) => readPublicGivingConfig(slug));
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const { slug } = await params;
-  const config = await loadConfig(slug);
+  const { slug: key } = await params;
+  const target = await resolveGiveSite(key);
+  if (target === null) return {};
+  const config = await loadConfig(target.slug);
   if (config.state === "live") return { title: { absolute: giveHeading(config.organizationName) } };
 
   // Not live: the bundle's own /give page, with its own metadata, when it has one.
-  if (await siteBundleHasPage(slug, GIVE_PATH)) return siteBundleMetadata(slug, GIVE_PATH);
+  if (await siteBundleHasPage(key, GIVE_PATH)) return siteBundleMetadata(key, GIVE_PATH);
   if (config.state === "absent") return {};
   // The platform's "unavailable" state is a dead end for a crawler: keep it out of the index.
   return { title: { absolute: giveHeading(config.organizationName) }, robots: { index: false } };
 }
 
-export default async function PublicGivePage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+export default async function PublicGivePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const { slug: key } = await params;
+  const target = await resolveGiveSite(key);
+  // A host key that does not resolve is the one 404 (nothing else a host could mean).
+  if (target === null) notFound();
+
+  redirectIfNeeded(target, { path: GIVE_PATH, search: toSearchString(await searchParams) });
+
+  const { slug, urls } = target;
   const config = await loadConfig(slug);
 
   if (config.state !== "live") {
     // Only a real bundle page falls through. The catch-all's DECISION-121 presbytery sign-in
     // fallback is deliberately switched off here: `absent` stays the one 404, identical for an
     // unknown slug, a non-tenant (presbytery) slug and a toggle-off org.
-    const site = await renderSitePage(slug, GIVE_PATH, { presbyteryFallback: false });
+    const site = await renderSitePage(key, GIVE_PATH, { presbyteryFallback: false });
     if (site.kind === "page") return site.node;
     if (config.state === "absent") notFound();
   }
@@ -94,7 +121,7 @@ export default async function PublicGivePage({ params }: { params: Promise<{ slu
   return (
     <div className="mx-auto max-w-xl space-y-6 px-4 py-8 sm:px-6 sm:py-12">
       <Link
-        href={`/site/${slug}`}
+        href={urls.home()}
         className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <ArrowLeft className="mr-1 size-4" aria-hidden />
@@ -108,7 +135,7 @@ export default async function PublicGivePage({ params }: { params: Promise<{ slu
           <h1 className="text-2xl font-semibold">{giveHeading(config.organizationName)}</h1>
           <GiveForm
             mode="public"
-            action={createPublicGiveSessionAction.bind(null, slug)}
+            action={createPublicGiveSessionAction.bind(null, key)}
             initialKey={randomUUID()}
             funds={config.funds}
             cardEnabled={config.cardEnabled}

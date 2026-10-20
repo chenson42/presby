@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertPlatformHostConfig,
+  hostClass,
   isIpLiteral,
   isPlatformHost,
   isProductionDeployment,
@@ -329,5 +330,19 @@ describe("F148: VERCEL_PROJECT_PRODUCTION_URL is never read", () => {
   it("the comment stripper really strips (control)", () => {
     expect(code(`// ${NEEDLE}\n/* ${NEEDLE} */\nconst x = 1;`)).not.toContain(NEEDLE);
     expect(code(`const x = process.env.${NEEDLE};`)).toContain(NEEDLE);
+  });
+});
+
+describe("hostClass (the cron log label, T6 / A6)", () => {
+  const ENV = { NEXT_PUBLIC_APP_URL: "https://app.platform.invalid" } as const;
+
+  it("labels platform, custom and invalid hosts, reading only Host", () => {
+    expect(hostClass(headers({ host: "app.platform.invalid" }), ENV)).toBe("platform");
+    expect(hostClass(headers({ host: "preview-x.vercel.app" }), ENV)).toBe("platform");
+    expect(hostClass(headers({ host: "church-one.invalid" }), ENV)).toBe("custom");
+    expect(hostClass(headers({ host: "bad host" }), ENV)).toBe("invalid");
+    expect(hostClass(headers({}), ENV)).toBe("invalid");
+    // A forwarded header never decides it.
+    expect(hostClass(headers({ host: "church-one.invalid", "x-forwarded-host": "app.platform.invalid" }), ENV)).toBe("custom");
   });
 });

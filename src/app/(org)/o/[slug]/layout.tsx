@@ -10,6 +10,7 @@ import { GlobalNav } from "@/components/shared/global-nav";
 import { PortalFooter } from "@/components/org-portal/portal-footer";
 import { PortalNav } from "./portal-nav";
 import { cn } from "@/lib/utils";
+import { slugSitePath } from "@/lib/site-urls";
 
 /**
  * The organization shell.
@@ -156,7 +157,7 @@ export default async function OrgSlugLayout({
             currentOrgSlug={slug}
             contentWidthClassName="max-w-6xl"
             orgMark={orgMark}
-            signOutRedirectTo={`/site/${slug}`}
+            signOutRedirectTo={slugSitePath(slug)}
             feedbackHref={feedbackHref}
           />
           {showPortalNav && orgOrganizationType && tileViewer ? (

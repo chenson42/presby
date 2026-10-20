@@ -214,6 +214,35 @@ function assertRateLimiterDisabled(): void {
 }
 
 /**
+ * The custom-domain specs (e2e/custom-domains/, Track F) drive `/api/cron/*` with a bearer to prove
+ * the proxy's cron pass-through on a church's own domain, which only works if the SERVER has
+ * `CRON_SECRET` set. `playwright.config.ts` sets it (and the `DOMAINS_*` test fakes) for a server it
+ * starts itself, but - exactly like RATE_LIMIT_DISABLED - not for a dev server that was already
+ * running and got reused. Without it a cron answers 503 ("set CRON_SECRET to enable"), the
+ * pass-through never matches, and the failure reads as a proxy bug. This asks the server, with a
+ * deliberately WRONG bearer so nothing runs: 401 means a secret is set, 503 means it is not.
+ */
+async function assertCronSecretOnServer(baseURL: string): Promise<void> {
+  let status: number;
+  try {
+    const res = await fetch(`${baseURL}/api/cron/domains`, { headers: { authorization: "Bearer not-the-secret" } });
+    status = res.status;
+  } catch {
+    return; // not reachable: the CSRF fetch below fails with its own, better message
+  }
+  if (status === 503) {
+    throw new Error(
+      `[globalSetup] The server at ${baseURL} has no CRON_SECRET (GET /api/cron/domains answered 503).\n` +
+        "The custom-domain specs prove the cron pass-through on a church's own domain and need it, plus the\n" +
+        "test-only fakes DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake\n" +
+        "DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json. playwright.config.ts sets them for a server it\n" +
+        "starts; a dev server you started yourself needs them in ITS environment (CRON_SECRET must equal the\n" +
+        "value the specs use: $CRON_SECRET, default giving-e2e-cron-secret). Restart it with them set.",
+    );
+  }
+}
+
+/**
  * The production-build lane (PW_PROD_BUILD=1, DECISION-159) is worthless if a
  * dev server answers it: a Turbopack dev server's hydration window is far wider
  * than a real user's. playwright.config.ts already refuses E2E_BASE_URL and
@@ -248,6 +277,8 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
       config.projects[0].use.baseURL ?? "http://localhost:3800",
     );
   }
+
+  await assertCronSecretOnServer(config.projects[0].use.baseURL ?? "http://localhost:3000");
 
   const dbUrl = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
   // Organizations, people and memberships need the OWNER connection: dbUrl

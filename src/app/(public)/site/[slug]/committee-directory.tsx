@@ -1,4 +1,5 @@
 import { PersonCard } from "presby-site-kit";
+import type { SiteUrls } from "@/lib/site-urls";
 import {
   getPublicCommitteeRoster,
   type PublicCommitteeRosterEntry,
@@ -114,9 +115,13 @@ function groupByCommittee(
 
 export async function PublicCommitteeDirectory({
   slug,
+  urls,
   filter,
 }: {
+  /** The organization's slug AS THE DATABASE RETURNED IT (reads only; never in a URL). */
   slug: string;
+  /** Builds the photo URLs: `/assets/<k>` on a custom host, `/site/<slug>/assets/<k>` on a platform host. */
+  urls: SiteUrls;
   filter: Record<string, unknown>;
 }) {
   const entries = await getPublicCommitteeRoster(
@@ -145,11 +150,7 @@ export async function PublicCommitteeDirectory({
                 key={`${group.groupName}-${index}`}
                 name={member.displayName}
                 title={GROUP_ROLE_LABELS[member.groupRole]}
-                photoUrl={
-                  member.photoKey
-                    ? `/site/${slug}/assets/${member.photoKey}`
-                    : undefined
-                }
+                photoUrl={member.photoKey ? urls.asset(member.photoKey) : undefined}
                 className={PERSON_CARD_CLASSNAME}
                 headingClassName={PERSON_CARD_HEADING_CLASSNAME}
               />

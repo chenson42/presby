@@ -10,6 +10,7 @@ import {
 import { getBlobStore, BlobValidationError } from "@/lib/storage/blob-store";
 import { sniffTicketAttachmentContentType } from "@/lib/storage/sniff";
 import { reservedSitePath } from "@/lib/sites-reserved-paths";
+import { slugSitePath } from "@/lib/site-urls";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 
 /**
@@ -101,15 +102,19 @@ function validateBundle(
     ) {
       return { ok: false, error: "Malformed entry in bundle.pages." };
     }
-    // PresbyPortal serves its own giving page at /give (and /give/return); a
-    // static route segment beats the catch-all that renders bundle pages, so a
-    // bundle page there would be stored and never shown. Refuse it, by name.
+    // PresbyPortal serves its own giving page at /give (and /give/return), the
+    // asset route, robots.txt and sitemap.xml (T15: a custom domain serves them at
+    // the root); a static route segment beats the catch-all that renders bundle
+    // pages, so a bundle page there would be stored and never shown. Refuse it, by name.
     const pagePath = (p as Record<string, unknown>).path as string;
     const reserved = reservedSitePath(pagePath);
     if (reserved.reserved) {
       return {
         ok: false,
-        error: `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} page for online giving. Rename or remove it.`,
+        error:
+          reserved.segment === "give"
+            ? `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} page for online giving. Rename or remove it.`
+            : `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} path (on a custom domain too). Rename or remove it.`,
       };
     }
   }
@@ -264,9 +269,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   // Both a layout-level revalidate and a per-page one — a layout-only
   // revalidate does not guarantee every already-cached leaf segment is torn
   // down under partial prerendering (Phase 3's own step 9 reasoning).
-  revalidatePath(`/site/${org.slug}`, "layout");
+  // slugSitePath() is the one builder of a slug URL (DECISION-181). Revalidation of the
+  // slug URL is what a platform-host render needs; every segment under /site/[slug] is
+  // force-dynamic (site-urls.test.ts pins that), so a custom host never serves a stale page.
+  revalidatePath(slugSitePath(org.slug), "layout");
   for (const page of pages) {
-    revalidatePath(`/site/${org.slug}${page.path === "/" ? "" : page.path}`);
+    revalidatePath(slugSitePath(org.slug, page.path));
   }
 
   return NextResponse.json({

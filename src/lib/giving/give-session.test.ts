@@ -120,7 +120,91 @@ describe("startGiveSession — the happy path", () => {
   });
 });
 
+describe("startGiveSession - where the donor returns (Track F, R5, DECISION-181)", () => {
+  const HOST = "church-one.invalid";
+  /** `db.execute` answers donorOrigin()'s serving-host read with this row (or throws). */
+  function serving(host: string | null | Error) {
+    mockExecute.mockImplementation(async (q: unknown) => {
+      const text = sqlText(q);
+      if (text.includes("serving_host")) {
+        if (host instanceof Error) throw host;
+        return { rows: [{ serving_host: host }] };
+      }
+      return text.includes("attach_session") ? { rows: [{ attached: true }] } : { rows: [] };
+    });
+  }
+
+  it("a PUBLIC donor returns to the organization's serving custom host, at clean paths", async () => {
+    serving(HOST);
+    await start(async () => row());
+    const input = mockCreateSession.mock.calls[0]![0];
+    expect(input.successUrl).toBe(`https://${HOST}/give/return?session_id={CHECKOUT_SESSION_ID}`);
+    expect(input.cancelUrl).toBe(`https://${HOST}/give`);
+  });
+
+  it("no serving host (none, or not serving) -> the platform's slug URL, exactly as before", async () => {
+    serving(null);
+    await start(async () => row());
+    expect(mockCreateSession.mock.calls[0]![0].successUrl).toBe(
+      "https://app.example.invalid/site/alder-creek/give/return?session_id={CHECKOUT_SESSION_ID}",
+    );
+  });
+
+  it("a database error reading the serving host falls back to the platform origin and logs the slug only", async () => {
+    serving(new Error("Failed query: select serving_host ... params: alder-creek"));
+    const result = await start(async () => row());
+    expect(result.kind).toBe("checkout");
+    expect(mockCreateSession.mock.calls[0]![0].successUrl).toContain("https://app.example.invalid/site/alder-creek/give/return");
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toMatch(/Failed query|select serving_host/);
+  });
+
+  it("a malformed serving host is ignored, never used as an origin", async () => {
+    serving("evil.invalid/path?x=1#");
+    await start(async () => row());
+    expect(JSON.stringify(mockCreateSession.mock.calls[0]![0])).not.toContain("evil");
+  });
+
+  it("the MEMBER surface always returns to the platform, even when a custom host is serving (members give on the platform)", async () => {
+    serving(HOST);
+    await start(async () => row(), PARSED, "member");
+    const input = mockCreateSession.mock.calls[0]![0];
+    expect(input.successUrl).toBe("https://app.example.invalid/o/alder-creek/giving/give/return?session_id={CHECKOUT_SESSION_ID}");
+    expect(JSON.stringify(input)).not.toContain(HOST);
+    // The member path never even asks.
+    expect(calls("serving_host")).toHaveLength(0);
+  });
+
+  it("production without an https platform origin is still `unavailable` when no custom host serves, but a serving host works", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
+    serving(null);
+    expect(await start(async () => row())).toEqual({ kind: "unavailable" });
+    expect(calls("fail_intent")).toHaveLength(1);
+
+    // The serving host is itself a safe origin (it comes from the database row), so it carries the donor.
+    serving(HOST);
+    const withHost = await start(async () => row());
+    expect(withHost.kind).toBe("checkout");
+    expect(mockCreateSession.mock.calls.at(-1)![0].successUrl).toContain(`https://${HOST}/give/return`);
+  });
+});
+
 describe("checkoutReturnUrls", () => {
+  it("builds the platform form with slugSitePath and the custom-host form with clean paths", () => {
+    expect(checkoutReturnUrls("https://app.example.invalid", "alder-creek", "public")).toEqual({
+      successUrl: "https://app.example.invalid/site/alder-creek/give/return?session_id={CHECKOUT_SESSION_ID}",
+      cancelUrl: "https://app.example.invalid/site/alder-creek/give",
+    });
+    expect(checkoutReturnUrls("https://church-one.invalid", "alder-creek", "public", true)).toEqual({
+      successUrl: "https://church-one.invalid/give/return?session_id={CHECKOUT_SESSION_ID}",
+      cancelUrl: "https://church-one.invalid/give",
+    });
+    // The member surface has no custom-host form: the flag is ignored there.
+    expect(checkoutReturnUrls("https://app.example.invalid", "alder-creek", "member", true).cancelUrl).toBe(
+      "https://app.example.invalid/o/alder-creek/giving/give",
+    );
+  });
+
   it("leaves Stripe's placeholder literal (braces unencoded) and nothing user-controlled in the URL", () => {
     const { successUrl, cancelUrl } = checkoutReturnUrls("https://app.example.invalid", "alder-creek", "public");
     expect(successUrl).toContain("{CHECKOUT_SESSION_ID}");

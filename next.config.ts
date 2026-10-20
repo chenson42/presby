@@ -1,6 +1,38 @@
 import type { NextConfig } from "next";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+// host.ts is PURE and imports nothing (Phase 3 API Contract section 1): it is
+// one of the only src/lib/domains files this config (and src/proxy.ts) may
+// import. Nothing else from src/lib/domains may be imported here.
+import { assertPlatformHostConfig, isProductionDeployment, platformHosts } from "./src/lib/domains/host";
+
+// Boot assertion (R2, T8): a production DEPLOYMENT (VERCEL_ENV, not NODE_ENV -
+// `next build` always sets NODE_ENV=production, and CI and local builds use
+// http://localhost:3000) must name its platform host, over https, and must not
+// carry any of the dev/test-only domain fakes. A host outside the set is a
+// custom host, so a misconfiguration 404s the platform; it can never serve
+// platform routes on a church's domain. Throws, naming the variable.
+if (isProductionDeployment()) assertPlatformHostConfig(process.env);
+
+/**
+ * A regex source matching exactly the platform-host set (R2), for the `host`
+ * condition of `redirects()` / `headers()`. Built at config time from the same
+ * `platformHosts()` the proxy uses, so the two cannot drift: the exact hosts
+ * (the host of NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_PLATFORM_HOSTS, and outside a
+ * production deployment loopback and DEV_ALLOWED_ORIGINS), `*.vercel.app`, and
+ * outside production `*.trycloudflare.com`. Next matches `host` WITHOUT the
+ * port, so none is needed here.
+ */
+function platformHostPattern(): string {
+  const escape = (host: string) => host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const alternatives = [...platformHosts()].map(escape);
+  alternatives.push("[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.vercel\\.app");
+  if (!isProductionDeployment()) {
+    alternatives.push("[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.trycloudflare\\.com");
+  }
+  return `(?:${alternatives.join("|")})`;
+}
+const PLATFORM_HOST = platformHostPattern();
 
 // The one policy string. Served REPORT-ONLY everywhere (the securityHeaders entry below) and
 // ENFORCED on the online-giving routes (giveRouteHeaders, below it): the same text, so what the
@@ -35,6 +67,21 @@ const contentSecurityPolicy =
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       );
 
+// HSTS is split by host (F147, DECISION-178). `includeSubDomains` on every response would pin
+// HTTPS for ALL of a church's subdomains for two years on whatever apex it connects, and outlive
+// the church's departure - so a platform host keeps it and every other host gets Vercel's own
+// default for custom domains (no `includeSubDomains`). preload intentionally omitted on both -
+// submitting to the browser preload list is effectively irreversible at the domain level; add it
+// only after the domain DNS is stable and all subdomains serve HTTPS.
+const hstsPlatform = {
+  key: "Strict-Transport-Security",
+  value: "max-age=63072000; includeSubDomains",
+};
+const hstsCustomHost = {
+  key: "Strict-Transport-Security",
+  value: "max-age=63072000",
+};
+
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   // TODO: When moving to an enforced CSP, drop this header in favor of `frame-ancestors` in the
@@ -46,13 +93,6 @@ const securityHeaders = [
   {
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
-  },
-  {
-    key: "Strict-Transport-Security",
-    // preload intentionally omitted — submitting to the browser preload list is effectively
-    // irreversible at the domain level; add it only after the domain DNS is stable and all
-    // subdomains serve HTTPS.
-    value: "max-age=63072000; includeSubDomains",
   },
   {
     key: "Content-Security-Policy-Report-Only",
@@ -105,17 +145,35 @@ const nextConfig: NextConfig = {
   // `platform.merged_home`. A permanent (308) config-level redirect, never
   // entering the React render pipeline — no Suspense boundary to accidentally
   // open on a segment whose whole job would otherwise be to redirect.
+  //
+  // Scoped to PLATFORM hosts (F151): `redirects()` runs before the proxy, so unscoped it would
+  // answer on a church's domain. On a custom host `/orgs` falls through to the proxy's rewrite
+  // and is the same neutral 404 as any other path the church's site does not have.
   async redirects() {
-    return [{ source: "/orgs", destination: "/home", permanent: true }];
+    return [
+      {
+        source: "/orgs",
+        has: [{ type: "host", value: PLATFORM_HOST }],
+        destination: "/home",
+        permanent: true,
+      },
+    ];
   },
   async headers() {
     return [
       { source: "/(.*)", headers: securityHeaders },
+      { source: "/(.*)", has: [{ type: "host", value: PLATFORM_HOST }], headers: [hstsPlatform] },
+      { source: "/(.*)", missing: [{ type: "host", value: PLATFORM_HOST }], headers: [hstsCustomHost] },
       // `:path*` matches zero or more segments, so these cover /site/<slug>/give itself AND
       // /site/<slug>/give/return (and the member equivalents). Do not widen to /site/:slug/* -
       // a congregation's own pages keep the report-only policy.
       { source: "/site/:slug/give/:path*", headers: giveRouteHeaders },
       { source: "/o/:slug/giving/give/:path*", headers: giveRouteHeaders },
+      // A custom host serves the same pages at CLEAN paths: `headers()` matches the INCOMING path,
+      // before the proxy's rewrite, so /give and /give/return on a church's domain would otherwise
+      // get only the report-only policy (T13, F151). Host-agnostic on purpose; on a platform host
+      // this path is a 404 and the header is harmless.
+      { source: "/give/:path*", headers: giveRouteHeaders },
     ];
   },
   // Year-end contribution statements (docs/work-log/2026-10-15-online-giving.md, Batch 5;
@@ -150,8 +208,14 @@ const nextConfig: NextConfig = {
   //
   // Set DEV_ALLOWED_ORIGINS to a comma-separated list (e.g. your LAN IP) rather
   // than hardcoding a machine-specific address here.
+  //
+  // "**.invalid" (recursive: `www.church-one.invalid` is three labels, which `*.invalid` would not match) is the reserved TLD the custom-domain e2e project maps to loopback
+  // (`--host-resolver-rules`, playwright.config.ts) so a real browser can load a church host and
+  // hydrate against `next dev`. RFC 2606 guarantees `.invalid` never resolves on the public
+  // internet, and this list has no effect outside `next dev`.
   allowedDevOrigins: [
     "*.trycloudflare.com",
+    "**.invalid",
     ...(process.env.DEV_ALLOWED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
   ],
 };

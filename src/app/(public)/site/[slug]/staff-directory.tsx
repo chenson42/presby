@@ -1,5 +1,6 @@
 import { StaffList, type StaffPerson } from "presby-site-kit";
 import { getPublicStaffRoster, type PublicStaffRosterFilter } from "@/lib/sites";
+import type { SiteUrls } from "@/lib/site-urls";
 
 /**
  * `/site/<slug>`'s `staffDirectory` live slot (docs/work-log/
@@ -73,9 +74,13 @@ function parseStaffRosterFilter(
 
 export async function PublicStaffDirectory({
   slug,
+  urls,
   filter,
 }: {
+  /** The organization's slug AS THE DATABASE RETURNED IT (reads only; never in a URL). */
   slug: string;
+  /** Builds the photo URLs: `/assets/<k>` on a custom host, `/site/<slug>/assets/<k>` on a platform host. */
+  urls: SiteUrls;
   filter: Record<string, unknown>;
 }) {
   const entries = await getPublicStaffRoster(slug, parseStaffRosterFilter(filter));
@@ -87,7 +92,7 @@ export async function PublicStaffDirectory({
   const people: StaffPerson[] = entries.map((entry) => ({
     name: entry.displayName,
     title: entry.roleLabel,
-    photoUrl: entry.photoKey ? `/site/${slug}/assets/${entry.photoKey}` : undefined,
+    photoUrl: entry.photoKey ? urls.asset(entry.photoKey) : undefined,
   }));
 
   return <StaffList people={people} />;

@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { edgeAuth } from "@/lib/auth/config";
+import { isCronRequest } from "@/lib/domains/cron-passthrough";
+import { isPlatformHost, requestHost, siteKeyRewritePath } from "@/lib/domains/host";
+import { PROBE_ACK_HEADER, PROBE_REQUEST_HEADER, answerProbe } from "@/lib/domains/probe";
 import { ADMIN_ROLE, FEATURES } from "@/lib/permissions";
 
 const PUBLIC_PATHS = new Set([
@@ -27,8 +30,59 @@ const PROTECTION_RULES: Array<{ pattern: RegExp; required: string }> = [
   { pattern: /^\/admin/, required: FEATURES.ADMIN_DASHBOARD },
 ];
 
+/**
+ * `/site/<segment containing a dot>` is the INTERNAL rewrite target of a
+ * custom host (`/site/church-one.example/about`). On a platform host it must
+ * not be reachable at all: the site key is a lookup key, and a platform-host
+ * request naming a dotted key would be a second way to ask the host resolver a
+ * question the visitor's own Host header is supposed to be the only input to.
+ * `%2e` / `%2E` count as a dot. The resolver independently requires
+ * `Host === key` (host mode) and a platform Host (slug mode), so this is the
+ * first of two locks, not the only one (Phase 2 R1, adversarial A3).
+ */
+const DOTTED_SITE_KEY = /^\/site\/[^/]*(?:\.|%2e)/i;
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // THE FIRST BRANCH (DECISION-176, Phase 2 R1). It runs before the /api/
+  // bypass, the /site bypass and PUBLIC_PATHS, because every one of those is
+  // a statement about PLATFORM routes and none of them may be true of a
+  // church's domain.
+  //
+  // A host is a LOOKUP KEY, never an identity (R3): requestHost() reads the
+  // `host` header and nothing else - never x-forwarded-host, forwarded or
+  // nextUrl.host - and this branch decides on host SHAPE and platform-set
+  // membership only. It never reads the database (the proxy stays a pure
+  // function of host, path and session claims - DECISION-177), never calls
+  // edgeAuth(), never reads a cookie, and has no other branch. Which hosts are
+  // real tenants is answered later, by one SECURITY DEFINER read that
+  // collapses every non-serving state to the same neutral 404.
+  const host = requestHost(req.headers);
+  if (host === null) return new NextResponse(null, { status: 404 });
+
+  if (!isPlatformHost(host)) {
+    // The live-ness probe (T1): a valid `nonce.mac` for EXACTLY this host gets
+    // a bodiless 204 carrying the ack. Reveals only "this host routes to this
+    // deployment"; reads no tenant row; sets no cookie.
+    const ack = answerProbe(host, req.headers.get(PROBE_REQUEST_HEADER));
+    if (ack !== null) {
+      return new NextResponse(null, { status: 204, headers: { [PROBE_ACK_HEADER]: ack } });
+    }
+    // A6: Vercel does not say which host a scheduled invocation uses. An exact
+    // cron path carrying the exact bearer passes straight through; everything
+    // else on /api/* falls to the rewrite below and is the same neutral 404.
+    if (isCronRequest(pathname, req.headers.get("authorization"), process.env.CRON_SECRET)) {
+      return NextResponse.next();
+    }
+    return NextResponse.rewrite(
+      new URL(siteKeyRewritePath(host, pathname) + req.nextUrl.search, req.url),
+    );
+  }
+
+  // Platform host: today's logic, plus the internal site-key target is not
+  // addressable from here.
+  if (DOTTED_SITE_KEY.test(pathname)) return new NextResponse(null, { status: 404 });
 
   if (pathname.startsWith("/api/")) return NextResponse.next();
   if (pathname.startsWith("/account/verify-email/")) return NextResponse.next();

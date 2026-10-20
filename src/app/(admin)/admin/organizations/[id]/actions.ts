@@ -28,6 +28,7 @@ import {
 } from "@/lib/sites";
 import { designateFoundingAdministrator } from "@/lib/founding-administrator";
 import { designateTreasurer } from "@/lib/treasurer-designation";
+import { slugSitePath } from "@/lib/site-urls";
 
 /**
  * The platform operator's brand actions — P0.5 slice c2 (Phase 3 re-run,
@@ -134,7 +135,7 @@ async function revalidateLiveSitePath(
     .where(eq(organizations.id, organizationId))
     .limit(1);
   if (row?.siteStatus === "live") {
-    revalidatePath(`/site/${row.slug}`, "layout");
+    revalidatePath(slugSitePath(row.slug), "layout");
   }
 }
 
@@ -526,7 +527,7 @@ export async function setSiteStatusAction(
     .where(eq(organizations.id, organizationId))
     .limit(1);
   if (orgRow) {
-    revalidatePath(`/site/${orgRow.slug}`, "layout");
+    revalidatePath(slugSitePath(orgRow.slug), "layout");
   }
 
   return { ok: true };

@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 /**
- * Orchestration tests for `/site/<slug>`'s page.tsx. What this file exists
+ * Orchestration tests for `/site/<key>`'s page.tsx. What this file exists
  * to pin:
  *
- *   1. `{ kind: "not_found" }` from `getPublishedSite()` calls Next's real
+ *   0. (Track F) the route segment is a SITE KEY: `resolveSite(key)` decides, the
+ *      slug the DATABASE returned drives every slug-keyed read, and a resolved
+ *      `redirectHost` is a 307 (never rendered) with path and query kept.
+ *   1. `{ kind: "not_found" }` from `resolveSite()` calls Next's real
  *      `notFound()` — this is the SAME response for a never-provisioned
  *      site, a suspended one, a nonexistent slug, the render flag off, and
  *      a corrupt bundle (Phase 1 Gap 5's enumeration-safety collapse); this
@@ -14,7 +17,7 @@
  *      has no matching sub-path is a real 404, not a "never published"
  *      case.
  *   3. On the ok path, `renderSiteBundle()` receives exactly what
- *      `getPublishedSite()` returned — `pages`, `brand`, and an `imageUrl`
+ *      `resolveSite()` returned — `pages`, `brand`, and an `imageUrl`
  *      closure built from `imageKeys` — never a placeholder.
  *   4. DECISION-121 — on the `not_found` branch ONLY, a presbytery/synod/
  *      general_assembly org renders `PresbyteryFallback` instead of the
@@ -26,9 +29,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const getPublishedSite = vi.fn();
+const resolveSite = vi.fn();
 vi.mock("@/lib/sites", () => ({
-  getPublishedSite: (...args: unknown[]) => getPublishedSite(...args),
+  resolveSite: (...args: unknown[]) => resolveSite(...args),
 }));
 
 const publicOrgSummary = vi.fn();
@@ -74,10 +77,15 @@ vi.mock("@/lib/db/domain/org", () => ({ organizationBrands: {} }));
 const notFoundMock = vi.fn(() => {
   throw new Error("NOT_FOUND");
 });
+const redirectMock = vi.fn((url: string) => {
+  throw new Error(`REDIRECT:${url}`);
+});
 vi.mock("next/navigation", () => ({
   notFound: () => notFoundMock(),
+  redirect: (url: string) => redirectMock(url),
 }));
 
+import { buildSiteUrls } from "@/lib/site-urls";
 import PublicSitePage, { generateMetadata } from "./page";
 import { PublicStaffDirectory } from "../staff-directory";
 import { PublicCommitteeDirectory } from "../committee-directory";
@@ -85,7 +93,8 @@ import { PublicGivingSlot } from "../public-giving-slot";
 
 afterEach(() => {
   cleanup();
-  getPublishedSite.mockReset();
+  resolveSite.mockReset();
+  redirectMock.mockClear();
   publicOrgSummary.mockReset();
   publicOrgSummary.mockResolvedValue(null);
   renderSiteBundle.mockReset();
@@ -97,6 +106,36 @@ afterEach(() => {
 
 function makeParams(slug = "alder-creek", path?: string[]) {
   return Promise.resolve({ slug, path });
+}
+
+/** The page also takes `searchParams` (to keep the query on a 307); most tests have none. */
+function renderPage(args: { params: ReturnType<typeof makeParams>; searchParams?: Record<string, string | string[] | undefined> }) {
+  return PublicSitePage({ params: args.params, searchParams: Promise.resolve(args.searchParams ?? {}) });
+}
+
+type LegacyResult =
+  | { kind: "ok"; site: unknown }
+  | { kind: "not_found"; reason?: "absent" | "read_failed" };
+
+/**
+ * Stubs `resolveSite()` for SLUG MODE from the result shape these tests were written against:
+ * the mock answers by the KEY it is called with, so `makeParams("northern-reach")` yields a
+ * resolved site (or a miss) for slug `northern-reach`. `redirectHost` is null unless given.
+ */
+function mockSite(result: LegacyResult, redirectHost: string | null = null) {
+  resolveSite.mockImplementation(async (key: string) => {
+    if (result.kind === "not_found") {
+      return { kind: "not_found", mode: "slug", slug: key, ...(result.reason ? { reason: result.reason } : {}) };
+    }
+    return {
+      kind: "ok",
+      mode: "slug",
+      slug: key,
+      site: result.site,
+      urls: buildSiteUrls({ mode: "slug", slug: key, platformOrigin: "http://localhost:3000" }),
+      redirectHost,
+    };
+  });
 }
 
 const BRAND = {
@@ -127,35 +166,35 @@ const SITE = {
 };
 
 describe("PublicSitePage — the enumeration-safe not_found collapse", () => {
-  it("calls notFound() when getPublishedSite() returns not_found and the slug resolves to nothing (a truly nonexistent org)", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+  it("calls notFound() when resolveSite() returns not_found and the slug resolves to nothing (a truly nonexistent org)", async () => {
+    mockSite({ kind: "not_found" });
     publicOrgSummary.mockResolvedValue(null);
 
     await expect(
-      PublicSitePage({ params: makeParams() }),
+      renderPage({ params: makeParams() }),
     ).rejects.toThrow("NOT_FOUND");
 
     expect(renderSiteBundle).not.toHaveBeenCalled();
   });
 
-  it("calls notFound() when getPublishedSite() returns not_found and the slug is a CONGREGATION — the fallback never applies to it", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+  it("calls notFound() when resolveSite() returns not_found and the slug is a CONGREGATION — the fallback never applies to it", async () => {
+    mockSite({ kind: "not_found" });
     publicOrgSummary.mockResolvedValue({
       name: "Alder Creek Presbyterian Church",
       organizationType: "congregation",
     });
 
     await expect(
-      PublicSitePage({ params: makeParams() }),
+      renderPage({ params: makeParams() }),
     ).rejects.toThrow("NOT_FOUND");
   });
 
   it("calls notFound() when renderSiteBundle() returns null (no matching page) — never the presbytery fallback, even for a presbytery org", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(null);
 
     await expect(
-      PublicSitePage({ params: makeParams() }),
+      renderPage({ params: makeParams() }),
     ).rejects.toThrow("NOT_FOUND");
 
     expect(publicOrgSummary).not.toHaveBeenCalled();
@@ -163,53 +202,53 @@ describe("PublicSitePage — the enumeration-safe not_found collapse", () => {
 });
 
 describe("PublicSitePage — reason: \"read_failed\" skips the publicOrgSummary follow-up read (docs/work-log/2026-09-26-public-render-blip.md)", () => {
-  it("does not call publicOrgSummary() when getPublishedSite() reports a DB read failure, and still 404s", async () => {
-    getPublishedSite.mockResolvedValue({
+  it("does not call publicOrgSummary() when resolveSite() reports a DB read failure, and still 404s", async () => {
+    mockSite({
       kind: "not_found",
       reason: "read_failed",
     });
 
     await expect(
-      PublicSitePage({ params: makeParams() }),
+      renderPage({ params: makeParams() }),
     ).rejects.toThrow("NOT_FOUND");
 
     expect(publicOrgSummary).not.toHaveBeenCalled();
   });
 
   it("still calls publicOrgSummary() when the not_found reason is absent (a confirmed miss, not a DB failure)", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    mockSite({ kind: "not_found" });
     publicOrgSummary.mockResolvedValue(null);
 
     await expect(
-      PublicSitePage({ params: makeParams() }),
+      renderPage({ params: makeParams() }),
     ).rejects.toThrow("NOT_FOUND");
 
     expect(publicOrgSummary).toHaveBeenCalledWith("alder-creek");
   });
 
   it("still calls publicOrgSummary() when reason is explicitly \"absent\"", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found", reason: "absent" });
+    mockSite({ kind: "not_found", reason: "absent" });
     publicOrgSummary.mockResolvedValue(null);
 
     await expect(
-      PublicSitePage({ params: makeParams() }),
+      renderPage({ params: makeParams() }),
     ).rejects.toThrow("NOT_FOUND");
 
     expect(publicOrgSummary).toHaveBeenCalledWith("alder-creek");
   });
 
   it("renders the byte-identical notFound() collapse whether the miss is a DB failure or a confirmed absence — the response never varies on `reason`", async () => {
-    getPublishedSite.mockResolvedValue({
+    mockSite({
       kind: "not_found",
       reason: "read_failed",
     });
-    const readFailedOutcome = await PublicSitePage({
+    const readFailedOutcome = await renderPage({
       params: makeParams(),
     }).catch((err: Error) => err.message);
 
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    mockSite({ kind: "not_found" });
     publicOrgSummary.mockResolvedValue(null);
-    const absentOutcome = await PublicSitePage({
+    const absentOutcome = await renderPage({
       params: makeParams(),
     }).catch((err: Error) => err.message);
 
@@ -220,13 +259,13 @@ describe("PublicSitePage — reason: \"read_failed\" skips the publicOrgSummary 
 
 describe("PublicSitePage — DECISION-121, the presbytery/synod/GA fallback", () => {
   it("renders PresbyteryFallback (org name + sign-in link) when the not_found slug resolves to a presbytery", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    mockSite({ kind: "not_found" });
     publicOrgSummary.mockResolvedValue({
       name: "Presbytery of the Northern Reach",
       organizationType: "presbytery",
     });
 
-    const el = await PublicSitePage({ params: makeParams("northern-reach") });
+    const el = await renderPage({ params: makeParams("northern-reach") });
     render(el);
 
     expect(
@@ -238,13 +277,13 @@ describe("PublicSitePage — DECISION-121, the presbytery/synod/GA fallback", ()
   });
 
   it("renders the same fallback for a synod", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    mockSite({ kind: "not_found" });
     publicOrgSummary.mockResolvedValue({
       name: "Synod of the Wide Plains",
       organizationType: "synod",
     });
 
-    const el = await PublicSitePage({ params: makeParams("wide-plains-synod") });
+    const el = await renderPage({ params: makeParams("wide-plains-synod") });
     render(el);
 
     expect(
@@ -253,13 +292,13 @@ describe("PublicSitePage — DECISION-121, the presbytery/synod/GA fallback", ()
   });
 
   it("renders the same fallback for the General Assembly", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    mockSite({ kind: "not_found" });
     publicOrgSummary.mockResolvedValue({
       name: "General Assembly",
       organizationType: "general_assembly",
     });
 
-    const el = await PublicSitePage({ params: makeParams("ga") });
+    const el = await renderPage({ params: makeParams("ga") });
     render(el);
 
     expect(screen.getByRole("heading", { name: "General Assembly" })).toBeTruthy();
@@ -267,11 +306,11 @@ describe("PublicSitePage — DECISION-121, the presbytery/synod/GA fallback", ()
 });
 
 describe("PublicSitePage — the ok path", () => {
-  it("passes getPublishedSite()'s own pages, brand, and currentPath to renderSiteBundle() — never a placeholder", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+  it("passes resolveSite()'s own pages, brand, and currentPath to renderSiteBundle() — never a placeholder", async () => {
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<h1>Welcome</h1>);
 
-    const el = await PublicSitePage({ params: makeParams() });
+    const el = await renderPage({ params: makeParams() });
     render(el);
 
     expect(renderSiteBundle).toHaveBeenCalledWith(
@@ -283,7 +322,7 @@ describe("PublicSitePage — the ok path", () => {
         brand: SITE.brand,
         imageUrl: expect.any(Function),
         pageUrl: expect.any(Function),
-        portalUrl: "/o/alder-creek",
+        portalUrl: "http://localhost:3000/o/alder-creek",
         portalNavGroup: "Connect",
         portalLabel: "Our Portal",
       }),
@@ -291,21 +330,21 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("points portalUrl at /o/<slug>, unaffected by which sub-page is being rendered", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek", ["about"]) });
+    await renderPage({ params: makeParams("alder-creek", ["about"]) });
 
     expect(renderSiteBundle).toHaveBeenCalledWith(
-      expect.objectContaining({ portalUrl: "/o/alder-creek" }),
+      expect.objectContaining({ portalUrl: "http://localhost:3000/o/alder-creek" }),
     );
   });
 
   it("derives currentPath from the catch-all path segments — a sub-page, not just the root", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek", ["about"]) });
+    await renderPage({ params: makeParams("alder-creek", ["about"]) });
 
     expect(renderSiteBundle).toHaveBeenCalledWith(
       expect.objectContaining({ currentPath: "/about" }),
@@ -313,10 +352,10 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("joins multiple path segments with a leading slash for a nested sub-page", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek", ["ministries", "food-pantry"]) });
+    await renderPage({ params: makeParams("alder-creek", ["ministries", "food-pantry"]) });
 
     expect(renderSiteBundle).toHaveBeenCalledWith(
       expect.objectContaining({ currentPath: "/ministries/food-pantry" }),
@@ -324,10 +363,10 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("an empty path array (not undefined) still resolves to the root, not an empty string", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek", []) });
+    await renderPage({ params: makeParams("alder-creek", []) });
 
     expect(renderSiteBundle).toHaveBeenCalledWith(
       expect.objectContaining({ currentPath: "/" }),
@@ -335,10 +374,10 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("builds pageUrl() as a same-origin /site/<slug>/<path> link, root path collapsing to no trailing path", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       pageUrl: (path: string) => string;
@@ -348,10 +387,10 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("builds imageUrl() from the site's own imageKeys map, resolving through this route's asset route", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       imageUrl: (key: string) => string;
@@ -368,36 +407,36 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("resolves logoUrl through the same generic asset route when the org has a brand mark", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
     orgBrandsSelectMock.mockResolvedValue([{ markAssetKey: "mark-blob-key" }]);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as { logoUrl: string | null };
     expect(call.logoUrl).toBe("/site/alder-creek/assets/mark-blob-key");
   });
 
   it("passes logoUrl as null when the org has no brand row or no mark set — never a broken image", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
     orgBrandsSelectMock.mockResolvedValue([]);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as { logoUrl: string | null };
     expect(call.logoUrl).toBeNull();
   });
 
   it("degrades to logoUrl: null (never throws) when resolveLogoUrl's own read fails mid-request — docs/work-log/2026-09-26-public-render-blip.md", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
     orgBrandsSelectMock.mockRejectedValue(new Error("simulated DB blip"));
     const consoleErrorSpy = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as { logoUrl: string | null };
     expect(call.logoUrl).toBeNull();
@@ -410,7 +449,7 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("translates PublishedSite.profile.social's keyed object into site-kit's socialLinks array, omitting unset platforms", async () => {
-    getPublishedSite.mockResolvedValue({
+    mockSite({
       kind: "ok",
       site: {
         ...SITE,
@@ -433,7 +472,7 @@ describe("PublicSitePage — the ok path", () => {
     });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams() });
+    await renderPage({ params: makeParams() });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       profile: {
@@ -459,10 +498,10 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("passes an all-null/empty profile through unchanged when nothing is set — never omitted, never thrown", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams() });
+    await renderPage({ params: makeParams() });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       profile: { address: string | null; socialLinks: unknown[] };
@@ -472,10 +511,10 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("returns the site-kit output alone — no page-level chrome bolted around it", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<h1>Welcome page content</h1>);
 
-    const el = await PublicSitePage({ params: makeParams() });
+    const el = await renderPage({ params: makeParams() });
     const { container } = render(<>{el}</>);
 
     expect(screen.getByText("Welcome page content")).toBeTruthy();
@@ -486,20 +525,20 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("passes the interactive ContactForm element into renderSiteBundle() for the contactForm block to place", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams() });
+    await renderPage({ params: makeParams() });
 
     const call = renderSiteBundle.mock.calls[0][0] as { contactForm?: unknown };
     expect(call.contactForm).toBeTruthy();
   });
 
   it("passes a liveSlots.staffDirectory RESOLVER FUNCTION into renderSiteBundle() for a {\"type\":\"liveSlot\"} block to place — presby-site-kit v4.0.0 made liveSlots values functions, not elements (docs/work-log/2026-08-28-public-directory-primitives.md)", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
@@ -518,14 +557,14 @@ describe("PublicSitePage — the ok path", () => {
       props: { slug: string; filter: unknown };
     };
     expect(resolved.type).toBe(PublicStaffDirectory);
-    expect(resolved.props).toEqual({ slug: "alder-creek", filter: suppliedFilter });
+    expect(resolved.props).toEqual({ slug: "alder-creek", urls: expect.objectContaining({ mode: "slug" }), filter: suppliedFilter });
   });
 
   it("passes a liveSlots.committeeDirectory resolver function into renderSiteBundle() alongside staffDirectory, resolving to a real <PublicCommitteeDirectory> element built from that call's own filter (docs/work-log/2026-08-28-public-directory-primitives.md)", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
@@ -538,14 +577,14 @@ describe("PublicSitePage — the ok path", () => {
       props: { slug: string; filter: unknown };
     };
     expect(resolved.type).toBe(PublicCommitteeDirectory);
-    expect(resolved.props).toEqual({ slug: "alder-creek", filter: suppliedFilter });
+    expect(resolved.props).toEqual({ slug: "alder-creek", urls: expect.objectContaining({ mode: "slug" }), filter: suppliedFilter });
   });
 
   it("a marker with no filter still resolves staffDirectory to {} — reproducing the shipped feature's exact unfiltered behavior with no content-repo migration required", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
@@ -557,10 +596,10 @@ describe("PublicSitePage — the ok path", () => {
   });
 
   it("passes a liveSlots.giving resolver that closes over the page's own slug and hands the marker's filter to <PublicGivingSlot> (docs/work-log/2026-10-15-online-giving.md, G16)", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
@@ -571,14 +610,15 @@ describe("PublicSitePage — the ok path", () => {
       props: { slug: string; filter: unknown };
     };
     expect(resolved.type).toBe(PublicGivingSlot);
-    expect(resolved.props).toEqual({ slug: "alder-creek", filter: suppliedFilter });
+    // `slug` (reads) and `siteKey` (the server-bound give action argument) are both passed.
+    expect(resolved.props).toEqual({ slug: "alder-creek", siteKey: "alder-creek", filter: suppliedFilter });
   });
 
   it("exposes exactly staffDirectory, committeeDirectory and giving — no other named slot", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
-    await PublicSitePage({ params: makeParams("alder-creek") });
+    await renderPage({ params: makeParams("alder-creek") });
 
     const call = renderSiteBundle.mock.calls[0][0] as {
       liveSlots?: Record<string, unknown>;
@@ -593,14 +633,14 @@ describe("PublicSitePage — the ok path", () => {
 
 describe("generateMetadata", () => {
   it("returns {} (no title override) when the site is not_found — never a distinguishable error page title", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "not_found" });
+    mockSite({ kind: "not_found" });
     const meta = await generateMetadata({ params: makeParams() });
     expect(meta).toEqual({});
     expect(buildPageMetadata).not.toHaveBeenCalled();
   });
 
   it("passes organizationName, origin, pages, currentPath, pageUrl, and the resolved logoUrl to buildPageMetadata()", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     buildPageMetadata.mockReturnValue({
       title: "Welcome",
       description: undefined,
@@ -626,7 +666,7 @@ describe("generateMetadata", () => {
   });
 
   it("degrades to logoUrl: null (never throws) when resolveLogoUrl's own read fails mid-request — its own call site, distinct from the page body's", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     buildPageMetadata.mockReturnValue({
       title: "Welcome",
       description: undefined,
@@ -650,7 +690,7 @@ describe("generateMetadata", () => {
   });
 
   it("translates buildPageMetadata()'s result into Next's Metadata shape, with an absolute title that bypasses the root layout's own template", async () => {
-    getPublishedSite.mockResolvedValue({ kind: "ok", site: SITE });
+    mockSite({ kind: "ok", site: SITE });
     buildPageMetadata.mockReturnValue({
       title: "Worship — Alder Creek Presbyterian Church",
       description: "Join us Sundays.",
@@ -677,5 +717,177 @@ describe("generateMetadata", () => {
     expect(meta.description).toBe("Join us Sundays.");
     expect(meta.alternates).toEqual({ canonical: "http://localhost:3000/site/alder-creek/worship" });
     expect(meta.robots).toEqual({ index: true, follow: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Track F: a custom host is a site KEY (DECISION-176, DECISION-181)
+// ---------------------------------------------------------------------------
+
+import { submitContactMessageAction } from "../actions";
+
+const HOST = "church-one.invalid";
+const CANONICAL = "www.church-one.invalid";
+const DB_SLUG = "alder-creek";
+
+/** Stubs `resolveSite()` for HOST MODE: the key is a host, the slug is the DATABASE's. */
+function mockHostSite(opts: { redirectHost?: string | null; canonicalHost?: string } = {}) {
+  resolveSite.mockImplementation(async (key: string) => ({
+    kind: "ok",
+    mode: "host",
+    slug: DB_SLUG,
+    site: SITE,
+    urls: buildSiteUrls({
+      mode: "host",
+      host: opts.canonicalHost ?? key,
+      slug: DB_SLUG,
+      platformOrigin: "http://localhost:3000",
+    }),
+    redirectHost: opts.redirectHost ?? null,
+  }));
+}
+
+describe("PublicSitePage - host mode: clean URLs, the DB slug, nothing the visitor controls", () => {
+  it("hands site-kit a clean-path URL space on the verified canonical host, and the portal link on the PLATFORM", async () => {
+    mockHostSite();
+    renderSiteBundle.mockReturnValue(<div />);
+    orgBrandsSelectMock.mockResolvedValue([{ markAssetKey: "mark-blob-key" }]);
+
+    await renderPage({ params: makeParams(HOST, ["about"]) });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      origin: string;
+      pageUrl: (p: string) => string;
+      imageUrl: (k: string) => string;
+      logoUrl: string | null;
+      portalUrl: string;
+    };
+    expect(call.origin).toBe(`https://${HOST}`);
+    expect(call.pageUrl("/")).toBe("/");
+    expect(call.pageUrl("/about")).toBe("/about");
+    expect(call.imageUrl("hero")).toBe("/assets/blob-key-1");
+    expect(call.logoUrl).toBe("/assets/mark-blob-key");
+    // Absolute and fixed: sign-in lives on the platform host, never on a church's domain.
+    expect(call.portalUrl).toBe(`http://localhost:3000/o/${DB_SLUG}`);
+    // No call-built URL names a /site/ prefix or the slug (G5).
+    for (const url of [call.pageUrl("/about"), call.imageUrl("hero"), call.logoUrl!]) {
+      expect(url).not.toContain("/site/");
+      expect(url).not.toContain(DB_SLUG);
+    }
+  });
+
+  it("closes the live slots over the DB-returned slug (reads) and the host key (the bound give action) - never the other way round", async () => {
+    mockHostSite();
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await renderPage({ params: makeParams(HOST) });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots: Record<string, (filter: Record<string, unknown>) => { props: Record<string, unknown> }>;
+    };
+    expect(call.liveSlots.staffDirectory!({}).props).toMatchObject({ slug: DB_SLUG });
+    expect(call.liveSlots.committeeDirectory!({}).props).toMatchObject({ slug: DB_SLUG });
+    expect(call.liveSlots.giving!({}).props).toMatchObject({ slug: DB_SLUG, siteKey: HOST });
+    // The staff photo builder is the host-mode one.
+    const staff = call.liveSlots.staffDirectory!({}).props as { urls: { asset: (k: string) => string } };
+    expect(staff.urls.asset("photo-1")).toBe("/assets/photo-1");
+  });
+
+  it("binds the contact form's action to the SITE KEY on the server (the client __slug field is gone)", async () => {
+    mockHostSite();
+    renderSiteBundle.mockReturnValue(<div />);
+    vi.mocked(submitContactMessageAction).mockClear();
+
+    await renderPage({ params: makeParams(HOST) });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      contactForm: { props: { action: (fd: FormData) => unknown } };
+    };
+    const fd = new FormData();
+    await call.contactForm.props.action(fd);
+    expect(vi.mocked(submitContactMessageAction)).toHaveBeenCalledWith(HOST, fd);
+  });
+
+  it("a host miss is the one notFound(): no presbytery fallback, no org summary read", async () => {
+    resolveSite.mockResolvedValue({ kind: "not_found", mode: "host", slug: null });
+
+    await expect(renderPage({ params: makeParams(HOST) })).rejects.toThrow("NOT_FOUND");
+
+    expect(publicOrgSummary).not.toHaveBeenCalled();
+    expect(renderSiteBundle).not.toHaveBeenCalled();
+  });
+
+  it("an unusable key (neither slug nor host) is the same notFound()", async () => {
+    resolveSite.mockResolvedValue({ kind: "not_found", mode: "invalid", slug: null });
+
+    await expect(renderPage({ params: makeParams("Bad_Key") })).rejects.toThrow("NOT_FOUND");
+    expect(publicOrgSummary).not.toHaveBeenCalled();
+  });
+
+  it("generateMetadata names the canonical host in origin and pageUrl", async () => {
+    mockHostSite();
+    buildPageMetadata.mockReturnValue({
+      title: "About",
+      description: undefined,
+      canonicalUrl: `https://${HOST}/about`,
+      openGraph: { type: "website", title: "About", url: "x", siteName: "x", images: [] },
+      twitter: { card: "summary", title: "About", description: undefined },
+      robots: { index: true, follow: true },
+    });
+
+    await generateMetadata({ params: makeParams(HOST, ["about"]) });
+
+    const arg = buildPageMetadata.mock.calls[0][0] as { origin: string; pageUrl: (p: string) => string };
+    expect(arg.origin).toBe(`https://${HOST}`);
+    expect(arg.pageUrl("/about")).toBe("/about");
+  });
+});
+
+describe("PublicSitePage - 307 hand-offs (DECISION-178)", () => {
+  it("a non-canonical alias redirects to the canonical host, keeping path and query, and renders nothing", async () => {
+    mockHostSite({ redirectHost: CANONICAL, canonicalHost: CANONICAL });
+
+    await expect(
+      renderPage({ params: makeParams("church-one.invalid", ["about", "our staff"]), searchParams: { tab: "2", x: ["a", "b c"] } }),
+    ).rejects.toThrow(`REDIRECT:https://${CANONICAL}/about/our%20staff?tab=2&x=a&x=b+c`);
+
+    expect(renderSiteBundle).not.toHaveBeenCalled();
+  });
+
+  it("the slug URL of an org whose custom host is serving redirects to that host", async () => {
+    mockSite({ kind: "ok", site: SITE }, HOST);
+
+    await expect(renderPage({ params: makeParams("alder-creek") })).rejects.toThrow(`REDIRECT:https://${HOST}/`);
+    await expect(renderPage({ params: makeParams("alder-creek", ["about"]) })).rejects.toThrow(
+      `REDIRECT:https://${HOST}/about`,
+    );
+    expect(renderSiteBundle).not.toHaveBeenCalled();
+  });
+
+  it("serves in place when there is no redirect host", async () => {
+    mockSite({ kind: "ok", site: SITE }, null);
+    renderSiteBundle.mockReturnValue(<h1>Welcome</h1>);
+
+    await renderPage({ params: makeParams("alder-creek") });
+
+    expect(redirectMock).not.toHaveBeenCalled();
+    expect(renderSiteBundle).toHaveBeenCalled();
+  });
+
+  it("never redirects a miss (there is no target to name)", async () => {
+    resolveSite.mockResolvedValue({ kind: "not_found", mode: "slug", slug: "alder-creek" });
+    publicOrgSummary.mockResolvedValue(null);
+
+    await expect(renderPage({ params: makeParams("alder-creek") })).rejects.toThrow("NOT_FOUND");
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to follow a malformed redirect host: serves in place instead (no open redirect from a corrupt row)", async () => {
+    mockSite({ kind: "ok", site: SITE }, "evil.invalid/path?x=1#");
+    renderSiteBundle.mockReturnValue(<h1>Welcome</h1>);
+
+    await renderPage({ params: makeParams("alder-creek") });
+
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 });

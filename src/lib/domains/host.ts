@@ -2,7 +2,7 @@
  * host.ts - host classification for custom domains (Track F). PURE: imports
  * nothing, so it is safe for `src/proxy.ts` and `next.config.ts`, and it is
  * one of the only files the proxy may import from this module (Phase 3 API
- * Contract section 1; `check:proxy-imports` lands in Batch 1c).
+ * Contract section 1; `check:proxy-imports` enforces it).
  *
  * docs/work-log/2026-10-19-custom-domains.md: Phase 2 R1-R4, R2 (the
  * platform-host set and its boot assertion), T8, T16; DECISION-176.
@@ -204,6 +204,20 @@ export function platformOrigin(env: EnvLike = process.env): string | null {
   if (url.protocol === "https:") return url.origin;
   if (url.protocol === "http:" && !production) return url.origin;
   return null;
+}
+
+/**
+ * Which class of host a request arrived on, for the one-line cron log (T6 / A6:
+ * Vercel does not say which host a scheduled invocation uses, and the
+ * real-domain acceptance pass reads this line). A label only - never a branch.
+ */
+export function hostClass(
+  headers: HeadersLike,
+  env: EnvLike = process.env,
+): "platform" | "custom" | "invalid" {
+  const host = requestHost(headers, env);
+  if (host === null) return "invalid";
+  return isPlatformHost(host, env) ? "platform" : "custom";
 }
 
 // ---------------------------------------------------------------------------

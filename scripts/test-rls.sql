@@ -821,7 +821,8 @@ begin;
   select set_config('app.current_org_id', :ALDER, true);
   select assert_eq(
     (select count(*) from app_roles
-      where key in ('treasurer', 'installed_pastor', 'support_contact')),
+      where key in ('treasurer', 'installed_pastor', 'support_contact')
+        and organization_id is not null),
     3, 'alder: sees its own three new roles');
   select assert_eq(
     (select count(*) from role_grants
@@ -833,7 +834,8 @@ begin;
   select set_config('app.current_org_id', :BRAMBLE, true);
   select assert_eq(
     (select count(*) from app_roles
-      where key in ('treasurer', 'installed_pastor', 'support_contact')),
+      where key in ('treasurer', 'installed_pastor', 'support_contact')
+        and organization_id is not null),
     0, 'bramblewood: sees no alder treasurer/installed_pastor/support_contact roles');
   select assert_eq(
     (select count(*) from role_grants
@@ -7846,7 +7848,7 @@ begin;
     1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
   select assert_eq(
     (select count(*) from app_roles where organization_id is null),
-    4, 'DECISION-152: there are now FOUR template roles — committee_chair, presbytery_stated_clerk, personnel_admin and congregation_stated_clerk; 0052 added exactly one');
+    6, 'DECISION-152: there are now SIX template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), and treasurer + giving_recorder (drizzle/0055)');
   select assert_eq(
     (select count(*) from app_role_permissions rp
        join app_roles r on r.id = rp.role_id
@@ -8517,3 +8519,12 @@ rollback;
 -- ===========================================================================
 -- END APPENDED SECTION - pipeline/member-calendar.
 -- ===========================================================================
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/online-giving (integration).
+-- 46. Online giving (drizzle/0055_presby_giving.sql, 0056_presby_giving_statements.sql).
+--     Kept in its own file so the section can be read, and run, on its own;
+--     \ir resolves relative to this script. If another pipeline appended a
+--     section 46 first, renumber at integration.
+-- ===========================================================================
+\ir giving/test-rls-46.sql

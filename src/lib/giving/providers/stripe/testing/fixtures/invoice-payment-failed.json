@@ -1,0 +1,25 @@
+{
+  "id": "evt_fixtureInvoicePaymentFailed",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1795184000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "invoice.payment_failed",
+  "data": {
+    "object": {
+      "id": "in_fixtureInvoice000002",
+      "object": "invoice",
+      "customer": "cus_fixture000002",
+      "amount_due": 2500,
+      "currency": "usd",
+      "parent": {
+        "type": "subscription_details",
+        "subscription_details": {
+          "subscription": "sub_fixtureMonthly0001"
+        }
+      },
+      "billing_reason": "subscription_cycle"
+    }
+  }
+}

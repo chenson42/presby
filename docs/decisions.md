@@ -4,6 +4,264 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-175 — Phase 3 implementation rulings for online giving: giving keys never travel the commission/delegation arms; the giving 2FA arm is an independent inline predicate pinned to the resolver; gifts and reversals are written only by SECURITY DEFINER functions; platform ingest-health is owner-only; the cascade-aware delete guard; print-only statement delivery; two allowlist amendments.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 3 tech-lead). One entry carrying eight numbered sub-rulings.
+
+1. **Downward paths closed (F139).** `presby_effective_permissions()` allows any role as a commission or delegation role, which would let a parent council's commission members read a congregation's per-member giving. Three triggers (0055) refuse a role carrying a `permissions.module = 'giving'` key as an `administrative_commissions`/`org_delegations` role and refuse binding such a key to a role already so used. Cost: a presbytery commission cannot be granted treasury powers; lifting that is a deliberate future pipeline.
+2. **2FA arm shape (F140).** `presby_two_factor_required()` gains an inline CTE reproducing the resolver's four arms rather than calling or refactoring `presby_effective_permissions()` (which needs an org context sign-in doesn't have, and whose file R2 pins as unchanged). Agreement is pinned by a DB test over scenario matrices and the real resolver, and drift is tripwired by an `md5(prosrc)` assertion on the resolver.
+3. **Writers.** Gifts and reversals have no INSERT/UPDATE grant for any role; offline recording, voiding and every apply path are SECURITY DEFINER, and triggers require the transaction-local marker `presby.giving_write_active` on every connection (grant + marker, DECISION-141).
+4. **Owner-only health.** `presby_giving_ingest_health()` and `presby_giving_requeue_event()` are executable by the owner only, called from one file outside `src/lib/giving/` through `getPlatformDb()`. This amends DECISION-171's "EXECUTE granted to `presby_app` alone" for these two functions; `getPlatformDb()` appears nowhere under `src/lib/giving/`.
+5. **Delete guard.** Gifts, reversals, donors, events (and, in 0056, statements) refuse DELETE unless the row's own `deletable_until` is in the future or the parent `organizations` row no longer exists (the sanctioned teardown cascade). Verified empirically in Batch 1; fallback is a GUC arm in `presby_guard_organizations_delete()`.
+6. **Statements.** Print plus a no-amounts portal notice in v1; the token download is a tracked follow-up. Issuing is refused in production until `GIVING_STATEMENTS_ENABLED=1` (CPA gate, an operator-set environment variable).
+7. **Stripe allowlist.** Adds `retrieveInvoiceForPayment` (an event-anchored single retrieve, required because Invoice no longer links to its PaymentIntent) and removes the portal session (unconfirmed for direct-charge customers). Account-onboarding links are served from `accounts.stripe.com`, so the origin assertion accepts that host and `connect.stripe.com`. The restricted-key table (Stripe confirmation 4) is the production key contract.
+8. **Donor dedupe.** A new Stripe customer attaches to an existing donor only on an exact normalized email and exact case-folded name match to a single donor; otherwise it is a new donor and a possible-duplicate suggestion.
+
+(2026-10-15, tech-lead Phase 3; `docs/work-log/2026-10-15-online-giving.md`.)
+
+---
+
+**DECISION-174 — `pdfkit` is the statement renderer, installed in Batch 5 and not before.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 2 architect)
+
+An issued year-end statement must be a byte-stable artifact with a retention obligation (§7 Section Q).
+
+- **Why not westervillelions' `window.print()` of a stored letter:**
+  - The printable output depends on today's code, not the issue-time code.
+  - Serving stored HTML from presby's origin is an XSS surface.
+  - It gives an account-less donor nothing to receive.
+- **What `pdfkit` is:** 0.20.2, MIT, actively maintained, with MIT transitive dependencies (`fontkit`, `linebreak`, `fflate`, `png-js`, `@noble/hashes`, `@noble/ciphers`). **One correction recorded at Batch 5a:** `fontkit` depends on `@swc/helpers` 0.5.23, which is Apache-2.0 (permissive and compatible, and already in the tree through `next`, deduped), so "all transitive dependencies MIT" was not quite true. `@types/pdfkit` 0.17.6 is a devDependency. It is server-only and renders the simple shape a statement needs: letterhead, address block, a table of gifts, totals, generated wording.
+- **Rejected:**
+  - `pdf-lib`: unmaintained since 2022.
+  - `@react-pdf/renderer`: wraps pdfkit and adds about ten packages of layout machinery.
+  - Headless Chromium: serverless function size.
+  - A hand-written PDF emitter: text measurement and wrapping are the library's whole value.
+- **Batch 5 obligations:**
+  1. Confirm the then-current version and licence.
+  2. Add `serverExternalPackages: ["pdfkit"]` (pdfkit is not in Next's default list) and prove its font data is traced into the function.
+  3. Embed a committed OFL font with Latin Extended and Vietnamese coverage, because donor names arrive from Stripe in any script and the standard-14 fonts are WinAnsi only.
+- **As shipped (Batch 5a):** `serverExternalPackages: ["pdfkit"]` plus `outputFileTracingIncludes` for the statements routes; Noto Sans Regular and Bold 2.015 (SIL OFL 1.1, unmodified, pinned to a commit, SHA-256 recorded in the work-log) committed under `src/lib/giving/statements/fonts/`. Non-Latin scripts beyond Latin, Greek, Cyrillic and Vietnamese are a tracked follow-up.
+
+(2026-10-15, adopted at Phase 2; `docs/work-log/2026-10-15-online-giving.md`.)
+
+---
+
+**DECISION-173 — An issued statement is a frozen snapshot plus PDF bytes stored through the blob adapter, never a re-render. Staleness is derived, never stored. A correction is a new version. Statement contents never enter `email_queue`.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 2 architect)
+
+**What issuing writes:**
+- A `giving_statements` row with snapshots of the donee legal name, address and EIN, the delivery address, totals split cash vs non-cash, the code wording version, issuer and time.
+- Frozen `giving_statement_lines` rows.
+- A PDF rendered once (DECISION-174), stored by `store()`, and referenced by a composite `(blob_asset_id, organization_id)` FK with NO ACTION. An FK binds the owner connection where a grant cannot (F44), so a referenced blob cannot be deleted on any path.
+
+**Immutability:** issued rows are trigger-frozen. There is no DELETE grant, and a BEFORE DELETE guard has the `deletable_until` exemption. Retention is at least 7 years.
+
+**Late changes:** "Needs correction" is computed (a gift or reversal for that donor and year created after `issued_at`). It is never a flag written onto a frozen row. Re-issue is version n+1, titled "Corrected statement, replaces statement dated X".
+
+**Wording:** IRS wording is generated in code and versioned. Only the greeting, closing and signatory come from `giving_settings`.
+
+**Member download:** a route handler in `(org)` checks, inside `withOrgContext()`, that the statement's donor is confirmed-linked to the viewer's own membership. "Not yours" and "absent" return the same 404. The file is served as an attachment with `no-store`.
+
+**Delivery:**
+- **Why not `email_queue`:** it is a platform table with full `presby_app` DML, no RLS, indefinite retention and no attachment column. Putting statement contents there would make it a second, unscoped copy of tier-2 data.
+- The email is a notice with no amounts.
+- For donors without an account, Phase 3 chooses between a DECISION-147-shaped credential (hashed, expiring, bound to one version, uniform failure response, its own un-brandable public route group) and print-only delivery in v1. The first real run is January 2028.
+
+(2026-10-15, adopted at Phase 2; `docs/work-log/2026-10-15-online-giving.md`.)
+
+---
+
+**DECISION-172 — The giving data model's invariants, at the shape level: composite tenant keys, FORCE RLS and no DELETE grant on every table; gifts trigger-frozen apart from one-way transitions, and corrected by insert-only reversal rows; integer cents, USD-only by CHECK; `occurred_on` in the org's zone; `livemode` on the connection and on every gift; a `stripe`-only provider enum; donors without `person_id`, linked through `memberships`; the donee identity in a new `giving_settings` table edited by `giving.manage`; `org_portal.giving` as a toggle-only, off-by-default catalog entry with static org-type applicability, and the platform flag of the same name retired.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 2 architect)
+
+**Tables and freezes:**
+- Every giving table carries `unique (id, organization_id)`. Every inter-table FK, and every FK to `memberships` and `blob_assets`, is composite with NO ACTION (RESTRICT can fail the fixture cascade, DECISION-161).
+- Gifts follow `roll_actions`' rule: status moves one way, `pending → succeeded | failed`; fee and net are set-once, because the balance transaction can arrive after success; every other update raises.
+- Refunds, disputes, dispute reinstatements, ACH returns and offline voids are rows in an insert-only reversal table.
+- BEFORE DELETE guards cover the owner path (F44).
+
+**Columns:**
+- Money is integer cents with `CHECK > 0`, `bigint` for aggregates.
+- `currency` is CHECK-pinned to `usd`, so adding a currency later is a constraint change, not a redesign.
+- The donor-covered fee has its own column, so the CPA's ruling is one constant.
+- `occurred_on` is the org-local date of authorization, computed in SQL from `organization_settings.time_zone` with the F132 fallback. Statements derive the year from it alone.
+- `livemode` is on the connection and on gifts. Offline gifts are `true`. Every total and statement predicate filters on it.
+
+**Provider enum and connections:**
+- The provider enum holds `stripe` alone; Vanco arrives as `alter type … add value`.
+- Connections are globally unique on `(provider, external_account_id)`. Stripe mints the key and a tenant never supplies it, so it is not an F103 oracle.
+
+**Donors and funds:**
+- Donors follow §7: no `person_id`. The link is a composite to `memberships`, plus `merged_into_id` and an `unidentified` kind that can never receive a statement.
+- Funds carry a restriction class by CHECK and are retired, never deleted.
+
+**What stays untouched:**
+- No `about_org_id`, no affiliation or publication function, and no `jsonb` (§9 rule 5); the raw body is `text`.
+- `households.is_giving_unit` and `organization_identifiers` are untouched.
+
+**Donee identity:**
+- A new `giving_settings` row, not an `organization_identifiers` kind. That table's sole writer grants standing to an affiliated council, which would let a presbytery rewrite the donee identity on a congregation's tax documents.
+- Edited by `giving.manage`, audited, snapshotted at issue, and required before any statement can be issued.
+
+**Catalog:**
+- Every entry gains a required `orgTypes: readonly OrganizationType[] | null`.
+- Giving is `["congregation", "new_worshiping_community"]`, with `flag: null` and `provisionedOn: false` (the operator's Q3 and Q4).
+- Applicability is enforced in `listFeatureToggles`, in `toggleOrgFeature` (existing `invalid_key`) and in `orgFeatureEnabledInTx`.
+- It is a static property mirroring `PortalTile.orgTypeScope`, not a gating axis: there is no table, no admin and no per-org choice.
+
+**Tiles:** the operate "Giving" tile and the admin-hub "Manage giving" tile both carry `orgFeatureKey` and an `orgTypeScope` pinned equal to the catalog's.
+
+**Flag retirement:** 0055 deletes the `org_portal.giving` flag row, which is ON in production behind an inert placeholder, and `scripts/seed.ts` stops seeding it.
+
+**No General Fund auto-seed on toggle:** the generic toggle module stays feature-agnostic (DECISION-130's one-directional rule), and the give page requires an online fund anyway.
+
+(2026-10-15, adopted at Phase 2; `docs/work-log/2026-10-15-online-giving.md`.)
+
+---
+
+**DECISION-171 — Webhook ingest is a tenant-RLS'd inbox that `presby_app` cannot touch directly. Rows are written, claimed, applied, replayed and summarized only through SECURITY DEFINER functions that take no organization id and derive it from the connection row. An unset secret on a money-bearing webhook returns 503, amending DECISION-028 rule 3.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 2 architect)
+
+**The setting:** `/api/webhooks/stripe` has no session, and `withOrgContext()` requires a member. Two shortcuts are rejected:
+- A "system org context" helper that calls `set_config` without a membership check. It would be a general bypass any future code could reach.
+- Writes on `getPlatformDb()`. That would put the owner connection, which no grant binds (F44), into tenant giving data, and break the static guarantee that `src/lib/giving/` never imports it.
+
+**The shape follows DECISION-147:** the verified signature is the credential, and the function derives everything from its own rows.
+
+**Functions:**
+- `presby_giving_ingest_event()`: unique on `(connection_id, external_event_id)`; unknown account or mode mismatch returns `ignored` and writes nothing.
+- `presby_giving_claim_event()`: returns the body to the processor.
+- A family of apply functions, one per normalized kind. Each re-derives the org from inbox → connection, validates the intent, fund, membership and gift belong to that org, and is idempotent on external ids.
+- `presby_giving_ingest_health()`: counts and timestamps only.
+- `presby_giving_requeue_event()`: replay, audited on the platform axis.
+
+All pin `search_path = public, pg_temp`, and `EXECUTE` is granted to `presby_app` alone. `presby_app` holds no table privilege on the inbox, so the raw body (names, emails, addresses) is unreachable from any tenant query and from every page.
+
+**Route contract:**
+- Secret unset → **503**. A 200 tells Stripe the event was delivered when nothing was recorded, and Stripe never retries; for money that is silent loss. An unset secret behind a configured endpoint is a misconfiguration, which is the case a retry exists for. Resend's 200 is unchanged.
+- Bad or missing signature → 400.
+- Platform-account event → 200, not handled.
+- Accepted, duplicate and ignored → one identical 200.
+- DB error → 500.
+
+**Processing and retention:**
+- Processing runs in `after()`, with a 5-minute cron for backlog, backoff and dead letters.
+- Bodies are nulled 90 days after a terminal status. The normalized rows are the record.
+- Ingest never reads the org toggle.
+
+**Accepted residual:** the functions cannot re-verify the signature. They trust a `presby_app` caller no further than `presby_app` is already trusted.
+
+(2026-10-15, adopted at Phase 2; `docs/work-log/2026-10-15-online-giving.md`.)
+
+---
+
+**DECISION-170 — Giving authority: `treasurer` (`giving.view`, `giving.record`, `giving.manage`) and `giving_recorder` (`giving.record`) are new template roles, with no default binding elsewhere. The first treasurer is designated by the platform operator in DECISION-155's shape, gated on zero `giving.manage` holders, and the designation creates no person. A `giving.manage` holder may grant and revoke giving-only roles, person-arm, with `assertPermissionSubset()` called unchanged (F138). Holders of any `giving.*` key must complete 2FA, via a new `permissions.requires_two_factor` column read by the existing SECURITY DEFINER predicate. The member self-view is identity-based and needs no key.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 2 architect)
+
+**DECISION-078, per office:** `treasurer` passes (G-3.0205, DECISION-080). `stated_clerk`, `session_member`, `installed_pastor` and `founding_administrator` fail. `giving_recorder` is a custom role, because no PC(USA) office exists for it.
+
+**The designation:**
+- `src/lib/treasurer-designation.ts`, one `getPlatformDb()` transaction from `/admin/organizations/[id]`, gated on `FEATURES.ADMIN_ORGANIZATIONS`.
+- It locks the org row and requires a congregation or new worshiping community.
+- The zero-holder gate is a plain CTE, never `presby_effective_permissions()` (F107).
+- The designee must already hold an active membership. The act creates no person and no membership.
+- It reuses or reactivates an org-owned `treasurer` (F109, additive reconcile), mints `giving_recorder` ungranted, and inserts one person-arm grant with `granted_by` as provenance.
+- Audited as `ORG_TREASURER_DESIGNATED`. It neither requires nor flips the toggle, and writes no giving table.
+- Not the F111 resolution, and no accretion to `founding_administrator`. `authz.ts`, `role-definitions.ts`, `role-grants.ts` and `drizzle/0010` are unchanged, and a test pins that.
+
+**F138 and the delegation path:**
+- Without delegation, nobody could ever grant the recorder role or hand over the treasurer role: the founding administrator lacks the giving keys and the treasurer lacks `roles.manage` and `role_grants.manage`.
+- `src/lib/giving/team.ts` adds a step-0 gate of `giving.manage`.
+- The target role must be org-owned, active, and contain only `permissions.module = 'giving'` keys. Grants are person-arm only, so group-arm can't widen access through, say, the Session group.
+- The subset check runs unchanged, and the existing `TENANT_ROLE_*` audit keys are used.
+- Revoking the last `giving.manage` holder is refused. If it happens anyway by role deactivation, the designation gate reopens.
+
+**2FA:**
+- `requires_two_factor` is true for the three giving keys.
+- `presby_two_factor_required()` gains an arm that must agree with `presby_effective_permissions()` on every resolver arm; a DB test pins agreement.
+- Giving admin pages and actions also check `twoFactorRequired && !twoFactorVerified` on the Node-side session, closing the claim-refresh latency.
+- DECISION-026's master switch and DB-error posture are unchanged. Extending the column to tier-3 keys is a tracked follow-up.
+
+**Self-view:** a member sees gifts and statements only on donors confirmed-linked to their own membership. It lives in `src/lib/giving/self.ts` under DECISION-162's self-read conditions, and household relationships confer nothing.
+
+(2026-10-15, adopted at Phase 2; `docs/work-log/2026-10-15-online-giving.md`.)
+
+---
+
+**DECISION-169 — Adds the `stripe` npm SDK (23.0.0, API version `2026-09-30.endive`), server-only, imported at runtime by exactly one module.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 2 architect)
+
+**Against the rubric:**
+- Nothing in `package.json` does this.
+- MIT, zero runtime dependencies, engines `node >= 20` (repo `>= 22`), actively released (2026-10-14).
+- The pinned API version was verified in the published tarball (`esm/apiVersion.js`).
+- About 17 MB unpacked, mostly types. Server-only, so zero client bytes.
+
+**Constraints:**
+- Never on the Edge: `src/proxy.ts` and everything it reaches never import it, and every importer is `runtime = "nodejs"`.
+- `src/lib/giving/providers/stripe/client.ts` is the only runtime importer, enforced by ESLint `no-restricted-imports` (type-only imports allowed).
+- The client sets `apiVersion` explicitly to the SDK's pinned version.
+- A major-version upgrade of the SDK is an API-version change and gets its own work-log.
+- Webhook verification uses the SDK's verifier over the raw body with a 300 s tolerance, replacing a hand-rolled verifier like Resend's.
+
+(2026-10-15, adopted at Phase 2; `docs/work-log/2026-10-15-online-giving.md`.)
+
+---
+
+**DECISION-168 — Giving is provider-neutral at the event boundary and Stripe-specific everywhere else: Stripe Connect, direct charges, each congregation's own Stripe-hosted-onboarded account, no application fee. Donors reach Stripe-hosted Checkout by redirect only: no Stripe.js and no iframe on any presby page. That is the SAQ-A stance. A Stripe payment becomes a gift only through a presby-created checkout intent, never through Stripe metadata. The platform key calls an enumerated allowlist from one module, and production uses a restricted key where Stripe permits.**
+
+**Status:** Resolved · **Date:** 2026-10-15 · **Feature:** `2026-10-15-online-giving` (Phase 2 architect, adopting the kickoff spike A–F with amendments)
+
+**Spike A, adopted:**
+- Accounts v2 merchant configuration; store only `acct_…`.
+- One platform endpoint for connected accounts; `livemode` checked against the connection.
+- OAuth connection of existing accounts deferred.
+- Express and Custom rejected (platform liability), and pasted keys rejected (secret custody).
+
+**Spike B–D, adopted:**
+- Checkout with inline `price_data`; subscription mode for monthly gifts.
+- One gift per succeeded PaymentIntent; reversal rows for refunds and disputes.
+- Fee and net from the balance transaction.
+- Amended for the portal: a portal session is only for a signed-in member's own linked customer, never from an email lookup.
+
+**Spike E–F, adopted:**
+- Q10 adds auto-linking through the intent.
+- `NormalizedEvent` gains `GiftPending` and `ConnectionStatusChanged`.
+- Refund initiation stays in the Stripe Dashboard.
+
+**Redirect only:**
+- The server action validates, computes cents and the gross-up, persists the intent, creates the session, asserts the origin `https://checkout.stripe.com`, and returns the URL. The hydrated client re-asserts the origin and navigates.
+- `form-action 'self'` and every other CSP directive are unchanged. `form-action` governs redirects after native POSTs, which `<HydrationGate>` makes impossible.
+- Return URLs come from the site's canonical origin, never `Host`.
+- The return page reads presby's own state without PII.
+- An enforced CSP on the give routes is a gate before any live-mode connection.
+
+**Intent authority:**
+- The fund and membership on a gift come from presby's `giving_checkout_intents` row.
+- A connected-account payment presby didn't originate (a dinner ticket, a Payment Link) is ignored.
+- That makes "pure contribution only" (G7) structural for online money and closes the crafted-metadata cross-org-fund vector.
+
+**Key custody (G27):**
+- Live keys only in production. Test-mode platform account elsewhere.
+- Restricted key where Connect permits; Phase 3 confirms per resource.
+- `client.ts` exports named functions only: create account, account link, Checkout session, portal session; retrieve account, one balance transaction, balance transactions by payout, one event already in the inbox.
+- Forbidden: listing or searching customers, charges, PaymentIntents, invoices or subscriptions, and retrieving customers.
+- Never log response or error bodies.
+- A rotation procedure goes in `docs/deployment.md`.
+- The privacy copy discloses the platform account's reach.
+
+(2026-10-15, adopted at Phase 2; `docs/work-log/2026-10-15-online-giving.md`.)
+
+*Sources the architect cited: Stripe — Restricted API keys (https://docs.stripe.com/keys/restricted-api-keys.md); Stripe — API permissions reference (https://docs.stripe.com/keys/permissions-reference).*
+
+---
+
 **DECISION-162 — On the `(org)` portal home, a tile is navigation and a widget is data. Tiles are never filtered by the viewer's permission (the destination owns the denial). A widget hides when its own read function denies, and that denial comes from the function's result, never from a separate page-level permission read. Tile density, badges and the main row's height stay server-side and unchanged. Each widget is its own `withOrgContext()` failure domain under one `Promise.all`, with no savepoints and no `Suspense`.**
 
 **Status:** Resolved · **Date:** 2026-10-14 · **Feature:** `2026-10-14-portal-home-alignment` (Phase 2 architect, from the Phase 1 analyst's R1–R5)

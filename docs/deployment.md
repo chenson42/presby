@@ -203,7 +203,9 @@ so no row that predates the CI run can appear in a log or an uploaded trace.
 | `AUTH_URL` | the canonical `www` host — **not** the apex, which 308s and would bounce `/api/auth/*` |
 | `NEXT_PUBLIC_APP_URL` | same as `AUTH_URL` |
 | `INITIAL_ADMIN_EMAILS` | The operator's own sign-in address. Deliberately **not** written down here — this repo is public, and `npm run check:secrets` treats a real address in a tracked file as a finding. Read it from the deployed environment. |
-| `CRON_SECRET` | generated; the email-queue worker needs it |
+| `CRON_SECRET` | generated; the email-queue worker, the daily maintenance job and the giving worker (`/api/cron/giving`) all need it — each answers 503 without it |
+| `STRIPE_SECRET_KEY` | **online giving only**, production only — a *restricted* key, never a full-access one. See "Online giving (Stripe)" below |
+| `STRIPE_WEBHOOK_SECRET` | **online giving only** — the signing secret of the one webhook endpoint. See below |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | **deferred** — see below |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **set 2026-10-19** (Production). The key belongs to PresbyPortal's **own Resend team** (its own Pro subscription), where `presbyportal.org` is the verified sending domain — never a team shared with other products, because the key is full-access (the Track F mail increment provisions church domains with it) and full access reaches every domain in its team. From: `PresbyPortal <noreply@presbyportal.org>`. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **deliberately unset.** `.env.example` says this credentials-login bypass is not suitable for production |
@@ -211,6 +213,277 @@ so no row that predates the CI run can appear in a log or an uploaded trace.
 
 Optional: `NEXT_PUBLIC_TURNSTILE_SITE_KEY`/`TURNSTILE_SECRET_KEY`,
 `UPSTASH_REDIS_REST_URL`/`_TOKEN` (falls back to in-memory rate limiting).
+
+For online giving, `NEXT_PUBLIC_APP_URL` has a second job: it is the **only**
+source of the URLs handed to Stripe (Checkout success/cancel, Connect
+onboarding return/refresh) and must be the canonical `https` origin. Anything
+else — unset, `http`, a malformed value — makes giving "unavailable" rather
+than guessing from a request header.
+
+---
+
+## Online giving (Stripe)
+
+Written in Batch 3a of `docs/work-log/2026-10-15-online-giving.md`. Everything
+here is **operator work that cannot be done from the repository**: the code is
+finished and tested against signed fixture bodies (`docs/testing.md` → "The
+signed-event replay harness"), but no Stripe account has ever been involved.
+The "test-mode smoke" below is the first time real Stripe objects meet this
+code, and it is yours to run.
+
+### What presby holds, and what that is worth
+
+One **platform** Stripe account with Connect enabled; each congregation owns its
+own connected account (Accounts v2, full Dashboard, Stripe collects fees and
+carries losses — presby takes no application fee and no liability). Presby
+stores only the connected account's `acct_…` id. The **platform API key** is the
+one secret of consequence: it can act on every connected account, so it is a
+*restricted* key limited to the calls `src/lib/giving/providers/stripe/client.ts`
+makes, set in the **production** environment only — never in CI, a preview, or
+`.env.local` on a machine that touches the production database.
+
+The webhook signing secret is lower-stakes (it can forge events, not move money)
+but is still production-only; the replay harness uses the non-key-shaped
+literal `giving-e2e-signing-secret`.
+
+### Restricted-key permissions (the production key contract)
+
+Create the key at Dashboard → Developers → API keys → *Create restricted key*.
+Each permission below is the *exact* set; grant nothing else. For the four rows
+marked **Connect**, the key-creation flow has a separate per-permission choice
+for "when accessing connected accounts" (restricted-api-keys docs, step 4) — it
+must be set for those rows.
+
+| Call (in `client.ts`) | Endpoint | Permission | Pattern |
+|---|---|---|---|
+| `createConnectedAccount` | `POST /v2/core/accounts` | `v2_account_storer_write` | platform's own account |
+| `createOnboardingLink` | `POST /v2/core/account_links` | `v2_account_storer_write` | platform's own account |
+| `retrieveConnectedAccount` | `GET /v2/core/accounts/{id}` | `v2_account_storer_read` | platform's own account |
+| `createCheckoutSession` | `POST /v1/checkout/sessions` | `checkout_session_write` | **Connect** (`Stripe-Account`) |
+| `retrieveBalanceTransaction`, `listBalanceTransactionsForPayout` | `GET /v1/balance_transactions` | `balance_read` | **Connect** |
+| `retrieveEvent` (replay of a purged body) | `GET /v1/events/{id}` | `event_read` | **Connect** |
+| `retrieveInvoiceForPayment` (renewals) | `GET /v1/invoices/{id}` | `invoice_read` | **Connect** |
+
+**Not granted, deliberately:** Customers, Charges, Payment Intents,
+Subscriptions, the Customer portal, Webhook endpoints, Refunds, Payouts,
+Transfers, and anything in the v1 `connected_account_*` family. A test pins that
+`client.ts` reaches exactly the six SDK resources the table covers.
+
+*Unconfirmed until the smoke:* whether the v2 account endpoints accept a
+restricted key in practice. If Stripe refuses it, run production on an
+unrestricted key, log it as a finding, and leave `client.ts` as it is — the
+allowlist module is the control either way.
+
+### Creating the webhook endpoint
+
+Dashboard → Developers → Webhooks → *Add destination*, once per mode (a live
+destination and a test/sandbox destination have different secrets):
+
+1. **Events from: Connected accounts.** *Not* "Your account" — presby consumes
+   events about the congregations' accounts, whose top-level `account` field says
+   which congregation. (Accounts v2 also emits "thin" v2 events on the *Your
+   account* scope; presby does not subscribe to them and needs no second
+   destination.)
+2. **API version: `2026-09-30.endive`.** Pin it when creating the destination. A
+   body at any other version is dead-lettered (`normalize_api_version`) rather
+   than parsed, because the field layouts differ.
+3. **URL:** `https://<canonical host>/api/webhooks/stripe` (the same host as
+   `NEXT_PUBLIC_APP_URL`).
+4. **Events — exactly these eighteen, nothing else:**
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`, `checkout.session.expired`,
+   `invoice_payment.paid`, `charge.succeeded`, `refund.created`,
+   `refund.updated`, `charge.dispute.created`,
+   `charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`,
+   `charge.dispute.closed`, `customer.subscription.deleted`,
+   `invoice.payment_failed`, `payout.paid`, `payout.failed`,
+   `account.updated`, `account.application.deauthorized`.
+   Any other type is acknowledged and dropped before storage, so subscribing to
+   more costs bandwidth for nothing. (`constants.test.ts` fails if this list and
+   `HANDLED_EVENT_TYPES` ever differ.)
+5. Copy the destination's **signing secret** into `STRIPE_WEBHOOK_SECRET` in
+   Vercel (production environment only) and redeploy.
+
+The route answers **503** while `STRIPE_WEBHOOK_SECRET` is unset (Stripe keeps
+retrying, so nothing is lost while you finish), **400** for a bad or stale
+signature, **500** if the database is down (Stripe retries), and one identical
+**200** for everything else — including an account presby doesn't know, which is
+deliberately indistinguishable from success.
+
+`vercel.json` runs `/api/cron/giving` every five minutes with `CRON_SECRET`. It
+processes events whose in-request processing was cut off, retries events that
+were parked (a refund that arrived before its gift), purges stored bodies 90 days
+after they finish, and expires abandoned checkout intents.
+
+### Key rotation
+
+*API key (`STRIPE_SECRET_KEY`).* Create a new restricted key with the table
+above → set it in Vercel production → redeploy → verify (a connected
+congregation's *Refresh status* succeeds, or `GET /api/cron/giving` shows no new
+`stripe_*` failures) → revoke the old key in the Dashboard. Between the redeploy
+and the revoke both keys work, so there is no outage. If the old key may have
+leaked, revoke it first and accept a short window in which gifts cannot start
+(donors see "temporarily unavailable"; nothing already paid is affected).
+
+*Webhook secret (`STRIPE_WEBHOOK_SECRET`).* In the destination, *Roll secret*
+with an expiry of 24 hours: for that window Stripe signs each delivery with both
+secrets and the SDK accepts a match on either. Set the new secret in Vercel,
+redeploy, and let the old one expire. If it leaked, roll with immediate expiry
+and accept that deliveries fail (Stripe retries them) until the redeploy lands.
+
+### Operator test-mode smoke — blocked on the platform account
+
+**Prerequisite (Operator Q1):** a test-mode (sandbox) platform Stripe account with
+Connect enabled. None exists yet; everything below is unverified until it does.
+Run against `development` or a preview, never production data.
+
+1. Set `STRIPE_SECRET_KEY` (a *test* restricted key built from the table) and
+   `STRIPE_WEBHOOK_SECRET` (from a test-mode destination created as above) and
+   `NEXT_PUBLIC_APP_URL`. Turn `org_portal.giving` on for a fixture congregation;
+   have a user holding `giving.manage` complete 2FA.
+2. **Connect:** *Connect Stripe* → onboarding on `accounts.stripe.com` with Stripe's
+   test data → return page. Expected: the status reads `active` after *Refresh
+   status*. Confirm in the logs that `account.updated` **reached the Connect
+   endpoint** for a v2 account (if not, the manual refresh is the fallback and
+   this is a finding).
+3. **Things the code assumed from the SDK's typings and that this step proves:**
+   (a) the account create body is accepted exactly as sent;
+   (b) the onboarding link is accepted **without** a `configurations` list — the
+   Phase 3 research read it off a docs page, but stripe-node 23.0.0's CHANGELOG
+   records it as removed in this API version. If Stripe answers
+   `configs_must_match_to_use_account_links`, add the field in
+   `providers/stripe/onboarding.ts` (one place, with a test);
+   (c) Checkout accepts `allowed_payment_method_types` (the pinned version
+   removed `payment_method_types`) and an `expires_at` 31 minutes out;
+   (d) a restricted key with only the table above can do all of the above.
+4. **Gifts:** a one-time card gift (`4242 4242 4242 4242`), a one-time ACH gift
+   (Stripe's test bank, including the delayed-success and failure test
+   accounts), a monthly gift, a refund and a dispute raised from the Dashboard,
+   and a payout. Each should end `applied` on the platform health page; a gift
+   shows its fee after `charge.succeeded`; the refund/dispute appear as
+   reversals; the payout appears as a settlement.
+5. **Capture one real response:** `GET /v2/core/accounts/{id}` for the connected
+   account, sanitize it (invented names, `example.invalid` addresses, fake ids),
+   and commit it under `src/lib/giving/providers/stripe/testing/fixtures/` with
+   a case in `status.test.ts`. That closes the "payouts-enabled path and the
+   requirements shape" question that Phase 3 left open. Run `npm run
+   check:secrets` over the new file first (the script scans tracked files; stage
+   it, or call `checkSecretsPii()` on its path).
+6. **Billing-portal probe (Stripe confirmation 3):** attempt a
+   `POST /v1/billing_portal/sessions` for a direct-charge customer with the
+   `Stripe-Account` header. Record the result in the work-log. v1 builds no
+   portal either way; if it works, a follow-up can add it for confirmed-linked
+   members.
+7. **Disputes:** one dispute is one reversal, keyed on the dispute's id. Money
+   leaving is recorded by whichever of `charge.dispute.created` (any status but
+   a `warning_*` inquiry) or `charge.dispute.funds_withdrawn` arrives first; the
+   other changes nothing. An inquiry records nothing until it escalates and the
+   funds are withdrawn. Money coming back is recorded by whichever of
+   `charge.dispute.funds_reinstated` or `charge.dispute.closed` with status
+   `won` arrives first, the same way; a lost dispute leaves the reversal in
+   place. In the smoke, raise a test dispute, confirm exactly one reversal
+   appears whichever event lands first, then close it as won and confirm one
+   reinstatement.
+
+8. **Give (Batch 4):** with the connection `active`, one fund offered online,
+   payouts attested and the give page turned on, open `/site/<slug>/give` and,
+   signed in as a plain member with no giving key, `/o/<slug>/giving/give`.
+   - A one-time $25 card gift: the browser lands on `checkout.stripe.com` (the
+     client re-asserts the host); Checkout shows the fund's online name; the
+     return page reads *confirming* and then *received* once the webhook has
+     applied it. In the database the intent goes `created` → `open` →
+     `completed`.
+   - *Cover the fees* on a card gift: Checkout's line says it includes the fee,
+     and the total equals the page's preview to the cent (the TS and SQL
+     formulas are pinned together, but only Stripe's own number proves the
+     fee the congregation actually pays).
+   - A bank (ACH) gift ends on *bank pending* until Stripe reports the debit;
+     a monthly gift creates a subscription and the return page says so.
+   - Submit the same form twice quickly (or double-click): one intent, one
+     session; the second is told it was already started.
+   - **`NEXT_PUBLIC_APP_URL` decides where Checkout sends the donor back.** Set
+     it to the canonical origin and confirm the cancel link returns to the give
+     page. (A request's `Host` header is never used.)
+   - Look at the response headers on the give routes: `Content-Security-Policy`
+     (enforced) as well as the report-only one, with no console violation.
+     Production emits no `'unsafe-eval'`; development adds it for React.
+
+### Pre-deploy runbook: the giving migrations and turning giving on
+
+Added at integration (v0.34.0). Production is at `0053` as of 2026-10-07.
+
+1. **Order.** `0054` first (the calendar migration, with its F133 pre-ship
+   count), then `0055_presby_giving` and `0056_presby_giving_statements`, each
+   hand-applied with the `psql ... -1` form in "Migrations" above, strictly in
+   journal order. The journal entries for 55 and 56 are in the branch.
+   Integrate on `development` first and run `scripts/test-rls.sql` there as
+   `presby_app` (expect **927** passes). Snapshot production before applying.
+2. **What `0055` does to existing data.** It deletes the `org_portal.giving`
+   `feature_flags` row (ON in production behind an inert placeholder), so the
+   placeholder tile disappears for everyone at deploy. That is intended; giving
+   is now a per-organization toggle, congregations and new worshiping
+   communities only, off by default.
+3. **Turn giving on per organization, only where wanted**, from
+   `/o/<slug>/admin/features`, and **designate the treasurer in the same step**
+   (`/admin/organizations/[id]`): until the operator designates one, nobody holds
+   a giving key and the admin pages are a dead end. Once a treasurer exists,
+   offline gift recording is fully live and real donor data goes into tier-2
+   tables, so tell the treasurer that no statement can be issued in production
+   until `GIVING_STATEMENTS_ENABLED=1` is set after the CPA review (and before
+   January 2027 for 2026 gifts).
+4. **The `/give` go-live residual.** Before turning giving on for a congregation,
+   check whether its published site already has its own page at `/give`. While
+   giving is not live that page renders exactly as before. The moment giving
+   goes live, the platform's give page replaces it (and it comes back if giving
+   is taken offline). Tell the congregation, and move that content to a
+   `/give/<x>` page or to the giving live slot if they want to keep it. A bundle
+   page at exactly `/give/return` is always the platform's.
+5. **Nothing takes money without keys.** With `STRIPE_SECRET_KEY` unset, the
+   treasurer panel says online giving is not enabled on this installation and the
+   public and member give forms are unreachable; with `STRIPE_WEBHOOK_SECRET`
+   unset the webhook answers 503.
+
+### Go-live checklist (enforced by humans)
+
+- `STRIPE_SECRET_KEY` (restricted, per the table) and `STRIPE_WEBHOOK_SECRET`
+  set in **production only**; the webhook destination is *Connected accounts*,
+  version `2026-09-30.endive`, the exact eighteen events.
+- The restricted key carries **`balance_read` with the "when accessing connected
+  accounts" choice set**. Payout reconciliation (Batch 6) reads balance
+  transactions on the congregation's account; without the scope every automatic
+  payout retries and then dead-letters, and its Payouts row never fills.
+- `NEXT_PUBLIC_APP_URL` is the canonical `https` origin; `CRON_SECRET` is set and
+  the giving cron shows 200s in the Vercel cron dashboard.
+- Upstash (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and Turnstile configured: the
+  in-memory rate limiter is per-instance on Vercel, so the public give form's
+  limits are only real with Upstash.
+- `auth.require_2fa` is on. (Holding any giving key already forces 2FA through
+  the permission, but the platform flag is the backstop for everyone else.)
+- The enforced `Content-Security-Policy` header is verified **in a browser** on
+  `/site/<slug>/give`, `/site/<slug>/give/return` and the member equivalents,
+  with a clean console (Batch 4 ships it; `next.config.ts`, same string as the
+  report-only policy, no Stripe origin - `check:giving-boundaries` B7).
+- Each congregation's Stripe **payouts are automatic** (attested in-app; manual
+  payouts cannot be reconciled), and its Stripe statement descriptor shows the
+  congregation's name.
+- `GIVING_STATEMENTS_ENABLED` is **unset** until the CPA has ruled on statement
+  wording (Batch 5). Nothing issues a statement in production without it.
+- Privacy copy discloses the platform account's technical reach at Stripe.
+- This section's key-rotation procedure has been read by whoever holds the key.
+
+### When something looks wrong
+
+- *Stripe shows delivery failures with 503:* `STRIPE_WEBHOOK_SECRET` is unset in
+  that environment. *With 400:* the secret differs from the destination's, or the
+  endpoint's clock/body was altered by a proxy (the route needs the raw body).
+- *Events stay `parked`:* normal for a few minutes (a refund before its gift);
+  a parked `no_gift`/`no_subscription` event gives up quietly after 24 hours
+  (a payment for something other than a gift). Any other parked code is retried
+  with back-off and dead-letters after eight attempts.
+- *Dead letters* appear as a count on the congregation's giving overview and in
+  the platform health page. The code (`over_reversal`, `amount_mismatch`,
+  `normalize_api_version`, …) says why; the body is never shown. Replay is an
+  operator act and is audited.
 
 ---
 

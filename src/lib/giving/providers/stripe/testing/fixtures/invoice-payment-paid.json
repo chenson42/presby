@@ -1,0 +1,30 @@
+{
+  "id": "evt_fixtureInvoicePaymentPaid",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1792592000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "invoice_payment.paid",
+  "data": {
+    "object": {
+      "id": "inpay_fixture0000000001",
+      "object": "invoice_payment",
+      "invoice": "in_fixtureInvoice000001",
+      "payment": {
+        "type": "payment_intent",
+        "payment_intent": "pi_fixtureRenewal00001"
+      },
+      "amount_paid": 2500,
+      "amount_requested": 2500,
+      "currency": "usd",
+      "livemode": false,
+      "status": "paid",
+      "status_transitions": {
+        "paid_at": 1792592000
+      },
+      "created": 1792592000,
+      "is_default": true
+    }
+  }
+}

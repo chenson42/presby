@@ -44,6 +44,9 @@ export const TILE_ICONS: Record<string, LucideIcon> = {
   groups: UsersRound,
   branding: Palette,
   giving: HandCoins,
+  // online-giving: the member tile and the treasurer's admin tile get distinct
+  // glyphs, same reasoning as calendar/events below.
+  "giving-admin": Landmark,
   worship: Music,
   committees: Gavel,
   oversight: ShieldCheck,

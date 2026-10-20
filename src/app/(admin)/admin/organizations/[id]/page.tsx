@@ -22,6 +22,11 @@ import {
   countFoundingAdministratorHolders,
   foundingAdministratorPlan,
 } from "@/lib/founding-administrator";
+import {
+  countGivingManageHolders,
+  treasurerDesignationApplies,
+} from "@/lib/treasurer-designation";
+import { listIngestHealth, type IngestHealthRow } from "@/lib/admin/giving-ingest-health";
 import { getOrganizationAffiliationAdminDetail } from "@/lib/org-provisioning";
 import { BrandForm } from "./brand-form";
 import { NeutralizeDialog } from "./neutralize-dialog";
@@ -29,6 +34,8 @@ import { SiteSection } from "./site-section";
 import { ProfileForm } from "./profile-form";
 import { ServiceTimesSection } from "./service-times-section";
 import { FoundingAdministratorSection } from "./founding-administrator-section";
+import { TreasurerDesignationSection } from "./treasurer-designation-section";
+import { IngestHealthSection } from "./ingest-health-section";
 import { AffiliationSection } from "./affiliation-section";
 
 // officeTemplateKey -> display name. Not exported by
@@ -107,6 +114,26 @@ export default async function OrganizationBrandDetailPage({
     ? (OFFICE_TEMPLATE_DISPLAY_NAMES[plan.officeTemplateKey] ?? plan.officeTemplateKey)
     : null;
 
+  // Treasurer designation (online giving, R2): only for the org types the
+  // giving toggle applies to, and read fresh on every render — a count, never
+  // names. A presbytery pays for no read at all.
+  const treasurerApplies = treasurerDesignationApplies(org.organizationType);
+  const givingManageHolderCount = treasurerApplies
+    ? await countGivingManageHolders(platformDb, id)
+    : 0;
+
+  // Payment-notice health (Batch 3b), same applicability as the treasurer
+  // section. Counts only; a failed read is `null` (rendered as "can't load",
+  // never as an empty, all-clear list) and never takes the page down.
+  let ingestHealth: IngestHealthRow[] | null = null;
+  if (treasurerApplies) {
+    try {
+      ingestHealth = (await listIngestHealth()).filter((row) => row.organizationId === id);
+    } catch {
+      ingestHealth = null;
+    }
+  }
+
   const affiliation = await getOrganizationAffiliationAdminDetail(id);
 
   const siteDetail = await getSiteAdminDetail(id);
@@ -184,8 +211,21 @@ export default async function OrganizationBrandDetailPage({
         officeTemplateName={officeTemplateName}
       />
 
+      {treasurerApplies && (
+        <TreasurerDesignationSection
+          organizationId={id}
+          organizationName={org.name}
+          canDesignate={givingManageHolderCount === 0}
+          currentHolderCount={givingManageHolderCount}
+        />
+      )}
+
+      {treasurerApplies && <IngestHealthSection rows={ingestHealth} />}
+
       {/* Stacking order (work-log Phase 3): founding administrator (actionable,
-          gating) -> council affiliation (identity) -> brand. */}
+          gating) -> treasurer designation (actionable, gating, applicable org
+          types only) -> payment-notice health (read-only, same org types) ->
+          council affiliation (identity) -> brand. */}
       <AffiliationSection affiliation={affiliation} />
 
       <section className="mt-8">

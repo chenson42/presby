@@ -490,3 +490,252 @@ test.describe("Admin — set and clear service times & office hours (leaves the 
     expect(restored).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test 7 — Treasurer designation (online giving, Batch 1b)
+// docs/work-log/2026-10-15-online-giving.md, Phase 2 R2 / Phase 3 "Designation".
+//
+// The section renders only for a congregation / new worshiping community:
+//   - alpha (a congregation with NO giving.manage holder) shows the control;
+//   - the presbytery shows no section at all;
+//   - once a treasurer is designated the control disappears and the section
+//     shows a COUNT, never a name or an email.
+//
+// The designee is the existing `org-single` fixture person (Marguerite
+// Ashcombe, an active member of alpha). Holding giving.manage flips her
+// sign-in 2FA requirement (arm B of presby_two_factor_required), so every row
+// this test creates — the role grant, the org-owned `treasurer` and
+// `giving_recorder` roles and their bindings — is removed again in `afterAll`
+// (and defensively in `beforeAll`, repairing a crashed prior run), and nothing
+// else in the suite signs in as org-single while it is in place (workers: 1).
+// ---------------------------------------------------------------------------
+
+import { E2E_ORGS } from "./support/seed-orgs";
+import { E2E_USERS } from "./support/users";
+
+const TREASURER_ORG = E2E_ORGS.alpha;
+const DESIGNEE = E2E_USERS["org-single"];
+const DESIGNEE_PERSON_ID = "e2e00000-0000-0000-0000-0000000000a1";
+
+async function removeGivingDesignation(sql: Sql) {
+  // Grants first (the role FK would cascade, but being explicit documents it),
+  // then the org-owned roles. `where key in (...)` and the org id are the only
+  // rows this can touch; alpha has no such roles before the test (asserted).
+  await sql`
+    delete from role_grants
+     where organization_id = ${TREASURER_ORG.id}::uuid
+       and role_id in (select id from app_roles
+                        where organization_id = ${TREASURER_ORG.id}::uuid
+                          and key in ('treasurer', 'giving_recorder'))
+  `;
+  await sql`
+    delete from app_roles
+     where organization_id = ${TREASURER_ORG.id}::uuid
+       and key in ('treasurer', 'giving_recorder')
+  `;
+}
+
+test.describe("Admin — treasurer designation (online giving)", () => {
+  test.use({ storageState: storageStatePath("admin") });
+  test.describe.configure({ mode: "serial" });
+
+  test.beforeAll(async () => {
+    const sql = platformSql();
+    await removeGivingDesignation(sql);
+    const holders = (await sql`
+      select 1
+        from role_grants rg
+        join app_role_permissions arp on arp.role_id = rg.role_id
+       where rg.organization_id = ${TREASURER_ORG.id}::uuid
+         and arp.permission_key = 'giving.manage'
+         and rg.starts_on <= current_date
+         and (rg.ends_on is null or rg.ends_on > current_date)
+    `) as unknown[];
+    expect(
+      holders,
+      "the alpha fixture must start with no giving.manage holder for the designation control to render",
+    ).toHaveLength(0);
+  });
+
+  test.afterAll(async () => {
+    await removeGivingDesignation(platformSql());
+  });
+
+  test("a congregation with no giving.manage holder shows the treasurer control, disabled until the email looks valid", async ({
+    page,
+  }) => {
+    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    const section = page.getByTestId("treasurer-designation-section");
+    await expect(section).toBeVisible({ timeout: 10_000 });
+    await expect(section.getByRole("heading", { name: "Treasurer" })).toBeVisible();
+
+    const email = section.getByLabel(/treasurer.s email address/i);
+    const trigger = section.getByRole("button", { name: "Designate treasurer" });
+    // HydrationGate keeps the fieldset disabled until the page has hydrated;
+    // wait for it before typing, exactly as a user would.
+    await expect(email).toBeEnabled({ timeout: 15_000 });
+    await expect(trigger).toBeDisabled();
+    await email.fill("not-an-email");
+    await expect(trigger).toBeDisabled();
+    await email.fill(DESIGNEE.email);
+    await expect(trigger).toBeEnabled();
+  });
+
+  test("a presbytery shows no treasurer section at all", async ({ page }) => {
+    await page.goto(`/admin/organizations/${E2E_ORGS.presbytery.id}`);
+    await expect(
+      page.getByRole("heading", { name: E2E_ORGS.presbytery.name }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("treasurer-designation-section")).toHaveCount(0);
+    await expect(page.getByLabel(/treasurer.s email address/i)).toHaveCount(0);
+  });
+
+  test("an account that is not a member of the organization is refused in plain words, creates nothing, and leaves the control in place", async ({
+    page,
+  }) => {
+    const sql = platformSql();
+    const membershipsBefore = (await sql`
+      select count(*)::int as n from memberships where organization_id = ${TREASURER_ORG.id}::uuid
+    `) as { n: number }[];
+
+    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    const section = page.getByTestId("treasurer-designation-section");
+    const email = section.getByLabel(/treasurer.s email address/i);
+    await expect(email).toBeEnabled({ timeout: 15_000 });
+    // The platform admin fixture has an account and no person at alpha.
+    await email.fill(E2E_USERS.admin.email);
+    await section.getByRole("button", { name: "Designate treasurer" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Yes, designate" }).click();
+
+    await expect(section.getByRole("status")).toContainText(/not a member of this organization/i, {
+      timeout: 15_000,
+    });
+    await expect(section.getByRole("button", { name: "Designate treasurer" })).toBeVisible();
+
+    const membershipsAfter = (await sql`
+      select count(*)::int as n from memberships where organization_id = ${TREASURER_ORG.id}::uuid
+    `) as { n: number }[];
+    expect(membershipsAfter[0].n).toBe(membershipsBefore[0].n);
+    const roles = (await sql`
+      select 1 from app_roles
+       where organization_id = ${TREASURER_ORG.id}::uuid and key in ('treasurer', 'giving_recorder')
+    `) as unknown[];
+    expect(roles, "a refused designation writes nothing").toHaveLength(0);
+  });
+
+  test("designating a member makes the control disappear; the section then shows a count, never a name, and the audit row carries ids only", async ({
+    page,
+  }) => {
+    const sql = platformSql();
+    type Counts = { people: number; memberships: number };
+    const countRows = async (): Promise<Counts> => {
+      const [row] = (await sql`
+        select (select count(*) from people)::int as people,
+               (select count(*) from memberships)::int as memberships
+      `) as Counts[];
+      return row;
+    };
+    const before = await countRows();
+
+    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    const section = page.getByTestId("treasurer-designation-section");
+    const email = section.getByLabel(/treasurer.s email address/i);
+    await expect(email).toBeEnabled({ timeout: 15_000 });
+    await email.fill(DESIGNEE.email);
+    await section.getByRole("button", { name: "Designate treasurer" }).click();
+
+    // The confirm is an AlertDialog (no native dialog), and it names the
+    // account and the organization before anything is written.
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText(DESIGNEE.email);
+    await expect(dialog).toContainText(TREASURER_ORG.name);
+    await dialog.getByRole("button", { name: "Yes, designate" }).click();
+
+    // The server action revalidates the page: the control is gone and the
+    // collapsed line appears. A count, not a name.
+    await expect(section.getByText(/already has one person who can manage giving/i)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(section.getByLabel(/treasurer.s email address/i)).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Designate treasurer" })).toHaveCount(0);
+
+    // And it stays that way on a fresh load. No name, no email anywhere in the section.
+    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    const reloaded = page.getByTestId("treasurer-designation-section");
+    await expect(reloaded.getByText(/already has one person who can manage giving/i)).toBeVisible({
+      timeout: 10_000,
+    });
+    const text = (await reloaded.textContent()) ?? "";
+    expect(text).not.toContain("Marguerite");
+    expect(text).not.toContain("Ashcombe");
+    expect(text).not.toContain(DESIGNEE.email);
+
+    // Database truth: no person and no membership was created; the designee
+    // holds one person-arm grant on the org-owned treasurer role; the
+    // recorder role exists and is ungranted.
+    expect(await countRows()).toEqual(before);
+    const grants = (await sql`
+      select r.key, rg.person_id::text as person_id, rg.group_id
+        from role_grants rg join app_roles r on r.id = rg.role_id
+       where rg.organization_id = ${TREASURER_ORG.id}::uuid
+         and r.key in ('treasurer', 'giving_recorder')
+    `) as { key: string; person_id: string | null; group_id: string | null }[];
+    expect(grants).toEqual([{ key: "treasurer", person_id: DESIGNEE_PERSON_ID, group_id: null }]);
+    const recorder = (await sql`
+      select 1 from app_roles
+       where organization_id = ${TREASURER_ORG.id}::uuid and key = 'giving_recorder'
+    `) as unknown[];
+    expect(recorder).toHaveLength(1);
+
+    // The audit row: platform-axis action, the org as resource, ids only.
+    type AuditRow = { metadata: Record<string, unknown>; actor_email: string | null };
+    const audit = (await sql`
+      select metadata, actor_email
+        from audit_events
+       where action = 'org.treasurer.designated'
+         and resource_id = ${TREASURER_ORG.id}
+       order by created_at desc
+       limit 1
+    `) as AuditRow[];
+    expect(audit).toHaveLength(1);
+    expect(audit[0].metadata).toMatchObject({
+      organizationId: TREASURER_ORG.id,
+      personId: DESIGNEE_PERSON_ID,
+      permissionKeys: ["giving.manage", "giving.record", "giving.view"],
+    });
+    expect(JSON.stringify(audit[0].metadata)).not.toContain(DESIGNEE.email);
+    expect(audit[0].actor_email).toBe(E2E_USERS.admin.email);
+  });
+});
+
+test.describe("Admin — treasurer designation at a 360 px phone viewport", () => {
+  test.use({
+    storageState: storageStatePath("admin"),
+    viewport: { width: 360, height: 740 },
+  });
+
+  test("the section fits the viewport with a 44 px touch target and no horizontal scroll inside it", async ({
+    page,
+  }) => {
+    // The previous describe's afterAll has removed the designation by now.
+    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    const section = page.getByTestId("treasurer-designation-section");
+    await expect(section).toBeVisible({ timeout: 10_000 });
+    const email = section.getByLabel(/treasurer.s email address/i);
+    await expect(email).toBeEnabled({ timeout: 15_000 });
+    await email.fill(DESIGNEE.email);
+
+    const box = await section.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(360 + 1);
+    const trigger = section.getByRole("button", { name: "Designate treasurer" });
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+    expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(360 + 1);
+
+    // Nothing inside the section scrolls sideways.
+    const overflows = await section.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    expect(overflows).toBe(false);
+  });
+});

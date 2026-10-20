@@ -746,20 +746,20 @@ async function seedFlags() {
     // program.md, Phase 3): org_portal.oversight/.reports/.insights
     // graduated out of this block above — real features now sit behind
     // them, so they follow the ordinary "seeded off" convention instead of
-    // waiting for the go-live sweep. Four flags remain in this block, not
-    // seven.
+    // waiting for the go-live sweep. Three flags remain in this block.
     // Tracked in docs/TODO.md ("Go-live: flip placeholder flags off," same
     // commit). Do NOT remove a flag key when its real feature ships — flip
     // it deliberately at that point and delete its entry from this block
     // (the "one durable key across iterations" rule org_portal.home_v2/
     // directory_v2 already established).
+    //
+    // org_portal.giving LEFT this block for good (docs/work-log/2026-10-15-
+    // online-giving.md, R11 / DECISION-172): giving has NO platform flag. Its
+    // only on/off switch is the per-org `org_portal.giving` toggle in
+    // ORG_FEATURE_CATALOG (provisioned OFF). drizzle/0055 deletes the old
+    // feature_flags row; re-seeding it here would resurrect a flag nothing
+    // reads (scripts/giving/test-rls-46.sql 46m asserts it is absent).
     // ============================================================
-    {
-      key: "org_portal.giving",
-      description:
-        "Giving & fund-accounting placeholder area in (org). OFF = /o/<slug>/admin/giving renders 'isn't turned on yet'. ON with no feature built = 'coming soon' stub, not a working ledger.",
-      enabled: true, // GO-LIVE: false
-    },
     {
       key: "org_portal.worship",
       description:

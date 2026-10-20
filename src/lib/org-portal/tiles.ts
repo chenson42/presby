@@ -388,15 +388,35 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   // this block's dev-visibility carve-out; left here because they're still
   // presbytery-scoped Product-IA-Scaffold tiles, not because they're inert.
   // ============================================================
+  // GRADUATED (online-giving, docs/work-log/2026-10-15-online-giving.md,
+  // Phase 3 "Tiles"; R11): the two giving tiles are no longer a flag-gated
+  // placeholder. Giving has NO platform flag — the per-org `org_portal.giving`
+  // toggle (ORG_FEATURE_CATALOG, provisioned OFF) is the whole gate, so neither
+  // tile sets `flagKey` and neither sets `comingSoon`. Both are scoped to the
+  // org types the toggle applies to; `org-feature-catalog.test.ts` pins this
+  // `orgTypeScope` EQUAL to the catalog entry's `orgTypes`. Tiles stay
+  // permission-blind (DECISION-162): each destination renders its own honest
+  // Forbidden / toggle-off state.
   {
     key: "giving",
-    label: "Giving & Finance",
-    description: "Fund accounting, giving records, and budgets.",
-    href: (slug) => `/o/${slug}/admin/giving`,
-    flagKey: "org_portal.giving",
+    label: "Giving",
+    description: "Give online and see your own giving history and statements.",
+    href: (slug) => `/o/${slug}/giving`,
+    orgFeatureKey: "org_portal.giving",
     category: "operate",
     domain: "giving",
-    comingSoon: true,
+    orgTypeScope: ["congregation", "new_worshiping_community"],
+  },
+  {
+    key: "giving-admin",
+    label: "Manage giving",
+    description:
+      "Connect Stripe, record gifts, manage funds and donors, and issue year-end statements.",
+    href: (slug) => `/o/${slug}/admin/giving`,
+    orgFeatureKey: "org_portal.giving",
+    category: "administer",
+    domain: "giving",
+    orgTypeScope: ["congregation", "new_worshiping_community"],
   },
   {
     key: "worship",

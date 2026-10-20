@@ -254,6 +254,79 @@ If the build ever flakes anyway, `rm -rf "$SCRATCH/app/.next"` and retry. A nega
 
 ---
 
+## Online giving: the signed-event replay harness
+
+Online giving's riskiest code is the webhook, and there is no Stripe account in
+CI. So the webhook is tested the way Stripe would drive it: fixture event bodies
+(`src/lib/giving/providers/stripe/testing/fixtures/*.json`, one per handled event
+type, all invented data) are **signed with the real scheme** and POSTed to the
+**real route** of a running dev server, against the real database.
+
+```bash
+# The server needs the two secrets this spec signs with. NON-key-shaped literals:
+# the SDK only needs HMAC bytes, and a key-shaped string in a public repo is a
+# check:secrets finding. STRIPE_SECRET_KEY stays UNSET - the webhook verifies with
+# the SDK's static helper, and that is part of what is proved.
+# <!-- leak-ok: non-key-shaped test literals, not credentials -->
+STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret CRON_SECRET=giving-e2e-cron-secret \
+  RATE_LIMIT_DISABLED=true npx next dev -p 3100 &
+E2E_BASE_URL=http://localhost:3100 npx playwright test e2e/giving-webhook.spec.ts
+```
+
+`playwright.config.ts` passes both secrets to a server *it* starts, so
+`npm run test:e2e` needs nothing extra; a server you started yourself needs them
+in its environment, and the spec's first test says so in words rather than
+failing every case with a 503. Stop only the server you started.
+
+What the spec proves, end to end: a bad signature is a 400 and writes nothing; a
+good one is a 200 and the gift is applied from presby's own intent (a body naming
+a foreign fund changes nothing); a byte-identical replay is a no-op; an unknown
+account and a `livemode` mismatch get the **same 200** and write nothing; a refund
+that arrives *before* its gift parks and then applies exactly once after the gift
+(the cron retries it); an over-reversal dead-letters and shows on the
+congregation's giving overview as a **count only**; `account.application.deauthorized`
+disconnects and is audited as a system act; a wrong API version dead-letters with
+its code. The secret-unset 503 is a unit test (`route.test.ts`): a running dev
+server's environment cannot change per request.
+
+The fixture signer is `testing/sign-event.ts` (`node:crypto`, so Playwright and
+the tripwire-restricted tree can import it); `sign-event.test.ts` proves its
+header is byte-for-byte what the Stripe SDK's own `generateTestHeaderString`
+produces and that `Stripe.webhooks.constructEvent` accepts it.
+
+The rest of the batch is covered by layers that need no server:
+
+| Layer | Where | Run |
+|---|---|---|
+| Pure: `normalize` (a fixture per event type, anomalies), `status` (v1/v2 agreement table), origin assertions (look-alike hosts, userinfo, ports), request builders, outcome aggregation + audit planning | `src/lib/giving/providers/stripe/*.test.ts`, `src/lib/giving/ingest/outcome.test.ts` | `npm run test` |
+| The allowlist: exact export set, forbidden-method grep, SDK-pinned API version, a failure whose message contains the secret never leaks it | `client.test.ts`, `client.sdk.test.ts` (fake SDK) | `npm run test` |
+| Processor orchestration with mocked database and client; routes with mocked ingest | `ingest/process.test.ts`, `src/app/api/**/route.test.ts` | `npm run test` |
+| The SECURITY DEFINER apply functions, inbox lifecycle (back-off, ageing, dead letters), the processor against the real database with a mocked Stripe client, the connection library, the owner-only health reader | `ingest/*.db.test.ts`, `connection.db.test.ts`, `src/lib/admin/giving-ingest-health.db.test.ts` | `npm run test:db` |
+
+**Starting a gift (Batch 4a: the give actions).** Same rule, one layer up: nothing
+calls Stripe and `STRIPE_SECRET_KEY` stays **unset** in e2e.
+
+| Layer | Where | Run |
+|---|---|---|
+| Form contract: amount strings (`10.999`, `1e3`, `-5`, `٣٠`), every field's refusal, the first-wrong-field order | `src/lib/giving/give-input.test.ts` | `npm run test` |
+| The action orchestration with the limiter, Turnstile, database and Stripe allowlist mocked: honeypot spends no budget, the three limiter keys in order, every `GiveResult` arm, `Host`/`X-Forwarded-Host` spoofing cannot move `success_url`; the member gate order, the toggle-only check, the viewer's own `membership_id` | `src/app/(public)/site/[slug]/give/actions.test.ts`, `src/app/(org)/o/[slug]/giving/give/actions.test.ts`, `src/lib/giving/give-session.test.ts` | `npm run test` |
+| The real `presby_giving_create_intent_*`, `attach_session`, `fail_intent`, `presby_public_giving_config` and `presby_giving_return_state` behind the wrappers: the refusals as `GiveResult`s, a Stripe failure leaving a `failed` row, a repeat key never minting a second session, the flood cap, the five return panels, the byte-identical `absent` | `src/lib/giving/give-session.db.test.ts` (the TS/SQL gross-up grid is `money.db.test.ts`) | `npm run test:db` |
+| The enforced CSP on the give routes: `next.config.ts` `headers()` (unit) and over HTTP (present on `/site/<slug>/give[/...]` and `/o/<slug>/giving/give[/...]`, absent on every neighbour) | `src/lib/giving/csp.test.ts`, `e2e/security-headers.spec.ts` | `npm run test`; Playwright on a dev server |
+
+With Stripe unset the give action writes the intent, marks it `failed` and
+answers `unavailable` - that is the e2e path, and the persisted row is what a
+spec asserts. **Restart the dev server after any `next.config.ts` change**
+(including a temporary mutation to prove a test fails): Next reloads the config
+mid-run and a server left on a half-edited file serves the wrong headers.
+
+**Not covered, and why.** Nothing here calls Stripe: not the account create, the
+onboarding link, Checkout, the balance-transaction or invoice reads, or a real
+`account.updated` for a v2 account. Those need the operator's test-mode platform
+account and are the smoke checklist in `docs/deployment.md` → "Online giving
+(Stripe)". Automating Stripe-hosted Checkout is out of scope permanently.
+
+---
+
 ## Continuous integration
 
 Two workflows run the database-backed suites on an ephemeral Neon branch:

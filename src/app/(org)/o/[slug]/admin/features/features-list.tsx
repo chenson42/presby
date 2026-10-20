@@ -3,10 +3,21 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import type { FeatureToggleEntry } from "@/lib/org-features";
+import type { OffWarning } from "@/lib/org-feature-warnings";
 import { toggleFeatureAction } from "./actions";
 
 /**
@@ -23,9 +34,16 @@ import { toggleFeatureAction } from "./actions";
 export function FeaturesList({
   slug,
   toggles,
+  offWarnings = {},
 }: {
   slug: string;
   toggles: FeatureToggleEntry[];
+  /**
+   * Per-feature "turning this OFF has a consequence" dialogs, keyed by feature
+   * key (docs/work-log/2026-10-15-online-giving.md; `loadOffWarnings`). A
+   * toggle with an entry asks in an AlertDialog before it switches off.
+   */
+  offWarnings?: Record<string, OffWarning>;
 }) {
   if (toggles.length === 0) {
     return (
@@ -42,7 +60,7 @@ export function FeaturesList({
     <ul className="space-y-3">
       {toggles.map((toggle) => (
         <li key={toggle.key}>
-          <FeatureToggleCard slug={slug} toggle={toggle} />
+          <FeatureToggleCard slug={slug} toggle={toggle} offWarning={offWarnings[toggle.key]} />
         </li>
       ))}
     </ul>
@@ -52,13 +70,16 @@ export function FeaturesList({
 function FeatureToggleCard({
   slug,
   toggle,
+  offWarning,
 }: {
   slug: string;
   toggle: FeatureToggleEntry;
+  offWarning?: OffWarning;
 }) {
   const router = useRouter();
   const [enabled, setEnabled] = useState(toggle.enabled);
   const [pending, setPending] = useState(false);
+  const [warnOpen, setWarnOpen] = useState(false);
 
   // Category-off UI state (docs/work-log/2026-08-27-feature-categories.md,
   // Phase 1 Gap 4; DECISION-130): a toggle whose category is off renders
@@ -123,10 +144,30 @@ function FeatureToggleCard({
           <Switch
             checked={enabled}
             disabled={pending || categoryOff}
-            onCheckedChange={handleChange}
+            onCheckedChange={(next) => {
+              // Turning OFF a feature that has a registered consequence asks first.
+              if (!next && offWarning) setWarnOpen(true);
+              else void handleChange(next);
+            }}
           />
         </label>
       </CardContent>
+      {offWarning && (
+        <AlertDialog open={warnOpen} onOpenChange={setWarnOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Turn off {toggle.name}?</AlertDialogTitle>
+              <AlertDialogDescription>{offWarning.description}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep it on</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void handleChange(false)}>
+                Turn it off
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </Card>
   );
 }

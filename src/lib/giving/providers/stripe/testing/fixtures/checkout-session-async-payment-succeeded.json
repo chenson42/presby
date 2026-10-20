@@ -1,0 +1,42 @@
+{
+  "id": "evt_fixtureCheckoutSessionAsyncPaymentSucceeded",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790345600,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "checkout.session.async_payment_succeeded",
+  "data": {
+    "object": {
+      "id": "cs_fixtureAch00000001",
+      "object": "checkout.session",
+      "mode": "payment",
+      "currency": "usd",
+      "customer": "cus_fixture000001",
+      "customer_details": {
+        "name": "Fixture Donor",
+        "email": "donor.fixture@example.invalid",
+        "address": {
+          "line1": "100 Fixture Lane",
+          "line2": null,
+          "city": "Faketown",
+          "state": "OH",
+          "postal_code": "00000",
+          "country": "US"
+        }
+      },
+      "client_reference_id": null,
+      "metadata": {
+        "presby_intent_id": "00000000-0000-4000-8000-000000000000"
+      },
+      "payment_method_types": [
+        "us_bank_account"
+      ],
+      "created": 1789999940,
+      "payment_status": "paid",
+      "payment_intent": "pi_fixtureAch00000001",
+      "amount_total": 10000,
+      "subscription": null
+    }
+  }
+}

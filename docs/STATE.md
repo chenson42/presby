@@ -3,11 +3,36 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-05.
+Updated 2026-10-19.
 
 ---
 
-## RESUME HERE — 2026-10-07: production migrated through 0053; Vercel access restored; nothing in flight
+## RESUME HERE — 2026-10-19: the online-giving pipeline is integrated at v0.34.0; PR pending
+
+**2026-10-19.** `pipeline/online-giving` (worktree `presby-giving`) is integrated and ready for its PR to `main`:
+online giving through per-congregation Stripe Connect, the treasurer's gift desk, the member self-view, itemized payouts, and frozen
+year-end PDF statements (migrations `0055`/`0056`, DECISION-168–175, F138–F145, `docs/work-log/2026-10-15-online-giving.md`;
+Phase 6 SHIP WITH NOTES, every note a `docs/TODO.md` line). **What is and is not true of it:** verified against recorded and signed
+Stripe fixtures only, never a real Stripe account; statements are refused in production until `GIVING_STATEMENTS_ENABLED=1` (CPA gate);
+with no Stripe keys nothing takes money and every give surface says so; giving is a per-org toggle (congregations and NWCs, off by
+default) with no platform flag, and `0055` deletes the old `org_portal.giving` flag row. `scripts/test-rls.sql` expected total on
+`development` after the migrations and seed are applied: **927**. A `/give` page in an existing site bundle keeps rendering until that
+org's giving goes live; going live replaces it (`docs/deployment.md` → pre-deploy runbook).
+
+**Next, in order** (the operator picks the pace):
+1. Merge the PR (`/merge-pr`), apply `0055`/`0056` to `development`, run `scripts/test-rls.sql` as `presby_app` (927), seed.
+2. Bump Next.js to 16.3.8 or later (a high advisory, Image Optimization SSRF) before any production deploy.
+3. Production deploy runbook through `0056` (`docs/deployment.md` → Migrations and the giving pre-deploy runbook; `0054` first).
+4. Production sign-in: local login, Resend (configured) and Google OAuth, so the operator can sign in at all.
+5. The operator's manual setup of the first customer at the platform URL (organization, founding administrator, site), before any custom domain.
+6. Track F (custom domains, web then mail), which the first customer's own domain waits on.
+
+Operator items that gate real money, none of them code: a Stripe test-mode Connect platform account and the smoke in
+`docs/deployment.md`; the CPA review of the statement wording; Upstash and Turnstile; the enforced-CSP browser check; the privacy notice.
+
+---
+
+## Previous handoff — 2026-10-07: production migrated through 0053; Vercel access restored; nothing in flight
 
 **2026-10-07.** The operator's Vercel access is restored. **Production (`br-wild-band-ax96gv09`) was migrated `0043`→`0053`** by
 hand-applied `psql`, one transaction per file, after a Neon snapshot (`snap-orange-math-axbat01u`) and a full catalog diff; the

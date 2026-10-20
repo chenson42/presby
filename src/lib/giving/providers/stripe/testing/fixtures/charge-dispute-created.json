@@ -1,0 +1,28 @@
+{
+  "id": "evt_fixtureChargeDisputeCreated",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790864000,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "charge.dispute.created",
+  "data": {
+    "object": {
+      "id": "dp_fixtureDispute00001",
+      "object": "dispute",
+      "amount": 5000,
+      "currency": "usd",
+      "payment_intent": "pi_fixturePaid000001",
+      "charge": "ch_fixtureCharge000001",
+      "status": "needs_response",
+      "reason": "fraudulent",
+      "payment_method_details": {
+        "type": "card",
+        "card": {
+          "brand": "visa"
+        }
+      },
+      "created": 1790864000
+    }
+  }
+}

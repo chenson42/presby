@@ -1,0 +1,21 @@
+{
+  "id": "evt_fixtureRefundCreated",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": 1790086400,
+  "account": "acct_fixtureAccount0001",
+  "livemode": false,
+  "type": "refund.created",
+  "data": {
+    "object": {
+      "id": "re_fixtureRefund000001",
+      "object": "refund",
+      "amount": 5000,
+      "currency": "usd",
+      "payment_intent": "pi_fixturePaid000001",
+      "charge": "ch_fixtureCharge000001",
+      "status": "succeeded",
+      "created": 1790086400
+    }
+  }
+}

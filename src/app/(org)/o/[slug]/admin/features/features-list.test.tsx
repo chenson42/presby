@@ -144,3 +144,65 @@ describe("FeaturesList — category-off state (Phase 1 Gap 4/5)", () => {
     expect(toggle.hasAttribute("disabled")).toBe(false);
   });
 });
+
+describe("FeaturesList — OFF warnings (docs/work-log/2026-10-15-online-giving.md)", () => {
+  const GIVING: FeatureToggleEntry = {
+    key: "org_portal.giving",
+    name: "Giving",
+    description: "Online giving, offline gift recording and year-end statements.",
+    enabled: true,
+    updatedAt: null,
+    updatedByEmail: null,
+    category: "giving",
+    categoryLabel: "Giving & Finance",
+    categoryEnabled: true,
+  };
+  const WARNING = {
+    title: "Monthly gifts are still active",
+    description:
+      "3 monthly gifts are still active in Stripe and keep charging until cancelled there. Turning this off hides Giving; it does not stop recording.",
+  };
+
+  it("turning OFF a feature with a warning asks first, in an AlertDialog - and does not call the action yet", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    render(<FeaturesList slug="alder-creek" toggles={[GIVING]} offWarnings={{ "org_portal.giving": WARNING }} />);
+    fireEvent.click(screen.getByRole("switch"));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toMatch(/Turn off Giving\?/);
+    expect(dialog.textContent).toMatch(/3 monthly gifts are still active in Stripe and keep charging until cancelled there/);
+    expect(dialog.textContent).toMatch(/does not stop recording/);
+    expect(mockToggleFeatureAction).not.toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it("'Turn it off' proceeds with the toggle; 'Keep it on' leaves it on", async () => {
+    mockToggleFeatureAction.mockResolvedValue({ ok: true });
+    render(<FeaturesList slug="alder-creek" toggles={[GIVING]} offWarnings={{ "org_portal.giving": WARNING }} />);
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(await screen.findByRole("button", { name: "Keep it on" }));
+    expect(mockToggleFeatureAction).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn it off" }));
+    await waitFor(() =>
+      expect(mockToggleFeatureAction).toHaveBeenCalledWith("alder-creek", { key: "org_portal.giving", enabled: false }),
+    );
+  });
+
+  it("turning a warned feature ON needs no confirmation", async () => {
+    mockToggleFeatureAction.mockResolvedValue({ ok: true });
+    render(<FeaturesList slug="s" toggles={[{ ...GIVING, enabled: false }]} offWarnings={{ "org_portal.giving": WARNING }} />);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(mockToggleFeatureAction).toHaveBeenCalledWith("s", { key: "org_portal.giving", enabled: true });
+  });
+
+  it("a feature with NO warning turns off immediately, as before", async () => {
+    mockToggleFeatureAction.mockResolvedValue({ ok: true });
+    render(<FeaturesList slug="s" toggles={[GIVING]} offWarnings={{}} />);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(mockToggleFeatureAction).toHaveBeenCalledWith("s", { key: "org_portal.giving", enabled: false });
+  });
+});

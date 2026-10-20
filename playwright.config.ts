@@ -123,6 +123,15 @@ export default defineConfig({
           // NOTE: this does NOT reach a dev server that was already running and got
           // reused. globalSetup checks for that case and fails with instructions.
           RATE_LIMIT_DISABLED: "true",
+          // The signed-event replay harness (e2e/giving-webhook.spec.ts) signs
+          // fixture bodies with this value and POSTs them to the real webhook
+          // route. NON-key-shaped literals: the Stripe SDK only needs HMAC bytes,
+          // and a key-shaped string in a public repository is a check:secrets
+          // finding. A value already in the environment wins, so a developer can
+          // point the spec at a server started with its own.
+          STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET ?? "giving-e2e-signing-secret",
+          // The same spec drives GET /api/cron/giving to retry a parked event.
+          CRON_SECRET: process.env.CRON_SECRET ?? "giving-e2e-cron-secret",
         },
       },
   use: {

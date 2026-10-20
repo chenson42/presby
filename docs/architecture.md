@@ -2,7 +2,7 @@
 
 *A first read for engineers joining the project. This document explains what we're building and why, what actually works today, and the handful of decisions that shape everything else. It intentionally stays high-level — each section links to the document that has the actual detail, rules, and rationale.*
 
-*Last written: 2026-09-25. The project is named **PresbyPortal** (`presbyportal.org`, DECISION-126) — that naming period is over. The code itself, deliberately, hasn't caught up yet: the database role, every SQL function, and every migration filename still use the `presby` prefix, and that's staying put on purpose until a dedicated rename pipeline runs (a live Postgres role and every RLS policy in this codebase reference it by name — see `docs/STATE.md`). This document uses PresbyPortal in prose and `presby` where it names an actual identifier in the code.*
+*Last written: 2026-09-25; online giving (section 8a) added 2026-10-19. The project is named **PresbyPortal** (`presbyportal.org`, DECISION-126) — that naming period is over. The code itself, deliberately, hasn't caught up yet: the database role, every SQL function, and every migration filename still use the `presby` prefix, and that's staying put on purpose until a dedicated rename pipeline runs (a live Postgres role and every RLS policy in this codebase reference it by name — see `docs/STATE.md`). This document uses PresbyPortal in prose and `presby` where it names an actual identifier in the code.*
 
 ---
 
@@ -28,7 +28,9 @@ This is deliberately a *functional* summary, not an implementation one — for t
 
 **Anyone signed in** lands on one page after authenticating that shows their own organizations and, if they hold platform-level access, the platform tools they hold — not a chooser screen followed by a second, separately-designed page.
 
-**Not yet built**, named honestly rather than glossed over: fund accounting/giving, worship and service planning, event check-in, a public event calendar, presbytery committee and commission tracking, and a presbytery-wide rollup dashboard (a viability map across every member congregation). Each has a real, working "coming soon" placeholder in the product today rather than a dead link.
+**Online giving** is built, with one honest limit: per-congregation giving through Stripe, an offline gift desk for the treasurer, members' own giving history, and year-end contribution statements all work against recorded Stripe fixtures but have never run against a live Stripe account, and the statements are switched off in production until an accountant has reviewed their wording (section 8a).
+
+**Not yet built**, named honestly rather than glossed over: fund accounting (the ledger behind giving), worship and service planning, event check-in, a public event calendar, presbytery committee and commission tracking, and a presbytery-wide rollup dashboard (a viability map across every member congregation). Each has a real, working "coming soon" placeholder in the product today rather than a dead link.
 
 ---
 
@@ -129,6 +131,24 @@ The shape we landed on, after working through a few alternatives:
 
 The reason for that last point is the one worth remembering: it would have been possible to let each congregation's repository build and deploy its own independent copy of the site — closer to a classic "micro-frontend" approach. We didn't, because that means a congregation's repository ships *code* that would run inside the platform, and content is not a security boundary you want to depend on hundreds of independent, loosely-supervised repositories to respect. Under the design we chose, a congregation's content can never become more than content — the platform's renderer simply doesn't know how to execute anything it wasn't built to render. That's a guarantee about what *can* happen, not a policy about what *should*.
 
+One path on a site is not the site's: `/site/<slug>/give` belongs to the platform when that congregation's giving is live (it is where the giving form lives), and falls through to the site's own page at that path whenever giving is not live.
+
+---
+
+## 8a. Money in: online giving
+
+*Built and tested against recorded and signed provider fixtures; never exercised against a live Stripe account. Pipeline history, the operator's go-live checklist and the accepted residuals are in [`docs/work-log/2026-10-15-online-giving.md`](work-log/2026-10-15-online-giving.md); the rulings are DECISION-168 through DECISION-175.*
+
+A congregation's gifts go directly to the congregation's own Stripe account (Stripe Connect, direct charges, no platform fee); PresbyPortal never holds the money. The shape that matters:
+
+- **A provider-neutral core with a Stripe adapter at the edge.** Everything that decides what a gift is works on normalized events; one module is the only place that imports the Stripe SDK, and a named-call allowlist is the only thing the platform's Stripe key may do. That key is a wildcard credential over every connected congregation, so its reach is deliberately small and disclosed.
+- **Redirect only.** A donor is sent to Stripe-hosted Checkout; no card or bank detail is entered on, or framed by, a PresbyPortal page. That keeps the platform at the lightest card-data compliance level.
+- **The checkout intent is the only path from a payment to a gift.** The fund, the congregation and any linked member come from a record presby created before the redirect, never from metadata Stripe echoes back, so a payment presby did not originate (a dinner ticket, a payment link) is ignored and a crafted payload cannot name another congregation's fund.
+- **Webhooks land in an inbox the application role cannot read.** The signed webhook writes raw events through narrow database functions that derive the congregation from the provider connection; processing normalizes them into gifts through further functions. The raw body is purged after a retention window.
+- **Gifts are append-only.** A gift's status moves one way; refunds, disputes, ACH returns and voids are separate reversal rows, never edits. Money is integer cents; totals count only live-mode, succeeded gifts.
+- **Statements are frozen snapshots plus stored PDF bytes** (rendered once with `pdfkit`, stored through the blob adapter, never re-rendered). Staleness is derived, a correction is a new version, and statement contents never pass through the email queue.
+- **Authority is its own small tree.** Giving keys are tier 2, require two-factor authentication, never travel the commission or delegation paths, and the first treasurer is designated by the platform operator, who can then delegate giving-only roles inside the congregation. A parent council sees none of a congregation's per-member giving, by the same tenancy rule as everything else.
+
 ---
 
 ## 9. Personalization
@@ -139,7 +159,7 @@ Each congregation can set its own brand — a colour, a logo, a type pairing —
 
 ## 10. Stack, in one paragraph
 
-Next.js 16 (App Router) and React 19, TypeScript throughout in strict mode. Drizzle ORM against Neon Postgres, deliberately over a WebSocket connection pool rather than Neon's simpler HTTP driver — the isolation model in section 4 depends on a transaction-scoped session variable, and the HTTP driver has no notion of a transaction, so the isolation model dictated the driver, not the other way around. NextAuth for authentication, Tailwind and Radix for UI primitives, deployed to Vercel.
+Next.js 16 (App Router) and React 19, TypeScript throughout in strict mode. Drizzle ORM against Neon Postgres, deliberately over a WebSocket connection pool rather than Neon's simpler HTTP driver — the isolation model in section 4 depends on a transaction-scoped session variable, and the HTTP driver has no notion of a transaction, so the isolation model dictated the driver, not the other way around. NextAuth for authentication, Tailwind and Radix for UI primitives, deployed to Vercel. Two server-side integrations arrived with online giving: the Stripe SDK (one module, server-only, Node runtime) for payments, and `pdfkit` for the year-end contribution statements.
 
 ---
 

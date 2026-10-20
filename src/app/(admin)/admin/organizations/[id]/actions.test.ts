@@ -105,6 +105,15 @@ vi.mock("@/lib/founding-administrator", () => ({
     mockDesignateFoundingAdministrator(...args),
 }));
 
+// @/lib/treasurer-designation — mocked wholesale for the same reason (online
+// giving, R2): the full result-variant matrix is proven against a real Postgres
+// by src/lib/treasurer-designation.test.ts; this file proves only
+// designateTreasurerAction's own layer.
+const mockDesignateTreasurer = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/treasurer-designation", () => ({
+  designateTreasurer: (...args: unknown[]) => mockDesignateTreasurer(...args),
+}));
+
 // A PRE-EXISTING circular import (org.ts -> schema.ts -> domain/index.ts ->
 // authz.ts -> org.ts) breaks when `@/lib/db/domain/org` is the FIRST module
 // in that cycle to load — authz.ts's top-level `organizationType(...)` call
@@ -127,6 +136,7 @@ import {
   setOrganizationProfileAction,
   setOrganizationServiceTimesAction,
   designateFoundingAdministratorAction,
+  designateTreasurerAction,
 } from "./actions";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { FEATURES } from "@/lib/permissions";
@@ -1251,6 +1261,163 @@ describe("designateFoundingAdministratorAction — result mapping", () => {
       }),
     );
     // Ids only — the designee's email is never logged in audit metadata.
+    const call = mockRecordAudit.mock.calls[0]?.[0];
+    expect(JSON.stringify(call)).not.toContain(VALID_EMAIL);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// designateTreasurerAction — docs/work-log/2026-10-15-online-giving.md, R2.
+// designateTreasurer() is mocked wholesale; this suite proves only the
+// action's own layer: auth/feature gate, zod validation, the result -> copy
+// switch, and that recordAudit()/revalidatePath() fire exactly once, only on
+// `ok`, with ids-only metadata.
+// ---------------------------------------------------------------------------
+
+describe("designateTreasurerAction — authorization", () => {
+  it("rejects an unauthenticated caller without calling designateTreasurer", async () => {
+    mockAuth.mockResolvedValue(null);
+    const result = await designateTreasurerAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in user lacking admin.organizations", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+    const result = await designateTreasurerAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("designateTreasurerAction — input validation", () => {
+  it("rejects an invalid organizationId without calling designateTreasurer", async () => {
+    const result = await designateTreasurerAction(
+      formData({ organizationId: "not-a-uuid", email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", ""],
+    ["not an email", "not-an-email"],
+    ["too long", `${"a".repeat(310)}@example.invalid`],
+  ])("rejects an invalid email (%s) without calling designateTreasurer", async (_label, email) => {
+    const result = await designateTreasurerAction(
+      formData({ organizationId: VALID_ORG, email }),
+    );
+    expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
+    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
+  });
+
+  it("normalizes the email (trim + lowercase) and passes the operator's user id", async () => {
+    mockDesignateTreasurer.mockResolvedValue({ kind: "no_such_user" });
+    await designateTreasurerAction(
+      formData({ organizationId: VALID_ORG, email: "  Designee@Example.INVALID  " }),
+    );
+    expect(mockDesignateTreasurer).toHaveBeenCalledWith(
+      VALID_ORG,
+      "designee@example.invalid",
+      "operator-1",
+    );
+  });
+});
+
+describe("designateTreasurerAction — result mapping", () => {
+  it.each([
+    [
+      "not_applicable",
+      { kind: "not_applicable" },
+      "Giving applies to congregations and new worshiping communities only.",
+    ],
+    [
+      "no_such_user",
+      { kind: "no_such_user" },
+      "No platform account exists for that email yet. Ask them to sign up first, then designate them here.",
+    ],
+    ["user_inactive", { kind: "user_inactive" }, "That account has been deactivated."],
+    [
+      "not_a_member",
+      { kind: "not_a_member" },
+      "That account is not a member of this organization. Designation never adds anyone — the organization's administrator enrols them first, then you designate them here.",
+    ],
+    [
+      "membership_ended (a real date)",
+      { kind: "membership_ended", endedOn: "2020-06-15" },
+      "That person's relationship with this organization ended on 2020-06-15.",
+    ],
+    [
+      "membership_ended (unknown)",
+      { kind: "membership_ended", endedOn: "unknown" },
+      "That person's relationship with this organization has ended.",
+    ],
+    [
+      "has_holders",
+      { kind: "has_holders", holderCount: 1 },
+      "This organization already has someone who can manage giving — designation is only available while nobody does (including as a lockout recovery).",
+    ],
+    [
+      "provisioning_incomplete",
+      { kind: "provisioning_incomplete" },
+      "This organization is missing its baseline setup or the treasurer role template — contact an engineer before designating a treasurer.",
+    ],
+    [
+      "race",
+      { kind: "race" },
+      "Someone just designated a treasurer for this organization — refresh the page.",
+    ],
+    [
+      "db_error",
+      { kind: "db_error" },
+      "We couldn't complete that just now — try again in a moment.",
+    ],
+  ])("maps %s to a client-visible error, writes no audit row", async (_label, mockResult, expectedError) => {
+    mockDesignateTreasurer.mockResolvedValue(mockResult);
+    const result = await designateTreasurerAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+    expect(result).toEqual({ ok: false, error: expectedError });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("on success, writes ORG_TREASURER_DESIGNATED with ids-only metadata (no email, no name) and revalidates the admin page", async () => {
+    mockDesignateTreasurer.mockResolvedValue({
+      kind: "ok",
+      personId: "person-1",
+      userId: "user-1",
+      treasurerRoleId: "role-1",
+      recorderRoleId: "role-2",
+      permissionKeys: ["giving.manage", "giving.record", "giving.view"],
+      priorHolderCount: 0,
+    });
+
+    const result = await designateTreasurerAction(
+      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTIONS.ORG_TREASURER_DESIGNATED,
+        resourceType: "organization",
+        resourceId: VALID_ORG,
+        metadata: {
+          organizationId: VALID_ORG,
+          personId: "person-1",
+          roleId: "role-1",
+          permissionKeys: ["giving.manage", "giving.record", "giving.view"],
+        },
+      }),
+    );
     const call = mockRecordAudit.mock.calls[0]?.[0];
     expect(JSON.stringify(call)).not.toContain(VALID_EMAIL);
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);

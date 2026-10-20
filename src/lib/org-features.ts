@@ -1,8 +1,13 @@
 import "server-only";
 import { cache } from "react";
 import { and, eq, sql } from "drizzle-orm";
-import { withOrgContext, type OrgTx } from "@/lib/authz";
+import {
+  withOrgContext,
+  type OrgTx,
+  type OrganizationType,
+} from "@/lib/authz";
 import { organizationFeatureToggles } from "@/lib/db/domain/org-features";
+import { organizations } from "@/lib/db/schema";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { isFlagEnabled } from "@/lib/flags";
 import {
@@ -72,6 +77,7 @@ export const ORG_FEATURE_CATALOG = [
     // org. A missing row still means OFF (DECISION-097) — the default-on is a
     // stored row, never a code constant.
     provisionedOn: false as const,
+    orgTypes: null,
   },
   // Member edit: tiered sensitive information (docs/work-log/
   // 2026-08-26-member-sensitive-info.md, Phase 3/DECISION-108). A DEDICATED
@@ -86,6 +92,7 @@ export const ORG_FEATURE_CATALOG = [
     category: "people" as const,
     flag: "org_portal.sensitive_info" as const,
     provisionedOn: false as const,
+    orgTypes: null,
   },
   // Member calendar (docs/work-log/2026-10-14-member-calendar.md, DECISION-160
   // R1). TOGGLE-ONLY: there is no platform flag for it (`flag: null`), so the
@@ -100,8 +107,78 @@ export const ORG_FEATURE_CATALOG = [
     category: "worship" as const,
     flag: null,
     provisionedOn: true as const,
+    orgTypes: null,
+  },
+  // Online giving (docs/work-log/2026-10-15-online-giving.md, Phase 3
+  // "Permissions & Flags"; R11 / DECISION-172). TOGGLE-ONLY: there is NO
+  // platform flag (`flag: null`) — drizzle/0055 deleted the old
+  // `org_portal.giving` feature_flags row and `scripts/seed.ts` no longer
+  // seeds it; the per-org toggle is the whole off switch. Provisioned OFF
+  // (`provisionedOn: false`): a missing row is off, `createOrganization()`
+  // writes nothing for it, and 0055 backfills no rows — giving is something a
+  // congregation's `org_features.manage` holder turns on deliberately.
+  //
+  // `orgTypes` is the applicability allow-list (see `OrgFeatureOrgTypes`):
+  // the toggle exists only for a congregation or a new worshiping community.
+  // A presbytery or synod gets no toggle row in the list, `invalid_key` from
+  // `toggleOrgFeature`, and `false` from `orgFeatureEnabledInTx` even if a
+  // stray row exists. The tile's `orgTypeScope` must equal this list
+  // (set-equality, pinned in tiles.test.ts).
+  {
+    key: "org_portal.giving",
+    name: "Giving",
+    description:
+      "Online giving, offline gift recording and year-end statements for this congregation. Turning this off hides every giving page; it never stops Stripe events from being recorded.",
+    category: "giving" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: ["congregation", "new_worshiping_community"] as const,
   },
 ] as const;
+
+/**
+ * The applicability list on a catalog entry: `null` means the feature applies
+ * to every organization type (the three pre-giving entries); an array is an
+ * ALLOW-LIST — check membership, never exclusion (the org-type enum has five
+ * values, and a new one must default to "not applicable", not "applicable").
+ * Same allow-list convention as `PortalTile.orgTypeScope`.
+ */
+export type OrgFeatureOrgTypes = readonly OrganizationType[] | null;
+
+/** Whether `organizationType` is in `orgTypes`. `null` allows every type; an
+ * unknown organization (`organizationType === null`) is never admitted by an
+ * allow-list — fail closed. */
+export function orgTypeAdmitted(
+  orgTypes: OrgFeatureOrgTypes,
+  organizationType: OrganizationType | null,
+): boolean {
+  if (orgTypes === null) return true;
+  return organizationType !== null && orgTypes.includes(organizationType);
+}
+
+/** True when at least one catalog entry carries an applicability list, so the
+ * organization-type read is worth making at all. Static for a given build. */
+const CATALOG_HAS_ORG_TYPE_RULES = ORG_FEATURE_CATALOG.some(
+  (entry) => entry.orgTypes !== null,
+);
+
+/**
+ * One read of `organizations.organization_type` in the caller's transaction.
+ * `organizations` is deliberately not tenant-isolated (the org tree is
+ * public), so this works under the org GUC. `null` for a row that does not
+ * exist — treated as "not admitted" by `orgTypeAdmitted`.
+ */
+async function readOrganizationTypeInTx(
+  tx: OrgTx,
+  organizationId: string,
+): Promise<OrganizationType | null> {
+  const [row] = await tx
+    .select({ organizationType: organizations.organizationType })
+    .from(organizations)
+    .where(eq(organizations.id, organizationId))
+    .limit(1);
+  return row?.organizationType ?? null;
+}
 
 export type OrgFeatureKey = (typeof ORG_FEATURE_CATALOG)[number]["key"];
 
@@ -196,6 +273,14 @@ export async function orgFeatureEnabledInTx(
   categoryAxisOn: boolean,
 ): Promise<boolean> {
   const catalogEntry = ORG_FEATURE_CATALOG.find((entry) => entry.key === key);
+  // Applicability first (online-giving): an inapplicable organization type is
+  // OFF no matter what row exists — a stray `org_portal.giving` row at a
+  // presbytery must not enable anything. One read, and only for an entry that
+  // actually carries an allow-list, so calendar/people pay nothing.
+  if (catalogEntry && catalogEntry.orgTypes !== null) {
+    const organizationType = await readOrganizationTypeInTx(tx, organizationId);
+    if (!orgTypeAdmitted(catalogEntry.orgTypes, organizationType)) return false;
+  }
   if (catalogEntry && categoryAxisOn) {
     const categoryEnabled = await categoryEnabledInTx(
       tx,
@@ -295,8 +380,17 @@ export async function listFeatureToggles(
       return cached;
     }
 
+    // Applicability (online-giving): omit entries that do not apply to this
+    // organization's type. One read, only when some entry has an allow-list.
+    const organizationType = CATALOG_HAS_ORG_TYPE_RULES
+      ? await readOrganizationTypeInTx(tx, organizationId)
+      : null;
+    const applicable = ORG_FEATURE_CATALOG.filter((entry) =>
+      orgTypeAdmitted(entry.orgTypes, organizationType),
+    );
+
     const toggles: FeatureToggleEntry[] = await Promise.all(
-      ORG_FEATURE_CATALOG.map(async (entry) => {
+      applicable.map(async (entry) => {
         const row = byKey.get(entry.key);
         return {
           key: entry.key,
@@ -357,6 +451,22 @@ export async function toggleOrgFeature(
     async (tx): Promise<ToggleOrgFeatureResult> => {
       if (!(await hasOrgFeaturesManage(tx, actorPersonId, organizationId))) {
         return { kind: "forbidden" };
+      }
+
+      // Applicability (online-giving): a key that exists in the catalog but
+      // does not apply to this organization's type is, for THIS organization,
+      // not a key — the same `invalid_key` an unknown string gets, so a
+      // presbytery can never write a giving toggle row. After the permission
+      // check, so a non-holder learns nothing from the difference.
+      const entry = ORG_FEATURE_CATALOG.find((e) => e.key === key);
+      if (entry && entry.orgTypes !== null) {
+        const organizationType = await readOrganizationTypeInTx(
+          tx,
+          organizationId,
+        );
+        if (!orgTypeAdmitted(entry.orgTypes, organizationType)) {
+          return { kind: "invalid_key" };
+        }
       }
 
       await tx

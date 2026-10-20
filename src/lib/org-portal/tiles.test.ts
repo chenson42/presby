@@ -72,7 +72,6 @@ const KNOWN_SEEDED_ORG_PORTAL_FLAG_KEYS = new Set([
   "org_portal.groups",
   "org_portal.events",
   "org_portal.credentials",
-  "org_portal.giving",
   "org_portal.worship",
   "org_portal.committees",
   "org_portal.oversight",
@@ -112,6 +111,23 @@ describe("PORTAL_TILES — flag-key shape", () => {
   // mocked: this file deliberately imports nothing from `org-features` (F135),
   // so a runtime import creeping back into `tiles.ts` fails here at load.
 
+  it("the two giving tiles are toggle-only (no flagKey, no comingSoon) and gated by the org_portal.giving org toggle — R11: giving has no platform flag", () => {
+    for (const key of ["giving", "giving-admin"]) {
+      const tile = PORTAL_TILES.find((t) => t.key === key);
+      expect(tile, key).toBeDefined();
+      expect(tile?.orgFeatureKey, key).toBe("org_portal.giving");
+      expect(tile?.flagKey, key).toBeUndefined();
+      expect(tile?.comingSoon, key).toBeUndefined();
+    }
+    const byKey = Object.fromEntries(PORTAL_TILES.map((t) => [t.key, t]));
+    expect(byKey.giving.href("alder-creek")).toBe("/o/alder-creek/giving");
+    expect(byKey["giving-admin"].href("alder-creek")).toBe(
+      "/o/alder-creek/admin/giving",
+    );
+    expect(byKey.giving.category).toBe("operate");
+    expect(byKey["giving-admin"].category).toBe("administer");
+  });
+
   it("the calendar tile is toggle-only (no flagKey) — DECISION-160", () => {
     const calendar = PORTAL_TILES.find((t) => t.key === "calendar");
     expect(calendar?.orgFeatureKey).toBe("org_portal.calendar");
@@ -144,15 +160,15 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("PORTAL_TILES has exactly 20 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar)", () => {
-    expect(PORTAL_TILES.length).toBe(20);
+  it("PORTAL_TILES has exactly 21 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin)", () => {
+    expect(PORTAL_TILES.length).toBe(21);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 20-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar)", () => {
+  it("mirrors the full 21-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
@@ -165,6 +181,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
         "features",
         "filings",
         "giving",
+        "giving-admin",
         "groups",
         "insights",
         "members",
@@ -239,7 +256,16 @@ describe("PORTAL_TILES — flag-key shape", () => {
     features: { domain: "administration", category: "administer" },
     branding: { domain: "administration", category: "administer" },
     tickets: { domain: "administration", category: "administer" },
-    giving: { domain: "giving", category: "operate" },
+    giving: {
+      domain: "giving",
+      category: "operate",
+      orgTypeScope: ["congregation", "new_worshiping_community"],
+    },
+    "giving-admin": {
+      domain: "giving",
+      category: "administer",
+      orgTypeScope: ["congregation", "new_worshiping_community"],
+    },
     worship: { domain: "worship", category: "operate" },
     committees: {
       domain: "governance",
@@ -300,11 +326,17 @@ describe("PORTAL_TILES — flag-key shape", () => {
       "reports",
     ]);
     const congregationOnly = new Set(["filings"]);
+    const congregationAndNwc = new Set(["giving", "giving-admin"]);
     for (const tile of PORTAL_TILES) {
       if (presbyteryOnly.has(tile.key)) {
         expect(tile.orgTypeScope).toEqual(["presbytery"]);
       } else if (congregationOnly.has(tile.key)) {
         expect(tile.orgTypeScope).toEqual(["congregation"]);
+      } else if (congregationAndNwc.has(tile.key)) {
+        expect([...(tile.orgTypeScope ?? [])].sort()).toEqual([
+          "congregation",
+          "new_worshiping_community",
+        ]);
       } else {
         expect(tile.orgTypeScope).toBeUndefined();
       }

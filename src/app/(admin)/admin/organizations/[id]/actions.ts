@@ -27,6 +27,7 @@ import {
   replaceOrganizationServiceTimes,
 } from "@/lib/sites";
 import { designateFoundingAdministrator } from "@/lib/founding-administrator";
+import { designateTreasurer } from "@/lib/treasurer-designation";
 
 /**
  * The platform operator's brand actions — P0.5 slice c2 (Phase 3 re-run,
@@ -777,6 +778,119 @@ export async function designateFoundingAdministratorAction(
           administrationRoleKey: result.administrationRoleKey,
           permissionKeys: result.permissionKeys,
           priorHolderCount: result.priorHolderCount,
+        },
+      });
+      revalidatePath(`/admin/organizations/${organizationId}`);
+      return { ok: true };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// designateTreasurerAction — docs/work-log/2026-10-15-online-giving.md, Phase 2
+// R2 / Phase 3 "Designation". DECISION-155's shape for the first holder of
+// `giving.manage` at a congregation or new worshiping community. Same
+// structure as designateFoundingAdministratorAction above: auth() ->
+// hasFeature(ADMIN_ORGANIZATIONS) -> field validation -> the lib function
+// (getPlatformDb() throughout, never withOrgContext()) -> recordAudit() ONLY on
+// success (a refusal mutates nothing) -> revalidatePath. It neither requires
+// nor flips the org_portal.giving toggle, writes no giving table, and does
+// not touch the founding administrator's bundle.
+// ---------------------------------------------------------------------------
+
+/**
+ * FormData fields: `organizationId` (uuid), `email`. There is no person
+ * picker: the lib resolves the user's person at THIS organization and creates
+ * neither a person nor a membership.
+ */
+export async function designateTreasurerAction(
+  formData: FormData,
+): Promise<PolicyResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) {
+    return { ok: false, error: "Invalid organization." };
+  }
+
+  const parsedEmail = designeeEmailSchema.safeParse(formData.get("email"));
+  if (!parsedEmail.success) {
+    return { ok: false, error: "Enter a valid email address." };
+  }
+
+  const result = await designateTreasurer(
+    organizationId,
+    parsedEmail.data,
+    session.user.id,
+  );
+
+  switch (result.kind) {
+    case "not_applicable":
+      return {
+        ok: false,
+        error:
+          "Giving applies to congregations and new worshiping communities only.",
+      };
+    case "no_such_user":
+      return {
+        ok: false,
+        error:
+          "No platform account exists for that email yet. Ask them to sign up first, then designate them here.",
+      };
+    case "user_inactive":
+      return { ok: false, error: "That account has been deactivated." };
+    case "not_a_member":
+      return {
+        ok: false,
+        error:
+          "That account is not a member of this organization. Designation never adds anyone — the organization's administrator enrols them first, then you designate them here.",
+      };
+    case "membership_ended":
+      return {
+        ok: false,
+        error:
+          result.endedOn === "unknown"
+            ? "That person's relationship with this organization has ended."
+            : `That person's relationship with this organization ended on ${result.endedOn}.`,
+      };
+    case "has_holders":
+      return {
+        ok: false,
+        error:
+          "This organization already has someone who can manage giving — designation is only available while nobody does (including as a lockout recovery).",
+      };
+    case "provisioning_incomplete":
+      return {
+        ok: false,
+        error:
+          "This organization is missing its baseline setup or the treasurer role template — contact an engineer before designating a treasurer.",
+      };
+    case "race":
+      return {
+        ok: false,
+        error:
+          "Someone just designated a treasurer for this organization — refresh the page.",
+      };
+    case "db_error":
+      return {
+        ok: false,
+        error: "We couldn't complete that just now — try again in a moment.",
+      };
+    case "ok": {
+      // Ids only — never the designee's email or name (Phase 3 metadata).
+      await recordAudit({
+        action: AUDIT_ACTIONS.ORG_TREASURER_DESIGNATED,
+        resourceType: "organization",
+        resourceId: organizationId,
+        metadata: {
+          organizationId,
+          personId: result.personId,
+          roleId: result.treasurerRoleId,
+          permissionKeys: result.permissionKeys,
         },
       });
       revalidatePath(`/admin/organizations/${organizationId}`);

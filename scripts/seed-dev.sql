@@ -1945,3 +1945,7 @@ commit;
 -- transaction (the write marker is transaction-local), so it runs AFTER the
 -- final commit above, never inside it.
 \ir giving/seed-dev-giving.sql
+
+-- Custom-domains fixture (drizzle/0057). Its own file and transaction, so it
+-- runs AFTER the final commit above, after giving's include.
+\ir domains/seed-dev-domains.sql

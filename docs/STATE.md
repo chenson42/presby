@@ -3,11 +3,39 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-19.
+Updated 2026-10-20.
 
 ---
 
-## RESUME HERE — 2026-10-19: the online-giving pipeline is integrated at v0.34.0; PR pending
+## RESUME HERE — 2026-10-20: production is on v0.34.0; Track F Increment 1 (web custom domains) is integrated at v0.35.0, PR pending
+
+**2026-10-20.** Production runs v0.34.0 (online giving, merged and deployed). `pipeline/custom-domains` (worktree
+`presby-domains`) is integrated for its PR to `main`: a congregation proves a domain with a TXT record and its public site is
+served there (migration `0057`, DECISION-176–182, F146–F152, `docs/work-log/2026-10-19-custom-domains.md`; Phase 6 SHIP WITH
+NOTES, every note a `docs/TODO.md` line; CLAUDE.md gained two invariants, "The Proxy Does Not Reach the Database" and "A Custom
+Host Is a Key, Not an Identity", and `check:proxy-imports` is the eighth tripwire). **What is and is not true of it:** it is the
+mechanism, not the cutover. `DOMAINS_PROVIDER` is unset in production, so a claim can be proven but cannot reach `live`
+("Connecting is temporarily unavailable"); nothing has been run against the real hosting provider, real Cloudflare or real DNS;
+the legacy-URL redirect map is unbuilt; church email domains are Increment 2 and unbuilt (the pipeline stays open for it, Batch 2a
+first, with the RLS-anchored `mail_domain.*` reader as its precondition). Do not point any real A/CNAME at Vercel before the
+acceptance pass.
+
+**Before and at merge** (`docs/deployment.md` → "Pre-deploy runbook: 0057"): confirm production is at `0056`; Neon snapshot; apply
+`0057` to production **without `psql -1`** (the file has its own `begin`/`commit`) and *before* the merge deploys; on `development`
+apply `0057` twice and the seed, then run `scripts/test-rls.sql` as `presby_app`; set `NEXT_PUBLIC_PLATFORM_HOSTS` (build time) and an
+https `NEXT_PUBLIC_APP_URL` in Production before the merge build; list the `presby` project's domains; leave `DOMAINS_PROVIDER`
+unset; then the platform-host regression smoke.
+
+**Next, in order** (the operator picks the pace):
+1. The Vercel project-scoped token and Production env (`VERCEL_API_TOKEN`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`,
+   `DOMAINS_PROVIDER=vercel`), then the real-domain acceptance pass on an operator-owned throwaway domain (`docs/TODO.md`, Track F).
+2. F111, the permission-ceiling pipeline (the first congregation's founding administrator is what delivers `domains.manage`).
+3. The documentation work still open in `docs/TODO.md`, and the legacy-URL redirect map before the first cutover.
+4. Production sign-in and the first customer's manual setup, as before; Increment 2 (mail) when Q13 and Q4 are decided.
+
+---
+
+## Previous handoff — 2026-10-19: the online-giving pipeline is integrated at v0.34.0; PR pending
 
 **2026-10-19.** `pipeline/online-giving` (worktree `presby-giving`) is integrated and ready for its PR to `main`:
 online giving through per-congregation Stripe Connect, the treasurer's gift desk, the member self-view, itemized payouts, and frozen
@@ -756,7 +784,7 @@ verified live via a real sign-in. Landed in a later commit.
 
 #### 3. Westerville First Presbyterian site recreation — org provisioned, real photos migrated
 
-User wanted to recreate `https://westervillefirstpresbyterian.org/` on
+User wanted to recreate the congregation's existing website on
 presby "as verbatim as possible." Confirmed: authorized to use the real
 content (their own church); Claude does not scrape the live site — content
 came from a real WordPress `Tools → Export` XML the user supplied.

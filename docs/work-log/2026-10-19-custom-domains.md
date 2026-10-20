@@ -2313,18 +2313,18 @@ Empty state **pass**; failure microcopy **pass**; permission gate **pass** (`dom
 ## Pre-merge checklist
 
 **A. On the branch (orchestrator, Rule 16 and neighbours) — none in the diff today.**
-1. `src/lib/db/domain/index.ts`: `export * from "./domains";`; then `npm run docs:erd` and `npm run check:schema-parity` against `development` with 0057 applied.
-2. `drizzle/meta/_journal.json`: `{ "idx": 57, "version": "7", "when": 1787014313186, "tag": "0057_presby_org_domains", "breakpoints": true }`.
-3. `scripts/test-rls.sql`: `\ir domains/test-rls-47.sql`; `scripts/seed-dev.sql`: `\ir domains/seed-dev-domains.sql`. Apply 0057 twice and the seed on `development`, then the full RLS suite there as `presby_app`.
-4. `docs/decisions.md`: DECISION-176–182 (latest on `main` is 175), with the amendments — four cron paths; the canonical-promotion rule; 1a-i's mail force-release pair and `force_release_reason` written only on its edge; 1a-ii's raw-SQL tenant insert; the module-map additions; residual (iii) with its 1e closure.
-5. `docs/schema-design-2.md`: F146–F152.
-6. `CLAUDE.md`: replace "The Edge Gate Cannot Reach the Database" (its premise is false); add "A Custom Host Is a Key, Not an Identity" (and "Account Mail Stays on the Platform Domain" may follow with Increment 2); the brand-cascade line, Project Layout additions, `src/proxy.ts` in the auth-touching Phase 4 gate, `check:proxy-imports` in Common Commands (eight tripwires); `.claude/agents/architect.md`'s `(public)/site/[slug]` site-key line.
-7. `docs/deployment.md`: the env table, the dated Vercel-account sentence, the reattach runbook, and a "Pre-deploy runbook: 0057" in the giving runbook's style.
-8. `docs/TODO.md`: the lines above, in the same commit (Rule 10); move the Done items.
-9. `docs/release-notes/v0.35.md` and `package.json` (0.34.0 → 0.35.0): non-engineer voice, the residual list above; do not say mail ships or claim "verified against the real provider".
-10. `docs/product/functionality-map.md` (bullet below) and `docs/architecture.md`.
-11. Commit the work-log; `/pre-push`.
-12. Leak check: no real hostname in new files or docs.
+1. **[x] done (docs:erd ran; parity left to the orchestrator, needs a DB)** `src/lib/db/domain/index.ts`: `export * from "./domains";`; then `npm run docs:erd` and `npm run check:schema-parity` against `development` with 0057 applied.
+2. **[x] done** `drizzle/meta/_journal.json`: `{ "idx": 57, "version": "7", "when": 1787014313186, "tag": "0057_presby_org_domains", "breakpoints": true }`.
+3. **[x] includes added; applying 0057 twice, the seed and the RLS suite on `development` are the orchestrator's (not done here)** `scripts/test-rls.sql`: `\ir domains/test-rls-47.sql`; `scripts/seed-dev.sql`: `\ir domains/seed-dev-domains.sql`. Apply 0057 twice and the seed on `development`, then the full RLS suite there as `presby_app`.
+4. **[x] done** `docs/decisions.md`: DECISION-176–182 (latest on `main` is 175), with the amendments — four cron paths; the canonical-promotion rule; 1a-i's mail force-release pair and `force_release_reason` written only on its edge; 1a-ii's raw-SQL tenant insert; the module-map additions; residual (iii) with its 1e closure.
+5. **[x] done (new §2q)** `docs/schema-design-2.md`: F146–F152.
+6. **[x] done ("Account Mail Stays on the Platform Domain" deliberately deferred to Increment 2)** `CLAUDE.md`: replace "The Edge Gate Cannot Reach the Database" (its premise is false); add "A Custom Host Is a Key, Not an Identity" (and "Account Mail Stays on the Platform Domain" may follow with Increment 2); the brand-cascade line, Project Layout additions, `src/proxy.ts` in the auth-touching Phase 4 gate, `check:proxy-imports` in Common Commands (eight tripwires); `.claude/agents/architect.md`'s `(public)/site/[slug]` site-key line.
+7. **[x] done** `docs/deployment.md`: the env table, the dated Vercel-account sentence, the reattach runbook, and a "Pre-deploy runbook: 0057" in the giving runbook's style.
+8. **[x] done** `docs/TODO.md`: the lines above, in the same commit (Rule 10); move the Done items.
+9. **[x] done (`package-lock.json` bumped to match)** `docs/release-notes/v0.35.md` and `package.json` (0.34.0 → 0.35.0): non-engineer voice, the residual list above; do not say mail ships or claim "verified against the real provider".
+10. **[x] done** `docs/product/functionality-map.md` (bullet below) and `docs/architecture.md`.
+11. **[ ] not done here, by instruction (no commit, no push)** Commit the work-log; `/pre-push`.
+12. **[x] done for the files touched (see the integration record at the end of this log for what remains elsewhere)** Leak check: no real hostname in new files or docs.
 
 **B. Production database (by hand, not by deploy)**
 1. Confirm production is at 0056 (`to_regclass('giving_funds')` and `giving_statements` non-null); else 0054–0056 first.
@@ -2587,3 +2587,38 @@ QA run 3 should: re-run `service.db.test.ts` and `npm run test:e2e:prod` in a qu
 - **Non-blocking notes:** (n1) `lockdown.spec.ts:61`/`:68` — when `beforeAll`'s `getPublicRenderFlag` fails, `afterAll` still calls `setPublicRenderFlag` with the unset value (refused only by `feature_flags.enabled` NOT NULL); skip the restore when nothing was saved. (n2) the run-1 TODO on the 7 leaked giving fixture people stays open. (n3) `admin-login.spec.ts:111` and `giving-admin.spec.ts:331` each timed out once in the accidental full run, not re-run. Integration: the 1e TODO moves to Done; the `mail_domain.*` reuse rule still binds Batch 2c.
 
 **Per-Phase Status:** | 5 — Verification (run 3) | qa | Complete | PASS (F-3 closed — self-check fails under a normalizing mutation at `lockdown.spec.ts:481`, lockdown 30/30 dev and prod; F-4 closed; a′ closed both lanes; Batch 1e verified by tests and an independent `presby_app` probe; section 47 114/0; auth gate 25/25 dev with MFA user; `test:e2e:prod` 67 then 27/27 on re-run, all failures Neon drops) | 2026-10-20 |
+
+---
+
+# Integration record — pre-merge checklist A (orchestrator, Rule 16), 2026-10-20
+
+*Worktree `presby-domains`, branch `pipeline/custom-domains` from `6fe80c7`. Uncommitted at the time of writing. No database was touched.*
+
+**Done (checklist A items 1 to 10 and 12):**
+- **1.** `src/lib/db/domain/index.ts` exports `./domains`. `npm run docs:erd` needs `DATABASE_URL`/`PLATFORM_DATABASE_URL` only to import `src/lib/db` (it never connects); run with placeholder URLs it reported "refreshed 11 diagrams from 104 tables" and produced **no diff** in `docs/schema-design.md`, because `src/lib/dev-docs.ts`'s `MODULES` has no `domains` entry (the same gap as events, sites, support, staff, calendar and giving; extended on the existing `docs/TODO.md` line). `check:schema-parity` was **not** run: it needs `development` with 0057 applied.
+- **2.** `_journal.json` idx 57 (`when` 1787014313186).
+- **3.** `\ir domains/test-rls-47.sql` appended to `scripts/test-rls.sql` (APPENDED SECTION banner, as 46); `\ir domains/seed-dev-domains.sql` appended after giving's include in `scripts/seed-dev.sql`.
+- **4.** DECISION-176 to 182 in `docs/decisions.md` with the amendments: four cron paths (176); the canonical-promotion rule, filed under 180 with a pointer from 178; 1a-i's mail force-release pair and `force_release_reason` written only on its edge, the raw-SQL tenant insert plus the `next_check_at` UPDATE, the insert guard and CHECK list, residual (iii) with its Batch 1e closure and the content-written-by-service remainder, and the `created_via` residual (180); the module map as shipped, the 1b rulings and named residuals (179); `slugSitePath` never throws, `donorOrigin`'s shape, the give-action ordering and the `give/return` 404 (181). DECISION-182 is recorded as an accepted design that is **not built**.
+- **5.** F146 to F152 as a new section 2q of `docs/schema-design-2.md` (before section 3).
+- **6.** `CLAUDE.md`: the Edge-gate invariant replaced by "The Proxy Does Not Reach the Database"; new "A Custom Host Is a Key, Not an Identity"; brand-cascade line; Project Layout (`src/proxy.ts` rewritten; `src/lib/domains/`, `src/lib/site-urls.ts`, `src/app/api/cron/domains/`, `scripts/domains/`); `src/proxy.ts` in the auth-touching Phase 4 gate; `check:giving-boundaries` (it was missing from the command block) and `check:proxy-imports` added, "All eight tripwires"; one Post-Login Landing sentence ("`/launch`, `/home` and every platform route exist only on platform hosts") and three "Edge" to "proxy" wording fixes. `.claude/agents/architect.md` gained the `(public)/site/[slug]` site-key line.
+- **7.** `docs/deployment.md`: dated Vercel-account update (legacy project deleted, `presby` auto-deploys `main`, preview builds skipped by the Ignored Build Step; the table marked historical); env rows (`NEXT_PUBLIC_PLATFORM_HOSTS`, `DOMAINS_PROVIDER`, the Vercel token variables **marked pending**, the test-only row); a new "Custom domains" section (configuration and the build assertion, `DOMAINS_PROVIDER` semantics and Production-only scope, the cron host-class log, the reattach runbook, "Pre-deploy runbook: 0057" with **apply without `-1`**, the go-live gate).
+- **8.** `docs/TODO.md`: the Track F line rewritten (real domain removed, points here, Increment 1 recorded as mechanism-not-cutover) plus the acceptance-pass, legacy-redirect, operator-token, Increment 2 lines; all other Phase 6 follow-ups; the `MODULES` line extended; the stale Vercel-account lines annotated; Done entries for Increment 1, Batch 1e, and the two docs follow-ups closed here (Track F line rewrite, `architecture.md` §8 intro).
+- **9.** `docs/release-notes/v0.35.md`, `v0.34.md`'s forward link, `package.json` and `package-lock.json` to 0.35.0.
+- **10.** `docs/product/functionality-map.md` (version stamp, Index line, full-map bullet, proxy and cron lines); `docs/architecture.md` (§8 intro reconciled and a custom-domains paragraph, §10 proxy sentence, last-written line); `docs/STATE.md` RESUME block for 2026-10-20.
+- **12.** `npm run check:secrets` passes (and passes with `v0.35.md` added to the index, since the scan reads tracked files only). The real domain named by the old Track F line is gone from `docs/TODO.md`, and from `docs/deployment.md` and `docs/STATE.md`, which were edited anyway.
+
+**Skipped or left, on purpose:**
+- Item 11 (commit the work-log, `/pre-push`): no commit or push by instruction.
+- `check:schema-parity`, applying 0057 twice and the seed on `development`, and `scripts/test-rls.sql` as `presby_app`: the orchestrator's, after this lands.
+- "Account Mail Stays on the Platform Domain" (CLAUDE.md invariant) and `src/lib/email/senders.ts` in Project Layout: they describe Increment 2, which is not built; the file does not exist.
+- The Phase 1 and Phase 3 TODO suggestions that are moot after the merge of PR #31 (the `check:schema-parity` red-until-`authz.ts` note) or that Batch 1d shipped (the `domains` tile pointing at a page that did not exist yet) were not filed.
+- Rule 13 (what's-new): not warranted at this merge (analyst). Rule 12: n/a.
+- **Real domain still present in older historical files, not touched:** `docs/reviews/2026-09-23-fpcw-feature-match.md` (two lines) and `docs/work-log/2026-08-24-public-site-parity-fixes.md` (the 2026-08-24 site-recreation record). `check:secrets` does not flag them; scrubbing history files is the operator's call.
+
+**Gate results (this worktree, no database contact; unit tests run with the `*DATABASE_URL` variables unset, the build with placeholder URLs):** `npm run typecheck` exit 0; `npm run lint` exit 0; `npm run check` exit 0 (eight tripwires); `npm run test` exit 0 (465 files passed, 64 skipped; 6,876 tests passed, 1,892 skipped); `npm run build` exit 0.
+
+### Integration verification (orchestrator, 2026-10-20)
+
+- **Production (by hand, before the merge):** Neon snapshot `snap-cool-poetry-axmms2ih`; production confirmed at 0056; `0057` applied with `ON_ERROR_STOP=1` and **without `-1`** → exit 0. Verified: `organization_domains` RLS + FORCE, one `tenant_isolation` policy; `presby_published_site` `search_path=public, pg_temp`, ACL `neondb_owner` + `presby_app` only; the serving helper not executable by `presby_app`; `presby_published_site_by_host` executable by `presby_app`; `permissions` 30 → 31 (`domains.manage`); organizations, users, memberships, sites and role-permission counts unchanged; 0 domain rows; the live (pre-merge) site still 200 on `/site/fpcw`.
+- **Vercel:** project domains are only `presbyportal.org` (→ `www`), `www.presbyportal.org`, `presby.vercel.app`; `NEXT_PUBLIC_PLATFORM_HOSTS` set in Production; `NEXT_PUBLIC_APP_URL` is `https://www.presbyportal.org` (read from the live canonical tag); `CRON_SECRET` set; no `DOMAINS_*` fake variables; `DOMAINS_PROVIDER` unset.
+- **Development:** `0057` applied twice (exit 0, 0) and `scripts/domains/seed-dev-domains.sql` twice (exit 0, 0); §47 standalone as `presby_app` 114/114 exit 0. `check:schema-parity` against development: 84 tables, 7 allowlisted, 0 failing. Full `scripts/test-rls.sql` no-stop as `presby_app`: two runs each lost the connection (`Operation timed out` at `test-rls.sql:1124`; then at `domains/test-rls-47.sql:271` after **961 passes** — stock + §46 complete, §47 partway); the only FAILs are the five known development drifts (`:127`, `:153`, `:184`, `:472`, `:7866`). With §47's standalone 114/114, every assertion has passed on development (expected integrated total 1,041 = 927 + 114).

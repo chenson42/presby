@@ -2072,11 +2072,18 @@ export async function readDomainsView(
 
       // "Recent activity": this organization's own `domain.*` audit rows, newest
       // first. audit_events carries no organization column and no RLS, so the
-      // filter is the WHERE below (metadata.organizationId, written by this
-      // service on every row) on a connection that has already verified the
-      // viewer's membership and permission. Only the `domain.` action family is
-      // selected, and activity.ts maps rows to hostnames and a who-category,
-      // never an email, id or IP.
+      // metadata.organizationId filter (written by this service on every row) is
+      // an application field, not a database property. Batch 1e anchors the read
+      // to the database as well: a row is shown only if its resource_id is the id
+      // of an `organization_domains` row THIS connection can see (that table is
+      // FORCE-RLS under the caller's org GUC), so a row naming another
+      // organization's domain cannot appear however its metadata was stamped.
+      // Both clauses stay. The cast is on the organization_domains side
+      // (`id::text`), never on audit_events.resource_id, so an index on that
+      // column stays usable. Only the `domain.` action family is selected, and
+      // activity.ts maps rows to hostnames and a who-category, never an email,
+      // id or IP. (Increment 2's `mail_domain.*` reader is written anchored the
+      // same way from its first line.)
       const auditRows = await tx
         .select({ id: auditEvents.id, action: auditEvents.action, createdAt: auditEvents.createdAt, metadata: auditEvents.metadata })
         .from(auditEvents)
@@ -2084,6 +2091,8 @@ export async function readDomainsView(
           and(
             sql`${auditEvents.action} like 'domain.%'`,
             sql`${auditEvents.metadata}->>'organizationId' = ${organizationId}`,
+            eq(auditEvents.resourceType, "organization_domain"),
+            sql`${auditEvents.resourceId} in (select ${organizationDomains.id}::text from ${organizationDomains})`,
           ),
         )
         .orderBy(desc(auditEvents.createdAt))

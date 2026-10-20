@@ -1030,6 +1030,134 @@ describe.skipIf(!hasDb)("src/lib/domains/service.ts (Postgres-backed)", () => {
       expect([...times].sort().reverse()).toEqual(times); // newest first
     });
 
+    // ---- Batch 1e: the Recent activity read is RLS-anchored (F152's acceptance condition) ----
+    //
+    // `audit_events` has no RLS and `presby_app` can SELECT it, so the metadata.organizationId filter alone is an
+    // application-written field. The read also requires `resource_type = 'organization_domain'` AND a `resource_id`
+    // that is the id of a row the caller's own RLS lets it see in `organization_domains`. The forged rows below are
+    // what a writer bug (or a hostile writer) could produce: right organizationId, wrong anchor.
+
+    /** An owner-inserted `domain.*` audit row, shaped like the service's, with the anchor fields the caller chooses. */
+    async function forge(
+      claimedOrg: string,
+      o: { hostname: string; resourceType: string | null; resourceId: string | null; action?: string },
+    ): Promise<void> {
+      await q(sql`
+        insert into audit_events (action, resource_type, resource_id, metadata)
+        values (${o.action ?? "domain.live"}, ${o.resourceType}, ${o.resourceId},
+                ${JSON.stringify({ organizationId: claimedOrg, hostname: o.hostname, actorKind: "tenant" })}::jsonb)`);
+    }
+
+    /** The hostnames the tenant connection reads under a given predicate, as the page's query would (no limit/merge). */
+    async function tenantAuditHosts(t: Tenant, extra: SQL): Promise<string[]> {
+      const { withOrgContext } = await import("@/lib/authz");
+      return withOrgContext(t.personId, t.org, async (tx) =>
+        rowsOf(
+          await tx.execute(sql`select metadata->>'hostname' as h from audit_events
+                                where action like 'domain.%' and metadata->>'organizationId' = ${t.org} and ${extra}`),
+        ).map((r) => String(r.h)),
+      );
+    }
+
+    const activityHosts = async (t: Tenant): Promise<string> => {
+      const view = await svc.readDomainsView(t.personId, t.org, { platformSiteUrl: "x" });
+      if (view.kind !== "ok") throw new Error(`view was ${view.kind}`);
+      return view.activity.map((i) => i.text).join("\n");
+    };
+
+    it("1e positive control: its own rows still appear, including a platform-initiated hold and a force-released row", async () => {
+      const a = await tenant();
+      const held = `www.${claim("held")}`; // one host per claim: the org cap is 3
+      const forced = `www.${claim("forced")}`;
+      await claimOk(a, held);
+      await claimOk(a, forced);
+      const heldRow = (await domainRows(a.org, sql`claim_name = ${held} and web_role = 'canonical'`))[0]!;
+      const forcedRows = await domainRows(a.org, sql`claim_name = ${forced}`);
+      expect(await svc.setDomainHold(platformActor(), String(heldRow.id), "paused", "Paused while support checks the claim.")).toMatchObject({ kind: "ok", changed: true });
+      for (const r of forcedRows) {
+        expect(await svc.forceReleaseDomain(platformActor(), String(r.id), { reason: "Released at the operator's decision." })).toMatchObject({ kind: "ok" });
+      }
+      const text = await activityHosts(a);
+      expect(text).toContain(`${heldRow.hostname} was paused by PresbyPortal support.`);
+      expect(text).toContain(`${forced} was released.`);
+      expect(text).toContain(held); // its own claim rows are there too
+      const view = await svc.readDomainsView(a.personId, a.org, { platformSiteUrl: "x" });
+      if (view.kind !== "ok") throw new Error("not ok");
+      expect(view.activity.some((i) => i.who === "support")).toBe(true);
+      // Every writer in the family stamps the anchor fields the read now depends on (guards the literal values).
+      const written = await q(sql`select action, resource_type, resource_id from audit_events
+                                   where action like 'domain.%' and metadata->>'organizationId' = ${a.org}`);
+      expect(written.length).toBeGreaterThanOrEqual(4); // 2 claims, 1 hold, 1 force-release
+      for (const w of written) {
+        expect(w.resource_type, String(w.action)).toBe("organization_domain");
+        expect(w.resource_id, String(w.action)).not.toBeNull();
+      }
+    });
+
+    it("1e: a row stamped with this organization's id but whose resource_id names ANOTHER organization's domain is absent", async () => {
+      const a = await tenant();
+      const b = await tenant();
+      const own = claim("mine");
+      const theirs = claim("theirs");
+      const planted = claim("planted");
+      const own1 = await claimOk(a, own);
+      const bClaim = await claimOk(b, theirs);
+      const bDomainId = bClaim.created[0]!.id;
+      await forge(a.org, { hostname: planted, resourceType: "organization_domain", resourceId: bDomainId });
+      // Control (non-vacuous): the same forged shape anchored to one of A's OWN domain rows is shown, so the marker
+      // is findable and the assertion below is about the anchor, not about the host name.
+      const visible = claim("visible");
+      await forge(a.org, { hostname: visible, resourceType: "organization_domain", resourceId: own1.created[0]!.id });
+      const text = await activityHosts(a);
+      expect(text).toContain(visible);
+      expect(text).not.toContain(planted);
+      expect(text).not.toContain(theirs);
+    });
+
+    it("1e: a row with a null resource_id, a wrong resource_type, or an id that is no domain row at all is absent", async () => {
+      const a = await tenant();
+      const ownId = (await claimOk(a, claim("mine"))).created[0]!.id;
+      const nullId = claim("nullid");
+      const wrongType = claim("wrongtype");
+      const noSuchRow = claim("nosuchrow");
+      const nullType = claim("nulltype");
+      await forge(a.org, { hostname: nullId, resourceType: "organization_domain", resourceId: null });
+      await forge(a.org, { hostname: wrongType, resourceType: "organization_feature_toggle", resourceId: ownId });
+      await forge(a.org, { hostname: nullType, resourceType: null, resourceId: ownId });
+      await forge(a.org, { hostname: noSuchRow, resourceType: "organization_domain", resourceId: "00000000-0000-4000-8000-000000000000" });
+      const text = await activityHosts(a);
+      for (const marker of [nullId, wrongType, nullType, noSuchRow]) expect(text, marker).not.toContain(marker);
+    });
+
+    it("1e mutation check: the metadata-only predicate DOES return the forged row (so the anchor is what excludes it), and the metadata clause is still load-bearing", async () => {
+      const a = await tenant();
+      const b = await tenant();
+      const aId = (await claimOk(a, claim("mine"))).created[0]!.id;
+      const bId = (await claimOk(b, claim("theirs"))).created[0]!.id;
+      const forgedForeignAnchor = claim("foreignanchor");
+      const wrongOrgRightAnchor = claim("wrongorg");
+      await forge(a.org, { hostname: forgedForeignAnchor, resourceType: "organization_domain", resourceId: bId });
+      await forge(b.org, { hostname: wrongOrgRightAnchor, resourceType: "organization_domain", resourceId: aId });
+
+      // The anchor removed (what the code did before 1e): the forged row is visible to A on the tenant connection.
+      expect(await tenantAuditHosts(a, sql`true`)).toContain(forgedForeignAnchor);
+      // The anchor alone: A's RLS-visible domain id passes it, so a row stamped for B but naming A's domain id would be
+      // shown. This is why BOTH clauses stay (belt and braces); removing the metadata clause would let this through.
+      const anchorOnly = rowsOf(
+        await (await import("@/lib/authz")).withOrgContext(a.personId, a.org, (tx) =>
+          tx.execute(sql`select metadata->>'hostname' as h from audit_events
+                          where action like 'domain.%' and resource_type = 'organization_domain'
+                            and resource_id in (select id::text from organization_domains)`),
+        ),
+      ).map((r) => String(r.h));
+      expect(anchorOnly).toContain(wrongOrgRightAnchor);
+
+      // The shipped read applies both: neither forged row is in A's feed.
+      const text = await activityHosts(a);
+      expect(text).not.toContain(forgedForeignAnchor);
+      expect(text).not.toContain(wrongOrgRightAnchor);
+    });
+
     it("applies the same gate: forbidden, feature_off", async () => {
       const noPerm = await tenant({ holds: false });
       const off = await tenant({ toggle: false });

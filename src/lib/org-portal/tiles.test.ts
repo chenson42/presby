@@ -128,6 +128,18 @@ describe("PORTAL_TILES — flag-key shape", () => {
     expect(byKey["giving-admin"].category).toBe("administer");
   });
 
+  it("the domains tile is toggle-only (no flagKey, no comingSoon), gated by the operator-enabled org_portal.domains toggle, administer under Communications, for every org type (custom-domains, G32)", () => {
+    const tile = PORTAL_TILES.find((t) => t.key === "domains");
+    expect(tile).toBeDefined();
+    expect(tile?.orgFeatureKey).toBe("org_portal.domains");
+    expect(tile?.flagKey).toBeUndefined();
+    expect(tile?.comingSoon).toBeUndefined();
+    expect(tile?.orgTypeScope).toBeUndefined();
+    expect(tile?.category).toBe("administer");
+    expect(tile?.domain).toBe("communications");
+    expect(tile?.href("alder-creek")).toBe("/o/alder-creek/admin/domains");
+  });
+
   it("the calendar tile is toggle-only (no flagKey) — DECISION-160", () => {
     const calendar = PORTAL_TILES.find((t) => t.key === "calendar");
     expect(calendar?.orgFeatureKey).toBe("org_portal.calendar");
@@ -160,15 +172,15 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("PORTAL_TILES has exactly 21 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin)", () => {
-    expect(PORTAL_TILES.length).toBe(21);
+  it("PORTAL_TILES has exactly 22 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains)", () => {
+    expect(PORTAL_TILES.length).toBe(22);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 21-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving)", () => {
+  it("mirrors the full 22-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
@@ -177,6 +189,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
         "communications",
         "credentials",
         "directory",
+        "domains",
         "events",
         "features",
         "filings",
@@ -266,6 +279,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
       category: "administer",
       orgTypeScope: ["congregation", "new_worshiping_community"],
     },
+    domains: { domain: "communications", category: "administer" },
     worship: { domain: "worship", category: "operate" },
     committees: {
       domain: "governance",

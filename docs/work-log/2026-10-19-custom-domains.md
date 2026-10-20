@@ -26,7 +26,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-19 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-19 |
 | 3 — Technical design | tech-lead | Complete (architect addendum A1–A6 folded 2026-10-19) | Design complete; implementers named; T1–T7 confirmed by the architect; Batch 1a-i ready for database-admin | 2026-10-19 |
-| 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); 1a-ii next | — | 2026-10-19 |
+| 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); **Batch 1a-ii complete** (full-stack-developer; `src/lib/domains/` service, DNS adapter, tenant and platform actions, catalog/tile/bundle edits; typecheck, lint, `npm run check`, build green; test-rls-47 still 114/114); 1b next | — | 2026-10-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1484,6 +1484,151 @@ psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/domains/test-rls-47.sql
 ```
 
 `test-rls-47` is a new section, (a)–(o). It touches no existing `scripts/test-rls.sql` section.
+
+---
+
+## Batch 1a-ii — domain service and actions (full-stack-developer)
+
+*2026-10-19, full-stack-developer. Worktree `presby-domains`, branch `pipeline/custom-domains`, Neon branch `pipeline-custom-domains` (endpoint `ep-dry-tree-axyn61wx`; all four URLs in `.env.local` checked before any write). Nothing committed. No Rule-16 shared file edited. No real Vercel, Resend or DNS call was made: every test uses the fakes, and the DoH adapter is exercised through an injected `fetch`.*
+
+### Files Created
+
+`src/lib/domains/` (all new; `service-only-writes.test.ts` is 1a-i's and stays green):
+
+- `host.ts`: PURE, imports nothing. `requestHost()` (reads only `host`), `normalizeHost()`, `platformHosts()` (memoized on `process.env`), `isPlatformHost()`, `platformOrigin()` (T16: `givingOrigin()`'s rule verbatim), `parseSiteKey()`, `siteKeyRewritePath()`, `assertPlatformHostConfig()`, `isProductionDeployment()`, `isIpLiteral()`. Built to the full Phase 3 contract rather than the classifier subset the claim path alone needs, because Phase 3 puts `host.ts` in this batch and 1c consumes all of it. `probe.ts` and `cron-passthrough.ts` are 1c's and are not built.
+- `hostname-rules.ts`: `normalizeClaimInput()`, the G2 pipeline, ten refusal reasons, the apex/`www` pair rule.
+- `proof.ts`: PURE; the `_presby-challenge.<claim>` / `presby-verify=<token>` naming.
+- `state.ts`: PURE; `DOMAIN_STATES`, `EDGES` (30 rows over the 25 legal pairs), `nextState()`, `edgePairs()`, `auditKeyNameFor()`, `isHolding()`, `isTerminal()`.
+- `policy.ts`: PURE; `DOMAIN_POLICY`, `NEXT_CHECK_CAP_MS`, `cadenceMs()`, `nextCheckCapMs()`.
+- `checklist.ts`: the view-model (`buildChecklist()`, `readObservation()`, record statuses, steps, phases, banners with the exact Phase 3 microcopy).
+- `adapters/dns.ts`: the `DnsResolver` / `DnsObserver` interfaces, `DohResolver` (Cloudflare and Google JSON), `QuorumDnsObserver`, `parseDohResponse()`, `parseTxtData()`, `isQueryableName()`, `createDohObserver()`.
+- `adapters/fake.ts`: `FakeDnsResolver`, `createFakeDns()`, and the `DOMAINS_FAKE_STATE_FILE` reader (`fileStateReader()`, read on every query, ignored when `NODE_ENV === "production"`).
+- `adapters/index.ts`: `getAdapters()` (`DOMAINS_DNS_PROVIDER`: unset or `doh` is the real quorum; `fake` only outside production).
+- `dns-checks.ts`: `checkProof()` (present / absent / wrong_value / unknown).
+- `audit-tx.ts`: `insertAuditRow(tx, …)`, the in-transaction audit write (not `recordAudit()`).
+- `notify.ts`: `collectNotificationContext()` (on the caller's own tx, in a savepoint), `sendDomainNotification()`, `buildDomainNotification()`; account-class `domain_notification`; ten event copies (only four are used in this batch).
+- `messages.ts`: PURE; `claimRefusalMessage()` (shared by the tenant and platform actions).
+- `service.ts`: the ONLY writer of `organization_domains` (A4). `transitionDomain()`, `claimDomain()`, `checkClaim()`, `changeCanonical()`, `removeClaim()`, `reconnectClaim()`, `readDomainsView()`, `domainExec()`, `classifyDomainDbError()`, `DomainTransitionError`.
+- `toggles.ts`: `setOperatorOrgToggle()`, `OPERATOR_TOGGLE_KEYS`.
+- Tests: `host.test.ts` (81), `hostname-rules.test.ts` (75), `state.test.ts` (12), `policy.test.ts` (20), `checklist.test.ts` (38), `adapters/dns.test.ts` (61), `notify.test.ts` (13), `service.db.test.ts` (97, DB-backed), `toggles.db.test.ts` (8, DB-backed).
+
+Actions:
+
+- `src/app/(org)/o/[slug]/admin/domains/actions.ts` and `actions.test.ts` (51): the five tenant actions.
+- `src/app/(admin)/admin/organizations/[id]/domains-actions.ts` and `domains-actions.test.ts` (20): the Q2 on-behalf claim and the Q1 toggle action. Named `domains-actions.ts`, so `check:audit` does not scan it; its header says audit is delegated.
+
+### Files Modified
+
+- `src/lib/audit.ts` (+16 `DOMAIN_*` keys) and `audit.test.ts` (the catalog pin).
+- `src/lib/org-features.ts`: two catalog entries (`org_portal.domains`, `org_portal.mail_domain`), `operatorEnabled` on every entry (`true` for those two), `listFeatureToggles()` omits operator entries, `toggleOrgFeature()` answers `invalid_key` for them (after the permission check). `org-feature-catalog.test.ts` updated.
+- `src/lib/org-portal/tiles.ts`: the `domains` tile (22 tiles). `tiles.test.ts` and `visible-tiles.test.ts` updated.
+- `src/lib/founding-administrator.ts`: `"domains.manage"` in the `base` array. `founding-administrator.test.ts` (pinned bundles, plus new plan tests) and `founding-administrator-section.tsx` / `.test.tsx` (a label, so the raw key never renders).
+
+### Endpoints / action signatures and gates
+
+No route handlers. Server actions (all return `{ ok: true; data? } | { ok: false; error; code; field?; retryAfterSeconds? }`, structurally an `ActionResult`):
+
+| Action | Gate |
+|---|---|
+| `claimDomainAction(slug, { domain, canonical: "www" \| "apex" })` | `auth()` → `resolveOrgContext(user, slug)` → in `withOrgContext`: `presby_has_permission(domains.manage)` then `org_portal.domains` toggle (`orgFeatureEnabledInTx`, category axis off, T10) → rate limit 5 / 24 h / org |
+| `checkDomainAction(slug, claimName)` | same gate; "Check now" is forced: 6 / 10 min / claim and 30 / h / org |
+| `changeCanonicalAction(slug, domainId)` | same gate; target must be `live` with no hold |
+| `removeClaimAction(slug, claimName, promoteDomainId?)` | same gate; `needs_canonical` / `invalid_target` |
+| `reconnectClaimAction(slug, claimName)` | same gate; confirms the TXT proof first; shares the check-now limits |
+| `claimDomainForOrgAction(organizationId, input)` (Q2) | `auth()` → `hasFeature(ADMIN_ORGANIZATIONS)`; platform actor; web only; the org toggle must already be on; `created_via = 'platform'` |
+| `setOrgDomainFeatureAction(organizationId, key, enabled)` (Q1) | same platform gate; `key` must be one of the two operator keys |
+
+`organizationId` is never read from client input on a tenant action. A tenant person from another org gets `forbidden` (membership is verified before the GUC is set).
+
+### Schema changes
+
+None. Migration `0057` was applied by 1a-i; nothing was applied in this batch. No new env var needs documenting for production. `DOMAINS_DNS_PROVIDER` (`doh` default | `fake`) is new and joins the test/dev-only row already in Phase 3's `docs/deployment.md` draft (the build assertion in `host.ts` already refuses `fake`).
+
+### Audit events
+
+Written by `transitionDomain()` (one row, same transaction) or, for the two non-edge writes, by `claimDomain()` / `changeCanonical()` / `removeClaim()` in their own transaction: `domain.claimed` (one per inserted row), `domain.proof_verified`, `domain.recovered`, `domain.expired`, `domain.parked`, `domain.released`, `domain.reconnected`, `domain.canonical_changed`; `tenant.org_feature.toggled` with `via: "platform"` from `toggles.ts`. All 16 `domain.*` keys are declared in `audit.ts` up front (1b needs `attach_requested`, `attached`, `live`, `live_lost`, `lapsed`, `release_requested`, `hold_set`, `hold_cleared`). Metadata: `organizationId, hostname, claimName, purpose, from, to, event, actorKind`, plus `trigger` (machine or `check_now`), `releaseCause`, `reason` (force-release only), `via`. **The proof token appears in no audit row, notification or log; tests assert it.** An observation-only check (no state change) writes no audit row, by design.
+
+**`check:audit` cannot see any of this** (it scans `actions.ts` text for direct mutation calls; there are none in these actions). Each actions file carries a header saying audit is delegated per R8. Coverage is proven by `service.db.test.ts`: it generates one test per `EDGES` row (30) and asserts that `transitionDomain()` writes the new state and **exactly one** audit row with the right key and actor, that a rollback after the transition leaves neither, and that a hand-listed title table equals `EDGES` (so a new edge cannot ship without a test). QA verifies through that file, not the tripwire.
+
+### Commands and results
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` (`--max-warnings=0`) | exit 0 |
+| `npm run check` (seven tripwires: audit-coverage, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries) | all pass. `check:secrets` scans git-tracked files only, so I ran `checkSecretsPii()` over all 39 new and modified files: 0 findings |
+| `npm run check:schema-parity` | green, 83 tables, 0 failing (1a-i recorded it red on this branch; it is green now) |
+| `npm run test` (no DB env) | 424 files passed, 61 skipped; 6252 tests passed, 1786 skipped |
+| New unit tests | 371 pass: host 81, hostname-rules 75, state 12, policy 20, checklist 38, dns 61, notify 13, tenant actions 51, platform actions 20 |
+| `service.db.test.ts`, serial, `vi.setConfig` timeouts 90 s / 120 s | **97/97**, 319 s |
+| `toggles.db.test.ts`, serial | **8/8**, 13 s |
+| DB subset, serial, `--testTimeout=180000`: `org-features`, `founding-administrator`, `org-provisioning`, `treasurer-designation`, `giving/access`, `org-feature-warnings.db`, `domains.db`, `domains.schema`, and `src/lib/domains/**` | 608 tests, 606 pass. The 2 failures were `Connection terminated unexpectedly` on Neon (one in `giving/access.test.ts` cleanup, two `organizations` inserts in `domains.db.test.ts`); **both files re-run alone: 63/63**. This is the Neon transport hiccup 1a-i and the giving pipeline also recorded |
+| `psql $APP_DATABASE_URL -f scripts/domains/test-rls-47.sql` (`rolbypassrls = f`) | exit 0, **114/114** |
+| `npm run build` | exit 0 |
+| Leftovers on the branch | none from this batch. I deleted one stray `domain.claimed` audit row from my own mutation run and one 1a-i fixture user (`domains-db-actor-…@example.invalid`) that 1a-i's run had left |
+
+**Timeouts.** `service.db.test.ts` makes hundreds of round trips to a remote Neon branch and takes about five minutes, so it raises the file's timeouts with `vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 })` (this file only). The repo-wide `org-features.test.ts` and `calendar.test.ts` still need `--testTimeout=180000` against this branch, as 1a-i recorded.
+
+**Failing-first, and where I used mutation checks instead.** This batch is new behaviour, so the tests were written with the code, not before it. One genuine failing-first: the first DB run failed 43 tests with `42501 permission denied for table organization_domains`, because a Drizzle `insert().values()` names every column with DEFAULT and Postgres checks INSERT privilege on every named column, while `presby_app`'s grant is eight columns. The fix is the raw column-limited insert (see Deviations 1), after which all 97 pass. Everything else was **mutation-checked**: I applied each of these to the code, ran the named test, saw it fail, and restored the file. All 19 were caught:
+
+| Mutation | Caught by |
+|---|---|
+| `state.ts`: drop a scope; add an extra edge | `state.test.ts` (pairs equal both directions; A15 shortcuts) |
+| `policy.ts`: grace 14 d; a cadence over its cap | `policy.test.ts` (trigger pin; cap test) |
+| DNS quorum: absent on one ok answer | `dns.test.ts` (4 error reasons, throwing resolver, wrong_value, state file) |
+| hostname rules: allow `%`; drop the mixed-script check | `hostname-rules.test.ts` |
+| `host.ts`: read `x-forwarded-host`; allow an IP literal in production | `host.test.ts` |
+| `transitionDomain()`: a second audit row; no audit row | `service.db.test.ts` edge cases |
+| gate: skip the permission check | "a member without domains.manage is forbidden" |
+| check: an `unknown` lookup expires a claim | "a resolver error is dns_unknown… never expires a claim" |
+| check: do not catch the cross-org unique violation | "the first organization to VERIFY wins" (A12) |
+| check: drop the forced-check rate limit | "rate-limits a person's 'Check now'" |
+| remove: do not demote the removed canonical | "needs a replacement" (unique-index violation) |
+| reconnect: skip the proof check | "without the proof it refuses" |
+| catalog: list operator toggles to tenants; let a tenant toggle them | `toggles.db.test.ts` "the TENANT path cannot flip it" |
+
+### Deviations
+
+1. **The claim insert is a raw SQL `INSERT` naming exactly the eight granted columns, and `next_check_at` is set by a following `UPDATE`.** Phase 3 did not specify the insert form; the natural one, the query builder, cannot work for `presby_app` (above). `next_check_at` is not in the insert grant (it is in the update grant), and without it a new claim would never be due for the cron, so the UPDATE is required, not cosmetic. Updates through the builder are fine (only the SET columns are named). **Any future tenant-path INSERT into this table must be raw with granted columns.** The A4 scan exempts `service.ts` from the raw-SQL rule, so this is legal.
+2. **`notify.ts` is built here, not in 1b.** T7 binds every claim, canonical change and removal to notify all holders plus the platform admins, and those actions are in this batch. To keep tenant paths off the platform connection (the `(org)` contract; `tickets-notifications.ts` precedent), recipients are collected on the caller's OWN transaction, in a savepoint, and the mail is sent after commit. The platform path uses a platform transaction, where the same query works on the owner connection.
+3. **Five tenant actions, not three.** Phase 3's 1a-ii row says "claim/check/remove"; §6 lists five, the service functions for `changeCanonical` and `reconnectClaim` are in scope, and a service function with no action cannot be used by 1d. They share one plumbing function and are tested the same way.
+4. **Two platform actions (the Q2 claim and the Q1 toggle) with no UI.** The brief names the on-behalf claim; the toggle action is what makes `toggles.ts` reachable. Pause, force-release and platform check-now stay 1b.
+5. **Two "production" predicates in `host.ts`**, on purpose: `VERCEL_ENV === "production"` for the host set and IP-literal refusal (so the production-build e2e lane on localhost still treats localhost as the platform, T8), and `NODE_ENV` for `platformOrigin()` so `givingOrigin()`'s existing tests keep passing when it becomes a re-export (T16).
+6. **The apex/`www` pairing uses a heuristic, not a public-suffix list** (Phase 2 rejected the PSL): exactly two labels, or three where the middle label is a well-known registry label under a two-letter code (`church.co.uk`). A wrong guess costs the admin one extra row to remove or one `www.` claim to add; the proof, not the guess, decides what is held. Named residual.
+7. **DNS `present` needs one resolver; `absent` needs every resolver.** An error from either resolver is `unknown`. A resolver showing the record while the other errors is `present`; one showing another `presby-verify=` value while the other errors is `unknown`, not `wrong_value`.
+8. **`checkClaim` handles two states** (`pending`; `lapsed` recovery). Every other state is `deferred` with no DNS query and no write. Phase 3 scoped 1a-ii to "proof check, expiry"; the rest is 1b's.
+9. **`claimDomain`, `changeCanonical` and `removeClaim` work on WEB rows only** (the org's web-row query); `checkClaim` and `readDomainsView` group by claim name for any purpose, so a lapsed mail row's proof recovery already works. The mail `lapsed → released` edge (both `remove` and `force_release`, per 1a-i's note) is exercised through `transitionDomain()` in the 30-row audit table; removing a mail row through a service function is Batch 2b.
+10. **`readDomainsView()`** (the page's gated read, with `presby_current_org_site_status()`) is in `service.ts`. It is data access, not UI, and it puts the read side of the gate in the same file as the writes.
+11. **`DomainTx = OrgTx` for both connections** (they are the same Drizzle type); `domainExec()` casts the platform transaction.
+12. **All 16 `domain.*` audit keys** are declared now, including the 1b-only ones, so 1b does not edit `audit.ts`.
+
+### What 1b must know
+
+- **The seams.** `checkClaim()` is the three-step routine (read; network with no transaction held; re-read `FOR UPDATE`, confirm the state, apply). 1b extends it: `PROOF_STATES` in `service.ts` is the set of states whose check is a proof lookup, and `applyProof()` is the per-state apply. Add `verified` (attach), `attach_pending`, `attached`, `live` and the grace/`release_pending` handling there. Rename to `observeAndAdvance` if you like; nothing outside `service.ts` calls the internals.
+- **`transitionDomain(tx, row, event, actor, opts)` rules.** It picks `release_cause` for you (`remove` → `removed`, or `opts.cause = "org_closed"`; `grace_elapsed` from `lapsed` → `lapsed_grace`, from `parked` carries the row's cause; `detach_ok` carries it; `force_release` needs `opts.cause` in `force_released | evicted` plus `opts.forceReleaseReason`, and only a **platform** actor). It sets `next_check_at` from `cadenceMs(to)` unless the patch names one. A tenant actor can drive every edge except `force_release`, because the grants cover state and observation columns. Never put a trigger-owned column in a patch.
+- **Always write `next_check_at` with `dbNowPlus(ms)`** (SQL, the transaction's `now()`). An app-clock `Date` can exceed the trigger's cap by clock skew and be refused; `parked` at exactly 24 h is only safe this way.
+- **Savepoint idiom** for an operation that can raise a unique violation: `tx.transaction((sp) => transitionDomain(sp, …))` inside `try/catch`, then `classifyDomainDbError(err)`. `held_elsewhere` is what `pending → verified` raises when another org verified first (A12, names no org). The audit row rolls back with the failed write.
+- **Canonical promotion gap (a design call for you).** If an org's canonical group is removed with no live host elsewhere, the org has no canonical row. When a later host reaches `live`, nothing promotes it, so the serving predicate returns null (the site keeps serving from its slug URL; fail-soft, not broken). Either `live_ok` should promote the first live host when none is canonical (a role write beside the transition, one `canonical_changed` row), or the admin must call `changeCanonical`. I did not decide this.
+- **Notifications.** Events already have copy: `lapsed`, `parked`, `released`, `force_released`, `hold_set`, `hold_cleared`. Call `collectNotificationContext(tx, orgId)` INSIDE the transaction (it opens its own savepoint), and `sendDomainNotification()` AFTER commit, never inside. `notifyAfterCommit` in `service.ts` is the wrapper. Sends are sequential and each `enqueueEmail` makes an inline attempt, so many recipients add latency to the request that triggered it; the cron does not care.
+- **The gate.** `gate()` is private to `service.ts`: tenants need the permission then the toggle; platform actors need the org to exist and the toggle on; machine actors skip it (the sweep keeps observing after an operator turns the toggle off, which only darkens serving). Reuse it for the platform check-now.
+- **Adapters.** `getAdapters()` returns `{ dns }` only; add `hosting` on the same seam (`DOMAINS_PROVIDER` unset = `unconfigured`). The fake state file has only a `dns` section; add `hosting` and `probe` to `FakeState` in `adapters/fake.ts`. `DnsObserver.lookup(name, type, match?)` already supports `A`, `AAAA`, `CNAME`, `CAA`, `SOA`, `NS`; the routing, apex (SOA), CAA, DNSSEC and Cloudflare-range checks are `dns-checks.ts` additions.
+- **Observation shape.** `DomainObservation` in `checklist.ts` already reserves `targets` (`{ cname, ipv4[] }`) and `routing.records[]` (`{ hostname, status, hint }`); write exactly that and the checklist renders it. `proofMissCount`, `probeMissCount` and the `policy.ts` debounce numbers (`proofLostMisses` 6 spanning ≥ 10 h, `liveLost*`) are defined and unused until you write the debounced lapse.
+- **Test pattern.** `service.db.test.ts`: `tenant()` builds an org, toggle, member and role; `walkTo(id, state)` arranges any state through legal owner edges; `backdateDomainClock` is the only past-clock seam; `createFakeDns()` gives a two-resolver quorum with error injection. The 30-row edge table asserts "exactly one audit row" for every edge, so a 1b transition needs no new audit test, only a behaviour test.
+- **A12.** `claimDomain` reads no other org's rows. Do not add a cross-org read to a claim or a check; the conflict surfaces only at verification.
+
+### Integration edits for the orchestrator (Rule 16)
+
+None are new from this batch beyond 1a-i's list. For the drafts:
+
+1. `docs/decisions.md`: amend DECISION-180 with "tenant-path inserts are raw SQL naming the eight granted columns, and `next_check_at` is set by an UPDATE (Deviation 1)". Amend DECISION-179's module map: `proof.ts`, `dns-checks.ts`, `audit-tx.ts` and `messages.ts` exist beyond the draft's list.
+2. `docs/TODO.md` (add): the canonical-promotion gap above; revisit the apex heuristic if a public-suffix list is ever adopted; the `domains` tile links to a page that does not exist until Batch 1d (dev only, once `seed-dev-domains.sql` is applied); `service.db.test.ts` takes about five minutes (split if CI minutes matter); sequential inline-attempt notifications in the request path.
+3. `docs/deployment.md`: `DOMAINS_DNS_PROVIDER` (`doh` default, `fake` dev/test only, refused by the production build assertion) joins the dev/test-only row.
+
+### Handoff
+
+**Next: full-stack-developer, Batch 1b** (Vercel adapter + fake; full `observeAndAdvance`; `/api/cron/domains` + `vercel.json`; the platform service functions and actions for check / pause / resume / force-release; `scripts/domains/reattach.ts`). QA (Phase 5) runs after 1d; it should read `service.db.test.ts` as the R8 evidence.
+
+**Nothing to test in a browser yet.** There is no page or form in this batch (1d). If `scripts/domains/seed-dev-domains.sql` has been applied to the branch, Alder Creek's admin hub now shows a "Website domain" tile that links to `/o/alder-creek/admin/domains`, which 404s until 1d. The actions can be exercised by the DB tests only.
 
 ---
 

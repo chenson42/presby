@@ -78,6 +78,7 @@ export const ORG_FEATURE_CATALOG = [
     // stored row, never a code constant.
     provisionedOn: false as const,
     orgTypes: null,
+    operatorEnabled: false as const,
   },
   // Member edit: tiered sensitive information (docs/work-log/
   // 2026-08-26-member-sensitive-info.md, Phase 3/DECISION-108). A DEDICATED
@@ -93,6 +94,7 @@ export const ORG_FEATURE_CATALOG = [
     flag: "org_portal.sensitive_info" as const,
     provisionedOn: false as const,
     orgTypes: null,
+    operatorEnabled: false as const,
   },
   // Member calendar (docs/work-log/2026-10-14-member-calendar.md, DECISION-160
   // R1). TOGGLE-ONLY: there is no platform flag for it (`flag: null`), so the
@@ -108,6 +110,7 @@ export const ORG_FEATURE_CATALOG = [
     flag: null,
     provisionedOn: true as const,
     orgTypes: null,
+    operatorEnabled: false as const,
   },
   // Online giving (docs/work-log/2026-10-15-online-giving.md, Phase 3
   // "Permissions & Flags"; R11 / DECISION-172). TOGGLE-ONLY: there is NO
@@ -133,6 +136,48 @@ export const ORG_FEATURE_CATALOG = [
     flag: null,
     provisionedOn: false as const,
     orgTypes: ["congregation", "new_worshiping_community"] as const,
+    operatorEnabled: false as const,
+  },
+  // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3
+  // "Permissions & Flags"; T9; DECISION-180; operator ruling Q1, 2026-10-19:
+  // "platform admin only, for now"). TOGGLE-ONLY (`flag: null`): the operator's
+  // standing rule is a per-org toggle, not a new global flag, before go-live.
+  // Provisioned OFF.
+  //
+  // `operatorEnabled: true` is the self-service switch Q1 asked for. While it is
+  // true the entry is NOT a tenant control at all: `listFeatureToggles()` omits
+  // it, so /o/<slug>/admin/features never shows it, and `toggleOrgFeature()`
+  // answers `invalid_key` for it, so an `org_features.manage` holder cannot
+  // flip it by posting the key. A platform admin flips it from
+  // /admin/organizations/<id> through `src/lib/domains/toggles.ts`. Changing it
+  // to `false` later is the entire change to make the toggle self-service.
+  //
+  // `org_portal.domains` gates web claims, the admin page and serving (the
+  // owner-only SQL predicate reads this toggle row). `org_portal.mail_domain`
+  // gates the church-mail section (Increment 2) and is the practical valve for
+  // the Resend domain cap. `orgTypes: null`: presbyteries and synods get sites
+  // and domains too (G32).
+  {
+    key: "org_portal.domains",
+    name: "Website domain",
+    description:
+      "Lets this organization connect its own web address to its public site.",
+    category: "communications" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: null,
+    operatorEnabled: true as const,
+  },
+  {
+    key: "org_portal.mail_domain",
+    name: "Email from your domain",
+    description:
+      "Lets this organization send its own notices from its own domain instead of through PresbyPortal.",
+    category: "communications" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: null,
+    operatorEnabled: true as const,
   },
 ] as const;
 
@@ -385,8 +430,10 @@ export async function listFeatureToggles(
     const organizationType = CATALOG_HAS_ORG_TYPE_RULES
       ? await readOrganizationTypeInTx(tx, organizationId)
       : null;
-    const applicable = ORG_FEATURE_CATALOG.filter((entry) =>
-      orgTypeAdmitted(entry.orgTypes, organizationType),
+    // Operator-only entries (Q1) are not a tenant control and never listed.
+    const applicable = ORG_FEATURE_CATALOG.filter(
+      (entry) =>
+        !entry.operatorEnabled && orgTypeAdmitted(entry.orgTypes, organizationType),
     );
 
     const toggles: FeatureToggleEntry[] = await Promise.all(
@@ -459,6 +506,11 @@ export async function toggleOrgFeature(
       // presbytery can never write a giving toggle row. After the permission
       // check, so a non-holder learns nothing from the difference.
       const entry = ORG_FEATURE_CATALOG.find((e) => e.key === key);
+      // Operator-only (Q1): for a tenant, not a key - the same `invalid_key` an
+      // unknown string gets, after the permission check so a non-holder learns
+      // nothing from the difference. The platform path is
+      // src/lib/domains/toggles.ts.
+      if (entry?.operatorEnabled) return { kind: "invalid_key" };
       if (entry && entry.orgTypes !== null) {
         const organizationType = await readOrganizationTypeInTx(
           tx,

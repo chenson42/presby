@@ -152,6 +152,14 @@ export function foundingAdministratorPlan(
     "org_features.manage",
     "tickets.file",
     "staff.manage",
+    // F150 (custom domains, DECISION-180): tier-1 and unconstitutional (the
+    // brand_admin precedent, DECISION-101), so no stated_clerk binding - but
+    // under assertPermissionSubset() a key nobody at the org holds can never be
+    // granted, so without this entry domains.manage would be ungrantable
+    // everywhere. Meets the amended criterion (i): no template can deliver it.
+    // drizzle/0057 backfills roles already designated; the additive-only
+    // reconcile in designation step 9 tops up a re-designation.
+    "domains.manage",
   ];
   return {
     administration: {

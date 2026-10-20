@@ -296,7 +296,11 @@ describe("visiblePortalTiles(category, organizationType, viewer) — category, t
       (t) =>
         t.category === "administer" &&
         (!t.orgTypeScope || t.orgTypeScope.includes("presbytery")),
-    ).map((t) => t.flagKey);
+    )
+      .map((t) => t.flagKey)
+      // Toggle-only tiles (giving-admin, domains) carry no flagKey: they read
+      // no platform flag, only their org toggle.
+      .filter((key): key is string => key !== undefined);
     const calledKeys = isFlagEnabled.mock.calls.map((call) => call[0]);
     expect(new Set(calledKeys)).toEqual(new Set(administerFlagKeys));
     expect(calledKeys).not.toContain("org_portal.filings");
@@ -433,9 +437,10 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
     isFlagEnabled.mockResolvedValue(true);
     isOrgFeatureEnabled.mockResolvedValue(true);
     // calendar is `operate`: an `administer` call must never consult its
-    // toggle — it consults only giving-admin's.
+    // toggle — it consults only giving-admin's and domains'.
     await visiblePortalTiles("administer", "congregation", VIEWER);
-    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2])).toEqual([
+    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
+      "org_portal.domains",
       "org_portal.giving",
     ]);
     isOrgFeatureEnabled.mockClear();
@@ -477,9 +482,11 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
     await visiblePortalTiles("operate", "congregation", VIEWER);
     await visiblePortalTiles("administer", "congregation", VIEWER);
     // calendar and giving have no flagKey, so their toggles ARE read on the
-    // operate call; giving-admin's on the administer call. Nothing else.
+    // operate call; giving-admin's and domains' on the administer call.
+    // Nothing else.
     expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.domains",
       "org_portal.giving",
       "org_portal.giving",
     ]);

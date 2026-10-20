@@ -418,6 +418,23 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     domain: "giving",
     orgTypeScope: ["congregation", "new_worshiping_community"],
   },
+  // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3
+  // "Permissions & Flags"; T9/T10). TOGGLE-ONLY and operator-enabled: no
+  // `flagKey`, and the per-org `org_portal.domains` toggle (flipped by a
+  // platform admin only, Q1) is the whole gate. `administer` (setting up the
+  // org's web presence, not day-to-day ministry) under Communications. No
+  // `orgTypeScope`: presbyteries and synods get sites and domains too (G32).
+  // Permission-blind like every tile (DECISION-162): the page renders its own
+  // honest Forbidden / toggle-off state.
+  {
+    key: "domains",
+    label: "Website domain",
+    description: "Connect your own web address to your public site.",
+    href: (slug) => `/o/${slug}/admin/domains`,
+    orgFeatureKey: "org_portal.domains",
+    category: "administer",
+    domain: "communications",
+  },
   {
     key: "worship",
     label: "Worship & Service Planning",

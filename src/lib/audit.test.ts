@@ -229,6 +229,23 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   GIVING_STATEMENT_DELIVERY_RECORDED: "tenant.giving_statement.delivery_recorded",
   GIVING_STATEMENT_DOWNLOADED: "tenant.giving_statement.downloaded",
   GIVING_STATEMENTS_BULK_DOWNLOADED: "tenant.giving_statements.bulk_downloaded",
+  // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3 section 8).
+  DOMAIN_CLAIMED: "domain.claimed",
+  DOMAIN_PROOF_VERIFIED: "domain.proof_verified",
+  DOMAIN_ATTACH_REQUESTED: "domain.attach_requested",
+  DOMAIN_ATTACHED: "domain.attached",
+  DOMAIN_LIVE: "domain.live",
+  DOMAIN_LIVE_LOST: "domain.live_lost",
+  DOMAIN_LAPSED: "domain.lapsed",
+  DOMAIN_RECOVERED: "domain.recovered",
+  DOMAIN_PARKED: "domain.parked",
+  DOMAIN_RECONNECTED: "domain.reconnected",
+  DOMAIN_RELEASE_REQUESTED: "domain.release_requested",
+  DOMAIN_RELEASED: "domain.released",
+  DOMAIN_EXPIRED: "domain.expired",
+  DOMAIN_CANONICAL_CHANGED: "domain.canonical_changed",
+  DOMAIN_HOLD_SET: "domain.hold_set",
+  DOMAIN_HOLD_CLEARED: "domain.hold_cleared",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

@@ -54,6 +54,7 @@ const BASE_PROPS = {
     "org_features.manage",
     "tickets.file",
     "staff.manage",
+    "domains.manage",
   ],
   officeTemplateName: "Congregation Stated Clerk" as string | null,
 };
@@ -167,6 +168,10 @@ describe("FoundingAdministratorSection — confirm dialog copy", () => {
     // must read "staff", never the literal "staff.manage".
     expect(body).toMatch(/staff/i);
     expect(body).not.toMatch(/staff\.manage/i);
+    // F150 — domains.manage joins the bundle; same drift guard: a raw key
+    // rendering verbatim is a FAIL.
+    expect(body).toMatch(/website domains/i);
+    expect(body).not.toMatch(/domains\.manage/i);
     expect(body).toMatch(/congregation stated clerk/i);
     expect(body).toMatch(/can only be done once/i);
   });

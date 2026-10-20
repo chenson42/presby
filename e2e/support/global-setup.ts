@@ -28,6 +28,7 @@ import { neon } from "@neondatabase/serverless";
 import { E2E_EMAILS, E2E_USER_LIST } from "./users";
 import { seedE2EUsers } from "./seed-users";
 import { seedE2EOrgs } from "./seed-orgs";
+import { sweepStaleDomainsUiFixtures } from "./domains-ui-fixture";
 
 const AUTH_DIR = path.resolve(__dirname, ".auth");
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -98,6 +99,19 @@ async function cleanupTestFeedback(dbUrl: string): Promise<void> {
       err
     );
   }
+}
+
+/**
+ * A custom-domains UI spec's teardown can lose to a Neon connection drop and leave its congregation behind
+ * (e2e/support/domains-ui-fixture.ts). That org holds a membership for the `mfa-enrolled` user, so the NEXT
+ * run's post-login landing for that user is `/home` rather than `/admin`, and the TOTP specs time out
+ * waiting for the wrong page (Phase 5 QA run 1, custom-domains). Sweep any such leftover before a session is
+ * acquired. A sweep failure is a thrown error, not a warning: running on past it reproduces the cascade.
+ */
+async function sweepStaleDomainsUiFixtureOrgs(platformDbUrl: string): Promise<void> {
+  if (!platformDbUrl) return; // seedE2EOrgs above has already thrown if the owner URL is missing where it matters
+  const removed = await sweepStaleDomainsUiFixtures(neon(platformDbUrl));
+  if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-domui-* organization(s) left by an earlier run`);
 }
 
 async function signInAndSave(
@@ -292,6 +306,7 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   // The suite owns its users. Any failure here throws — see the file header.
   await seedE2EUsers(dbUrl);
   await seedE2EOrgs(platformDbUrl);
+  await sweepStaleDomainsUiFixtureOrgs(platformDbUrl);
   await cleanupTestFeedback(dbUrl);
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });

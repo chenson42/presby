@@ -34,6 +34,7 @@ import {
   getPublicRenderFlag,
   portOf,
   rawGet,
+  rawPathGet,
   rawPost,
   setPublicRenderFlag,
   shape,
@@ -399,7 +400,7 @@ test.describe("the cron pass-through on a custom host (A6)", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("encoded, dot-segment, upper-case and extra-segment variants never reach a handler, even with the valid bearer", async ({ request, baseURL }) => {
+  test("encoded, upper-case and extra-segment variants never reach a handler, even with the valid bearer", async ({ request, baseURL }) => {
     const variants = [
       "/api/cron/%65mail-queue",
       "/api/cron%2Femail-queue",
@@ -425,6 +426,79 @@ test.describe("the cron pass-through on a custom host (A6)", () => {
       expect(res.headers()["content-type"] ?? "", path).not.toContain("application/json");
       noCookie(res, path);
     }
+  });
+
+  // DOT-SEGMENTS (A6, F-2). The client libraries above normalise `.` / `..` away before sending, so these go out
+  // through node:http with the request-target exactly as written. MEASURED behaviour (dev and production build):
+  // Next collapses dot-segments (literal and %2e / %2E) BEFORE the proxy runs, so the proxy sees the exact path.
+  // Therefore: with NO bearer the variant is the same neutral 404 as any other /api/* path on a custom host; with
+  // the valid bearer it reaches the handler exactly as the exact path does (A6 permits "unless Next has already
+  // normalized them" - the bearer, not the spelling, is the credential). Neither is a bypass: the bearer is still
+  // required, and what it opens is the one handler the exact path opens.
+  test.describe("raw dot-segment paths (sent un-normalized)", () => {
+    const DOT_VARIANTS = [
+      "/api/cron/./email-queue",
+      "/api/cron/x/../email-queue",
+      "/api/cron/%2e/email-queue",
+      "/api/cron/%2E/email-queue",
+      "/api/cron/x/%2e%2e/email-queue",
+      "/api/cron/x/%2E%2E/email-queue",
+      "/api/cron/x/.%2e/email-queue",
+      "/api/cron/%2e%2e/cron/email-queue",
+      "/api/cron/./giving",
+    ];
+
+    test("without the bearer each is byte-identical to the 404 of any other /api/* path", async ({ request, baseURL }) => {
+      const reference = await shape(await rawGet(request, baseURL, HOSTS.oneCanonical, "/api/auth/csrf"), HOSTS.oneCanonical);
+      expect(reference.status).toBe(404);
+      for (const path of DOT_VARIANTS) {
+        const res = await rawPathGet(baseURL, HOSTS.oneCanonical, path);
+        expect(res.status, path).toBe(404);
+        expect(res.rawHeaders["set-cookie"], `Set-Cookie on ${path}`).toBeUndefined();
+        expect({ status: res.status, headers: res.headers, body: res.body }, path).toEqual(reference);
+      }
+    });
+
+    test("the raw path really is sent un-normalized: the same variants answer 404 on an UNCLAIMED host too, and a wrong bearer changes nothing", async ({ baseURL }) => {
+      // (A control: if the harness silently normalised, the no-bearer 404s above would still pass, so also pin the
+      // wrong-bearer and unclaimed-host shapes to one another.)
+      for (const path of DOT_VARIANTS) {
+        const wrong = await rawPathGet(baseURL, HOSTS.oneCanonical, path, { authorization: "Bearer wrong" });
+        const none = await rawPathGet(baseURL, HOSTS.oneCanonical, path);
+        const unclaimed = await rawPathGet(baseURL, HOSTS.unknown, path);
+        expect(wrong.status, path).toBe(404);
+        expect(wrong, path).toEqual({ ...none, rawHeaders: wrong.rawHeaders });
+        expect(unclaimed.status, path).toBe(404);
+      }
+    });
+
+    test("with the valid bearer each gets the same status and body class as the exact path (the handler's own answer, nothing else)", async ({ request, baseURL }) => {
+      const cases: Array<{ path: string; exact: string }> = DOT_VARIANTS.map((path) => ({
+        path,
+        exact: path.endsWith("/giving") ? "/api/cron/giving" : "/api/cron/email-queue",
+      }));
+      for (const { path, exact } of cases) {
+        // ?limit=1 keeps the email queue to one unit of work.
+        const ref = await rawGet(request, baseURL, HOSTS.oneCanonical, `${exact}?limit=1`, bearer);
+        expect(ref.status(), exact).toBe(200);
+        const res = await rawPathGet(baseURL, HOSTS.oneCanonical, `${path}?limit=1`, bearer);
+        expect(res.status, path).toBe(ref.status());
+        expect(String(res.rawHeaders["content-type"] ?? ""), path).toContain("application/json");
+        expect((JSON.parse(res.body) as { ok?: boolean }).ok, path).toBe(true);
+        expect(res.rawHeaders["set-cookie"], `Set-Cookie on ${path}`).toBeUndefined();
+      }
+    });
+
+    test("a dot-segment that climbs OUT of /api/cron is not a cron call: it never reaches a handler, bearer or not", async ({ baseURL }) => {
+      // `/api/cron/../auth/csrf` collapses to a platform route, which a custom host answers with the neutral 404.
+      for (const path of ["/api/cron/../auth/csrf", "/api/cron/%2e%2e/auth/csrf", "/api/cron/x/../../auth/session"]) {
+        for (const headers of [{}, bearer]) {
+          const res = await rawPathGet(baseURL, HOSTS.oneCanonical, path, headers);
+          expect(res.status, `${path} ${JSON.stringify(headers)}`).toBe(404);
+          expect(String(res.rawHeaders["content-type"] ?? ""), path).not.toContain("application/json");
+        }
+      }
+    });
   });
 
   test("the exemption is for GET-style cron calls only on those exact paths: a POST with the bearer is still 404", async ({ request, baseURL }) => {

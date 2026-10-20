@@ -85,6 +85,10 @@ async function open(page: Page) {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 }
 
+// A domain action is a server-action POST that takes 3-5.3 s on Neon (QA run 1, Increment 1); the default 5 s
+// expect timeout is inside that. Every expectation that waits on the POST (its toast, and the card state it
+// revalidates) gets this upper bound. It is a ceiling, not a delay: a fast run waits no longer.
+const ACTION_MS = 20_000;
 const toastText = (page: Page) => page.locator("[data-sonner-toast]");
 const card = (page: Page) => page.getByTestId("claim-card").first();
 
@@ -119,8 +123,8 @@ test.describe.serial("Domains checklist (desktop)", () => {
     await page.getByRole("button", { name: "Start" }).click();
 
     // The proof record is shown, with Copy controls and a Missing chip.
-    await expect(card(page)).toBeVisible();
-    await expect(card(page)).toHaveAttribute("data-phase", "proving");
+    await expect(card(page)).toBeVisible({ timeout: ACTION_MS });
+    await expect(card(page)).toHaveAttribute("data-phase", "proving", { timeout: ACTION_MS });
     const proof = card(page).locator('[data-record-kind="proof"]');
     await expect(proof.locator("code").nth(0)).toHaveText(`_presby-challenge.${claimName}`);
     const value = (await proof.locator("code").nth(1).textContent())!.trim();
@@ -132,29 +136,29 @@ test.describe.serial("Domains checklist (desktop)", () => {
     // Check now before the record is published: nothing happens, and it says why that is normal.
     writeState(world(claimName));
     await card(page).getByRole("button", { name: "Check now" }).click();
-    await expect(toastText(page).last()).toContainText("Nothing has changed yet. DNS changes can take up to an hour to be seen.");
+    await expect(toastText(page).last()).toContainText("Nothing has changed yet. DNS changes can take up to an hour to be seen.", { timeout: ACTION_MS });
     await expect(proof.locator("[data-status]")).toHaveText("Missing");
 
     // Publish the record (the fake "DNS" now has it) and the routing, then check: found and connected.
     published = world(claimName, { proof: value, routing: true, probe: true });
     writeState(published);
     await card(page).getByRole("button", { name: "Check now" }).click();
-    await expect(toastText(page).last()).toContainText("We found your ownership record. We're connecting your domain now.");
-    await expect(card(page)).toHaveAttribute("data-phase", "connecting");
+    await expect(toastText(page).last()).toContainText("We found your ownership record. We're connecting your domain now.", { timeout: ACTION_MS });
+    await expect(card(page)).toHaveAttribute("data-phase", "connecting", { timeout: ACTION_MS });
     await expect(proof.locator("[data-status]")).toHaveText("Correct");
 
     // The next check connects it: the provider has the name, and the HTTPS certificate is on its way.
     await card(page).getByRole("button", { name: "Check now" }).click();
-    await expect(toastText(page).last()).toContainText("Connected. Now securing your site with HTTPS.");
-    await expect(card(page)).toHaveAttribute("data-phase", "securing");
+    await expect(toastText(page).last()).toContainText("Connected. Now securing your site with HTTPS.", { timeout: ACTION_MS });
+    await expect(card(page)).toHaveAttribute("data-phase", "securing", { timeout: ACTION_MS });
     await expect(card(page).getByText("Securing your site... this usually takes a few minutes.")).toBeVisible();
     await expect(card(page).locator('[data-record-kind="routing"]')).not.toHaveCount(0);
     await expect(proof.locator("[data-status]")).toHaveText("Correct");
 
     // Check again: the probe answers, the host is live.
     await card(page).getByRole("button", { name: "Check now" }).click();
-    await expect(toastText(page).last()).toContainText("Your site is live on this domain.");
-    await expect(card(page)).toHaveAttribute("data-phase", "live");
+    await expect(toastText(page).last()).toContainText("Your site is live on this domain.", { timeout: ACTION_MS });
+    await expect(card(page)).toHaveAttribute("data-phase", "live", { timeout: ACTION_MS });
     const view = card(page).getByRole("link", { name: /View your site/ });
     await expect(view).toHaveAttribute("href", `https://www.${claimName}/`);
     await expect(view).toHaveAttribute("rel", "noopener noreferrer");
@@ -179,8 +183,8 @@ test.describe.serial("Domains checklist (desktop)", () => {
 
     await alias.getByRole("button", { name: `Make ${claimName} primary` }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Make primary" }).click();
-    await expect(toastText(page).last()).toContainText(`${claimName} is now your primary address.`);
-    await expect(card(page).locator(`[data-host="${claimName}"]`)).toContainText("Primary address");
+    await expect(toastText(page).last()).toContainText(`${claimName} is now your primary address.`, { timeout: ACTION_MS });
+    await expect(card(page).locator(`[data-host="${claimName}"]`)).toContainText("Primary address", { timeout: ACTION_MS });
     await expect(card(page).getByRole("link", { name: /View your site/ })).toHaveAttribute("href", `https://${claimName}/`);
     // The change is in the recent-activity list, in words.
     await expect(page.getByTestId("claim-card").first()).toBeVisible();
@@ -205,8 +209,8 @@ test.describe.serial("Domains checklist (desktop)", () => {
 
     await card(page).getByRole("button", { name: /^Remove/ }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Remove domain" }).click();
-    await expect(toastText(page).last()).toContainText(`${claimName} was removed.`);
-    await expect(card(page)).toHaveAttribute("data-phase", "parked");
+    await expect(toastText(page).last()).toContainText(`${claimName} was removed.`, { timeout: ACTION_MS });
+    await expect(card(page)).toHaveAttribute("data-phase", "parked", { timeout: ACTION_MS });
 
     const exit = page.getByTestId("offboarding-card");
     await expect(exit).toContainText("Before you delete anything,");
@@ -217,8 +221,8 @@ test.describe.serial("Domains checklist (desktop)", () => {
 
     // The ownership record is still published, so Reconnect works.
     await card(page).getByRole("button", { name: "Reconnect" }).click();
-    await expect(toastText(page).last()).toContainText("Reconnected. We're checking your records again.");
-    await expect(card(page)).not.toHaveAttribute("data-phase", "parked");
+    await expect(toastText(page).last()).toContainText("Reconnected. We're checking your records again.", { timeout: ACTION_MS });
+    await expect(card(page)).not.toHaveAttribute("data-phase", "parked", { timeout: ACTION_MS });
     await expect(page.getByTestId("offboarding-card")).toHaveCount(0);
     await page.close();
   });
@@ -228,23 +232,23 @@ test.describe.serial("Domains checklist (desktop)", () => {
     await open(page);
     // Back to live first (a never-connected host is released outright; only a connected one is held for 30 days).
     await card(page).getByRole("button", { name: "Check now" }).click();
-    await expect(toastText(page).last()).toContainText("Connected. Now securing your site with HTTPS.");
+    await expect(toastText(page).last()).toContainText("Connected. Now securing your site with HTTPS.", { timeout: ACTION_MS });
     await card(page).getByRole("button", { name: "Check now" }).click();
-    await expect(toastText(page).last()).toContainText("Your site is live on this domain.");
-    await expect(card(page)).toHaveAttribute("data-phase", "live");
+    await expect(toastText(page).last()).toContainText("Your site is live on this domain.", { timeout: ACTION_MS });
+    await expect(card(page)).toHaveAttribute("data-phase", "live", { timeout: ACTION_MS });
     // Remove it, then take the proof away.
     await card(page).getByRole("button", { name: /^Remove/ }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Remove domain" }).click();
-    await expect(card(page)).toHaveAttribute("data-phase", "parked");
+    await expect(card(page)).toHaveAttribute("data-phase", "parked", { timeout: ACTION_MS });
     writeState({});
     await card(page).getByRole("button", { name: "Reconnect" }).click();
-    await expect(toastText(page).last()).toContainText("We can't find your ownership record yet. Add it back at your DNS provider, then try again.");
-    await expect(card(page)).toHaveAttribute("data-phase", "parked");
+    await expect(toastText(page).last()).toContainText("We can't find your ownership record yet. Add it back at your DNS provider, then try again.", { timeout: ACTION_MS });
+    await expect(card(page)).toHaveAttribute("data-phase", "parked", { timeout: ACTION_MS });
     // Put the record back and it reconnects.
     writeState(published);
     await card(page).getByRole("button", { name: "Reconnect" }).click();
-    await expect(toastText(page).last()).toContainText("Reconnected. We're checking your records again.");
-    await expect(card(page)).not.toHaveAttribute("data-phase", "parked");
+    await expect(toastText(page).last()).toContainText("Reconnected. We're checking your records again.", { timeout: ACTION_MS });
+    await expect(card(page)).not.toHaveAttribute("data-phase", "parked", { timeout: ACTION_MS });
     await page.close();
   });
 
@@ -279,8 +283,8 @@ test.describe.serial("Primary address advisory (follow-up A)", () => {
     await expect(banner).toContainText(`www.${b} is live`);
     await banner.getByRole("button", { name: `Make www.${b} primary` }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Make primary" }).click();
-    await expect(toastText(page).last()).toContainText(`www.${b} is now your primary address.`);
-    await expect(page.getByTestId("primary-advisory")).toHaveCount(0);
+    await expect(toastText(page).last()).toContainText(`www.${b} is now your primary address.`, { timeout: ACTION_MS });
+    await expect(page.getByTestId("primary-advisory")).toHaveCount(0, { timeout: ACTION_MS });
     const roles = (await sql`select hostname, web_role from organization_domains where id in (${primary.id}::uuid, ${alias.id}::uuid) order by hostname`) as { hostname: string; web_role: string }[];
     expect(roles.find((r) => r.hostname === `www.${b}`)!.web_role).toBe("canonical");
     expect(roles.find((r) => r.hostname === `www.${a}`)!.web_role).toBe("alias");

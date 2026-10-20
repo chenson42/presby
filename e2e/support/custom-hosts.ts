@@ -29,6 +29,8 @@
  * delete guard allows.
  */
 import { createHash } from "node:crypto";
+import http from "node:http";
+import { gunzipSync } from "node:zlib";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 import type { Sql } from "./db";
 import { backdateDomainClockHttp } from "./domains-fixture";
@@ -123,6 +125,72 @@ export async function rawGet(
       headers: { ...(host === null ? {} : { host: `${host}:${portOf(baseURL)}` }), ...headers },
     }),
   );
+}
+
+/**
+ * A GET whose request-target is sent EXACTLY as given, with an explicit `Host`. Playwright's `request` (WHATWG
+ * `URL` underneath) and a browser both collapse `.` / `..` segments before a byte leaves the client, so they
+ * cannot test what a hostile client that does NOT normalize sends; `node:http` writes the string it is handed.
+ * Returns the response in the `Snapshot` shape (`shape()`'s reduction: volatile headers dropped, the requested
+ * host fixed, an HTML body reduced to what a visitor sees), plus the raw header bag for cookie checks.
+ * Same 20 s timeout and single counted retry on a stall/reset as `rawGet`.
+ */
+export interface RawPathResponse extends Snapshot {
+  rawHeaders: Record<string, string | string[] | undefined>;
+}
+
+export async function rawPathGet(
+  baseURL: string | undefined,
+  host: string,
+  rawPath: string,
+  headers: Record<string, string> = {},
+): Promise<RawPathResponse> {
+  const origin = new URL(baseURL ?? "http://localhost:3000");
+  const once = () =>
+    new Promise<RawPathResponse>((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: origin.hostname,
+          port: origin.port || 80,
+          method: "GET",
+          path: rawPath,
+          headers: { host: `${host}:${portOf(baseURL)}`, "accept-encoding": "gzip", ...headers },
+          timeout: REQUEST_TIMEOUT_MS,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("error", reject);
+          res.on("end", () => {
+            const needle = new RegExp(host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+            const reduced: Record<string, string> = {};
+            for (const [k, v] of Object.entries(res.headers)) {
+              if (VOLATILE_HEADERS.has(k)) continue;
+              const joined = Array.isArray(v) ? v.join(", ") : String(v ?? "");
+              reduced[k] = k === "x-middleware-rewrite" ? "<rewrite>" : joined.replace(needle, "<host>");
+            }
+            const wire = Buffer.concat(chunks);
+            // Ask for gzip as Playwright's client does, so the response header set matches a normal request's.
+            const decoded = res.headers["content-encoding"] === "gzip" ? gunzipSync(wire) : wire;
+            const text = maskPerRequest(decoded.toString("utf8")).replace(needle, "<host>");
+            const looksHtml = (res.headers["content-type"] ?? "").includes("text/html");
+            resolve({ status: res.statusCode ?? 0, headers: reduced, body: looksHtml ? visibleText(text) : text, rawHeaders: res.headers });
+          });
+        },
+      );
+      req.on("timeout", () => req.destroy(new Error("timeout")));
+      req.on("error", reject);
+      req.end();
+    });
+  try {
+    return await once();
+  } catch (err) {
+    const message = String((err as Error)?.message ?? err);
+    if (!/timeout|ECONNRESET|socket hang up|EPIPE/i.test(message)) throw err;
+    stalledRetries.push(`GET(raw) ${host} ${rawPath}`);
+    console.warn(`[custom-hosts] raw request stalled or was reset, retrying once (#${stalledRetries.length}): ${host} ${rawPath}`);
+    return once();
+  }
 }
 
 /** Same for a POST (webhooks, ingest, credentials). Not retried: a POST is not idempotent in general. */

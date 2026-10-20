@@ -15,6 +15,14 @@
  * slug prefix `e2e-domui-` is deliberately NOT `e2e-domains-`, so the
  * custom-hosts world's stale-org sweep never touches (or trips over) it.
  * Everything is synthetic: `*.invalid`, invented names. No Real Data.
+ *
+ * RESILIENCE TO A NEON DROP (Phase 5 loop-back, QA run 1). Every statement here goes over Neon's HTTP
+ * driver, which now and then answers `fetch failed` / `Connection terminated unexpectedly`. A teardown
+ * that died on one left the congregation behind with a membership for the `mfa-enrolled` user, and the
+ * next run's post-login landing for that user was `/home`, not `/admin` (five TOTP specs timed out).
+ * So (1) every teardown step is retried with backoff (`withDbRetry`; each step is idempotent);
+ * (2) setup sweeps any stale fixture org first; and (3) `sweepStaleDomainsUiFixtures` is also called by
+ * globalSetup, so a leak from an earlier run is gone before ANY spec signs the user in.
  */
 import { generateSync } from "otplib";
 import type { Browser, BrowserContext } from "@playwright/test";
@@ -50,23 +58,62 @@ async function userIdByEmail(sql: Sql, email: string): Promise<string> {
   return rows[0].id;
 }
 
-/** Removes any fixture org a crashed run left, and its fixed-id person. */
-async function removeStale(sql: Sql): Promise<void> {
-  const stale = (await sql`select id from organizations where slug ~ '^e2e-domui-[0-9]+$'`) as { id: string }[];
+/** The shape of a dropped Neon connection (the HTTP driver's `fetch failed`, the pool's reset, a socket timeout). */
+const DB_DROP = /fetch failed|Connection terminated|terminating connection|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|timeout|NeonDbError/i;
+
+/**
+ * Retries `step` with exponential backoff (0.5 s, 1 s, 2 s, 4 s) while it fails with a connection-drop error;
+ * any other error (a constraint, a bug) is thrown at once. Every caller passes an IDEMPOTENT step, so a drop
+ * that landed after the statement committed is harmless on the retry. Exported for the unit test.
+ */
+export async function withDbRetry<T>(label: string, step: () => Promise<T>, opts: { attempts?: number; baseMs?: number } = {}): Promise<T> {
+  const attempts = opts.attempts ?? 5;
+  const baseMs = opts.baseMs ?? 500;
+  for (let n = 1; ; n++) {
+    try {
+      return await step();
+    } catch (err) {
+      const message = String((err as { message?: unknown })?.message ?? err) + String((err as { cause?: unknown })?.cause ?? "");
+      if (n >= attempts || !DB_DROP.test(message)) throw err;
+      console.warn(`[domains-ui-fixture] ${label}: connection dropped, retry ${n}/${attempts - 1}`);
+      await new Promise((resolve) => setTimeout(resolve, baseMs * 2 ** (n - 1)));
+    }
+  }
+}
+
+/**
+ * Removes any fixture org a crashed or dropped run left, and its fixed-id person. Safe to call at any time
+ * and from globalSetup: it touches only `e2e-domui-<digits>` orgs and the fixture's own fixed person id.
+ */
+export async function sweepStaleDomainsUiFixtures(sql: Sql): Promise<number> {
+  const stale = await withDbRetry("list stale orgs", async () => (await sql`select id from organizations where slug ~ '^e2e-domui-[0-9]+$'`) as { id: string }[]);
   for (const { id } of stale) await removeById(sql, id);
-  await sql`delete from people where id = ${PERSON_ID}::uuid`;
+  await withDbRetry("delete fixture person", () => sql`delete from people where id = ${PERSON_ID}::uuid`);
+  return stale.length;
+}
+
+async function removeStale(sql: Sql): Promise<void> {
+  await sweepStaleDomainsUiFixtures(sql);
 }
 
 async function removeById(sql: Sql, orgId: string): Promise<void> {
   // The derived-roster trigger refuses the cascade a fixture org's delete fires against its
-  // group_memberships; disabled around the delete, as every other fixture teardown here does.
-  await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
+  // group_memberships; disabled around the delete, as every other fixture teardown here does. The whole
+  // disable/delete/enable unit is retried, so a drop between the statements can never leave the trigger off:
+  // the next attempt re-disables, deletes and re-enables, and a final failure still tries to re-enable.
   try {
-    await sql`delete from organizations where id = ${orgId}::uuid`;
+    await withDbRetry(`delete org ${orgId}`, async () => {
+      await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
+      try {
+        await sql`delete from organizations where id = ${orgId}::uuid`;
+      } finally {
+        await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+      }
+    });
   } finally {
-    await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+    await withDbRetry("re-enable roster trigger", () => sql`alter table group_memberships enable trigger group_memberships_reject_derived`);
   }
-  await sql`delete from people where id = ${PERSON_ID}::uuid`;
+  await withDbRetry("delete fixture person", () => sql`delete from people where id = ${PERSON_ID}::uuid`);
 }
 
 /**
@@ -140,11 +187,11 @@ export async function setSiteStatus(sql: Sql, orgId: string, status: "provisioni
 export async function removeDomainsUiFixture(sql: Sql, fx: DomainsUiFixture | undefined): Promise<void> {
   if (!fx) return;
   assertSlug(fx.slug);
-  await sql`delete from organization_sites where organization_id = ${fx.orgId}::uuid`;
+  await withDbRetry("delete organization_sites", () => sql`delete from organization_sites where organization_id = ${fx.orgId}::uuid`);
   await removeById(sql, fx.orgId);
-  const left = (await sql`select 1 from organizations where id = ${fx.orgId}::uuid`) as unknown[];
+  const left = await withDbRetry("confirm org gone", async () => (await sql`select 1 from organizations where id = ${fx.orgId}::uuid`) as unknown[]);
   if (left.length > 0) throw new Error(`[domains-ui-fixture] ${fx.slug} was not removed`);
-  const rows = (await sql`select 1 from organization_domains where organization_id = ${fx.orgId}::uuid`) as unknown[];
+  const rows = await withDbRetry("confirm domain rows gone", async () => (await sql`select 1 from organization_domains where organization_id = ${fx.orgId}::uuid`) as unknown[]);
   if (rows.length > 0) throw new Error(`[domains-ui-fixture] domain rows of ${fx.slug} survived its removal`);
 }
 

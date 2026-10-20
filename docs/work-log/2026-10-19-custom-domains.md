@@ -27,7 +27,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-19 |
 | 3 — Technical design | tech-lead | Complete (architect addendum A1–A6 folded 2026-10-19) | Design complete; implementers named; T1–T7 confirmed by the architect; Batch 1a-i ready for database-admin | 2026-10-19 |
 | 4 — Implementation | 1a-i database-admin → 1a-ii full-stack-developer · 1b full-stack-developer · 1c full-stack-developer (after PR #31 + rebase) · 1d ux-developer · 2a database-admin → api-developer · 2b, 2c api-developer | In progress: **Batch 1a-i complete** (database-admin; `0057` applied twice to `pipeline-custom-domains`, test-rls-47 114/114 as `presby_app`, stock suite unchanged vs baseline); **Batch 1a-ii complete** (full-stack-developer; `src/lib/domains/` service, DNS adapter, tenant and platform actions, catalog/tile/bundle edits; typecheck, lint, `npm run check`, build green; test-rls-47 still 114/114); **Batch 1b complete** (full-stack-developer; Vercel adapter + fake, probe client, `/api/cron/domains` sweep, the full `observeAndAdvance` lifecycle, platform hold / force-release / check, reattach script; typecheck, lint, `npm run check`, unit, DB-backed suites, test-rls-47 114/114, build green); **Batch 1c complete** (full-stack-developer; proxy first branch + probe + A6 cron pass-through, `check:proxy-imports`, `next.config.ts` host split + boot assertion, `resolveSite`/`SiteUrls`, 307s, robots, neutral 404, `donorOrigin`; typecheck, lint, `npm run check` (eight tripwires), unit 6,697, DB-backed suites, test-rls-47 114/114, build, auth gate 101 passed incl. MFA-enrolled login, `custom-hosts` 68 passed on dev and on a production build, `npm run test:e2e:prod` 65 passed); **Batch 1d complete** (ux-developer; org page, platform section and list, toggles UI, follow-ups A and B; typecheck, lint, `npm run check`, unit 6,876, DB-backed suites, test-rls-47 114/114, build, `custom-hosts` 98 passed on dev, `test:e2e:prod` 67 passed); QA next | — | 2026-10-19 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 complete; loop-back (F-1 fixed by orchestrator; F-2 to full-stack) | FAIL (run 1) | 2026-10-20 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1980,6 +1980,7 @@ Activity isolation is application-enforced (Deviation 3). The `loading.tsx` abse
 - Unit: `npm run test` (6,876), plus `npm run check`, `npm run lint`, `npm run typecheck`, `npm run build`.
 - DB-backed, serial (`npx dotenv -e .env.local -- vitest run --no-file-parallelism --testTimeout=180000 <file>`): `src/lib/domains/service.db.test.ts` (97), `sweep.db.test.ts` (71; report any retried test by name, ruling 4c), `serving.db.test.ts`, `platform-read.db.test.ts` (13), `toggles.db.test.ts`, `service-only-writes.test.ts`, `src/lib/db/domain/domains.db.test.ts`, `domains.schema.test.ts`, plus the 1b/1c giving and sites suites. Expect the Neon "Connection terminated" flake after a run; judge by test counts.
 - RLS: `psql "$APP_DATABASE_URL" -f scripts/domains/test-rls-47.sql` (114).
+<!-- leak-ok: non-secret e2e literals (the defaults in playwright.config.ts and the giving specs), not credentials -->
 - E2E (start a dev server with `RATE_LIMIT_DISABLED=true CRON_SECRET=giving-e2e-cron-secret STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=$PWD/.tmp/domains-fake-state.json`, set `E2E_BASE_URL`; the spec's state file path is that exact default): `--project=custom-hosts e2e/custom-domains` (98: `serving`, `lockdown`, `forms-and-giving`, `headers`, `domains-admin`, `domains-platform`); the auth gate `--project=chromium` `totp-full-login`, `totp-callback-bypass`, `post-login-routing`, `role-boundaries`, `admin-login`, `security-headers`, `public-sites`, `giving-public`, `branded-signin`, `giving-webhook`, `hydration/giving-give-form`, and `admin-organizations*` (the org page gained a section); `npm run test:e2e:prod` (67, stop any dev server first: it builds into `.next`).
 - Manual: the real-domain acceptance pass is still ahead of go-live.
 
@@ -2009,6 +2010,165 @@ Activity isolation is application-enforced (Deviation 3). The `loading.tsx` abse
 ## Implementer Notes
 
 [Tradeoffs taken, anything that diverged from the design and why.]
+
+---
+
+## Phase 5 loop-back — F-2 and e2e hardening (full-stack-developer)
+
+**Date:** 2026-10-20 · **Scope:** test and harness code only; no `src/` change, no schema, no new env var or flag. Pipeline Neon branch `ep-dry-tree-axyn61wx` only. My own dev server on `:3114` (stopped; `:3000` untouched), Playwright-owned `:3800` for the production lane.
+
+### F-2 (A6 dot-segment coverage)
+
+- **Measured truth, as QA recorded:** Next collapses dot-segments (literal and `%2e` / `%2E`) before the proxy runs, so the proxy sees the exact path. Without the bearer the variant is the neutral `/api/*` 404; with the valid bearer it reaches the handler exactly as the exact path does (A6: "unless Next has already normalized them"). The bearer, not the spelling, is the credential.
+- `e2e/support/custom-hosts.ts`: new `rawPathGet()` - a `node:http` GET that sends the request-target verbatim (Playwright's client and browsers normalize `.`/`..` before sending, so they cannot test this), explicit `Host`, gzip requested and decoded so the header set matches a normal request, same 20 s timeout and one counted stall-retry as `rawGet`; returns the `shape()` reduction plus raw headers. Verified against a local echo server that `/api/cron/./email-queue`, `/x/../` and `/x/%2e%2e/` arrive un-normalized.
+- `e2e/custom-domains/lockdown.spec.ts`: title corrected (the old test never contained a dot-segment: "encoded, upper-case and extra-segment variants..."); header comment corrected; new `raw dot-segment paths (sent un-normalized)` block, nine variants (`./`, `x/../`, `%2e`, `%2E`, `x/%2e%2e/`, `x/%2E%2E/`, `x/.%2e/`, `%2e%2e/cron/`, `/api/cron/./giving`):
+  1. no bearer: 404 **byte-identical** (status, all non-volatile headers, visible body) to the custom-host `/api/auth/csrf` 404, no `Set-Cookie`;
+  2. control that the harness is not silently normalizing: wrong-bearer response equals the no-bearer response, and the unclaimed host answers 404 too;
+  3. valid bearer: same status as the exact path (200), `application/json`, `ok: true`, no `Set-Cookie`;
+  4. a dot-segment that climbs **out** of `/api/cron` (`/api/cron/../auth/csrf`, `%2e%2e`, `x/../../auth/session`) is 404 and non-JSON with or without the bearer.
+- First run failed once on a harness difference (the node client sent no `Accept-Encoding`, so the reference carried `content-encoding: gzip` and the raw response did not); fixed in `rawPathGet`, not by loosening the assertion.
+
+### (a) Toast timeouts
+
+`e2e/custom-domains/domains-admin.spec.ts`: `ACTION_MS = 20_000` (comment: domain POSTs take 3-5.3 s on Neon; ceiling, not a delay). Applied to every post-action toast expectation (12) and to the card-state expectations that wait on the same POST's revalidation (`data-phase` x10, the claim card's first appearance, the "Primary address" tag, the primary-advisory removal).
+
+### (b) Fixture teardown resilience
+
+- `e2e/support/domains-ui-fixture.ts`: `withDbRetry()` (5 attempts, 0.5/1/2/4 s backoff, only for connection-drop errors - `fetch failed`, `Connection terminated`, `ECONNRESET`, timeouts; a constraint error throws at once). Wraps every teardown step: the `organization_sites` delete, the whole disable-trigger / delete-org / enable-trigger unit (re-run as a unit, plus a final retried re-enable, so a drop between statements cannot leave `group_memberships_reject_derived` disabled), the person delete, and both confirm SELECTs. New exported `sweepStaleDomainsUiFixtures()` (touches only `e2e-domui-<digits>` orgs and the fixture's fixed person id); setup's `removeStale` now uses it.
+- `e2e/support/global-setup.ts`: calls the sweep with the owner URL before any session is acquired, so a leak from an earlier run is gone before the MFA user signs in for any spec (a failure throws; it does not warn and carry on).
+- Unit behaviour checked ad hoc (`tsx`): succeeds after 2 simulated drops; a non-drop error throws after 1 attempt; exhausts after 5 attempts.
+- **Proof (b) holds:** I deliberately leaked an `e2e-domui-*` org with a membership for the MFA user, then ran `totp-full-login` + `totp-callback-bypass`: globalSetup logged `swept 1 stale e2e-domui-* organization(s)`, **8 passed**, and a follow-up SELECT shows 0 `e2e-(domui|domains)-` orgs and 0 fixture person rows.
+
+### Also
+
+`npm run check` was red at HEAD only because QA's own Phase 5 text (line ~2025) quotes the same non-secret e2e literals the orchestrator already annotated at the 1d handoff line; added the matching `<!-- leak-ok: ... -->` line above it.
+
+### Commands and results
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm run check` (all tripwires, incl. `check:secrets`) | exit 0 |
+| Dev `:3114`, `--project=custom-hosts`: `lockdown` + `domains-admin` + `domains-platform` | **59 passed**, exit 0, no fixture-retry or request-stall warning in the log |
+| Dev `:3114`, `--project=chromium`: `hydration/domains-claim-form`, `totp-full-login` (MFA-enrolled), `totp-callback-bypass`, `post-login-routing`, `role-boundaries` | **27 passed**, exit 0 |
+| Dev `:3114`, deliberate leak then `totp-full-login` + `totp-callback-bypass` | sweep removed 1 org, **8 passed**, exit 0 |
+| `npm run test:e2e:prod` (build + `next start :3800`; `prod-build` hydration incl. `domains-claim-form`, `prod-custom-hosts` incl. all four new raw dot-segment tests) | **71 passed**, exit 0 |
+
+`domains-admin.spec.ts` is not in the `prod-custom-hosts` project by design (the fake DNS state file is ignored under `NODE_ENV=production`); it ran on dev only. First dev attempt at the new block had one `beforeAll` Neon error on `setPublicRenderFlag` (environmental); the re-run passed.
+
+### Files modified
+
+`e2e/custom-domains/lockdown.spec.ts`, `e2e/custom-domains/domains-admin.spec.ts`, `e2e/support/custom-hosts.ts`, `e2e/support/domains-ui-fixture.ts`, `e2e/support/global-setup.ts`, this work-log. Nothing committed.
+
+### Handoff
+
+Back to qa for run 2: F-1 (orchestrator) and F-2 (above) are closed; (a) and (b) folded in. The (c) TODOs (RLS-anchored activity read, the 7 leaked people from `giving/access.test.ts`, 1c Deviation 10 correction) remain with tech-lead / the integration list.
+
+---
+
+# Phase 5 — Verification (qa) — run 1 (Increment 1, web)
+
+**Date:** 2026-10-20 · **Verified by:** qa (read-only; recorded by the orchestrator) · **Subject:** `pipeline/custom-domains` @ `15bcc5c` vs `main`.
+
+**Environment:** Neon `ep-dry-tree-axyn61wx` only (all four `.env.local` URLs checked before any write). Servers started and stopped by PID: dev `:3113`, `next start` `:3801`; Playwright owned `:3800`; port 3000 never touched. Fixture writes only on the pipeline branch through the repo's e2e helpers along legal edges, all torn down (0 `e2e-dom*` orgs left), `sites.public_render` restored.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**. `npm run lint`: **PASS**.
+<!-- leak-ok: QA quotes the non-secret e2e literals (playwright.config.ts defaults) it found at the 1d handoff line; not credentials -->
+- `npm run check`: **FAIL** (exit 1) — `check:secrets` soft finding at the work-log's 1d QA-handoff line (`CRON_SECRET=giving-e2e-cron-secret STRIPE_WEBHOOK_SECRET=…`), non-secret e2e literals, but CI runs `npm run check` (`.github/workflows/ci.yml:37`). The remaining tripwires run separately all pass (`check:audit`, `check:sql-date`, `check:deps-drift`, `check:brand-scope`, `check:hydration-gate`, `check:giving-boundaries`, `check:proxy-imports`).
+- `npm run check:schema-parity`: **PASS** (83 tables, 7 differences, all allowlisted, 0 failing). `npm run build`: **PASS** (`/o/[slug]/admin/domains`, `/admin/organizations/domains`, `/api/cron/domains`, `/site/[slug]/robots.txt` in the route table).
+
+## Unit Tests
+
+- `npm run test`: 6,876 passed, 1,888 skipped (DB-gated), 0 failed, exit 0.
+- **DB lane** (`npm run test:db -- --testTimeout=180000 --hookTimeout=180000`, serial): 8,760 passed, 3 failed, 1 skipped, 3,995 s, exit 1. `giving/ingest/apply.db.test.ts:495` — `Connection terminated unexpectedly` (Neon drop), re-run alone 53/53. `db/fixture-deletable.test.ts` (2 canary assertions) — 7 expired leaked people (`Odalys Viewer13`–`18`, `Talbot Outsider2`) created 2026-10-20 01:51 UTC by PR #31's `giving/access.test.ts:135/:257` (already on `main`), matching 1a-ii's recorded Neon drop in that file's cleanup — not this diff; now permanent on the pipeline branch. The skip is PR #31's opt-in `render-pdf.test.ts` sample writer. All domain suites passed first attempt: `service.db` 97/97, `sweep.db` 71/71, `serving.db`, `platform-read.db` 13/13, `toggles.db`, `service-only-writes`, `domains.db`, `domains.schema`.
+- **RLS** (`presby_app`, `rolbypassrls = f`): `scripts/domains/test-rls-47.sql` `ON_ERROR_STOP=1` exit 0, **114/114**. Stock `scripts/test-rls.sql` + §47 (no-stop scratch copy, §46 and §47 by absolute path): 1,038 passes; §47 114/114; §46 263; six FAILs, all the pre-existing drifts (`:127`, `:153`, `:184`, `:472`, `:7335`, `:7866`).
+
+## End-to-End Tests
+
+| Lane | Result |
+|---|---|
+| Dev `:3113` `chromium`: `totp-full-login` (MFA-enrolled), `totp-callback-bypass`, `post-login-routing`, `role-boundaries`, `admin-login`, `security-headers`, `public-sites`, `giving-public`, `branded-signin`, `giving-webhook`, `hydration/` (5), `admin-organizations`, `admin-organizations-create` | **128 passed**, 0 failed/skipped/flaky, exit 0 |
+| Dev `:3113` `custom-hosts`, all of `e2e/custom-domains/` (98) | Run 1: 95 passed, 1 failed (`domains-admin.spec.ts:220` Reconnect toast not seen within 5 s; the POST took 5.3 s), 2 did not run. File re-run 21/21. All 98 green across runs; no harness stalls |
+| `npm run test:e2e:prod` | Run 1: 65 passed, 2 failed (`statistics-congregation.spec.ts:144/:172`, `NeonDbError: fetch failed` in setup). Run 2: **67 passed**, one harness stall-retry |
+| Prod `:3801` `custom-hosts` | 81 passed, 3 failed, 14 did not run: `lockdown.spec.ts:369` stalled on request and retry (file re-run 25/25); `domains-admin.spec.ts:142`/`:418` structural — under `NODE_ENV=production` the fake DNS state file is ignored by design (`src/lib/domains/adapters/index.ts:50-56`), which the `prod-custom-hosts` project already excludes (those runs sent real DoH lookups for `.invalid` names; harmless, disclosed). On prod: `domains-platform` 9/9, `forms-and-giving` 9/9, `headers` 8/8, `serving` 26/26 |
+| Prod `:3801` `chromium`, auth-gate set | Run 1: 120 passed, 8 failed — 3 hydration `fetch failed`; the `domains-claim-form` teardown failed at `e2e/support/domains-ui-fixture.ts:143`, leaving an org holding a membership for the MFA user, so five TOTP specs (`totp-full-login.spec.ts:58`, `totp-callback-bypass.spec.ts:128/191/227/267`) timed out waiting for `/admin` because `/launch` correctly routed to `/home` (password → TOTP → landing worked). Re-run after the stale-org sweep **16/16** |
+
+**Auth-touching gate (R12; the diff touches `src/proxy.ts` and `src/app/(auth)/signin/page.tsx`): satisfied** — full MFA-enrolled login green on a dev server and a production build.
+
+### Independent measurements (production build `:3801`, raw `http.request` with explicit Host)
+
+1. **Identical-response invariant.** Baseline: a never-claimed host before any row existed. The same host walked through pending, verified, attach_pending, attached, lapsed, parked, release_pending, released; live with paused, disputed, toggle off, toggle row absent, site suspended, site provisioning, org inactive, `sites.public_render` off; plus an expired claim. Each **byte-identical** to the baseline on `/` and `/about` (status, all headers except `date`/`connection`/`content-length`, raw body unmasked). Two different unknown hosts differ only in the echoed host name. Positive control: `live` → 200 with the church's title. **Timing** (80 interleaved rounds): unknown p50 356 / p90 389 ms; seeded paused 355 / 386; fresh unknown per round 357 / 407 — indistinguishable.
+2. **No `Set-Cookie`** on page 200 and `/about`; 404 for unknown path and unknown host; asset (`immutable`), sitemap, robots; the alias 307 (`no-store`, `Location: https://www.church-one.invalid/about?x=1`); `/give`, `/signin`, `/api/auth/csrf`, `/api/auth/session`, `/admin`, `/o/x`, `/orgs`, `/home`, `/totp`; `/site/<other slug>` and `/site/<other host>`; the probe 204 (ack verified; replay on another host gets no ack); all four cron pass-throughs (200); POSTs. The real server-action POST is covered by `forms-and-giving`/`lockdown` (green).
+3. **Spoofing changes nothing.** Platform host with `X-Forwarded-Host`, `Forwarded`, `X-Original-Host`, `X-Host` naming a church → the platform page. Church host with forwarded headers naming another church → the requesting church. `/site/<dotted>` and `/site/…%2E…` on the platform host → 404. `/give` with a spoofed forwarded host never mentions it.
+4. **Cron negatives.** Same path (`/api/cron/email-queue`): no bearer, wrong, empty, wrong-length, lowercase `bearer`, `Basic`, Vercel UA + `x-vercel-cron-schedule` — byte-identical to each other; against `/api/auth/csrf` they differ only in the echoed path and Flight row ordering (1c Deviation 10 caveat). `%65`, `%2F`, upper-case, unlisted → 404. Trailing/doubled slash → Next's own 308 (same for any path). **Dot-segment forms** (`/api/cron/./email-queue`, `/x/../`, `%2e`, `/x/%2e%2e/`) with the valid bearer **reach the handler (200)** because Next normalizes before the proxy; without the bearer they 404 — A6's "unless Next has already normalized them" case: safe, but see F-2.
+5. **HSTS split (F147).** Platform `/`, `/signin`: `max-age=63072000; includeSubDomains`. Custom page, 404, `/give`: `max-age=63072000`. `/give` on a custom host carries the enforced CSP.
+6. **Record correction.** `next start` **does** send `x-middleware-rewrite: /site/<host>/<path>` (contrary to 1c Deviation 10). It echoes only the visitor's own host and path, identically across states — no tenancy leak. Vercel's behaviour goes to the acceptance pass.
+
+### Retried or re-run tests, by name (ruling 4c)
+
+- `sweep.db.test.ts` `retry: 1`: zero retries (71/71 first attempt).
+- Harness `withOneRetry`: `headers.spec.ts:64` passed after one retry (prod lane run 2); `lockdown.spec.ts:369` failed even after its retry, green on file re-run.
+- Failed once, passed on re-run: `domains-admin.spec.ts:196` (timing margin), `apply.db.test.ts:495`, `statistics-congregation.spec.ts:144/:172`, the 3 hydration + 5 TOTP prod failures (the Neon cascade). No test retried in every run.
+
+## Regression Tests Added
+
+Feature pipeline: tests were written alongside the code with recorded mutation checks; QA cannot confirm any failed before its fix. Guards for Phase 4 defects: `sweep.db.test.ts:1019` (a correct record judged against generic targets, 1b); `e2e/custom-domains/serving.spec.ts:116` (neutral 404 title flip on hydration, 1c); the `serving.spec.ts:104` canary (`**.invalid`, 1c); `sweep.db.test.ts:~1440-1454` (the `ensureCanonical` notice, 1d follow-up B).
+
+## Coverage on Critical Modules
+
+`permissions.ts` 100%; `two-factor.ts` 91.3% statements, 100% branches; `flags.ts` 100%. New pure modules: `domains/state.ts`, `cron-passthrough.ts`, `probe.ts`, `debounce.ts`, `policy.ts`, `site-urls.ts` 100%; `checklist.ts` 98.7%; `host.ts` 97.6%; `hostname-rules.ts` 96.7%; `activity.ts` 85.5%.
+
+## Feature-Gate Audit
+
+| Route or action | `auth()` present? | Gate present? | Correct key? |
+|---|---|---|---|
+| `claimDomainAction`, `checkDomainAction`, `changeCanonicalAction`, `removeClaimAction`, `reconnectClaimAction` (`(org)/o/[slug]/admin/domains/actions.ts:95-119`) | yes, then `resolveOrgContext`; org id never from the client | inside `withOrgContext`: `presby_has_permission(…,'domains.manage')` then the `org_portal.domains` toggle (`service.ts:430-455`), at `:594`, `:1595`, `:1754`, `:1838`, `:1939` | `domains.manage` |
+| page `/o/[slug]/admin/domains` | yes + `resolveOrgContext` + `assertOrgAccess` | `readDomainsView` (`service.ts:2035`) | `domains.manage` |
+| `claimDomainForOrgAction`, `setOrgDomainFeatureAction`, `checkDomainPlatformAction`, `setDomainHoldAction`, `forceReleaseDomainAction` (`[id]/domains-actions.ts:88-91`) | yes | yes | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `/admin/organizations/domains` (`:84-85`), `/admin/organizations/[id]` (`:77-78`), `/admin/organizations` (`:53-54`) | yes | yes (Edge `/admin` a complement) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `GET /api/cron/domains` | n/a | `CRON_SECRET` bearer, constant time; 503 unset, 401 wrong (`route.ts:64-69`) | n/a |
+| `api/cron/{email-queue,maintenance,giving}`, `[id]/actions.ts`, `api/sites/ingest`, `(auth)/signin/page.tsx` | unchanged | unchanged (host-class log line or `slugSitePath()` only) | n/a |
+| Public `submitContactMessageAction`, give actions | n/a (anonymous) | key re-resolved; host mode requires `Host === key` (`sites.ts:607-613`) | n/a |
+
+**Audit coverage (R8):** `service.db.test.ts:1054-1162` — one test per edge pinned to `state.EDGES` (30), each asserting exactly one audit row with the right key, actor, metadata and no token; `:1164` rollback atomicity; non-edge writes: claimed `:355`, `canonical_changed` `:766`/`:874`, hold set/cleared `sweep.db.test.ts:1543-1576`, toggle `toggles.db.test.ts:49`.
+
+## Schema/RLS Audit (live catalog, pipeline branch)
+
+`organization_domains`: `relrowsecurity`/`relforcerowsecurity` `t`; one `tenant_isolation` policy (USING and WITH CHECK on `presby_current_org()`); `presby_app` table SELECT, column INSERT on 8, column UPDATE on 14, no DELETE; trigger-owned (`grace_ends_at`, `state_changed_at`, `proof_verified_at`, `attached_at`, `live_at`, `released_at`) and owner-only (`platform_hold`, `hold_reason`, `force_release_reason`, `expires_at`) columns outside its grants; three guards enabled; functions SECURITY DEFINER with `search_path=public, pg_temp`; serving helper owner-only; `published_site`, `by_host`, `current_org_site_status` owner + `presby_app`; no PUBLIC.
+
+| Probe (as `presby_app`, rolled back) | Result | Refusing layer |
+|---|---|---|
+| Insert and read under Alder Creek GUC | 1 row (positive control) | — |
+| Read/update that row under Bramblewood GUC | 0 rows / 0 updated | RLS USING |
+| Cross-org insert | "violates row-level security policy" | RLS WITH CHECK |
+| `UPDATE grace_ends_at`, `UPDATE platform_hold`, `DELETE` | permission denied | grant |
+| `pending → live` | "not a legal edge" | trigger |
+| Owner connection `parked → release_pending` shortcut | refused, 23514 | trigger |
+| Call the serving helper | permission denied for function | EXECUTE ACL |
+| Any read with no GUC | 0 rows | RLS |
+
+`audit_events`: no RLS; `presby_app` holds INSERT, SELECT; with no GUC `presby_app` reads 154 `domain.*` rows across 16 orgs (posture predates this pipeline, 0048).
+
+**Ruling on 1d Deviation 3 (Recent activity reads `audit_events` on the tenant connection): ACCEPTABLE for Increment 1, not a FAIL.** The org id comes from `resolveOrgContext` (membership verified) and is re-checked by `withOrgContext` and the `domains.manage` + toggle gate; the filter is `action like 'domain.%' and metadata->>'organizationId' = $bound` (`service.ts:2080-2090`); every `domain.*` writer stamps `organizationId` from the RLS-visible row or the server-derived org (`service.ts:405`, `:665`, `:1507`, `:1778`, `:1876`, `:2281`), and no caller passes `opts.metadata` (the only override seam, `:417`); output reduced to `{at, id, text, who}`; a negative test asserts org B's rows are absent (`service.db.test.ts:1011`). It does **not** meet F152's acceptance condition (tenant reads reach a non-RLS table only by joining from their own RLS-filtered rows). Every `domain.*` row carries `resource_type = 'organization_domain'` and a non-null `resource_id` (222/222), so a no-schema RLS anchor is available: `and resource_type = 'organization_domain' and resource_id in (select id::text from organization_domains)`. Recommend tech-lead records a named residual and adds that anchor (or a definer reader) as a TODO before Increment 2 copies the pattern for `mail_domain.*`.
+
+**Item 7:** no `loading.tsx`; no native dialogs (the `confirm()` hits are AlertDialog handlers); no new `console.log` except the pre-existing maintenance-cron line now carrying the host class; other new logging `console.info/warn/error` with no error text; no real data (`*.invalid`; placeholder `yourchurch.org`).
+
+## Verdict
+
+**FAIL** (handed back to Phase 4):
+- **F-1 (`automated-test`):** `npm run check` exits 1 (CI `.github/workflows/ci.yml:37`); the finding is the work-log's 1d handoff line. Fix: a `<!-- leak-ok: … -->` annotation or reword. Owner: ux-developer or the orchestrator.
+- **F-2 (coverage gap, A6 binding gate):** `e2e/custom-domains/lockdown.spec.ts:402` is titled "encoded, **dot-segment**, upper-case and extra-segment variants never reach a handler" but its variants (`:403-412`) contain no dot-segment form, and the measured behaviour is the opposite of the title (Next-normalized dot-segment paths with the valid bearer reach the handler — safe and A6-permitted, but untested and misdescribed). Fix: raw-path cases (`http.request` or `curl --path-as-is`) for `./`, `../`, `%2e`, `%2e%2e` — 404 without the bearer, and with it the same response as the exact path; correct the title. Owner: full-stack-developer.
+
+Fold in (non-blocking): (a) explicit toast timeouts above 5 s in `domains-admin.spec.ts` (domain POSTs run 3–5.3 s on Neon; `:196` failed once); (b) make `e2e/support/domains-ui-fixture.ts` teardown resilient to a Neon drop (a leaked org changes the MFA user's landing and cascades into the auth gate); (c) TODOs: the RLS-anchored activity read; the 7 permanent leaked people from `giving/access.test.ts`'s non-retrying teardown; correct 1c Deviation 10 on `x-middleware-rewrite`.
+
+Everything else would pass: identical-response invariant, timing, cookies, spoofing, gates, schema/RLS posture, and the full MFA-enrolled login on dev and prod.
+
+**Per-Phase Status:** | 5 — Verification | qa | Complete | FAIL (F-1 check:secrets at the work-log; F-2 A6 dot-segment coverage gap at e2e/custom-domains/lockdown.spec.ts:402); auth gate green on dev + prod build; identical-response measured byte-identical | 2026-10-20 |
+
+**Orchestrator, 2026-10-20:** F-1 fixed by the orchestrator — a `<!-- leak-ok: non-secret e2e literals … -->` annotation above the handoff line; `npm run check` now exits 0. F-2 and (a)/(b) loop back to full-stack-developer; (c) and the Deviation 3 residual go to tech-lead / the integration TODO list.
 
 ---
 

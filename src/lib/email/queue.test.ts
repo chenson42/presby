@@ -82,6 +82,10 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { computeNextAttemptAt, enqueueEmail, processQueueBatch, recordDeliveryEvent } from "./queue";
+import { renderEmail } from "./render";
+
+// Every message is a RenderedEmail (DECISION-191): build one through the layout.
+const message = renderEmail({ subject: "Test", heading: "Test", blocks: [{ kind: "p", text: "Test" }] });
 
 // ---------------------------------------------------------------------------
 // Backoff math — computeNextAttemptAt
@@ -340,8 +344,7 @@ describe("enqueueEmail — persist-first behavior", () => {
 
     const result = await enqueueEmail({
       to: "user@example.com",
-      subject: "Test",
-      html: "<p>Test</p>",
+      message,
       templateKey: "password_reset",
     });
 
@@ -352,14 +355,23 @@ describe("enqueueEmail — persist-first behavior", () => {
     expect(result.id).toBe("test-id-123");
   });
 
+  it("stores the rendered subject, html and text parts of the message (DECISION-018, DECISION-191)", async () => {
+    process.env.EMAIL_DEV_INTERCEPT = "1";
+    await enqueueEmail({ to: "user@example.com", message, templateKey: "password_reset" });
+    const stored = mockInsertValues.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(stored.subject).toBe(message.subject);
+    expect(stored.htmlBody).toBe(message.html);
+    expect(stored.textBody).toBe(message.text);
+    expect(stored.textBody).toEqual(expect.any(String));
+  });
+
   it("Case B (inline failure): db.insert called; returns sentInline=false with backoff update", async () => {
     delete process.env.EMAIL_DEV_INTERCEPT;
     mockSendEmail.mockRejectedValue(new Error("Resend down"));
 
     const result = await enqueueEmail({
       to: "user@example.com",
-      subject: "Test",
-      html: "<p>Test</p>",
+      message,
       templateKey: "password_reset",
     });
 

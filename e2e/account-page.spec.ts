@@ -89,6 +89,31 @@ test.describe("Account page (/account)", () => {
       "should stay on /account/2fa",
     ).toBe("/account/2fa");
   });
+
+  test("/account/2fa enrolment takes the code in six labelled boxes, enabled after hydration, with no box grabbing focus on load", async ({ page }) => {
+    // Arrange
+    await signIn(page);
+
+    // Act
+    await page.goto("/account/2fa");
+
+    // Assert — the shared one-time-code input (review-polish Batch B). It sits
+    // below the QR instructions, so it must NOT take focus on load (Phase 2 R2.2:
+    // on a phone that would scroll past the QR code and cover it with the keyboard).
+    const group = page.getByRole("group", { name: /6-digit code from your app/i });
+    await expect(group).toBeVisible();
+    const first = page.getByLabel(/^digit 1 of 6$/i);
+    await expect(first, "boxes are enabled once the HydrationGate lifts").toBeEnabled();
+    for (let n = 1; n <= 6; n++) {
+      await expect(page.getByLabel(new RegExp(`^digit ${n} of 6$`, "i"))).toBeVisible();
+      await expect(page.getByLabel(new RegExp(`^digit ${n} of 6$`, "i"))).not.toBeFocused();
+    }
+    // Typing still advances (the same component as /totp), without submitting.
+    await first.click();
+    await page.keyboard.type("123");
+    await expect(page.getByLabel(/^digit 4 of 6$/i)).toBeFocused();
+    expect(new URL(page.url()).pathname).toBe("/account/2fa");
+  });
 });
 
 test.describe("Email verification landing (/account/verify-email/[token])", () => {

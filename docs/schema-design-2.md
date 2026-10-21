@@ -1744,6 +1744,34 @@ deliberately ships no writer. What I did, and deliberately did not do:
 
 **F152 — `DROP`/`CREATE` of `presby_published_site(text)` resets its ACL and the `search_path` pin from `0048`** (the same drift as F38). `0057` re-applies and asserts both (owner plus `presby_app`, no `PUBLIC`; `search_path = public, pg_temp`), inside a top-level `begin; … commit;`, so **`0057` must be applied without `psql -1`** (the inner `commit` would otherwise end the outer transaction early). Separately, `email_queue` has no RLS and `presby_app` holds full DML, so org-attributed mail (Increment 2) is readable across orgs on a tenant-connection bug. Accepted on two conditions: tenant reads reach it only by joining from their own RLS-filtered rows (as `giving_statement_deliveries` does), and `test-rls` asserts both ACLs. **The same condition governs `audit_events`:** a tenant-connection read of it must be anchored by `resource_type` plus `resource_id in (select id::text from <the org's own RLS table>)`, never by an application-written metadata field alone. Increment 1's "Recent activity" read began as a named violation of that condition and **Batch 1e (2026-10-20) closed it for the row set** (DECISION-180 (iii)); the row *content* being service-written is accepted, and the `mail_domain.*` reader must be anchored from its first line (Batch 2c).
 
+## 2r. Review polish — findings (F160–F165)
+
+*(2026-10-21, `docs/work-log/2026-10-21-review-polish.md` Phases 2–6; no migration, DECISION-190–193; recorded by the orchestrator at integration. F160 to F164 are Phase 2 findings; F165 was found in Phase 3 while converting the senders. None is a schema finding; they are recorded here because this is the project's findings series.)*
+
+### F160 — the brand-scope tripwire reads email strings as markup
+
+**F160 — `check:brand-scope` scans every `.ts`/`.tsx` under `src/`,** and its C2 `<table` rule and E3 `<style` rule assume React markup, so any HTML-email string trips them. **Resolved** by R12, not by changing the tripwire: the email layout uses inline styles only, no `<style` anywhere under `src/lib/email/`, and a single annotated table helper (`render.ts`, `ui-ok`). `check:brand-scope` passes with no new exemption.
+
+### F161 — the email-change message put the new address into HTML unescaped
+
+**F161 — `email_change_verify` interpolated `newEmail` into `<strong>${newEmail}</strong>`** (`src/app/(account)/account/actions.ts`), mitigated only by the upstream email-format check. **Closed** structurally by DECISION-191: `renderEmail` escapes every content string. Regression test: `src/lib/email/account-messages.test.ts:37` (a hostile `<img src=x onerror=1>@example.invalid` is escaped in `html` and raw in `text`). Shipped inside the single `feat(email)` commit (Phase 3 edge case 11), not as a separate `fix:`.
+
+### F162 — ticket and feedback subjects were HTML-escaped
+
+**F162 — the ticket and feedback senders HTML-escaped the subject** (`src/lib/tickets-notifications.ts`, `feedback/actions.ts`), so "Q&A" arrived as "Q&amp;A", and CR/LF was not stripped. **Closed** class-wide: `renderEmail` owns the subject, never escapes it, and collapses whitespace and CR/LF. The feedback half is moot in practice, since feedback categories are allow-listed and the subject can never hold an escapable character; the class is covered by `render.test.ts` and the ticket tests (`tickets/actions.test.ts:317`, `tickets-notifications.test.ts`).
+
+### F163 — the palette-literal ban is enforced only by review
+
+**F163 — roughly 80 Tailwind palette literals** (red, green, amber, blue and yellow families alone) remain in `src/**/*.tsx`, including `/signin`'s error panels and the `/admin/organizations/[id]` forms. This pipeline removed two (`/totp`'s `text-red-500`, the organizations Branded badge) and added none. **Open:** a tree-wide sweep or a tripwire is a `docs/TODO.md` line.
+
+### F164 — the recovery-code path had no running-server coverage
+
+**F164 — the `/totp` recovery-code path, the lockout escape hatch, had no e2e coverage;** every spec typed only a six-digit code. **Closed** by `e2e/totp-recovery-code.spec.ts` (`:49`, `:115`), which asserts the persisted `totp.recovery_failed` and `totp.recovery_succeeded` audit rows, `used_at`, and that a used code fails on second use. New coverage, not a code fix.
+
+### F165 — ticket and feedback mail carried relative links
+
+**F165 — `tickets-notifications.ts` and `feedback/actions.ts` put relative hrefs** (`/admin/tickets/{id}`, `/o/{slug}/tickets/{id}`, `/admin/feedback`) into outbound mail, where a relative URL resolves to nothing. **Closed** by DECISION-191 (an absolute `http(s)` `href` is required) and DECISION-193 (d): links are built from `platformOrigin()` and the button is omitted when it is `null`. Regression coverage: `feedback/actions.test.ts:489` and five cases in `tickets-notifications.test.ts`.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

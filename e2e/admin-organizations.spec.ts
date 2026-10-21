@@ -113,6 +113,106 @@ test.describe("Admin — /admin/organizations list", () => {
     // fixture is still present under the filter.
     await expect(page.getByText(ALPHA_ORG_NAME)).toBeVisible({ timeout: 10_000 });
   });
+
+  // ---- Review-polish Batch C: the council tree and its filters ----------
+  const PRESBYTERY_NAME = "Presbytery of the Eastern Fells";
+
+  test("tree: the presbytery row precedes its congregations, which sit deeper", async ({
+    page,
+  }) => {
+    await page.goto("/admin/organizations");
+    const pres = page.locator("tr", { hasText: PRESBYTERY_NAME }).first();
+    const alpha = page.locator("tr", { hasText: ALPHA_ORG_NAME });
+    await expect(alpha).toBeVisible({ timeout: 10_000 });
+    const presDepth = Number(await pres.getAttribute("data-depth"));
+    const alphaDepth = Number(await alpha.getAttribute("data-depth"));
+    expect(alphaDepth).toBeGreaterThan(presDepth);
+    const rows = await page.locator("tbody tr").evaluateAll((trs) =>
+      trs.map((t) => t.textContent ?? ""),
+    );
+    const presIdx = rows.findIndex((t) => t.includes(PRESBYTERY_NAME));
+    const alphaIdx = rows.findIndex((t) => t.includes(ALPHA_ORG_NAME));
+    expect(presIdx).toBeGreaterThanOrEqual(0);
+    expect(presIdx).toBeLessThan(alphaIdx);
+  });
+
+  test("filter by name: the match is emphasised, its presbytery is dimmed with no Manage link", async ({
+    page,
+  }) => {
+    await page.goto("/admin/organizations?q=wrenfield");
+    const alpha = page.locator("tr", { hasText: ALPHA_ORG_NAME });
+    await expect(alpha).toHaveAttribute("data-match", "true", { timeout: 10_000 });
+    await expect(alpha.getByRole("link", { name: /manage/i })).toBeVisible();
+    const pres = page.locator("tr", { hasText: PRESBYTERY_NAME });
+    await expect(pres).toHaveAttribute("data-match", "false");
+    await expect(pres.getByRole("link", { name: /manage/i })).toHaveCount(0);
+  });
+
+  test("filter by type: congregations match, their presbytery stays as context", async ({
+    page,
+  }) => {
+    await page.goto("/admin/organizations?type=congregation");
+    await expect(page.locator("tr", { hasText: ALPHA_ORG_NAME })).toHaveAttribute(
+      "data-match",
+      "true",
+      { timeout: 10_000 },
+    );
+    await expect(page.locator("tr", { hasText: PRESBYTERY_NAME })).toHaveAttribute(
+      "data-match",
+      "false",
+    );
+  });
+
+  test("unknown type/status values are ignored: 200 and the unfiltered tree", async ({
+    page,
+  }) => {
+    const response = await page.goto("/admin/organizations?type=bogus&status=nonsense");
+    expect(response?.status()).toBe(200);
+    await expect(page.locator("tr", { hasText: PRESBYTERY_NAME })).toHaveAttribute(
+      "data-match",
+      "true",
+      { timeout: 10_000 },
+    );
+    await expect(page.getByText(/organizations match/)).toHaveCount(0);
+  });
+
+  test("the GET form round-trips into the URL and Clear filters resets it", async ({
+    page,
+  }) => {
+    await page.goto("/admin/organizations");
+    await page.getByLabel("Name").fill("wrenfield");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(/q=wrenfield/, { timeout: 10_000 });
+    await page.getByRole("link", { name: "Clear filters" }).click();
+    await expect(page).toHaveURL(/\/admin\/organizations$/);
+  });
+
+  test("nothing matching shows the empty state with a way out", async ({ page }) => {
+    await page.goto("/admin/organizations?q=zzzz-no-such-church");
+    await expect(page.getByText("Nothing matches these filters.")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("at 360px the name and Manage stay visible and the page does not scroll sideways", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto("/admin/organizations?q=wrenfield");
+    const alpha = page.locator("tr", { hasText: ALPHA_ORG_NAME });
+    const manage = alpha.getByRole("link", { name: /manage/i });
+    await manage.scrollIntoViewIfNeeded({ timeout: 10_000 });
+    const box = await manage.boundingBox();
+    expect(box).not.toBeNull();
+    // Horizontally inside the 360px viewport (vertical position is irrelevant).
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

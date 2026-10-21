@@ -25,10 +25,8 @@ const mockEnqueueEmail = vi.hoisted(() =>
 );
 vi.mock("@/lib/email", () => ({ enqueueEmail: mockEnqueueEmail }));
 
-// escapeHtml: passthrough in tests (XSS correctness is tested separately in escape-html.test.ts)
-vi.mock("@/lib/email/escape-html", () => ({
-  escapeHtml: (s: string) => s,
-}));
+// escapeHtml is NOT mocked: renderEmail() owns escaping now (DECISION-191), and the
+// notification test below asserts the real escaped output.
 
 // ---------------------------------------------------------------------------
 // Drizzle db mock — chainable insert, update, select, query
@@ -472,6 +470,65 @@ describe("submitFeedback — bug-only metadata handling", () => {
     });
     const insertedValues = mockInsertValues.mock.calls[0][0];
     expect(insertedValues.appVersion).toHaveLength(32);
+  });
+});
+
+describe("submitFeedback — admin notification email (DECISION-191)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({
+      user: { id: "user-member-123", email: "member@example.com", name: "Pat <b>O'Neil</b> & Co" },
+    });
+    mockCheckRateLimit.mockResolvedValue({ allowed: true });
+    mockSelectWhere.mockResolvedValueOnce([
+      { email: "admin-a@example.invalid", name: "A" },
+      { email: "admin-b@example.invalid", name: "B" },
+    ]);
+  });
+
+  it("enqueues one rendered message per admin: raw subject, html escaped once, text part, absolute link - regression for F162 escaped subject and F165 relative link", async () => {
+    await submitFeedback({
+      body: "Q&A is <broken>\nsecond line",
+      category: "bug",
+      contextPath: "/o/alder-creek/a&b",
+      appVersion: "0.5.2",
+      tzOffsetMinutes: null,
+    });
+
+    expect(mockEnqueueEmail).toHaveBeenCalledTimes(2);
+    const calls = mockEnqueueEmail.mock.calls.map((c) => c[0] as { to: string; templateKey: string; message: { subject: string; html: string; text: string } });
+    expect(calls.map((c) => c.to)).toEqual(["admin-a@example.invalid", "admin-b@example.invalid"]);
+    const { message, templateKey } = calls[0]!;
+    expect(templateKey).toBe("feedback_notification");
+
+    expect(message.subject).toBe("New feedback — bug");
+    // A hostile sender name and message are escaped exactly once in html, raw in text.
+    expect(message.html).not.toContain("<b>O'Neil</b>");
+    expect(message.html).not.toContain("<broken>");
+    expect(message.html).toContain("Pat &lt;b&gt;O&#x27;Neil&lt;/b&gt; &amp; Co");
+    expect(message.html).toContain("Q&amp;A is &lt;broken&gt;<br>second line");
+    expect(message.html).toContain("/o/alder-creek/a&amp;b");
+    expect(message.html).not.toContain("&amp;amp;");
+    expect(message.text).toContain("From: Pat <b>O'Neil</b> & Co <member@example.com>");
+    expect(message.text).toContain("> Q&A is <broken>\n> second line");
+    expect(message.text).toContain("App version: 0.5.2");
+    // The link is absolute (it used to be the relative /admin/feedback, dead in a mail client).
+    expect(message.html).toContain('href="http://localhost:3000/admin/feedback"');
+    expect(message.text).toContain("http://localhost:3000/admin/feedback");
+  });
+
+  it("omits the page and version facts for a non-bug category", async () => {
+    await submitFeedback({
+      body: "Nice app",
+      category: "suggestion",
+      contextPath: "/ignored",
+      appVersion: "9.9.9",
+      tzOffsetMinutes: null,
+    });
+    const { message } = mockEnqueueEmail.mock.calls[0]![0] as { message: { text: string; subject: string } };
+    expect(message.subject).toBe("New feedback — suggestion");
+    expect(message.text).not.toContain("Page:");
+    expect(message.text).not.toContain("App version:");
   });
 });
 

@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { generateSync } from "otplib";
 import { E2E_USERS } from "./support/users";
 import { E2E_TOTP_TEST_SECRET } from "./support/totp-fixture";
+import { enterTotpCode } from "./support/totp-page";
 
 /**
  * The Phase 4 auth-e2e gate (CLAUDE.md — any change touching
@@ -41,14 +42,14 @@ test.describe("Full login path with an MFA-enrolled user", () => {
     ).toBeVisible();
 
     // (d) — a wrong code is rejected, and the challenge is not consumed.
-    await page.getByPlaceholder(/123456/).fill("000000");
+    await enterTotpCode(page, "000000");
     await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/totp\?.*error=invalid/, { timeout: 10_000 });
     await expect(page.getByText(/didn.t match/i)).toBeVisible();
 
     // (b) — the real code, computed from the same secret the fixture seeded.
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
 
     // (c) — same shape as the plain `admin` fixture (admin role, no

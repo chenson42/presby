@@ -3,11 +3,37 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-20.
+Updated 2026-10-21.
 
 ---
 
-## RESUME HERE — 2026-10-20: production is on v0.34.0; Track F Increment 1 (web custom domains) is integrated at v0.35.0, PR pending
+## RESUME HERE — 2026-10-21: production is on v0.35.0; review polish is integrated at v0.36.0, PR pending; invitations in Phase 5
+
+**2026-10-21.** Production runs v0.35.0 (custom domains for the web, merged and deployed; the operator is working through the
+production test checklist). `pipeline/review-polish` (worktree `presby-polish`) is integrated for its PR to `main`: the operator's
+four production-review notes, namely Google's own sign-in button (DECISION-190), one box per digit on `/totp` and `/account/2fa`
+with a recovery-code toggle and `HydrationGate` rule H3 (DECISION-192), every outbound email as a `RenderedEmail` built by the pure
+`renderEmail()` (DECISION-191; closes F161, F162, F165), and `/admin/organizations` as a filterable council tree (DECISION-193 holds
+the implementation rulings; findings F160–F165, `docs/schema-design-2.md` §2r; `docs/work-log/2026-10-21-review-polish.md`; Phase 6
+SHIP WITH NOTES, every note a `docs/TODO.md` line). No migration, no permission, flag or dependency change.
+
+**In flight:** `pipeline/invitations` (worktree `presby-invites`, migration `0059`, DECISION-183–189, F153–F159 and F166–F168) is in
+Phase 5. It merges **second** and adapts `account_invitation` to `renderEmail` at its integration (the brand makes anything else a
+compile error); expect a text conflict in `src/lib/email/queue.ts`. Apply `0059` to production by hand (`psql -1`, snapshot first)
+before that merge deploys. `scripts/test-rls.sql` on `development` currently fails at line 127 (Alder Creek has 10 memberships, 9
+expected, from a demo-account membership added 2026-10-14); fix the row or the count at that integration.
+
+**Open operator questions:** the email button contrast (6.84:1 against a 7:1 target: keep the brand blue or switch to navy); the
+"test organization" flag's semantics (its own pipeline); removing the `/signin` `npm run db:seed` hint; whether Google's official
+white button is the "pops" the operator meant. The review-polish checklist steps (Google button states, real-phone code autofill,
+Gmail and Apple Mail dark mode, the Vercel `RESEND_FROM_EMAIL` value) go onto the production test checklist.
+
+**Next, in order:** merge review polish (v0.36.0); finish invitations (QA → Phase 6 → integration → v0.37.0); the F166 bug-fix
+pipeline (first-enrolment `/account/2fa` hides the recovery codes); then the items under the previous handoff below.
+
+---
+
+## Previous handoff — 2026-10-20: production is on v0.34.0; Track F Increment 1 (web custom domains) is integrated at v0.35.0, PR pending
 
 **2026-10-20.** Production runs v0.34.0 (online giving, merged and deployed). `pipeline/custom-domains` (worktree
 `presby-domains`) is integrated for its PR to `main`: a congregation proves a domain with a TXT record and its public site is

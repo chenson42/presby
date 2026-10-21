@@ -26,12 +26,12 @@ vi.mock("server-only", () => ({}));
 // stand-in does what the real `enqueueEmail` does that matters here - writes the platform `email_queue` row and
 // returns its id - so the delivery's `email_queue_id` and the bounce join are exercised against a real row.
 vi.mock("@/lib/email", () => ({
-  enqueueEmail: async (input: { to: string; subject: string; html: string; text?: string; templateKey: string }) => {
+  enqueueEmail: async (input: { to: string; message: { subject: string; html: string; text: string }; templateKey: string }) => {
     const { getPlatformDb } = await import("@/lib/db");
     const { sql: dsql } = await import("drizzle-orm");
     const result = (await getPlatformDb().execute(dsql`
       insert into email_queue (to_email, subject, html_body, text_body, template_key, status, sent_at)
-      values (${input.to}, ${input.subject}, ${input.html}, ${input.text ?? null}, ${input.templateKey}, 'sent', now())
+      values (${input.to}, ${input.message.subject}, ${input.message.html}, ${input.message.text}, ${input.templateKey}, 'sent', now())
       returning id`)) as unknown as { rows?: Array<{ id: string }> } | Array<{ id: string }>;
     const rows = Array.isArray(result) ? result : (result.rows ?? []);
     return { id: rows[0]!.id, sentInline: true };

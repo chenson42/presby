@@ -20,11 +20,20 @@
  *   H2 — a `.ts` (non-`.tsx`) file that calls `useForm` can never render the
  *        gate itself (the "move the call into a custom hook" bypass), so it
  *        fails unless exempted.
+ *   H3 — a non-test `.tsx` file that imports
+ *        "@/components/shared/one-time-code-input" must ALSO import `HydrationGate`
+ *        and render `<HydrationGate` (DECISION-192, amending DECISION-159). A form
+ *        whose submitted value depends on hydration is gated even without
+ *        `useForm`: typing digits before hydration and pressing Verify posts an
+ *        empty code, which `/totp` counts as a failed attempt (an audit row and one
+ *        of ten rate-limit slots). Deliberately narrow: this is not a generic
+ *        "every client form" rule.
  *
  * Exemption: `// hydration-gate-ok: <reason>` on the SAME line as the
- * `useForm` call or on the line directly above. The reason is mandatory. A
- * file passes if every call is exempted, or if the gate import and element are
- * present. Use it only for a deliberately client-only, never-SSR'd form.
+ * `useForm` call (H3: the one-time-code import) or on the line directly above.
+ * The reason is mandatory. A file passes if every call or import is exempted,
+ * or if the gate import and element are present. Use it only for a deliberately
+ * client-only, never-SSR'd form.
  *
  * Not a proof; just a tripwire. It sees PRESENCE, not that the gate actually
  * wraps the controls (the SSR wiring tests, code review and a browser pass
@@ -45,6 +54,7 @@ const SRC = path.join(ROOT, "src");
 const CALL_RE = /(?<![A-Za-z0-9_$])useForm\s*[<(]/;
 const IMPORT_RE = /from\s+["']@\/components\/shared\/hydration-gate["']/;
 const ELEMENT_RE = /<HydrationGate[\s>]/;
+const OTC_IMPORT_RE = /from\s+["']@\/components\/shared\/one-time-code-input["']/;
 const EXEMPT_RE = /\/\/\s*hydration-gate-ok:\s*(\S.*)$/;
 const EXEMPT_NO_REASON_RE = /\/\/\s*hydration-gate-ok:\s*$/;
 
@@ -76,6 +86,7 @@ export function checkHydrationGate(files) {
 
     const lines = file.content.split("\n");
     const calls = [];
+    const otcImports = [];
     let hasImport = false;
     let hasElement = false;
 
@@ -85,11 +96,47 @@ export function checkHydrationGate(files) {
       if (IMPORT_RE.test(line)) hasImport = true;
       if (ELEMENT_RE.test(line)) hasElement = true;
       if (CALL_RE.test(line)) calls.push(i);
+      if (OTC_IMPORT_RE.test(line)) otcImports.push(i);
     }
-    if (calls.length === 0) continue;
+    if (calls.length === 0 && otcImports.length === 0) continue;
 
     const gated = hasImport && hasElement;
     const isTsx = rel.endsWith(".tsx");
+
+    // H3 applies to .tsx consumers only: a .ts file importing the component for
+    // a type cannot render it.
+    for (const i of isTsx ? otcImports : []) {
+      const here = lines[i];
+      const above = lines[i - 1] ?? "";
+      const exempt = EXEMPT_RE.test(here) || EXEMPT_RE.test(above);
+      const emptyReason =
+        !exempt && (EXEMPT_NO_REASON_RE.test(here) || EXEMPT_NO_REASON_RE.test(above));
+      const at = { file: rel, line: i + 1, text: here.trim().slice(0, 120) };
+
+      if (exempt) continue;
+
+      if (emptyReason) {
+        violations.push({
+          rule: "H3",
+          ...at,
+          message:
+            "`// hydration-gate-ok:` needs a reason after the colon. Say why this form is never server-rendered.",
+        });
+        continue;
+      }
+
+      if (!gated) {
+        const missing = [
+          ...(hasImport ? [] : ["the import from @/components/shared/hydration-gate"]),
+          ...(hasElement ? [] : ["a <HydrationGate> element"]),
+        ].join(" and ");
+        violations.push({
+          rule: "H3",
+          ...at,
+          message: `this file imports OneTimeCodeInput but lacks ${missing}. A form that takes a one-time code must be inoperable until it hydrates, or a pre-hydration Verify posts an empty code (DECISION-192; docs/ui-standards.md, Forms — State Patterns). Wrap the <form> in <HydrationGate>, or annotate with \`// hydration-gate-ok: <reason>\`.`,
+        });
+      }
+    }
 
     for (const i of calls) {
       const here = lines[i];

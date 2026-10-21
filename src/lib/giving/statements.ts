@@ -1037,9 +1037,7 @@ export async function sendStatementNotices(
         });
         const queued = await enqueueEmail({
           to: String(row.delivery_email),
-          subject: notice.subject,
-          html: notice.html,
-          text: notice.text,
+          message: notice.message,
           templateKey: notice.templateKey,
         });
         await tx.execute(sql`

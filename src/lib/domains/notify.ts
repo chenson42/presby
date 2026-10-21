@@ -1,7 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { enqueueEmail } from "@/lib/email";
-import { escapeHtml } from "@/lib/email/escape-html";
+import { renderEmail, type RenderedEmail } from "@/lib/email/render";
 import type { OrgTx } from "@/lib/authz";
 import { platformOrigin } from "./host";
 
@@ -27,9 +27,10 @@ import { platformOrigin } from "./host";
  * NEVER A SECRET. The body names the organization, the hostnames and the kind
  * of change. It never contains a proof token, a provider message, or who in
  * particular did it beyond "your organization's administrators" / "PresbyPortal
- * support" / "an automated check". Every interpolated string is HTML-escaped
- * (the email XSS invariant). Failure to notify never throws: it is logged with
- * ids only and the change stands.
+ * support" / "an automated check". Every message is built through
+ * `renderEmail()` (DECISION-191), which takes raw strings and escapes them (the
+ * email XSS invariant). Failure to notify never throws: it is logged with ids
+ * only and the change stands.
  */
 
 export type DomainNotificationEvent =
@@ -212,41 +213,31 @@ const ACTOR_COPY: Record<DomainNotification["actorKind"], string> = {
   machine: "an automated check",
 };
 
-/** Builds the message body. Exported for the unit test. */
+/** Builds the message. Exported for the unit test. */
 export function buildDomainNotification(
   ctx: NotificationContext,
   n: DomainNotification,
-): { subject: string; html: string; text: string } {
+): RenderedEmail {
   const copy = EVENT_COPY[n.event];
   const origin = platformOrigin();
   const link = origin ? `${origin}/o/${ctx.slug}/admin/domains` : null;
-  const hostLines = n.hostnames.map((h) => `- ${h}`).join("\n");
-  const text = [
-    `${copy.line}`,
-    ``,
-    `Organization: ${ctx.organizationName}`,
-    `Domain${n.hostnames.length === 1 ? "" : "s"}:`,
-    hostLines,
-    `Made by: ${ACTOR_COPY[n.actorKind]}`,
-    link ? `\nReview it here: ${link}` : "",
-    `\nIf you did not expect this, contact PresbyPortal support.`,
-  ]
-    .filter((line) => line !== "")
-    .join("\n");
-  const html = [
-    `<p>${escapeHtml(copy.line)}</p>`,
-    `<p><strong>Organization:</strong> ${escapeHtml(ctx.organizationName)}<br />`,
-    `<strong>Domain${n.hostnames.length === 1 ? "" : "s"}:</strong></p>`,
-    `<ul>${n.hostnames.map((h) => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`,
-    `<p><strong>Made by:</strong> ${escapeHtml(ACTOR_COPY[n.actorKind])}</p>`,
-    link ? `<p><a href="${escapeHtml(link)}">Review it here &rarr;</a></p>` : "",
-    `<p>If you did not expect this, contact PresbyPortal support.</p>`,
-  ].join("\n");
-  return {
+  return renderEmail({
     subject: `${copy.subject} - ${ctx.organizationName}`,
-    html,
-    text,
-  };
+    heading: copy.subject,
+    blocks: [
+      { kind: "p", text: copy.line },
+      {
+        kind: "facts",
+        rows: [
+          { label: "Organization", value: ctx.organizationName },
+          { label: "Made by", value: ACTOR_COPY[n.actorKind] },
+        ],
+      },
+      { kind: "list", label: `Domain${n.hostnames.length === 1 ? "" : "s"}:`, items: n.hostnames },
+    ],
+    action: link ? { label: "Review it here", href: link } : undefined,
+    footnote: "If you did not expect this, contact PresbyPortal support.",
+  });
 }
 
 /**
@@ -264,14 +255,20 @@ export async function sendDomainNotification(
     );
     return;
   }
-  const message = buildDomainNotification(ctx, n);
+  let message: RenderedEmail;
+  try {
+    message = buildDomainNotification(ctx, n);
+  } catch {
+    console.error(
+      `[domains-notify] message build failed (organization ${ctx.organizationId}, event ${n.event})`,
+    );
+    return;
+  }
   for (const to of ctx.recipients) {
     try {
       await enqueueEmail({
         to,
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
+        message,
         templateKey: "domain_notification",
       });
     } catch {
@@ -355,28 +352,20 @@ export function buildOperatorAlert(
   ctx: NotificationContext,
   kind: OperatorAlertKind,
   hostnames: string[],
-): { subject: string; html: string; text: string } {
+): RenderedEmail {
   const copy = OPERATOR_COPY[kind];
   const origin = platformOrigin();
   const link = origin ? `${origin}/admin/organizations` : null;
-  const hosts = hostnames.map((h) => `- ${h}`).join("\n");
-  const text = [
-    copy.line,
-    "",
-    `Organization: ${ctx.organizationName}`,
-    "Domain(s):",
-    hosts,
-    link ? `\nPlatform admin: ${link}` : "",
-  ]
-    .filter((line) => line !== "")
-    .join("\n");
-  const html = [
-    `<p>${escapeHtml(copy.line)}</p>`,
-    `<p><strong>Organization:</strong> ${escapeHtml(ctx.organizationName)}</p>`,
-    `<ul>${hostnames.map((h) => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`,
-    link ? `<p><a href="${escapeHtml(link)}">Open platform admin &rarr;</a></p>` : "",
-  ].join("\n");
-  return { subject: copy.subject, html, text };
+  return renderEmail({
+    subject: copy.subject,
+    heading: copy.subject,
+    blocks: [
+      { kind: "p", text: copy.line },
+      { kind: "facts", rows: [{ label: "Organization", value: ctx.organizationName }] },
+      { kind: "list", label: "Domain(s):", items: hostnames },
+    ],
+    action: link ? { label: "Open platform admin", href: link } : undefined,
+  });
 }
 
 /** Sends an operator alert to the collected platform admins. Never throws. */
@@ -390,14 +379,18 @@ export async function sendOperatorAlert(
     console.warn(`[domains-notify] no platform admins to alert (${kind}, organization ${ctx.organizationId})`);
     return;
   }
-  const message = buildOperatorAlert(ctx, kind, hostnames);
+  let message: RenderedEmail;
+  try {
+    message = buildOperatorAlert(ctx, kind, hostnames);
+  } catch {
+    console.error(`[domains-notify] operator alert build failed (${kind}, organization ${ctx.organizationId})`);
+    return;
+  }
   for (const to of ctx.recipients) {
     try {
       await enqueueEmail({
         to,
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
+        message,
         templateKey: "domain_notification",
       });
     } catch {

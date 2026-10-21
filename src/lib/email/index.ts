@@ -19,11 +19,13 @@ export {
 } from "./queue";
 export type { EnqueueEmailInput, BatchResult, DeliveryEventType } from "./queue";
 
-// sendPasswordResetEmail is kept for fork backward compat.
-// @deprecated — call enqueueEmail() directly with templateKey: 'password_reset'.
-// The two starter call sites have been migrated to enqueueEmail(). This export
-// exists so fork callers are not broken. Will be removed in a future version.
-export { sendPasswordResetEmail } from "./send";
+// renderEmail builds the only message shape enqueueEmail accepts (DECISION-191).
+// Senders import it from "@/lib/email/render" directly, not through this barrel:
+// several tests replace the whole barrel with a stub, and the pure giving notice
+// must not reach the server-only queue.
+export { renderEmail } from "./render";
+export type { RenderedEmail, EmailContent, EmailBlock } from "./render";
+
 export type { SendEmailInput } from "./send";
 
 // sendEmail is intentionally NOT re-exported here. It is the raw transport

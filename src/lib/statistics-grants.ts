@@ -5,7 +5,8 @@ import { db, getPlatformDb } from "@/lib/db";
 import { withOrgContext, type OrgTx } from "@/lib/authz";
 import { organizations } from "@/lib/db/domain/org";
 import { statisticsSubmissionGrants } from "@/lib/db/domain/returns";
-import { enqueueEmail, escapeHtml } from "@/lib/email";
+import { enqueueEmail } from "@/lib/email";
+import { renderEmail, type RenderedEmail } from "@/lib/email/render";
 import { isFlagEnabled } from "@/lib/flags";
 import { formatDateUTC } from "@/lib/format-date";
 
@@ -206,6 +207,40 @@ export interface IssueStatisticsGrantInput {
 }
 
 /**
+ * The grant email (DECISION-191). Raw strings in: `renderEmail()` escapes them
+ * for HTML and keeps the subject a plain header. The link is built by the
+ * caller and appears unchanged in the button, the printed link and the text.
+ * The expiry is a fixed UTC calendar day, labelled, identical in `html` and
+ * `text` (it used to be the server's local `toDateString()` in html and an ISO
+ * timestamp in text).
+ */
+export function buildStatisticsGrantEmail(params: {
+  recipientName: string;
+  congregationName: string;
+  reportYear: number;
+  expiresAt: Date;
+  submitUrl: string;
+}): RenderedEmail {
+  return renderEmail({
+    subject: `File ${params.congregationName}'s ${params.reportYear} statistical report`,
+    heading: `${params.reportYear} statistical report`,
+    blocks: [
+      { kind: "p", text: `Hi ${params.recipientName},` },
+      {
+        kind: "p",
+        text: `${params.congregationName} has been asked to file its ${params.reportYear} annual statistical report.`,
+      },
+      {
+        kind: "p",
+        text: `This link expires on ${formatDateUTC(params.expiresAt)} (UTC) and can be used once.`,
+      },
+    ],
+    action: { label: "Open the report form", href: params.submitUrl },
+    footnote: "If you were not expecting this, you can safely ignore this email.",
+  });
+}
+
+/**
  * Issues a new submission grant. Mints a 32-byte CSPRNG token
  * (`randomBytes(32).toString("base64url")`, byte-for-byte the
  * `requestPasswordReset` precedent — never bcrypt, a fast hash is correct
@@ -312,21 +347,16 @@ export async function issueStatisticsGrant(
 
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
     const submitUrl = `${baseUrl}/file-statistics?token=${rawToken}`;
-    const safeRecipientName = escapeHtml(issuedToName);
-    const safeCongregationName = escapeHtml(cong.name);
-    const expiresLabel = inserted!.expiresAt.toDateString();
 
     await enqueueEmail({
       to: issuedToEmail,
-      subject: `File ${cong.name}'s ${input.reportYear} statistical report`,
-      html: `
-        <p>Hi ${safeRecipientName},</p>
-        <p><strong>${safeCongregationName}</strong> has been asked to file its ${input.reportYear} annual statistical report.</p>
-        <p>Click the link below to open the form. This link expires on ${expiresLabel} and can be used once.</p>
-        <p><a href="${submitUrl}">${submitUrl}</a></p>
-        <p>If you were not expecting this, you can safely ignore this email.</p>
-      `,
-      text: `File ${cong.name}'s ${input.reportYear} statistical report. This link expires ${inserted!.expiresAt.toISOString()} and can be used once.\n\n${submitUrl}\n\nIf you were not expecting this, ignore this email.`,
+      message: buildStatisticsGrantEmail({
+        recipientName: issuedToName,
+        congregationName: cong.name,
+        reportYear: input.reportYear,
+        expiresAt: inserted!.expiresAt,
+        submitUrl,
+      }),
       templateKey: "statistics_submission_grant",
     });
 

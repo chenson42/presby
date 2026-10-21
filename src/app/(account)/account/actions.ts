@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { users, emailVerificationTokens, passwordResetTokens } from "@/lib/db/schema";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { enqueueEmail } from "@/lib/email";
+import { buildEmailChangeVerifyEmail } from "@/lib/email/account-messages";
 import { checkRateLimit } from "@/lib/rate-limit";
 import type { ActionResult } from "@/types/actions";
 
@@ -146,15 +147,7 @@ export async function requestEmailChange(input: {
 
   await enqueueEmail({
     to: newEmail,
-    subject: "Confirm your new email address",
-    html: `
-      <p>Hi,</p>
-      <p>You requested to change your sign-in email address to <strong>${newEmail}</strong>.</p>
-      <p>Click the link below to confirm. The link expires in 24 hours.</p>
-      <p><a href="${verifyUrl}">${verifyUrl}</a></p>
-      <p>If you did not request this change, you can safely ignore this email.</p>
-    `,
-    text: `Confirm your email change: ${verifyUrl}\n\nExpires in 24 hours. If you did not request this, ignore this email.`,
+    message: buildEmailChangeVerifyEmail({ newEmail, verifyUrl }),
     templateKey: "email_change_verify",
   });
 

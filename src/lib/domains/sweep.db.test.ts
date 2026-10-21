@@ -279,7 +279,12 @@ describe.skipIf(!hasDb)("the domain lifecycle past pending, via the sweep (Postg
     for (const name of DOMAIN_GUARD_TRIGGERS) expect(states[name], name).toBe("O");
   }
 
-  const emails = () => mockEnqueue.mock.calls.map((c) => c[0] as { to: string; subject: string; text: string; html: string; templateKey: string });
+  // enqueueEmail takes { to, message: RenderedEmail, templateKey }: flatten the message for the assertions.
+  const emails = () =>
+    mockEnqueue.mock.calls.map((c) => {
+      const i = c[0] as { to: string; templateKey: string; message: { subject: string; text: string; html: string } };
+      return { to: i.to, templateKey: i.templateKey, ...i.message };
+    });
   const subjectsLike = (re: RegExp) => emails().filter((e) => re.test(e.subject));
 
   // ===================================================================

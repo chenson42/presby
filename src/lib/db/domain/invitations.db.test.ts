@@ -574,7 +574,7 @@ describe.skipIf(!hasDb)("drizzle/0059 account_invitations (Postgres-backed)", ()
       }
     });
 
-    it("the SQL holder counts equal the TypeScript counts (verbatim lift) across holder shapes", async () => {
+    it("the SQL holder counts across holder shapes pin the lifted asymmetry; the TypeScript counts are thin wrappers over them since Batch 2d (so agreement is by construction)", async () => {
       const { countFoundingAdministratorHolders } = await import("@/lib/onboarding/founding-administrator");
       const { countGivingManageHolders } = await import("@/lib/onboarding/treasurer-designation");
       const org = await fx.makeOrg("counts");

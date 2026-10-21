@@ -1,41 +1,36 @@
 /**
- * Parity: the TypeScript designation transactions vs the SQL apply helpers
- * (docs/work-log/2026-10-21-invitations.md, Phase 2 R1 "Phase 4 lands a
- * parity DB test before the deletion"; Phase 3 Batch 1c).
+ * The designation effect, pinned (docs/work-log/2026-10-21-invitations.md,
+ * Phase 2 R1; Phase 3 Batch 1c, Batch 2d).
  *
- * R1 moves the effect of `designateFoundingAdministrator()` and
- * `designateTreasurer()` (src/lib/onboarding/*.ts, getPlatformDb()
- * transactions) into the ungranted plpgsql helpers
+ * R1 moved the effect of the retired TypeScript transactions
+ * `designateFoundingAdministrator()` and `designateTreasurer()` (getPlatformDb()
+ * transactions, deleted in Batch 2d) into the ungranted plpgsql helpers
  * `presby_apply_founding_administrator` / `presby_apply_treasurer`
  * (drizzle/0059 section 6), reached only through `presby_accept_invitation`.
- * This suite drives BOTH over the same fixture shapes - each scenario builds
- * two identical throwaway orgs, one per path - and compares the resulting
- * app_roles, app_role_permissions, role_grants, people and memberships rows
- * with ids and timestamps normalized away.
  *
- * TWO ASSERTIONS PER SCENARIO:
- *   1. SQL == TS (the parity proof). Lives only until Batch 2d deletes the TS
- *      transactions; Batch 2d removes the `designateFoundingAdministrator` /
- *      `designateTreasurer` half of each scenario and keeps (2).
- *   2. SQL == the committed golden snapshot
- *      (`designation-parity.golden.json`). This is the pin that SURVIVES the
- *      deletion: after Batch 2d nothing else says what a designation writes.
- *      Regenerate it ONLY with a recorded ruling that the effect is meant to
- *      change (WRITE_DESIGNATION_GOLDEN=1 rewrites it from the SQL side);
- *      a blind regeneration defeats the pin.
+ * HISTORY. Batch 1c landed this file as a PARITY proof: each scenario built two
+ * identical throwaway orgs, ran the TypeScript transaction on one and the SQL
+ * acceptance on the other, and compared the resulting app_roles,
+ * app_role_permissions, role_grants, people and memberships rows with ids and
+ * timestamps normalized away. It was green for all 11 scenarios (12 tests) in
+ * the same run that Batch 2d deleted the TypeScript transactions, as R1
+ * requires ("Phase 4 lands a parity DB test before the deletion").
+ *
+ * WHAT SURVIVES. Every scenario still runs the real acceptance path (the
+ * `presby_accept_invitation` function, existing account, through the presby_app
+ * connection) and asserts SQL == the committed golden snapshot
+ * (`designation-parity.golden.json`) - the rows the retired TypeScript wrote,
+ * frozen on the day the two were proven equal. After the deletion nothing
+ * else says what a designation writes, so this is the pin. Regenerate the
+ * golden ONLY with a recorded ruling that the effect is meant to change
+ * (WRITE_DESIGNATION_GOLDEN=1 rewrites it from the SQL side); a blind
+ * regeneration defeats the pin.
  *
  * Scenarios: founding administrator for every org type with a created person
  * (congregation/presbytery carry the office half, the others do not), an
  * existing person at the org, and the F109 reuse-and-reactivate path with an
  * additive-only reconcile (a congregation-added key survives); treasurer at
  * both allow-listed types, and F109 for both treasurer and giving_recorder.
- *
- * Divergences BY DESIGN, not compared (Phase 1 C1/G2/G3, Phase 3): the SQL
- * founding-administrator path names a created person from the invitee names
- * (the fixtures use the same names TS derives from users.name), resolves an
- * existing account's person exactly as TS's classifyPersonRows() does, and
- * additionally links an on-file address match (no TS counterpart; covered by
- * invitations.db.test.ts).
  *
  * Run with (serial, per docs/testing.md):
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/onboarding/designation-parity.db.test.ts
@@ -56,10 +51,10 @@ const GOLDEN_PATH = path.join(__dirname, "designation-parity.golden.json");
 const WRITE_GOLDEN = process.env.WRITE_DESIGNATION_GOLDEN === "1";
 
 /** A short, DNS-label-safe org label (organizations_slug_format; <= 63 chars with the fixture's stamp). */
-function orgLabel(name: string, side: "ts" | "sql"): string {
+function orgLabel(name: string): string {
   let h = 0;
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return `p${h.toString(36)}-${side}`;
+  return `p${h.toString(36)}`;
 }
 
 type OrgType = "congregation" | "presbytery" | "synod" | "general_assembly" | "new_worshiping_community";
@@ -71,10 +66,8 @@ interface DesignationState {
   membership: { engagementStatus: string; currentRoll: string | null; endedOn: string | null };
 }
 
-describe.skipIf(!hasDb)("designation parity: TypeScript transactions vs SQL apply helpers (R1)", () => {
+describe.skipIf(!hasDb)("designation effect: SQL apply helpers vs the golden snapshot (R1)", () => {
   let fx: InvitationFixture;
-  let designateFoundingAdministrator: typeof import("./founding-administrator").designateFoundingAdministrator;
-  let designateTreasurer: typeof import("./treasurer-designation").designateTreasurer;
   let operator: string;
   const golden: Record<string, DesignationState> = WRITE_GOLDEN
     ? {}
@@ -85,8 +78,6 @@ describe.skipIf(!hasDb)("designation parity: TypeScript transactions vs SQL appl
     const mod = await import("@/lib/testing/invitation-fixture");
     fx = await mod.createInvitationFixture("parity");
     operator = fx.actingUserId;
-    ({ designateFoundingAdministrator } = await import("./founding-administrator"));
-    ({ designateTreasurer } = await import("./treasurer-designation"));
   });
 
   afterAll(async () => {
@@ -152,8 +143,7 @@ describe.skipIf(!hasDb)("designation parity: TypeScript transactions vs SQL appl
     };
   }
 
-  function pin(name: string, sqlState: DesignationState, tsState: DesignationState) {
-    expect(sqlState, `${name}: SQL apply helper vs TypeScript transaction`).toEqual(tsState);
+  function pin(name: string, sqlState: DesignationState) {
     if (WRITE_GOLDEN) {
       written[name] = sqlState;
     } else {
@@ -186,50 +176,33 @@ describe.skipIf(!hasDb)("designation parity: TypeScript transactions vs SQL appl
   // -------------------------------------------------------------------------
 
   /**
-   * One FA scenario on two identical orgs. `prepare` builds the org-side
-   * preconditions on each; `existingPerson` links the designee's account to
-   * a person already at the org.
+   * One FA scenario through the real acceptance path (existing account).
+   * `prepare` builds the org-side preconditions; `existingPerson` links the
+   * designee's account to a person already at the org.
    */
   async function faScenario(
     name: string,
     type: OrgType,
     options: { existingPerson?: boolean; prepare?: (org: string) => Promise<void> } = {},
   ) {
-    // TS side.
-    const tsOrg = await fx.makeOrg(orgLabel(name, "ts"), { organizationType: type });
-    await options.prepare?.(tsOrg);
-    const tsEmail = fx.email(orgLabel(name, "ts"));
-    const tsUser = await fx.makeUser(tsEmail, { name: "Marisol Quenby" });
+    const org = await fx.makeOrg(orgLabel(name), { organizationType: type });
+    await options.prepare?.(org);
+    const email = fx.email(orgLabel(name));
+    const user = await fx.makeUser(email, { name: "Marisol Quenby" });
     if (options.existingPerson) {
       const p = await fx.makePerson("Marisol", "Quenby");
-      await fx.addMember(tsOrg, p);
-      await fx.linkUser(p, tsUser);
-    }
-    const ts = await designateFoundingAdministrator(tsOrg, tsEmail, operator);
-    expect(ts.kind, `${name}: TS outcome`).toBe("ok");
-    if (ts.kind !== "ok") return;
-
-    // SQL side, through the real acceptance path (existing account).
-    const sqlOrg = await fx.makeOrg(orgLabel(name, "sql"), { organizationType: type });
-    await options.prepare?.(sqlOrg);
-    const sqlEmail = fx.email(orgLabel(name, "sql"));
-    const sqlUser = await fx.makeUser(sqlEmail, { name: "Marisol Quenby" });
-    if (options.existingPerson) {
-      const p = await fx.makePerson("Marisol", "Quenby");
-      await fx.addMember(sqlOrg, p);
-      await fx.linkUser(p, sqlUser);
+      await fx.addMember(org, p);
+      await fx.linkUser(p, user);
     }
     const inv = await fx.insertInvitation({
-      organizationId: sqlOrg, purpose: "founding_administrator", email: sqlEmail, createdByUserId: operator,
+      organizationId: org, purpose: "founding_administrator", email, createdByUserId: operator,
       firstName: "Marisol", lastName: "Quenby",
     });
-    const r = await fx.accept(inv.token, { userId: sqlUser });
+    const r = await fx.accept(inv.token, { userId: user });
     expect(r.outcome, `${name}: SQL outcome`).toBe("accepted");
-    expect(r.person_mode).toBe(ts.mode);
-    expect([...(r.permission_keys as string[])].sort()).toEqual([...ts.permissionKeys].sort());
-    expect(r.office_role_key).toBe(ts.officeRoleKey);
+    expect(r.person_mode, `${name}: person mode`).toBe(options.existingPerson ? "existing_person" : "created_person");
 
-    pin(name, await stateOf(sqlOrg, String(r.person_id)), await stateOf(tsOrg, ts.personId));
+    pin(name, await stateOf(org, String(r.person_id)));
   }
 
   it.each(["congregation", "presbytery", "synod", "general_assembly", "new_worshiping_community"] as const)(
@@ -267,34 +240,21 @@ describe.skipIf(!hasDb)("designation parity: TypeScript transactions vs SQL appl
   // -------------------------------------------------------------------------
 
   async function trScenario(name: string, type: "congregation" | "new_worshiping_community", prepare?: (org: string) => Promise<void>) {
-    // TS side: designateTreasurer resolves the user, then the user's person.
-    const tsOrg = await fx.makeOrg(orgLabel(name, "ts"), { organizationType: type });
-    await prepare?.(tsOrg);
-    const tsPerson = await fx.makePerson("Odalys", "Pennick");
-    await fx.addMember(tsOrg, tsPerson);
-    const tsEmail = fx.email(orgLabel(name, "ts"));
-    await fx.linkUser(tsPerson, await fx.makeUser(tsEmail));
-    const ts = await designateTreasurer(tsOrg, tsEmail, operator);
-    expect(ts.kind, `${name}: TS outcome`).toBe("ok");
-    if (ts.kind !== "ok") return;
-
-    // SQL side: the same shape, accepted by that account.
-    const sqlOrg = await fx.makeOrg(orgLabel(name, "sql"), { organizationType: type });
-    await prepare?.(sqlOrg);
-    const sqlPerson = await fx.makePerson("Odalys", "Pennick");
-    await fx.addMember(sqlOrg, sqlPerson);
-    const sqlEmail = fx.email(orgLabel(name, "sql"));
-    const sqlUser = await fx.makeUser(sqlEmail);
-    await fx.linkUser(sqlPerson, sqlUser);
-    await fx.addEmail(sqlPerson, sqlEmail);
+    const org = await fx.makeOrg(orgLabel(name), { organizationType: type });
+    await prepare?.(org);
+    const person = await fx.makePerson("Odalys", "Pennick");
+    await fx.addMember(org, person);
+    const email = fx.email(orgLabel(name));
+    const user = await fx.makeUser(email);
+    await fx.linkUser(person, user);
+    await fx.addEmail(person, email);
     const inv = await fx.insertInvitation({
-      organizationId: sqlOrg, purpose: "treasurer", email: sqlEmail, createdByUserId: operator, personId: sqlPerson,
+      organizationId: org, purpose: "treasurer", email, createdByUserId: operator, personId: person,
     });
-    const r = await fx.accept(inv.token, { userId: sqlUser });
+    const r = await fx.accept(inv.token, { userId: user });
     expect(r.outcome, `${name}: SQL outcome`).toBe("accepted");
-    expect(r.permission_keys).toEqual(ts.permissionKeys);
 
-    pin(name, await stateOf(sqlOrg, sqlPerson), await stateOf(tsOrg, tsPerson));
+    pin(name, await stateOf(org, person));
   }
 
   it.each(["congregation", "new_worshiping_community"] as const)("treasurer, %s", async (type) => {

@@ -125,6 +125,18 @@ const securityHeaders = [
 // violation is both blocked and reported. Everything else on the site stays report-only.
 const giveRouteHeaders = [{ key: "Content-Security-Policy", value: contentSecurityPolicy }];
 
+// The account-invitation routes (DECISION-183/185, R6): the accept URL carries a bearer credential
+// in its query string, so a browser must not send it onward in a Referer header, must not cache the
+// page, and a crawler must not index it. Applied AFTER the catch-all securityHeaders entry below
+// (`headers()` entries merge in order and the later value for a key wins), so `no-referrer` replaces
+// the site-wide `strict-origin-when-cross-origin` here and nowhere else. Scoped to PLATFORM hosts
+// like the HSTS split: a church's custom host never serves /invite (the proxy 404s it first).
+const inviteRouteHeaders = [
+  { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "Cache-Control", value: "no-store" },
+  { key: "X-Robots-Tag", value: "noindex, nofollow" },
+];
+
 const nextConfig: NextConfig = {
   // Widens Turbopack's project-root inference to this repo's own PARENT
   // directory — not a hardcoded absolute path, so this is safe to commit
@@ -164,6 +176,9 @@ const nextConfig: NextConfig = {
       { source: "/(.*)", headers: securityHeaders },
       { source: "/(.*)", has: [{ type: "host", value: PLATFORM_HOST }], headers: [hstsPlatform] },
       { source: "/(.*)", missing: [{ type: "host", value: PLATFORM_HOST }], headers: [hstsCustomHost] },
+      // Exact paths, no wildcard: /invite and /invite/accepted are the only invitation routes.
+      { source: "/invite", has: [{ type: "host", value: PLATFORM_HOST }], headers: inviteRouteHeaders },
+      { source: "/invite/accepted", has: [{ type: "host", value: PLATFORM_HOST }], headers: inviteRouteHeaders },
       // `:path*` matches zero or more segments, so these cover /site/<slug>/give itself AND
       // /site/<slug>/give/return (and the member equivalents). Do not widen to /site/:slug/* -
       // a congregation's own pages keep the report-only policy.

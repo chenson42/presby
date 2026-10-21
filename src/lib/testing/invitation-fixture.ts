@@ -65,6 +65,8 @@ export interface InvitationInput {
   createdAt?: SQL;
   resentFromId?: string | null;
   resendCount?: number;
+  /** The email_queue row the invitation is linked to (set at insert, immutable). */
+  emailQueueId?: string | null;
 }
 
 export interface AcceptInput {
@@ -141,13 +143,13 @@ export async function createInvitationFixture(label: string) {
     const [row] = await q(sql`
       insert into account_invitations (organization_id, purpose, email_normalized, invitee_first_name,
              invitee_last_name, person_id, token_hash, created_by_user_id, created_at, expires_at,
-             resent_from_id, resend_count)
+             resent_from_id, resend_count, email_queue_id)
       values (${input.organizationId}, ${input.purpose}, ${input.email},
               ${input.firstName === undefined ? (input.purpose === "founding_administrator" ? "Invited" : null) : input.firstName},
               ${input.lastName === undefined ? (input.purpose === "founding_administrator" ? "Person" : null) : input.lastName},
               ${input.personId ?? null}, ${tokenHash}, ${input.createdByUserId},
               ${input.createdAt ?? sql`now()`}, ${input.expiresAt ?? sql`now() + interval '7 days'`},
-              ${input.resentFromId ?? null}, ${input.resendCount ?? 0})
+              ${input.resentFromId ?? null}, ${input.resendCount ?? 0}, ${input.emailQueueId ?? null})
       returning id`);
     return { id: String(row!.id), token, tokenHash };
   }

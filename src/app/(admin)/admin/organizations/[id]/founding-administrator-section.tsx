@@ -17,8 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { OrganizationType } from "@/lib/authz";
 import {
-  designateFoundingAdministratorAction,
-  type PolicyResult,
+  inviteFoundingAdministratorAction,
+  type InvitationActionResult,
 } from "./actions";
 
 /**
@@ -96,11 +96,14 @@ export function FoundingAdministratorSection({
   officeTemplateName,
 }: FoundingAdministratorSectionProps) {
   const [email, setEmail] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<PolicyResult | null>(null);
+  const [result, setResult] = useState<InvitationActionResult | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const emailLooksValid = EMAIL_SHAPE_RE.test(email.trim());
+  const emailLooksValid =
+    EMAIL_SHAPE_RE.test(email.trim()) && firstName.trim() !== "" && lastName.trim() !== "";
 
   // `organizationType` is accepted as a prop (and threaded through, per the
   // page-gate contract) but is not read directly here: the presbytery-only
@@ -117,12 +120,16 @@ export function FoundingAdministratorSection({
       const fd = new FormData();
       fd.set("organizationId", organizationId);
       fd.set("email", trimmedEmail);
-      const outcome = await designateFoundingAdministratorAction(fd);
+      fd.set("firstName", firstName.trim());
+      fd.set("lastName", lastName.trim());
+      const outcome = await inviteFoundingAdministratorAction(fd);
       setResult(outcome);
       setConfirmOpen(false);
       if (outcome.ok) {
-        toast.success(`${trimmedEmail} is now ${organizationName}'s founding administrator.`);
+        toast.success(`Invitation sent to ${trimmedEmail}.`);
         setEmail("");
+        setFirstName("");
+        setLastName("");
       } else {
         toast.error(outcome.error);
       }
@@ -154,9 +161,10 @@ export function FoundingAdministratorSection({
         Founding administrator
       </h2>
       <p className="mt-1 text-sm text-blue-900/80 dark:text-blue-200/80">
-        This organization has no one yet who can manage roles. Designate one
-        person by email to hand it over — this can only be done once per
-        organization (or again if it ever loses every role-manager).
+        This organization has no one yet who can manage roles. Invite one
+        person by email to hand it over: they get a link to accept, and nobody
+        holds the role until they do. This can only be done while nobody can
+        manage roles (so also as a recovery if it ever loses every role-manager).
       </p>
 
       {result && !result.ok && (
@@ -172,7 +180,7 @@ export function FoundingAdministratorSection({
           role="status"
           className="mt-3 rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
         >
-          Founding administrator designated.
+          Invitation sent. Nobody holds this role until it is accepted.
         </div>
       )}
 
@@ -188,10 +196,31 @@ export function FoundingAdministratorSection({
           disabled={isPending}
         />
         <p className="mt-1.5 text-xs text-muted-foreground">
-          The person must sign up for a platform account first — they&apos;ll
-          land on a page saying they have no organizations yet — then you
-          designate them here by that same email address.
+          The person does not need an account yet. The link in the email lets
+          them create one, or sign in to the one they have, and accept.
         </p>
+      </div>
+      <div className="mt-3 grid max-w-sm gap-3">
+        <div>
+          <Label htmlFor="foundingAdministratorFirstName">First name</Label>
+          <Input
+            id="foundingAdministratorFirstName"
+            name="firstName"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            disabled={isPending}
+          />
+        </div>
+        <div>
+          <Label htmlFor="foundingAdministratorLastName">Last name</Label>
+          <Input
+            id="foundingAdministratorLastName"
+            name="lastName"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            disabled={isPending}
+          />
+        </div>
       </div>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -201,28 +230,28 @@ export function FoundingAdministratorSection({
           disabled={!emailLooksValid || isPending}
           onClick={() => setConfirmOpen(true)}
         >
-          {isPending ? "Designating…" : "Designate founding administrator"}
+          {isPending ? "Sending…" : "Send invitation"}
         </Button>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Designate {email.trim()} as {organizationName}&apos;s founding
+              Invite {email.trim()} to be {organizationName}&apos;s founding
               administrator?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              They will be able to manage {permissionSummary}
+              Once they accept, they will be able to manage {permissionSummary}
               {officeTemplateName
                 ? `, plus this organization's constitutional ${officeTemplateName} office`
                 : ""}
-              . This can only be done once — the organization&apos;s own
-              administrators grant everyone after this through the ordinary
-              Roles page.
+              . The invitation goes to {email.trim()} and works once; nobody holds
+              this role until it is accepted. After this, the organization&apos;s
+              own administrators grant everyone through the ordinary Roles page.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirm} disabled={isPending}>
-              {isPending ? "Designating…" : "Yes, designate"}
+              {isPending ? "Sending…" : "Yes, send invitation"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

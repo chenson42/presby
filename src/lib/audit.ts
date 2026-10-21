@@ -440,6 +440,39 @@ export const AUDIT_ACTIONS = {
   DOMAIN_HOLD_SET: "domain.hold_set",
   DOMAIN_HOLD_CLEARED: "domain.hold_cleared",
   // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/invitations, 2026-10-21 (docs/work-log/
+  // 2026-10-21-invitations.md, Phase 3 section 5; DECISION-183/186/188/189).
+  // Account invitations. Metadata is IDS ONLY: never the token, its hash, a
+  // password or the invited address. Every row is inserted by
+  // src/lib/onboarding/{issue,accept}.ts INSIDE the mutation's own
+  // transaction (insertAuditRow, never recordAudit()), so the change and its
+  // audit row commit or roll back together. `check:audit` walks only
+  // `src/app/**/actions.ts` and cannot see these writes; Rule 7 is proven by
+  // the per-outcome DB tests instead.
+  //   - INVITATION_CREATED / _RESENT / _REVOKED: actor = the platform operator.
+  //     created: { invitationId, organizationId, purpose, personId, expiresAt,
+  //       selfAddressed, acknowledgedDoNotContact }.
+  //     resent: { invitationId (new), supersededInvitationId, organizationId,
+  //       purpose, resendCount }.
+  //     revoked: { invitationId, organizationId, purpose, via:
+  //       'single' | 'revoke_all' }.
+  //   - INVITATION_ACCEPTED: actor = the accepting user. { invitationId,
+  //     organizationId, purpose, personId, mode: 'new_account' |
+  //     'existing_account', invitedByUserId, inviterIsInvitee }.
+  //   - INVITATION_ACCEPT_BLOCKED: actor = the account when known, else null.
+  //     { invitationId, organizationId, purpose, reason }.
+  //   - USER_CREATED_VIA_INVITATION: new-account mode only; actor = the new
+  //     user. { userId, invitationId, organizationId }.
+  // At acceptance the existing ORG_FOUNDING_ADMINISTRATOR_DESIGNATED /
+  // ORG_TREASURER_DESIGNATED rows are written too, with viaInvitationId,
+  // invitedByUserId and inviterIsInvitee added to their metadata.
+  INVITATION_CREATED: "invitation.created",
+  INVITATION_RESENT: "invitation.resent",
+  INVITATION_REVOKED: "invitation.revoked",
+  INVITATION_ACCEPTED: "invitation.accepted",
+  INVITATION_ACCEPT_BLOCKED: "invitation.accept_blocked",
+  USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
+  // ---------------------------------------------------------------------------
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

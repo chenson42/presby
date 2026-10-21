@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HydrationGate } from "@/components/shared/hydration-gate";
-import { designateTreasurerAction, type PolicyResult } from "./actions";
+import { inviteTreasurerAction, type InvitationActionResult } from "./actions";
 
 // Client-side shape check only: the action's zod schema is the real gate. It
 // only keeps the confirm dialog from opening on obvious garbage.
@@ -62,7 +62,7 @@ export function TreasurerDesignationSection({
 }: TreasurerDesignationSectionProps) {
   const [email, setEmail] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<PolicyResult | null>(null);
+  const [result, setResult] = useState<InvitationActionResult | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const emailLooksValid = EMAIL_SHAPE_RE.test(email.trim());
@@ -73,11 +73,11 @@ export function TreasurerDesignationSection({
       const fd = new FormData();
       fd.set("organizationId", organizationId);
       fd.set("email", trimmedEmail);
-      const outcome = await designateTreasurerAction(fd);
+      const outcome = await inviteTreasurerAction(fd);
       setResult(outcome);
       setConfirmOpen(false);
       if (outcome.ok) {
-        toast.success(`${trimmedEmail} is now ${organizationName}'s treasurer.`);
+        toast.success(`Invitation sent to ${trimmedEmail}.`);
         setEmail("");
       } else {
         toast.error(outcome.error);
@@ -116,8 +116,9 @@ export function TreasurerDesignationSection({
         Treasurer
       </h2>
       <p className="mt-1 text-sm text-blue-900/80 dark:text-blue-200/80">
-        No one here can manage giving yet. Designate the congregation&apos;s
-        first treasurer by email — this can only be done while nobody holds that
+        No one here can manage giving yet. Invite the congregation&apos;s
+        first treasurer by email: they get a link to accept, and nobody holds
+        the access until they do. This can only be done while nobody holds that
         access (it also works as a recovery if the last treasurer is ever
         removed).
       </p>
@@ -135,7 +136,7 @@ export function TreasurerDesignationSection({
           role="status"
           className="mt-3 rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
         >
-          Treasurer designated.
+          Invitation sent. Nobody holds this access until it is accepted.
         </div>
       )}
 
@@ -152,10 +153,10 @@ export function TreasurerDesignationSection({
             disabled={isPending}
           />
           <p className="mt-1.5 text-xs text-muted-foreground">
-            The person must already be a member of this organization and have a
-            platform account. Designation never adds anyone to the organization;
-            if they are not a member yet, the organization&apos;s administrator
-            enrols them first.
+            The address must be the one on file for a member of this
+            organization. An invitation never adds anyone to the organization;
+            if they are not enrolled yet, the organization&apos;s administrator
+            enrols them first. They do not need an account yet.
           </p>
         </div>
 
@@ -166,15 +167,15 @@ export function TreasurerDesignationSection({
             disabled={!emailLooksValid || isPending}
             onClick={() => setConfirmOpen(true)}
           >
-            {isPending ? "Designating…" : "Designate treasurer"}
+            {isPending ? "Sending…" : "Send invitation"}
           </Button>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Designate {email.trim()} as {organizationName}&apos;s treasurer?
+                Invite {email.trim()} to be {organizationName}&apos;s treasurer?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                They will be able to view every gift and donor, record gifts,
+                Once they accept, they will be able to view every gift and donor, record gifts,
                 and manage the organization&apos;s giving settings, funds and
                 giving team. Holding this access requires two-factor sign-in.
                 After this, the treasurer — not the platform — adds and removes
@@ -184,7 +185,7 @@ export function TreasurerDesignationSection({
             <AlertDialogFooter>
               <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
               <AlertDialogAction onClick={handleConfirm} disabled={isPending}>
-                {isPending ? "Designating…" : "Yes, designate"}
+                {isPending ? "Sending…" : "Yes, send invitation"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

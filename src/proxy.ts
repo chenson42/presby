@@ -21,6 +21,17 @@ const PUBLIC_PATHS = new Set([
   // needs. See docs/work-log/2026-09-25-submission-grants.md Phase 2.
   "/file-statistics",
   "/file-statistics/submitted",
+  // Account invitations (DECISION-183/185, docs/work-log/2026-10-21-
+  // invitations.md) - the public, token-consuming `(invite)` flow. EXACT paths
+  // again, for the same reason: the token rides the query string (or the
+  // `Path=/invite` hand-off cookie), so no prefix may admit a sibling path.
+  // BOTH signed-in and anonymous visitors reach /invite (Flow 4 needs the
+  // session), so the page - not the proxy - reads auth() and enforces the
+  // email match and the 2FA-verified session (G9). On a church's custom host
+  // the first branch above returns before this set is consulted, so neither
+  // path exists there.
+  "/invite",
+  "/invite/accepted",
 ]);
 
 const PROTECTION_RULES: Array<{ pattern: RegExp; required: string }> = [

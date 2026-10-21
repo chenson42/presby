@@ -35,7 +35,7 @@ The operator asked (2026-10-21, while the invitations pipeline runs) to "work on
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named per batch | 2026-10-21 |
-| 4 — Implementation | A ux-developer · B full-stack-developer · C ux-developer · D api-developer | Pending | — | — |
+| 4 — Implementation | A ux-developer · B full-stack-developer · C ux-developer · D api-developer | In progress (A, C, D complete; B pending) | — | 2026-10-21 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -888,6 +888,85 @@ Hand-off note: Phase 4 starts with A. Judgment agents (qa, analyst) stay read-on
 ---
 
 # Phase 4 — Implementation
+
+## Batches A and C (ux-developer, 2026-10-21)
+
+**Status: A complete, C complete.** Nothing staged or committed.
+
+### Batch A — Google sign-in button
+- Created `src/app/(auth)/signin/google-sign-in-button.tsx` (the `GOOGLE_BUTTON` constant, element-scoped `--gsi-*` properties, official inline "G" SVG, generated `<Button variant="outline">` with colour-hinted classes, `min-h-[44px]`) and `google-sign-in-button.test.tsx` (submit button + name, aria-hidden SVG, 44px, every `--gsi-*` property inline, merge result, light and dark contrast >= 7:1 label and >= 3:1 stroke).
+- Modified `src/app/(auth)/signin/page.tsx` (button swap; both "never recolored" comments rewritten to the R8 rationale; `data-brand-neutral` kept; the `npm run db:seed` hint untouched), `docs/ui-standards.md` (sole-exemption sentence plus the checklist parenthetical), `e2e/branded-signin.spec.ts` (S1 adopted: computed background `rgb(255,255,255)` under a live brand and height >= 44 in test 1; new test 1b with emulated dark scheme asserting `rgb(19,19,20)` and label `rgb(227,227,227)`).
+- Google guidelines were fetched from developers.google.com/identity/branding-guidelines (not blocked). Fill, stroke and label values for light and dark match R7 exactly (neutral theme #F2F2F2 is not used). The page publishes no hover, pressed or disabled colours, so those are Material state layers (8% / 12% / disabled) pre-composited to opaque hex, as Phase 3 directed. Google Sans is not loaded (recorded departure).
+- Browser evidence (dev server 3600, Playwright): computed button colours light `rgb(255,255,255)` / text `rgb(31,31,31)` / border `rgb(116,119,117)`, dark `rgb(19,19,20)` / `rgb(227,227,227)` / `rgb(142,145,143)`; height 44 at 360px and 1280px; hover light `rgb(238,238,238)`, dark `rgb(36,36,37)`. Screenshots in the scratchpad: `signin-phone-light.png`, `signin-phone-dark.png`, `signin-desktop-light.png`, `signin-desktop-dark.png`, `signin-phone-dark-focus.png`. Pressed, disabled and keyboard focus ring were not separately captured (hover persisted in the focus shot); they follow the same class set and should be eyeballed once by QA.
+- Gates: `e2e/branded-signin.spec.ts` 5/5 passed (including the old MFA test 2 on the current /totp); vitest signin 24 passed; eslint clean.
+
+### Batch C — hierarchical, filterable /admin/organizations
+- Created `src/app/(admin)/admin/organizations/org-tree.ts` (pure: `parseOrgFilters`, `orgFiltersToQuery`, `buildOrgTree`; iterative DFS with visited set; cycle remnants and self or unknown parents become roots; ancestors of matches kept; child summaries from the unfiltered tree; 500-row cap) and `org-tree.test.ts` (ordering, unknown parent, self-parent, cycles, filter allow-list, `%`/`_` literal, NFC and case folding, 100-char cap, array params, ancestors dimmed, unbranded AND, summaries, cap and truncation, query round-trip with `filter` first).
+- Modified `page.tsx` (one `getPlatformDb()` select adding `parentId` and `lifecycleStatus`, wrapped in try/catch with an inline `role="alert"` "We couldn't load the organization list" panel and Try again link, R15; GET `role="search"` form with name, type and platform-status native selects; All and Still-on-default-palette links carry the other params with `filter` first; `<Table>` primitive; static indent map capped at 4 plus left-border guide; `data-depth` and `data-match`; Manage only on matching rows, with `aria-label`; lifecycle badge for non-active; Branded badge literal removed (F163); empty states for none, no matches, all branded; truncation message) and `e2e/admin-organizations.spec.ts` (7 new cases: tree order and depth, q match with dimmed ancestor and no Manage, type filter, bogus params ignored, form round trip and Clear filters, empty state, 360px).
+- Browser evidence (Playwright, 3600, fixture tree of 15 orgs: 1 synod, 5 presbyteries, 9 congregations): 360px and 1280px, zero horizontal overflow in every variant (tree, `?q=`, `?type=`, `?filter=unbranded&status=`, no-match, dark). At 360px the Organization column wraps and the Manage link (44px tall) sits inside the viewport; Type, Status, Branding fold into a sub-line below `sm`. Screenshots in the scratchpad: `orgs-phone-tree.png`, `orgs-desktop-tree.png`, `orgs-phone-q.png`, `orgs-desktop-q.png`, `orgs-desktop-unbranded.png`, `orgs-phone-none.png`, `orgs-desktop-dark.png`. First screenshot pass showed the Manage link clipped off-screen at 360px; fixed with `whitespace-normal` on the name cell, re-verified.
+- Gates: `admin-organizations.spec.ts` new and touched cases 10/10 on a warm server (the first run had two cold-compile timeouts on pre-existing tests, they passed on rerun); full file earlier 18 passed. Vitest org-tree plus signin: 48 passed. `npm run lint` clean; `npm run check` all eight tripwires pass.
+- Not exercised: collapse and expand (always expanded, Q7), the 500-row cap against a real large table (unit tested only; the fixture has 15 rows), the DB-unreachable error panel (not simulated in a browser).
+
+### Notes and tradeoffs
+- `npm run typecheck` currently reports only (a) Batch D's in-progress `EnqueueEmailInput` errors and (b) `stripe`/`pdfkit` module-not-found and one implicit-any in `giving/providers/stripe`. (b) is environmental: the worktree had no `node_modules`, so I cloned the sibling checkout's (APFS clone) and it predates those dependencies. A fresh `npm ci` in this worktree would clear it. Nothing in A or C appears in the error list.
+- Dev server on 3600 is running from this worktree with the Playwright test fakes (CRON_SECRET and DOMAINS_* fakes); I ran e2e with `E2E_ALLOW_SHARED_DB=true` because `.env.local` points at the isolated Neon branch `pipeline-review-polish`.
+- I ran `pkill -f "next dev"` once to restart the 3600 server, which matches every `next dev` process of this user, not just mine. No other process was visible at the time, but if another pipeline's dev server died around 12:35, that is why.
+- Tree nested rows show the type, status and branding on a sub-line only below `sm`; the "All (n)" count is the total organization count, not the filtered count.
+
+## Batch D — rich HTML email (api-developer, 2026-10-21)
+
+**Status: D complete.** Nothing staged or committed. Next agent: **qa** after Batch B lands (the Phase 4 MFA e2e gate belongs to B); D has no UI.
+
+### Contract (what the next agent consumes)
+
+No routes, no server-action signature changes, no `FEATURES`/flag/seed/schema/audit change. The contract is the library surface:
+
+- `renderEmail(content: EmailContent): RenderedEmail` in `src/lib/email/render.ts` (pure; no `server-only`, no db, no env, no headers). `EmailContent = { subject, preheader?, heading, blocks: EmailBlock[], action?: { label, href }, footnote? }`; `EmailBlock` is `p | facts | list | quote`. Callers pass RAW strings; it escapes. `RenderedEmail = { subject, html, text }` with a type-only `unique symbol` brand. Throws only when `action.href` is not an absolute http(s) URL (the message never echoes the URL).
+- `enqueueEmail(input: { to; message: RenderedEmail; templateKey; from?; replyTo?; maxAttempts? })`. `subject`/`html`/`text` are no longer accepted. The `@/lib/email` barrel re-exports `renderEmail` and the types, but every sender imports `@/lib/email/render` directly (several tests stub the barrel).
+- `src/lib/email/account-messages.ts`: `buildPasswordResetEmail({ resetUrl })`, `buildEmailChangeVerifyEmail({ newEmail, verifyUrl })`.
+- Exported builders: `buildStatisticsGrantEmail(...)` (`src/lib/statistics-grants.ts`); `buildDomainNotification` and `buildOperatorAlert` now return `RenderedEmail`; `buildStatementNotice` now returns `{ templateKey, message: RenderedEmail }` (shape change).
+- Deleted: `sendPasswordResetEmail` (send.ts and the barrel). Fallback sender strings in `send.ts` and `.env.example` are now "PresbyPortal <noreply@example.com>".
+- Invitations adoption (not edited here): its `account_invitation` sender must build a `RenderedEmail` through `renderEmail`; the brand makes anything else a compile error. The action URL is an unchanged substring in `href` (`&` as `&amp;` only), the printed link and `text`, so its G5 rewrite must `replaceAll` both the escaped and raw forms across `html` and `text`. `render.test.ts` asserts this.
+
+### Per-sender result (every `enqueueEmail` caller; 13 call sites, 12 template keys)
+
+| # | templateKey | Builder | Notes |
+|---|---|---|---|
+| 1 | `email_change_verify` | `buildEmailChangeVerifyEmail` | F161 closed: `newEmail` escaped by `renderEmail`; test uses `<img src=x onerror=1>@example.invalid`. |
+| 2 | `password_reset` | `buildPasswordResetEmail` | "expires in 60 minutes" kept. |
+| 3 | `feedback_notification` | module-local `buildFeedbackEmail` | F162 (raw subject) and F165 (absolute `{platformOrigin()}/admin/feedback`, omitted when null); built once, reused for every admin. |
+| 4 | `ticket_filed_confirmation` | module-local `buildTicketFiledEmail` | F162; new best-effort link to `/o/{slug}/tickets`. |
+| 5-9 | `ticket_new`, `ticket_operator_reply`, `ticket_submitter_reply`, `ticket_resolved`, `ticket_feedback_promoted` | shared module-local `ticketMessage(...)` | F162, F165 (absolute `/admin/tickets/{id}` or `/o/{slug}/tickets/{id}`; button omitted when `platformOrigin()` is null). |
+| 10 | `statistics_submission_grant` | `buildStatisticsGrantEmail` | Expiry is now "May 4, 2090 (UTC)" via the existing `formatDateUTC` (not `toDateString()`), identical in html and text. |
+| 11, 12 | `domain_notification` (notice and operator alert) | `buildDomainNotification`, `buildOperatorAlert` | Every phrase `notify.test.ts` asserts is preserved; still ACCOUNT-class (no `from`/`replyTo`). The build is inside a try so "never throws" still holds. |
+| 13 | `giving.statement.notice` | `buildStatementNotice` -> `{ templateKey, message }` | B5 asserted on the full rendered subject, html and text; header comment now "no digit in the content but the tax year"; privacy sentence verbatim. |
+
+### Files created
+`src/lib/email/render.ts`, `render.test.ts` (37 tests), `account-messages.ts`, `account-messages.test.ts`, `src/lib/tickets-notifications.test.ts`, `src/lib/statistics-grants-email.test.ts`.
+
+### Files modified
+`src/lib/email/{queue.ts,queue.test.ts,send.ts,index.ts}`, `.env.example`, `src/app/(account)/account/actions.ts`, `src/app/(password-reset)/actions.ts`, `src/app/(member)/feedback/{actions.ts,actions.test.ts}`, `src/app/(org)/o/[slug]/tickets/{actions.ts,actions.test.ts}`, `src/lib/tickets-notifications.ts`, `src/lib/statistics-grants.ts`, `src/lib/domains/{notify.ts,notify.test.ts,service.db.test.ts,sweep.db.test.ts}`, `src/lib/giving/statements.ts`, `src/lib/giving/statements.db.test.ts`, `src/lib/giving/statements/{notice.ts,notice.test.ts}`. The feedback and ticket action tests no longer mock `escapeHtml` (renderEmail owns escaping now; the old passthrough mock would have hidden a double-escape).
+
+### Schema / audit events
+None. No `actions.ts` mutation was added; `npm run check:audit` passes.
+
+### Tests and gates
+- `render.test.ts`: escaping once in html and raw in text and subject for every block kind; CR/LF and whitespace collapse and the 200-character cap on the subject; href accept and reject (`javascript:`, `data:`, relative, protocol-relative, `ftp:`, spaces, control characters, quote and angle bracket, empty) and the error never echoes the URL; the action URL as an unchanged substring in `href`, the printed link and `text` (with `&` in the URL; a `replaceAll` rewrites all three; no zero-width characters); text generated from structure (exact expected string); no style element, image, script, link or `url(`; colour-scheme metas; hidden preheader; every table `role="presentation"` and exactly one table-open source line, annotated `ui-ok`; explicit `bgcolor` and `color` on every `td` and text element; palette equals `PLATFORM_TOKENS.light` via `parseColor` and clears contrast; chrome of an empty message free of `$`, decimals, thousands patterns, years, the domain tests' forbidden words, `@`, phone shapes and "unsubscribe"; the `RenderedEmail` cast scan over every `.ts`/`.tsx` under `src/` (plus a self-check that the scan catches the casts it exists for).
+- Sender tests: `account-messages.test.ts`, `tickets-notifications.test.ts`, `statistics-grants-email.test.ts`, new cases in `notify.test.ts`, `notice.test.ts` rewritten to the full rendered message, the feedback and tickets action tests, `queue.test.ts` (stores `message.subject/html/text`). The F161 test is named "regression for F161 unescaped newEmail"; the feedback and ticket confirmation tests are named for F162/F165.
+- Results: `npm run typecheck` clean except `pdfkit`/`stripe` module-not-found (environmental: this worktree's `node_modules` is a clone that predates those deps, as the Batch A/C note says). `npm run lint` clean. `npm run check`: all eight tripwires pass, **`check:brand-scope` with no new exemption** (R12). `npm run test`: 471 files passed, 64 skipped, 6970 tests passed WITH `pdfkit` and `stripe` temporarily symlinked in from the giving checkout's `node_modules` (removed afterwards, nothing in that checkout touched); without them exactly five files fail to import (`render-pdf.test.ts`, `stripe/client.test.ts`, `stripe/testing/sign-event.test.ts`, `api/webhooks/stripe/route.test.ts`, `admin/giving/statements/print/route.test.ts`), none email-related.
+- DB-backed, one file per process, `--no-file-parallelism`, `.env.local` (Neon branch `pipeline-review-polish`): `statistics-grants.test.ts` 30/30. `statements.db.test.ts`: whole-file run lost one Neon websocket connection mid-file (the known flake); the notice test and the stale tests pass on re-run. `service.db.test.ts`: 100/101, the one failure was the dropped connection; that test passes alone, and "notifies the holders after commit, without the token" passes. `sweep.db.test.ts`: 70/71, the failure was the dropped connection; the nudge group passes alone.
+- Not run: `e2e/giving-statements.spec.ts` (the real stored-row proof of the R13 chrome constraints; needs the running dev server and fixtures, so QA's post-D regression runs it) and any real-client rendering (Gmail, Apple Mail).
+
+### Samples for the operator
+HTML plus plain text for every sender are under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/email-samples/` (`<templateKey>.html` and `.txt`; the operator alert is `domain_operator_alert`). Screenshots (Chromium, 760px and 360px): `shot-<templateKey>-<desktop|phone>-light.png` for password_reset, ticket_operator_reply, feedback_notification, giving_statement_notice and domain_notification. Chromium honours the declared single `light` colour scheme, so the dark-preference emulation and the forced-dark flag render the same as light (`-dark-pref`, `-forced-dark` files); that shows the declaration works where it is honoured. It is not a simulation of a mail client's own inversion, which remains an eyeball check. Two samples (`feedback_notification`, `ticket_filed_confirmation`) mirror the sender's content because those builders are module-local inside `'use server'` files; the rest run through the real sender code.
+
+### Deviations and notes
+- **Contrast (design rule 7).** White on the platform blue, and the blue link on white, are 6.84:1, below the 7:1 the design asked for every pair. They clear the platform's own D2 floor (4.5:1), which `PLATFORM_TOKENS` records. Body text, muted text and the navy header all clear 7:1. The test asserts 7:1 for those and 4.5:1 for the button and link pairs. A navy button would reach 7:1 at the cost of the brand blue; left for the orchestrator or operator to rule.
+- **Statistics-grant expiry** uses the repo's `formatDateUTC` (medium style) plus "(UTC)" rather than the design's long `Intl` format, to avoid a second date formatter.
+- **`buildStatisticsGrantEmail` is exported** from `statistics-grants.ts` (a normal lib file, not `'use server'`) so it can be unit tested; the design had it module-local.
+- **Headings** were left open by the design for most senders; each is short and sentence case ("New feedback", "Your ticket has been filed", "Reset your password").
+- **F165** (relative links in ticket and feedback mail) is closed as designed. The three token-bearing senders keep `NEXT_PUBLIC_APP_URL ?? localhost` link construction (out of scope).
+- Behaviour change worth the operator's eye: ticket and feedback mail now carries working absolute links; with no safe `NEXT_PUBLIC_APP_URL` (production without an https value) the button is omitted rather than throwing.
 
 ## Files Created
 

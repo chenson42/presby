@@ -36,7 +36,7 @@ The operator asked (2026-10-21, while the invitations pipeline runs) to "work on
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named per batch | 2026-10-21 |
 | 4 — Implementation | A ux-developer · B full-stack-developer · C ux-developer · D api-developer | Complete (A, B, C, D) | — | 2026-10-21 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-10-21 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1011,71 +1011,142 @@ Screenshots in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presb
 - `text-destructive` on the dark scheme reads dim against the dark background (`totp-10-dark.png`); it is the platform token and complies with F163, so any contrast change is a token decision, not this batch's.
 - Enrolment completion itself (a real `completeEnrollment`) is covered by the jsdom test with a mocked action only; no e2e mutates the seeded admin row.
 
-## Files Created
-
-- `path/to/file` — purpose
-
-## Files Modified
-
-- `path/to/file` — what changed
-
-## Schema Changes
-
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
-
-## Audit Events
-
-- [Action key written when the security-sensitive mutation fires]
-
-## Implementer Notes
-
-[Tradeoffs taken, anything that diverged from the design and why.]
-
 ---
 
-# Phase 5 — Verification (qa)
+# Phase 5: Verification (qa)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+**Verdict: PASS.** All required gates are green, the auth-touching e2e ran on a real dev server with the MFA-enrolled seeded user, and the feature-gate audit is clean. The only red I hit either predates this branch (shown on `main`) or is a database timeout that passed when re-run on its own.
+
+**Date:** 2026-10-21
+**Verified by:** qa, against worktree `/Users/cshenso/git/presby-platform/presby-polish`, branch `pipeline/review-polish`, HEAD `2fad8ac`, isolated Neon branch `pipeline-review-polish`.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS** (exit 0). `npm run lint`: **PASS** (exit 0, `--max-warnings=0`). `npm run check`: **PASS**, all eight tripwires, including the new H3 rule in `check:hydration-gate` and `check:brand-scope` with no new exemption. `npm run build`: **PASS**; `/signin`, `/totp` and `/admin/organizations` compiled.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Non-DB suite** (`npx vitest run`): 474 files passed, 64 skipped (the DB-backed ones), 0 failed. 7055 tests passed, 0 failed, 26.8s. That includes `scripts/check-hydration-gate.test.mjs` (29 tests, H3 cases included).
+
+**DB-backed files**, 71 in all, each run in its own process with `--no-file-parallelism` and `.env.local`:
+
+- **Diff-related files:**
+  - `src/lib/giving/statements.db.test.ts`: 24/24.
+  - `src/lib/domains/sweep.db.test.ts`: 71/71. It exited 1 only because of an unhandled `Connection terminated unexpectedly`.
+  - `src/lib/domains/service.db.test.ts`: 100/101. The one failure, `attach_pending -remove-> parked (web)`, was a 22.6s timeout and passed when re-run on its own.
+  - `src/lib/statistics-grants.test.ts`: 29/30. The one timeout passed when re-run on its own.
+- **The other 67 files:** 62 clean. 1693 passed and 11 failed in total:
+  - **6 tests passed when re-run on their own:** 20s timeouts in `directory.test.ts` (1), `giving/attention.db.test.ts` (1) and `giving/ingest/lifecycle.db.test.ts` (4).
+  - **2 tests are limited by latency, not broken:** in `org-features.test.ts:532`, the two combinatorial cases still time out alone at 20s. With `--testTimeout=180000` the whole file passes 29/29 in 103s. This file is not in the diff.
+  - **3 failures are in the fixture-leak canary** (`src/lib/db/fixture-deletable.test.ts`), caused by leftover database state, not by code. The branch holds 26 people rows and 3 organization rows stamped as deletable test fixtures; one has an expired window.
+    - The earliest row (20:10 UTC) predates this QA session.
+    - The 3 organization rows (21:01 UTC) were leaked by me: I killed my own broad `npm run test:db` run mid-file at that minute because it gave no progress output.
+    - The branch is disposable, and the canary prints its own cleanup SQL. That cleanup, or deleting the branch, is the orchestrator's call.
+- **Latency:** the branch's round-trip time measured 87–357 ms. That explains the timeouts, alongside the known "Connection terminated" flake.
+
+Failures attributable to this diff: **none**.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+All dev-lane runs were against `PORT=3600` started from this worktree with Playwright's test env (`RATE_LIMIT_DISABLED`, `DOMAINS_*` fakes, `CRON_SECRET`), plus `E2E_ALLOW_SHARED_DB=true`. The MFA-enrolled seeded user went through the new `/totp` every time.
+
+- **Targeted dev lane (74 tests, 14 files).** Files: totp-full-login, totp-callback-bypass, totp-code-entry, totp-recovery-code, branded-signin, account-page, admin-organizations, giving-statements, and every `e2e/hydration/` spec.
+  - **First run:** 71 passed, 2 failed, 1 did not run. `totp-full-login.spec.ts:59` was still on "Verifying…" mid-render when its wait expired. Right after it, the `totp-recovery-code.spec.ts:31` beforeAll hit Neon `fetch failed`.
+  - **Re-run of those specs:** 3/3 passed.
+  - **Order check:** running hydration/totp-challenge, totp-callback-bypass, totp-code-entry, totp-full-login and totp-recovery-code back to back gave 22/22. The action writes `lastUsedAt` but doesn't refuse a reused code, so no TOTP-replay order dependency exists.
+  - **R13 real-row proof:** `giving-statements.spec.ts:264` passed. It is the stored-row check that the notice email carries no amounts.
+- **Prod-build lane** (`PW_PROD_PORT=3900`, scratch copy outside `~/git/presby-platform/` with hardlinked `node_modules`): **73/73 passed** (6.5 min), `hydration/totp-challenge` included.
+  - **My own negative control:** with `<HydrationGate>` removed from the copy's `totp-challenge-form.tsx`, the spec went red at `e2e/hydration/totp-challenge.spec.ts:76` (no gate fieldset).
+  - With line 76 also removed, it went red at the behavioural `:77` (`toBeDisabled()` on the boxes). Both assertions guard the gate.
+- **Full dev suite (450 tests, both projects):** 431 passed, 3 failed, 16 did not run (30.5 min).
+  - **`admin-organizations.spec.ts:225`:** a cold-compile timeout on the `[id]` detail page, which this diff doesn't touch. The whole file passed when re-run.
+  - **`giving-statements.spec.ts:243`:** a print-route 500 during the full run. The whole file passed 11/11 when re-run.
+  - **`giving-connect.spec.ts:273`:** **this failure predates the branch.** It fails 3/3 here, and identically on `main` 86dd835: same line, same received text ("The give page is on…"). I checked `main` with a production build of a `git archive main` copy on port 3601, against the same isolated branch. The "Take it offline" toast confirms the action worked, but the state text doesn't refresh within 5s. Its 11 serial followers did not run on either branch.
+
+Totals across the runs that matter: no failure attributable to this diff.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+Every test below except F164 was checked by mutating a scratch copy (never the worktree) and confirming it goes red.
+
+- `escapes a hostile new address in html and keeps it raw in text - regression for F161 unescaped newEmail`, at `src/lib/email/account-messages.test.ts:37`. Red when `esc()` in `render.ts` returns its input unchanged.
+  - Nobody watched it fail before the fix: it is one `feat` commit, and the builder didn't exist before it. The mutation stands in for that.
+- `the confirmation is a rendered message: raw subject … - regression for escaped ticket subjects (F162)`, at `src/app/(org)/o/[slug]/tickets/actions.test.ts:317`. Red when `cleanSubject` HTML-escapes the subject. Also red under that mutation: 5 cases in `src/lib/tickets-notifications.test.ts` (shared helper at `:55`) and the escaping case in `render.test.ts`.
+- `enqueues one rendered message per admin: … - regression for F162 escaped subject and F165 relative link`, at `src/app/(member)/feedback/actions.test.ts:489`.
+  - It goes **red on F165** when the link is made relative.
+  - It **cannot go red on F162**: the feedback category is allow-listed (`VALID_CATEGORIES`), so the subject never holds an escapable character. That half of F162 is moot for feedback; the class is covered by `render.test.ts` and the ticket tests.
+- F165 for tickets: 5 cases in `src/lib/tickets-notifications.test.ts` (`:81`, `:114`, `:137`, `:166`, `:185`) go red when the origin prefix is dropped from the ticket links.
+- F164 (recovery-code path): `e2e/totp-recovery-code.spec.ts:49` and `:115`. This is new coverage rather than a code fix. It checks the persisted audit rows (`totp.recovery_failed`, `totp.recovery_succeeded`), `used_at`, and that a used code fails on second use. It passed on the running server.
+- DECISION-192: `e2e/hydration/totp-challenge.spec.ts:63`. It asserts that no `totp.verify_failed` row was written. It passed in both lanes and failed under my negative control.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100% statements / 100% branches
+- `src/lib/two-factor.ts`: 91.3% / 100% (not changed by this diff; meets the 90% target)
+- `src/lib/flags.ts`: 100% / 100%
+- New modules:
+  - `src/lib/email/render.ts`: 100 / 100
+  - `src/components/shared/one-time-code-input.tsx`: 99.05 / 93.75
+  - `src/app/(admin)/admin/organizations/org-tree.ts`: 99.02 / 91.48
+  - `src/app/(auth)/totp/totp-challenge-form.tsx`: 100 / 100
+  - `src/app/(auth)/signin/google-sign-in-button.tsx`: 100 / 100
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+Verified by reading the page and action bodies, not inferred from green tests. No `api/**/route.ts` was added or changed. `src/proxy.ts`, `src/auth.ts`, `src/lib/auth/*`, `verifyTotpAction` and `src/lib/permissions.ts` are absent from the diff.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| GET `/admin/organizations` (page) | yes | yes, inline denial, unchanged | `FEATURES.ADMIN_ORGANIZATIONS` (the proxy's `/admin` gate is a complement) |
+| `requestEmailChange` (`(account)/account/actions.ts`) | yes, unchanged | n/a, self-service on the caller's own account | n/a |
+| `submitFeedback` (`(member)/feedback/actions.ts`) | yes, unchanged | n/a, any member | n/a |
+| `fileTicketAction` (`(org)/o/[slug]/tickets/actions.ts`) | yes, via `resolveActingIdentity`, unchanged | n/a, tenant org permission, unchanged | n/a |
+| `requestPasswordReset` (`(password-reset)/actions.ts`) | n/a, anonymous by design (Turnstile and rate limit unchanged) | n/a | n/a |
+| `verifyTotpAction` (`(auth)/totp/actions.ts`) | not in the diff | n/a | n/a |
 
-## Verdict
+In all four changed actions, only the email-building lines changed.
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+## Phase 2 binding rulings: spot-check
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+- **R1/R2:** the boxes carry no `name`. There is exactly one hidden `<input name={name}>`. `autoFocus` defaults to off and runs in an effect keyed on `useHydrated()`. No `maxLength`; `type="text"`, `inputMode="numeric"`, `autoComplete="one-time-code"` on box 1.
+- **R3:** the boxes use the generated `<Input>`. `src/components/ui/*` is untouched.
+- **R4/R5:** `HydrationGate` wraps both the `/totp` form and the enrolment form. H3 is enforced and tested. `/account/2fa` leaves `autoFocus` off.
+- **R6:** digit and recovery `token` fields are mounted one at a time, so exactly one `token` field exists in each mode. `sp.error` is allow-listed. The error text uses `text-destructive` with `role="alert"`.
+- **R7/R8:**
+  - The Google literals live only in `google-sign-in-button.tsx`, as `--gsi-*` properties. There are none in `globals.css` or `src/lib/brand/`, and `button.tsx` gets no variant.
+  - `data-brand-neutral` is kept, and both comments were rewritten.
+  - The `npm run db:seed` hint is unchanged (`signin/page.tsx:153`).
+- **R9:** `render.ts` and `account-messages.ts` use no `server-only`, no `process.env` and no db. `notice.ts` imports `@/lib/email/render` directly.
+- **R10:** the only `as RenderedEmail` under `src/` is at `render.ts:285`. `sendPasswordResetEmail` is gone. Fallback sender strings now read "PresbyPortal".
+- **R12:** `src/lib/email/` contains no `<style`. There is one table helper (`render.ts:118-121`), annotated `ui-ok`.
+- **Palette literals:** no Tailwind palette class was added under `src/`. The only hex values outside the Google file are `render.ts`'s `EMAIL_PALETTE`, which Phase 3 rule 7 sanctions and a token-equality test checks.
+- **R14/R15:** the org page does a single `getPlatformDb()` select. It never reads `path`, writes nothing, catches the read error and renders an inline retry. No `error.tsx` was added.
+
+## Notes for the orchestrator and Phase 6 (not blocking)
+
+1. **`giving-connect.spec.ts:273` fails on `main` too.** Worth a TODO or finding line: the toast confirms success, but `give-page-state` doesn't refresh within 5s.
+2. **Fixture-leak canary is red on `pipeline-review-polish`.** I caused part of it (3 organization rows, 21:01 UTC) by killing my own `test:db` run; the rest predates QA. Clean it up, or delete the branch at pipeline cleanup.
+3. **Things QA did not check by eye:**
+   - The Google button's pressed, disabled and keyboard-focus states (Batch A asked).
+   - Real-phone one-time-code autofill.
+   - Gmail and Apple Mail dark mode.
+
+   These belong to Phase 6 or the operator checklist (steps 1.1 and 1.3).
+4. **Contrast deviation still needs a ruling.** White on the platform blue, and the blue link on white, measure 6.84:1 in the email button and link, below the design's 7:1 target (Phase 4 D).
+5. **Possible issue outside this diff:** the give form calls `crypto.randomUUID`, which is undefined on a plain-http `*.invalid` custom host in dev, causing a browser unhandled rejection. No test failed.
+6. **Work-log tidy-up:** the work-log still has the template's placeholder Phase 4 sections (the "Files Created — `path/to/file`" block, about lines 1014–1033).
+7. **Process transparency:**
+   - I created two one-line `.mjs` helpers in the worktree root for read-only DB queries (latency and fixture counts) and deleted each straight away. `git status` was clean afterwards.
+   - All mutations and the prod lane ran in scratchpad copies, which are deleted.
+   - I stopped only the servers I started, by PID: 3600, plus 3601 for the `main` baseline. Nothing on 3500 was touched.
+
+## Per-Phase Status row
+
+| 5 — Verification | qa | Complete | PASS | 2026-10-21 |
+
+## Handoff
+
+Next: **analyst (Phase 6, shipped vs intent).** Carry forward notes 1–7. The non-blocking residuals are the visual checks in note 3, the contrast ruling in note 4, the moot feedback half of F162, and Phase 3's accepted residual that recovery mode is lost after a failed attempt.
 
 ---
 

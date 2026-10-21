@@ -42,6 +42,7 @@ import { generateBrandTokens } from "@/lib/brand/generate";
 import { BRAND_SCOPE_SELECTOR } from "@/lib/brand/contract";
 import { E2E_USERS } from "./support/users";
 import { E2E_TOTP_TEST_SECRET } from "./support/totp-fixture";
+import { enterTotpCode } from "./support/totp-page";
 import { generateSync } from "otplib";
 
 type Sql = ReturnType<typeof neon<false, false>>;
@@ -334,7 +335,7 @@ test.describe.serial("Org-branded /signin", () => {
     ).toBeVisible();
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
 
     // Same admin-role, no-organizations shape totp-full-login.spec.ts

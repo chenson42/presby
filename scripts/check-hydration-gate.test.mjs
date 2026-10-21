@@ -155,3 +155,117 @@ describe("H2 — useForm in a .ts file", () => {
     ).toEqual([]);
   });
 });
+
+describe("H3 — a one-time-code consumer must render <HydrationGate> (DECISION-192)", () => {
+  const OTC_IMPORT = 'import { OneTimeCodeInput } from "@/components/shared/one-time-code-input";';
+
+  const GATED_OTC = `${IMPORT}
+${OTC_IMPORT}
+export function F() {
+  return <HydrationGate><form><OneTimeCodeInput name="token" /></form></HydrationGate>;
+}`;
+
+  it("passes a gated consumer", () => {
+    expect(checkHydrationGate([f("src/app/a/totp-form.tsx", GATED_OTC)])).toEqual([]);
+  });
+
+  it("fails an ungated consumer, naming the import line", () => {
+    const v = checkHydrationGate([
+      f("src/app/a/totp-form.tsx", `${OTC_IMPORT}\nexport const F = () => <form><OneTimeCodeInput name="t" /></form>;`),
+    ]);
+    expect(rules(v)).toEqual(["H3"]);
+    expect(v[0].file).toBe("src/app/a/totp-form.tsx");
+    expect(v[0].line).toBe(1);
+    expect(v[0].message).toContain("OneTimeCodeInput");
+  });
+
+  it("fails when the gate is imported but never rendered", () => {
+    const v = checkHydrationGate([
+      f("src/app/a/totp-form.tsx", `${IMPORT}\n${OTC_IMPORT}\nexport const F = () => <form />;`),
+    ]);
+    expect(rules(v)).toEqual(["H3"]);
+    expect(v[0].message).toContain("<HydrationGate> element");
+  });
+
+  it("fails when the gate is rendered but not imported", () => {
+    const v = checkHydrationGate([
+      f("src/app/a/totp-form.tsx", `${OTC_IMPORT}\nexport const F = () => <HydrationGate />;`),
+    ]);
+    expect(rules(v)).toEqual(["H3"]);
+    expect(v[0].message).toContain("the import");
+  });
+
+  it("fails when the gate element appears only in a comment", () => {
+    const v = checkHydrationGate([
+      f("src/app/a/totp-form.tsx", `${IMPORT}\n${OTC_IMPORT}\n// <HydrationGate> goes here\nexport const F = () => <form />;`),
+    ]);
+    expect(rules(v)).toEqual(["H3"]);
+  });
+
+  it("catches a multi-line import at its `from` line", () => {
+    const v = checkHydrationGate([
+      f(
+        "src/app/a/totp-form.tsx",
+        'import {\n  OneTimeCodeInput,\n} from "@/components/shared/one-time-code-input";\nexport const F = () => <form />;',
+      ),
+    ]);
+    expect(rules(v)).toEqual(["H3"]);
+    expect(v[0].line).toBe(3);
+  });
+
+  it("passes an exempt consumer (reason on the line above)", () => {
+    expect(
+      checkHydrationGate([
+        f("src/app/a/totp-form.tsx", `// hydration-gate-ok: rendered only inside a dialog opened by a click\n${OTC_IMPORT}\nexport const F = () => <form />;`),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("passes an exempt consumer (reason on the same line)", () => {
+    expect(
+      checkHydrationGate([
+        f("src/app/a/totp-form.tsx", `${OTC_IMPORT} // hydration-gate-ok: client-only dialog\nexport const F = () => <form />;`),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("fails an exemption with no reason", () => {
+    const v = checkHydrationGate([
+      f("src/app/a/totp-form.tsx", `// hydration-gate-ok:\n${OTC_IMPORT}\nexport const F = () => <form />;`),
+    ]);
+    expect(rules(v)).toEqual(["H3"]);
+    expect(v[0].message).toContain("needs a reason");
+  });
+
+  it("ignores a test file that imports the component", () => {
+    expect(
+      checkHydrationGate([f("src/app/a/totp-form.test.tsx", `${OTC_IMPORT}\nit("x", () => {});`)]),
+    ).toEqual([]);
+  });
+
+  it("does not flag the component's own file or its siblings that merely mention the path", () => {
+    expect(
+      checkHydrationGate([
+        f(
+          "src/components/shared/one-time-code-input.tsx",
+          'export function OneTimeCodeInput() { return <input />; }\n// imported as "@/components/shared/one-time-code-input"',
+        ),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("does not apply to a .ts file (a type import cannot render the component)", () => {
+    expect(
+      checkHydrationGate([
+        f("src/app/a/types.ts", 'import type { OneTimeCodeInputProps } from "@/components/shared/one-time-code-input";'),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("reports H3 and H1 independently when a file breaks both", () => {
+    const v = checkHydrationGate([
+      f("src/app/a/mixed.tsx", `${OTC_IMPORT}\nconst form = useForm<V>({});\nexport const F = () => <form />;`),
+    ]);
+    expect(rules(v).sort()).toEqual(["H1", "H3"]);
+  });
+});

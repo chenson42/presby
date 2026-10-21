@@ -24,13 +24,46 @@
  * import time. This file doesn't touch that module, but the rule is simplest
  * held uniformly rather than argued about per file.
  */
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 
 type Sql = ReturnType<typeof neon<false, false>>;
 
 /** RFC 4648 base32 — see the file header for why this value is not a secret. */
 export const E2E_TOTP_TEST_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+
+/**
+ * A fixed, invented recovery code for the mfa-enrolled user (F164: the /totp
+ * recovery path had no running-server coverage). Same shape the app generates
+ * (`XXXX-XXXX`, alphabet without 0/O/1/I). Single-use, so it is re-seeded by
+ * seedRecoveryCode() before every spec that consumes it.
+ */
+export const E2E_RECOVERY_CODE = "WXYZ-2345";
+
+/** A well-formed recovery code that was never issued: the "wrong code" case. */
+export const E2E_WRONG_RECOVERY_CODE = "ZZZZ-9999";
+
+/**
+ * Mirrors src/lib/two-factor.ts hashRecoveryCode() (sha256 of the trimmed,
+ * upper-cased code, hex), COPIED rather than imported per this directory's
+ * no-app-import rule (see the header). If the app's algorithm changes, this
+ * copy fails the recovery-code spec loudly: a wrong hash can never match.
+ */
+function hashRecoveryCodeForFixture(code: string): string {
+  return createHash("sha256").update(code.trim().toUpperCase()).digest("hex");
+}
+
+/**
+ * Replaces the user's recovery codes with exactly one unused code,
+ * E2E_RECOVERY_CODE. Idempotent; safe to call before every test.
+ */
+export async function seedRecoveryCode(sql: Sql, userId: string): Promise<void> {
+  await sql`DELETE FROM user_totp_recovery_codes WHERE user_id = ${userId}`;
+  await sql`
+    INSERT INTO user_totp_recovery_codes (user_id, code_hash)
+    VALUES (${userId}, ${hashRecoveryCodeForFixture(E2E_RECOVERY_CODE)})
+  `;
+}
 
 function encryptForFixture(plain: string): string {
   const raw = process.env.AUTH_TOTP_ENCRYPTION_KEY;
@@ -77,4 +110,5 @@ export async function seedTotpEnrollment(
       secret_ciphertext = EXCLUDED.secret_ciphertext,
       last_used_at      = NULL
   `;
+  await seedRecoveryCode(sql, userId);
 }

@@ -82,9 +82,8 @@ const mockEnqueueEmail = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/lib/email", () => ({
   enqueueEmail: (...args: unknown[]) => mockEnqueueEmail(...args),
 }));
-vi.mock("@/lib/email/escape-html", () => ({
-  escapeHtml: (s: string) => s,
-}));
+// escapeHtml is NOT mocked: renderEmail() owns escaping now (DECISION-191), and the
+// confirmation test below asserts the real escaped output.
 
 const mockRevalidatePath = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({
@@ -313,6 +312,26 @@ describe("fileTicketAction", () => {
       },
     });
     expect(mockRevalidatePath).toHaveBeenCalledWith("/o/alder-creek/tickets");
+  });
+
+  it("the confirmation is a rendered message: raw subject, html escaped once, text part, absolute link - regression for escaped ticket subjects (F162)", async () => {
+    mockFileTicket.mockResolvedValueOnce({ kind: "ok", ticketId: "ticket-1" });
+
+    await fileTicketAction("alder-creek", ticketFormData({ subject: "Q&A <b>page</b>" }));
+
+    const { message } = mockEnqueueEmail.mock.calls[0]![0] as {
+      message: { subject: string; html: string; text: string };
+    };
+    // The subject is a plain-text header: never HTML-escaped.
+    expect(message.subject).toBe("Ticket filed: Q&A <b>page</b>");
+    // Escaped exactly once in html; raw in text.
+    expect(message.html).toContain("Q&amp;A &lt;b&gt;page&lt;/b&gt;");
+    expect(message.html).not.toContain("&amp;amp;");
+    expect(message.html).not.toContain("<b>page</b>");
+    expect(message.text).toContain('Your ticket "Q&A <b>page</b>"');
+    // F165-style: an absolute, working link rather than a relative one.
+    expect(message.html).toContain('href="http://localhost:3000/o/alder-creek/tickets"');
+    expect(message.text).toContain("http://localhost:3000/o/alder-creek/tickets");
   });
 });
 

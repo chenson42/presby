@@ -377,7 +377,11 @@ describe.skipIf(!hasDb)("src/lib/domains/service.ts (Postgres-backed)", () => {
         const name = claim("church");
         await claimOk(t, name);
         const token = await tokenOf(t.org, name);
-        const calls = mockEnqueue.mock.calls.map((c) => c[0] as Record<string, string>);
+        // enqueueEmail takes { to, message: RenderedEmail, templateKey }: flatten the message for the assertions.
+        const calls = mockEnqueue.mock.calls.map((c) => {
+          const i = c[0] as { to: string; templateKey: string; message: Record<string, string> };
+          return { to: i.to, templateKey: i.templateKey, ...i.message } as Record<string, string>;
+        });
         const mine = calls.find((c) => c.to === email);
         expect(mine, "holder was notified").toBeDefined();
         expect(mine!.templateKey).toBe("domain_notification");

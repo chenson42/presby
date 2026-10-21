@@ -74,6 +74,28 @@ describe("buildDomainNotification", () => {
     expect(m.html).toContain("&lt;img");
   });
 
+  it("escapes an ampersand once in html and leaves it raw in text and subject (DECISION-191)", () => {
+    const m = buildDomainNotification(
+      { ...CTX, organizationName: "Faith & Hope Church" },
+      { event: "claimed", hostnames: ["a.invalid"], actorKind: "tenant" },
+    );
+    expect(m.subject).toBe("A domain was added - Faith & Hope Church");
+    expect(m.html).toContain("Faith &amp; Hope Church");
+    expect(m.html).not.toContain("&amp;amp;");
+    expect(m.text).toContain("Organization: Faith & Hope Church");
+  });
+
+  it("renders the layout: a button to the domains page, the printed link, and a plain-text part with the same words", () => {
+    const m = buildDomainNotification(CTX, { event: "claimed", hostnames: ["a.invalid", "b.invalid"], actorKind: "tenant" });
+    const href = "https://www.platform.example/o/alder-creek/admin/domains";
+    expect(m.html).toContain(`href="${href}"`);
+    expect(m.html).toContain(">Review it here</a>");
+    expect(m.text).toContain(`Review it here:\n${href}`);
+    expect(m.text).toContain("Domains:\n- a.invalid\n- b.invalid");
+    expect(m.text).toContain("If you did not expect this, contact PresbyPortal support.");
+    expect(m.html).toContain("If you did not expect this, contact PresbyPortal support.");
+  });
+
   it("omits the link when no safe platform origin is configured, rather than guessing one", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
     const m = buildDomainNotification(CTX, { event: "claimed", hostnames: ["a.invalid"], actorKind: "tenant" });
@@ -106,6 +128,9 @@ describe("sendDomainNotification", () => {
     expect(calls.map((c) => c.to)).toEqual(CTX.recipients);
     for (const c of calls) {
       expect(c.templateKey).toBe("domain_notification");
+      expect(c.message).toEqual(
+        expect.objectContaining({ subject: expect.any(String), html: expect.any(String), text: expect.any(String) }),
+      );
       expect(c).not.toHaveProperty("from");
       expect(c).not.toHaveProperty("replyTo");
     }

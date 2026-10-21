@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { users, userRoles, roles, roleFeatures } from "@/lib/db/schema";
 import { FEATURES } from "@/lib/permissions";
 import { enqueueEmail } from "@/lib/email";
-import { escapeHtml } from "@/lib/email/escape-html";
+import { renderEmail, type EmailBlock, type RenderedEmail } from "@/lib/email/render";
+import { platformOrigin } from "@/lib/domains/host";
 
 /**
  * Ticket lifecycle email notifications — shared by `(org)/tickets`,
@@ -31,9 +32,10 @@ import { escapeHtml } from "@/lib/email/escape-html";
  * next door, which DO need `getPlatformDb()` because `tickets`/
  * `ticket_messages` ARE FORCE RLS (DECISION-069).
  *
- * Every function below: `escapeHtml()`s every interpolated string (XSS
- * invariant — src/lib/email.ts's own header), builds a small HTML body,
- * calls `enqueueEmail()` with a `templateKey` unique per event, wrapped in
+ * Every function below: builds a `RenderedEmail` through `ticketMessage()`
+ * (RAW strings in; `renderEmail()` escapes them for HTML, keeps the subject a
+ * plain header and generates the plain-text part — DECISION-191), calls
+ * `enqueueEmail()` with a `templateKey` unique per event, wrapped in
  * try/catch logged via `console.error` — NEVER throws. A notification
  * failure must never take down the mutation it reports on, the same
  * contract `recordAudit()` already holds for audit writes.
@@ -86,8 +88,26 @@ export async function resolveOperatorByUserId(
   return row ?? null;
 }
 
-function ticketEmailFooter(href: string, label: string): string {
-  return `<hr />\n<p><a href="${escapeHtml(href)}">${escapeHtml(label)} &rarr;</a></p>`;
+/**
+ * The shared shape of every ticket message: a heading, content blocks and one
+ * "view" button. The button is built from the validated platform origin and is
+ * omitted when none is safe (F165: the old links were relative, dead in a mail
+ * client). `path` is the in-app path, e.g. `/admin/tickets/<id>`.
+ */
+function ticketMessage(params: {
+  subject: string;
+  heading: string;
+  blocks: ReadonlyArray<EmailBlock>;
+  path: string;
+  label: string;
+}): RenderedEmail {
+  const origin = platformOrigin();
+  return renderEmail({
+    subject: params.subject,
+    heading: params.heading,
+    blocks: params.blocks,
+    action: origin ? { label: params.label, href: `${origin}${params.path}` } : undefined,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -118,20 +138,30 @@ export async function notifyOperatorsOfNewTicket(params: {
       return;
     }
 
-    const subjectLine = `New ticket: ${params.subject}`;
-    const html = [
-      `<p><strong>${escapeHtml(params.organizationName)}</strong> filed a new support ticket.</p>`,
-      `<p><strong>Subject:</strong> ${escapeHtml(params.subject)}</p>`,
-      `<p><strong>Category:</strong> ${escapeHtml(params.changeClass)} &middot; <strong>Area:</strong> ${escapeHtml(params.area)} &middot; <strong>Priority:</strong> ${escapeHtml(params.priority)}</p>`,
-      `<p><strong>Submitted by:</strong> ${escapeHtml(params.submitterName)}</p>`,
-      ticketEmailFooter(`/admin/tickets/${params.ticketId}`, "View this ticket"),
-    ].join("\n");
+    const message = ticketMessage({
+      subject: `New ticket: ${params.subject}`,
+      heading: "New support ticket",
+      blocks: [
+        {
+          kind: "facts",
+          rows: [
+            { label: "Organization", value: params.organizationName },
+            { label: "Subject", value: params.subject },
+            { label: "Category", value: params.changeClass },
+            { label: "Area", value: params.area },
+            { label: "Priority", value: params.priority },
+            { label: "Submitted by", value: params.submitterName },
+          ],
+        },
+      ],
+      path: `/admin/tickets/${params.ticketId}`,
+      label: "View this ticket",
+    });
 
     for (const operator of operators) {
       await enqueueEmail({
         to: operator.email,
-        subject: escapeHtml(subjectLine),
-        html,
+        message,
         templateKey: "ticket_new",
       });
     }
@@ -154,19 +184,20 @@ export async function notifySubmitterOfOperatorReply(params: {
   excerpt: string;
 }): Promise<void> {
   try {
-    const html = [
-      `<p>${escapeHtml(params.operatorName)} replied to your ticket "${escapeHtml(params.subject)}".</p>`,
-      `<p style="white-space:pre-wrap">${escapeHtml(params.excerpt)}</p>`,
-      ticketEmailFooter(
-        `/o/${params.slug}/tickets/${params.ticketId}`,
-        "View the full thread",
-      ),
-    ].join("\n");
+    const message = ticketMessage({
+      subject: `New reply on your ticket: ${params.subject}`,
+      heading: "New reply on your ticket",
+      blocks: [
+        { kind: "p", text: `${params.operatorName} replied to your ticket "${params.subject}".` },
+        { kind: "quote", text: params.excerpt },
+      ],
+      path: `/o/${params.slug}/tickets/${params.ticketId}`,
+      label: "View the full thread",
+    });
 
     await enqueueEmail({
       to: params.submitterEmail,
-      subject: escapeHtml(`New reply on your ticket: ${params.subject}`),
-      html,
+      message,
       templateKey: "ticket_operator_reply",
     });
   } catch (err) {
@@ -198,17 +229,21 @@ export async function notifyOperatorsOfSubmitterReply(params: {
       return;
     }
 
-    const html = [
-      `<p>${escapeHtml(params.submitterName)} replied to their ticket "${escapeHtml(params.subject)}".</p>`,
-      `<p style="white-space:pre-wrap">${escapeHtml(params.excerpt)}</p>`,
-      ticketEmailFooter(`/admin/tickets/${params.ticketId}`, "View this ticket"),
-    ].join("\n");
+    const message = ticketMessage({
+      subject: `New reply on ticket: ${params.subject}`,
+      heading: "New reply on a ticket",
+      blocks: [
+        { kind: "p", text: `${params.submitterName} replied to their ticket "${params.subject}".` },
+        { kind: "quote", text: params.excerpt },
+      ],
+      path: `/admin/tickets/${params.ticketId}`,
+      label: "View this ticket",
+    });
 
     for (const operator of recipients) {
       await enqueueEmail({
         to: operator.email,
-        subject: escapeHtml(`New reply on ticket: ${params.subject}`),
-        html,
+        message,
         templateKey: "ticket_submitter_reply",
       });
     }
@@ -237,18 +272,19 @@ export async function notifySubmitterOfResolution(params: {
   status: "resolved" | "declined";
 }): Promise<void> {
   try {
-    const html = [
-      `<p>Your ticket "${escapeHtml(params.subject)}" has been marked <strong>${escapeHtml(params.status)}</strong>.</p>`,
-      ticketEmailFooter(
-        `/o/${params.slug}/tickets/${params.ticketId}`,
-        "View the full thread",
-      ),
-    ].join("\n");
+    const message = ticketMessage({
+      subject: `Your ticket has been ${params.status}: ${params.subject}`,
+      heading: `Your ticket has been ${params.status}`,
+      blocks: [
+        { kind: "p", text: `Your ticket "${params.subject}" has been marked ${params.status}.` },
+      ],
+      path: `/o/${params.slug}/tickets/${params.ticketId}`,
+      label: "View the full thread",
+    });
 
     await enqueueEmail({
       to: params.submitterEmail,
-      subject: escapeHtml(`Your ticket has been ${params.status}: ${params.subject}`),
-      html,
+      message,
       templateKey: "ticket_resolved",
     });
   } catch (err) {
@@ -271,15 +307,22 @@ export async function notifySubmitterOfPromotion(params: {
   subject: string;
 }): Promise<void> {
   try {
-    const html = [
-      `<p>Hi ${escapeHtml(params.submitterName)}, your feedback has been turned into a ticket so we can track it: "${escapeHtml(params.subject)}".</p>`,
-      ticketEmailFooter(`/o/${params.slug}/tickets/${params.ticketId}`, "View the ticket"),
-    ].join("\n");
+    const message = ticketMessage({
+      subject: `Your feedback became a ticket: ${params.subject}`,
+      heading: "Your feedback became a ticket",
+      blocks: [
+        {
+          kind: "p",
+          text: `Hi ${params.submitterName}, your feedback has been turned into a ticket so we can track it: "${params.subject}".`,
+        },
+      ],
+      path: `/o/${params.slug}/tickets/${params.ticketId}`,
+      label: "View the ticket",
+    });
 
     await enqueueEmail({
       to: params.submitterEmail,
-      subject: escapeHtml(`Your feedback became a ticket: ${params.subject}`),
-      html,
+      message,
       templateKey: "ticket_feedback_promoted",
     });
   } catch (err) {

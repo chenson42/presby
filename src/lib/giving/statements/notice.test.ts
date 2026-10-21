@@ -9,9 +9,11 @@ describe("buildStatementNotice", () => {
     expect(buildStatementNotice(base).templateKey).toBe("giving.statement.notice");
   });
 
-  it("carries no amounts and no gift detail anywhere - subject, html or text", () => {
+  // R13 / B5: asserted on the FULL rendered message - the layout's own chrome
+  // included - not on a body fragment.
+  it("carries no amounts and no gift detail anywhere - the full rendered subject, html or text", () => {
     for (const corrected of [false, true]) {
-      const n = buildStatementNotice({ ...base, corrected });
+      const { message: n } = buildStatementNotice({ ...base, corrected });
       for (const part of [n.subject, n.html, n.text]) {
         expect(part).not.toContain("$");
         expect(part).not.toMatch(/\d+\.\d{2}/);
@@ -20,24 +22,35 @@ describe("buildStatementNotice", () => {
     }
   });
 
-  it("names the organization, the year and the link", () => {
-    const n = buildStatementNotice(base);
+  it("names the organization, the year and the link, with the link unchanged in href, printed link and text", () => {
+    const n = buildStatementNotice(base).message;
     expect(n.subject).toBe("Your 2027 giving statement from Fixture Presbyterian Church");
-    expect(n.text).toContain("https://app.example.invalid/o/fixture/giving");
+    expect(n.text).toContain("\nhttps://app.example.invalid/o/fixture/giving\n");
     expect(n.html).toContain('href="https://app.example.invalid/o/fixture/giving"');
+    expect(n.html).toContain(">https://app.example.invalid/o/fixture/giving</a>");
+    expect(n.html).toContain(">View my statement</a>");
+  });
+
+  it("keeps the privacy sentence, in html and text", () => {
+    const n = buildStatementNotice(base).message;
+    const sentence = "For your privacy this message does not list any gifts.";
+    expect(n.html).toContain(sentence);
+    expect(n.text).toContain(sentence);
   });
 
   it("says a corrected statement replaces the earlier one", () => {
-    const n = buildStatementNotice({ ...base, corrected: true });
+    const n = buildStatementNotice({ ...base, corrected: true }).message;
     expect(n.subject).toBe("Your corrected 2027 giving statement from Fixture Presbyterian Church");
     expect(n.text).toContain("It replaces the earlier one.");
   });
 
-  it("escapes a hostile organization name in the html and keeps a subject to one line", () => {
-    const n = buildStatementNotice({ ...base, organizationName: `<img src=x onerror=1>\r\nBcc: x@example.invalid & "co"` });
+  it("escapes a hostile organization name once in the html and keeps a subject to one line", () => {
+    const n = buildStatementNotice({ ...base, organizationName: `<img src=x onerror=1>\r\nBcc: x@example.invalid & "co"` }).message;
     expect(n.html).not.toContain("<img");
     expect(n.html).toContain("&lt;img src=x onerror=1&gt;");
     expect(n.html).toContain("&amp;");
+    expect(n.html).not.toContain("&amp;amp;");
     expect(n.subject).not.toMatch(/[\r\n]/);
+    expect(n.text).toContain('& "co"');
   });
 });

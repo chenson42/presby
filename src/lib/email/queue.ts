@@ -5,6 +5,7 @@ import { emailQueue, auditEvents } from "@/lib/db/schema";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { sql, and, eq, lt } from "drizzle-orm";
 import { sendEmail } from "./send";
+import type { RenderedEmail } from "./render";
 
 // ----- recordDeliveryEvent -------------------------------------------------
 // Called by POST /api/webhooks/resend to backfill delivery-status timestamps
@@ -80,9 +81,11 @@ export async function recordDeliveryEvent(
 
 export type EnqueueEmailInput = {
   to: string;
-  subject: string;
-  html: string;
-  text?: string;
+  /**
+   * The laid-out message (DECISION-191). Only `renderEmail()` can produce a
+   * `RenderedEmail`, so an unwrapped or text-less message is a type error.
+   */
+  message: RenderedEmail;
   from?: string;
   replyTo?: string;
   templateKey: string;
@@ -235,9 +238,9 @@ export async function enqueueEmail(
       toEmail: input.to,
       fromEmail: input.from ?? null,
       replyTo: input.replyTo ?? null,
-      subject: input.subject,
-      htmlBody: input.html,
-      textBody: input.text ?? null,
+      subject: input.message.subject,
+      htmlBody: input.message.html,
+      textBody: input.message.text,
       templateKey: input.templateKey,
       maxAttempts: input.maxAttempts ?? 8,
     })

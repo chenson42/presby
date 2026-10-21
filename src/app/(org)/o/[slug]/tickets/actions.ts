@@ -23,7 +23,8 @@ import {
 import { getBlobStore, BlobValidationError } from "@/lib/storage/blob-store";
 import { sniffTicketAttachmentContentType } from "@/lib/storage/sniff";
 import { enqueueEmail } from "@/lib/email";
-import { escapeHtml } from "@/lib/email/escape-html";
+import { renderEmail, type RenderedEmail } from "@/lib/email/render";
+import { platformOrigin } from "@/lib/domains/host";
 import type { ActionResult } from "@/types/actions";
 
 /**
@@ -117,6 +118,33 @@ async function storeAttachmentIfPresent(
   }
 }
 
+/**
+ * The "ticket filed" confirmation (DECISION-191). Raw strings only:
+ * `renderEmail()` escapes them for HTML and keeps the subject a plain header
+ * (F162). The link is built from the validated platform origin and omitted when
+ * none is safe.
+ */
+function buildTicketFiledEmail(params: {
+  subject: string;
+  organizationName: string;
+  slug: string;
+}): RenderedEmail {
+  const origin = platformOrigin();
+  return renderEmail({
+    subject: `Ticket filed: ${params.subject}`,
+    heading: "Your ticket has been filed",
+    blocks: [
+      {
+        kind: "p",
+        text: `Your ticket "${params.subject}" has been filed for ${params.organizationName}. We'll follow up soon.`,
+      },
+    ],
+    action: origin
+      ? { label: "View your tickets", href: `${origin}/o/${params.slug}/tickets` }
+      : undefined,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // fileTicketAction
 // ---------------------------------------------------------------------------
@@ -163,10 +191,11 @@ export async function fileTicketAction(
   if (identity.userEmail) {
     await enqueueEmail({
       to: identity.userEmail,
-      subject: escapeHtml(`Ticket filed: ${subject.trim()}`),
-      html: [
-        `<p>Your ticket "${escapeHtml(subject.trim())}" has been filed for ${escapeHtml(identity.organizationName)}. We'll follow up soon.</p>`,
-      ].join("\n"),
+      message: buildTicketFiledEmail({
+        subject: subject.trim(),
+        organizationName: identity.organizationName,
+        slug,
+      }),
       templateKey: "ticket_filed_confirmation",
     });
   }

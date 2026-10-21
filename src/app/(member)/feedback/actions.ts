@@ -8,7 +8,8 @@ import * as schema from "@/lib/db/schema";
 import { ADMIN_ROLE } from "@/lib/permissions";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { enqueueEmail } from "@/lib/email";
-import { escapeHtml } from "@/lib/email/escape-html";
+import { renderEmail, type RenderedEmail } from "@/lib/email/render";
+import { platformOrigin } from "@/lib/domains/host";
 import type { ActionResult } from "@/types/actions";
 // computeLocalDate lives in date-utils.ts — extracted from this file because
 // Next.js 16 Turbopack requires all exports from "use server" files to be
@@ -16,50 +17,47 @@ import type { ActionResult } from "@/types/actions";
 import { computeLocalDate } from "./date-utils";
 
 // ---------------------------------------------------------------------------
-// Helper: admin notification email HTML
+// Helper: admin notification email
 // ---------------------------------------------------------------------------
 
 /**
- * Build the HTML body for the admin notification email.
- * ALL member-supplied strings are passed through escapeHtml() before
- * interpolation — this is an XSS invariant that must survive all future
- * edits to this template.
+ * Build the admin notification email (DECISION-191). Every member-supplied
+ * string is passed RAW: `renderEmail()` escapes it for HTML (the XSS
+ * invariant that used to live here as hand-written escapeHtml calls), keeps the
+ * subject a plain header, and generates the plain-text part. The "View all
+ * feedback" link is built from the validated platform origin and omitted when
+ * none is safe (it used to be a relative href, dead in a mail client; F165).
  */
-function buildFeedbackEmailHtml(params: {
+function buildFeedbackEmail(params: {
   body: string;
   category: string | null;
   contextPath: string | null;
   appVersion: string | null;
   submitterName: string;
   submitterEmail: string;
-}): string {
+}): RenderedEmail {
   const { body, category, contextPath, appVersion, submitterName, submitterEmail } =
     params;
+  const origin = platformOrigin();
+  const categoryLabel = category ?? "general";
 
-  // Escape every member-supplied string before HTML interpolation.
-  const safeBody = escapeHtml(body);
-  const safeName = escapeHtml(submitterName);
-  const safeEmail = escapeHtml(submitterEmail);
-  const safeCategory = escapeHtml(category ?? "general");
-  const safeContextPath = contextPath ? escapeHtml(contextPath) : null;
-  const safeAppVersion = appVersion ? escapeHtml(appVersion) : null;
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "From", value: `${submitterName} <${submitterEmail}>` },
+    { label: "Category", value: categoryLabel },
+  ];
+  if (contextPath) rows.push({ label: "Page", value: contextPath });
+  if (appVersion) rows.push({ label: "App version", value: appVersion });
 
-  return [
-    `<p><strong>From:</strong> ${safeName} &lt;${safeEmail}&gt;</p>`,
-    `<p><strong>Category:</strong> ${safeCategory}</p>`,
-    `<p><strong>Message:</strong></p>`,
-    `<p style="white-space:pre-wrap">${safeBody}</p>`,
-    safeContextPath
-      ? `<p><strong>Page:</strong> ${safeContextPath}</p>`
-      : "",
-    safeAppVersion
-      ? `<p><strong>App version:</strong> ${safeAppVersion}</p>`
-      : "",
-    `<hr />`,
-    `<p><a href="/admin/feedback">View all feedback &rarr;</a></p>`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  return renderEmail({
+    subject: `New feedback — ${categoryLabel}`,
+    heading: "New feedback",
+    blocks: [
+      { kind: "facts", rows },
+      { kind: "p", text: "Message:" },
+      { kind: "quote", text: body },
+    ],
+    action: origin ? { label: "View all feedback", href: `${origin}/admin/feedback` } : undefined,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -184,19 +182,19 @@ export async function submitFeedback(
     if (admins.length === 0) {
       console.warn("[feedback] No admins found — skipping notification email.");
     } else {
-      const safeCategory = escapeHtml(input.category ?? "general");
+      // One message for every admin: nothing in it is per-recipient.
+      const message = buildFeedbackEmail({
+        body: trimmedBody,
+        category: input.category,
+        contextPath,
+        appVersion,
+        submitterName: session.user.name ?? "A member",
+        submitterEmail: session.user.email ?? "",
+      });
       for (const admin of admins) {
         await enqueueEmail({
           to: admin.email,
-          subject: `New feedback — ${safeCategory}`,
-          html: buildFeedbackEmailHtml({
-            body: trimmedBody,
-            category: input.category,
-            contextPath,
-            appVersion,
-            submitterName: session.user.name ?? "A member",
-            submitterEmail: session.user.email ?? "",
-          }),
+          message,
           templateKey: "feedback_notification",
         });
       }

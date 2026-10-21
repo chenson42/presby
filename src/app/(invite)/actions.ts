@@ -2,7 +2,7 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { auth, unstable_update } from "@/auth";
 import { signOutAction } from "@/lib/auth/sign-out-action";
 import { isLocalLoginEnabled } from "@/lib/auth/local-login";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -10,9 +10,9 @@ import { getRequestIp } from "@/lib/request-ip";
 import { acceptInvitation, type AcceptResult } from "@/lib/onboarding/accept";
 import { isWellFormedInvitationToken } from "@/lib/onboarding/invitation-token";
 import {
-  INVITE_COOKIE_PATH,
-  INVITE_TOKEN_COOKIE,
+  INVITE_PAGE_PATH,
   inviteCookieOptions,
+  inviteTokenCookieName,
 } from "@/lib/onboarding/invite-cookie";
 import {
   INVITATION_DEAD_LINK_COPY,
@@ -109,7 +109,7 @@ function tokenFrom(formData: FormData): string | null {
 
 async function clearHandoffCookie(): Promise<void> {
   const jar = await cookies();
-  jar.set(INVITE_TOKEN_COOKIE, "", {
+  jar.set(inviteTokenCookieName(), "", {
     ...inviteCookieOptions(),
     maxAge: 0,
   });
@@ -240,6 +240,19 @@ export async function acceptSignedInAction(
 
   if (result.kind === "accepted") {
     await clearHandoffCookie();
+    // Re-sign the session cookie. The proxy decides the /o/* 2FA wall from the
+    // COOKIE's `twoFactorRequired` claim (it never reaches the database), and
+    // accepting can ADD a reason to require 2FA (a treasurer holds giving keys,
+    // arm B of presby_two_factor_required) for an account whose cookie says it
+    // is not required. jwt() recomputes the claim from the database on every
+    // run, but only an update re-issues the cookie. The invitation is already
+    // committed, so a failed refresh must not turn success into an error: the
+    // pages that hold tier-2 data gate 2FA themselves from a fresh auth().
+    try {
+      await unstable_update({ user: {} });
+    } catch {
+      console.error("[invite] session refresh after accept failed");
+    }
     // The slug comes from the definer function's row, never from the request.
     redirect(`/launch?next=${encodeURIComponent(`/o/${result.organizationSlug}`)}`);
   }
@@ -255,24 +268,24 @@ async function stashToken(formData: FormData): Promise<boolean> {
   const token = tokenFrom(formData);
   if (!token) return false;
   const jar = await cookies();
-  jar.set(INVITE_TOKEN_COOKIE, token, inviteCookieOptions());
+  jar.set(inviteTokenCookieName(), token, inviteCookieOptions());
   return true;
 }
 
 /** "Sign in to accept" -> `/signin?callbackUrl=/invite` (the token rides the cookie). */
 export async function startSignInToAcceptAction(formData: FormData): Promise<void> {
-  if (!(await stashToken(formData))) redirect(INVITE_COOKIE_PATH);
-  redirect(`/signin?callbackUrl=${encodeURIComponent(INVITE_COOKIE_PATH)}`);
+  if (!(await stashToken(formData))) redirect(INVITE_PAGE_PATH);
+  redirect(`/signin?callbackUrl=${encodeURIComponent(INVITE_PAGE_PATH)}`);
 }
 
 /** A signed-in visitor who still has to pass the 2FA challenge: `/totp?callbackUrl=/invite`. */
 export async function continueToVerifyAction(formData: FormData): Promise<void> {
-  if (!(await stashToken(formData))) redirect(INVITE_COOKIE_PATH);
-  redirect(`/totp?callbackUrl=${encodeURIComponent(INVITE_COOKIE_PATH)}`);
+  if (!(await stashToken(formData))) redirect(INVITE_PAGE_PATH);
+  redirect(`/totp?callbackUrl=${encodeURIComponent(INVITE_PAGE_PATH)}`);
 }
 
 /** "Sign out to accept": store the token, sign out, land back on `/invite`. */
 export async function switchAccountAction(formData: FormData): Promise<void> {
   await stashToken(formData);
-  await signOutAction(INVITE_COOKIE_PATH);
+  await signOutAction(INVITE_PAGE_PATH);
 }

@@ -203,7 +203,7 @@ describe("proxy — /site/* (public organization websites, DECISION-085)", () =>
 
 describe("proxy — /invite (account invitations, DECISION-183/185)", () => {
   // Exact-path entries in PUBLIC_PATHS, like /file-statistics: the token rides
-  // the query string or the Path=/invite cookie, so no prefix bypass.
+  // the query string or the host-only Path=/ hand-off cookie, so no prefix bypass.
 
   it("admits /invite and /invite/accepted with no auth() call at all", async () => {
     for (const path of ["/invite", "/invite?token=abc123", "/invite/accepted"]) {

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { auth } from "@/auth";
 import { isLocalLoginEnabled } from "@/lib/auth/local-login";
 import { previewInvitation } from "@/lib/onboarding/accept";
-import { INVITE_TOKEN_COOKIE } from "@/lib/onboarding/invite-cookie";
+import { inviteTokenCookieName } from "@/lib/onboarding/invite-cookie";
 import { isWellFormedInvitationToken } from "@/lib/onboarding/invitation-token";
 import { AnonymousState } from "./anonymous-state";
 import { ConfirmState } from "./confirm-state";
@@ -26,9 +26,10 @@ export const dynamic = "force-dynamic";
  * consumes nothing: mail scanners and link prefetchers open links, so GET only
  * previews (the existing verify-email page consumes on GET - not copied).
  *
- * The token comes from the query, else the `invite_token` hand-off cookie (R6:
- * the token never travels through `callbackUrl`, so after "Sign in to accept"
- * it is waiting here). The query always wins.
+ * The token comes from the query, else the hand-off cookie (R6: the token never
+ * travels through `callbackUrl`, so after "Sign in to accept" it is waiting
+ * here; `Path=/` because a server-action redirect renders this page inside the
+ * sign-in or verify action's own POST, addendum 2). The query always wins.
  *
  * `previewInvitation(token, session?.user?.id)`: the second argument is the
  * `auth()` session id and nothing else (D-3, source-scanned) - it makes the
@@ -47,10 +48,11 @@ export default async function InvitePage({
   const { token: queryToken } = await searchParams;
   const jar = await cookies();
   const candidate =
-    (typeof queryToken === "string" && queryToken) || jar.get(INVITE_TOKEN_COOKIE)?.value || "";
-  // No token at all: possibly the render a server action's redirect prepared
-  // without the path-scoped hand-off cookie; RecheckOnce re-asks the browser.
-  if (candidate === "") return <DeadLinkState recheck />;
+    (typeof queryToken === "string" && queryToken) ||
+    jar.get(inviteTokenCookieName())?.value ||
+    "";
+  // No token at all, or one that is not shaped like a token: the one dead-link
+  // render, byte-identical to every other dead state (DECISION-147 bucket).
   if (!isWellFormedInvitationToken(candidate)) return <DeadLinkState />;
   const token = candidate;
 

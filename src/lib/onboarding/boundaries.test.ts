@@ -17,6 +17,11 @@
  *      `auth()` session - never from form data, the query or a cookie.
  *   4. The `(invite)` route group has no layout and no loading boundary (a
  *      Suspense boundary would flush a 200 before a page that redirects).
+ *   5. THE HAND-OFF COOKIE IS NAMED ONLY WHERE IT IS READ OR WRITTEN (Phase 2
+ *      addendum 2). It is `Path=/` now, so every platform request carries it for
+ *      up to 30 minutes; only this scan keeps the reading of it confined to
+ *      `(invite)`. The name may be referenced only in `invite-cookie.ts`,
+ *      `(invite)/actions.ts` and `(invite)/invite/page.tsx`.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -136,5 +141,43 @@ describe("D-3: identities come only from the auth() session", () => {
   it("the actions never read a user id or an email out of form data", () => {
     const code = read(path.join(INVITE_TREE, "actions.ts"));
     expect(code).not.toMatch(/formData\.get\(\s*["'](userId|email|organizationId|organization|slug)["']\s*\)/);
+  });
+});
+
+describe("addendum 2: the hand-off cookie's name is referenced only where it is used", () => {
+  const ALLOWED = new Set(
+    [
+      "src/lib/onboarding/invite-cookie.ts",
+      "src/app/(invite)/actions.ts",
+      "src/app/(invite)/invite/page.tsx",
+    ].map((f) => path.join(ROOT, f)),
+  );
+  // The literal names (either spelling) and the helper that resolves them.
+  const NAMES = /invite_token|__Host-invite_token|inviteTokenCookieName/;
+
+  it("nothing outside the three allowed files names the cookie (comments excluded)", () => {
+    const offenders = NON_TEST.filter((f) => !ALLOWED.has(f) && NAMES.test(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the literal cookie names live in invite-cookie.ts and nowhere else; the other two files go through inviteTokenCookieName()", () => {
+    const literalHolders = NON_TEST.filter((f) => /["'`](?:__Host-)?invite_token["'`]/.test(read(f))).map(rel);
+    expect(literalHolders).toEqual([rel(path.join(SRC, "lib/onboarding/invite-cookie.ts"))]);
+    for (const file of [path.join(INVITE_TREE, "actions.ts"), path.join(INVITE_TREE, "invite", "page.tsx")]) {
+      expect(read(file), rel(file)).toMatch(/inviteTokenCookieName\(/);
+    }
+  });
+
+  it("the proxy never reads the cookie (it stays a pure function of host, path and session claims)", () => {
+    expect(read(path.join(SRC, "proxy.ts"))).not.toMatch(NAMES);
+    expect(read(path.join(SRC, "proxy.ts"))).not.toMatch(/invite-cookie/);
+  });
+
+  it("no module outside the allowed three imports the cookie module", () => {
+    const importers = NON_TEST.filter((f) => /from\s+"@\/lib\/onboarding\/invite-cookie"/.test(read(f)));
+    expect(importers.filter((f) => !ALLOWED.has(f)).map(rel)).toEqual([]);
+    expect(importers.map(rel).sort()).toEqual(
+      [path.join(INVITE_TREE, "actions.ts"), path.join(INVITE_TREE, "invite", "page.tsx")].map(rel).sort(),
+    );
   });
 });

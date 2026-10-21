@@ -23,8 +23,6 @@ const mockPreview = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/onboarding/accept", () => ({
   previewInvitation: (...args: unknown[]) => mockPreview(...args),
 }));
-const mockRefresh = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
 const mockLocalLogin = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/auth/local-login", () => ({ isLocalLoginEnabled: () => mockLocalLogin() }));
 vi.mock("../actions", () => ({
@@ -73,7 +71,6 @@ afterEach(() => {
   mockCookieGet.mockReset();
   mockPreview.mockReset();
   mockLocalLogin.mockReset();
-  mockRefresh.mockReset();
 });
 
 describe("dead link", () => {
@@ -83,15 +80,22 @@ describe("dead link", () => {
     expect(mockPreview).not.toHaveBeenCalled();
   });
 
-  it("no token at all re-asks the browser once (a server action's redirect prerenders /invite without the path-scoped cookie); a token that is present never does", async () => {
+  it("an empty token is the plain dead-link markup, byte-identical to a dead token, with no client refresh component (regression for the dead-link flash)", async () => {
+    // Phase 2 addendum 2: the empty-token render used to mount a RecheckOnce
+    // patch because the hand-off cookie was Path=/invite and so missing from the
+    // render a server action's redirect prepares. The cookie is Path=/ now, so an
+    // empty token is just a dead link: one markup, no script, no special case.
     await renderPage({});
-    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    const empty = document.body.innerHTML;
     cleanup();
-    mockRefresh.mockReset();
-    mockPreview.mockResolvedValue(null);
-    await renderPage({ token: TOKEN });
     await renderPage({ token: "not-a-token" });
-    expect(mockRefresh).not.toHaveBeenCalled();
+    expect(document.body.innerHTML).toBe(empty);
+    cleanup();
+    mockPreview.mockResolvedValue(null);
+    await renderPage();
+    expect(document.body.innerHTML).toBe(empty);
+    expect(empty).not.toMatch(/<script/i);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("This link isn't active");
   });
 
   it("a malformed token is the dead link without a round trip", async () => {
@@ -122,6 +126,23 @@ describe("token source", () => {
     mockCookieGet.mockReturnValue({ value: OTHER_TOKEN });
     await renderPage({});
     expect(mockPreview).toHaveBeenCalledWith(OTHER_TOKEN, undefined);
+  });
+
+  it("reads the dev name `invite_token` outside production and `__Host-invite_token` in production", async () => {
+    mockCookieGet.mockReturnValue({ value: OTHER_TOKEN });
+    await renderPage({});
+    expect(mockCookieGet).toHaveBeenCalledWith("invite_token");
+    cleanup();
+    mockCookieGet.mockClear();
+    const previous = process.env.NODE_ENV;
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    try {
+      await renderPage({});
+      expect(mockCookieGet).toHaveBeenCalledWith("__Host-invite_token");
+      expect(mockCookieGet).not.toHaveBeenCalledWith("invite_token");
+    } finally {
+      (process.env as Record<string, string>).NODE_ENV = previous!;
+    }
   });
 
   it("the query token wins over the cookie", async () => {

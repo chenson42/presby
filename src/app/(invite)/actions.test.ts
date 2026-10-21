@@ -19,7 +19,8 @@
 vi.mock("server-only", () => ({}));
 
 const mockAuth = vi.hoisted(() => vi.fn());
-vi.mock("@/auth", () => ({ auth: mockAuth }));
+const mockUpdate = vi.hoisted(() => vi.fn());
+vi.mock("@/auth", () => ({ auth: mockAuth, unstable_update: mockUpdate }));
 
 const cookieJar = vi.hoisted(() => ({ set: vi.fn() }));
 const mockHeaders = vi.hoisted(() => vi.fn());
@@ -136,7 +137,7 @@ describe("acceptNewAccountAction", () => {
     const url = await redirectOf(acceptNewAccountAction(IDLE, form(NEW_FIELDS)));
     expect(url).toBe("/invite/accepted");
     expect(url).not.toContain(TOKEN);
-    expect(cookieJar.set).toHaveBeenCalledWith("invite_token", "", expect.objectContaining({ maxAge: 0, path: "/invite", httpOnly: true }));
+    expect(cookieJar.set).toHaveBeenCalledWith("invite_token", "", expect.objectContaining({ maxAge: 0, path: "/", httpOnly: true }));
     expect(mockAccept).toHaveBeenCalledWith({
       token: TOKEN,
       mode: { kind: "new_account", firstName: "Marisol", lastName: "Quenby", password: "correct horse" },
@@ -218,6 +219,38 @@ describe("acceptSignedInAction", () => {
     expect(cookieJar.set).toHaveBeenCalledWith("invite_token", "", expect.objectContaining({ maxAge: 0 }));
   });
 
+  it("refreshes the session after an accept so the edge 2FA claim sees the new authority - regression for the treasurer reaching /o/<slug> without the wall", async () => {
+    // The proxy reads twoFactorRequired from the session COOKIE, which is only re-signed by an update.
+    // Accepting a treasurer invitation adds a giving key (2FA arm B) to an account whose cookie says
+    // "not required"; without this the wall was missing until the next sign-in.
+    mockAuth.mockResolvedValue(session());
+    mockAccept.mockResolvedValue({ kind: "accepted", mode: "existing_account", organizationSlug: "quillhaven" });
+    const order: string[] = [];
+    mockUpdate.mockImplementation(async () => void order.push("update"));
+    mockRedirect.mockImplementationOnce((url: string) => {
+      order.push("redirect");
+      throw new Error(`REDIRECT:${url}`);
+    });
+    await redirectOf(acceptSignedInAction(IDLE, form({ token: TOKEN })));
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["update", "redirect"]);
+  });
+
+  it("a failed session refresh never undoes or hides an accepted invitation (still redirects)", async () => {
+    mockAuth.mockResolvedValue(session());
+    mockAccept.mockResolvedValue({ kind: "accepted", mode: "existing_account", organizationSlug: "quillhaven" });
+    mockUpdate.mockRejectedValue(new Error("boom"));
+    const url = await redirectOf(acceptSignedInAction(IDLE, form({ token: TOKEN })));
+    expect(url).toBe("/launch?next=%2Fo%2Fquillhaven");
+  });
+
+  it("does not refresh the session when nothing was accepted", async () => {
+    mockAuth.mockResolvedValue(session());
+    mockAccept.mockResolvedValue({ kind: "dead" });
+    await acceptSignedInAction(IDLE, form({ token: TOKEN }));
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
   it("D-3: the identity is the session's, whatever the form claims", async () => {
     mockAuth.mockResolvedValue(session());
     await redirectOf(acceptSignedInAction(IDLE, form({ token: TOKEN, userId: "c2000000-0000-4000-8000-0000000000ff", email: "forged@example.invalid" })));
@@ -247,21 +280,35 @@ describe("acceptSignedInAction", () => {
 });
 
 describe("the cookie hand-off (R6)", () => {
-  it("startSignInToAcceptAction stores the token in an httpOnly Path=/invite cookie and redirects without it", async () => {
+  it("startSignInToAcceptAction stores the token in a host-only httpOnly Path=/ cookie and redirects without it (addendum 2)", async () => {
     const url = await redirectOf(startSignInToAcceptAction(form({ token: TOKEN })));
     expect(url).toBe("/signin?callbackUrl=%2Finvite");
     expect(url).not.toContain(TOKEN);
     expect(cookieJar.set).toHaveBeenCalledWith("invite_token", TOKEN, {
-      httpOnly: true, secure: false, sameSite: "lax", path: "/invite", maxAge: 1800,
+      httpOnly: true, secure: false, sameSite: "lax", path: "/", maxAge: 1800,
     });
+    // Host-only: a `domain` attribute would break the __Host- prefix's guarantee.
+    expect(Object.keys(cookieJar.set.mock.calls[0][2])).not.toContain("domain");
   });
 
-  it("the cookie is Secure in production", async () => {
+  it("in production the cookie is __Host-invite_token, Secure, Path=/ and has no domain; clearing uses the same name and options", async () => {
     const previous = process.env.NODE_ENV;
     (process.env as Record<string, string>).NODE_ENV = "production";
     try {
       await redirectOf(startSignInToAcceptAction(form({ token: TOKEN })));
-      expect(cookieJar.set).toHaveBeenCalledWith("invite_token", TOKEN, expect.objectContaining({ secure: true }));
+      expect(cookieJar.set).toHaveBeenCalledWith(
+        "__Host-invite_token",
+        TOKEN,
+        expect.objectContaining({ secure: true, path: "/", httpOnly: true }),
+      );
+      expect(Object.keys(cookieJar.set.mock.calls[0][2])).not.toContain("domain");
+      cookieJar.set.mockClear();
+      await redirectOf(acceptNewAccountAction(IDLE, form(NEW_FIELDS)));
+      expect(cookieJar.set).toHaveBeenCalledWith(
+        "__Host-invite_token",
+        "",
+        expect.objectContaining({ maxAge: 0, secure: true, path: "/" }),
+      );
     } finally {
       (process.env as Record<string, string>).NODE_ENV = previous!;
     }

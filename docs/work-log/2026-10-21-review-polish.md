@@ -37,7 +37,7 @@ The operator asked (2026-10-21, while the invitations pipeline runs) to "work on
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named per batch | 2026-10-21 |
 | 4 — Implementation | A ux-developer · B full-stack-developer · C ux-developer · D api-developer | Complete (A, B, C, D) | — | 2026-10-21 |
 | 5 — Verification | qa | Complete | PASS | 2026-10-21 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-21 |
 
 ---
 
@@ -1152,34 +1152,139 @@ Next: **analyst (Phase 6, shipped vs intent).** Carry forward notes 1–7. The n
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*2026-10-21, analyst (read-only). I read the work-log in full, the code for each batch, and the scratchpad screenshots and email samples. I started no servers and wrote no files. HEAD is e05b772.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.**
+
+All four operator notes are delivered as Phase 1 described them. Every Phase 1 gap is either closed in code, explicitly deferred, or assigned below as a tracked follow-up. Nothing needs to reopen Phase 3 or 4.
+
+The notes are:
+- Visual and phone checks that no agent could do. These belong to the operator checklist.
+- One contrast ruling for the operator.
+- Housekeeping the orchestrator owes at integration.
+- The "test organization" flag and the `/signin` developer hint, both still waiting on the operator.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> The operator's four review notes shipped as specified. The recovery-code lockout trap I flagged in Phase 1 is closed. The remaining open items are things only the operator's eyes and phone can check, plus two questions only the operator can rule on.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Google button.** The screenshots (`signin-phone-light.png`, `signin-phone-dark.png`) show Google's official light and dark styling: white or near-black surface, thin neutral border, four-colour "G", and the "Sign in with Google" label. The button is 44px tall, and the colours are element-scoped `--gsi-*` properties that an org brand cannot repaint. The branded-signin e2e asserts the computed colours in both schemes. `data-brand-neutral` stays for the focus ring, and the stale "never recolored" comments are rewritten.
+- **2FA entry.** `/totp` delivers every verb the operator asked for, plus the safeguards I asked for.
+  - One box per digit, with focus on box 1 once hydrated.
+  - Backspace and Delete both erase backward across boxes.
+  - Paste and whole-code autofill spread across the boxes.
+  - There is no auto-submit. Focus moves to Verify and Enter submits.
+  - **Recovery codes** are kept behind a visible "Use a recovery code instead" toggle. The two modes render mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one. This was my main Phase 1 worry and it is closed.
+  - `HydrationGate` wraps the form, so a pre-hydration submit cannot post an empty token. That would have burned a rate-limit slot and written `TOTP_VERIFY_FAILED`.
+  - The hydration spec asserts that no `totp.verify_failed` audit row exists. QA's negative control confirms the gate matters.
+  - `verifyTotpAction` and its audit keys are untouched. The error copy is unchanged and identical for authenticator and recovery failures, so it does not leak which one failed.
+  - `/account/2fa` enrolment gets the same boxes, does not grab focus, and is also gated.
+- **Email.** Every one of the 13 `enqueueEmail` call sites now goes through `renderEmail`. The branded `RenderedEmail` type makes a missed or future sender a compile error, which is stronger than the scan I proposed.
+  - The layout has a text wordmark, a bulletproof button, and the raw URL printed beneath it (`shot-password_reset-phone-light.png`).
+  - Every message gets a generated plain-text part, including feedback and tickets, which had none.
+  - The giving notice still names no amounts (QA's real-row proof passed) and keeps its privacy sentence verbatim.
+  - Real defects closed along the way:
+    - F161, the unescaped `newEmail`, now has a hostile-input regression test.
+    - F162, HTML-escaped subjects, is fixed class-wide by `renderEmail` owning the subject.
+    - F165, dead relative links in ticket and feedback mail, is fixed.
+- **Organizations page.** The tree reads from `parent_id` only. It never touches `path` and writes nothing. Each row shows indentation, child counts ("3 congregations"), and a lifecycle badge for non-active orgs.
+  - A search for "wren" keeps its presbytery as a greyed, un-clickable ancestor (`orgs-phone-q.png`).
+  - The `?filter=unbranded` bookmark still works.
+  - Unknown filter values are ignored rather than causing a 500.
+  - At 360px there is no horizontal overflow and Manage stays on screen.
+  - The Branded badge's palette literal was removed. A read failure shows an inline retry rather than a stack trace.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Google "pops".** Phase 1 said: confirm with the operator that "pops" means the coloured "G" on a white button. Shipped: exactly that, as Google's current guidance prescribes. Google Sans is not loaded, which is a recorded departure. Verdict: **matches**. The operator's confirmation is still outstanding but not blocking. On a white page the button is no louder than before apart from the mark, so if the operator expected a loud filled button they will say so at checklist step 1.1.
+- **Google button states.** Phase 1 said: all four states, plus a focus ring. Shipped: all are coded, with hover and pressed fills pre-composited to opaque hex. Only default and hover were seen in a browser. Verdict: **matches in code, pressed, disabled and focus-ring states unverified by eye** (follow-up below).
+- **Rule conflict (gap 1).** Phase 1 said: the palette-literal ban needs an explicit exemption. Shipped: a single-file exemption (DECISION-190), with `ui-standards.md` updated. Verdict: **matches**.
+- **Digit boxes.** Phase 1 said: boxes, a recovery path, no auto-submit, hydration safety, and a shared helper for the broken e2e specs. Shipped: all of it. The ten `getByPlaceholder(/123456/)` sites are replaced by one helper, and a new recovery-code spec closes F164. Verdict: **matches**.
+- **Enrolment form.** Phase 1 said: optional and cheap. Shipped: done, and gated (the architect's upgrade). Verdict: **matches**.
+- **Recovery mode after a failed attempt.** Phase 1 did not address this. Shipped: a failed attempt reloads the page into digit mode, so a recovery-code user must press the toggle again. The error copy names the option. Verdict: **acceptable drift**, accepted in Phase 3.
+- **Email mechanism.** Phase 1 said: an explicit builder, plus a scan. Shipped: a branded type, plus a scan for casts. Verdict: **acceptable drift**, and an improvement.
+- **Mail colour scheme.** Phase 1 said: declare `light dark`. Shipped: a single declared `light` scheme, because no dark styles exist. Explicit `bgcolor` and `color` on every block back it up. Verdict: **acceptable drift**. Gmail and Apple Mail force-inversion is unverified.
+- **Mail contrast.** Phase 1 said: a legible, accessible button. Shipped: 6.84:1 for white on the brand blue, against a 7:1 target. It clears the platform's own 4.5:1 floor. The orchestrator kept brand blue pending the operator. Verdict: **acceptable drift, needs an operator ruling**.
+- **Sender name.** Phase 1 said: change "presby" to "PresbyPortal". Shipped: code and `.env.example` strings changed. The production Vercel value is an operator action. Verdict: **matches in code**.
+- **Statistics grant date.** Phase 1 said: fix the server-timezone date. Shipped: "(UTC)" via `formatDateUTC`, identical in html and text. Verdict: **matches**.
+- **Org tree layout.** Phase 1 said: always expanded, filters in the URL, ancestors kept, a soft cap, child counts, mobile-safe. Shipped: all of it. Verdict: **matches**.
+- **Org tree status filter.** Phase 1 said: filter on `platformStatus` and badge non-active lifecycle. Shipped: both. Verdict: **matches**.
+- **"All (15)" count.** Phase 1 did not specify it. Shipped: it is always the total, not the filtered count. The filtered count is in the line "1 of 15 organizations match". Verdict: **acceptable**.
+- **Error and cap paths.** Phase 1 said: confirm an error boundary exists. Shipped: the page catches the read and shows an inline retry. The DB-down panel and the 500-row cap were never exercised in a browser (the fixture has 15 rows). Verdict: **matches in code, unverified live**.
+- **Test-organization flag.** Phase 1 said: out of scope, no placeholder UI. Shipped: none. Verdict: **matches, still owed to the operator**.
+- **`/signin` developer hint.** Phase 1 said: report it to the operator and do not silently fix it. Shipped: untouched. The screenshots show "First time? Run `npm run db:seed`…" on the page. Verdict: **matches, but still on a production page**.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** pass. The organizations page has three distinct empty states: no orgs, filters match nothing, and nothing unbranded. `/totp` and the Google button have no empty state, so those are not applicable.
+- **Failure microcopy:** pass.
+  - `/totp` shows human copy with `role="alert"`, with no code in the URL.
+  - The organizations page shows an inline "We couldn't load the organization list" and a retry link.
+  - A bad mail `href` throws a message that does not echo the URL, and the existing send-time catches log it.
+- **Permission gate:** pass.
+  - `/admin/organizations` keeps `FEATURES.ADMIN_ORGANIZATIONS` with its inline denial (QA read the body).
+  - `/signin` and `/totp` stay permission-free by design.
+  - Callback redirect sanitising is unchanged (`totp-callback-bypass` 7/7).
+- **Audit event:** pass, not applicable for new mutations. None were added. The existing `totp.*` audit rows are asserted by the new specs, and `check:audit` passes.
+- **Mobile (360px):** pass on every surface I could see.
+  - Screenshots: `signin-phone-*`, `totp-*`, `orgs-phone-*`, `enrol-*`, and the email phone shots.
+  - A real defect was found and fixed in the browser pass: the enrolment boxes wrapped 5+1 at 296px.
+  - Real-device checks are listed below.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Each line is phrased for `docs/TODO.md`.
 
-## Red Flags (if NEEDS REWORK)
+- [ ] **Operator production checklist for review-polish (steps 1.1, 1.3, 2.1 and the sender-name step).** Check the Google button's pressed, disabled and keyboard-focus states in light and dark. Check real-phone iOS and Android one-time-code autofill into `/totp`. Open one of each mail type in Gmail and Apple Mail with dark mode on. Confirm the Google button's prominence is what "pops" meant. Confirm "Sign in with email" does not look disabled in light mode (the pre-submit screenshot shows it pale grey). Re-read the Vercel `RESEND_FROM_EMAIL` value. — `docs/work-log/2026-10-21-review-polish.md` Phase 6.
+- [ ] **Operator ruling: email button and link contrast.** White on brand blue `#1a5aa8` is 6.84:1 against a 7:1 target (it clears the platform's 4.5:1 floor). Either accept it, or switch the button to navy. — Phase 6.
+- [ ] **Operator ruling and scoping: the "test organization" flag.** The operator's step 2.1 note, deferred at kickoff. It needs rulings on whether a per-org test mark bypasses global flags, whether it excludes the org from statistics and publication, and the schema consequences. Not a small note, so it needs its own pipeline. — Phase 6.
+- [ ] **Operator decision: remove the `npm run db:seed` developer hint from `/signin`**, which shows on production whenever local login is on. Also decide whether to render a message for OAuth failures (`AccessDenied`, `OAuthAccountNotLinked`), because the page currently shows nothing for them. — Phase 1 gap 6, deferred.
+- [ ] **Adopt `renderEmail` in the invitations pipeline's `account_invitation` email, at whichever integration lands second.** The `RenderedEmail` brand makes a miss a compile error. Its G5 link rewrite must `replaceAll` both the escaped and raw URL forms across `html` and `text`. Expect a small text conflict in `src/lib/email/queue.ts`. — Phase 2 R13.
+- [ ] **Palette-literal sweep or tripwire (F163).** About 80 `red/green/amber/blue/yellow` literals remain in `src/**/*.tsx`, including `/signin`'s own error panels (`border-red-500/30 bg-red-500/10`) and the `/admin/organizations/[id]` forms. This pipeline added none. — Phase 2 F163.
+- [ ] **`/admin/organizations` pagination beyond the 500-row display cap**, once presbyteries load their rolls of unmanaged congregations. Also exercise the cap and the DB-unreachable panel once against a real browser, since the fixture has 15 rows and neither was ever run live. — Phase 3 edge case 13, Phase 6.
+- [ ] **Persist recovery mode across a failed `/totp` attempt (low).** A recovery-code user lands back in digit mode after a wrong code and must press the toggle again. Accepted residual. — Phase 3 edge case 3.
+- [ ] **Android empty-box Backspace in `OneTimeCodeInput`.** Android soft keyboards often send no key event, so Backspace on an empty box cannot step back. A filled box still clears. Re-check on a physical device and decide whether it needs a fix. — Phase 4 Batch B residual.
+- [ ] **`text-destructive` reads dim on the dark scheme** (`totp-10-dark.png`). This is a platform token decision, not a `/totp` one. — Phase 4 Batch B.
+- [ ] **Revisit the single declared `color-scheme: light` in `render.ts`** after the Gmail and Apple Mail dark-mode eyeball. Add dark styles only if the clients invert badly. — Phase 3 edge case 16.
+- [ ] **`check:hydration-gate` as a generic "every client form" rule.** H3 deliberately covers only `OneTimeCodeInput` consumers. A broader rule is its own decision. — DECISION-192.
+- [ ] **`e2e/giving-connect.spec.ts:273` fails on `main` 86dd835 and on this branch.** The "Take it offline" toast confirms success, but the give-page state text does not refresh within 5s, and its 11 serial followers do not run. Needs its own bug-fix pipeline. — Phase 5 note 1.
+- [ ] **The give form calls `crypto.randomUUID`, which is undefined on a plain-http `*.invalid` custom host in dev**, causing an unhandled browser rejection. Check whether any real path hits it. — Phase 5 note 5.
+- [ ] **Clean the fixture-leak canary on Neon branch `pipeline-review-polish`.** It holds 26 people rows and 3 organization rows stamped as test fixtures, one with an expired window. Run the canary's own cleanup SQL, or delete the branch at pipeline cleanup under the standing authorization. — Phase 5 note 2.
 
-- [Specific. What has to change before this ships.]
+**Integration housekeeping the orchestrator owes (Workflow Rules 10, 13, 14, 16):**
+- Record DECISION-190, 191, 192 and 193, and F160 to F165 (F162's feedback half is moot, since feedback categories are allow-listed). Resolve the DECISION-193 numbering note.
+- Update the `check:hydration-gate` line in `CLAUDE.md` Common Commands to name H3.
+- Update `docs/product/functionality-map.md` and the release notes.
+- **Rule 12 (mark feedback row done): not applicable.** The source was the operator's production checklist artifact, not an in-app feedback row.
+- **Rule 13 (what's-new): optional.** The Google button, `/totp` boxes and rich mail are member-visible, so consider one combined entry. The organizations tree is admin tooling and does not need one.
+- **Rule 15 (`docs/architecture.md`): no update.** None of the four changes is a new subsystem.
+- This is not a rework item, but the Phase 3 design keeps D as one `feat(email)` commit with no `fix:` commit. The F161 and F162 defects are named in that commit body instead of carrying `fix:` trailers. Record that choice in the integration commit.
+
+## Per-Phase Status row
+
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-21 |
+
+## Handoff
+
+Next: the **orchestrator**. This closes the analyst's pipeline phase. Land the follow-ups above in `docs/TODO.md`, then do the integration housekeeping, in the same commit as the work (Rule 10). Put the operator checklist steps into the operator's prod-test artifact, and take the three operator questions to the operator: the contrast ruling, the "test organization" flag, and the `/signin` hint. Merge order with invitations still follows Phase 2 R13. No further agent phase is pending.
+
+Files read (all in `/Users/cshenso/git/presby-platform/presby-polish/`):
+- `docs/work-log/2026-10-21-review-polish.md`
+- `src/app/(auth)/signin/google-sign-in-button.tsx`
+- `src/app/(auth)/signin/page.tsx`
+- `src/app/(auth)/totp/totp-challenge-form.tsx`
+- `src/app/(auth)/totp/page.tsx`
+- `src/lib/email/render.ts`
+- `src/app/(member)/feedback/actions.ts`
+
+Scratchpad evidence (all under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/`):
+- `signin-phone-light.png`, `signin-phone-dark.png`
+- `orgs-desktop-tree.png`, `orgs-phone-q.png`
+- `totp-8-error.png`
+- `email-samples/shot-password_reset-phone-light.png`
+- `email-samples/giving_statement_notice.txt`
+- `email-samples/ticket_operator_reply.txt`

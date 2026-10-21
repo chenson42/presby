@@ -29,7 +29,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 2 — Architectural review (addendum on Phase 3 divergences) | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete (Increment 1); implementers named | 2026-10-21 |
-| 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → api-developer + ux-developer (B4) | In progress: Batch 0 complete (uncommitted); B1 next | — | 2026-10-21 |
+| 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → api-developer + ux-developer (B4) | In progress: Batch 0 complete (committed 3c294fc/a423b40/6c73c08); Batch 1 complete (uncommitted; 0059 hand-written, applied twice to pipeline-invitations; 66 + 12 + 10 tests, test-rls-59 36 assertions as presby_app); B2 next | — | 2026-10-21 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -688,6 +688,208 @@ CLAUDE.md → Permissions vs Flags: the credential-as-third-mechanism sentence (
 - **The route-tree test covers directories only.** Files such as `robots.ts` produce a dotted URL (`/robots.txt`) that the DNS-label slug CHECK already refuses, so they are out of scope. The pre-existing `orgs` entry (no longer a page, a `next.config.ts` redirect) is deliberately left in the list.
 - **The new route-tree test is the lasting fix for F157;** the `invite` pin is by name because the route does not exist until Batch 3, and should become redundant (not removed) when `src/app/(invite)/invite` lands.
 - The moved DB-backed suites are slow (about 55 s for the treasurer file alone against the Neon branch); a combined run of the DB subset exceeds ten minutes, so run them one file at a time in the background.
+
+---
+
+## Batch 1 — schema (database-admin, 2026-10-21)
+
+**Status: Batch 1 complete (1a, 1b, 1c), working tree uncommitted.** Built on Batch 0, which was committed while Batch 1 was in progress (`3c294fc`, `a423b40`, `6c73c08`, work-log `6434308`). Batch 1 did not touch, revert or restage any Batch 0 file. Suggested commits: `feat(invitations): migration 0059 and the account_invitations domain model` (1a+1b) and `test(invitations): Batch 1c DB, parity and RLS suites` (1c), each with `Work-Log: 2026-10-21-invitations`.
+
+### Migration mode
+
+**Hand-written:** `drizzle/0059_presby_account_invitations.sql`. Drizzle Kit cannot emit any of it (RLS, triggers, definer functions, revokes), and `db:generate` is broken repo-wide.
+
+- **Transaction handling:** the file has **no `begin`/`commit` of its own**, unlike 0047/0057, because no existing function is dropped and re-created. Apply it **with `-1`**: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0059_presby_account_invitations.sql`. A pure test pins this (`invitations.schema.test.ts`, "carries no top-level begin/commit").
+- **Applied to:** Neon branch `pipeline-invitations` only (`br-mute-credit-axdunoa2`, endpoint `ep-autumn-mud-axr8kawo`). I checked this against `.env.local` before the first apply. Owner connection, direct endpoint. Never run against `development` or `production`.
+- **Idempotence proof:** the file was corrected in place three times during Batch 1 (see Implementer Notes). After the last correction I applied the whole file twice more in a row. Both runs exited 0, with no change in row counts across `users`, `people`, `memberships`, `contact_methods`, `app_roles`, `app_role_permissions`, `role_grants`, `organizations` and `account_invitations`, and no change in a function-ACL fingerprint (13 ACL entries). The second run printed only the expected `already exists, skipping` notices. Base counts after all suites ran equal the pre-Batch-1 counts (users 32, people 763, memberships 125, role_grants 94, app_roles 102). The only additions are the staged seed's 3 contact rows and 6 invitations, so the test fixtures leaked nothing.
+- **`_journal.json`:** **not edited** (integration-only, Rule 16). See Integration instructions for the exact entry.
+
+### Files Created
+
+- `drizzle/0059_presby_account_invitations.sql`: table, composite keys, 19 CHECKs, 6 indexes, 3 guards, FORCE RLS + `tenant_isolation`, grants, 7 functions, comments.
+- `src/lib/db/domain/invitations.ts`: the Drizzle mirror. It has every column, both composite FKs (`foreignKey(...)`, including the self-FK), all named CHECKs and indexes, and exported enumerations (`ACCOUNT_INVITATION_PURPOSES`, `_ORIGINS`, `_BLOCKED_REASONS`, `_MAX_RESENDS`, `_MAX_EXPIRY_DAYS`, `_ACCEPT_MARKER`). The header names everything the builder cannot express and points at the 0059 section that enforces it.
+- `src/lib/db/domain/invitations.schema.test.ts`: pure pin (10 tests). The migration's constraint and index names must equal the Drizzle declarations. The purpose, origin and blocked-reason CHECK lists must equal the TS enumerations. Every `v_block` the accept function can commit must be in the CHECK list. The file must have no begin/commit. presby_app must receive exactly the two EXECUTE grants. The marker must be armed only inside `presby_accept_invitation`, and exactly twice. The unique-violation arm must be scoped by constraint name.
+- `src/lib/db/domain/invitations.db.test.ts`: owner-path and presby_app suite (66 tests). Coverage is listed below.
+- `src/lib/onboarding/designation-parity.db.test.ts` + `src/lib/onboarding/designation-parity.golden.json`: R1 parity (12 tests) and the golden snapshot (11 scenarios).
+- `src/lib/testing/invitation-fixture.ts`: test-support harness on `createCalendarFixture()`, reusable by Batch 2. It provides `mintToken()`/`hashToken()` (same shape as the planned `invitation-token.ts`), `insertInvitation()` (owner), `accept()`/`preview()` (**through the presby_app `db` connection**), `snapshot()` (an org- and address-scoped row-count snapshot for "nothing written"), `makeBareOrg()` (no derived group), and a `cleanup()` that also removes the people and users that acceptance created.
+- `scripts/invitations/test-rls-59.sql`: staged `presby_app` section 59 (36 assertions).
+- `scripts/invitations/seed-dev-invitations.sql`: staged dev fixture. It adds F159's `contact_methods` rows and 6 invitations with known tokens.
+
+### Files Modified
+
+- None outside the files above. `scripts/test-rls.sql`, `scripts/seed-dev.sql`, `drizzle/meta/_journal.json`, `src/lib/db/domain/index.ts`, `docs/TODO.md`, `docs/decisions.md` and `docs/STATE.md` are untouched (Rule 16).
+
+### Schema Changes
+
+**Table `account_invitations`** (R2 as ruled, plus D-1, D-2 and D-8). Columns are exactly as in Phase 3's Data Model table: `id`, `organization_id` (cascade, fixture teardown only), `purpose`, `origin`, `email_normalized`, `invitee_first_name`/`_last_name`, `person_id`, `token_hash`, `created_by_user_id`, `created_at`, `expires_at`, `email_queue_id` (plain uuid, no FK), `resent_from_id`, `resend_count`, `accepted_at`/`accepted_user_id`, `revoked_at`/`revoked_by_user_id`, `superseded_at`, `blocked_at`/`blocked_reason`, `redacted_at`.
+- **Keys:** `unique (id, organization_id)`; `unique (token_hash)`. `account_invitations_person_membership_fk`: `(person_id, organization_id)` → `memberships (person_id, organization_id)`, MATCH SIMPLE. `account_invitations_resent_from_fk`: `(resent_from_id, organization_id)` → `(id, organization_id)`. Plain FKs go to `users` and `organizations` only.
+- **CHECKs (19, drop-then-add):** purpose and origin lists; email shape (lowercase, trimmed, ≤ 320, one `@`); email null iff redacted; names shape and names-by-purpose; treasurer has person; token-hash shape; expiry window (≤ 30 days); resend count 0–5; resend lineage (`resent_from_id is null` ⇔ `resend_count = 0`); at most one terminal timestamp; accepted shape (⇒ user and person); revoked shape; blocked shape; blocked-reason list; redacted ⇒ terminal.
+- **Indexes:**
+  - `account_invitations_open_address_uq` (R2).
+  - **`account_invitations_open_designation_uq`** (D-2): `(organization_id, purpose) where purpose in (...)` and all four terminal timestamps null.
+  - **`account_invitations_resent_from_uq`** (D-1): `(resent_from_id) where resent_from_id is not null`.
+  - `account_invitations_email_created_ix`, `_inviter_created_ix`, `_org_created_ix` (R8 limits).
+- **Guards (SECURITY INVOKER, search_path pinned, bind the owner):**
+  - **`BEFORE INSERT`:** rows are born open. No terminal timestamp, no redaction, and no `accepted_user_id`, `revoked_by_user_id` or `blocked_reason` at insert. A founding-administrator row cannot name a person at insert. **The D-1 chain check:** the parent must exist in the same org, already be superseded, and have the same purpose, origin, address and person, and `resend_count` must equal parent + 1.
+  - **`BEFORE UPDATE`:** NEW is compared with OLD after overlaying only the columns the one legal transition may change, so any unnamed column is frozen by default. The legal transitions are open→accepted (marker required; `person_id` may go null→value), open→blocked (marker required), open→revoked, open→superseded, and terminal→redacted.
+  - **`BEFORE DELETE`:** passes only when the parent organization is gone (the 0057 idiom).
+- **RLS and grants:** `enable` + `force`; `tenant_isolation` (using + with check on `presby_current_org()`). `revoke all … from public, presby_app, presby_platform`; `grant select … to presby_platform`. **presby_app holds no table privilege.**
+- **Functions (all SECURITY DEFINER, owner `neondb_owner`, `search_path = public, pg_temp`, revoked from PUBLIC, presby_app and presby_platform first):**
+  - `presby_founding_administrator_holder_count(uuid)`, `presby_giving_manage_holder_count(uuid)` and `presby_founding_administrator_permission_keys(text)`: owner only. The two counts are lifted verbatim from the TS CTEs. The bundle is pinned against `foundingAdministratorPlan()` for every `organization_type` enum value read from the catalog.
+  - `presby_apply_founding_administrator(uuid,uuid,uuid)` and `presby_apply_treasurer(uuid,uuid,uuid)`: ungranted, and step-for-step ports of the TS transactions. Each re-checks its own gate and returns a non-`ok` outcome rather than raising.
+  - `presby_preview_invitation(text, uuid default null)`: STABLE. Zero rows for every non-live state. Masks the address in SQL. With a null `p_user_id`, `session_matches` is null and no `users` row is read (D-3).
+  - `presby_accept_invitation(text, uuid, text, text, text)`: the Phase 3 algorithm in its binding order, with the addendum conditions built in:
+    - **D-5.1:** the outer block re-arms the marker immediately before its `blocked_at` update and clears it immediately after.
+    - **D-5.2:** the exception handler matches SQLSTATE **and** the constraint name or message text, and carries a comment table beside it. `unique_violation` maps to `account_exists` **only** when `CONSTRAINT_NAME = 'users_email_unique'`. The handler also covers 42501 `memberships_guard_insert` → `person_elsewhere`, 23514 `role_grants_needs_membership` → `membership_ended`, 23503 `memberships_sync_derived_group` → `provisioning_incomplete`, and P0001 `apply refused` (an apply helper's own gate) → that reason. Every other exception re-raises.
+    - **Contradiction 2:** the new-account existence check is `lower(u.email) = email_normalized`.
+  - **EXECUTE goes to presby_app on preview and accept only.**
+
+### Audit Events
+
+- **None are written by the database layer** (R7: `accept.ts` writes them in the same transaction, Batch 2c). The accept function returns everything those rows need:
+  - `invitation.accepted`: `invitation_id`, `organization_id`, `purpose`, `person_id`, `mode`, `created_by_user_id` (→ `invitedByUserId`), `inviter_is_invitee`.
+  - `user.created_via_invitation`: `user_id` when `mode = 'new_account'`.
+  - `org.founding_administrator.designated`: `person_id`, `user_id`, `person_mode` (→ the existing `mode` field), `administration_role_key`, `office_role_key`, `permission_keys`.
+  - `org.treasurer.designated`: `person_id`, `treasurer_role_id` (→ the existing `roleId` field), `permission_keys`.
+  - `invitation.accept_blocked`: `invitation_id`, `organization_id`, `purpose`, `blocked_reason`, and `user_id` (the account in existing mode, null in new mode).
+- Non-terminal and `dead` outcomes return `outcome` only, with every other column null, so there is nothing to attribute (matching Phase 3).
+
+### Regression Tests Added (Batch 1c)
+
+**Test counts (one file per process, `--no-file-parallelism`, against `pipeline-invitations`):**
+
+| Suite | Tests | Result |
+|---|---|---|
+| `src/lib/db/domain/invitations.db.test.ts` | 66 | 66 pass |
+| `src/lib/onboarding/designation-parity.db.test.ts` | 12 | 12 pass |
+| `src/lib/db/domain/invitations.schema.test.ts` (pure, no DB) | 10 | 10 pass |
+| `scripts/invitations/test-rls-59.sql` as **presby_app** | 36 assertions | exit 0 |
+| `src/lib/onboarding/founding-administrator.test.ts` (unchanged; TS pins) | 32 | 32 pass |
+| `src/lib/onboarding/treasurer-designation.test.ts` (unchanged; TS pins) | 24 | 24 pass |
+
+**`invitations.db.test.ts` coverage** (calls go through the presby_app `db` connection, exactly as `accept.ts` will):
+
+- **Structure and ACL:** FORCE RLS and the one policy. presby_app has no table or column privilege; presby_platform has SELECT only. EXECUTE exactly as ruled, and PUBLIC executes nothing. Definer, owner and search_path pins. The three guards are present, and no other trigger exists. Through presby_app, the table, the counts and the apply helpers are all refused.
+- **Guards (owner path):** pre-terminal inserts refused (4 variants); a founding-administrator row with a person at insert refused; the accept and blocked transitions refused without the marker, with a rolled-back positive control showing that with the marker they pass; 7 identity edits refused; revoke allowed and then frozen except for redaction; an open row cannot be redacted; delete refused while the org exists, and the teardown cascade passes; D-2 (a second open designation at the same org refused for a different address and for the same address, a different purpose allowed, an expired-open row still blocks, a revoked row does not); CHECKs.
+- **Resend chain (D-1):**
+  - The insert guard refuses an unsuperseded parent, a wrong count and a different address.
+  - A second successor is refused by `account_invitations_resent_from_uq`.
+  - The cap: a sixth resend is refused by the CHECK.
+  - **The consistency invariant over a real 3-resend chain:** every parent is superseded, with the same purpose and address and count = parent + 1. Every superseded row has exactly one successor (the architect's suggestion), and only the head is live.
+- **Single sources:** the SQL bundle equals `foundingAdministratorPlan()` for every enum value in the catalog. The SQL counts equal the TS counts across holder shapes, including the lifted asymmetry: an ended membership still counts as an FA holder, but no longer as a giving holder.
+- **Preview:**
+  - The masked address appears, and the full address appears nowhere in the row.
+  - `session_matches` is null without a session, true for a mixed-case match and false for another account.
+  - The display name: the treasurer's roster name; for a founding administrator, the on-file match.
+  - Zero rows for 9 non-live tokens: unknown, empty, null, **the stored hash (R5)**, expired, revoked, superseded, accepted and blocked.
+  - Preview writes nothing.
+- **Dead bucket:** 12 calls (6 dead tokens × both modes) return identical shapes: `dead`, with every other column null. The programmer-error raises (both or neither of user id and password hash, a bad hash, a blank name) do not change the row.
+- **Accepted:**
+  - New account × founding administrator: the users row, the person, the staff membership, both grants with `granted_by` = the inviter, the claim, and single use.
+  - New account × treasurer: the link, `contact_methods.verified_at`, the grant, and `giving_recorder` minted but not granted.
+  - Existing **mixed-case** account × founding administrator.
+  - Existing account × treasurer, reusing the already-linked person.
+  - Existing account × founding administrator, reusing the account's own person at the org.
+  - G3: a founding administrator's on-file address match is **linked**, not duplicated.
+  - A presbytery gets the office half and the presbytery bundle; a synod gets no office half.
+  - **Self-acceptance:** `inviter_is_invitee = true`.
+- **Non-terminal outcomes write nothing** (snapshot equality, invitation row unchanged, token still live): `account_exists` with exact case; **`account_exists` for a mixed-case existing account, with exactly one users row for that address afterwards (addendum contradiction 2)**; `email_mismatch` for another account and for a missing account; `account_inactive`.
+- **Each blocked reason at step 4** (`blocked_at` committed, snapshot otherwise equal, the link dead afterwards):
+  - `has_holders`, for the founding administrator and the treasurer (existing mode reports `user_id`).
+  - `not_applicable`.
+  - `provisioning_incomplete`, for the founding administrator on a bare org and for the treasurer with a missing template (owner path, rolled back).
+  - `person_merged`.
+  - `membership_ended`, three ways.
+  - `person_linked_elsewhere`, two ways.
+  - `person_elsewhere`, two ways.
+  - `ambiguous_person`, two ways.
+- **Every exception-mapping arm through the REAL guard that raises it (D-5).** A test-only trigger function, armed by a transaction-local GUC and inert otherwise, changes the world between step 4 and the write that the real guard then refuses with its real message. It is created in `beforeAll` and dropped in `afterAll`, on the pipeline branch only.
+  - `memberships_guard_insert` → `person_elsewhere`, **with `blocked_at` read back on a different connection after the presby_app commit, and the subtransaction's account, person and memberships verified gone (D-5.1)**.
+  - `role_grants_needs_membership` → `membership_ended`.
+  - `memberships_sync_derived_group` → `provisioning_incomplete`.
+  - An apply helper's own gate → P0001 → `has_holders`.
+  - `users_email_unique` race → `account_exists`, non-terminal, with nothing written.
+  - **Any other `unique_violation` re-raises** (never `account_exists`).
+  - An `insufficient_privilege` with any other message re-raises.
+- **Concurrency:** two parallel acceptances produce one winner and one `dead`, with one users row. Accept vs revoke holding the org lock: the accept is `dead`. Accept vs resend: the old token is `dead` and the new one accepts. A three-round resend/accept loop on one org completes with no deadlock.
+
+**Parity (`designation-parity.db.test.ts`):** each scenario builds two identical throwaway orgs. On one it runs the TS transaction; on the other it runs `presby_accept_invitation` (existing account). It then compares normalized `app_roles` (key, name, kind, protected, active, sorted permissions), `role_grants` (role, principal, granted_by, reason, starts/ends), the designee person and the membership.
+- **SQL == TS** for:
+  - the founding administrator with a created person at all 5 org types;
+  - the founding administrator with an existing person at the org;
+  - F109 reuse-and-reactivate with an additive-only reconcile, at a congregation (a congregation-added key survives on both roles) and at a presbytery (the congregation's renamed office role keeps its name);
+  - the treasurer at congregation and new_worshiping_community;
+  - treasurer F109 for both roles, keeping the template's constitutional kind and protected flag.
+- **SQL == golden** for the same 11 scenarios, plus a test that the golden has no stale entries.
+- **The golden survives Batch 2d.** Batch 2d deletes the SQL == TS half of each scenario (the `designate*` calls) and keeps `pin()`'s golden comparison. Regenerating (`WRITE_DESIGNATION_GOLDEN=1`) needs a recorded ruling.
+
+**Failing-first proofs** (each: open the hole on the pipeline branch, run the targeted test or section, cite the failure, restore by re-applying 0059 or re-enabling the trigger, and confirm green):
+
+| Mechanism | How it was broken | Failure observed |
+|---|---|---|
+| presby_app has no table privilege (test-rls 59b) | `grant select on account_invitations to presby_app` | `test-rls-59.sql:106` `FAIL 59b: presby_app holds no privilege of any kind … expected 0, got 1` |
+| owner-only counts (59c) | `grant execute on presby_giving_manage_holder_count(uuid) to presby_app` | `test-rls-59.sql:166` `FAIL 59c: and nothing else … expected 0, got 1` |
+| preview zero rows for dead states (59e) | preview with its `expires_at > now()` predicate removed | `test-rls-59.sql:235` `FAIL 59e: every dead state previews as ZERO rows … expected 0, got 1` |
+| **D-5.1 marker re-arm** | accept with the outer `set_config` before the blocked update removed | "memberships_guard_insert (42501) … COMMITTED" fails with 42501 from `presby_account_invitations_guard_update()` at the blocked update. The whole call errors, exactly the failure the architect predicted |
+| **contradiction 2, `lower(email)`** | existence check changed to `u.email = …` | "MIXED-CASE existing account blocks …": `expected 'accepted' to be 'account_exists'`. A second account was created |
+| **D-5.2 constraint scoping** | `if v_con = 'users_email_unique'` → `if true` | "ANY OTHER unique_violation re-raises": `expected a raise … expected null not to be null` (it was swallowed as `account_exists`) |
+| update guard (marker binds the owner) | `disable trigger account_invitations_guard_update` | "refused WITHOUT the marker, even for the owner": `expected a raise matching /accepted only through presby_accept_invitation/` |
+| insert guard (D-1 chain) | `disable trigger account_invitations_guard_insert` | "a resend must follow a SUPERSEDED parent …": `expected a raise matching /resend must follow/` |
+
+After all proofs I applied 0059 twice more (the idempotence proof above). All three triggers were confirmed `tgenabled = 'O'`, and test-rls-59 is green (36).
+
+### Gate Results (database-admin, 2026-10-21)
+
+- `npm run typecheck`: pass. `npm run lint` (`--max-warnings=0`): pass. `npm run check` (all eight tripwires): pass.
+- `check:secrets` scans **tracked** files only, and the new files are untracked. I ran its exported `checkSecretsPii()` over `git ls-files --others --exclude-standard`: no findings in the 9 new files.
+- **Schema parity with the new file included.** `check:schema-parity` imports `src/lib/db/domain/index.ts`, which I may not edit. A scratch copy of the script that also imported `./invitations` (run, then deleted) reported 85 domain tables compared, 7 differences, all 7 allowlisted and pre-existing, 0 failing. The unmodified script reports 84 tables with the same 7 differences, so `account_invitations` matches columns, nullability and both composite FKs with zero drift.
+- **Flakes, not regressions.**
+  - In the first full run, one test ("an OPEN row cannot be redacted", two owner statements) timed out at 20 s. On re-run it passed in under a second: a Neon stall.
+  - The parity file's first scenario once exceeded 20 s on a cold pool, so that file sets `testTimeout: 60_000`.
+  - In the final serial run, the parity file lost two scenarios to `Connection terminated unexpectedly` inside the TS transaction (the TS side returned `db_error`). Re-run singly: 12/12. Row counts afterwards still equal baseline.
+- **The shared `scripts/test-rls.sql` cannot run end to end on `pipeline-invitations`, for a pre-existing reason unrelated to Batch 1.** It stops at section 2, line 127: `FAIL alder: sees own memberships — expected 9, got 10`. The extra Alder Creek membership was created on **2026-10-14**, a week before this pipeline. It is a demo-account row inherited from `development` when the branch was forked, not a fixture, and Batch 1 wrote nothing at Alder Creek. The suite sets `ON_ERROR_STOP` itself, so nothing after section 2 runs on this branch. To still prove the one catalog-wide sweep 0059 could break, I ran **C-3** (line ~5600: "every table in schema public carries FORCE ROW LEVEL SECURITY except the 26 named") in isolation as presby_app. It passes (0), as does its staleness twin (26). Sections 36 and 40 are name-listed and cannot see the new functions. **For integration:** the post-merge full run on `development` will hit the same section-2 assertion if that branch still carries the demo membership. Reconcile the count, or the row, before treating the full suite as the gate.
+
+### Implementer Notes
+
+- **Bug found and fixed in Batch 1's own function, by its own tests (no shipped code affected).** In existing-account mode with no live person linked to the account anywhere, `select p.id, true into v_person, v_found … limit 1` matched no row. PL/pgSQL then set `v_found` to NULL, not false, so `if not v_found` was false and person resolution was skipped. The grant then hit `role_grants_principal_check` with a null person, and the call errored. **Fix:** test `FOUND` immediately after each `SELECT INTO`. I also added an internal invariant inside the subtransaction: if no person or account is resolved, raise `internal_error`, which is unmapped, so `db_error`. Caught by "existing account (MIXED-CASE email) × founding administrator" and "self-acceptance". This is one of the three in-place corrections. The others were: a `collate "C"` sort so the treasurer key order matches the TS `.sort()` byte order, and a plain local in place of `SELECT INTO` a field of a not-yet-assigned record.
+- **The three-way lock order** is implemented exactly as ruled: organization → invitation (`for update`, re-validated) → users (`for update`, existing mode) → person (`for update`).
+- **Holder-count asymmetry, lifted verbatim, flagged rather than fixed.** The founding-administrator count's group arm uses `gm.ends_on is null` with no date window and no membership join, while the giving count is membership-aware. R1 says "lifted verbatim", and a behaviour change would be a separate ruling. A DB test pins the asymmetry as it stands, so a future fix is a visible decision.
+- **`users.email` existence check is a sequential scan.** There is no `lower(email)` index, and `users` is `schema.ts`/Drizzle Kit territory: a hand-added index would be dropped by the next `db:push`. Negligible at today's scale (32 users on the branch). A TODO candidate if the user table grows.
+- **Dev seed rows dated 2099.** The two live Quillhaven rows and the live Fernwood resend have `created_at` 2099-01-01 and `expires_at` 2099-01-30, so test-rls-59's positive control never expires on a long-lived `development`. The expiry CHECK caps the window at 30 days from `created_at`. **For Batch 2b:** a rolling-24 h limit query should also bound `created_at <= now()`, or it will count these three dev rows forever.
+
+### Deviations from the design (all small; none changes an architect ruling)
+
+1. **One trailing OUT column, `treasurer_role_id uuid`, on `presby_accept_invitation`.** The existing `org.treasurer.designated` metadata carries `roleId`, and `accept.ts` (presby_app, no table access) could not otherwise produce it. For the treasurer purpose, `administration_role_key` is `'treasurer'` and `office_role_key` is null. The signature (the ACL target) is unchanged: OUT columns are not part of it.
+2. **`person_mode` values:** `created_person`, `existing_person` and **`linked_person`** (a founding administrator's on-file match, or an unlinked treasurer roster person). TS had only the first two. The internal `existing_person_new_membership` (TS's defensive zero-membership branch) is reported as `existing_person`, as TS did.
+3. **A `BEFORE INSERT` guard in addition to the design's update and delete guards.** It enforces that rows are born open (Creation Is Guarded As Strongly As Mutation, F54–F58), that a founding-administrator row has no person at insert, and the D-1 chain check. The addendum allowed either a `BEFORE INSERT` check **or** the Batch 1c test; both are implemented. **For Batch 2b:** `issue.ts` must insert open rows only; must not set `person_id` for `founding_administrator`; must set `resent_from_id` and `resend_count = parent + 1` on a resend; and must supersede before inserting (both partial indexes).
+4. **The marker value is `'true'`** (the house idiom: `presby.affiliation_trigger_active`, `giving_write_active`, DECISION-141), not the `'on'` in the Phase 3 text. The guard checks `= 'true'`.
+5. **Treasurer, existing account that is already a different person.** Phase 3 did not spell this case. The function refuses before linking (two live people on one account is the F110/F112 state). The reason is `ambiguous_person` if that other person is at this org, else `person_elsewhere`, both from the closed list.
+6. **Preview `person_display_name` for a founding administrator** first prefers the matching session's own live person at the org, then the single on-file match, then the invitee names. This mirrors accept step 4(a)/(b).
+7. **Existing-account founding administrator who needs a new person:** the names come from `p_first_name`/`p_last_name` if given, else from the invitee names on the row. In new mode, names are required. A blank name or a control character in new mode raises `invalid_parameter_value` (a programmer error: `accept.ts` validates first, G17), as does a bad bcrypt shape.
+
+### Integration instructions (orchestrator, Rule 16; nothing below was edited by Batch 1)
+
+- **`drizzle/meta/_journal.json`:** append `{ "idx": 59, "version": "7", "when": <after 0057's 1787014313186; leave room for 0058, e.g. 1787014373186>, "tag": "0059_presby_account_invitations", "breakpoints": true }`. Per Phase 3, 0058 (Track F mail) may land before or after it, so do not assume contiguity.
+- **`src/lib/db/domain/index.ts`:** add `export * from "./invitations";`. Then run the real `npm run check:schema-parity`; the scratch-equivalent result above was 0 failing. Then run **`npm run docs:erd`** (Phase 3 1a). It regenerates `docs/schema-design.md` through the schema barrel, so it can only see the table once the export exists.
+- **`scripts/test-rls.sql`:** append one line at the end, after the last section's closing banner: `\ir invitations/test-rls-59.sql`. It needs `scripts/install-test-helpers.sql` (owner) first, as the whole suite does. Re-run the whole suite as presby_app on the merged `development` after the seed is merged.
+- **`scripts/seed-dev.sql`:** append the full contents of `scripts/invitations/seed-dev-invitations.sql` at the **end** of the file (it references Quillhaven, Marrowbone and Fernwood, people `c1000000-…-0001/-0002/-0006`, and the elder fixture user `e0000000-…-00f2`). It is idempotent and never touches the e2e orgs. test-rls-59 depends on it.
+- **`docs/decisions.md`:**
+  - DECISION-184 should name `resent_from_id` (not `superseded_by_id`), the D-2 index, the D-1 unique index, and the `BEFORE INSERT` born-open and chain guard. The addendum's DECISION-183 sentence fix applies as already recorded.
+  - DECISION-188 should carry the outcome contract as built: the outcome strings, the `blocked_reason` list, `person_mode` including `linked_person`, the trailing `treasurer_role_id`, the D-5.1 re-arm, and the D-5.2 mapping table.
+- **Findings log (`docs/schema-design-2.md`):** F153–F159 as proposed. Batch 1 adds no new F-number; the `FOUND` bug was Batch 1's own pre-merge defect, caught by its own tests.
+- **`docs/TODO.md`:** add a line for a possible `lower(users.email)` index if `users` grows (it needs a `schema.ts` change, not a hand migration). The holder-count asymmetry above deserves a line for a future ruling. Add the 2099-dated dev seed rows with the limit-query note for Batch 2b, unless 2b handles it first.
+- **`docs/deployment.md` pre-deploy runbook for 0059:** apply **with `-1`** (unlike 0057, the file has no inner transaction): `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0059_presby_account_invitations.sql`. Verify FORCE + one policy; `has_table_privilege('presby_app','account_invitations',…)` is false for all four privileges; presby_app EXECUTE on the two functions only; the seven functions are definer with a pinned search_path. **Do not run** `test-rls-59.sql` or `seed-dev-invitations.sql` on production.
+
+### Handoff to Batch 2 (api-developer)
+
+- **What exists now:** the `account_invitations` table (`src/lib/db/domain/invitations.ts`, imported directly until the integration export) and the seven functions above. `src/lib/testing/invitation-fixture.ts` is ready for the `issue.ts`/`accept.ts` DB tests.
+- **Apply locally (pipeline branch only):** `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0059_presby_account_invitations.sql`, then optionally `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/invitations/seed-dev-invitations.sql`. Both are already applied to `pipeline-invitations`.
+- **`accept.ts` call:** `select * from presby_accept_invitation($1::text, $2::uuid, $3::text, $4::text, $5::text)` on `db`, inside `db.transaction` with the audit inserts. Outcomes: `dead | account_exists | email_mismatch | account_inactive | blocked | accepted`.
+- **`previewInvitation`:** `select * from presby_preview_invitation($1::text, $2::uuid)`, with `$2` from `auth()` only (D-3).
+- **`issue.ts` (owner):** the gates are `presby_founding_administrator_holder_count(org)` and `presby_giving_manage_holder_count(org)`. Map `unique_violation` on `account_invitations_open_designation_uq` **or** `account_invitations_open_address_uq` (by constraint name) to `already_pending` (D-2). Note Deviation 3's insert rules.
+- **Batch 2d:** when `countFoundingAdministratorHolders`/`countGivingManageHolders` become wrappers over the SQL counts, the "SQL counts equal TS counts" test in `invitations.db.test.ts` becomes tautological. Keep the asymmetry assertions (they pin behaviour), and drop or rename the equality. When deleting the `designate*` transactions, keep each parity scenario's `pin()` golden comparison and remove the TS half (see the parity file header).
+- **`test-rls.sql` sections added:** 59 (staged as `scripts/invitations/test-rls-59.sql`, sections (a)–(g)). No existing section touched.
+- **Next agent:** api-developer (Batch 2).
 
 ---
 

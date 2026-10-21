@@ -31,7 +31,7 @@
 | 2 — Architectural review (addendum 2: hand-off cookie path) | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete (Increment 1); implementers named | 2026-10-21 |
 | 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → **full-stack-developer (B4, one coupled batch; Phase 3 had split it between api-developer and ux-developer)** | **Complete.** Batch 0 committed 3c294fc/a423b40/6c73c08; Batch 1 committed 1199659; Batch 2 committed fda586c; Batch 3 committed aea024a; **Batch 4 complete (uncommitted): addendum-2 cookie fix with fail-before/pass-after observer e2e, the throwaway-org invitation e2e fixture, new-account + existing-account (Case A, Case B, treasurer, mismatch) + fixture-sweep specs, admin-organizations Tests 7-8 rewrite, a post-accept session refresh (F167); 7081 unit tests, 72 e2e green incl. the three auth specs** | — | 2026-10-21 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-10-21 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1197,46 +1197,181 @@ Phase 3 recorded: "a treasurer accepted from an existing non-2FA account is walk
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+**Date:** 2026-10-21
+**Verified by:** qa (read-only; worktree `presby-invites`, HEAD `f807246`, clean before and after; `.env.local` points at `ep-autumn-mud-axr8kawo` / `pipeline-invitations`)
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS**. `npm run lint` (`--max-warnings=0`): **PASS**. `npm run check`: **PASS** on all eight tripwires (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports). `npm run build`: **PASS**; `ƒ /invite` and `○ /invite/accepted` are in the route table and there were no warnings.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Pure suite (`npx vitest run`):**
+- 7081 passed, 0 failed, 2018 skipped, in 28.9 s.
+- 483 files passed, 67 skipped.
+- The skips are the DB-gated files. Every one of them was run separately below, so no skip goes unaccounted for.
+
+**DB-backed, one file per process (`--no-file-parallelism`) against `pipeline-invitations`:**
+
+| File | Result |
+|---|---|
+| `src/lib/db/domain/invitations.db.test.ts` | 66/66. The first run had one 20 s timeout at `:1042` (`ambiguous_person`, treasurer); it passed when re-run alone. |
+| `src/lib/onboarding/designation-parity.db.test.ts` | 12/12, compared against the committed golden |
+| `src/lib/onboarding/issue.db.test.ts` | 50/50 |
+| `src/lib/onboarding/accept.db.test.ts` | 30/30 |
+| `src/lib/onboarding/founding-administrator.test.ts` | 17/17 |
+| `src/lib/onboarding/treasurer-designation.test.ts` | 11/11 |
+| The other 68 DB-gated files in the repo | 62 green on the first pass. See the next three rows. |
+| `children`, `event-types`, `giving/ingest/process.db`, `roll` | Green when re-run singly. The first-pass failures were all 20 s timeouts or `Connection terminated unexpectedly`. |
+| `src/lib/org-features.test.ts` | 29/29 with `--testTimeout=90000`. It timed out twice at the default 20 s on its exhaustive axis × category × toggle loops. The one assertion failure in the first run came 3 s after the previous test timed out, while that test's queries were still running. `org-features.ts` is not in this diff. |
+| `src/lib/db/fixture-deletable.test.ts` | **3 failed: environment, not this pipeline's code.** See Notes, item 1. |
+
+**Migration and RLS:**
+- `scripts/invitations/test-rls-59.sql` as `presby_app` (`rolbypassrls = f`; `assert_eq` was already installed): 36/36 passed, exit 0. Run before and after the re-apply below.
+- **0059 idempotence:** I re-applied it twice as owner (`psql -1 -v ON_ERROR_STOP=1`). Both runs exited 0 with only the seven expected "already exists, skipping" notices.
+  - Before and after snapshots are identical: row counts (users 32, people 763, memberships 125, role_grants 94, app_roles 102, invitations 15), plus fingerprints of function bodies, ACLs, owners and `search_path`, the table ACL, and the constraint/trigger/index counts.
+  - All three guards are still `tgenabled = O`.
+  - The file has no top-level `begin`/`commit`.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+My dev server ran from this worktree (`PORT=3500 npm run dev`, with `RATE_LIMIT_DISABLED`, `AUTH_TOTP_ENCRYPTION_KEY`, the `DOMAINS_*` fakes and `CRON_SECRET`), with `E2E_ALLOW_SHARED_DB=true` and the chromium project. Every server I started (3500, 3510, 3520) was stopped by its own PID tree. Port 3600 was never touched.
+
+**Main run: 72 passed, 0 failed, 0 skipped, in 3.7 min.**
+
+| Spec | Passed |
+|---|---|
+| `invitation-new-account` (MFA enrolment path) | 1 |
+| `invitation-existing-account` (Case A, Case B with real `/totp`, treasurer, wrong account) | 4 |
+| `invitation-fixture-sweep` | 1 |
+| `admin-organizations` | 17 |
+| `totp-full-login` | 1 |
+| `totp-callback-bypass` | 7 |
+| `branded-signin` | 4 |
+| `post-login-routing` | 12 |
+| `admin-email-queue` | 5 |
+| `security-headers` | 20 |
+
+**Hydration, dev lane:** `e2e/hydration/` passed 8/8.
+
+**Hydration, production lane:** `npm run test:e2e:prod` with `PW_PROD_PORT=3950` passed 72/72 (8 `prod-build` + 64 `prod-custom-hosts`), with no skips. Playwright tore down its own server.
+
+**Pre-hydration probe of the new accept form:** I ran a scratch script that holds the JS chunks, opens a seeded live invitation anonymously at 360 px, and inspects the form (preview only, nothing consumed).
+- Before hydration, the `HydrationGate` fieldset is `disabled` and `aria-busy`, `#invite-password` and the submit button match `:disabled`, and typing is refused.
+- After hydration, the form is enabled.
+
+**Mandatory auth gate is satisfied:**
+- Case B: the MFA-enrolled seeded user, through the real `/totp` code.
+- The new-account spec: `/account/2fa` enrolment, then the `/totp` challenge, then `/o/<slug>`.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+| Test | Location | Guards against | Fail-before / pass-after |
+|---|---|---|---|
+| Observer e2e, Case A | `e2e/invitation-existing-account.spec.ts:80` | Dead-link flash after sign-in, plus `Path=/invite` (addendum 2) | **Reproduced by me**: HEAD spec against a scratch server built from `9e72e7c`, the parent of fix commit `a0ffa0c`. Failed on exactly the three assertions: `:114` immediate count (expected 0, got 1), `:118` observer flag (expected false, got true), `:124` `cookie.path` (expected `"/"`, got `"/invite"`). Passes at HEAD. |
+| Observer e2e, Case B | same file `:183` | Same | Failed at `:219`, `:222`, `:227`; passes at HEAD. The mismatch case passed in both runs, matching the implementer's log. |
+| `is Path=/ - regression for the dead-link flash…` | `src/lib/onboarding/invite-cookie.test.ts:19` | Cookie path | Mutation test (path set back to `/invite` in a scratch copy of HEAD): failed, along with seven dependent cookie tests. Passes at HEAD. |
+| Empty token renders plain dead-link markup | `src/app/(invite)/invite/page.test.tsx:83` | `RecheckOnce` patch returning | Passes at HEAD; I confirmed `recheck-once.tsx` is gone. |
+| F167 unit: `refreshes the session after an accept…` | `src/app/(invite)/actions.test.ts:222` | Treasurer reaching `/o/<slug>` without the 2FA wall | Mutation test (only `unstable_update` removed): exactly this test failed, `expected "vi.fn()" to be called 1 times, but got 0 times`. Passes at HEAD. |
+| F167 e2e: treasurer case | `e2e/invitation-existing-account.spec.ts:283` | Same | In the `9e72e7c` tree it fails earlier, at `:309` (the flash), which hides F167. So I ran it against a HEAD copy with only `unstable_update` removed: Case A and Case B passed, and the treasurer case timed out at `:317` waiting for `/account/2fa`. Passes at HEAD. |
+| F157 route tree and named-pins regressions | `src/lib/reserved-slugs.test.ts:55`, `:62` | `RESERVED_SLUGS` drift | Passes. I relied on the Batch 0 fail-before record. |
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+| Module | Statements | Target |
+|---|---|---|
+| `src/lib/permissions.ts` | 100% | 100% |
+| `src/lib/two-factor.ts` | 91.3% (uncovered lines 35–39) | 90%+ |
+| `src/lib/flags.ts` | 100% | 100% |
+| New pure modules (`invitation-token`, `input`, `status`, `labels`, `invite-cookie`, `credential-keys`) | 100% | |
+| `invitation-email.ts` | 100% statements, 90% branch (line 91) | |
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+I verified each row by reading the bodies. No `src/app/api/**/route.ts` file is in the diff.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| `inviteFoundingAdministratorAction` (`(admin)/admin/organizations/[id]/actions.ts:824`) | yes | yes (`:826`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `inviteTreasurerAction` (`:869`) | yes | yes (`:871`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `resendInvitationAction` (`:928`) | yes | yes (`:930`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `revokeInvitationAction` (`:959`) | yes | yes (`:961`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `revokeAllInvitationsAction` (`:993`) | yes | yes (`:995`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| GET `/admin/organizations/[id]` (`page.tsx:81`; now reads invitation rows with full addresses) | yes | yes (`:82`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `retryEmailAction` (`(admin)/admin/email-queue/actions.ts:36`; changed for F158) | yes | yes (`:38`) | `FEATURES.ADMIN_EMAIL_QUEUE` |
+| `acceptSignedInAction` (`(invite)/actions.ts:219`) | yes | n/a: the token is the credential (DECISION-147/183). G9 check at `:225`. Identity comes from the session only. | n/a |
+| `acceptNewAccountAction` (`(invite)/actions.ts:157`) | yes, used to refuse when a session exists (`:165`) | n/a: anonymous and token-gated by design, with an IP rate limit and a local-login check | n/a |
+| `startSignInToAcceptAction`, `continueToVerifyAction`, `switchAccountAction` | no, by design: they only write the visitor's own token into a cookie | n/a | n/a |
+| GET `/invite`, GET `/invite/accepted` | page calls `auth()`; `previewInvitation` receives only `session?.user?.id` (D-3) | n/a (exact `PUBLIC_PATHS` entries, `src/proxy.ts` diff) | n/a |
+
+## Schema/RLS Audit
+
+Checked against the live catalog on the pipeline branch:
+- `account_invitations` has `relforcerowsecurity = t` and one `tenant_isolation` policy (using and with check on `presby_current_org()`).
+- `aclexplode(relacl)` shows only the owner and `presby_platform: SELECT`. There are no column ACLs.
+- The three guard triggers are present and enabled.
+- All 7 functions are `SECURITY DEFINER`, owned by `neondb_owner`, with `search_path = public, pg_temp`.
+- `presby_app` holds EXECUTE on only `presby_preview_invitation(text,uuid)` and `presby_accept_invitation(text,uuid,text,text,text)`. There is no PUBLIC EXECUTE anywhere.
+- The indexes include D-2 `account_invitations_open_designation_uq` and D-1 `account_invitations_resent_from_uq`.
+
+Which layer actually refuses each attempt (all probes rolled back):
+
+| Probe | Connection | Refused by |
+|---|---|---|
+| SELECT, UPDATE, DELETE on the table; EXECUTE on `presby_giving_manage_holder_count` and `presby_apply_treasurer`; SELECT even with an org GUC set | `presby_app` | **The grant** (`permission denied`). RLS is never reached; it stays in place as the second layer for Increment 2. |
+| Accept or block without the marker; editing an identity column (`token_hash`); DELETE | owner (`neondb_owner`, `rolbypassrls = t`) | **The triggers** (`…accepted only through presby_accept_invitation()`, `…blocked only through…`, `…one legal transition…`, `…rows are permanent…`). |
+| R5: raw token vs its stored SHA-256 hex | `presby_app` | The raw token previews 1 row; the hash previews 0. The address comes back masked (`i***@example.invalid`). |
+
+## Binding Rulings Honoured
+
+- **R1–R8, R10:** verified in the catalog and in `accept.ts`, `issue.ts`, `queue.ts`, `invitation-email.ts`, `next.config.ts` and `src/proxy.ts`. In particular:
+  - `accept.ts` uses only `db`, and its audit rows are written in the same transaction.
+  - `issue.ts` uses only `getPlatformDb()`, never reads `users`, and supersedes first.
+  - The limits are bounded above by `now()`.
+  - The link is built only from `platformOrigin()`.
+  - The `origin` CHECK still allows only `platform`, so Increment 2 has not leaked in.
+- **R3:** `src/auth.ts`, `src/lib/auth/`, `(auth)/`, `api/auth/` and `launch/` have no diff.
+- **R9 as reversed:** no refusal; `inviterIsInvitee` is stamped on both rows; the "Self-designated" badge shows (`invitation-list.tsx:121`).
+- **D-1 to D-8:** both indexes are live. Both index names map to `already_pending` (`issue.ts:89`). `p_user_id` comes from the session only. `isTotpConfigured()` is checked for both purposes. The marker is re-armed on the blocked path (0059 `:1328`). The `account_exists` mapping is scoped to `users_email_unique` (`:1280`). `email_queue_id` is set at insert.
+- **Contradiction 2:** the existence checks use `lower(u.email)` (`:851`, `:1061`).
+- **Addendum 2:** host-only `Path=/`, `__Host-invite_token` in production, `INVITE_PAGE_PATH` split out, `RecheckOnce` deleted, boundary scan added.
+
+## Audit (Rule 7) and the Token
+
+- Each outcome's audit row is proven in its own transaction by `issue.db` (50) and `accept.db` (30).
+- I also scanned every `invitation.*`, `user.created_via_invitation` and `org.*.designated` row live on the branch (73 rows). None contains a token-shaped string, a 64-hex hash or an `@`. The metadata keys are ids only.
+- After all runs, no `account_invitation` queue row in `sent`, `failed` or `cancelled` carries a link. The rows I saw mid-run with a link were `issue.db`'s own fixtures, and its cleanup removed them.
+- The e2e asserts that the token is in no URL, no `audit_events` row and no `email_queue` row.
+
+## Notes (non-blocking)
+
+1. **`fixture-deletable.test.ts` fails because of residue on the pipeline branch.** It reports 78 people and 101 organizations whose deletable windows have closed.
+   - The organizations were created at 18:15–18:22 UTC by the `domains-svc` fixture and at 18:41 UTC by the `ingest-apply` fixture. The people expired in the same 20:xx UTC window, and the "Dom Holder" sample name points to the same domains fixture.
+   - That matches the Batch 0 combined `domains` + `giving` run that "cascaded 48 failures" after a Neon timeout.
+   - None of those orgs has an invitation, and my runs added none.
+   - It goes away when the branch is deleted at cleanup. Whoever runs the post-merge suite on `development` should include this file.
+   - The underlying weakness, teardown in those two fixtures not surviving a connection drop, existed before this pipeline and is worth a TODO line.
+2. **The Neon branch was flaky throughout:** 20 s timeouts and `Connection terminated`. Every affected file passed when re-run singly; `org-features` needed `--testTimeout=90000`.
+3. **Test names:** the observer e2e tests don't carry the "— regression for …" suffix. Their unit counterparts do, and the F167 unit test uses a hyphen instead of an em dash.
+4. **Fixed-string `console.error` in production paths:** `(invite)/actions.ts:254`, `accept.ts:316`, `issue.ts:574`/`:730`. They log an error class only, never the token. There is no `console.log`.
+5. **Residuals already on record:** F166 (recovery codes and `callbackUrl` lost after first enrolment, pre-existing), D-6 (the dead-link cookie now goes with every platform request for up to 30 minutes, still inert), and the link stays at rest in `email_queue` while a row is `queued`.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**PASS.** Every required check is green, including the stricter auth-touching gate: e2e ran against a real dev server, through both the MFA-enrolled seeded user and the new-account enrolment path. Fail-before / pass-after is reproduced for the addendum-2 observer test and, in isolation, for F167, both unit and e2e. The feature-gate audit, the live-catalog Schema/RLS audit and the binding-rulings check are clean.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+---
+
+**Per-Phase Status:** | 5 — Verification | qa | Complete | PASS | 2026-10-21 |
+
+**Handoff:** Next is **analyst, Phase 6 (Shipped vs Intent)**. Two items for integration: Note 1, which needs `fixture-deletable` run on `development` after the merge, and the existing Batch 1 caveat that `scripts/test-rls.sql` stops at section 2 because of the Alder Creek demo membership.
+
+**Evidence** is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/qa/`:
+- `e2e-head.log`, `e2e-fail-before.log`, `e2e-f167-mutant.log`
+- `e2e-hyd-dev.log`, `e2e-prod.log`
+- `rls59.log`, `rls59-after.log`
+- `snap-before.txt`, `snap-after.txt`
+- `dbrest/` (per-file DB logs)
 
 ---
 

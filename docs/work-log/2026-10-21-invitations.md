@@ -29,7 +29,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 2 — Architectural review (addendum on Phase 3 divergences) | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete (Increment 1); implementers named | 2026-10-21 |
-| 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → api-developer + ux-developer (B4) | In progress: Batch 0 complete (committed 3c294fc/a423b40/6c73c08); Batch 1 complete (uncommitted; 0059 hand-written, applied twice to pipeline-invitations; 66 + 12 + 10 tests, test-rls-59 36 assertions as presby_app); B2 next | — | 2026-10-21 |
+| 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → api-developer + ux-developer (B4) | In progress: Batch 0 complete (committed 3c294fc/a423b40/6c73c08); Batch 1 complete (committed 1199659); **Batch 2 complete (uncommitted; issue.ts, accept.ts, (invite)/actions.ts, queue redaction, admin actions, F158, PUBLIC_PATHS, headers, TS designation transactions deleted after parity green; 50 + 30 DB tests, 7000 unit tests)**; B3 next | — | 2026-10-21 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -890,6 +890,137 @@ After all proofs I applied 0059 twice more (the idempotence proof above). All th
 - **Batch 2d:** when `countFoundingAdministratorHolders`/`countGivingManageHolders` become wrappers over the SQL counts, the "SQL counts equal TS counts" test in `invitations.db.test.ts` becomes tautological. Keep the asymmetry assertions (they pin behaviour), and drop or rename the equality. When deleting the `designate*` transactions, keep each parity scenario's `pin()` golden comparison and remove the TS half (see the parity file header).
 - **`test-rls.sql` sections added:** 59 (staged as `scripts/invitations/test-rls-59.sql`, sections (a)–(g)). No existing section touched.
 - **Next agent:** api-developer (Batch 2).
+
+---
+
+## Batch 2 — server (api-developer, 2026-10-21)
+
+**Status: Batch 2 complete (2a, 2b, 2c, 2d), working tree uncommitted.** Built on Batch 1 (HEAD 35cbd17). Did not touch any Rule 16 integration-only file (`scripts/test-rls.sql`, `scripts/seed-dev.sql`, `drizzle/meta/_journal.json`, `src/lib/db/domain/index.ts`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md`). No commit made. No schema change (0059 untouched). Suggested commits: `feat(invitations): token, email, queue redaction and the issue side` (2a+2b), `feat(invitations): accept side, (invite) actions and the admin invitation actions` (2c), `refactor(invitations): retire the TypeScript designation transactions` (2d, after the parity-green run recorded below), each with `Work-Log: 2026-10-21-invitations`.
+
+### Files Created
+
+- `src/lib/onboarding/invitation-token.ts` (+ test): `mintInvitationToken()`, `hashInvitationToken()`, `isWellFormedInvitationToken()` (`^[A-Za-z0-9_-]{43}$`). Pure `node:crypto`; also the e2e fixture seam (Batch 4).
+- `src/lib/onboarding/invitation-email.ts` (+ test): `renderInvitationEmail()` (the ONLY place the message is built), `ACCOUNT_INVITATION_TEMPLATE_KEY`. Link is `${platformOrigin()}/invite?token=<token>` and nothing else; returns `null` when there is no safe origin. The accept URL is one unchanged substring in the html (href and printed copy) and in the text. Names `escapeHtml`'d, control characters stripped, capped at 100; no sender free text; the invited address is never in the body.
+- `src/lib/onboarding/input.ts` (+ test): G17 boundaries shared by `issue.ts` and `accept.ts` (email trim/lowercase/shape, NFC + control-strip names 1-100, password 8 characters min and **72 UTF-8 bytes** max, `UUID_RE`).
+- `src/lib/onboarding/status.ts`, `labels.ts` (+ test): `deriveInvitationStatus()`, `deliveryState()`, status and delivery vocabulary, operator and invitee copy per blocked reason, the dead-link and rate-limit literals. Pure, client-safe.
+- `src/lib/onboarding/issue.ts` (+ `issue.db.test.ts`): the issue side, **`getPlatformDb()` only** (below).
+- `src/lib/onboarding/accept.ts` (+ `accept.db.test.ts`): the accept side, **`db` (presby_app) only** (below).
+- `src/lib/onboarding/invite-cookie.ts`: `INVITE_TOKEN_COOKIE = "invite_token"`, `inviteCookieOptions()` (httpOnly, `Secure` in production, `SameSite=Lax`, `Path=/invite`, `Max-Age=1800`). Shared with the Batch 3 page, which reads the cookie when the query has no token.
+- `src/app/(invite)/actions.ts` (+ test): the five public actions. No `layout.tsx`, no `loading.tsx`, no pages (Batch 3).
+- `src/lib/email/credential-keys.ts`: `CREDENTIAL_TEMPLATE_KEYS`, `REDACTED_BODY_MARKER`, `isCredentialTemplateKey()`, dependency-free so the Retry action and the email-queue page can import it without `@/lib/db` (queue.ts re-exports them).
+- `src/lib/email/queue-credential.test.ts`, `src/lib/onboarding/boundaries.test.ts` (S4 and D-3 source scans), `src/lib/onboarding/invite-headers.test.ts`.
+
+### Files Modified
+
+- `src/lib/audit.ts` (+ `audit.test.ts` catalog pin): six keys appended in one block (below).
+- `src/lib/email/queue.ts`, `src/lib/email/index.ts`: `insertQueueRowInTx(tx, input)`, `attemptQueuedSend(id)`, `cancelQueuedEmail(tx, id)`; `enqueueEmail()` is now their composition (behaviour preserved; `queue.test.ts` and `api/cron/email-queue/route.test.ts` untouched and green). Redaction of credential bodies in the same UPDATE that sets `sent` (inline and worker) or `failed` (worker permanent failure). Barrel re-exports.
+- `src/app/(admin)/admin/organizations/[id]/actions.ts` (+ `actions.test.ts`): `designateFoundingAdministratorAction` and `designateTreasurerAction` **replaced** by the five invitation actions; every `no_such_user` string and the "ask them to sign up first" copy is gone (C5).
+- `src/app/(admin)/admin/organizations/[id]/founding-administrator-section.tsx`, `treasurer-designation-section.tsx` (+ both tests): **minimal rewire only, forced by the deletion** (they imported the deleted actions): call the new actions, founding administrator gains first and last name inputs, "sign up first" and "must have a platform account" hints removed, button copy "Send invitation". Everything else in them (pending rows, resend/revoke, confirm sentences for self-address and local-login-off, `HydrationGate` on the founding-administrator form) is Batch 3's.
+- `src/app/(admin)/admin/email-queue/actions.ts` (+ test): **F158**, `retryEmailAction` refuses a `failed` row whose `templateKey` is in `CREDENTIAL_TEMPLATE_KEYS`. `page.tsx`: `cancelled` joins the status filter/strip/badges; a failed credential row shows "can't be retried, use Resend" instead of the Retry button.
+- `src/proxy.ts` (+ `proxy.test.ts`): `PUBLIC_PATHS` gains exactly `"/invite"` and `"/invite/accepted"`.
+- `next.config.ts` (+ `src/lib/giving/csp.test.ts`, whose exact header-source list pin gained the two entries): `/invite` and `/invite/accepted` get `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow`, scoped with `has: host PLATFORM_HOST`, placed after the catch-all so they win.
+- `src/lib/onboarding/founding-administrator.ts`, `treasurer-designation.ts` (+ tests): the TypeScript designation transactions, `deriveNameFromUser()` and the result types are **deleted** (2d). What remains: `foundingAdministratorPlan()`, `TREASURER_DESIGNATION_ORG_TYPES`, `treasurerDesignationApplies()`, and `countFoundingAdministratorHolders()` / `countGivingManageHolders()` as thin wrappers over the two owner-only SQL count functions (same exported signatures; `page.tsx` unchanged). Neither module has a runtime `@/lib/db` import any more.
+- `src/lib/onboarding/designation-parity.db.test.ts`: the TypeScript half of each scenario removed; every scenario now runs the real acceptance and asserts SQL == the committed golden (`designation-parity.golden.json`, **not regenerated**).
+- `src/lib/db/domain/invitations.db.test.ts`: one test retitled (the SQL-vs-TS count equality is tautological now; the asymmetry assertions are kept). `src/lib/testing/invitation-fixture.ts`: `insertInvitation` takes `emailQueueId`.
+
+### Contract for Batch 3 (ux-developer) and Batch 4
+
+**Admin server actions** (`src/app/(admin)/admin/organizations/[id]/actions.ts`; each: `auth()` then `hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)`, `Unauthorized.` / `Forbidden.` otherwise; ids by `UUID_RE`; `revalidatePath` on success only):
+
+| Action | FormData | Result |
+|---|---|---|
+| `inviteFoundingAdministratorAction(fd)` | `organizationId`, `email`, `firstName`, `lastName`, optional `acknowledge` (`"true"`/`"on"`) | `InvitationActionResult` |
+| `inviteTreasurerAction(fd)` | `organizationId`, `email`, optional `acknowledge` | `InvitationActionResult` |
+| `resendInvitationAction(fd)` | `organizationId`, `invitationId` (must belong to that org) | `InvitationActionResult` |
+| `revokeInvitationAction(fd)` | `organizationId`, `invitationId` | `InvitationActionResult` (`{ ok: true, invitationId }`) |
+| `revokeAllInvitationsAction(fd)` | `organizationId` | `InvitationActionResult` (`{ ok: true }`) |
+
+`type InvitationActionResult = { ok: true; invitationId?: string; expiresAt?: string /* ISO */; delivery?: 'sent' | 'queued'; selfAddressed?: boolean } | { ok: false; error: string; needsAcknowledgement?: 'do_not_contact' }`. The UI composes the success copy from `delivery`/`expiresAt`/`selfAddressed` ("Invitation sent to x. It expires on [date]. Nobody holds this role until it is accepted."; `queued` is "Invitation created. Email delivery is delayed; we'll keep trying."). When `needsAcknowledgement` is present, show the `error` text with a confirm and re-submit with `acknowledge=true`. Error strings are final operator copy and never mention account existence.
+
+**List read for the org page** (server only, `src/lib/onboarding/issue.ts`): `listInvitationsForOrg(organizationId): Promise<InvitationListRow[]>` with `{ id, purpose, email, inviteeFirstName, inviteeLastName, personId, status: 'pending'|'accepted'|'expired'|'revoked'|'blocked', delivery: 'queued'|'sent'|'delivered'|'bounced'|'failed'|'cancelled'|'unknown', createdAt, expiresAt, acceptedAt, selfDesignated, blockedReason, resendCount, canResendAt }`; superseded rows are excluded. Labels and per-reason operator copy: `src/lib/onboarding/labels.ts` (`INVITATION_STATUS_LABEL`, `DELIVERY_STATE_LABEL`, `BLOCKED_REASON_OPERATOR_COPY`); both client-safe. `issue.ts` is imported only from `(admin)` (source scan) and is `server-only`.
+
+**Public actions** (`src/app/(invite)/actions.ts`, no `FEATURES` key: the token is the credential). All state-returning actions have the `useActionState` shape `(prev: AcceptFormState, formData) => Promise<AcceptFormState>`; **this differs from Phase 3's `acceptSignedInAction(formData)` signature on purpose**, so the signed-in Accept form can show an inline `role="alert"` error:
+
+| Action | Fields | Behaviour |
+|---|---|---|
+| `acceptNewAccountAction(prev, fd)` | `token`, `firstName`, `lastName`, `password`, `confirm` | IP-keyed `checkRateLimit("invite_accept:<ip>", 10/hour)` first; refuses if a session exists; confirm mismatch; refuses while `auth.local_login` is off; on success clears the cookie and `redirect("/invite/accepted")` |
+| `acceptSignedInAction(prev, fd)` | `token` | rate limit; `auth()` required; **G9**: refuses `twoFactorRequired && !twoFactorVerified`; identity ONLY from `session.user.id`; on success clears the cookie and `redirect("/launch?next=%2Fo%2F<slug>")` (slug from the function's row) |
+| `startSignInToAcceptAction(fd)` | `token` | sets the `invite_token` cookie, `redirect("/signin?callbackUrl=%2Finvite")` (no token in a URL) |
+| `continueToVerifyAction(fd)` | `token` | cookie, `redirect("/totp?callbackUrl=%2Finvite")` |
+| `switchAccountAction(fd)` | `token` | cookie, `signOutAction("/invite")` |
+
+`type AcceptFormState = { status: 'idle' } | { status: 'error'; code: AcceptErrorCode; message: string; field?: 'firstName'|'lastName'|'password'|'confirm' }`, with `AcceptErrorCode` = `rate_limited | signed_in | not_signed_in | two_factor_required | local_login_disabled | dead | account_exists | email_mismatch | account_inactive | blocked | invalid_input | password_mismatch | db_error`. `message` is ready to render (dead link is `INVITATION_DEAD_LINK_COPY`; blocked reasons are `INVITEE_BLOCKED_COPY[reason]`). A malformed token is the dead bucket without a round trip.
+
+**For the Batch 3 page** (`src/app/(invite)/invite/page.tsx`): `previewInvitation(token, session?.user?.id)` from `@/lib/onboarding/accept` returns `InvitationPreview | null` (`organizationName, organizationType, purpose, inviteeFirstName, inviteeLastName, personDisplayName, maskedEmail, expiresAt, sessionMatches: boolean | null`); null is the dead-link state. **The second argument MUST be the `auth()` session id** (a source scan, `boundaries.test.ts`, fails otherwise; it also fails if the page imports `getPlatformDb`, `issue.ts` or any `@/lib/db*` module, or if `(invite)` gains a `layout.tsx`/`loading.tsx`). Token source: query `token`, else the `invite_token` cookie (`INVITE_TOKEN_COOKIE`). Render states by `preview`, `session`, `sessionMatches`, `session.user.twoFactorRequired/Verified`, `isLocalLoginEnabled()`. The hidden `token` field of the forms carries the token.
+
+### Server library contracts
+
+- **`createInvitation(input)`** returns `ok { invitationId, expiresAt, delivery, selfAddressed } | has_holders | already_pending { invitationId | null, expired } | not_applicable | provisioning_incomplete | no_matching_person | ambiguous_person | membership_ended | needs_acknowledgement { reason: 'do_not_contact' } | totp_unavailable | link_origin_unavailable | invalid_input { field } | rate_limited | db_error`. One transaction under the organization-row lock: org, applicability (treasurer allow-list), holder gate (owner-only SQL count), baseline provisioning pre-check (derived group; both role templates for a treasurer), **treasurer person first (C6)**, `isTotpConfigured()`, do-not-contact, one open designation, durable limits, render, queue row (`insertQueueRowInTx`), invitation row with `email_queue_id` set at insert, `invitation.created` audit row; the provider call is AFTER the commit and a failure leaves the row `queued` (`delivery: 'queued'`). **It reads no `users` row** (source-scanned).
+- **`resendInvitation`** (supersede FIRST, then insert the successor with `resent_from_id` and `resend_count + 1`, cancel+scrub the old queued email, audit): `ok | not_found | not_open | has_holders | link_origin_unavailable | rate_limited | db_error`. **`revokeInvitation`**: `ok | not_found | not_open | db_error`. **`revokeAllOpenInvitations`**: `ok { revoked } | db_error`.
+- **Durable limits** (one constants block, `INVITATION_LIMITS`): 20 per inviter, 10 per organization, 3 per recipient address, each per rolling 24 h over every row including superseded/revoked and bounded **above** by `now()` (the 2099 dev-seed rows never count); resend cooldown 5 minutes; 5 resends per chain; default expiry 7 days. One refusal literal for every cause. A resend counts as an email against the per-inviter/org/address limits.
+- **`acceptInvitation({ token, mode })`**: validation (G17) and bcrypt (cost 10, once per new-account submission whether the token is live, dead or malformed) before the token is looked up; then one `db.transaction` containing `presby_accept_invitation(...)` and the audit rows. Results: `accepted { mode, organizationSlug } | dead | account_exists | email_mismatch | account_inactive | blocked { reason } | invalid_input { field } | db_error`.
+
+### Audit Events
+
+All inserted with `insertAuditRow(tx, ...)` in the mutation's own transaction (never `recordAudit()`); ids only. Six keys appended to `AUDIT_ACTIONS` in one block: `invitation.created`, `invitation.resent`, `invitation.revoked`, `invitation.accepted`, `invitation.accept_blocked`, `user.created_via_invitation`.
+
+| Outcome | Rows | Actor |
+|---|---|---|
+| created | `invitation.created` | operator |
+| resent | `invitation.resent` | operator |
+| revoked (single) / revoked-all | `invitation.revoked` (`via: single` / `revoke_all`), one per row | operator |
+| accepted, new account | `invitation.accepted`, `user.created_via_invitation`, `org.founding_administrator.designated` or `org.treasurer.designated` (with `viaInvitationId`, `invitedByUserId`, `inviterIsInvitee`) | the new user (email null: the full address never reaches this code) |
+| accepted, existing account | `invitation.accepted`, the designation row | the accepting user (email from the session) |
+| blocked | one `invitation.accept_blocked` (`reason`) per reason | the account when known (existing mode), else null |
+| dead, `account_exists`, `email_mismatch`, `account_inactive`, validation failures | none (nothing to attribute) | n/a |
+
+`check:audit` has nothing to see in the new `actions.ts` files (no `db.*` call, no `recordAudit()` there by design), so Rule 7 is proven the DECISION-179 way, by the per-outcome DB tests below.
+
+### Tests
+
+**Pure/unit (always run):** `invitation-token` 4, `invitation-email` 11, `input` 17, `status`+`labels` 6, `queue-credential` 11, `(invite)/actions` 34, `boundaries` 9, `invite-headers` 4, admin `actions.test.ts` 119 (rewritten around `issue.ts`), both section tests, `email-queue/actions` +2 (F158), `proxy` +2, `csp` pin updated, `audit` catalog pin. Whole suite: **474 files passed, 6996 tests passed, 2018 skipped (DB-gated)**.
+
+**DB-backed, one file per process against `pipeline-invitations` (`--no-file-parallelism`):**
+
+| File | Tests | Result |
+|---|---|---|
+| `src/lib/onboarding/issue.db.test.ts` | 50 | 50 pass |
+| `src/lib/onboarding/accept.db.test.ts` | 30 | 30 pass |
+| `src/lib/db/domain/invitations.db.test.ts` (Batch 1, rerun) | 66 | 66 pass (one 20 s Neon stall on the first run, passes alone) |
+| `src/lib/onboarding/designation-parity.db.test.ts` | 12 | 12 pass, **both before (SQL == TS and SQL == golden) and after the deletion (SQL == golden)** |
+| `src/lib/onboarding/founding-administrator.test.ts` | 17 | pass |
+| `src/lib/onboarding/treasurer-designation.test.ts` | 11 | pass |
+
+`issue.db.test.ts`, one test per outcome: created (founding administrator delivered; provider failing so the row stays `queued` with a working link whose token hashes to the stored `token_hash` and previews through the real function, then **a later `processQueueBatch(1)` success redacts it**; treasurer), the identical result and queue shape for an address with and without an account, self-addressed, a **failed audit insert rolling back** create / resend / revoke / revoke-all, every refusal (`has_holders` x2, `already_pending` x2 incl. expired, `not_applicable`, `provisioning_incomplete`, `no_matching_person` incl. another org's person, `ambiguous_person`, `membership_ended`, `needs_acknowledgement` then ok-acknowledged, `totp_unavailable`, `link_origin_unavailable`, `invalid_input`), the three durable limits plus the **2099-dated rows never counted** regression, the real unique-violation error shape by constraint name and **a real race through a test-only trigger on both create (`already_pending`) and resend (`not_open`)**, resend (lineage, old email cancelled and scrubbed, old link dead, new link live, expired-open resendable, cooldown, chain cap, address limit, not_open x3, not_found x3, `has_holders`, `link_origin_unavailable`), revoke (queue cancelled/scrubbed, sent left sent, cross-org `not_found`), revoke-all (only this org, one audit row each), list, and source scans (no `users` read, no `recordAudit`, platform connection only).
+
+`accept.db.test.ts`: accepted x {new, existing} x {founding administrator, treasurer} with the exact audit rows and metadata, the bcrypt hash verified against the password, ids only (no address, token, hash or password anywhere in audit), self-designation `inviterIsInvitee` on both rows, single use; failed audit insert rolls back an acceptance and a **committed `blocked_at`**; **each of the eight blocked reasons** writes exactly one `invitation.accept_blocked`, commits `blocked_at`, writes nothing else and kills the link; `account_exists`, `email_mismatch`, `account_inactive`, and every dead state write no audit row and leave the token alive where it should; validation before the DB incl. the UTF-8 byte limit and "not a token oracle"; bcrypt runs exactly once for live, dead and malformed tokens; preview (masked, `session_matches`, null for every dead state and for the stored hash).
+
+**Failing-first proofs (Batch 2):** with `redactionFor()` disabled, 4 unit tests and the DB test "delivered -> sent, body redacted" fail; restored, green (the mutation was reverted before anything else ran). The Batch 1 proofs stand.
+
+### Gate Results (api-developer, 2026-10-21)
+
+- `npm run typecheck`: pass. `npm run lint` (`--max-warnings=0`): pass. `npm run check` (all eight tripwires, `check:audit` and `check:proxy-imports` included): pass.
+- `check:secrets` scans tracked files only; I ran its exported `checkSecretsPii()` over every untracked and modified file (43): 0 findings.
+- Row counts after all DB suites equal the pre-batch baseline (users 32, people 763, memberships 125, role_grants 94, app_roles 102, invitations 6 = the staged seed); no `Fixture ... for inv-*` org leaked; the test-only triggers/functions created by the suites are dropped (verified in the catalog).
+- Flakes (Neon, not regressions): the first full `issue.db` run lost two tests to `Connection terminated unexpectedly` (they pass on re-run, and the 50/50 run is recorded above); `invitations.db` had one 20 s timeout on a single test, which passes alone.
+
+### Deviations and judgement calls (all small; none changes an architect ruling)
+
+1. **`acceptSignedInAction` is `(prev, formData)` returning `AcceptFormState`**, not `(formData)` as in Phase 3, so the form can render the refusal inline.
+2. **Cancelling a queued invitation email also scrubs its body** (`cancelQueuedEmail` redacts credential keys in the same UPDATE). Phase 3 said only "cancel"; a cancelled row still held a link, so this is strictly tighter.
+3. **`createInvitation` returns `invalid_input { field: 'organizationId' }` for an organization that does not exist** (Phase 3's result union had no `not_found`), and **`already_pending.invitationId` is `string | null`** (null only when the race-rolled-back rival no longer exists to name).
+4. **`resendInvitation` also re-checks the holder gate** (`has_holders`) and applies the per-inviter/org/address limits (a resend is an email); Phase 3 listed only the cooldown and the chain cap. **A unique violation during resend maps to `not_open`.**
+5. **The two section components were rewired** (minimum edit, forced by the deletion); see Files Modified. Phase 3 assigned their redesign to Batch 3, which still owns it.
+6. **`email_queue` bodies of a `failed` credential row are redacted too** (Phase 3 listed `sent` and `failed`; this is just recorded because the Retry refusal depends on it).
+7. **The "four resolver files unchanged" mechanical test is not re-added**: it was retired in F131 because a byte-identical-to-main pin only means something inside its own pipeline. `boundaries.test.ts`/`founding-administrator.test.ts` pin the durable form instead: no `src/lib/onboarding` module imports a resolver-side file.
+8. **Actor email on `invitation.accepted` (new account) is null**: the full invited address never reaches application code on the anonymous path (DECISION-153), so the audit row carries `actor_user_id` only; existing-account rows carry the session's email.
+
+### Notes for Batch 3, Batch 4 and integration
+
+- **Batch 3:** the founding-administrator form still lacks the Phase 3 confirm sentences (self-address via `selfAddressed`, local-login-off warning) and `HydrationGate`; the page does not read or render `listInvitationsForOrg` yet; `isLocalLoginEnabled()`/`isTotpConfigured()` page props are not wired. A pending invitation does not yet replace the form (the server refuses a second one with `already_pending` and the message names Resend/Revoke, which the UI does not offer until Batch 3). `(invite)/invite/page.tsx` and `invite/accepted/page.tsx` do not exist; `RESERVED_SLUGS`'s `invite` pin is by name until they do.
+- **Batch 4:** `e2e/admin-organizations.spec.ts` Test 7 (treasurer) asserts the old button/dialog copy and "designating a member makes the control disappear"; it needs the rewrite in Phase 3's blast-radius section (and a throwaway org with an on-file email, F159). `e2e/support/invitation-fixture.ts` should reuse `invitation-token.ts` (`mintInvitationToken()`/`hashInvitationToken()`).
+- **Integration (orchestrator):** the doc edits and shared-file edits already listed in Batch 1 and Phase 3 stand. **New TODO lines** for the TODO aggregator: scrub `password_reset`, `email_change_verify`, `statistics_submission_grant` bodies (F154: add the key to `credential-keys.ts`, one edit also makes Retry refuse it); the hand-off cookie is not cleared on a dead link (D-6); the founding-administrator holder-count asymmetry (ruling: keep, per the orchestrator); `INVITATION_LIMITS` are constants in `issue.ts` (no per-environment override). The `next.config.ts` `/invite` header rules must be re-checked against the parallel review-polish pipeline's header work. When `renderEmail()`/`RenderedEmail` from review-polish merges, adapt `invitation-email.ts` (the one place) and `insertQueueRowInTx`'s caller; `queue.ts`'s new functions are starter-generic (S9, stage for `/downstream-sync`).
+- **Next agent:** ux-developer (Batch 3).
 
 ---
 

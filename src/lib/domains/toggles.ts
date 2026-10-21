@@ -5,7 +5,7 @@ import { organizations } from "@/lib/db/schema";
 import { organizationFeatureToggles } from "@/lib/db/domain/org-features";
 import { ORG_FEATURE_CATALOG } from "@/lib/org-features";
 import type { OrgTx } from "@/lib/authz";
-import { AUDIT_ACTIONS, insertAuditRow } from "./audit-tx";
+import { AUDIT_ACTIONS, insertAuditRow } from "@/lib/audit-tx";
 
 /**
  * toggles.ts - the platform-connection writer for the operator-enabled org

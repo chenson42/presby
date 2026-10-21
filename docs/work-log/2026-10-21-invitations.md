@@ -32,7 +32,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete (Increment 1); implementers named | 2026-10-21 |
 | 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → **full-stack-developer (B4, one coupled batch; Phase 3 had split it between api-developer and ux-developer)** | **Complete.** Batch 0 committed 3c294fc/a423b40/6c73c08; Batch 1 committed 1199659; Batch 2 committed fda586c; Batch 3 committed aea024a; **Batch 4 complete (uncommitted): addendum-2 cookie fix with fail-before/pass-after observer e2e, the throwaway-org invitation e2e fixture, new-account + existing-account (Case A, Case B, treasurer, mismatch) + fixture-sweep specs, admin-organizations Tests 7-8 rewrite, a post-accept session refresh (F167); 7081 unit tests, 72 e2e green incl. the three auth specs** | — | 2026-10-21 |
 | 5 — Verification | qa | Complete | PASS | 2026-10-21 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-21 |
 
 ---
 
@@ -1377,34 +1377,201 @@ Which layer actually refuses each attempt (all probes rolled back):
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*2026-10-21. Read-only. I did not start a server or run anything. I checked the shipped feature against my Phase 1 review through the work-log, QA's Phase 5 evidence, and spot reads of the code. The spot reads covered the email copy, the labels, the invite page state machine, the resend webhook, the sent notice, and a grep of `src` and `e2e` for the old "sign up first" copy. The only hit is the e2e assertion that the phrase is absent.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.** Everything Phase 1 promised for the platform designations ships and is verified on a real server, including both MFA paths. Two things the operator should know before using it in production:
+
+- **Staff and Roles half not built.** The backlog line this pipeline set out to close is only half closed. The org-level "Invite to sign in" is Increment 2, which has no Phase 3 design yet.
+- **Every new invitee hits the F166 detour.** F166 is the pre-existing first-enrolment bug. The recovery-code panel vanishes and the `callbackUrl` is lost.
+
+Neither is a defect in what was built. Each is a tracked follow-up below.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A platform operator can now invite a founding administrator or first treasurer by email. The recipient proves mailbox ownership with a single-use link, then creates an account or signs in to one they have, and only then receives the access. The sender's screen is identical whether or not the address has an account. The staff-and-roles half of the original request, and a clean first-time 2FA enrolment, are still open.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The operator's blocker is gone.** "The account did not exist yet" can no longer happen. Both false "sign up first" strings and the section hint are removed. e2e `admin-organizations.spec.ts:602` asserts the phrase is absent.
+- **No enumeration on the sender side.** The send path never reads `users`, which is source-scanned. The e2e asserts that an address with an account and one without get the identical notice string. The refusals describe the org or the roster, never the account.
+- **The preview consumes nothing.**
+  - The e2e reloads twice and the link survives.
+  - The dead-link page is byte-identical for unknown, expired, revoked, superseded, used, blocked and empty tokens.
+  - The honest messages (blocked reasons, `account_exists`, mismatch) appear only after the token is proven.
+- **The token stays out of URLs.**
+  - The hand-off cookie fix is the strongest piece of QA evidence. The observer e2e fails on `9e72e7c` on exactly the three assertions and passes now. QA reproduced that independently.
+  - F167 (the treasurer reaching `/o/<slug>` without the 2FA wall) was found by an e2e and fixed failing-first.
+- **Consent and 2FA are enforced where they matter.**
+  - Existing accounts must click Accept.
+  - A 2FA-required account needs a verified session (G9).
+  - Self-designation is allowed and audited as the operator ruled: `inviterIsInvitee` is on both audit rows and the org page shows a "Self-designated" badge.
+- **The credential does not linger.** After send, the stored body is replaced by a marker, and cancel and failed rows are scrubbed too. Retry on a scrubbed row is refused and points to Resend (F158).
+- **The email is as promised.** I read it: platform-origin link only, greeting by first name, no sender free text, the invited address never in the body, names escaped and capped.
+- **Delivery state is honest.** Bounce outranks delivery. The label "Bounced. Check the address" is exactly what Phase 1 asked for.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said (C1): every designation is pending until the email owner accepts. Shipped: yes, including existing accounts. **Matches.**
+- Phase 1 said (C2, Flow 6, G13): an org-level "Invite to sign in" action and "No login yet" markers, so grants to people with no login stop being silently inert. Shipped: not in this pipeline. Phase 1's own batch order made it Increment 2, and R10 requires a Phase 2 addendum first. **Acceptable drift, but it changes what "done" means.** See Follow-Up 1.
+- Phase 1 said (Flow 4, G4): the token rides `callbackUrl`. Shipped: a host-only `Path=/` httpOnly cookie, `__Host-invite_token` in production. This follows R6 and addendum 2. **Acceptable drift, better than my design.**
+- Phase 1 said (Flow 3): sign-in, then 2FA enrolment if required, then `/launch`. Shipped: the same, but a new invitee passes through F166.
+  - The recovery codes appear, then vanish within about a second.
+  - The "Continue" link and `callbackUrl` are lost.
+  - The account answers one more `/totp` challenge before landing.
+  - This bug is pre-existing and outside the pipeline. This feature routes every new invitee through it. **Acceptable drift with a high-priority follow-up.**
+- Phase 1 said (G5, Q6): scrub the link after send, with TODOs for the other templates. Shipped: invitation key only, plus the cancel and failed paths. **Matches.**
+- Phase 1 said (G18, Q9): address redaction 90 days after the invitation ends. Shipped: the columns and comments exist, but the sweep does not. The migration comment states "not enforced". **Matches the ruling** (S6). The release note must not claim it.
+- Phase 1 said (C4, G11, Q8): ship a Google claim function and contract. Shipped: nothing is wired. R3 removed the claim from `signIn` and `jwt`, so Increment 3 is now "configure Google, add `email_verified` hardening, add a Flow 4 e2e". **Acceptable drift by ruling.**
+- Phase 1 said (G7): durable limits plus an IP layer. Shipped: 20/10/3 per 24 h, 5-minute cooldown, 5 resends per chain, and an IP limiter on accept. A resend counts as a send. **Matches.**
+- Phase 1 said (G8, G9, G17, G19): the local-login-off and TOTP-unconfigured checks, the 2FA-verified session, the 72-byte password limit, and the `do_not_contact` warning. Shipped: all present and tested. **Matches.**
+- Phase 1 said (G14): audit events. Shipped: all six keys plus the designated rows with `viaInvitationId`. They are ids only, proven one test per outcome. QA scanned 73 live rows. **Matches.**
+- Phase 1 said (R9 reversal): the platform role confers nothing. Shipped: acceptance goes through the same token, email match, confirm click and, for existing accounts, a verified session. **Matches the operator's ruling.**
+- Phase 1 said (adversarial pass): redirect targets, state-machine shortcuts, cross-tenant exposure. Shipped: confirmed.
+  - The only redirects are the static `/invite` and the slug read from the function's row.
+  - `previewInvitation` takes only the session id (scan-enforced).
+  - Presby_app holds no table privilege; QA confirmed it against the catalog.
+  - The sign-in-to-accept hand-off cannot reach another invitation's org.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state: pass.** An org with no invitations shows the form. The failed-list read shows an alert, not an empty list. The `/no-organization` page gains the "If you were invited, open the link in your invitation email." sentence (S7).
+- **Failure microcopy: pass, with one nit.**
+  - Good: "Email delivery is delayed; we'll keep trying", "We can't finish setting up your account right now. Your link is still good.", and one literal for every rate limit.
+  - Nit: a failed Resend or Revoke renders under the shared "Not sent." prefix in `invitation-sent-notice.tsx`. That reads wrong for a revoke.
+- **Permission gate: pass.** The five admin actions, the org page and `retryEmailAction` check `auth()` then the key. The accept path is token-gated by design. QA read every body.
+- **Audit event: pass.**
+- **Mobile (360 px): pass.** The ux-developer browser pass found no overflow and 44 px controls. The admin e2e has a 360 px case. QA's pre-hydration probe at 360 px showed the new accept form is inert until hydrated. I did not re-browse.
+- **Untested path, not a failure:**
+  - The e2e covers an existing account that is not 2FA-required (Case A) and one that is enrolled (Case B).
+  - It does not cover an existing account that is 2FA-required but not yet enrolled. That is likely the shape of the hand-made `the operator's own test account` account in checklist step 10.
+  - The design says it works: the "verify" state, then `/totp`, then `/account/2fa`. After enrolment F166 drops the `callbackUrl`, so the invitee must reopen the email link. The 30-minute cookie also helps.
+  - This should be walked once manually and then get its own spec.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES: each becomes a `docs/TODO.md` line in the integration commit)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+1. `- [ ] **Invitations Increment 2: org-level "Invite to sign in" + "No login yet" markers (C2/G13/Flow 6).** Edit, do not close, the existing backlog line "Invitation flow for a person with no account (founding-administrator Flow 2 / G4)": Increment 1 closed only its platform-designation half. Until this ships, the second person a founding administrator creates through Staff has no login. Needs the R10 Phase 2 addendum first: tenant write path under withOrgContext, column-limited SELECT excluding token_hash, F155 (no cross-org signal to the sender), Q5 subset-rule feasibility. Priority: before the first customer onboards its own staff. — 2026-10-21-invitations Phase 6`
+2. `- [ ] **F166 bug-fix pipeline: /account/2fa first enrolment loses the recovery codes and callbackUrl** (revalidatePath replaces the client panel; the fresh-codes cookie is read only on the next load). Every new invitee hits it and answers one extra /totp challenge. Fix before the first non-operator invitee is onboarded. — 2026-10-21-invitations Batch 4`
+3. `- [ ] **e2e: existing account that is 2FA-required but not enrolled accepts an invitation (verify state, /totp, /account/2fa, reopen link, Accept).** Not covered by Cases A/B; the stopgap production account is probably this shape. Walk it manually at checklist step 10, then write the spec. — Phase 6`
+4. `- [ ] **Invitations Increment 3: Google.** Configure Google, add email_verified === true to evaluateSignIn(), add a Flow 4 e2e through Google. No claim in signIn/jwt (R3, DECISION-187). — Phase 2/6`
+5. `- [ ] **F154: scrub credential bodies for password_reset, email_change_verify and statistics_submission_grant.** Add the keys to src/lib/email/credential-keys.ts; one edit also makes Retry refuse them. — Phase 2/4`
+6. `- [ ] **S6: owner-only sweep on the maintenance cron that nulls account_invitations.email_normalized 90 days after an invitation ends (redacted_at).** Not built. The release note and any user-facing text must not claim redaction. — Phase 2/3`
+7. `- [ ] **D-6: the hand-off cookie is not cleared on a dead link; with Path=/ it now travels on every platform request for up to 30 minutes.** Inert (httpOnly, dead token). — addendum 2`
+8. `- [ ] **Founding-administrator holder-count asymmetry:** the FA count's group arm has no date window and no membership join, while the giving count is membership-aware (lifted verbatim in 0059; pinned by a DB test). Needs a ruling. — Batch 1 deviation 6`
+9. `- [ ] **requestEmailChange says "That email is already in use" to any signed-in user** (existing enumeration leak, noted in Phase 1). — Phase 1`
+10. `- [ ] **Possible lower(users.email) index** if users grows (needs a schema.ts change, not a hand migration); the new-account existence check is a sequential scan. — Batch 1`
+11. `- [ ] **Fixture teardown weakness: domains-svc and ingest-apply fixtures leave people and orgs behind when a connection drops** (fixture-deletable.test.ts reports 78 people and 101 orgs past their window on the pipeline branch). Run fixture-deletable on development after the merge. — QA Note 1`
+12. `- [ ] **Copy nit: a failed Resend or Revoke shows under "Not sent."** (invitation-sent-notice.tsx); use a neutral prefix. — Phase 6`
 
-## Red Flags (if NEEDS REWORK)
+**Integration items owed (orchestrator; recorded for continuity, not new TODO lines):**
 
-- [Specific. What has to change before this ships.]
+- Convert `account_invitation` to `renderEmail` after polish merges. The accept URL must stay an unchanged substring in the href, the printed link and the text, and the scrub must `replaceAll` across the escaped and raw forms.
+- `scripts/test-rls.sql`: the Alder Creek count of 10 vs 9.
+- Apply 0059 to production by hand, with a snapshot first, before the merge deploys.
+- Reconcile the runbook. Phase 3's integration text says apply "without `psql -1`", but Batch 1 and QA ruled that 0059 has no inner transaction and must be applied with `-1`. Write `docs/deployment.md` the Batch 1 way.
+- DECISION-183 text: replace "an inviter may not accept their own invitation" with the operator's self-designation sentence.
+- DECISION-184 should name `resent_from_id`, the D-1 and D-2 indexes, and the `BEFORE INSERT` born-open and chain guard.
+- DECISION-185: the `Path=/` and `__Host-` cookie amendment.
+- DECISION-188: the outcome contract and the F167 session refresh.
+- Findings F153–F159, F166, F167, and F168 (the server-action-redirect and hand-off-cookie finding).
+- CLAUDE.md: the credential-as-third-mechanism sentence, `(invite)` added to the un-brandable list, and the operator's Two Hierarchies sentence. Also the `.claude/agents/architect.md` route-group bullet.
+- Rule 15: `docs/architecture.md:100` genuinely changes. The first administrator becomes "a platform-issued credential the designee accepts, applied by a SECURITY DEFINER function", and the module path moves.
+- Rule 14: the functionality map.
+- Rule 12: no feedback row. This originated in the operator's production test, not in-app feedback.
+- Rule 13: no what's-new entry. This is operator tooling plus a pre-membership onboarding page.
+- Release note must not claim 90-day redaction, Google sign-in, or that the other email templates are scrubbed. It may state the link is at rest while a row is `queued`.
+- QA's nits (observer e2e test-name suffixes, the fixed-string `console.error` lines) are not worth tracking.
+
+## Operator checklist: confirmed, with corrections
+
+The 11 steps are the right manual production test. They need a prerequisites block and the following corrections.
+
+**Step 0 (add): prerequisites and cautions**
+
+- **Migration:** 0059 is applied to production before the deploy.
+- **Env, each missing item changes what a step can show:**
+  - `NEXT_PUBLIC_APP_URL` must be the production https origin. Without it, sends refuse with `link_origin_unavailable`.
+  - `AUTH_TOTP_ENCRYPTION_KEY` must be set. Without it, sends are refused as "totp unavailable".
+  - `RESEND_WEBHOOK_SECRET` must be set. Without it, rows stay "Sent" forever, so steps 2 and 8 cannot show "Delivered" or "Bounced".
+  - `auth.local_login` must be on. Otherwise `/invite` offers no password form.
+- **Use a congregation made for testing.** Acceptance creates permanent records: a person, a membership, role grants, and audit rows. People and organizations cannot be deleted. A founding administrator or treasurer accepted on a real congregation also blocks a later real designation (`has_holders`) until removed through role tools.
+- **Per-address limit:** three invitations per recipient address per 24 hours, across all orgs. Resends count and revokes do not refund. Ten per org and 20 per inviter per 24 h. Testing steps 2, 5, 8 and 10 against one inbox will hit "Too many invitations right now." Use plus-addresses or separate inboxes.
+- **Mailbox for steps 2 and 5:** the address must have no account. Use `+tag` variants; they are distinct addresses.
+
+**Step-by-step**
+
+1. **Confirmed.**
+   - Also confirm the treasurer form appears only on a congregation or new worshiping community.
+   - An org that already has a holder shows the lockout-recovery sentence.
+2. **Confirmed, reword.**
+   - The page does not auto-refresh. Reload to see Sent move to Delivered, and only with the webhook secret.
+   - The treasurer sentence says "access", not "role".
+3. **Confirmed, with specifics.**
+   - Sender is the platform domain.
+   - Subject is "You're invited to PresbyPortal for <congregation>".
+   - Greeting is "Hello <first name>,".
+   - The link is `<production origin>/invite?token=…`, never a church host.
+   - After the polish PR merges, also confirm the styled button and the printed link both work.
+4. **Confirmed.** Use a private window; a same-browser operator session changes the page. The masked address looks like `r***@domain`, and the names are prefilled.
+5. **Confirmed with two corrections.**
+   - **Sequence.** "Sign in → 2FA enrolment → land" is really:
+     - `/totp` leads to `/account/2fa` enrolment.
+     - **Copy the recovery codes the moment they show.** F166 can remove the panel within about a second. If it vanishes, reload `/account/2fa` within five minutes.
+     - The "Continue" link is gone.
+     - The account answers one more `/totp` code, then lands in `/o/<slug>`.
+   - **Audit rows.** The expected rows are `invitation.created`, `invitation.accepted`, `user.created_via_invitation` and the designated row. "IDs only" means the metadata: no token, hash, password or address.
+     - The new-user rows have a blank actor email.
+     - Existing-account rows show the actor's own address in the actor column.
+6. **Confirmed.** Reload and re-open both land on the same dead-link page as a made-up token.
+7. **Confirmed with additions.**
+   - The operator account must be 2FA-enrolled.
+   - Flow: "Sign in to accept" → credentials → real `/totp` code → back at `/invite` ("Accepting as <name> at <congregation>") → Accept → `/o/<slug>`.
+   - If no person is on file at that congregation with that email, acceptance creates one from the invitation's names. That is a permanent record.
+   - Expect `inviterIsInvitee: true` on both audit rows, and "Self-designated" on the org page.
+   - The second half (signed in as a different account) is correct: masked address and a sign-out button.
+8. **Confirmed with limits.**
+   - Resend inside five minutes shows the one rate-limit literal, "Too many invitations right now. Try again later."
+   - After a resend, the old link is dead and the new one works.
+   - Revoke kills the link and brings the form back.
+   - For bounce, use Resend's simulator address. It needs the webhook secret.
+   - A resend and the replacement invitation both count toward the per-address limit.
+9. **Confirmed, with one part not testable.**
+   - A roster person with an on-file email and active membership is required (F159).
+   - The "nobody enrolled" message is correct.
+   - `/admin/email-queue` shows the row with the body replaced by "[Removed after delivery: this message contained a one-time sign-in link.]".
+   - A `failed` credential row cannot be produced on demand. Skip the "Retry points to Resend" half; unit and e2e tests cover it.
+10. **Confirmed, with two corrections.**
+    - The stopgap account `the operator's own test account` is the treasurer-test account, so this is a treasurer invitation. The congregation needs a roster person with that email on file, or the send refuses.
+    - Run it twice if possible, once with 2FA enrolled and once not. The unenrolled case is the untested path in Follow-Up 3. It works through the "verify" state and `/account/2fa`, but F166 drops the `callbackUrl`. If you land elsewhere, re-open the email link. The 30-minute cookie carries the token.
+    - Also confirm: "Create your account" answers "An account already exists… sign in to accept". After accept, the treasurer lands at `/account/2fa?callbackUrl=/o/<slug>` if not yet enrolled (F167).
+11. **Confirmed.** Repeat 4, 5 and 7 on a phone at 360 px. A form entered before hydration is refused.
+
+**Add**
+
+- **Step 12, revoke all.** On an org with a pending founding-administrator and treasurer invitation, use "Revoke all open invitations". Both links die and the form returns.
+- **Step 13, `/no-organization`.** Signed in with no congregation, confirm the page now says "If you were invited, open the link in your invitation email."
+
+## Per-Phase Status
+
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-21 |
+
+## Handoff
+
+**Next: the orchestrator.**
+
+1. Integrate after the review-polish merge, through `/merge-pr`, applying the integration items above.
+2. Apply the twelve follow-ups to `docs/TODO.md` in the same commit (Rule 10).
+3. Split the old backlog line rather than closing it.
+4. Update the operator's checklist artifact with the prerequisites block and corrections above.
+
+Start the F166 bug-fix pipeline (tech-lead, brief Phase 3) after both merges. Increment 2 is a separate Feature pipeline and needs the architect's R10 addendum before its Phase 3.
+
+**Files referenced:**
+- `/Users/cshenso/git/presby-platform/presby-invites/docs/work-log/2026-10-21-invitations.md`
+- `/Users/cshenso/git/presby-platform/presby-invites/src/lib/onboarding/invitation-email.ts`
+- `/Users/cshenso/git/presby-platform/presby-invites/src/lib/onboarding/labels.ts`
+- `/Users/cshenso/git/presby-platform/presby-invites/src/lib/onboarding/status.ts`
+- `/Users/cshenso/git/presby-platform/presby-invites/src/app/(invite)/invite/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-invites/src/app/(admin)/admin/organizations/[id]/invitation-sent-notice.tsx`
+- `/Users/cshenso/git/presby-platform/presby-invites/src/app/api/webhooks/resend/route.ts`

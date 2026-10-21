@@ -3,7 +3,7 @@
  * Tests for <FoundingAdministratorSection> —
  * docs/work-log/2026-09-28-founding-administrator.md Phase 4 Batch C.
  * `./actions` is mocked (a "use server" module whose real implementation
- * pulls `@/lib/founding-administrator` -> `@/lib/db` into the module
+ * pulls `@/lib/onboarding/founding-administrator` -> `@/lib/db` into the module
  * graph — same reasoning `profile-form.test.tsx`'s own header gives).
  *
  * Pins:

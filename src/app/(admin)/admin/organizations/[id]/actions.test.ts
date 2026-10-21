@@ -93,24 +93,24 @@ vi.mock("@/lib/sites", () => ({
     mockReplaceOrganizationServiceTimes(...args),
 }));
 
-// @/lib/founding-administrator — mocked wholesale, same principle as
+// @/lib/onboarding/founding-administrator — mocked wholesale, same principle as
 // @/lib/sites above: SQL/trigger correctness (the full result-variant
 // matrix) is proven by founding-administrator.test.ts against a real
 // Postgres connection. This file proves only designateFoundingAdministratorAction's
 // own layer — auth/feature gate, zod validation, the result -> copy switch,
 // and that recordAudit()/revalidatePath() fire exactly once, only on `ok`.
 const mockDesignateFoundingAdministrator = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/founding-administrator", () => ({
+vi.mock("@/lib/onboarding/founding-administrator", () => ({
   designateFoundingAdministrator: (...args: unknown[]) =>
     mockDesignateFoundingAdministrator(...args),
 }));
 
-// @/lib/treasurer-designation — mocked wholesale for the same reason (online
+// @/lib/onboarding/treasurer-designation — mocked wholesale for the same reason (online
 // giving, R2): the full result-variant matrix is proven against a real Postgres
-// by src/lib/treasurer-designation.test.ts; this file proves only
+// by src/lib/onboarding/treasurer-designation.test.ts; this file proves only
 // designateTreasurerAction's own layer.
 const mockDesignateTreasurer = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/treasurer-designation", () => ({
+vi.mock("@/lib/onboarding/treasurer-designation", () => ({
   designateTreasurer: (...args: unknown[]) => mockDesignateTreasurer(...args),
 }));
 

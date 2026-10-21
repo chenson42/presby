@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/treasurer-designation.ts — docs/work-log/
+ * Tests for src/lib/onboarding/treasurer-designation.ts — docs/work-log/
  * 2026-10-15-online-giving.md, Phase 2 R2 / Phase 3 "Designation".
  *
  * Two independent suites:
@@ -16,7 +16,7 @@
  *      following `founding-administrator.test.ts`'s harness: dynamic imports
  *      in `beforeAll`, self-contained throwaway orgs via
  *      `createGivingFixture()`, torn down in `afterAll`. Run for real with:
- *        npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/treasurer-designation.test.ts
+ *        npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/onboarding/treasurer-designation.test.ts
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -32,7 +32,7 @@ vi.mock("@/lib/audit", () => ({
   recordAudit: vi.fn(),
 }));
 
-const ROOT = path.resolve(__dirname, "../..");
+const ROOT = path.resolve(__dirname, "../../..");
 
 // ---------------------------------------------------------------------------
 // 1. The DECISION-155 import boundary (no database)
@@ -40,7 +40,7 @@ const ROOT = path.resolve(__dirname, "../..");
 
 describe("treasurer designation — the DECISION-155 import boundary", () => {
   const SOURCE = readFileSync(
-    path.join(ROOT, "src/lib/treasurer-designation.ts"),
+    path.join(ROOT, "src/lib/onboarding/treasurer-designation.ts"),
     "utf8",
   );
   // Strip comments so the header's prose naming the files is not an import.
@@ -79,7 +79,7 @@ describe.skipIf(!hasDb)(
     let designateTreasurer: typeof import("./treasurer-designation").designateTreasurer;
     let countGivingManageHolders: typeof import("./treasurer-designation").countGivingManageHolders;
     let TREASURER_DESIGNATION_ORG_TYPES: typeof import("./treasurer-designation").TREASURER_DESIGNATION_ORG_TYPES;
-    let ORG_FEATURE_CATALOG: typeof import("./org-features").ORG_FEATURE_CATALOG;
+    let ORG_FEATURE_CATALOG: typeof import("../org-features").ORG_FEATURE_CATALOG;
     let withOrgContext: typeof import("@/lib/authz").withOrgContext;
     let appRoles: typeof import("@/lib/db/domain/authz").appRoles;
     let appRolePermissions: typeof import("@/lib/db/domain/authz").appRolePermissions;
@@ -99,7 +99,7 @@ describe.skipIf(!hasDb)(
     beforeAll(async () => {
       ({ designateTreasurer, countGivingManageHolders, TREASURER_DESIGNATION_ORG_TYPES } =
         await import("./treasurer-designation"));
-      ({ ORG_FEATURE_CATALOG } = await import("./org-features"));
+      ({ ORG_FEATURE_CATALOG } = await import("../org-features"));
       ({ withOrgContext } = await import("@/lib/authz"));
       ({ appRoles, appRolePermissions, roleGrants } = await import(
         "@/lib/db/domain/authz"

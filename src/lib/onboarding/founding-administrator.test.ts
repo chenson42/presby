@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/founding-administrator.ts — docs/work-log/
+ * Tests for src/lib/onboarding/founding-administrator.ts — docs/work-log/
  * 2026-09-28-founding-administrator.md, DECISION-155.
  *
  * Two independent suites in this file:
@@ -28,7 +28,7 @@
  * `npm test` in CI does not set DATABASE_URL, so suite 2 (including its own
  * pure-function sub-suites) is SKIPPED there, not failed. Run it for real
  * with:
- *   dotenv -e .env.local -- vitest run src/lib/founding-administrator.test.ts --no-file-parallelism
+ *   dotenv -e .env.local -- vitest run src/lib/onboarding/founding-administrator.test.ts --no-file-parallelism
  *
  * F110/F112 — `people_user_id_unique_idx` DOES NOT EXIST on this branch
  * (Batch A's headline finding: the index collides with a committed

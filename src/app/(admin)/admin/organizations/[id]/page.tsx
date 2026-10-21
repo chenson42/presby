@@ -21,11 +21,11 @@ import {
 import {
   countFoundingAdministratorHolders,
   foundingAdministratorPlan,
-} from "@/lib/founding-administrator";
+} from "@/lib/onboarding/founding-administrator";
 import {
   countGivingManageHolders,
   treasurerDesignationApplies,
-} from "@/lib/treasurer-designation";
+} from "@/lib/onboarding/treasurer-designation";
 import { listIngestHealth, type IngestHealthRow } from "@/lib/admin/giving-ingest-health";
 import { getOrganizationAffiliationAdminDetail } from "@/lib/org-provisioning";
 import { readOrgDomainsForPlatform } from "@/lib/domains/platform-read";
@@ -41,7 +41,7 @@ import { AffiliationSection } from "./affiliation-section";
 import { DomainsSection } from "./domains-section";
 
 // officeTemplateKey -> display name. Not exported by
-// `@/lib/founding-administrator` — that module returns the key only
+// `@/lib/onboarding/founding-administrator` — that module returns the key only
 // (work-log Phase 4 Batch B's "Contract Batch C consumes"); the human name
 // is this page's own display concern.
 const OFFICE_TEMPLATE_DISPLAY_NAMES: Record<string, string> = {

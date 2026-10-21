@@ -26,8 +26,8 @@ import {
   setOrganizationProfile,
   replaceOrganizationServiceTimes,
 } from "@/lib/sites";
-import { designateFoundingAdministrator } from "@/lib/founding-administrator";
-import { designateTreasurer } from "@/lib/treasurer-designation";
+import { designateFoundingAdministrator } from "@/lib/onboarding/founding-administrator";
+import { designateTreasurer } from "@/lib/onboarding/treasurer-designation";
 import { slugSitePath } from "@/lib/site-urls";
 
 /**
@@ -682,7 +682,7 @@ export async function setOrganizationServiceTimesAction(
 // setOrganizationBrandAction/setOrganizationProfileAction above: auth() ->
 // hasFeature(ADMIN_ORGANIZATIONS) -> field validation -> the lib function
 // (getPlatformDb() throughout, never withOrgContext() — see this file's own
-// header and src/lib/founding-administrator.ts's) -> recordAudit() only on
+// header and src/lib/onboarding/founding-administrator.ts's) -> recordAudit() only on
 // success (a refusal mutates nothing) -> revalidatePath.
 // ---------------------------------------------------------------------------
 

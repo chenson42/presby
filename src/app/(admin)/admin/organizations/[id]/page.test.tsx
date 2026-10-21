@@ -59,7 +59,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 const mockCountHolders = vi.hoisted(() => vi.fn());
 const mockPlan = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/founding-administrator", () => ({
+vi.mock("@/lib/onboarding/founding-administrator", () => ({
   countFoundingAdministratorHolders: (...args: unknown[]) => mockCountHolders(...args),
   foundingAdministratorPlan: (...args: unknown[]) => mockPlan(...args),
 }));
@@ -73,7 +73,7 @@ vi.mock("./founding-administrator-section", () => ({
 }));
 
 const mockCountGiving = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/treasurer-designation", () => ({
+vi.mock("@/lib/onboarding/treasurer-designation", () => ({
   countGivingManageHolders: (...args: unknown[]) => mockCountGiving(...args),
   // The real predicate is a one-line allow-list; restated here so the page's
   // branching is exercised, not the mock's.

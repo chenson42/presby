@@ -25,7 +25,7 @@ import {
  * Human-friendly labels for the administration half of the founding-
  * administrator bundle (`foundingAdministratorPlan()`'s `permissionKeys`,
  * work-log Phase 2 Ruling 3). Kept here, not imported from
- * `@/lib/founding-administrator` — that module transitively imports
+ * `@/lib/onboarding/founding-administrator` — that module transitively imports
  * `@/lib/db`, whose module-scope pool construction throws without
  * `DATABASE_URL` (Batch B's own discovery, restated in its header comment);
  * a client component must not pull that module into the browser bundle.

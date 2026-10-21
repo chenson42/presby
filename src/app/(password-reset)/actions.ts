@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { users, passwordResetTokens } from "@/lib/db/schema";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { enqueueEmail } from "@/lib/email";
+import { buildPasswordResetEmail } from "@/lib/email/account-messages";
 import { getRequestIp } from "@/lib/request-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { verifyTurnstile } from "@/lib/turnstile";
@@ -95,15 +96,7 @@ export async function requestPasswordReset(input: {
   const resetUrl = `${baseUrl}/reset-password?token=${rawToken}`;
   await enqueueEmail({
     to: userRow.email,
-    subject: "Reset your password",
-    html: `
-      <p>Hi,</p>
-      <p>Someone requested a password reset for your account.</p>
-      <p>Click the link below to set a new password. This link expires in 60 minutes.</p>
-      <p><a href="${resetUrl}">${resetUrl}</a></p>
-      <p>If you did not request this, you can safely ignore this email.</p>
-    `,
-    text: `Click the link below to reset your password. This link expires in 60 minutes.\n\n${resetUrl}\n\nIf you did not request this, ignore this email.`,
+    message: buildPasswordResetEmail({ resetUrl }),
     templateKey: "password_reset",
   });
 

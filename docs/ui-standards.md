@@ -116,7 +116,7 @@ only.
 
 **Category colours (event types).** A fourth family of platform tokens: `--category-<key>` (the tint) and `--category-<key>-foreground` (the ink) for nine closed keys — rose, orange, amber, lime, teal, sky, violet, fuchsia, and neutral (reserved for an organization's default event type). They are `platform` with a `categorical` marker in `TOKEN_POLICY`, so no organization's brand can re-declare them, and `CATEGORY_PAIRS` in `src/lib/brand/contract.ts` proves, in both colour schemes, ink on tint at 7:1 and ink on `--background` and `--card` at 3:1. Use them through the static map in `src/lib/events/type-palette.ts` (`bg-category-teal text-category-teal-foreground border-l-category-teal-foreground`) — never build the class name from the key, because Tailwind only finds literal strings. A category colour never carries meaning alone: pair it with an icon and a visible or screen-reader name, and a 4px ink rule so it survives a black-and-white print. They are **not** the status colours; `--success`, `--warning` and `--info` remain reserved and the status-chip gap stays open.
 
-**Never write a Tailwind palette literal** — `bg-blue-600`, `text-amber-700`, `border-green-500`, `dark:text-red-300`, and so on. If you need a color that isn't one of the tokens above, that's a missing token and a design decision, not a class string to reach for. Raise it — status chips (success/warning/info) are the known gap here (tracked in `docs/TODO.md`); everything else routes through the tokens.
+**Never write a Tailwind palette literal** — `bg-blue-600`, `text-amber-700`, `border-green-500`, `dark:text-red-300`, and so on. If you need a color that isn't one of the tokens above, that's a missing token and a design decision, not a class string to reach for. Raise it — status chips (success/warning/info) are the known gap here (tracked in `docs/TODO.md`); everything else routes through the tokens. Sole exemption: the Google sign-in button's published colours, confined to `src/app/(auth)/signin/google-sign-in-button.tsx` (DECISION-190).
 
 ---
 
@@ -403,6 +403,8 @@ return (
 ```
 
 Wrap the `<form>` element from the outside (or, for a flow with no `<form>` tag such as `member-wizard`, its root element). Never add a `<legend>` to the gate, and never put opacity on it. A checkbox or radio registered under the gate must have a defined default and must not use `defaultChecked`. `npm run check:hydration-gate` fails any file that calls `useForm` without importing and rendering it; a deliberately client-only form carries `// hydration-gate-ok: <reason>` on or above the call. A new pre-hydration behaviour is tested by holding the page's JavaScript with `page.route` (see `docs/testing.md`), never by racing a throttle.
+
+**One-time code entry (DECISION-192/193).** A short numeric code (the TOTP challenge on `/totp`, enrolment on `/account/2fa`) is taken with `OneTimeCodeInput` (`src/components/shared/one-time-code-input.tsx`): one 44px-or-wider box per digit, one hidden `<input name>` carrying the joined value, `inputMode="numeric"` and `autoComplete="one-time-code"` on box 1, no `maxLength` so an autofill or paste that delivers several characters can be spread across the boxes. Backspace and Delete both erase backward across boxes; arrows, Home and End move; nothing auto-submits (a typo would spend a rate-limited attempt), `onComplete` lets the caller move focus to its own Verify button. `autoFocus` is off by default and, when on, focuses box 1 in an effect after hydration, never through the HTML attribute. **Every consumer renders `<HydrationGate>`** even though it is not a `useForm` form: a Verify pressed before hydration posts an empty code. `npm run check:hydration-gate` enforces it as rule H3. Never use the shadcn `InputOTP` primitive (it needs the `input-otp` package).
 
 **Submit button state:**
 - Show a loading indicator during `pending`. Use ellipsis ("Saving…") or a spinner — not the bare button text.
@@ -697,7 +699,7 @@ QA runs this in Phase 5 for any change that touches UI. A single unchecked box b
 - [ ] Touch targets ≥44×44px for primary interactive elements
 - [ ] Contrast ratios meet the AAA floor (7:1) for body text and 3:1 for non-text/control borders — not just AA
 - [ ] Type-scale roles used for text sizing (`text-2xl` because it's `title`, not because it looked right) — no raw or arbitrary sizes
-- [ ] No hard-coded Tailwind palette literals (`bg-blue-600`, `text-amber-700`, `dark:text-red-300`) — tokens only
+- [ ] No hard-coded Tailwind palette literals (`bg-blue-600`, `text-amber-700`, `dark:text-red-300`) — tokens only (sole exemption: the Google sign-in button's published colours, confined to `google-sign-in-button.tsx`, DECISION-190)
 - [ ] Semantic HTML: `<h1>` on every page, landmark roles (`<main>`, `<nav>`, `<section>`) where applicable
 - [ ] Action bar order: text-labeled buttons left of icon-only buttons
 - [ ] Back links use `?from=` when the page is reachable from multiple origins, with validation on the receiving end

@@ -28,6 +28,7 @@ import { generateSync } from "otplib";
 import type { Browser, BrowserContext } from "@playwright/test";
 import type { Sql } from "./db";
 import { E2E_TOTP_TEST_SECRET } from "./totp-fixture";
+import { enterTotpCode } from "./totp-page";
 import { E2E_USERS, storageStatePath } from "./users";
 
 /**
@@ -206,7 +207,7 @@ export async function verifiedContext(browser: Browser, callbackPath = "/home"):
   const context = await browser.newContext({ storageState: storageStatePath("mfa-enrolled") });
   const page = await context.newPage();
   await page.goto(`/totp?callbackUrl=${encodeURIComponent(callbackPath)}`);
-  await page.getByPlaceholder(/123456/).fill(generateSync({ secret: E2E_TOTP_TEST_SECRET }));
+  await enterTotpCode(page, generateSync({ secret: E2E_TOTP_TEST_SECRET }));
   await page.getByRole("button", { name: /^verify$/i }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/totp"), { timeout: 15_000 });
   await page.close();

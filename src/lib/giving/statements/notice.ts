@@ -1,4 +1,6 @@
-import { escapeHtml } from "@/lib/email/escape-html";
+// Directly from render.ts, never the "@/lib/email" barrel: the barrel pulls in the
+// server-only queue and this file is pure (Phase 2 R9).
+import { renderEmail, type RenderedEmail } from "@/lib/email/render";
 
 /**
  * The statement NOTICE email - docs/work-log/2026-10-15-online-giving.md, R12
@@ -8,13 +10,18 @@ import { escapeHtml } from "@/lib/email/escape-html";
  * indefinite retention, and it has no attachment column. A statement's
  * CONTENTS therefore never enter it: this email says only that a statement
  * exists and where to find it. NO AMOUNTS ANYWHERE, the subject included, and
- * no gift detail - the body has no digit but the tax year. `check:giving-
+ * no gift detail - the content has no digit but the tax year. `check:giving-
  * boundaries` rule B5 keeps this the one file that names the template key, and
  * keeps money tokens out of it.
  *
- * Pure: no database, no `server-only`. Every interpolated string is
- * HTML-escaped (`escapeHtml`), and the organization name is stripped of line
- * breaks before it reaches a subject header.
+ * The message is laid out by `renderEmail()` (DECISION-191, Phase 2 R13): its
+ * fixed chrome is built to contain no `$`, no decimal and no thousands-separated
+ * number, so `notice.test.ts` asserts the no-amounts rule on the FULL rendered
+ * subject, html and text, not on a fragment.
+ *
+ * Pure: no database, no `server-only`. `renderEmail()` escapes every string,
+ * and strips line breaks from the subject; the organization name is also
+ * flattened to one line here because it appears in the body.
  */
 
 export const STATEMENT_NOTICE_TEMPLATE = "giving.statement.notice";
@@ -30,9 +37,8 @@ export interface StatementNoticeInput {
 
 export interface StatementNotice {
   templateKey: string;
-  subject: string;
-  html: string;
-  text: string;
+  /** The laid-out message: pass it to `enqueueEmail({ message })`. */
+  message: RenderedEmail;
 }
 
 function oneLine(value: string): string {
@@ -48,16 +54,19 @@ export function buildStatementNotice(input: StatementNoticeInput): StatementNoti
   const intro = input.corrected
     ? `${org} has issued a corrected ${year} giving statement. It replaces the earlier one.`
     : `${org} has issued your ${year} giving statement.`;
-  const where = "Sign in to view and download it:";
   const privacy =
     "For your privacy this message does not list any gifts. If you don't have an account, or you didn't expect this message, please contact the church office.";
 
-  const text = [intro, "", where, input.link, "", privacy].join("\n");
-  const html = [
-    `<p>${escapeHtml(intro)}</p>`,
-    `<p>${escapeHtml(where)} <a href="${escapeHtml(input.link)}">${escapeHtml(input.link)}</a></p>`,
-    `<p>${escapeHtml(privacy)}</p>`,
-  ].join("\n");
+  const message = renderEmail({
+    subject,
+    heading: input.corrected ? "Your corrected giving statement is ready" : "Your giving statement is ready",
+    blocks: [
+      { kind: "p", text: intro },
+      { kind: "p", text: "Sign in to view and download it." },
+      { kind: "p", text: privacy },
+    ],
+    action: { label: "View my statement", href: input.link },
+  });
 
-  return { templateKey: STATEMENT_NOTICE_TEMPLATE, subject, html, text };
+  return { templateKey: STATEMENT_NOTICE_TEMPLATE, message };
 }

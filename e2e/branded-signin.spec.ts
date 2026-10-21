@@ -42,6 +42,7 @@ import { generateBrandTokens } from "@/lib/brand/generate";
 import { BRAND_SCOPE_SELECTOR } from "@/lib/brand/contract";
 import { E2E_USERS } from "./support/users";
 import { E2E_TOTP_TEST_SECRET } from "./support/totp-fixture";
+import { enterTotpCode } from "./support/totp-page";
 import { generateSync } from "otplib";
 
 type Sql = ReturnType<typeof neon<false, false>>;
@@ -226,6 +227,14 @@ test.describe.serial("Org-branded /signin", () => {
 
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 
+    // S1 (Phase 2): under a live brand the Google button is still Google's
+    // light fill, not the org's --primary. Proves the brand cascade cannot
+    // repaint it (DECISION-190) and that tailwind-merge replaced the
+    // primitive's own background.
+    const google = page.getByRole("button", { name: "Sign in with Google" });
+    await expect(google).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    expect((await google.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+
     // Alder Creek's own organization_settings.require_two_factor forces
     // elder.fixture through the 2FA gate at sign-in regardless of its own
     // two_factor_required column (public-sites.spec.ts's own documented
@@ -246,6 +255,20 @@ test.describe.serial("Org-branded /signin", () => {
     } finally {
       await setFlag(sql, "auth.require_2fa", originalRequire2faFlag);
     }
+  });
+
+  // Case 1b — S1, dark scheme: the same branded page, `.dark` on <html>
+  // (next-themes follows the emulated OS scheme), and the Google button is
+  // Google's dark fill, still unaffected by the brand.
+  test("1b. under a brand, in dark mode, the Google button is Google's dark fill", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto(`/signin?callbackUrl=${encodeURIComponent(`/o/${ALDER_CREEK_SLUG}/directory`)}`);
+    const google = page.getByRole("button", { name: "Sign in with Google" });
+    await expect(google).toBeVisible();
+    await expect(google).toHaveCSS("background-color", "rgb(19, 19, 20)");
+    await expect(google).toHaveCSS("color", "rgb(227, 227, 227)");
   });
 
   // -------------------------------------------------------------------
@@ -312,7 +335,7 @@ test.describe.serial("Org-branded /signin", () => {
     ).toBeVisible();
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
 
     // Same admin-role, no-organizations shape totp-full-login.spec.ts

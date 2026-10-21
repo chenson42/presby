@@ -22,6 +22,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { generateSync } from "otplib";
 import { E2E_USERS } from "./support/users";
 import { E2E_TOTP_TEST_SECRET } from "./support/totp-fixture";
+import { enterTotpCode } from "./support/totp-page";
 
 async function signInWithCallback(
   page: Page,
@@ -69,7 +70,7 @@ test.describe("2FA callback-bypass regression", () => {
     // The real code, entered on the /totp landing reached via the forced
     // re-navigation above, still completes sign-in normally.
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
     // Not a literal "Welcome" match — /admin's greeting band is time-of-day
@@ -123,7 +124,7 @@ test.describe("2FA callback-bypass regression", () => {
     );
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
     // Not a literal "Welcome" match — /admin's greeting band is time-of-day
@@ -179,7 +180,7 @@ test.describe("2FA callback-bypass regression", () => {
     // Complete a REAL TOTP code — the worst-case moment for this bypass,
     // per the security review: the victim has just proven their identity.
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
 
     // mfa-enrolled carries no organizations, so /launch's matrix lands it on
@@ -221,7 +222,7 @@ test.describe("2FA callback-bypass regression", () => {
     ).toBeVisible();
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
 
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
@@ -261,7 +262,7 @@ test.describe("2FA callback-bypass regression", () => {
     ).toBeVisible();
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
-    await page.getByPlaceholder(/123456/).fill(code);
+    await enterTotpCode(page, code);
     await page.getByRole("button", { name: /^verify$/i }).click();
 
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });

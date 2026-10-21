@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { HydrationGate } from "@/components/shared/hydration-gate";
+import { OneTimeCodeInput } from "@/components/shared/one-time-code-input";
 import { completeEnrollment } from "./actions";
 
 interface TotpEnrollFormProps {
@@ -122,26 +122,23 @@ export function TotpEnrollForm({
         a fresh one.
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-3">
-        <Label htmlFor="totp-enroll-code">
-          Enter the 6-digit code from your app
-        </Label>
-        <Input
-          id="totp-enroll-code"
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]{6}"
-          maxLength={6}
-          value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-          required
-          className="tracking-widest"
-          placeholder="123456"
-        />
-        <Button type="submit" disabled={pending}>
-          {pending ? "Verifying…" : "Confirm enrollment"}
-        </Button>
-      </form>
+      <HydrationGate>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-3">
+          {/* autoFocus stays off here: the box sits below the QR instructions, and
+              grabbing focus on a phone would scroll past them and put the keyboard
+              over the QR code (Phase 2 R2.2). */}
+          <OneTimeCodeInput
+            name="code"
+            label="Enter the 6-digit code from your app"
+            value={code}
+            onValueChange={setCode}
+            disabled={pending}
+          />
+          <Button type="submit" disabled={pending}>
+            {pending ? "Verifying…" : "Confirm enrollment"}
+          </Button>
+        </form>
+      </HydrationGate>
     </div>
   );
 }

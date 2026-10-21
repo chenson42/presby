@@ -418,7 +418,8 @@ npm run check:secrets # Tripwire: scans every git-tracked file (the repo is publ
                        # exemption), plus env-var-shaped secrets, off-allowlist email addresses,
                        # and phone/SSN-shaped numbers outside the 555 fake-number convention
                        # (soft findings — annotate a real false positive with `// leak-ok: <reason>`)
-npm run check:hydration-gate # Tripwire: every useForm root renders <HydrationGate> (DECISION-159);
+npm run check:hydration-gate # Tripwire: every useForm root renders <HydrationGate> (DECISION-159),
+                              # and so does every OneTimeCodeInput consumer (rule H3, DECISION-192);
                               # exemption `// hydration-gate-ok: <reason>`
 npm run check:giving-boundaries # Tripwire: the giving "appears nowhere else" properties (Stripe SDK
                        # imported by one file, no owner connection inside src/lib/giving, ...)

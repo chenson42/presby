@@ -4,6 +4,58 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-193 — Implementation rulings for the review-polish batches: six real code boxes, a closed email block vocabulary, direct `@/lib/email/render` imports, origin-built mail links, and an always-expanded organizations tree.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 3, tech-lead; confirmed as shipped in Phase 4)
+
+- **(a) Code entry.** `OneTimeCodeInput` is six real generated `<Input>` boxes plus one hidden `name`d input carrying the joined digits, not a single hidden input under presentational cells (DECISION-192 holds either way). Backspace and Delete both erase backward across boxes; paste and whole-code autofill spread across boxes; there is no auto-submit, and completing the code moves focus to Verify. On `/totp` the digit mode and the recovery mode mount mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one.
+- **(b) Layout vocabulary.** `renderEmail` takes a closed block vocabulary (`p`, `facts`, `list`, `quote`) plus one optional action and a footnote, escapes everything, and declares a single `color-scheme: light` while only one scheme ships.
+- **(c) Imports.** Message builders for the two `'use server'` account senders live in `src/lib/email/account-messages.ts`; every sender imports `@/lib/email/render` directly, never through the `@/lib/email` barrel that several tests stub.
+- **(d) Links.** Ticket and feedback mail links are built from `platformOrigin()` and the button is omitted when it is `null` (F165).
+- **(e) Organizations tree.** `/admin/organizations` is always expanded, reads `parent_id` only (never `path`), rows carry `data-depth`/`data-match`, and the 500-row cap is a display cap.
+
+**As shipped.** The email button and link (white on the platform blue, blue on white) measure 6.84:1, below the 7:1 the design asked for and above the platform's 4.5:1 floor; kept pending an operator ruling (`docs/TODO.md`). The statistics-grant expiry uses the existing `formatDateUTC` plus "(UTC)" rather than a second formatter.
+
+(2026-10-21, Phase 3, `docs/work-log/2026-10-21-review-polish.md`.)
+
+---
+
+**DECISION-192 — A form whose submitted value depends on hydration is gated even without `useForm`: every consumer of `src/components/shared/one-time-code-input.tsx` renders `<HydrationGate>`, enforced by rule H3 of `check:hydration-gate`.**
+
+**Status:** Resolved (amends DECISION-159) · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 2, architect)
+
+DECISION-159 gated every `useForm` root because react-hook-form overwrites pre-hydration input. The per-digit code input has the same exposure without `useForm`: before hydration the boxes are inert and the hidden `token` is empty, so a submit posts nothing, burns a rate-limit slot and writes `totp.verify_failed`. H3: a non-test `.tsx` file that imports `@/components/shared/one-time-code-input` must import and render `<HydrationGate>`, with the same mandatory-reason `// hydration-gate-ok: <reason>` exemption. The component focuses on mount only when asked (`autoFocus` defaults to off; `/totp` asks, `/account/2fa` does not), and only after hydration.
+
+**As shipped.** `/totp` and the `/account/2fa` enrolment form are both gated. `e2e/hydration/totp-challenge.spec.ts` asserts no `totp.verify_failed` row is written pre-hydration and passes in both lanes; removing the gate turns it red. A generic "every client form" rule is deliberately not part of this decision (`docs/TODO.md`).
+
+(2026-10-21, Phase 2, `docs/work-log/2026-10-21-review-polish.md`.)
+
+---
+
+**DECISION-191 — Every outbound email is a `RenderedEmail`, a branded `{ subject, html, text }` that only the pure `renderEmail()` in `src/lib/email/render.ts` can produce; `enqueueEmail` accepts nothing else.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 2, architect; built in Batch D)
+
+`renderEmail` escapes all content, validates the action `href` (absolute `http(s)` only, and the error never echoes the URL), collapses whitespace and CR/LF in the subject and caps it at 200 characters, generates the plain-text part from the structured content, prints the raw action URL beneath the button, and uses inline styles and a single annotated table helper (no `<style>`, no images, no scripts). A source scan bans casts to the brand outside `render.ts`. There is no automatic wrapping inside `enqueueEmail`, and no sender choice inside `renderEmail` (DECISION-182 stays keyed on `templateKey`). `render.ts` is pure: no `server-only`, no `process.env`, no database.
+
+**As shipped.** All 13 `enqueueEmail` call sites (12 template keys) convert in one batch; `sendPasswordResetEmail` is deleted; fallback sender strings read "PresbyPortal". This structurally closes F161 (unescaped `newEmail`) and F162 (HTML-escaped subjects) and fixes F165 (relative links in ticket and feedback mail). The giving statement notice still names no amounts. Gmail and Apple Mail dark-mode rendering is unverified (operator checklist). Any later sender, including the invitations pipeline's `account_invitation`, must build through `renderEmail`; anything else is a compile error.
+
+(2026-10-21, Phase 2, `docs/work-log/2026-10-21-review-polish.md`.)
+
+---
+
+**DECISION-190 — The Google sign-in button is the only exemption from the palette-literal ban.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 2, architect; built in Batch A)
+
+Google's published fill, stroke, text and "G" colours for the light and dark buttons live in one typed constant in `src/app/(auth)/signin/google-sign-in-button.tsx`. They are applied as element-scoped `--gsi-*` custom properties that are never declared in `globals.css` or `TOKEN_POLICY`, so no org brand can repaint them. The button renders the generated `<Button>` with no new primitive variant. `data-brand-neutral` stays for the platform focus ring. Google publishes no hover, pressed or disabled colours; those are Material state layers pre-composited to opaque hex. Google Sans is not loaded (a recorded departure). `docs/ui-standards.md` records the exemption.
+
+**As shipped.** Default and hover states are verified in a browser and by `e2e/branded-signin.spec.ts` in both schemes (including under a live org brand); pressed, disabled and keyboard-focus states are coded but not yet checked by eye (operator checklist).
+
+(2026-10-21, Phase 2, `docs/work-log/2026-10-21-review-polish.md`.)
+
+---
+
 **DECISION-182 — Outbound mail goes through a closed sender registry: `account` | `org` | `org_fallback_only` (credential-bearing org mail); an unknown template key is `account`, and a guard test fails any `templateKey` not in the registry.**
 
 **Status:** Accepted design, **not built** (Increment 2, Batches 2a to 2c) · **Date:** 2026-10-19 · **Feature:** `2026-10-19-custom-domains` (Phase 2 draft, Phase 3 refinement). Recorded now so the numbering and the constraints are fixed before the schema work starts; Increment 1 ships none of it, and the `org_portal.mail_domain` toggle is inert.

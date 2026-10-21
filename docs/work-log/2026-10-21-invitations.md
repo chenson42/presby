@@ -2,8 +2,8 @@
 
 > **Slug:** `2026-10-21-invitations`
 > **Surface:** mixed — invitation acceptance (auth-adjacent, platform chrome); platform admin designations; org admin staff/roles
-> **Permission(s):** TBD in Phase 1 (existing designation/grant permissions likely cover sending; acceptance is token-gated)
-> **Flag(s):** no new platform flag (operator rule); per-org gating only if Phase 1 finds a need
+> **Permission(s):** none new — existing `admin.organizations` covers sending, resending, revoking; acceptance is token-gated (DECISION-147/183)
+> **Flag(s):** none — no new platform flag (operator rule), no per-org toggle needed (Phase 3)
 > **Estimated complexity:** medium-to-large (auth-touching)
 > **Pipeline mode:** Full
 
@@ -27,8 +27,9 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-21 |
-| 3 — Technical design | tech-lead | In progress | — | 2026-10-21 |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 2 — Architectural review (addendum on Phase 3 divergences) | architect | Complete | Approved with suggestions | 2026-10-21 |
+| 3 — Technical design | tech-lead | Complete | Design complete (Increment 1); implementers named | 2026-10-21 |
+| 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → api-developer + ux-developer (B4) | In progress: Batch 0 complete (uncommitted); B1 next | — | 2026-10-21 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -295,75 +296,398 @@ All auth-touching: the Phase 4/5 MFA e2e gate applies to every increment changin
 
 ---
 
+## Phase 2 addendum: rulings on Phase 3 divergences (architect, 2026-10-21)
+
+*Recorded by the orchestrator. The architect is read-only and returned this section as text. It sits here so that Phase 2's rulings stay together; it was written after Phase 3.*
+
+*Read-only. I read Phase 2 (R1–R10, S1–S9), the operator's R9 reversal and Phase 3 in full. Spot-checked the live tree in `presby-invites`: `users_email_unique` is a plain case-sensitive `UNIQUE("email")` (`drizzle/0000_initial.sql:113`). The guard triggers the accept function has to map raise generic SQLSTATEs (`foreign_key_violation`, `insufficient_privilege`), so the mapping cannot rely on the code alone.*
+
+### Rulings on D-1 to D-8
+
+- **D-1, `resent_from_id` + `resend_count` instead of `superseded_by_id`: Accepted with condition.** The reason holds. Pointing back from the new row avoids both a deferred FK and a second write to a row that is already frozen. It keeps the composite self-FK, and the chain cap comes free. **Condition (Batch 1a):** add a partial unique index on `(resent_from_id) where resent_from_id is not null`. A superseded row can then have at most one successor, so the chain is a line in the database, not a tree. **Condition (Batch 1c):** a DB test pinning the chain's consistency: the parent is `superseded_at`, has the same `purpose` and `email_normalized`, and `resend_count = parent + 1`. A `BEFORE INSERT` check that does the same is also acceptable. Without one of these, the per-chain cap trusts `issue.ts` alone. DECISION-184's "resend supersedes and never rotates" stands; the integration text should name `resent_from_id`, not `superseded_by_id`.
+- **D-2, a second partial unique index `(organization_id, purpose) where purpose in ('founding_administrator','treasurer')` and every terminal timestamp is null: Accepted with condition.** It turns G1/Q4 into a database property. The `purpose in (...)` predicate keeps Increment 2 out of it, and F103 is unaffected because presby_app cannot insert. **Condition:** `issue.ts` maps a `unique_violation` on either partial index (matched by constraint name) to `already_pending`, not `db_error`. Resend's supersede-first-then-insert order has to stay as written: reversing it violates this index.
+- **D-3, `presby_preview_invitation(p_token, p_user_id)` returning `session_matches`: Accepted with condition.** This is the right way to keep the full address out of app code. **Condition:** `p_user_id` comes only from the `auth()` session, never from form data or the query. The S4 source-scan should also assert that `previewInvitation` is called with the session id. With `p_user_id` null the function reads no `users` row (S1 preserved), and dead states still return zero rows regardless of `p_user_id`.
+- **D-4, `isTotpConfigured()` at send for both purposes: Accepted.** It correctly extends S2, since new accounts default to `two_factor_required = true`.
+- **D-5, refusals returned rather than raised; apply phase in a subtransaction: Accepted with two conditions.** Committing `blocked_at` requires returned outcomes. I endorse this.
+  1. **Re-arm the marker on the exception path.** If the inner `begin … exception` block rolls back, any `set_config('presby.invitation_accept_active', …, true)` made inside it is rolled back too, because Postgres reverts GUC changes when a subtransaction aborts. The outer block's `blocked_at` update then hits the freeze trigger without the marker, raises, and the whole acceptance turns into `db_error` instead of `blocked`. The outer block must arm the marker immediately before its own `blocked_at` update and clear it immediately after. A Batch 1c test should drive a late trigger refusal (for example `memberships_guard_insert`) and assert `blocked_at` is committed.
+  2. **Map exceptions narrowly.** `unique_violation` becomes `account_exists` **only** when `GET STACKED DIAGNOSTICS … CONSTRAINT_NAME = 'users_email_unique'`. Any other unique violation, such as an `app_roles` or `role_grants` conflict the `on conflict` forms missed, re-raises. Otherwise a schema bug tells the invitee "an account already exists" and leaves the token live in a loop. The trigger mappings likewise match SQLSTATE plus the message text (the codes are generic), and each mapping gets its own Batch 1c test. That suite already lists "each blocked reason", so this extends it rather than adding to it.
+- **D-6, hand-off cookie not cleared on a dead link: Accepted.** Server Components cannot delete cookies. The cookie holds a dead token, is httpOnly, scoped to `Path=/invite` and expires in 30 minutes. The query token always wins over the cookie, as designed. Recording it as a TODO line is enough.
+- **D-7, R9 reversal (no refusal; `inviter_is_invitee` returned and stamped in audit; the self-addressed send gets an extra confirm sentence): Accepted.** It matches the operator's constraints: same token, same email match, same confirmation, a 2FA-verified session for existing accounts, and `inviterIsInvitee` on both audit rows. My Phase 2 refusal is withdrawn. The governing text is the operator's Two Hierarchies sentence.
+- **D-8, `email_queue_id` set at insert and immutable: Accepted.** It is tighter than R2.
+
+### Contradictions Phase 3 does not list as divergences
+
+1. **DECISION-183 text (must fix at integration).** Phase 3 records "DECISION-183–187: as proposed by the architect". My proposed DECISION-183 ends "An inviter may not accept their own invitation." The operator reversed that. **Required:** replace the sentence with "A self-sent designation is permitted, accepted through the same token, email match and confirmation as any invitee, and audited `inviterIsInvitee`; the platform role confers nothing." DECISION-184 also takes the D-1/D-2 wording. Otherwise the decision log contradicts the shipped behaviour and the amended CLAUDE.md.
+2. **New-account existence check ignores case (Isolation / identity integrity).** Step 3, new mode, says "a `users` row with this email already → `account_exists`", and step 5 relies on `users_email_unique`. That constraint is case-sensitive. An existing `Foo@example.invalid` account would not stop a second account being created for `foo@example.invalid`. That second account could then take the invitation's authority, sidestepping the existing account's 2FA and the existing-account path. **Required:** the step 3 check is `lower(email) = email_normalized`, and the insert path keeps it (the `users` row lock does not cover a row that does not exist yet, so this check is what carries it; the narrow `account_exists` mapping in D-5 condition 2 is the race backstop for exact-case collisions). Add a Batch 1c test with a mixed-case existing account.
+3. **Freeze-trigger scope widened without saying so.** Phase 3 also gates the `blocked_at` transition on the marker, which R2 did not. I accept it as tighter. It is the reason D-5 condition 1 matters.
+
+I found no other silent departures:
+
+- **Isolation:** presby_app holds no table grant and only two EXECUTEs. The acceptance path has no org GUC, and `accept.ts` and `(invite)` stay off `getPlatformDb` (S4).
+- **Composite Tenant Keys:** `unique (id, organization_id)`, the composite person FK to `memberships`, the composite self-FK, and plain FKs to `users` only.
+- **Two Hierarchies:** `granted_by` is provenance only. The resolver files and `presby_two_factor_required()` are pinned unchanged. Self-designation is handled per the operator's sentence.
+- **Proxy:** two exact Set entries; `check:proxy-imports` is untouched.
+- **(org) contract:** untouched. The post-accept redirect uses the slug from the function's row, and `/o/<slug>` authorizes itself.
+- **Permissions vs Flags:** no new key or flag. `auth.local_login` goes through `isLocalLoginEnabled()` only, and `auth.require_2fa` is not read.
+
+### Suggestions (non-blocking)
+
+- Batch 1c: assert that no superseded row lacks exactly one successor. This catches an owner-path bug that supersedes without inserting.
+- Keep the exception-mapping table in a comment beside the handler in `0059`, so a future guard-message edit visibly touches it.
+
+### Gate
+
+**Gate:** yes. Batch 1 (database-admin, migration 0059) may start as designed once Batch 0a is committed, with the conditions above built in: the `resent_from_id` unique index and chain test (D-1), `already_pending` mapping (D-2), session-only `p_user_id` (D-3), marker re-arm on the exception path and constraint-name-scoped mapping (D-5), and the case-insensitive new-account check (contradiction 2). The DECISION-183 text fix happens at integration.
+
+---
+
 # Phase 3 — Technical Design (tech-lead)
+
+*2026-10-21, tech-lead. Designs **Increment 1** only: platform designations (founding administrator, treasurer) plus the acceptance machinery. Increment 2 (org-level "Invite to sign in") is not designed here: R10 requires a Phase 2 addendum first, then its own Phase 3. Increment 3 reduces to configuring Google (R3). Read against the live tree of `presby-invites` (branch `pipeline/invitations`, `0057` the newest migration).*
+
+**Inputs honoured.** Phase 2 R1–R8 and R10 as ruled; R9 as reversed by the operator (self-designation allowed, audited `inviterIsInvitee`); operator rulings Q1 (always pending), Q2 (all invitation mail from the platform domain, `account` class, Increment 2 included), Q6 (scrub the link after send; TODO for the other credential templates); Q3–Q5, Q7–Q10 at the analyst's defaults. No new `FEATURES` key, tenant permission, or platform flag (operator rule). Every divergence from an architect ruling or suggestion is listed in **Divergences from Phase 2** below with its reason. **No operator ruling is blocking** (two confirmations are listed under Handoff).
 
 ## Summary
 
-[One paragraph: what we're building and why.]
+A platform operator designating a founding administrator or first treasurer no longer looks the person up by account; they send a single-use, expiring invitation to an email address. The send step never reads `users`, so the sender's screen is identical whether or not the address has an account. The recipient proves they control the mailbox by holding the link, then either creates an account (name confirmation, password) or signs in to an account they already have, and in both cases clicks "Accept". Only then does one `SECURITY DEFINER` function (`presby_accept_invitation`, run on the RLS-enforced `presby_app` connection, no org GUC) create or verify the account, link or create the person, apply the designation and claim the invitation in a single transaction; the designation logic moves from two TypeScript platform-connection transactions into ungranted plpgsql helpers behind a parity test. The invitation is a DECISION-147-style credential: 32 random bytes, stored only as a SHA-256 hash, hashed in SQL from the raw token, never consumed on GET, never in `callbackUrl` (a `Path=/invite` httpOnly cookie carries it across sign-in), and scrubbed from `email_queue` once the message is sent. This closes the production blocker of 2026-10-21 ("the account did not exist yet") and removes the false "ask them to sign up first" copy (C5), and it turns a latent hazard (a mistyped email that matches a real account silently receiving administrator authority) into a consent step.
 
 ## Permissions & Flags
 
-- Permission key(s): `area.action`
-- Default role bindings: [list]
-- Feature flag(s): [key, or "not needed"]
+- **Permission key(s):** none new. Sending, resending, revoking, revoke-all and listing: existing `FEATURES.ADMIN_ORGANIZATIONS`, checked in each action body (`auth()` then `hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)`), exactly as the two `designate*Action`s do today. Acceptance: **no permission** — the token is the third access mechanism (DECISION-147/183); for an existing account the action additionally requires a session (and a 2FA-verified one when `twoFactorRequired`, G9). The token is never mapped into `FEATURES.*`, a session claim or the resolver.
+- **Default role bindings:** unchanged (platform admins holding `admin.organizations`). No tenant key is added, so `foundingAdministratorPlan()` / `presby_founding_administrator_permission_keys()` and the F150/0057 backfill are untouched.
+- **Feature flag(s):** **not needed** (operator rule: no new platform flag pre-live), and **no per-org toggle is needed either**: every send is an explicit act of a platform admin, so there is no rollout to stage. Kill levers without a flag: "Revoke all open invitations" per org (platform action, built in this increment), deploy revert (open tokens land on the dead-link page; pending rows are inert). Existing flags read: `isLocalLoginEnabled()` (fails open) for the accept page and the send-time warning; `auth.require_2fa` is **not** read (G9 uses the session's `twoFactorRequired`/`twoFactorVerified`).
 
 ## API Contract
 
-- `POST /api/...` — purpose, request body, response shape
-- `GET /api/...` — purpose, query params, response shape
-- Or server-action signatures: `async function actionName(input): Promise<Result>`
+### 1. SQL functions (migration `0059`; all `SECURITY DEFINER`, owner `neondb_owner`, `set search_path = public, pg_temp` per DECISION-148; every function `revoke all … from public, presby_app, presby_platform` first, then only the two grants named)
+
+| Function | Grantee | Purpose |
+|---|---|---|
+| `presby_founding_administrator_holder_count(p_org uuid) returns int` | owner only | The roles.manage / role_grants.manage holder CTE, lifted verbatim from `founding-administrator.ts`. Single source for the send gate (`issue.ts` via `getPlatformDb()`), the page count, and the accept gate. Owner-only: a cross-org count is an oracle. |
+| `presby_giving_manage_holder_count(p_org uuid) returns int` | owner only | The `giving.manage` effective-holder CTE (membership-aware), lifted verbatim from `treasurer-designation.ts`. |
+| `presby_founding_administrator_permission_keys(p_org_type text) returns text[]` | owner only, `immutable` | The bundle (`base` + `congregation_oversight.manage` for a presbytery). `foundingAdministratorPlan()` stays as display copy, pinned equal by a DB test over every `organization_type` enum value read from the catalog (so a sixth type forces a conscious edit). |
+| `presby_apply_founding_administrator(p_org uuid, p_person_id uuid, p_granted_by uuid)` | **none** (internal; called only from `presby_accept_invitation`) | Steps 1–2 and 7–10 of today's `designateFoundingAdministrator`: read org type fresh, holder gate, reuse-and-reactivate `founding_administrator` role (F109), office template read from the live row, additive-only permission reconcile (`on conflict do nothing`), person-arm grants with `granted_by` = the inviter (provenance only). Returns `(outcome text, administration_role_key text, office_role_key text, permission_keys text[])`; outcome `ok` or `has_holders`. The caller already holds the org-row lock. |
+| `presby_apply_treasurer(p_org uuid, p_person_id uuid, p_granted_by uuid)` | **none** | Steps 1–2 and 5–7 of today's `designateTreasurer`: `not_applicable` (allow-list `congregation`, `new_worshiping_community`), holder gate, both templates read before any write (`provisioning_incomplete`), reuse-and-reactivate `treasurer` and `giving_recorder`, additive reconcile, one person-arm grant for `treasurer` only. Returns `(outcome, permission_keys text[], treasurer_role_id uuid, recorder_role_id uuid)`. |
+| `presby_preview_invitation(p_token text, p_user_id uuid default null)` | `presby_app` | `STABLE`. Hashes `p_token` in SQL. **Zero rows for every non-live state** (unknown, expired, accepted, revoked, superseded, blocked, redacted). Otherwise one row: `organization_name, organization_type, purpose, invitee_first_name, invitee_last_name, person_display_name, masked_email, expires_at, session_matches boolean`. `masked_email` is computed in SQL (`left(local,1) || '***@' || domain`): the full address never reaches application code on the anonymous path (DECISION-153). `person_display_name` is the treasurer's roster name, or, for a founding administrator, the read-only email match at the org when it resolves to exactly one live person, else the invitee names. `session_matches` is `lower(users.email) = email_normalized` for `p_user_id` (null when `p_user_id` is null) — a boolean for the token holder, so the page can say "signed in as another account" without ever holding the invited address (a masked-string comparison would collide). Reads no `users` row when `p_user_id` is null (S1). |
+| `presby_accept_invitation(p_token text, p_user_id uuid default null, p_password_hash text default null, p_first_name text default null, p_last_name text default null)` | `presby_app` | R1/R5. Raw token, hashed in SQL. Exactly one of `p_user_id` (existing account) / `p_password_hash` (new account) is non-null (else `raise` — a programmer error, not an outcome). Returns exactly one row: `(outcome, blocked_reason, invitation_id, organization_id, organization_slug, purpose, mode, user_id, person_id, person_mode, created_by_user_id, inviter_is_invitee, administration_role_key, office_role_key, permission_keys)`. |
+
+Defaults trail every required parameter (`p_token` is the only required one): valid SQL. The two preview/accept signatures are the ACL targets; any later parameter change is a drop-and-recreate with the ACL re-applied in the same file.
+
+**`presby_accept_invitation` algorithm (binding order; each step named because a reorder reopens a finding):**
+
+1. Hash the token (`encode(sha256(convert_to(p_token,'UTF8')),'hex')`); read the invitation by hash, unlocked. None: return `outcome='dead'`.
+2. Lock the **organization row** `for update`, then re-select the invitation `for update` and re-validate (all four terminal timestamps null, `expires_at > now()`). Else `dead`. Lock order for every writer, issue and accept alike: organization → invitation → users → person (no resend/accept deadlock).
+3. **Existing mode:** lock the `users` row `for update` before any person read (this serializes acceptances for one account and stands in for the withheld `people.user_id` unique index, F110/F112). Missing row or `lower(email) <> email_normalized` → `email_mismatch`; `is_active = false` → `account_inactive`. **New mode:** check the hash shape (`^\$2[aby]\$\d{2}\$.{53}$`) and `lower(btrim(p_first_name/p_last_name))` length 1–100; a `users` row with this email already → `account_exists`.
+4. **Gates, nothing written yet.** Treasurer: `presby_giving_manage_holder_count`, applicability, template presence. Founding administrator: `presby_founding_administrator_holder_count`, baseline provisioning (`groups.derived_from = 'active_membership'` exists). Then **person resolution**:
+   - *Treasurer:* `person_id` is on the row; it must be live (`merged_into_id is null`, else `person_merged`), hold an active membership at this org (else `membership_ended`), and have `user_id` null or equal to the accepting account (else `person_linked_elsewhere`).
+   - *Founding administrator:* (a) a live person already linked to the accepting account: at this org active → reuse; ended → `membership_ended`; elsewhere → `person_elsewhere`. (b) otherwise match `contact_methods` (`kind='email'`, `lower(btrim(value)) = email_normalized`) restricted to people with a membership at **this** org (the table has no org column; people are global): exactly one with an active membership and `user_id is null` → link; one with a different `user_id` → `person_linked_elsewhere`; ended membership → `membership_ended`; more than one → `ambiguous_person`; none → create a new person (invitee-confirmed names) with a `staff` membership (DECISION-128/129, no `roll_actions` row).
+   Any refusal here: set `blocked_at`/`blocked_reason` (marker armed), write nothing else, return `outcome='blocked'` with the closed reason.
+5. **Apply phase inside an inner `begin … exception` block** (a subtransaction, so a late failure leaves nothing behind): new mode inserts `users` (`email` = the invitation's address, `email_verified = now()`, `name` = first + space + last, defaults for `two_factor_required` etc.); person create or `update people set user_id = … where id = … and user_id is null` (row count must be 1) ; membership insert if created; `contact_methods.verified_at` on the matching address only; the `presby_apply_*` helper; then the claim `update` (`accepted_at`, `accepted_user_id`, `person_id`) with `set_config('presby.invitation_accept_active','on',true)` armed immediately before and cleared immediately after (DECISION-141 idiom). Exceptions map as the TypeScript catches did: `memberships_guard_insert` ("already exists elsewhere") → `person_elsewhere`; `role_grants_needs_membership` → `membership_ended`; "has no derived group active_membership" → `provisioning_incomplete`; `unique_violation` on `users.email` → `account_exists` (non-terminal); anything else re-raises (the whole transaction aborts; the caller returns `db_error`). A mapped *blocked* reason is committed by the outer block after the subtransaction rolled back.
+6. Return `outcome='accepted'` with the row. `inviter_is_invitee := (accepted_user_id = created_by_user_id)`. **No refusal on self-acceptance** (operator ruling on R9).
+
+**Outcome semantics.** *Non-terminal, nothing written, token stays live:* `account_exists` (offer "sign in to accept"), `email_mismatch`, `account_inactive`. *Terminal, `blocked_at` committed, nothing else:* `blocked` with `blocked_reason` in `has_holders | person_elsewhere | membership_ended | person_merged | person_linked_elsewhere | ambiguous_person | not_applicable | provisioning_incomplete`. *Uniform:* `dead` (unknown/expired/revoked/superseded/consumed/blocked) — one outcome, one row shape, one UI string (DECISION-147 bucket; identity-uniform, state-honest after the credential is proven, per the DECISION-152 split).
+
+### 2. TypeScript library — `src/lib/onboarding/` (R-placement)
+
+- `founding-administrator.ts`, `treasurer-designation.ts` (moved, Batch 0): after the parity test passes the two `designate*` transactions and `deriveNameFromUser` are **deleted**; the modules keep the display/gate surface: `foundingAdministratorPlan()`, `TREASURER_DESIGNATION_ORG_TYPES`, `treasurerDesignationApplies()`, and `countFoundingAdministratorHolders()` / `countGivingManageHolders()` rewritten as thin wrappers over the two SQL count functions (same exported signatures, so `page.tsx` is unchanged on this point).
+- `invitation-token.ts` (pure, `node:crypto`, zero other imports): `mintInvitationToken(): { token: string; tokenHash: string }` (32 random bytes base64url, 43 chars; SHA-256 hex), `hashInvitationToken(token)`, `isWellFormedToken(s)` (`^[A-Za-z0-9_-]{43}$`; also the e2e fixture seam).
+- `status.ts` / `labels.ts` (pure, client-safe): `deriveInvitationStatus(row, now) → 'pending' | 'accepted' | 'expired' | 'revoked' | 'blocked'` (`superseded` rows are hidden from lists), `INVITATION_STATUS_LABEL` ("Pending", "Accepted", "Expired", "Revoked", "Couldn't be completed"), `BLOCKED_REASON_OPERATOR_COPY`, `deliveryState(queueRow) → 'queued' | 'sent' | 'delivered' | 'bounced' | 'failed' | 'cancelled'`.
+- `invitation-email.ts`: `renderInvitationEmail({ firstName, organizationName, purpose, token, expiresAt }) → { subject, html, text }`. Link = `${platformOrigin()}/invite?token=${token}` only (null origin → the send refuses `link_origin_unavailable`); names `escapeHtml`'d and capped (100 chars); no sender free text; template key constant `ACCOUNT_INVITATION_TEMPLATE_KEY = "account_invitation"`.
+- `issue.ts` (`import "server-only"`; **`getPlatformDb()` only**; imported only from `(admin)`):
+  - `createInvitation(input: { organizationId; purpose: 'founding_administrator' | 'treasurer'; email: string; firstName?: string; lastName?: string; inviter: { userId: string; email: string | null }; acknowledgeDoNotContact?: boolean }): Promise<CreateInvitationResult>`
+  - `CreateInvitationResult = { kind:'ok'; invitationId; expiresAt: Date; delivery: 'sent' | 'queued'; selfAddressed: boolean } | { kind: 'has_holders' } | { kind:'already_pending'; invitationId; expired: boolean } | { kind:'not_applicable' } | { kind:'provisioning_incomplete' } | { kind:'no_matching_person' } | { kind:'ambiguous_person' } | { kind:'membership_ended' } | { kind:'needs_acknowledgement'; reason:'do_not_contact' } | { kind:'totp_unavailable' } | { kind:'link_origin_unavailable' } | { kind:'invalid_input'; field } | { kind:'rate_limited' } | { kind:'db_error' }`
+  - `resendInvitation(input: { organizationId; invitationId; actor })`, `revokeInvitation(input: { organizationId; invitationId; actor })`, `revokeAllOpenInvitations(input: { organizationId; actor })`, `listInvitationsForOrg(organizationId): Promise<InvitationListRow[]>` (derived status, delivery state joined from `email_queue`, `selfDesignated` = `accepted_user_id = created_by_user_id`, `blockedReason`, `canResendAt`; superseded rows excluded; full address shown to platform admins only while `redacted_at` is null).
+  - **`createInvitation` transaction (R8 order):** mint token → lock organization row `for update` → org exists; purpose applicability (treasurer: allow-list); send-time gate via the owner-only SQL count function; baseline provisioning pre-check (founding administrator); treasurer person resolution **first** (C6: exact normalized email match on `contact_methods` among people with a membership at this org; zero → `no_matching_person`, more than one → `ambiguous_person`, ended-only → `membership_ended`); `isTotpConfigured()` (both purposes: new accounts default `two_factor_required = true`, so an unconfigured deployment would strand either invitee — extends S2, which named only the treasurer); `do_not_contact` check (G19) unless acknowledged; one open row per (org, purpose) (`already_pending`); durable limits (below); render email; **insert the `email_queue` row in the same transaction** (new `queue.ts` function), insert the invitation row with `email_queue_id` set at insert (never updated afterwards), insert the `invitation.created` audit row via `insertAuditRow(tx, …)` (never `recordAudit()`); commit; **then** the post-commit send attempt (`queue.ts`), whose failure leaves the row `queued` for the worker and returns `delivery: 'queued'` ("Email delivery is delayed; we'll keep trying"). The send step reads no `users` row.
+  - **Durable limits (counted on `account_invitations` including superseded/revoked rows so churn cannot dodge them; evaluated inside the org lock):** per inviter 20 per rolling 24 h; per organization 10 per 24 h; per recipient address 3 per 24 h across all orgs (not an oracle in Increment 1 — only platform admins send; F155 binds Increment 2); resend cooldown 5 minutes from the latest row's `created_at`; at most 5 resends per chain (`resend_count`). One refusal literal for every limit: "Too many invitations right now. Try again later." Numbers live in one constants block in `issue.ts`.
+  - **Resend** (`open` rows only, expired-open allowed): in one transaction, lock org, lock the old row, **supersede it first** (`superseded_at = now()`, which frees both partial unique indexes), then insert the new row (`resent_from_id` = old id, `resend_count` = old + 1, new token, new 7-day expiry, new queue row), cancel a still-`queued` old queue row, audit `invitation.resent`, commit, post-commit send. **Revoke:** terminal `revoked_at`/`revoked_by_user_id`, cancel a still-`queued` queue row (`status = 'cancelled'`), audit `invitation.revoked`. **Revoke-all:** the same per open row of the org (one audit row each, `via: 'revoke_all'`).
+- `accept.ts` (`import "server-only"`; **`db` (presby_app) only, never `getPlatformDb`**; S4 source-scan):
+  - `previewInvitation(token: string, userId?: string): Promise<InvitationPreview | null>` (one `select * from presby_preview_invitation($1,$2)`).
+  - `acceptInvitation(input: { token: string; mode: { kind:'new_account'; firstName; lastName; password } | { kind:'existing_account'; userId; email: string | null } }): Promise<AcceptResult>`; validates (G17: password 8 min, **72 bytes max counted as UTF-8**; names 1–100 after trim, NFC, control characters stripped; token well-formed) *before* the database; **bcrypt (cost 10, as the reset path) is computed for every new-account submission before the token is looked up**, so a dead token costs the same as a live one; opens `db.transaction`, runs the function, and **in the same transaction** writes the audit rows (R7): `accepted` → `invitation.accepted`, `user.created_via_invitation` (new mode), and the `org.*.designated` event; `blocked` → `invitation.accept_blocked`; `dead`, `account_exists`, `email_mismatch`, `account_inactive` write no row (nothing to attribute). A failed audit insert rolls the whole acceptance back. Never logs the token, hash, password or address; `db_error` logs the error class only.
+  - `AcceptResult = { kind:'accepted'; mode: 'new_account' | 'existing_account'; organizationSlug: string } | { kind:'dead' } | { kind:'account_exists' } | { kind:'email_mismatch' } | { kind:'account_inactive' } | { kind:'blocked'; reason: BlockedReason } | { kind:'invalid_input'; field: 'password' | 'firstName' | 'lastName' } | { kind:'db_error' }`.
+- `queue.ts` additions (starter-generic, S9): `insertQueueRowInTx(tx, input): Promise<{ id }>` and `attemptQueuedSend(id): Promise<{ sentInline: boolean }>`; `enqueueEmail()` is re-expressed as their composition (behaviour-preserving; `queue.test.ts` stays green). `CREDENTIAL_TEMPLATE_KEYS = new Set(['account_invitation'])`; the three UPDATE sites that set `sent` (inline, worker) or `failed` (worker permanent failure) also set `html_body`/`text_body` to a fixed marker ("[Removed after delivery: this message contained a one-time sign-in link.]") for those keys. `cancelQueuedEmail(tx, id)`. `password_reset`, `email_change_verify`, `statistics_submission_grant` stay as a TODO (F154).
+
+### 3. Server actions
+
+`src/app/(admin)/admin/organizations/[id]/actions.ts` — `designateFoundingAdministratorAction` and `designateTreasurerAction` are **replaced** (every `no_such_user` string and the "ask them to sign up first" copy are deleted, C5):
+
+- `inviteFoundingAdministratorAction(formData: FormData): Promise<InvitationActionResult>` — fields `organizationId` (uuid), `email`, `firstName`, `lastName`, optional `acknowledge`.
+- `inviteTreasurerAction(formData): Promise<InvitationActionResult>` — `organizationId`, `email`, optional `acknowledge`.
+- `resendInvitationAction(formData)`, `revokeInvitationAction(formData)` — `organizationId`, `invitationId`; the action verifies the invitation belongs to the org.
+- `revokeAllInvitationsAction(formData)` — `organizationId`.
+- `type InvitationActionResult = { ok: true; invitationId?: string; expiresAt?: string; delivery?: 'sent' | 'queued'; selfAddressed?: boolean } | { ok: false; error: string; needsAcknowledgement?: 'do_not_contact' }`. Every action: `auth()` → `hasFeature(ADMIN_ORGANIZATIONS)` → zod validation (`z.string().trim().toLowerCase().email().max(320)`, names 1–100) → `issue.ts` → `revalidatePath`. No `db.*` in this file (audit is written inside `issue.ts`'s transaction), so `check:audit` stays green and Rule 7 is proven by per-outcome DB tests (below), not by the tripwire (R7).
+
+`src/app/(invite)/actions.ts` (no `auth()` for the new-account path; the existing-account action calls `auth()`):
+
+- `acceptNewAccountAction(prev: AcceptFormState, formData: FormData): Promise<AcceptFormState>` — fields `token`, `firstName`, `lastName`, `password`, `confirm`. IP-keyed `checkRateLimit('invite_accept:<ip>', 10 per hour)` as a second layer (never token-keyed, like `stats_submit`); refuses if a session exists ("Sign out first, or sign in to accept this invitation"); on `accepted` clears the hand-off cookie and `redirect('/invite/accepted')`; every other outcome returns an inline-error state.
+- `acceptSignedInAction(formData)` — field `token`; `auth()`; refuses unless `!(twoFactorRequired && !twoFactorVerified)` (G9); calls `acceptInvitation({ mode: existing_account })`; on `accepted` clears the cookie and `redirect('/launch?next=/o/<organizationSlug>')` (the slug comes from the function's row, never from the request).
+- `startSignInToAcceptAction(formData)` — sets the cookie (below) then `redirect('/signin?callbackUrl=/invite')`. `continueToVerifyAction(formData)` — same cookie, then `redirect('/totp?callbackUrl=/invite')` (needed because a Server Component cannot set a cookie, and a signed-in visitor who arrives from the email has none yet). `switchAccountAction(formData)` — sets the cookie then `signOutAction('/invite')`.
+- **Cookie (R6):** name `invite_token`, httpOnly, `Secure` in production, `SameSite=Lax`, `Path=/invite`, `Max-Age=1800`. The token never appears in `callbackUrl`, `/totp` URLs, audit metadata or logs.
+
+### 4. Routes, proxy, headers
+
+- `GET /invite?token=…` (page; token from the query, else the cookie): renders exactly one state — **dead link**; **anonymous** (both "Create your account" and "Already have an account? Sign in to accept" always shown, S1; the create form is replaced by "Password sign-in is turned off" when `isLocalLoginEnabled()` is false, G8); **signed in, session does not match** ("You're signed in as another account. Sign out to accept this invitation." + `switchAccountAction`); **signed in, 2FA required** (explains, `continueToVerifyAction`); **confirm** (matching, verified: "Accepting as <person name> at <org>" + Accept). GET consumes nothing and writes nothing. Metadata `robots: noindex`.
+- `GET /invite/accepted` (static, accepts no token or parameter, like `/file-statistics/submitted`): "Your account is ready", button to `/signin?callbackUrl=/launch`.
+- `src/proxy.ts` `PUBLIC_PATHS` gains exactly `"/invite"` and `"/invite/accepted"` (exact, no prefix). A source test asserts both are members and that `/invite/x` is not. Unreachable on church hosts (the custom-host branch returns before `PUBLIC_PATHS`, confirmed by the architect). `check:proxy-imports` unaffected.
+- `next.config.ts` `headers()`: for `/invite` and `/invite/accepted`, scoped with `has: [{ type: 'host', value: PLATFORM_HOST }]` (the existing mechanism, line ~165), `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, `X-Robots-Tag: noindex`.
+- `RESERVED_SLUGS` gains `invite` and the missing `file-statistics` (F157), plus a route-tree test (every top-level `src/app` segment and route-group child is reserved or on an explicit exemption list).
+
+### 5. Audit (`AUDIT_ACTIONS` appended in one block in Batch 2a; metadata is ids only — never the token, hash, password or address)
+
+| Key | Written by | Actor | Metadata |
+|---|---|---|---|
+| `invitation.created` | `issue.ts` (tx) | the operator | `invitationId, organizationId, purpose, personId, expiresAt, selfAddressed, acknowledgedDoNotContact` |
+| `invitation.resent` | `issue.ts` (tx) | the operator | `invitationId` (new), `supersededInvitationId, organizationId, purpose, resendCount` |
+| `invitation.revoked` | `issue.ts` (tx) | the operator | `invitationId, organizationId, purpose, via: 'single' \| 'revoke_all'` |
+| `invitation.accepted` | `accept.ts` (same tx) | the accepting user | `invitationId, organizationId, purpose, personId, mode, invitedByUserId, inviterIsInvitee` |
+| `invitation.accept_blocked` | `accept.ts` (same tx) | the account when known, else null | `invitationId, organizationId, purpose, reason` |
+| `user.created_via_invitation` | `accept.ts` (same tx), new mode only | the new user | `userId, invitationId, organizationId` |
+| `org.founding_administrator.designated` / `org.treasurer.designated` | `accept.ts` (same tx), at acceptance only | the accepting user | existing metadata plus `viaInvitationId, invitedByUserId, inviterIsInvitee`; `resourceId` stays the organization id (F18) |
+
+Both the inviter (`invitedByUserId`) and the accepting user (the actor) are on the designated row — this resolves the "Phase 3 picks the actor" item. `inviterIsInvitee: true` is stamped on `invitation.accepted` and on the `org.*.designated` row; `selfAddressed` at send is a best-effort email comparison, the accepted-time flag (id comparison) is authoritative.
+
+### 6. Who sees what (copy contract; ux-developer owns final wording, tone from the analyst's Phase 1 lines)
+
+- **Invitee, any dead state:** one string, "This link is no longer active. If you already accepted it, you can sign in. Otherwise ask whoever invited you to send a new one." (the sign-in hint is static text, so it distinguishes nothing). Identical markup and round trips for no-such-token, expired, revoked, superseded, used, blocked.
+- **Invitee after the token is proven:** honest, plain-language messages per `blocked_reason` and for `account_exists` ("An account already exists for this address. Sign in to accept."), `email_mismatch`, `account_inactive`; `person_elsewhere` etc. are explained to the invitee in words ("this account is already linked to a person at another congregation; contact the person who invited you").
+- **Platform operator (org page):** status vocabulary pending / accepted / expired / revoked / couldn't be completed with an operator-language reason, delivery state (queued, sent, delivered, "Bounced. Check the address", failed, cancelled), "Self-designated" badge when `accepted_user_id = created_by_user_id`.
+- **Send refusals describe the org or the roster, never account existence** (Phase 1 Flow 1/2 sentences, including the lockout-recovery sentence for `has_holders` and "Nobody enrolled at this congregation has that email on file. The congregation's administrator enrols them first." for `no_matching_person`).
 
 ## Data Model
 
-[New tables / columns / indexes, or "No schema changes required."]
+**Migration `drizzle/0059_presby_account_invitations.sql`** (hand-written, idempotent: drop-then-add CHECKs, `create or replace`, revoke-then-grant; applied twice on `pipeline-invitations` to prove replay, as 0057 was). Drizzle mirror `src/lib/db/domain/invitations.ts` (the `domain/index.ts` export is an integration edit, Rule 16; app modules import the file directly, as `founding-administrator.ts` imports `domain/org`). Not `email_queue`: **no change to that table** (the queue-row link lives on the invitation side, a plain uuid, 0056 precedent; `status = 'cancelled'` needs no schema change — it is unchecked text and the claim query reads only `'queued'`).
+
+**Table `account_invitations`** (R2 as ruled, with the divergences listed below):
+
+| Column | Type / rule |
+|---|---|
+| `id` | uuid pk default `gen_random_uuid()`; `unique (id, organization_id)` (Composite Tenant Keys) |
+| `organization_id` | uuid not null → `organizations(id) on delete cascade` (reachable only through D10's guarded fixture teardown) |
+| `purpose` | text not null, CHECK in (`founding_administrator`, `treasurer`) — Increment 2 widens |
+| `origin` | text not null default `platform`, CHECK in (`platform`) — Increment 2 adds `org` |
+| `email_normalized` | text, CHECK `= lower(btrim(...))`, length ≤ 320, contains `@`; **null iff `redacted_at` is not null** |
+| `invitee_first_name`, `invitee_last_name` | text, length 1–100 when present; both required for `founding_administrator`; null for `treasurer` |
+| `person_id` | uuid null; **required at insert for `treasurer`** (CHECK `purpose <> 'treasurer' or person_id is not null`); for `founding_administrator` null → value once, at accept |
+| composite FK | `(person_id, organization_id)` → `memberships (person_id, organization_id)` (`memberships_person_org_key` exists; `people` is global, so the relationship row carries the tenant — verified); MATCH SIMPLE so a null `person_id` is unconstrained |
+| `token_hash` | text not null **unique**, CHECK `~ '^[0-9a-f]{64}$'`; immutable, never rotated |
+| `created_by_user_id` | uuid not null → `users(id)` (plain FK, as `role_grants.granted_by`) |
+| `created_at` | timestamptz not null default `now()` |
+| `expires_at` | timestamptz not null; CHECK `> created_at` and `<= created_at + interval '30 days'` (default 7 days is applied by `issue.ts`; no expiry picker in v1) |
+| `email_queue_id` | uuid null, **no FK**; set at insert, immutable |
+| `resent_from_id` | uuid null; composite self-FK `(resent_from_id, organization_id)` → `(id, organization_id)` |
+| `resend_count` | int not null default 0, CHECK 0–5 |
+| `accepted_at`, `accepted_user_id` | timestamptz / uuid → `users(id)` |
+| `revoked_at`, `revoked_by_user_id` | timestamptz / uuid → `users(id)` |
+| `superseded_at` | timestamptz |
+| `blocked_at`, `blocked_reason` | timestamptz / text, CHECK `blocked_at is null = blocked_reason is null`, closed list (the eight reasons above) |
+| `redacted_at` | timestamptz |
+
+**CHECKs:** at most one of the four terminal timestamps (`accepted_at`, `revoked_at`, `superseded_at`, `blocked_at`) is non-null; `accepted_at` ⇒ `accepted_user_id` and `person_id` non-null, and `accepted_user_id` null otherwise; `revoked_at` ⇔ `revoked_by_user_id`; `redacted_at` ⇒ exactly one terminal timestamp (only a finished invitation can be redacted).
+
+**Indexes:** both **partial unique indexes** share the predicate "all four terminal timestamps null" (expiry is derived and sits **outside** the predicate, so an expired-but-open row keeps blocking until a resend supersedes it or the operator revokes it, Flow 5): (1) `(organization_id, purpose, email_normalized)` (R2; the Increment 2 shape); (2) **`(organization_id, purpose) where purpose in ('founding_administrator','treasurer')`** — the database-level form of G1/Q4 "one pending designation per org and purpose regardless of address" (R2's index alone would let a second address in; the org-row lock made the app check race-safe, this makes it a database property, and Increment 2's new purpose is excluded from it by the `purpose in (...)` predicate). Limit indexes: `(email_normalized, created_at)`, `(created_by_user_id, created_at)`, `(organization_id, created_at)`. Per F103 the unique indexes are not an oracle (`organization_id` leads; presby_app cannot insert in Increment 1).
+
+**Triggers (bind every connection, the owner included — F44; `revoke all` from public/presby_app/presby_platform):** `BEFORE UPDATE` freeze: identity columns (`id, organization_id, purpose, origin, token_hash, created_by_user_id, created_at, expires_at, email_queue_id, resent_from_id, resend_count`, invitee names) are immutable; terminal states are one-way and exclusive; `email_normalized` may only go non-null → null together with `redacted_at` on a terminal row; `person_id` may go null → value once, only on the accept transition; **the `accepted_at` and `blocked_at` transitions require the transaction-local marker `presby.invitation_accept_active`, which only `presby_accept_invitation` arms**; revoke, supersede, redaction are owner-path transitions (presby_app holds no UPDATE). `BEFORE DELETE` guard, cascade-aware (pass only when the organization row is already gone, i.e. fixture teardown; otherwise `insufficient_privilege`), the `presby_org_domains_guard_delete()` idiom from 0057 written out locally.
+
+**RLS and grants:** `enable` + `force row level security`; policy `tenant_isolation` (`organization_id = presby_current_org()`) for Increment 2; `revoke all on account_invitations from public, presby_app, presby_platform`; `grant select … to presby_platform` (0049 idiom); **presby_app holds no table privilege at all**, only `EXECUTE` on `presby_preview_invitation(text, uuid)` and `presby_accept_invitation(text, uuid, text, text, text)`. Comments on the table and on the 90-day policy state **redaction is not enforced yet** (S6; the release note must not claim it); invitee names are retained after redaction (the person row already holds them for accepted invitations) — named residual.
+
+**Staged test assets (Rule 16: the shared files are edited only at integration):** `scripts/invitations/test-rls-59.sql` (presby_app cannot read/write/delete rows; marker-less accept transition refused on the owner path; dead-link refusals return one shape; the gate and apply functions are not executable by presby_app or public) and `scripts/invitations/seed-dev-invitations.sql` (the `contact_methods` rows the dev fixtures lack, F159), merged by the orchestrator at integration. Note for the runbook: 0058 is reserved for Track F mail; 0059 may apply first, so the journal edit at integration must not assume contiguity.
 
 ## Component / Page Plan
 
-- Pages to create: [list]
-- Components to create: [list]
-- Files to modify: [list]
+**Pages to create** (`(invite)`, un-brandable, **no `layout.tsx`, no `loading.tsx`**; platform palette; `check:brand-scope` green with no edit):
+- `src/app/(invite)/invite/page.tsx` (Server Component; reads token, `auth()`, `previewInvitation`, `isLocalLoginEnabled()`; renders one state), `src/app/(invite)/invite/accepted/page.tsx`, `src/app/(invite)/actions.ts`.
+
+**Components to create:**
+- `src/app/(invite)/invite/invite-states.tsx` (server components per state; preview header "A PresbyPortal administrator invited you to be <role> at <org>", masked address, expiry), `accept-form.tsx` (`'use client'`; plain `<form action={formAction}>` with `useActionState`, **not** react-hook-form, so it degrades before hydration; show-password toggle; focus to the heading or the error on every state change; inline `role="alert"` errors; labels tied to inputs; `autoComplete="new-password"`; 16 px inputs; 44 px targets; rules stated before typing; one column at 360 px; no colour-only status).
+- `src/app/(admin)/admin/organizations/[id]/invitation-list.tsx` (`'use client'`; shared by both sections: rows with status text + icon, delivery state, address, sent/expiry, Resend, Revoke behind `AlertDialog`), `revoke-all-invitations.tsx` (`AlertDialog`, rendered only when at least one open row exists).
+- `src/lib/onboarding/` modules from the API contract above.
+
+**Files to modify:**
+- `src/app/(admin)/admin/organizations/[id]/page.tsx` (read `listInvitationsForOrg`, `isLocalLoginEnabled()`, `isTotpConfigured()`; pass props; a pending invitation replaces the form), `actions.ts` (above), `founding-administrator-section.tsx` (email + first + last name; confirm dialog names the org, address and role, adds the self-address sentence and the local-login-off warning; the "must sign up first" hint (~lines 190–194) is removed, C5; `HydrationGate` added), `treasurer-designation-section.tsx` (email; button copy "Send invitation"; keeps `data-testid="treasurer-designation-section"`), the co-located tests.
+- `src/lib/audit.ts` (six keys, one appended block), `src/lib/email/queue.ts`, `src/lib/email/index.ts` (barrel re-exports of the new queue functions), `src/app/(admin)/admin/email-queue/actions.ts` (**`retryEmailAction` refuses a row whose `templateKey` is in `CREDENTIAL_TEMPLATE_KEYS`**: a redacted body would be re-sent as the marker text; message points to Resend on the organization page; F158) and `page.tsx` (`VALID_STATUSES` gains `cancelled`), `src/proxy.ts` (two Set entries), `next.config.ts` (headers), `src/lib/reserved-slugs.ts`, `src/app/no-organization/page.tsx` (S7: "If you were invited, open the link in your invitation email."), `src/lib/giving/team.ts` and `scripts/test-rls.sql` (path comments only, at integration).
+- Moves (Batch 0): `src/lib/founding-administrator.ts`, `treasurer-designation.ts` and their tests → `src/lib/onboarding/`; every importer found by grep (the `(admin)/admin/organizations/[id]` actions, page, sections and tests; `e2e/admin-organizations.spec.ts` comments; `src/lib/giving/team.ts`; `docs/` mentions at integration).
 
 ## Implementation Order
 
-1. Schema (if any) → `npm run db:push` on a Neon branch
-2. `FEATURE_CATALOG` entry + seed binding
-3. Route handlers / server actions
-4. UI
-5. Audit events for security-sensitive paths
-6. Release notes entry
+Gates for every batch: `npm run typecheck`, `npm run lint`, the batch's unit and DB tests (`--no-file-parallelism` for the DB subset, `.env.local` on the `pipeline-invitations` branch), and `npm run check` (all eight tripwires). No commit without operator approval; each batch below is one or more commits with the trailers from CLAUDE.md (`Work-Log: 2026-10-21-invitations`).
+
+**Batch 0 — mechanical groundwork (api-developer), three commits, no behaviour change except the F157 fix**
+- 0a `refactor(onboarding): move the designation modules` — the pure move plus importers (git mv, no content edits beyond import paths and path comments). Exit: typecheck, unit tests and the existing e2e specs untouched.
+- 0b `refactor(audit): lift insertAuditRow to src/lib/audit-tx.ts` (S3; `src/lib/domains/audit-tx.ts` re-exports; both import paths work).
+- 0c `fix(reserved-slugs): reserve invite and file-statistics` (F157) with the route-tree test. Trailers `Caught-By: agent-review`, `Discovered-In: Phase-2`.
+
+**Batch 1 — schema (database-admin)**
+- 1a `0059` table, CHECKs, indexes, freeze and delete triggers, RLS, grants, comments; Drizzle mirror; `check:schema-parity`; `npm run docs:erd`.
+- 1b the functions in the order: three single-source functions → the two ungranted apply helpers → preview → accept; ACLs; dependency check (no existing `SECURITY DEFINER` body references anything changed — none is altered).
+- 1c DB tests and staged scripts. **The parity test lands here, before any TypeScript deletion:** the same fixtures drive the existing TypeScript `designateFoundingAdministrator()`/`designateTreasurer()` and the SQL helpers, comparing the resulting `app_roles`, `app_role_permissions`, `role_grants`, `people`, `memberships` rows (ids and timestamps normalized), for every org type and for the F109 reuse-and-reactivate and additive-reconcile paths; it also freezes a **golden snapshot** of the expected rows, so the test survives the TypeScript deletion in Batch 2 as a pin. Other DB tests: freeze-trigger edges; delete guard (refuses a non-fixture org's row, passes the cascade); presby_app privilege and function-ACL negatives; owner and `proconfig` (search_path) pins; the six dead states return identical shapes and zero preview rows; accept for {new, existing} × {founding administrator, treasurer}; each blocked reason; each non-terminal outcome writes nothing (row-count snapshots of every touched table); concurrency (two parallel accepts one winner; accept vs revoke; accept vs resend; a resend/accept loop for lock order); the raw-token property (calling with the stored hash fails); `inviter_is_invitee`; the plan-vs-SQL bundle pin. Exit: 0059 applied twice cleanly; `scripts/invitations/test-rls-59.sql` passes as `presby_app`.
+
+**Batch 2 — server (api-developer)**
+- 2a token, email rendering, audit keys, `queue.ts` (transaction-aware insert, post-commit send, redaction, cancel) with unit tests; `queue.test.ts` and `src/app/api/cron/email-queue/route.test.ts` unchanged and green.
+- 2b `issue.ts` plus durable limits, with **one DB test per outcome** (created, resent, revoked, revoked-all, and each refusal) asserting the audit row is in the same transaction and a failed audit insert rolls the change back; the unconfigured-origin, TOTP-unconfigured, do-not-contact and rate-limit refusals; a send whose provider call fails leaves the row `queued` with the link present and a later worker success redacts it.
+- 2c `accept.ts` and `(invite)/actions.ts` (cookie, IP limit, 2FA check, redirects) with the per-outcome audit tests (accepted per mode, each blocked reason, none written for dead/non-terminal); admin `actions.ts` replacement; `retryEmailAction` refusal.
+- 2d wiring and deletion: `PUBLIC_PATHS`, `next.config.ts` headers, TypeScript count wrappers over the SQL functions, then **delete** the two `designate*` transactions and `deriveNameFromUser` (only after the parity test is green in the same run). Source-scan tests (S4): `accept.ts` and everything under `src/app/(invite)/` never import `getPlatformDb`; `issue.ts` is imported only from `(admin)`; the four resolver files plus `presby_two_factor_required()` are unchanged (the existing "four files unchanged" assertion moves with the module).
+
+**Batch 3 — UI (ux-developer)**: `(invite)` pages and form, admin sections, invitation list, revoke-all, `/no-organization` copy, component tests; **browser verification at a 360 px phone viewport** (Key Invariants → Verify in a Browser) of both `/invite` paths and both sections; `check:hydration-gate`, `check:brand-scope`.
+
+**Batch 4 — end-to-end (api-developer for the fixture and the auth specs; ux-developer for the admin spec)**: see QA requirements and e2e blast radius below.
+
+**Integration (orchestrator, serialized, Rule 16):** merge `scripts/invitations/test-rls-59.sql` into `scripts/test-rls.sql` and the seed block into `scripts/seed-dev.sql`; export `invitations.ts` from `src/lib/db/domain/index.ts`; `drizzle/meta/_journal.json`; DECISION-183–189 into `docs/decisions.md`; F153–F159 into `docs/schema-design.md`'s findings; TODO and STATE reconciliation; the CLAUDE.md and agent-file edits listed below; `docs/product/functionality-map.md` (Rule 14); `docs/architecture.md:100` (Rule 15, S8); run `scripts/test-rls.sql` against the merged `development` branch; the pre-deploy runbook for `0059` in `docs/deployment.md` (apply to production before the merge deploys, without `psql -1`, mirroring the 0057 runbook); release notes by `/release-notes` after Phase 6.
 
 ## Edge Cases & Risks
 
-- [Thing that could fail or that needs special handling]
+- **Treasurer needs an on-file email (F159, operationally important).** C6 resolves the treasurer by the email on `contact_methods`, not by account, and neither `e2e` fixtures nor `scripts/seed-dev.sql` contain a single `contact_methods` row, so the existing treasurer e2e designee (a person with a user link and no email) can no longer be designated, and in production a treasurer who was enrolled without an email will get "Nobody enrolled at this congregation has that email on file". Staff hire does capture a primary email (`createPerson`). The operator must confirm the first customer's treasurer is enrolled with an email before the acceptance test.
+- **Existing accounts now consent.** Behaviour change for existing accounts (C1): an existing account is no longer designated instantly. Existing designations already made are untouched.
+- **Cookie cannot be cleared from the page on a dead link** (a Server Component cannot delete cookies); it is cleared on accept and otherwise expires in 30 minutes, path-scoped, httpOnly, holding a token that is already dead. Diverges from R6's "clears it on dead link"; inert.
+- **Idempotent double submit:** the button disables while pending; a genuine second POST after success meets a consumed token and gets the dead-link string, whose static hint ("If you already accepted it, you can sign in") covers that case without distinguishing states.
+- **2FA is already enforced for new invitees without new code:** `users.two_factor_required` defaults true, `jwt()` recomputes `twoFactorRequired` (including arm B) from the database on every request, so a treasurer accepted from an existing non-2FA account is walked to `/totp` → `/account/2fa` by the proxy on `/o/*`; no `unstable_update` is needed after accept. `/invite` is public, so the page itself enforces G9.
+- **Mail abuse and phishing:** platform-domain mail with operator-typed names: names escaped and capped, no free-text message, durable limits, the link built only from `platformOrigin()` (never `Host`). An unset or invalid production `NEXT_PUBLIC_APP_URL` makes the send refuse `link_origin_unavailable`.
+- **Wrong or squatted address:** whoever controls the mailbox becomes the person. Mitigations in place: full address in the confirm dialog, named-person confirmation on the accept page, platform-originated sends only.
+- **Forwarded link (accepted residual, as password reset):** a forwardee with no account sets a password and becomes that person; the operator sees "Accepted [date]" and can undo through role tools. Existing-account acceptance is bound to the invited address by `session_matches` / the function's email check.
+- **Self-designation (operator ruling):** the operator is the only platform admin and will be some churches' first administrator. The platform role confers nothing: the acceptance still needs the emailed token, the email match, the confirmation click, and (existing account) a 2FA-verified session; audit rows carry `inviterIsInvitee: true`; the org page shows "Self-designated". Dev and fixtures may use either a second seeded admin or the same one.
+- **Orphan outbound mail:** a revoked or superseded invitation whose email is still `queued` is cancelled in the same transaction; one already `processing` arrives dead.
+- **Lock contention:** all invitation writes for an org serialize on its organization-row lock; acceptable at this volume.
+- **Retention:** terminal rows keep the address until the owner-only sweep (S6) ships — a TODO now; do not claim 90-day redaction anywhere user-facing.
+- **Worker redaction race:** the redaction is part of the same `UPDATE` that sets `sent`/`failed`, so there is no window where a delivered row still carries the link; a row stuck `queued` through retries (at most about three hours at the existing backoff) does.
+- **Google (R3):** nothing is wired; `evaluateSignIn()` still never checks `email_verified` — an Increment 3 hardening item, unchanged here.
+- **Increment 2 forward notes (not designed):** the subset rule (Q5) is feasible as `presby_effective_permissions(invitee_person, org, today)` read inside the inviter's `withOrgContext()` transaction (the function's org-argument guard is satisfied there) followed by `assertPermissionSubset(tx, inviterPersonId, orgId, inviteeKeys)`; needs the R10 Phase 2 addendum (tenant write path, column-limited SELECT excluding `token_hash`, F155) first.
+
+## E2E blast radius (existing specs whose assertions this change alters)
+
+- **`e2e/admin-organizations.spec.ts` — Test 7 (treasurer designation), all four tests and the 360 px describe.** The button ("Designate treasurer"), dialog ("Yes, designate") and success line change; "an account that is not a member … refused" becomes the roster message and needs a designee fixture with an on-file email; "designating a member makes the control disappear" no longer holds (a pending invitation panel replaces the form, the holder count stays zero, no grant, no role rows, the audit row is `invitation.created`); the shared `removeGivingDesignation()` cleanup is no longer what needs undoing. **Invitation rows cannot be deleted** (delete guard) except by deleting their organization, and the durable per-inviter/per-address limits would make repeated runs fail on permanent fixtures, so **every e2e path that creates or seeds an invitation uses a throwaway congregation** (`deletable_until`, the `e2e/support/custom-hosts.ts` `createSiteOrg` idiom) torn down at the end, which cascades the invitations. Test 7 is rewritten onto such an org (person + `staff` membership + `contact_methods` row, `people.deletable_until`).
+- No other existing spec asserts designation behaviour (`grep` of `e2e/` for designate/founding/treasurer: the giving specs seed grants by SQL through `giving-fixture.ts`, unaffected). `e2e/admin-email-queue.spec.ts` should be re-read by the implementer for any assertion on rendered bodies or status filters.
+- Unit/DB specs rewritten or moved: `founding-administrator.test.ts`, `treasurer-designation.test.ts` (kept as pins plus the golden parity), `organizations/[id]/actions.test.ts`, both section tests, `page.test.tsx`, `reserved-slugs.test.ts`, `email-queue/actions.test.ts`, `queue.test.ts` (unchanged but must stay green).
+
+## QA requirements (Phase 5; this feature is auth-touching: `src/proxy.ts` is edited and the flow creates accounts and drives sign-in)
+
+PASS requires the e2e suite run against a real dev server with an MFA-enrolled seeded user (`AUTH_TOTP_ENCRYPTION_KEY` and `RATE_LIMIT_DISABLED=true` set). A deferred or skipped e2e is BLOCKED. New specs (fixture `e2e/support/invitation-fixture.ts` follows DECISION-157: assert-and-throw guards — fixture org slug prefix, `example.invalid` emails, never a permanent org — and the cascade teardown order org → people → users):
+
+1. **New-account path** (`e2e/invitation-new-account.spec.ts`): seed a founding-administrator invitation (known token hash, created by the `admin` fixture) to a fresh `*.example.invalid` address on a throwaway org → open `/invite?token=…`, reload twice (nothing consumed) → confirm names, a 7-character password rejected inline, a valid password → `/invite/accepted` → sign in → `/totp`/`/account/2fa` **enrolment** (the secret is in the `<pre>` under "Can't scan? Enter manually"; compute the code with `otplib`) → lands in `/o/<slug>`; assert the audit rows, the grant, and that the token appears nowhere in `audit_events` or `email_queue`; a second use of the link shows the dead-link page.
+2. **MFA-enrolled existing-account path, self-designation** (`e2e/invitation-existing-account.spec.ts`): seed an invitation created by and addressed to the `mfa-enrolled` fixture (the production-shaped case) → link → "Sign in to accept" → credentials → **`/totp` challenge with the real code** → back at `/invite` (token via the cookie, never in the URL — assert) → Accept → `/launch` → `/o/<slug>`; assert `inviterIsInvitee: true` on `invitation.accepted` and the designated row, and the "Self-designated" badge on the org page; also a mismatch case (signed in as another fixture) and a treasurer purpose case.
+3. **Send half** (admin spec on a throwaway org): send through the UI, assert the pending row, the `email_queue` row (recipient, `account_invitation`, status), and — because the body is scrubbed after send — that the stored body is the marker. The link shape (app origin, never a church host) is asserted by the `invitation-email.ts` unit test and a DB test with a failing provider (row stays `queued` with the link).
+4. Existing specs per the blast radius above; `e2e/totp-full-login.spec.ts` and `post-login-routing.spec.ts` still green. One real-provider smoke through Resend test inboxes before go-live (the operator checklist covers it).
+
+Feature-gate audit rows QA will check by reading bodies: the five admin actions (`auth()` + `ADMIN_ORGANIZATIONS`), `acceptSignedInAction` (`auth()` + 2FA gate), `acceptNewAccountAction` and the three cookie actions (deliberately anonymous, token-gated).
+
+## Operator test-checklist additions (for the production acceptance checklist when this ships)
+
+1. As platform admin, open an organization with no administrator: the founding-administrator form asks for email, first and last name; no sentence anywhere says "sign up first".
+2. Send an invitation to an inbox you control: the page says "Invitation sent to … It expires on [date]. Nobody holds this role until it is accepted." A pending row shows the delivery state moving queued → sent → delivered.
+3. The email arrives from the platform domain, the link host is the production app origin, the greeting names the recipient; it has no free text.
+4. Open the link in a private window and reload twice: preview shows the congregation, the role and a masked address; the link is still live.
+5. New-account path: a 7-character password is rejected inline; set a good one → "Your account is ready" → sign in → 2FA enrolment → land in the congregation; Roles shows the access; the audit page shows `invitation.created`, `invitation.accepted`, `user.created_via_invitation` and the designated row, with ids only (no address, no token).
+6. Reuse the link: the same "no longer active" page as a made-up token.
+7. Existing-account (self-designation) path: invite your own admin address to another congregation: Sign in to accept → 2FA challenge → Accept; the audit row says `inviterIsInvitee: true` and the org page shows "Self-designated". Also open a link while signed in as a different account: "signed in as another account" with a masked address and a sign-out button.
+8. Resend and revoke: Resend within 5 minutes is refused; after a resend the old link is dead and the new one works; Revoke kills the link; send to a bounce-simulator address and the row shows "Bounced. Check the address".
+9. Treasurer: with a congregation member enrolled with an on-file email, invite that address; with an address nobody has, the roster message appears. After delivery, `/admin/email-queue` shows the `account_invitation` row with the body removed, and Retry on a failed invitation row points you to Resend.
+10. Day-one case: the account hand-created on 2026-10-21 — invite its address, choose "Create your account" (it answers "An account already exists… sign in to accept"), sign in with the password you set through /forgot-password, accept.
+11. Repeat steps 4–5 and 7 on a phone (360 px wide).
+
+## Divergences from Phase 2 (with reasons)
+
+- **D-1. Resend lineage points forward-to-back, not back-to-forward (R2 ruled `superseded_by_id`).** The table carries `resent_from_id` + `resend_count` on the *new* row and `superseded_at` on the old. Reason: with `superseded_by_id` the old row must name a new row that cannot be inserted while the old one still occupies both partial unique indexes, which forces a deferred FK or a second UPDATE of the frozen old row; pointing the new row at the old one needs neither and gives the per-chain cap for free. Same composite-key discipline, same state vocabulary. *Architect: please acknowledge or direct otherwise before Batch 1.*
+- **D-2. A second partial unique index `(organization_id, purpose)` for the two designation purposes** beyond R2's `(organization_id, purpose, email_normalized)`: G1/Q4 say a pending designation blocks a second regardless of address; this makes it a database property rather than only the org-lock app check.
+- **D-3. `presby_preview_invitation` takes an optional `p_user_id` and returns `session_matches`** (R2 specified the preview columns without it) so the page never needs the full address to detect "signed in as someone else" (S1/DECISION-153 spirit; a masked comparison would collide).
+- **D-4. `isTotpConfigured()` at send for both purposes** (S2 named the treasurer): new accounts default `two_factor_required = true`.
+- **D-5. Accept refusals are returned, not raised,** for the non-terminal and terminal-blocked outcomes: R1 requires a gate conflict to commit `blocked_at` with nothing else written, which a raised exception would roll back; only the dead state is a single uniform outcome. The apply phase runs inside a subtransaction so a late trigger refusal also leaves nothing behind.
+- **D-6. The hand-off cookie is not cleared on a dead link** (R6), for the reason in Edge Cases.
+- **D-7. R9 reversal implemented as: no refusal, `inviter_is_invitee` returned by the function and stamped in audit; the self-address send step is allowed with an extra confirm sentence.**
+- **D-8. `email_queue_id` is set at insert, not "set once" later** (the queue row is inserted first in the same transaction), a strictly tighter immutability than R2.
+- Suggestions followed: S1, S2 (extended), S3, S4, S5 (in Batch 0c), S6 (TODO, not built), S7, S8, S9. R10 respected: no Increment 2 design.
+
+## Feasibility check (against the live tree)
+
+- **Signatures:** every new function has its required parameter first and only trailing defaults (`p_token`; `p_org`/`p_person_id`/`p_granted_by` have none). Valid SQL.
+- **ALTER/DROP:** none against existing objects. 0059 only adds a table, triggers and functions; `email_queue` is untouched; no existing `SECURITY DEFINER` body is altered or depended on by a column change, so there is no silent request-time break. The TypeScript deletions are guarded by grep: importers of the two modules were enumerated (admin `actions.ts`, `page.tsx`, both sections and tests, `src/lib/giving/team.ts`, `e2e/admin-organizations.spec.ts` comments, `scripts/test-rls.sql`/`seed-dev.sql`/docs comments); `deriveNameFromUser` is referenced only by its own module and test.
+- **CHECKs and triggers vs fixtures:** the new table is empty in `scripts/seed-dev.sql` and every e2e fixture, so no shipped fixture is refused; the freeze trigger only governs UPDATE, so seeded rows (including expired ones with explicit `created_at`) insert freely; fixture addresses are `example.invalid` and satisfy `check:secrets`. **One gap found:** no fixture has `contact_methods` rows (F159) — the staged `seed-dev-invitations.sql` and the e2e helper add them; `scripts/seed-dev.sql` itself is an integration edit.
+- **FKs and tenant columns:** the tenant id is `organization_id` on `account_invitations`, `memberships`, and (through the composite) the self-FK; `memberships_person_org_key unique (person_id, organization_id)` exists, so the composite person FK is valid; `people` and `contact_methods` carry no tenant column (global), which is why person resolution always goes through `memberships`; plain FKs to `users` only.
+- **Verified in the live code:** `jwt()` recomputes `twoFactorRequired` per request; `/account/2fa` shows the secret in a `<pre>`; `next.config.ts` already scopes headers with `has: [{ type: 'host', value: PLATFORM_HOST }]`; `retryEmailAction` would re-send a redacted body (F158); `createPerson()` records a primary email.
+- **For the implementer to confirm on first read (named, not assumed):** the exact unique constraint behind `app_roles_org_key` for the `on conflict` form; which rows `org-provisioning.ts`'s `groupSeedPlan()` requires so the e2e throwaway org supports `memberships` inserts (`groups.derived_from = 'active_membership'`); that `/launch` honours `?next=/o/<slug>` for the existing-account redirect (the CLAUDE.md matrix says it does).
+
+## Out of Scope
+
+Increment 2 (org-level "Invite to sign in", "No login yet" markers, the subset rule's implementation, any tenant write path) and Increment 3 (Google); a cross-org invitation list (the "oversight" surface in this increment is the per-org panel with the Self-designated badge and revoke-all); bulk/CSV; SMS; free-text inviter message; auto-send on hire or grant; auto sign-in after accept; self-service "request access"; domain auto-join; the 90-day redaction sweep (S6); scrubbing the other three credential templates (F154); `person_identifiers` writes; breached-password checks or magic links; changing the account email during acceptance; statistics-grant links; the `requestEmailChange` "already in use" enumeration leak (existing, TODO); a custom expiry picker; an operator-facing "Resend" for terminal rows; Turnstile on the accept form (the token is the proof; the IP limit is the second layer).
+
+## Proposed decisions and findings (for integration; the shared files are not edited here)
+
+- **DECISION-183–187:** as proposed by the architect (Phase 2), with D-5 folded into 183 and D-1/D-2 into 184.
+- **DECISION-188 (implementation).** The accept function's outcome contract: returned (not raised) outcomes, `blocked_at` commit semantics, subtransaction apply phase, non-terminal refusals write nothing, self-acceptance stamped not refused (operator ruling), `session_matches` in the preview.
+- **DECISION-189 (implementation).** The issue-side protocol: queue row and invitation in one transaction with the link set at insert, post-commit send, redaction at `sent`/`failed`, the two partial unique indexes, resend lineage by `resent_from_id`, the durable-limit numbers (20/10/3 per 24 h, 5 min cooldown, 5 resends), the 7-day default and 30-day cap.
+- **F158.** `retryEmailAction` resets a `failed` row to `queued` and would re-send a credential row whose body was redacted; it must refuse for `CREDENTIAL_TEMPLATE_KEYS`.
+- **F159.** The roster-resolved treasurer flow depends on `contact_methods` emails that no seed or e2e fixture carries, and production data may lack for the treasurer; fixtures and the operator checklist must supply them.
+- F153–F157 as proposed by the architect.
+
+## Integration doc edits (orchestrator, at integration)
+
+CLAUDE.md → Permissions vs Flags: the credential-as-third-mechanism sentence (architect's text); CLAUDE.md → The Brand Is a Cascade Override: add `(invite)` to the un-brandable list; **CLAUDE.md → Two Hierarchies Intersect Nowhere: the operator's R9-reversal sentence** ("A platform admin acquires tenant authority only as any person does — by accepting an invitation addressed to their own email; a self-sent designation is permitted and audited as such, and the platform role itself confers nothing."); `.claude/agents/architect.md` Route Group Rules: the `(invite)` bullet (architect's text); `docs/architecture.md:100` (S8); `docs/product/functionality-map.md`; `docs/TODO.md` lines for S6, F154, Increment 2, Increment 3, the `requestEmailChange` leak, the D-6 cookie note.
 
 ## Implementer
 
-[database-admin | api-developer | ux-developer | full-stack-developer]
+**Named, in order:** **api-developer** (Batch 0) → **database-admin** (Batch 1) → **api-developer** (Batch 2) → **ux-developer** (Batch 3) → **api-developer** (Batch 4: fixture and the two MFA auth specs) with **ux-developer** (Batch 4: admin spec rewrite and 360 px). No full-stack-developer: the schema and the anonymous write path are the risk and deserve a specialist each. Batches are serial in one worktree (shared files; Rule 16); Batch 1 may start as soon as Batch 0a is committed, since it needs only the moved module paths for the parity test.
+
+## Handoff
+
+**Operator confirmations (non-blocking; defaults stand if unanswered):** (1) the "oversight list" for self-accepted designations is the per-org panel's "Self-designated" badge, not a cross-org list; (2) before the production acceptance, confirm the first customer's treasurer is enrolled with an email on file (F159). **Architect:** acknowledge D-1 before Batch 1 starts. **Next: api-developer for Batch 0; database-admin may start Batch 1 once 0a is committed.**
 
 ---
 
 # Phase 4 — Implementation
 
+## Batch 0 — mechanical groundwork (api-developer, 2026-10-21)
+
+**Status: Batch 0 complete, working tree uncommitted (awaiting operator approval).** Phase 3 calls for three commits (0a move, 0b audit lift, 0c F157 fix); the changes are separable by file and ready to be staged as those three commits.
+
 ## Files Created
 
-- `path/to/file` — purpose
+- `src/lib/audit-tx.ts` (0b) — the `insertAuditRow` implementation, moved with `git mv` from `src/lib/domains/audit-tx.ts`; content unchanged (S3).
+- `src/lib/domains/audit-tx.ts` (0b) — now a three-line re-export shim (`AUDIT_ACTIONS`, `insertAuditRow`, `AuditActor`) so both import paths work, as Phase 3 specifies.
+- `src/lib/onboarding/` (0a) — new directory holding the four moved files below.
 
 ## Files Modified
 
-- `path/to/file` — what changed
+0a — pure move (`git mv`), importers updated, no behaviour change:
+- `src/lib/founding-administrator.ts` → `src/lib/onboarding/founding-administrator.ts` (content unchanged).
+- `src/lib/treasurer-designation.ts` → `src/lib/onboarding/treasurer-designation.ts` (content unchanged).
+- `src/lib/founding-administrator.test.ts` → `src/lib/onboarding/founding-administrator.test.ts`: header path and run-command comment only.
+- `src/lib/treasurer-designation.test.ts` → `src/lib/onboarding/treasurer-designation.test.ts`: `ROOT` is now `../../..`, the source-scan reads `src/lib/onboarding/treasurer-designation.ts`, the two `./org-features` dynamic imports are `../org-features`, header and command comment.
+- `src/app/(admin)/admin/organizations/[id]/{actions.ts, actions.test.ts, page.tsx, page.test.tsx, founding-administrator-section.tsx, founding-administrator-section.test.tsx}` — `@/lib/founding-administrator` and `@/lib/treasurer-designation` imports, `vi.mock` specifiers and path comments now point at `@/lib/onboarding/...` (the two founding-administrator section files carry comments only). The treasurer section files needed no change.
+- `src/lib/giving/team.ts` — one path comment.
+
+0b:
+- `src/lib/domains/service.ts`, `src/lib/domains/toggles.ts` — import `AUDIT_ACTIONS, insertAuditRow` from `@/lib/audit-tx` instead of `./audit-tx`.
+
+0c (F157):
+- `src/lib/reserved-slugs.ts` — `RESERVED_SLUGS` gains `file-statistics` and `invite`; header documents the new route-tree test.
+- `src/lib/reserved-slugs.test.ts` — two new tests (below).
+
+**Not edited (Rule 16 integration-only, or integration-time doc edits per Phase 3):** `scripts/test-rls.sql:7924` still says `src/lib/founding-administrator.test.ts` (a comment); `docs/testing.md`, `docs/architecture.md`, `docs/STATE.md`, `docs/TODO.md`, `docs/decisions.md`, `docs/schema-design-2.md`, `docs/product/functionality-map.md`, `docs/release-notes/v0.35.md`, older work-logs and the shipped migrations `drizzle/0052`/`0057` still mention the old paths in prose; the orchestrator carries those at integration. `e2e/admin-organizations.spec.ts` needed no edit (it names only `data-testid`s, no module path).
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- none (Batch 1 owns `0059`).
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+- none written in Batch 0 (no new mutation; `insertAuditRow` behaviour is unchanged).
+
+## Regression Tests Added
+
+- `src/lib/reserved-slugs.test.ts` — "reserves every live top-level route segment in src/app — regression for RESERVED_SLUGS drift (F157)": walks `src/app` (flattening route groups, skipping dynamic/private/parallel segments) and asserts every live top-level segment is reserved. Verified failing before the fix (`["file-statistics"]` unreserved) and passing after.
+- `src/lib/reserved-slugs.test.ts` — "reserves `file-statistics` and `invite` — regression for RESERVED_SLUGS drift (F157)": pins the two names, including `invite` before its route exists (also case-insensitively). Failed before, passes after.
+
+## Batch 0 Gate Results (api-developer, 2026-10-21)
+
+- `npm run typecheck`: pass. `npm run lint` (`--max-warnings=0`): pass. `npm run check` (all eight tripwires): pass.
+- Unit (no DB): `src/app/(admin)/admin/organizations` (all 18 files), `reserved-slugs.test.ts`, `audit.test.ts`: 20 files, 339 tests, all pass.
+- DB-backed, one file at a time against the `pipeline-invitations` branch (`--no-file-parallelism`): `onboarding/treasurer-designation.test.ts` 24/24, `onboarding/founding-administrator.test.ts` 32/32, `domains/toggles.db.test.ts` 8/8, `giving/team.db.test.ts` 24/24, `domains/service.db.test.ts` 101/101 across three runs (see next bullet).
+- **Flake, not a regression:** a combined run of `src/lib/domains` + `src/lib/giving` in one process failed one `service.db.test.ts` test and then cascaded 48 failures and many skips (`describe.skipIf(!hasDb)` files) after a Neon connection timeout. Run alone, `service.db.test.ts` failed one different test each time with `Connection terminated unexpectedly` (a Neon connection drop, not an assertion); both tests that failed across the two runs pass when re-run on their own. The only change that file's subject sees is an import path (`./audit-tx` to `@/lib/audit-tx`). QA should run the DB subset one file per process.
+- Regression tests fail before and pass after the F157 fix (see Regression Tests Added).
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+- **Worktree had no `node_modules`;** ran `npm ci` inside `presby-invites` (no lockfile or `package.json` change; the `prepare` hook skipped hook installation because a worktree's `.git` is a file, so the pre-commit and commit-msg hooks are not installed in this worktree. The orchestrator should confirm hooks run at commit time).
+- **0b lifts rather than copies:** `git mv` of the implementation to `src/lib/audit-tx.ts`, with `src/lib/domains/audit-tx.ts` recreated as the re-export. The two in-repo callers were switched to the new path (per the task); the shim keeps the old path working for anything that lands on a parallel branch.
+- **The route-tree test covers directories only.** Files such as `robots.ts` produce a dotted URL (`/robots.txt`) that the DNS-label slug CHECK already refuses, so they are out of scope. The pre-existing `orgs` entry (no longer a page, a `next.config.ts` redirect) is deliberately left in the list.
+- **The new route-tree test is the lasting fix for F157;** the `invite` pin is by name because the route does not exist until Batch 3, and should become redundant (not removed) when `src/app/(invite)/invite` lands.
+- The moved DB-backed suites are slow (about 55 s for the treasurer file alone against the Neon branch); a combined run of the DB subset exceeds ten minutes, so run them one file at a time in the background.
 
 ---
 

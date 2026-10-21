@@ -35,7 +35,7 @@ The operator asked (2026-10-21, while the invitations pipeline runs) to "work on
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named per batch | 2026-10-21 |
-| 4 — Implementation | A ux-developer · B full-stack-developer · C ux-developer · D api-developer | In progress (A, C, D complete; B pending) | — | 2026-10-21 |
+| 4 — Implementation | A ux-developer · B full-stack-developer · C ux-developer · D api-developer | Complete (A, B, C, D) | — | 2026-10-21 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -967,6 +967,49 @@ HTML plus plain text for every sender are under `/private/tmp/claude-501/-Users-
 - **Headings** were left open by the design for most senders; each is short and sentence case ("New feedback", "Your ticket has been filed", "Reset your password").
 - **F165** (relative links in ticket and feedback mail) is closed as designed. The three token-bearing senders keep `NEXT_PUBLIC_APP_URL ?? localhost` link construction (out of scope).
 - Behaviour change worth the operator's eye: ticket and feedback mail now carries working absolute links; with no safe `NEXT_PUBLIC_APP_URL` (production without an https value) the button is omitted rather than throwing.
+
+## Batch B: per-digit 2FA code entry (full-stack-developer, 2026-10-21)
+
+**Status: B complete.** Nothing staged or committed. Next agent: **qa** (Phase 5). The Phase 4 MFA-enrolled running-server gate is met by this batch (results below); A, C and D carry no auth-path change of their own.
+
+### Contract (what the next agent consumes)
+
+No routes, no server-action signature changes (`verifyTotpAction` is byte-for-byte unchanged, as are its audit keys and rate limit), no `FEATURES`, flag, seed, schema or `AUDIT_ACTIONS` change.
+
+- `OneTimeCodeInput` (`src/components/shared/one-time-code-input.tsx`, `'use client'`, UI only): props `name, label, value, onValueChange, length=6, autoFocus=false, disabled, invalid, describedBy, onComplete, id, className`. Six real generated `<Input>` boxes (`aria-label="Digit n of 6"`, no `name`, no `maxLength`, `type="text"`, `inputMode="numeric"`, `autoComplete="one-time-code"` on box 1 only) plus ONE hidden `<input name={name}>` carrying the joined digits. Behaviour as in Phase 3's table (digit advance, overtype, non-digit ignored, NFKC full-width digits, multi-character input and paste spread across boxes, Backspace and Delete both erase backward across boxes, arrows/Home/End, `onComplete` on a changed complete code, no auto-submit). A cleared middle box leaves a hole, so the emitted code is short and Verify stays disabled.
+- `TotpChallengeForm` (`src/app/(auth)/totp/totp-challenge-form.tsx`): props `{ callbackUrl, error?: "invalid" | "rate_limited" }`; `<HydrationGate><form action={verifyTotpAction}>`; digit mode and recovery mode render mutually exclusive `token` fields (digit mode: the hidden input; recovery mode: the visible `#totp-recovery` text input, mounted by the toggle with `autoFocus`); `VerifyButton` with `useFormStatus` ("Verifying…"), disabled until six digits (recovery: non-blank) or while pending; completing the code moves focus to Verify (after the render that enables it); error copy unchanged, one `<p id="totp-error" role="alert" class="text-destructive">`, wired by `aria-describedby`/`aria-invalid` to every box and to the recovery field.
+- `page.tsx` is a Server Component that allow-lists `sp.error` to `invalid | rate_limited` and renders the form.
+- `/account/2fa` enrolment form: `HydrationGate` around the `<form>`, the single input replaced by `<OneTimeCodeInput name="code" … />`, `autoFocus` off; `handleSubmit`, the toast and `completeEnrollment` unchanged.
+- `check:hydration-gate` rule **H3**: a non-test `.tsx` file importing `@/components/shared/one-time-code-input` must import and render `<HydrationGate>`; same `// hydration-gate-ok: <reason>` grammar (reason mandatory); `.ts` files exempt (a type import cannot render it). Header comment updated. CLAUDE.md's Common Commands line is the orchestrator's integration edit (already listed).
+- `e2e/support/totp-page.ts`: `enterTotpCode`, `enterRecoveryCode`, `totpGroup`, `totpBox`, `verifyButton`, `recoveryToggle`, `recoveryField`. Both entry helpers wait for the control to be enabled (the HydrationGate lifts), neither presses Verify.
+- `e2e/support/totp-fixture.ts`: `E2E_RECOVERY_CODE` (`WXYZ-2345`), `E2E_WRONG_RECOVERY_CODE`, `seedRecoveryCode(sql, userId)` (deletes the user's recovery rows, inserts one unused code with the uppercase sha256, algorithm copied not imported); called from `seedTotpEnrollment` so every globalSetup run re-seeds it.
+
+### Files created
+`src/components/shared/one-time-code-input.tsx` and `.test.tsx` (50 tests); `src/app/(auth)/totp/totp-challenge-form.tsx` and `.test.tsx` (17); `src/app/(account)/account/2fa/totp-enroll-form.test.tsx` (5); `e2e/support/totp-page.ts`; `e2e/totp-code-entry.spec.ts` (11); `e2e/totp-recovery-code.spec.ts` (2); `e2e/hydration/totp-challenge.spec.ts` (1).
+
+### Files modified
+`src/app/(auth)/totp/page.tsx`, `src/app/(account)/account/2fa/totp-enroll-form.tsx`, `scripts/check-hydration-gate.mjs` and `.test.mjs` (13 new H3 cases), `e2e/support/totp-fixture.ts`, the ten `getByPlaceholder(/123456/)` sites (`e2e/totp-full-login.spec.ts` 2, `e2e/totp-callback-bypass.spec.ts` 5, `e2e/branded-signin.spec.ts` 1, `e2e/support/domains-ui-fixture.ts` 1, `e2e/support/giving-fixture.ts` 1; `grep -rn 123456 e2e` now returns nothing), `e2e/account-page.spec.ts` (+1 test: six labelled boxes, enabled after hydration, none focused on load, typing advances), `docs/ui-standards.md` (a "One-time code entry" paragraph in Forms), `docs/testing.md` (the helper, the fixture code, the hydration example).
+
+### Schema / audit events
+None. `npm run check:audit` passes. The new specs assert the existing rows: `totp.recovery_failed`, `totp.recovery_succeeded`, `totp.verify_succeeded`, and (hydration spec) that NO `totp.verify_failed` row exists since the test began.
+
+### Gate results (all on this worktree, Neon branch `pipeline-review-polish`)
+- `npm run typecheck`: clean (fresh `node_modules`). `npm run lint`: clean. `npm run check`: all eight tripwires pass, including H3.
+- `npm run test`: 474 files passed, 64 skipped (DB-backed), 7055 tests passed.
+- **Running-server e2e on dev port 3600** (`E2E_ALLOW_SHARED_DB=true E2E_BASE_URL=http://localhost:3600 npx playwright test … --project=chromium`, MFA-enrolled seeded user through the new `/totp`): `totp-full-login` 1/1, `totp-callback-bypass` 7/7, `branded-signin` 5/5 (including test 2, the MFA login), `totp-recovery-code` 2/2, `totp-code-entry` 11/11 (paste from the real clipboard with a space, a synthetic paste into box 4, a whole-code `fill()` as the autofill case, toggle leaves exactly one `token` field, wrong code, 360px layout), `hydration/totp-challenge` 1/1, `account-page` 7/7, plus `hydration/domains-claim-form` 2/2 and `hydration/giving-offline-gift-form` 1/1 (the two fixtures that sign in through `/totp`). One early run had two failures that were `page.goto` aborts and a 30 s timeout during a Turbopack recompile right after I edited the form; both specs passed on the immediate rerun and in the final runs.
+- **Production-build lane** (`PW_PROD_PORT=3900`, scratch copy with hardlinked `node_modules`, `npm run test:e2e:prod`, both projects): **73 passed** (6.6 min), including `hydration/totp-challenge` and every other hydration spec. **Negative control:** with `<HydrationGate>` removed from `totp-challenge-form.tsx` in the scratch copy, the spec went RED at the pre-release assertion (the gate fieldset's `aria-busy` never appears, so boxes and toggle are not disabled pre-hydration); with the gate restored and `.next` rebuilt it passed (1/1). The lane's copy was taken before the final `gap-1.5` box-size edit; the post-edit rebuild for the control ran the final sources, and the dev lane (34 specs) re-ran green after the edit.
+- Final dev-lane re-run after the last component edit: `totp-code-entry` 11, `totp-recovery-code` 2, `totp-full-login` 1, `totp-callback-bypass` 7, `branded-signin` 5, `account-page` 7, `hydration/totp-challenge` 1: 34 passed.
+
+### Browser verification (360px, iPhone SE device profile, Chromium; dev server 3600)
+Screenshots in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/`: `totp-1-load.png` (box 1 focused with ring), `totp-2-typed.png`, `totp-3-erased.png`, `totp-4b-complete-settled.png` (Verify enabled and focused), `totp-5-paste.png`, `totp-6b-recovery-settled.png`, `totp-6c-recovery-filled.png`, `totp-7-back.png`, `totp-8-error.png`, `totp-9-rate-limited.png`, `totp-10-dark.png`, `enrol-1-load.png`, `enrol-2-typed.png`. Observed: focus on box 1 at load; typing "48" leaves focus on box 3; Backspace then Delete walk back to box 1 and erase; a whole-code input event and a paste of `123 456` fill all six and focus Verify; recovery toggle focuses the recovery field with exactly one `token` field, and the way back refocuses box 1 with cleared boxes; the error state shows red boxes (`aria-invalid`), the message and box 1 focused; zero horizontal overflow on `/totp` and `/account/2fa`.
+- **Defect found and fixed in the browser pass.** The first build used `w-11` boxes and `gap-2`, which needs 304px; `/account/2fa` has `p-8` padding, so its content width is 296px and the row wrapped 5+1 (the `/totp` e2e passed because its content width is 312px). Boxes are now `min-w-11 max-w-12 flex-1` with `gap-1.5` (294px floor), so both pages show one row and the boxes grow to 48px where there is room; the row still wraps rather than shrinks below 44px (200% zoom).
+
+### Not exercised / residuals
+- **A real iPhone or Android one-time-code autofill was not exercised.** The spread path is proven with a synthetic whole-code input event (`fill()`), a real clipboard paste and a synthetic paste, and the no-`maxLength` / `autocomplete="one-time-code"` attributes are asserted, but iOS's own suggestion bar needs a physical device or the operator's checklist step. Nothing indicates a dependency is needed (Phase 2 addendum not triggered).
+- Android soft keyboards often report Backspace as an input event with no key event; Backspace on an EMPTY box then cannot step back (a filled box still clears via the empty-value input event). Accepted residual, no sentinel hack; noted for the operator's phone pass.
+- Recovery mode is not preserved across a failed attempt (page reload returns to digit mode), as designed and accepted in Phase 3.
+- `text-destructive` on the dark scheme reads dim against the dark background (`totp-10-dark.png`); it is the platform token and complies with F163, so any contrast change is a token decision, not this batch's.
+- Enrolment completion itself (a real `completeEnrollment`) is covered by the jsdom test with a mocked action only; no e2e mutates the seeded admin row.
 
 ## Files Created
 

@@ -29,6 +29,7 @@ import { E2E_EMAILS, E2E_USER_LIST } from "./users";
 import { seedE2EUsers } from "./seed-users";
 import { seedE2EOrgs } from "./seed-orgs";
 import { sweepStaleDomainsUiFixtures } from "./domains-ui-fixture";
+import { sweepStaleInvitationFixtures } from "./invitation-fixture";
 
 const AUTH_DIR = path.resolve(__dirname, ".auth");
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -112,6 +113,19 @@ async function sweepStaleDomainsUiFixtureOrgs(platformDbUrl: string): Promise<vo
   if (!platformDbUrl) return; // seedE2EOrgs above has already thrown if the owner URL is missing where it matters
   const removed = await sweepStaleDomainsUiFixtures(neon(platformDbUrl));
   if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-domui-* organization(s) left by an earlier run`);
+}
+
+/**
+ * The invitation specs (e2e/invitation-*.spec.ts, admin-organizations.spec.ts Tests 7-8) build a throwaway
+ * congregation and accept invitations into it. An acceptance addressed to a permanent fixture user
+ * (`mfa-enrolled`) gives that user a membership there; if teardown lost to a Neon connection drop, the user's
+ * post-login landing would change from `/admin` to `/o/<slug>` or `/home` for every later spec. Sweep any such
+ * leftover (and its throwaway users) before a session is acquired, exactly as the custom-domains UI fixture does.
+ */
+async function sweepStaleInvitationFixtureOrgs(platformDbUrl: string): Promise<void> {
+  if (!platformDbUrl) return;
+  const removed = await sweepStaleInvitationFixtures(neon(platformDbUrl));
+  if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-invite-* organization(s) left by an earlier run`);
 }
 
 async function signInAndSave(
@@ -307,6 +321,7 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   await seedE2EUsers(dbUrl);
   await seedE2EOrgs(platformDbUrl);
   await sweepStaleDomainsUiFixtureOrgs(platformDbUrl);
+  await sweepStaleInvitationFixtureOrgs(platformDbUrl);
   await cleanupTestFeedback(dbUrl);
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });

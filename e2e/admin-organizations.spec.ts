@@ -492,93 +492,115 @@ test.describe("Admin — set and clear service times & office hours (leaves the 
 });
 
 // ---------------------------------------------------------------------------
-// Test 7 — Treasurer designation (online giving, Batch 1b)
-// docs/work-log/2026-10-15-online-giving.md, Phase 2 R2 / Phase 3 "Designation".
+// Test 7 — Treasurer INVITATION (online giving, Batch 1b; rewritten for the
+// account-invitation pipeline, docs/work-log/2026-10-21-invitations.md,
+// Phase 3 "E2E blast radius").
 //
-// The section renders only for a congregation / new worshiping community:
-//   - alpha (a congregation with NO giving.manage holder) shows the control;
+// A platform designation is no longer an instant grant: the operator sends a
+// single-use invitation to the address on file for a member of the congregation,
+// and nobody holds the access until the invitee accepts (the acceptance paths are
+// e2e/invitation-new-account.spec.ts and invitation-existing-account.spec.ts).
+// So this block asserts what a SEND does and does not do:
+//   - alpha-like congregation (no giving.manage holder) shows the control;
 //   - the presbytery shows no section at all;
-//   - once a treasurer is designated the control disappears and the section
-//     shows a COUNT, never a name or an email.
+//   - an address nobody enrolled is refused in roster words, writes nothing;
+//   - a send queues one `account_invitation` mail, writes `invitation.created`
+//     (ids only), shows a pending row in place of the form, and grants NOTHING;
+//   - Resend inside the 5-minute cooldown is refused in plain words; Revoke kills
+//     the link and brings the form back.
 //
-// The designee is the existing `org-single` fixture person (Marguerite
-// Ashcombe, an active member of alpha). Holding giving.manage flips her
-// sign-in 2FA requirement (arm B of presby_two_factor_required), so every row
-// this test creates — the role grant, the org-owned `treasurer` and
-// `giving_recorder` roles and their bindings — is removed again in `afterAll`
-// (and defensively in `beforeAll`, repairing a crashed prior run), and nothing
-// else in the suite signs in as org-single while it is in place (workers: 1).
+// WHY A THROWAWAY CONGREGATION. Invitation rows cannot be deleted except by the
+// cascade of their organization, and the durable per-inviter / per-address limits
+// would fail repeated runs on the permanent alpha fixture. The treasurer is a
+// roster person (a person, a `contact_methods` email and an active membership,
+// F159) created for this block and removed with it. Nothing here touches alpha,
+// so the old `removeGivingDesignation()` cleanup is gone with the instant grant.
 // ---------------------------------------------------------------------------
 
 import { E2E_ORGS } from "./support/seed-orgs";
 import { E2E_USERS } from "./support/users";
+import {
+  addRosterPerson,
+  auditRowsFor,
+  INVITE_NAMES,
+  inviteAddress,
+  removeInviteOrg,
+  rosterUserId,
+  setupInviteOrg,
+  type InviteOrg,
+} from "./support/invitation-fixture";
 
-const TREASURER_ORG = E2E_ORGS.alpha;
-const DESIGNEE = E2E_USERS["org-single"];
-const DESIGNEE_PERSON_ID = "e2e00000-0000-0000-0000-0000000000a1";
+/** Where a credential email's body goes once it is sent (`src/lib/email/credential-keys.ts`). */
+const REDACTED_BODY_MARKER = "[Removed after delivery: this message contained a one-time sign-in link.]";
 
-async function removeGivingDesignation(sql: Sql) {
-  // Grants first (the role FK would cascade, but being explicit documents it),
-  // then the org-owned roles. `where key in (...)` and the org id are the only
-  // rows this can touch; alpha has no such roles before the test (asserted).
-  await sql`
-    delete from role_grants
-     where organization_id = ${TREASURER_ORG.id}::uuid
-       and role_id in (select id from app_roles
-                        where organization_id = ${TREASURER_ORG.id}::uuid
-                          and key in ('treasurer', 'giving_recorder'))
-  `;
-  await sql`
-    delete from app_roles
-     where organization_id = ${TREASURER_ORG.id}::uuid
-       and key in ('treasurer', 'giving_recorder')
-  `;
+type QueueRow = { to_email: string; template_key: string; status: string; html_body: string; text_body: string | null };
+
+async function queueRowFor(sql: Sql, invitationId: string): Promise<QueueRow> {
+  const rows = (await sql`
+    select q.to_email, q.template_key, q.status, q.html_body, q.text_body
+      from account_invitations i join email_queue q on q.id = i.email_queue_id
+     where i.id = ${invitationId}::uuid`) as QueueRow[];
+  expect(rows, "the invitation is linked to exactly one queued mail").toHaveLength(1);
+  return rows[0];
 }
 
-test.describe("Admin — treasurer designation (online giving)", () => {
+test.describe("Admin — treasurer invitation (online giving)", () => {
   test.use({ storageState: storageStatePath("admin") });
   test.describe.configure({ mode: "serial" });
+  test.setTimeout(90_000);
+
+  let org: InviteOrg;
+  let treasurerEmail: string;
+  let treasurerPersonId: string;
 
   test.beforeAll(async () => {
     const sql = platformSql();
-    await removeGivingDesignation(sql);
+    org = await setupInviteOrg(sql);
+    treasurerEmail = inviteAddress(org, "treasurer");
+    treasurerPersonId = await addRosterPerson(sql, org, {
+      first: INVITE_NAMES.rosterFirst,
+      last: INVITE_NAMES.rosterLast,
+      email: treasurerEmail,
+    });
     const holders = (await sql`
       select 1
         from role_grants rg
         join app_role_permissions arp on arp.role_id = rg.role_id
-       where rg.organization_id = ${TREASURER_ORG.id}::uuid
+       where rg.organization_id = ${org.orgId}::uuid
          and arp.permission_key = 'giving.manage'
          and rg.starts_on <= current_date
          and (rg.ends_on is null or rg.ends_on > current_date)
     `) as unknown[];
     expect(
       holders,
-      "the alpha fixture must start with no giving.manage holder for the designation control to render",
+      "the throwaway congregation must start with no giving.manage holder for the invitation control to render",
     ).toHaveLength(0);
   });
 
   test.afterAll(async () => {
-    await removeGivingDesignation(platformSql());
+    await removeInviteOrg(platformSql(), org);
   });
 
   test("a congregation with no giving.manage holder shows the treasurer control, disabled until the email looks valid", async ({
     page,
   }) => {
-    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    await page.goto(`/admin/organizations/${org.orgId}`);
     const section = page.getByTestId("treasurer-designation-section");
     await expect(section).toBeVisible({ timeout: 10_000 });
     await expect(section.getByRole("heading", { name: "Treasurer" })).toBeVisible();
 
     const email = section.getByLabel(/treasurer.s email address/i);
-    const trigger = section.getByRole("button", { name: "Designate treasurer" });
+    const trigger = section.getByRole("button", { name: "Send invitation" });
     // HydrationGate keeps the fieldset disabled until the page has hydrated;
     // wait for it before typing, exactly as a user would.
     await expect(email).toBeEnabled({ timeout: 15_000 });
     await expect(trigger).toBeDisabled();
     await email.fill("not-an-email");
     await expect(trigger).toBeDisabled();
-    await email.fill(DESIGNEE.email);
+    await email.fill(treasurerEmail);
     await expect(trigger).toBeEnabled();
+    // No sentence anywhere tells the operator the person must "sign up first" (C5: there is no sign-up path).
+    expect(((await section.textContent()) ?? "").toLowerCase()).not.toContain("sign up first");
   });
 
   test("a presbytery shows no treasurer section at all", async ({ page }) => {
@@ -590,152 +612,341 @@ test.describe("Admin — treasurer designation (online giving)", () => {
     await expect(page.getByLabel(/treasurer.s email address/i)).toHaveCount(0);
   });
 
-  test("an account that is not a member of the organization is refused in plain words, creates nothing, and leaves the control in place", async ({
+  test("an address nobody enrolled here is refused in roster words, writes nothing, and leaves the control in place", async ({
     page,
   }) => {
     const sql = platformSql();
-    const membershipsBefore = (await sql`
-      select count(*)::int as n from memberships where organization_id = ${TREASURER_ORG.id}::uuid
-    `) as { n: number }[];
-
-    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    const stranger = inviteAddress(org, "nobody");
+    await page.goto(`/admin/organizations/${org.orgId}`);
     const section = page.getByTestId("treasurer-designation-section");
     const email = section.getByLabel(/treasurer.s email address/i);
     await expect(email).toBeEnabled({ timeout: 15_000 });
-    // The platform admin fixture has an account and no person at alpha.
-    await email.fill(E2E_USERS.admin.email);
-    await section.getByRole("button", { name: "Designate treasurer" }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: "Yes, designate" }).click();
+    await email.fill(stranger);
+    await section.getByRole("button", { name: "Send invitation" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Yes, send invitation" }).click();
 
-    await expect(section.getByRole("status")).toContainText(/not a member of this organization/i, {
-      timeout: 15_000,
-    });
-    await expect(section.getByRole("button", { name: "Designate treasurer" })).toBeVisible();
+    // The refusal describes the roster, never whether the address has an account.
+    const alert = section.getByRole("alert").filter({ hasText: /nobody enrolled at this congregation/i });
+    await expect(alert).toBeVisible({ timeout: 15_000 });
+    await expect(alert).toContainText("has that email on file");
+    await expect(section.getByRole("button", { name: "Send invitation" })).toBeVisible();
 
-    const membershipsAfter = (await sql`
-      select count(*)::int as n from memberships where organization_id = ${TREASURER_ORG.id}::uuid
-    `) as { n: number }[];
-    expect(membershipsAfter[0].n).toBe(membershipsBefore[0].n);
-    const roles = (await sql`
-      select 1 from app_roles
-       where organization_id = ${TREASURER_ORG.id}::uuid and key in ('treasurer', 'giving_recorder')
-    `) as unknown[];
-    expect(roles, "a refused designation writes nothing").toHaveLength(0);
+    const counts = (await sql`
+      select (select count(*)::int from account_invitations where organization_id = ${org.orgId}::uuid) as invitations,
+             (select count(*)::int from email_queue where to_email = ${stranger}) as mail,
+             (select count(*)::int from app_roles where organization_id = ${org.orgId}::uuid
+                and key in ('treasurer', 'giving_recorder')) as roles`) as { invitations: number; mail: number; roles: number }[];
+    expect(counts[0], "a refused invitation writes nothing").toEqual({ invitations: 0, mail: 0, roles: 0 });
   });
 
-  test("designating a member makes the control disappear; the section then shows a count, never a name, and the audit row carries ids only", async ({
+  test("sending to the roster person's address queues one invitation mail, shows a pending row in place of the form, and grants nothing", async ({
     page,
   }) => {
     const sql = platformSql();
-    type Counts = { people: number; memberships: number };
+    const operatorId = await rosterUserId(sql, "admin");
+    type Counts = { people: number; memberships: number; grants: number; roles: number };
     const countRows = async (): Promise<Counts> => {
       const [row] = (await sql`
-        select (select count(*) from people)::int as people,
-               (select count(*) from memberships)::int as memberships
-      `) as Counts[];
+        select (select count(*)::int from memberships where organization_id = ${org.orgId}::uuid) as memberships,
+               (select count(distinct m.person_id)::int from memberships m where m.organization_id = ${org.orgId}::uuid) as people,
+               (select count(*)::int from role_grants where organization_id = ${org.orgId}::uuid) as grants,
+               (select count(*)::int from app_roles where organization_id = ${org.orgId}::uuid) as roles`) as Counts[];
       return row;
     };
     const before = await countRows();
 
-    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    await page.goto(`/admin/organizations/${org.orgId}`);
     const section = page.getByTestId("treasurer-designation-section");
     const email = section.getByLabel(/treasurer.s email address/i);
     await expect(email).toBeEnabled({ timeout: 15_000 });
-    await email.fill(DESIGNEE.email);
-    await section.getByRole("button", { name: "Designate treasurer" }).click();
+    await email.fill(treasurerEmail);
+    await section.getByRole("button", { name: "Send invitation" }).click();
 
-    // The confirm is an AlertDialog (no native dialog), and it names the
-    // account and the organization before anything is written.
+    // The confirm is an AlertDialog (no native dialog); it names the address and the organization before
+    // anything is written, and tells the operator nobody holds the access until it is accepted.
     const dialog = page.getByRole("alertdialog");
-    await expect(dialog).toContainText(DESIGNEE.email);
-    await expect(dialog).toContainText(TREASURER_ORG.name);
-    await dialog.getByRole("button", { name: "Yes, designate" }).click();
+    await expect(dialog).toContainText(treasurerEmail);
+    await expect(dialog).toContainText(org.name);
+    await expect(dialog).toContainText(/nobody holds this role until it is accepted/i);
+    await expect(dialog.getByTestId("self-address-sentence")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Yes, send invitation" }).click();
 
-    // The server action revalidates the page: the control is gone and the
-    // collapsed line appears. A count, not a name.
-    await expect(section.getByText(/already has one person who can manage giving/i)).toBeVisible({
-      timeout: 15_000,
-    });
+    const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
+    await expect(notice).toBeVisible({ timeout: 20_000 });
+    await expect(notice).toContainText(/Nobody holds this access until it is accepted/);
+    // The pending row replaces the form: the control is gone, the row shows the address and its state.
     await expect(section.getByLabel(/treasurer.s email address/i)).toHaveCount(0);
-    await expect(section.getByRole("button", { name: "Designate treasurer" })).toHaveCount(0);
+    const row = section.getByTestId("invitation-row");
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText(treasurerEmail);
+    await expect(row).toContainText("Pending");
+    await expect(row.getByRole("button", { name: "Resend" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "Revoke" })).toBeVisible();
 
-    // And it stays that way on a fresh load. No name, no email anywhere in the section.
-    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
+    // And it stays that way on a fresh load: still pending, still no form, nobody holds the access.
+    await page.goto(`/admin/organizations/${org.orgId}`);
     const reloaded = page.getByTestId("treasurer-designation-section");
-    await expect(reloaded.getByText(/already has one person who can manage giving/i)).toBeVisible({
-      timeout: 10_000,
+    await expect(reloaded.getByTestId("invitation-row")).toContainText("Pending", { timeout: 10_000 });
+    await expect(reloaded.getByLabel(/treasurer.s email address/i)).toHaveCount(0);
+
+    // Database truth: one open treasurer invitation naming the roster person; nothing was granted and no
+    // person, membership or role was created (acceptance, not sending, is what applies the designation).
+    const [invitation] = (await sql`
+      select id, purpose, person_id::text as person_id, created_by_user_id::text as created_by,
+             accepted_at, revoked_at, email_queue_id is not null as queued
+        from account_invitations where organization_id = ${org.orgId}::uuid`) as {
+      id: string; purpose: string; person_id: string; created_by: string; accepted_at: string | null;
+      revoked_at: string | null; queued: boolean;
+    }[];
+    expect(invitation).toMatchObject({
+      purpose: "treasurer",
+      person_id: treasurerPersonId,
+      created_by: operatorId,
+      accepted_at: null,
+      revoked_at: null,
+      queued: true,
     });
-    const text = (await reloaded.textContent()) ?? "";
-    expect(text).not.toContain("Marguerite");
-    expect(text).not.toContain("Ashcombe");
-    expect(text).not.toContain(DESIGNEE.email);
+    expect(await countRows(), "sending creates no person, membership, grant or role").toEqual(before);
 
-    // Database truth: no person and no membership was created; the designee
-    // holds one person-arm grant on the org-owned treasurer role; the
-    // recorder role exists and is ungranted.
-    expect(await countRows()).toEqual(before);
-    const grants = (await sql`
-      select r.key, rg.person_id::text as person_id, rg.group_id
-        from role_grants rg join app_roles r on r.id = rg.role_id
-       where rg.organization_id = ${TREASURER_ORG.id}::uuid
-         and r.key in ('treasurer', 'giving_recorder')
-    `) as { key: string; person_id: string | null; group_id: string | null }[];
-    expect(grants).toEqual([{ key: "treasurer", person_id: DESIGNEE_PERSON_ID, group_id: null }]);
-    const recorder = (await sql`
-      select 1 from app_roles
-       where organization_id = ${TREASURER_ORG.id}::uuid and key = 'giving_recorder'
-    `) as unknown[];
-    expect(recorder).toHaveLength(1);
+    // The mail: one row, platform-domain account mail by key; once sent its body no longer holds the link.
+    const mail = await queueRowFor(sql, invitation.id);
+    expect(mail.to_email).toBe(treasurerEmail);
+    expect(mail.template_key).toBe("account_invitation");
+    if (mail.status === "sent") {
+      expect(mail.html_body, "the credential is scrubbed from the stored body once sent").toBe(REDACTED_BODY_MARKER);
+      expect(mail.text_body).toBe(REDACTED_BODY_MARKER);
+    } else {
+      // A provider that is down leaves it queued WITH the link (the named residual); never anything else.
+      expect(mail.status).toBe("queued");
+      expect(mail.html_body).toContain("/invite?token=");
+    }
+    expect(mail.html_body).not.toContain(treasurerEmail);
 
-    // The audit row: platform-axis action, the org as resource, ids only.
-    type AuditRow = { metadata: Record<string, unknown>; actor_email: string | null };
-    const audit = (await sql`
-      select metadata, actor_email
-        from audit_events
-       where action = 'org.treasurer.designated'
-         and resource_id = ${TREASURER_ORG.id}
-       order by created_at desc
-       limit 1
-    `) as AuditRow[];
+    // The audit row: the operator as actor, the organization in metadata, ids only.
+    const audit = (await auditRowsFor(sql, invitation.id)).filter((a) => a.action === "invitation.created");
     expect(audit).toHaveLength(1);
     expect(audit[0].metadata).toMatchObject({
-      organizationId: TREASURER_ORG.id,
-      personId: DESIGNEE_PERSON_ID,
-      permissionKeys: ["giving.manage", "giving.record", "giving.view"],
+      invitationId: invitation.id,
+      organizationId: org.orgId,
+      purpose: "treasurer",
+      personId: treasurerPersonId,
     });
-    expect(JSON.stringify(audit[0].metadata)).not.toContain(DESIGNEE.email);
+    expect(JSON.stringify(audit[0].metadata)).not.toContain(treasurerEmail);
     expect(audit[0].actor_email).toBe(E2E_USERS.admin.email);
+    expect(audit[0].actor_user_id).toBe(operatorId);
+    // No designation event until it is accepted.
+    const designated = (await sql`
+      select 1 from audit_events where action = 'org.treasurer.designated' and resource_id = ${org.orgId}`) as unknown[];
+    expect(designated).toHaveLength(0);
+  });
+
+  test("Resend inside the cooldown is refused in plain words; Revoke kills the link and brings the form back", async ({
+    page,
+  }) => {
+    const sql = platformSql();
+    await page.goto(`/admin/organizations/${org.orgId}`);
+    const section = page.getByTestId("treasurer-designation-section");
+    const row = section.getByTestId("invitation-row");
+    await expect(row).toContainText("Pending", { timeout: 15_000 });
+
+    // Just sent: the 5-minute cooldown refuses a resend, and the refusal is announced inline, not toast-only.
+    await row.getByRole("button", { name: "Resend" }).click();
+    const refusal = section.getByRole("alert").filter({ hasText: /not sent/i });
+    await expect(refusal).toBeVisible({ timeout: 15_000 });
+    // One literal for every limit (cooldown, per-address, per-org, per-inviter): it does not say which.
+    await expect(refusal).toContainText("Too many invitations right now. Try again later.");
+
+    // Revoke behind an AlertDialog (never a native confirm).
+    await row.getByRole("button", { name: "Revoke" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText(treasurerEmail);
+    await dialog.getByRole("button", { name: "Yes, revoke" }).click();
+
+    // The form is back for a different invitation; the old row is a revoked one.
+    await expect(section.getByLabel(/treasurer.s email address/i)).toBeVisible({ timeout: 20_000 });
+    await expect(section.getByTestId("invitation-row")).toContainText("Revoked");
+    const [invitation] = (await sql`
+      select id, revoked_at is not null as revoked, accepted_at from account_invitations
+       where organization_id = ${org.orgId}::uuid`) as { id: string; revoked: boolean; accepted_at: string | null }[];
+    expect(invitation).toMatchObject({ revoked: true, accepted_at: null });
+    const audit = await auditRowsFor(sql, invitation.id);
+    expect(audit.map((a) => a.action)).toEqual(["invitation.created", "invitation.revoked"]);
+    expect(audit[1].metadata).toMatchObject({ invitationId: invitation.id, organizationId: org.orgId, via: "single" });
+    // The refused resend left no successor row behind.
+    const rows = (await sql`select count(*)::int as n from account_invitations where organization_id = ${org.orgId}::uuid`) as { n: number }[];
+    expect(rows[0].n).toBe(1);
+  });
+
+  test.describe("at a 360 px phone viewport", () => {
+    test.use({ viewport: { width: 360, height: 740 } });
+
+    test("the section fits the viewport with a 44 px touch target and no horizontal scroll inside it", async ({
+      page,
+    }) => {
+      // The previous test revoked the only invitation, so the form is back.
+      await page.goto(`/admin/organizations/${org.orgId}`);
+      const section = page.getByTestId("treasurer-designation-section");
+      await expect(section).toBeVisible({ timeout: 10_000 });
+      const email = section.getByLabel(/treasurer.s email address/i);
+      await expect(email).toBeEnabled({ timeout: 15_000 });
+      await email.fill(treasurerEmail);
+
+      const box = await section.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(360 + 1);
+      const trigger = section.getByRole("button", { name: "Send invitation" });
+      const triggerBox = await trigger.boundingBox();
+      expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+      expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(360 + 1);
+
+      // Nothing inside the section scrolls sideways - including the revoked row listed under the form.
+      const overflows = await section.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+      expect(overflows).toBe(false);
+    });
   });
 });
 
-test.describe("Admin — treasurer designation at a 360 px phone viewport", () => {
-  test.use({
-    storageState: storageStatePath("admin"),
-    viewport: { width: 360, height: 740 },
+// ---------------------------------------------------------------------------
+// Test 8 — Founding-administrator INVITATION (Phase 3 QA requirement 3, the
+// "send half"). Same throwaway-congregation discipline as Test 7.
+//
+// The sender's screen is IDENTICAL whether or not the address already has an
+// account (the send step reads no `users` row): the same notice, the same
+// pending row. Sent to an address with no account (org A) and to the `member`
+// fixture's address, which has one (org B), the notice text must be the same
+// string. A self-addressed send (the operator's own address) adds one sentence
+// to the confirm dialog and nothing else (the operator ruling on R9).
+// ---------------------------------------------------------------------------
+
+test.describe("Admin — founding administrator invitation", () => {
+  test.use({ storageState: storageStatePath("admin") });
+  test.describe.configure({ mode: "serial" });
+  test.setTimeout(90_000);
+
+  let orgA: InviteOrg;
+  let orgB: InviteOrg;
+  let noticeForNewAddress = "";
+
+  test.beforeAll(async () => {
+    const sql = platformSql();
+    orgA = await setupInviteOrg(sql);
+    // Distinct stamps: both orgs live at once, and the slug and id are derived from the stamp.
+    orgB = await setupInviteOrg(sql, { stamp: orgA.stamp + 1, sweep: false });
   });
 
-  test("the section fits the viewport with a 44 px touch target and no horizontal scroll inside it", async ({
+  test.afterAll(async () => {
+    const sql = platformSql();
+    await removeInviteOrg(sql, orgA);
+    await removeInviteOrg(sql, orgB);
+  });
+
+  async function fillAndSend(page: import("@playwright/test").Page, input: { email: string; first: string; last: string }) {
+    const section = page.getByTestId("founding-administrator-section");
+    const email = section.getByLabel("Email address");
+    await expect(email).toBeEnabled({ timeout: 15_000 });
+    const send = section.getByRole("button", { name: "Send invitation" });
+    await expect(send).toBeDisabled();
+    await email.fill(input.email);
+    await section.getByLabel("First name").fill(input.first);
+    await expect(send, "disabled until the last name is filled too").toBeDisabled();
+    await section.getByLabel("Last name").fill(input.last);
+    await expect(send).toBeEnabled();
+    await send.click();
+    return section;
+  }
+
+  test("an address with no account: the dialog names the organization, address and role; the send queues one mail and shows a pending row", async ({
     page,
   }) => {
-    // The previous describe's afterAll has removed the designation by now.
-    await page.goto(`/admin/organizations/${TREASURER_ORG.id}`);
-    const section = page.getByTestId("treasurer-designation-section");
-    await expect(section).toBeVisible({ timeout: 10_000 });
-    const email = section.getByLabel(/treasurer.s email address/i);
+    const sql = platformSql();
+    const address = inviteAddress(orgA, "founding");
+    await page.goto(`/admin/organizations/${orgA.orgId}`);
+    const section = await fillAndSend(page, { email: address, first: INVITE_NAMES.first, last: INVITE_NAMES.last });
+
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText(address);
+    await expect(dialog).toContainText(orgA.name);
+    await expect(dialog).toContainText(/founding administrator/i);
+    await expect(dialog.getByTestId("self-address-sentence")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Yes, send invitation" }).click();
+
+    const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
+    await expect(notice).toBeVisible({ timeout: 20_000 });
+    noticeForNewAddress = ((await notice.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    expect(noticeForNewAddress).toMatch(/Nobody holds this role until it is accepted/);
+    const row = section.getByTestId("invitation-row");
+    await expect(row).toContainText(address);
+    await expect(row).toContainText(`${INVITE_NAMES.first} ${INVITE_NAMES.last}`);
+    await expect(row).toContainText("Pending");
+
+    const [invitation] = (await sql`
+      select id, purpose, invitee_first_name, invitee_last_name, person_id, accepted_at
+        from account_invitations where organization_id = ${orgA.orgId}::uuid`) as {
+      id: string; purpose: string; invitee_first_name: string; invitee_last_name: string; person_id: string | null; accepted_at: string | null;
+    }[];
+    expect(invitation).toMatchObject({
+      purpose: "founding_administrator",
+      invitee_first_name: INVITE_NAMES.first,
+      invitee_last_name: INVITE_NAMES.last,
+      person_id: null,
+      accepted_at: null,
+    });
+    const mail = await queueRowFor(sql, invitation.id);
+    expect(mail.to_email).toBe(address);
+    expect(mail.template_key).toBe("account_invitation");
+    if (mail.status === "sent") expect(mail.html_body).toBe(REDACTED_BODY_MARKER);
+    else expect(mail.status).toBe("queued");
+    // Sending creates no account, no person and no grant: acceptance does.
+    const written = (await sql`
+      select (select count(*)::int from users where lower(email) = ${address}) as users,
+             (select count(*)::int from memberships where organization_id = ${orgA.orgId}::uuid) as memberships,
+             (select count(*)::int from role_grants where organization_id = ${orgA.orgId}::uuid) as grants`) as { users: number; memberships: number; grants: number }[];
+    expect(written[0]).toEqual({ users: 0, memberships: 0, grants: 0 });
+    const audit = await auditRowsFor(sql, invitation.id);
+    expect(audit.map((a) => a.action)).toEqual(["invitation.created"]);
+    expect(JSON.stringify(audit[0].metadata)).not.toContain(address);
+  });
+
+  test("an address that already has an account gets the IDENTICAL result (the send never reads users); the operator's own address adds one sentence", async ({
+    page,
+  }) => {
+    const sql = platformSql();
+    await page.goto(`/admin/organizations/${orgB.orgId}`);
+    const section = page.getByTestId("founding-administrator-section");
+    const email = section.getByLabel("Email address");
     await expect(email).toBeEnabled({ timeout: 15_000 });
-    await email.fill(DESIGNEE.email);
 
-    const box = await section.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(360 + 1);
-    const trigger = section.getByRole("button", { name: "Designate treasurer" });
-    const triggerBox = await trigger.boundingBox();
-    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
-    expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(360 + 1);
+    // Self-addressed: the one extra sentence, then cancel without sending.
+    await email.fill(E2E_USERS.admin.email);
+    await section.getByLabel("First name").fill("Operator");
+    await section.getByLabel("Last name").fill("Selfaddress");
+    await section.getByRole("button", { name: "Send invitation" }).click();
+    const selfDialog = page.getByRole("alertdialog");
+    await expect(selfDialog.getByTestId("self-address-sentence")).toContainText(/your own address/i);
+    await selfDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    const none = (await sql`select count(*)::int as n from account_invitations where organization_id = ${orgB.orgId}::uuid`) as { n: number }[];
+    expect(none[0].n, "cancelling the confirm sends nothing").toBe(0);
 
-    // Nothing inside the section scrolls sideways.
-    const overflows = await section.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
-    expect(overflows).toBe(false);
+    // An existing account's address (the `member` fixture has one).
+    await email.fill(E2E_USERS.member.email);
+    await section.getByRole("button", { name: "Send invitation" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText(E2E_USERS.member.email);
+    await expect(dialog.getByTestId("self-address-sentence")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Yes, send invitation" }).click();
+
+    const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
+    await expect(notice).toBeVisible({ timeout: 20_000 });
+    const noticeForExisting = ((await notice.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    expect(noticeForExisting, "the sender's screen is the same whether or not the address has an account").toBe(noticeForNewAddress);
+    await expect(section.getByTestId("invitation-row")).toContainText("Pending");
+
+    // The person it names was NOT looked up or touched: no grant, no membership, the member account unchanged.
+    const written = (await sql`
+      select (select count(*)::int from memberships where organization_id = ${orgB.orgId}::uuid) as memberships,
+             (select count(*)::int from role_grants where organization_id = ${orgB.orgId}::uuid) as grants`) as { memberships: number; grants: number }[];
+    expect(written[0]).toEqual({ memberships: 0, grants: 0 });
   });
 });

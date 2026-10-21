@@ -6,8 +6,8 @@ import { isFlagEnabled } from "@/lib/flags";
 import { getPublishedSiteBrand } from "@/lib/sites";
 import { BrandTokens } from "@/components/brand/brand-tokens";
 import { OrgWordmark } from "@/components/brand/org-mark";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { GoogleSignInButton } from "./google-sign-in-button";
 import { SignInCredentialsForm } from "./signin-credentials-form";
 import { parseOrgSlugFromCallbackUrl } from "./parse-org-slug";
 import { slugSitePath } from "@/lib/site-urls";
@@ -33,11 +33,14 @@ import { slugSitePath } from "@/lib/site-urls";
  * `siteBrand` at `null` and renders byte-identical platform-default chrome.
  * Branding never blocks or slows sign-in.
  *
- * Phase 6 rework (2026-08-24): the Google sign-in `<form>` below carries
- * `data-brand-neutral` — without it, `<BrandTokens>` re-declaring `--primary`
- * at page scope repaints the stock shadcn `<Button>`'s `bg-primary`, which is
- * exactly the recolor the design forbids. The credentials form's own submit
- * button is NOT wrapped and is allowed to carry the brand.
+ * The Google sign-in `<form>` below carries `data-brand-neutral`. Since
+ * DECISION-190 the button paints Google's own published colours through
+ * element-scoped `--gsi-*` properties, which no org brand can re-declare, so
+ * the wrapper no longer protects the colours. It still resets `--ring` to the
+ * platform value, which keeps the focus ring's contrast (D4) holding against
+ * the white or near-black Google surface whatever the org's brand. The
+ * credentials form's own submit button is NOT wrapped and is allowed to carry
+ * the brand.
  */
 export default async function SignInPage({
   searchParams,
@@ -117,12 +120,12 @@ export default async function SignInPage({
       )}
 
       {/*
-        data-brand-neutral: the Google button is never recolored (Phase 1
-        Gap, Phase 3 design — "brand wraps the form, never restyles it";
-        Google's own brand guidelines forbid recoloring their button). The
+        data-brand-neutral: resets --ring to the platform value so the focus
+        ring on Google's white / near-black button keeps its D4 contrast under
+        any org brand. The button's colours are Google's own and cannot be
+        repainted regardless (DECISION-190, google-sign-in-button.tsx). The
         credentials form's submit button below is deliberately NOT wrapped —
-        it is allowed to carry the org brand, matching the public site's own
-        look. See src/components/brand/brand-tokens.tsx's
+        it is allowed to carry the org brand. See brand-tokens.tsx's
         `[data-brand-neutral]` doc comment for the mechanism.
       */}
       <form
@@ -133,9 +136,7 @@ export default async function SignInPage({
         className="mt-6"
         data-brand-neutral=""
       >
-        <Button type="submit" className="w-full">
-          Sign in with Google
-        </Button>
+        <GoogleSignInButton />
       </form>
 
       {localLoginEnabled && (

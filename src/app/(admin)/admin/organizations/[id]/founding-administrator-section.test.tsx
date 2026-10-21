@@ -24,10 +24,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { InvitationActionResult } from "./actions";
+import type { InvitationListRow } from "@/lib/onboarding/issue";
+import { invitationRow } from "./invitation-row.fixture";
 
 const mockDesignateAction = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
   inviteFoundingAdministratorAction: (fd: FormData) => mockDesignateAction(fd),
+  resendInvitationAction: vi.fn(),
+  revokeInvitationAction: vi.fn(),
 }));
 
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -59,6 +63,10 @@ const BASE_PROPS = {
     "domains.manage",
   ],
   officeTemplateName: "Congregation Stated Clerk" as string | null,
+  invitations: [] as InvitationListRow[],
+  localLoginEnabled: true,
+  totpConfigured: true,
+  inviterEmail: "operator@example.invalid" as string | null,
 };
 
 const globalAlertSpy = vi.spyOn(window, "alert");
@@ -278,7 +286,7 @@ describe("FoundingAdministratorSection — every result variant's copy", () => {
     {
       name: "ok",
       result: { ok: true, invitationId: "inv-1", expiresAt: "2026-10-28T12:00:00.000Z", delivery: "sent" },
-      expected: /invitation sent\. nobody holds this role until it is accepted/i,
+      expected: /invitation sent\. it expires on .* nobody holds this role until it is accepted/i,
     },
   ];
 
@@ -311,4 +319,134 @@ describe("FoundingAdministratorSection — every result variant's copy", () => {
       }
     });
   }
+});
+
+describe("FoundingAdministratorSection — Batch 3 states", () => {
+  it("an open invitation replaces the form with its row (no email field, no send button)", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "pending" })]}
+      />,
+    );
+    expect(screen.queryByLabelText(/email address/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /send invitation/i })).toBeNull();
+    expect(screen.getByText(/an invitation is open/i)).toBeTruthy();
+    expect(screen.getByTestId("invitation-row")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^resend$/i })).toBeTruthy();
+  });
+
+  it("an expired invitation still holds the slot and offers Resend", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "expired" })]}
+      />,
+    );
+    expect(screen.queryByLabelText(/email address/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /^resend$/i })).toBeTruthy();
+  });
+
+  it("a finished invitation (revoked) does not hide the form, and stays listed as history", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "revoked" })]}
+      />,
+    );
+    expect(screen.getByLabelText(/email address/i)).toBeTruthy();
+    expect(screen.getByTestId("invitation-row")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^resend$/i })).toBeNull();
+  });
+
+  it("adds the self-address sentence only when the address is the operator's own (case-insensitive)", () => {
+    render(<FoundingAdministratorSection {...BASE_PROPS} />);
+    fillForm("Operator@Example.invalid");
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    expect(screen.getByTestId("self-address-sentence").textContent).toMatch(/your own address/i);
+    expect(screen.getByTestId("self-address-sentence").textContent).toMatch(/self-designation/i);
+  });
+
+  it("omits the self-address sentence for someone else", () => {
+    render(<FoundingAdministratorSection {...BASE_PROPS} />);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    expect(screen.queryByTestId("self-address-sentence")).toBeNull();
+  });
+
+  it("warns in the confirm when password sign-in is off, and not when it is on", () => {
+    const { unmount } = render(
+      <FoundingAdministratorSection {...BASE_PROPS} localLoginEnabled={false} />,
+    );
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    expect(screen.getByTestId("local-login-off-sentence").textContent).toMatch(/password sign-in is turned off/i);
+    unmount();
+    cleanup();
+    render(<FoundingAdministratorSection {...BASE_PROPS} />);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    expect(screen.queryByTestId("local-login-off-sentence")).toBeNull();
+  });
+
+  it("do-not-contact: the first result swaps the dialog for the warning, 'Send anyway' re-submits with acknowledge", async () => {
+    mockDesignateAction
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "This person asked not to be contacted. Account invitations are not marketing mail.",
+        needsAcknowledgement: "do_not_contact",
+      })
+      .mockResolvedValueOnce({ ok: true, invitationId: "inv-1", expiresAt: "2026-10-28T12:00:00.000Z", delivery: "sent" });
+    render(<FoundingAdministratorSection {...BASE_PROPS} />);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, send invitation/i }));
+    });
+    expect((mockDesignateAction.mock.calls[0][0] as FormData).get("acknowledge")).toBeNull();
+    expect(screen.getByRole("alertdialog").textContent).toMatch(/asked not to be contacted/i);
+    expect(toastError).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /send anyway/i }));
+    });
+    expect((mockDesignateAction.mock.calls[1][0] as FormData).get("acknowledge")).toBe("true");
+    expect(toastSuccess).toHaveBeenCalled();
+  });
+
+  it("with two-factor not configured the send is disabled and the operator is told why", () => {
+    render(<FoundingAdministratorSection {...BASE_PROPS} totpConfigured={false} />);
+    expect(screen.getByRole("alert").textContent).toMatch(/two-factor sign-in isn.t set up/i);
+    fillForm();
+    expect((screen.getByRole("button", { name: /send invitation/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("a queued delivery says delivery is delayed", async () => {
+    mockDesignateAction.mockResolvedValueOnce({
+      ok: true,
+      invitationId: "inv-1",
+      expiresAt: "2026-10-28T12:00:00.000Z",
+      delivery: "queued",
+    });
+    render(<FoundingAdministratorSection {...BASE_PROPS} />);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /yes, send invitation/i }));
+    });
+    expect(screen.getByText(/email delivery is delayed/i)).toBeTruthy();
+  });
+
+  it("the read-only state still lists history rows (an accepted invitation)", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        canDesignate={false}
+        currentHolderCount={1}
+        invitations={[invitationRow({ status: "accepted", acceptedAt: new Date("2026-10-22T09:00:00.000Z"), selfDesignated: true })]}
+      />,
+    );
+    expect(screen.getByText(/one person/i)).toBeTruthy();
+    expect(screen.getAllByText("Accepted")).toHaveLength(2); // the status badge and the date label
+    expect(screen.getByText("Self-designated")).toBeTruthy();
+  });
 });

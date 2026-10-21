@@ -12,10 +12,14 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { InvitationListRow } from "@/lib/onboarding/issue";
+import { invitationRow } from "./invitation-row.fixture";
 
 const mockDesignate = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
   inviteTreasurerAction: (fd: FormData) => mockDesignate(fd),
+  resendInvitationAction: vi.fn(),
+  revokeInvitationAction: vi.fn(),
 }));
 
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -34,6 +38,10 @@ const PROPS = {
   organizationName: "Alder Creek Presbyterian Church",
   canDesignate: true,
   currentHolderCount: 0,
+  invitations: [] as InvitationListRow[],
+  localLoginEnabled: true,
+  totpConfigured: true,
+  inviterEmail: "operator@example.invalid" as string | null,
 };
 
 const alertSpy = vi.spyOn(window, "alert");
@@ -96,7 +104,7 @@ describe("TreasurerDesignationSection — the control", () => {
   });
 
   it("confirms in an AlertDialog that names the person and the organization, then calls the action with the org id and the trimmed email", async () => {
-    mockDesignate.mockResolvedValue({ ok: true, invitationId: "inv-1", delivery: "sent" });
+    mockDesignate.mockResolvedValue({ ok: true, invitationId: "inv-1", delivery: "sent", expiresAt: "2026-10-28T12:00:00.000Z" });
     render(<TreasurerDesignationSection {...PROPS} />);
     typeEmail("  treasurer@example.invalid ");
     fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
@@ -111,7 +119,7 @@ describe("TreasurerDesignationSection — the control", () => {
     expect(fd.get("organizationId")).toBe("org-1");
     expect(fd.get("email")).toBe("treasurer@example.invalid");
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
-    expect(await screen.findByText(/invitation sent\. nobody holds this access until it is accepted/i)).toBeTruthy();
+    expect(await screen.findByText(/invitation sent\. it expires on .* nobody holds this access until it is accepted/i)).toBeTruthy();
   });
 
   it("renders the action's error copy inline, verbatim, and toasts it", async () => {
@@ -139,5 +147,55 @@ describe("TreasurerDesignationSection — the control", () => {
     expect(alertSpy).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(promptSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("TreasurerDesignationSection — Batch 3 states", () => {
+  it("an open invitation replaces the form with its row", () => {
+    render(
+      <TreasurerDesignationSection
+        {...PROPS}
+        invitations={[invitationRow({ purpose: "treasurer", status: "pending" })]}
+      />,
+    );
+    expect(screen.queryByLabelText(/email address/i)).toBeNull();
+    expect(screen.getByText(/an invitation is open/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^resend$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^revoke$/i })).toBeTruthy();
+  });
+
+  it("adds the self-address sentence only for the operator's own address", () => {
+    render(<TreasurerDesignationSection {...PROPS} />);
+    typeEmail("operator@example.invalid");
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    expect(screen.getByTestId("self-address-sentence")).toBeTruthy();
+  });
+
+  it("warns when password sign-in is off", () => {
+    render(<TreasurerDesignationSection {...PROPS} localLoginEnabled={false} />);
+    typeEmail("treasurer@example.invalid");
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    expect(screen.getByTestId("local-login-off-sentence")).toBeTruthy();
+  });
+
+  it("with two-factor not configured the send is disabled", () => {
+    render(<TreasurerDesignationSection {...PROPS} totpConfigured={false} />);
+    typeEmail("treasurer@example.invalid");
+    expect((screen.getByRole("button", { name: /send invitation/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("alert").textContent).toMatch(/two-factor sign-in isn.t set up/i);
+  });
+
+  it("do-not-contact: acknowledged re-submit carries acknowledge=true", async () => {
+    mockDesignate
+      .mockResolvedValueOnce({ ok: false, error: "This person asked not to be contacted.", needsAcknowledgement: "do_not_contact" })
+      .mockResolvedValueOnce({ ok: true, invitationId: "inv-1", expiresAt: "2026-10-28T12:00:00.000Z", delivery: "sent" });
+    render(<TreasurerDesignationSection {...PROPS} />);
+    typeEmail("treasurer@example.invalid");
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /yes, send invitation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /send anyway/i }));
+    await waitFor(() => expect(mockDesignate).toHaveBeenCalledTimes(2));
+    expect((mockDesignate.mock.calls[0][0] as FormData).get("acknowledge")).toBeNull();
+    expect((mockDesignate.mock.calls[1][0] as FormData).get("acknowledge")).toBe("true");
   });
 });

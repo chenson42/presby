@@ -28,6 +28,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-21 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 2 — Architectural review (addendum on Phase 3 divergences) | architect | Complete | Approved with suggestions | 2026-10-21 |
+| 2 — Architectural review (addendum 2: hand-off cookie path) | architect | Complete | Approved with suggestions | 2026-10-21 |
 | 3 — Technical design | tech-lead | Complete | Design complete (Increment 1); implementers named | 2026-10-21 |
 | 4 — Implementation | api-developer (B0) → database-admin (B1) → api-developer (B2) → ux-developer (B3) → api-developer + ux-developer (B4) | In progress: Batch 0 complete (committed 3c294fc/a423b40/6c73c08); Batch 1 complete (committed 1199659); **Batch 2 complete (committed fda586c; issue.ts, accept.ts, (invite)/actions.ts, queue redaction, admin actions, F158, PUBLIC_PATHS, headers, TS designation transactions deleted after parity green; 50 + 30 DB tests, 7000 unit tests)**; **Batch 3 complete (uncommitted; (invite) pages and forms, both admin sections, invitation list, revoke-all, /no-organization copy; 7067 unit tests; 360px + desktop browser pass)**; B4 next | — | 2026-10-21 |
 | 5 — Verification | qa | Pending | — | — |
@@ -338,6 +339,66 @@ I found no other silent departures:
 ### Gate
 
 **Gate:** yes. Batch 1 (database-admin, migration 0059) may start as designed once Batch 0a is committed, with the conditions above built in: the `resent_from_id` unique index and chain test (D-1), `already_pending` mapping (D-2), session-only `p_user_id` (D-3), marker re-arm on the exception path and constraint-name-scoped mapping (D-5), and the case-insensitive new-account check (contradiction 2). The DECISION-183 text fix happens at integration.
+
+---
+
+## Phase 2 addendum 2: the hand-off cookie path (architect, 2026-10-21)
+
+*Recorded by the orchestrator. The architect is read-only and returned this section as text. It was requested after Batch 3 found the hand-off cookie invisible on the return from sign-in.*
+
+**Verdict: Approved with one required change.** Move the cookie to a host-only `Path=/` and remove `RecheckOnce`. This amends R6 and the cookie sentence in proposed DECISION-185. Nothing else in R6 changes: the token still never goes into `callbackUrl`, a URL, audit metadata or a log.
+
+### Why Batch 3 hit this
+
+Batch 3's diagnosis is right. A server-action redirect does not make the browser send a new request. Next renders the redirect target inside the action's own POST, and that POST carries only the cookies scoped to the action's path. The sign-in action already documents the same behaviour for the 2FA gate (`src/app/(auth)/signin/actions.ts` lines 30-40).
+
+`/signin`, `/totp` and `/invite` have no path prefix in common except `/`. The redirect chain can also pass through `/account/2fa?callbackUrl=/invite`, for an account that must use 2FA but has not enrolled. So `Path=/invite` cannot reach the render that needs it, and any narrower path has to list every auth page the chain might cross.
+
+### Ruling
+
+1. **`src/lib/onboarding/invite-cookie.ts`:**
+   - `inviteCookieOptions()` returns `path: "/"`, with **no `domain` attribute ever**. Keep httpOnly, `SameSite=Lax`, `Max-Age=1800`, and `Secure` in production.
+   - The cookie name depends on the environment: `__Host-invite_token` in production, `invite_token` otherwise (the same pattern NextAuth uses for its secure-prefixed names). Export `inviteTokenCookieName(env)` in place of the bare constant.
+   - The `__Host-` prefix makes the browser itself enforce "Secure, Path=/, no Domain". That means no future subdomain (P5's slug labels) can plant its own invitation token in this cookie.
+   - Split the conflated constant. Add `INVITE_PAGE_PATH = "/invite"` and use it for every redirect in `(invite)/actions.ts`. The cookie path is just `"/"`.
+   - `clearHandoffCookie()` keeps spreading `inviteCookieOptions()`, so the clear uses the same path and name.
+2. **Remove `RecheckOnce`:** delete `recheck-once.tsx`, the `recheck` prop on `DeadLinkState`, and the special case for an empty token in `page.tsx`. An empty token goes back to the single dead-link render, which is byte-identical again. There should be one mechanism for this, not a mechanism plus a patch that hides it failing. The patch also has a cost of its own: a screen reader announces "This link isn't active" (`role="status"`) to someone who has just signed in correctly.
+3. **Comments:** update `src/proxy.ts:27` and the comment in `invite-cookie.ts` to describe `Path=/`. The proxy's code does not change, and it still never reads the cookie.
+4. **Boundary test:** extend `boundaries.test.ts` with a source scan. The cookie name may be referenced only in `invite-cookie.ts`, `(invite)/actions.ts` and `(invite)/invite/page.tsx`. Now that every platform request carries the cookie, only that scan keeps the reading of it confined to `(invite)`.
+
+### What `Path=/` exposes
+
+- **More requests carry it.** For up to 30 minutes it goes with every request to the platform host: pages, `/api/*`, `/site/<slug>` on the platform host, and same-origin assets. It is httpOnly, so no script can read it, including script on a tenant's public-site page. `SameSite=Lax` keeps it off cross-site POSTs and subresource requests. A top-level cross-site GET does carry it, but that only hands back the visitor's own token.
+- **Logs.** The app does not log request headers, and Vercel's request logs do not record cookies. Any future tool that captures headers would capture the session cookie too, which is already `Path=/` and a stronger credential.
+- **Custom hosts are unaffected.** A host-only cookie is never sent to a church's own domain. The rule that a custom host gets no session, cookies or platform routes still holds, and the proxy's custom-host branch is unchanged.
+- **The proxy invariant is unaffected.** The proxy does not read the cookie and does not reach the database (DECISION-177).
+- **D-6 gets slightly wider.** On a dead link the cookie is still not cleared, and it now goes with every platform request instead of only `/invite` requests. It is still inert: it holds a dead token and expires within 30 minutes. Update the TODO line for D-6 to say so.
+- **Post-login landing is unaffected.** `callbackUrl=/invite` is an explicit, sanitized callback, like `/account/2fa`. `/launch` remains the fallback target, and `destination.ts` is not touched.
+
+### Options rejected
+
+- **Setting the cookie on several paths (`/invite`, `/signin`, `/totp`):** it has to list every auth page on the chain, including `/account/2fa` today and an OAuth callback later. It breaks silently the next time the auth flow changes.
+- **Routing through `/launch?next=/invite`:** it changes the DECISION-044 matrix, depends on undocumented redirect-in-redirect handling, and puts `/launch`'s "we can't reach your congregations" page in front of the invite on a database blip.
+- **Making the action redirect go through a route handler first:** how Next handles a server-action redirect to a `route.ts` is not documented.
+- **Having the auth actions read the invite cookie:** this would tie the `(auth)` pages to the onboarding module.
+- **Keeping `RecheckOnce` as the fix:** the wrong page still renders and is still announced.
+
+### The test that pins it (Batch 4, written by the implementer)
+
+Add to `e2e/invitation-existing-account.spec.ts`, in two cases. **Case A, no MFA:** open the invitation link, click "Sign in to accept", enter credentials, land on `/invite`, see the confirm state. **Case B, MFA-enrolled, self-designated:** the same, but enter the real `/totp` code before landing on `/invite`. In both cases:
+
+- Before navigating, `page.addInitScript` installs a `MutationObserver` that sets `window.__deadSeen = true` if any `h1` containing "This link isn't active" is ever added. After "Accepting as … at …" is visible, assert `__deadSeen !== true`; also assert the dead-link heading count is 0 immediately on arrival at `/invite`, with no reload.
+- Collect every request URL with `page.on("request")`; assert none contains the token.
+- `context.cookies()` shows the hand-off cookie with `path: "/"`, `httpOnly: true`, `sameSite: "Lax"`, a domain equal to the exact host, and an expiry no more than 1800 s away. After Accept, the cookie is gone.
+
+Unit tests: `invite-cookie` options (`path: "/"`, no `domain`, the name in each environment); update `actions.test.ts:250`; `page.test.ts`: an empty token renders the plain dead-link markup.
+
+**Proof the test catches the bug:** the observer assertion fails on `af31f44` (the flash happens there even with `RecheckOnce`) and passes after the change. QA records fail-before / pass-after.
+
+### Proposed decision and finding (orchestrator, at integration)
+
+- **DECISION-185 (amend in place):** replace "a `Path=/invite` httpOnly cookie carries it across sign-in" with "a host-only, `Path=/`, httpOnly, `SameSite=Lax`, 30-minute cookie (`__Host-invite_token` in production) carries it across sign-in. The path is `/` because a server-action redirect renders its target inside the action's own request."
+- **Proposed finding:** a server-action `redirect()` renders its target inside the action's own POST, so the target page sees only cookies scoped to the action's path. Any hand-off cookie that crosses an auth action has to be `Path=/`.
 
 ---
 

@@ -1473,3 +1473,10 @@ I wrote nothing to disk. Files read:
 - `/Users/cshenso/git/presby-platform/presby-revoke/docs/work-log/2026-10-22-designation-revoke.md`
 - `/Users/cshenso/git/presby-platform/presby-revoke/src/lib/onboarding/designation-holder-copy.ts`
 - `/Users/cshenso/git/presby-platform/presby-revoke/src/app/(admin)/admin/organizations/[id]/treasurer-designation-section.tsx`
+
+---
+
+## Integration (orchestrator, 2026-10-22)
+
+- `origin/main` merged (already up to date). Shared files edited at integration (Rule 16): journal idx 60 (0058 gap kept), `\ir designation-revoke/test-rls-60.sql`, DECISION-194–196, `schema-design-2.md` §2t, CLAUDE.md Two Hierarchies residual sentence, `architecture.md` correction, functionality map, STATE, TODO (revoke follow-ups, production clean-up items, fpcw parity tracks), `docs/reviews/2026-10-22-fpcw-parity.md`, release note v0.38.0.
+- **`development`:** 0060 applied with `psql -1` (exit 0; 4 new functions present). `scripts/test-rls.sql` as `presby_app` **stops at line 217** ("presbytery: sees only its own members — expected 2, got 3"), the documented 2026-10-14 demo-membership drift, before reaching §60. §60 run directly (`scripts/designation-revoke/test-rls-60.sql` as `presby_app`): **exit 0, "Section 60 complete"** (13 assertion blocks). The full suite's from-empty result is QA's pipeline-branch run plus Batch A's.

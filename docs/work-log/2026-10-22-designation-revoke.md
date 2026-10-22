@@ -1126,6 +1126,92 @@ Copy only; no logic change. Fixes the Phase 6 run 1 blocking finding: the treasu
 
 **Results:** `npm run typecheck` clean; `npm run lint` clean (0 warnings); the four unit files (copy, dialog, treasurer section, founding-administrator section) 87/87; `e2e/designation-revoke.spec.ts` 8/8 on a real dev server. The in-worktree dev server hit the Turbopack font flake (all 8 failed on `@vercel/turbopack-next/internal/font/google/font`), so the passing run used the docs/testing.md hardlinked scratch copy (removed afterwards). Next: **qa** re-runs the five named files, then **analyst** re-reads the three strings.
 
+## Phase 5 — Re-run after Phase 6 copy fix (qa)
+
+*Recorded verbatim by the orchestrator.*
+
+The copy fix changes copy and tests only, and every check you asked for passed, including the 8/8 e2e run on a real dev server. Verdict: **PASS**.
+
+
+
+**Date:** 2026-10-22. **Reviewed at:** `a49412c` (the copy-fix commit after `890ea37`), branch `pipeline/designation-revoke`, worktree `/Users/cshenso/git/presby-platform/presby-revoke`. Scope: the five files the Phase 6 analyst named, plus the standard gates. Not auth-touching.
+
+### Diff scope (`git diff 890ea37..HEAD -- src e2e`)
+
+The change is copy, comments and tests only, with no logic change.
+- **`src/lib/onboarding/designation-holder-copy.ts`:**
+  - The treasurer `sectionLead` string and the `treasurerLine` string are replaced.
+  - `recordLine` becomes a template that uses `${page}`. `page` is an existing local (`:208`, `slot === "founding_administrator" ? "Roles" : "Giving team"`) that `lastHolderLine` already uses at `:239`.
+  - No new branch, condition or data path. The founding-administrator `recordLine` text is byte-identical to before.
+- **`treasurer-designation-section.tsx`:** a JSDoc prop comment only (`:33-34`).
+- **Tests:** four test files change their string assertions and add guards that the old denial wording is absent. The copy test gains one test pinning `recordLine` to Roles vs Giving team.
+- **Denial wording:** none of "gains no access", "no access to them" or "gives the platform operator no access" remains in a shipped string. The only remaining occurrences are inside `not.toMatch`/`queryByText(...).toBeNull()` guards.
+- **Commit trailers:** the commit carries `Caught-By: agent-review`, `Discovered-In: Phase-6` and `Work-Log: 2026-10-22-designation-revoke`.
+
+### Type Check
+
+`npm run typecheck`: exit 0.
+
+### Lint and tripwires
+
+- `npm run lint` (`--max-warnings=0`): exit 0.
+- `npm run check`: exit 0. All eight tripwires passed (audit-coverage, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
+
+### Unit Tests
+
+- **Full suite (`npm run test`):** 496 files passed, 69 skipped; 7371 tests passed, 2055 skipped.
+  - Run 1 had 7370 passed with the same 69/2055 skipped. The +1 is the new `recordLine` test.
+  - The skips are the DB-backed subset that is skipped without its env and serial run (docs/testing.md). The count is the same as run 1, and no DB-touching code changed, so this is not a new finding.
+- **The four named files: 4/4 files, 87/87 tests passed.**
+  - `src/lib/onboarding/designation-holder-copy.test.ts`
+  - `src/app/(admin)/admin/organizations/[id]/revoke-holder-dialog.test.tsx`
+  - `src/app/(admin)/admin/organizations/[id]/treasurer-designation-section.test.tsx`
+  - `src/app/(admin)/admin/organizations/[id]/founding-administrator-section.test.tsx`
+
+### End-to-End Tests
+
+**`e2e/designation-revoke.spec.ts`: 8/8 passed, 0 skipped, 0 flaky (1.3 min).**
+- **Server:** a real dev server that Playwright started itself (`RATE_LIMIT_DISABLED=true`), against the pipeline Neon branch (`ep-small-king`).
+- **Exported env:** no `DATABASE_URL`, `PLATFORM_DATABASE_URL` or `APP_DATABASE_URL` was exported, so nothing overrode `.env.local`. Port 3000 was free beforehand.
+- **Where it ran:** Phase 4 hit the Turbopack font flake in this worktree, so I used the docs/testing.md procedure.
+  - I made a scratch copy outside `~/git/presby-platform/` with a hardlinked `node_modules` (`cp -al`).
+  - Before running, I confirmed with `diff -rq` that the copy's `src/` and the spec were identical to the worktree.
+  - The copy was deleted afterwards. Nothing is listening on 3000, and the worktree's `git status` is clean.
+- **What the treasurer test asserts:** test `:268` asserts the new lead text and the new dialog line on a real rendered page, then completes the revoke and checks for `org.treasurer.revoked`.
+- **Server noise:** two `[WebServer] Error: The destination stream closed early.` lines were logged during the founding-administrator tests. They are dev-server noise when a page or context closes mid-stream, probably the second-tab test at `:219`. No test failed or retried because of them.
+
+### Regression Tests Added
+
+This is a copy fix, so there is no bug to watch fail before the fix. The guards that stop the denial coming back are:
+- `not.toMatch(/gains no access|no access to them/i)` on the lead;
+- `not.toMatch(/no access/i)` on `treasurerLine`, in the copy test and in the dialog test;
+- `queryByText(/gains no access/i)` returns null in the section test;
+- a test pinning `recordLine` to the slot's own page.
+
+I did not run the new guards against the old strings to watch them fail. By reading them, each would have matched the pre-fix text exactly.
+
+### Feature-Gate Audit
+
+No protected routes were touched in this delta. No route, action or gate code changed since the run 1 audit at `890ea37`.
+
+### Verdict
+
+**PASS**
+
+Non-blocking nit: the test title at `e2e/designation-revoke.spec.ts:268` still reads "the dialog says donor and gift data stays". That makes no claim about operator access and its assertions are updated, so it is cosmetic. Retitle it only if the implementer is in the file anyway.
+
+### Per-Phase Status row
+
+| 5 — Verification (re-run after Phase 6 copy fix) | qa | Complete | PASS | 2026-10-22 |
+
+### Handoff
+
+Next: **analyst** (Phase 6 run 2). Re-read the three strings in `/Users/cshenso/git/presby-platform/presby-revoke/src/lib/onboarding/designation-holder-copy.ts` (`:130` lead, `:253` `treasurerLine`, `:255` `recordLine`) and the prop comment at `/Users/cshenso/git/presby-platform/presby-revoke/src/app/(admin)/admin/organizations/[id]/treasurer-designation-section.tsx:33-34`. They match the wording the run 1 analyst required, word for word.
+
+Logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/qa2/` (`typecheck.log`, `lint.log`, `check.log`, `four.log`, `unit.log`, `e2e.log`).
+
+---
+
 # Phase 6 — Shipped vs Intent (analyst)
 
 ## Run 1 (NEEDS REWORK — copy only)

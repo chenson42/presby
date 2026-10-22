@@ -148,11 +148,6 @@ export default async function SignInPage({
           </div>
 
           <SignInCredentialsForm callbackUrl={callbackUrl} />
-
-          <p className="mt-4 text-xs text-muted-foreground">
-            First time? Run <code>npm run db:seed</code> to provision the
-            seeded admin user.
-          </p>
         </>
       )}
     </main>

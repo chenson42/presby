@@ -7,8 +7,9 @@
  * reasoning `profile-form.test.tsx`'s own header gives).
  *
  * Pins:
- *   - `canDesignate: false` renders the read-only line naming the holder
- *     count and no form.
+ *   - `canDesignate: false` renders the holders by display name (never an
+ *     email) with a Revoke on each revocable row, the lead sentence naming the
+ *     holder count, and no form; zero holders is the unchanged invite form.
  *   - `canDesignate: true` renders the form (email, first and last name) and
  *     says the person needs no account yet - no copy anywhere tells the
  *     operator to have them "sign up first" (C5, the 2026-10-21 blocker).
@@ -25,7 +26,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { InvitationActionResult } from "./actions";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
+import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
 import { invitationRow } from "./invitation-row.fixture";
+import { derivedGroupHolderRow, groupHolderRow, holderRow } from "./holder-row.fixture";
 
 const mockDesignateAction = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
@@ -50,7 +53,8 @@ const BASE_PROPS = {
   organizationName: "Alder Creek Presbyterian Church",
   organizationType: "congregation" as const,
   canDesignate: true,
-  currentHolderCount: 0,
+  holderPeopleCount: 0,
+  holders: [] as HolderRow[],
   administrationPermissionKeys: [
     "people.manage",
     "roles.manage",
@@ -100,32 +104,78 @@ function fillForm(email = "clerk@example.invalid") {
   typeNames();
 }
 
-describe("FoundingAdministratorSection — disabled/read-only state", () => {
-  it("collapses to a read-only line naming the holder count and renders no form when canDesignate is false", () => {
+describe("FoundingAdministratorSection — holders state", () => {
+  it("lists the holders and renders no form when canDesignate is false", () => {
     render(
       <FoundingAdministratorSection
         {...BASE_PROPS}
         canDesignate={false}
-        currentHolderCount={2}
+        holderPeopleCount={2}
+        holders={[holderRow(), holderRow({ key: "person:2", subjectId: "p2", displayName: "Barnaby Quill" })]}
       />,
     );
 
-    expect(screen.getByText(/2 people/i)).toBeTruthy();
+    expect(screen.getByText(/2 people can manage roles/i)).toBeTruthy();
+    expect(screen.getByText("Perpetua Ashgrove")).toBeTruthy();
+    expect(screen.getByText("Barnaby Quill")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^revoke access for/i })).toHaveLength(2);
     expect(screen.queryByLabelText(/email address/i)).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: /send invitation/i }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /send invitation/i })).toBeNull();
   });
 
-  it("says one person, singular, when currentHolderCount is 1", () => {
+  it("says one person, singular, when the holder count is 1", () => {
     render(
       <FoundingAdministratorSection
         {...BASE_PROPS}
         canDesignate={false}
-        currentHolderCount={1}
+        holderPeopleCount={1}
+        holders={[holderRow()]}
       />,
     );
-    expect(screen.getByText(/one person/i)).toBeTruthy();
+    expect(screen.getByText(/1 person can manage roles/i)).toBeTruthy();
+  });
+
+  it("a derived-group holder row has no Revoke and says the congregation's officers change it", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        canDesignate={false}
+        holderPeopleCount={7}
+        holders={[derivedGroupHolderRow()]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /revoke access/i })).toBeNull();
+    expect(screen.getByTestId("derived-holder-note").textContent).toMatch(/officers change this/i);
+  });
+
+  it("renders no email address anywhere in the holders state", () => {
+    const { container } = render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        canDesignate={false}
+        holderPeopleCount={4}
+        holders={[holderRow(), groupHolderRow()]}
+      />,
+    );
+    expect(container.textContent).not.toMatch(/@/);
+  });
+
+  it("zero holders is the unchanged invite form (no list, no lead sentence)", () => {
+    render(<FoundingAdministratorSection {...BASE_PROPS} />);
+    expect(screen.getByLabelText(/email address/i)).toBeTruthy();
+    expect(screen.queryByTestId("designation-holder-list")).toBeNull();
+    expect(screen.queryByText(/can manage roles at this organization/i)).toBeNull();
+  });
+
+  it("an open invitation with zero holders renders its row and no holder list", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "pending" })]}
+      />,
+    );
+    expect(screen.getByText(/an invitation is open/i)).toBeTruthy();
+    expect(screen.queryByTestId("designation-holder-list")).toBeNull();
   });
 });
 
@@ -436,16 +486,19 @@ describe("FoundingAdministratorSection — Batch 3 states", () => {
     expect(screen.getByText(/email delivery is delayed/i)).toBeTruthy();
   });
 
-  it("the read-only state still lists history rows (an accepted invitation)", () => {
+  it("the holders state still lists history rows (an accepted invitation)", () => {
     render(
       <FoundingAdministratorSection
         {...BASE_PROPS}
         canDesignate={false}
-        currentHolderCount={1}
+        holderPeopleCount={1}
+        holders={[holderRow()]}
         invitations={[invitationRow({ status: "accepted", acceptedAt: new Date("2026-10-22T09:00:00.000Z"), selfDesignated: true })]}
       />,
     );
-    expect(screen.getByText(/one person/i)).toBeTruthy();
+    expect(screen.getByText(/1 person can manage roles/i)).toBeTruthy();
+    // The holder row never says "Self-designated" or "Accepted": those are the
+    // invitation row's facts, so strict-mode matches elsewhere stay unique.
     expect(screen.getAllByText("Accepted")).toHaveLength(2); // the status badge and the date label
     expect(screen.getByText("Self-designated")).toBeTruthy();
   });

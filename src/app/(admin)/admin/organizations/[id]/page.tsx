@@ -18,14 +18,9 @@ import {
   getOrganizationProfileAdminDetail,
   listOrganizationServiceTimes,
 } from "@/lib/sites";
-import {
-  countFoundingAdministratorHolders,
-  foundingAdministratorPlan,
-} from "@/lib/onboarding/founding-administrator";
-import {
-  countGivingManageHolders,
-  treasurerDesignationApplies,
-} from "@/lib/onboarding/treasurer-designation";
+import { foundingAdministratorPlan } from "@/lib/onboarding/founding-administrator";
+import { treasurerDesignationApplies } from "@/lib/onboarding/treasurer-designation";
+import { listDesignationHolders } from "@/lib/onboarding/designation-holders";
 import { listIngestHealth, type IngestHealthRow } from "@/lib/admin/giving-ingest-health";
 import { isLocalLoginEnabled } from "@/lib/auth/local-login";
 import { isTotpConfigured } from "@/lib/two-factor";
@@ -108,26 +103,30 @@ export default async function OrganizationBrandDetailPage({
 
   if (!org) notFound();
 
-  // Read fresh on every render, never cached — the same discipline
-  // role-definitions.ts's roleHolderCount() states for its own gate
-  // (work-log Phase 3, "Component / Page Plan").
-  const foundingAdministratorHolderCount = await countFoundingAdministratorHolders(
+  // Read fresh on every render, never cached: the holder LIST is the one read
+  // (drizzle/0060: the SQL count is derived from the same list), and both the
+  // displayed count and `canDesignate` come from it, so "N people hold this" and
+  // "N rows to act on" cannot drift (F169). Rows carry a display name only, never
+  // an email (DECISION-195). A failed read throws to the page error boundary:
+  // it never renders an empty all-clear and never offers the invite form.
+  const foundingAdministratorHolders = await listDesignationHolders(
     platformDb,
     id,
+    "founding_administrator",
   );
-  const foundingAdministratorCanDesignate = foundingAdministratorHolderCount === 0;
+  const foundingAdministratorCanDesignate = foundingAdministratorHolders.holderPeopleCount === 0;
   const plan = foundingAdministratorPlan(org.organizationType);
   const officeTemplateName = plan.officeTemplateKey
     ? (OFFICE_TEMPLATE_DISPLAY_NAMES[plan.officeTemplateKey] ?? plan.officeTemplateKey)
     : null;
 
   // Treasurer designation (online giving, R2): only for the org types the
-  // giving toggle applies to, and read fresh on every render — a count, never
-  // names. A presbytery pays for no read at all.
+  // giving toggle applies to, read fresh on every render, the same way (a
+  // presbytery pays for no read at all).
   const treasurerApplies = treasurerDesignationApplies(org.organizationType);
-  const givingManageHolderCount = treasurerApplies
-    ? await countGivingManageHolders(platformDb, id)
-    : 0;
+  const givingManageHolders = treasurerApplies
+    ? await listDesignationHolders(platformDb, id, "treasurer")
+    : { holderPeopleCount: 0, rows: [] };
 
   // Payment-notice health (Batch 3b), same applicability as the treasurer
   // section. Counts only; a failed read is `null` (rendered as "can't load",
@@ -244,7 +243,8 @@ export default async function OrganizationBrandDetailPage({
         organizationName={org.name}
         organizationType={org.organizationType}
         canDesignate={foundingAdministratorCanDesignate}
-        currentHolderCount={foundingAdministratorHolderCount}
+        holderPeopleCount={foundingAdministratorHolders.holderPeopleCount}
+        holders={foundingAdministratorHolders.rows}
         administrationPermissionKeys={plan.administration.permissionKeys}
         officeTemplateName={officeTemplateName}
         invitations={foundingInvitations}
@@ -257,8 +257,9 @@ export default async function OrganizationBrandDetailPage({
         <TreasurerDesignationSection
           organizationId={id}
           organizationName={org.name}
-          canDesignate={givingManageHolderCount === 0}
-          currentHolderCount={givingManageHolderCount}
+          canDesignate={givingManageHolders.holderPeopleCount === 0}
+          holderPeopleCount={givingManageHolders.holderPeopleCount}
+          holders={givingManageHolders.rows}
           invitations={treasurerInvitations}
           localLoginEnabled={localLoginEnabled}
           totpConfigured={totpConfigured}

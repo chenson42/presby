@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-22 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named (database-admin, then full-stack-developer) | 2026-10-22 |
-| 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batch B) | In progress — Batch A complete (0060 applied to `pipeline-designation-revoke`); Batch B pending | — | 2026-10-22 |
+| 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batch B) | Complete — Batch A (0060 applied to `pipeline-designation-revoke`) and Batch B (library, action, UI, tests, e2e, browser check) | — | 2026-10-22 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -837,28 +837,82 @@ Files read (all under the `presby-revoke` worktree): `docs/work-log/2026-10-22-d
 - **Integration (orchestrator):** the `_journal.json` entry above; `\ir designation-revoke/test-rls-60.sql` at the end of `scripts/test-rls.sql`, then re-run on `development` after 0060 is applied there.
 - **Not done here (Batch B or the orchestrator):** audit keys, the library, the action, the UI, the e2e spec, and the decision, TODO and schema-design text.
 
-## Batch B — full-stack-developer
+## Batch B — full-stack-developer (2026-10-22)
 
-## Files Created
+*Written directly by full-stack-developer, in the `presby-revoke` worktree against the `pipeline-designation-revoke` Neon branch only. No Rule 16 shared file was touched: `drizzle/meta/_journal.json`, `scripts/test-rls.sql`, `scripts/seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `src/lib/db/domain/index.ts` and `CLAUDE.md` are unchanged. No push.*
 
-- `path/to/file` — purpose
+### Files created
 
-## Files Modified
+- `src/lib/onboarding/designation-holder-types.ts`: pure, **no imports** (client-safe): `DesignationSlot`, `HolderSubjectKind`, `HolderActor`, `HolderRow`, `RevokeHolderActionResult`.
+- `src/lib/onboarding/designation-holder-copy.ts`: pure copy (every string in Phase 3 "Copy"), `reasonSchema` (zod, trimmed, 10 to 500 code points, no C0/C1 control characters except tab and newline), `parseReason`, `formatSince` (string split, never a `Date`), the dialog sentences as functions of `HolderRow`.
+- `src/lib/onboarding/designation-holder-rows.ts`: pure assembly of `HolderRow[]` from the SQL rows (see departure 1).
+- `src/lib/onboarding/designation-holders.ts`: `server-only`, platform connection only. `listDesignationHolders` (four reads: list function, companion lateral, person-arm names, role permissions) and `revokeDesignationHolder` (one transaction: the SQL function, then on `revoked` only `insertAuditRow(tx, ...)`).
+- `src/app/(admin)/admin/organizations/[id]/designation-holder-list.tsx` and `revoke-holder-dialog.tsx` (client; `AlertDialog` + `Textarea`, plain controlled state, not `useForm`).
+- `src/app/(admin)/admin/organizations/[id]/holder-row.fixture.ts`: test-support `HolderRow` builders.
+- Tests: `designation-holder-copy.test.ts`, `designation-holder-rows.test.ts`, `designation-holders.db.test.ts` (16 tests, real Postgres), `designation-holder-list.test.tsx`, `revoke-holder-dialog.test.tsx`, and `e2e/designation-revoke.spec.ts` (8 tests).
 
-- `path/to/file` — what changed
+### Files modified
 
-## Schema Changes
+- `src/lib/audit.ts`: `ORG_FOUNDING_ADMINISTRATOR_REVOKED` and `ORG_TREASURER_REVOKED`, plus the correction of the 2026-09-28 "revocation rides TENANT_ROLE_REVOKED" comment. `src/lib/audit.test.ts`: both strings in `EXPECTED_ENTRIES`.
+- `actions.ts`: the single `revokeDesignationHolderAction` (still no `db.*` call, no `recordAudit`). `actions.test.ts`: 33 new tests.
+- `founding-administrator-section.tsx` / `treasurer-designation-section.tsx`: `currentHolderCount` replaced by `holderPeopleCount` + `holders`; the `!canDesignate` branch renders the lead sentence, the list and the invitation history; a `role="status"` revoke notice is held in section state so it survives the row going away. The treasurer "a count, NEVER names" comment is rewritten to cite DECISION-195. Their tests rewritten for the holders state (the zero-holder invite form and open-invitation states pinned unchanged).
+- `page.tsx`: the two `count*` reads replaced by `listDesignationHolders` (treasurer only when `treasurerApplies`); `canDesignate` and the count come from the same read; a failed read throws. `page.test.tsx`: mocks re-pointed, the "COUNT only (no names)" test rewritten to the new contract (names yes, emails never, group member names never) plus failed-read and single-read tests.
+- `src/lib/onboarding/boundaries.test.ts`: new S4 block (scan 6).
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+### Schema changes
 
-## Audit Events
+None in Batch B (0060 was Batch A's). No `schema.ts` change.
 
-- [Action key written when the security-sensitive mutation fires]
+### Audit events
 
-## Implementer Notes
+`org.founding_administrator.revoked` and `org.treasurer.revoked`: written only on `revoked`, in the revoke's own transaction; metadata `organizationId, slot, arm, personId | groupId, grantIds, roleKeys, appliedEndsOn, clampedToMembershipEnd, companionGrantIds, reason, holderCountBefore, holderCountAfter, reachedZero, selfRevoke, openInvitationIds`; no name, no email (asserted in the DB test and the e2e spec).
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+### Action signature and gate
+
+`revokeDesignationHolderAction(formData): Promise<RevokeHolderActionResult>`, `auth()` then `hasFeature(ADMIN_ORGANIZATIONS)` (`Unauthorized.` / `Forbidden.`), then validation (`Invalid request.`), reason (`field: "reason"`), then the library. No flag, no new `FEATURES` key, no new env var.
+
+### Test and gate results
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | PASS |
+| `npm run lint` (`--max-warnings=0`) | PASS (one unused eslint-disable and one `sql<Date>` mention in a comment, both found by the gates and fixed) |
+| `npm run check`, all eight tripwires | PASS: audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports |
+| `npm run test` (unit) | PASS: 496 files passed, 69 skipped; 7370 tests passed, 2055 skipped |
+| DB tests, serial (`designation-holders`, `designation-revoke`, `invitations`, `issue`, `accept`, `designation-parity`, `audit`) | PASS: 213 tests in the first run, which also had one `afterAll` hook failure in `issue.db.test.ts` coinciding with a Neon DNS drop (ENOTFOUND, the same infrastructure signature Batch A recorded); `issue.db.test.ts` re-run alone 50/50. The `fixture-deletable` leak canary is green (5/5) |
+| `npm run build` | PASS, in the hardlinked scratch copy (see departure 4) |
+| `e2e/designation-revoke.spec.ts`, real dev server | PASS 8/8 (three runs on final-shape code; the last after the final CSS tweak) |
+| Existing-spec blast radius, same dev server: `admin-organizations.spec.ts`, `invitation-existing-account.spec.ts`, `invitation-new-account.spec.ts` | PASS 29/29. This includes the strict-mode "Self-designated" / "Accepted" assertions after acceptance, which is exactly when a holder row now also renders, so the wording rule held |
+
+Environmental note: two e2e runs were lost to network drops (`NeonDbError: fetch failed` / `getaddrinfo ENOTFOUND` on the Neon host, and a transient server-component serialization error that is just the DNS error surfacing). They were re-run after DNS stabilised; every failure in them was a connection failure, none an assertion.
+
+### Browser verification (not just a 200)
+
+Real Chromium, real dev server (Turbopack), signed in as the admin fixture, throwaway congregation, both a person holder and a managed group with a 78-character name (screenshots read, not just taken):
+
+- **360 x 740 (phone):** the section shows the lead sentence, a person row ("Alderic Fennimore", "Since 1 Jan 2020 · Granted another way", "Roles: Portal Administrator", "Also holds this through <the long group name>") and a group row ("<long name> (group)", "1 person holds this through the group."), each with a full-width Revoke button. Nothing scrolls sideways (asserted: section and page `scrollWidth <= clientWidth`; Revoke buttons >= 44 px). The dialog fits the phone, scrolls internally, and its Yes/Cancel buttons are >= 44 px and reachable. Typing "short" and confirming shows the inline red "Add a reason of at least 10 characters." under the textarea with the dialog still open.
+- **1280 x 900 (desktop):** rows lay out side by side with Revoke at the right; the dialog is centred with the permission list, the "will still hold this access through ..." sentence, the "Others can still manage roles here" sentence and the reason field.
+- **A defect found by looking, fixed:** on the phone the dialog's text and bullet list were centre-aligned (the shadcn `AlertDialogHeader` default below `sm`), which read badly with bullets. Fixed with `text-left` / `place-items-start` on the header and body; re-screenshotted, left-aligned and correct. The page-level state machine (open, too-short reason, valid reason, success notice, form reappears, second-tab "already removed") is exercised by the e2e spec.
+
+### Implementer notes: departures from the Phase 3 design (all narrowings or splits; flag any you disagree with)
+
+1. **`designation-holder-rows.ts` added** (a pure sibling): the row assembly (grouping, `leavesNoHolders`, `alsoThroughGroupNames`, provenance) lives in a pure file so it is unit-tested without a database or a `server-only` mock; the library only does the four reads and calls it. The `HolderGrantRow` / `CompanionGrantRow` shapes are exported from there.
+2. **`HolderActor` type** in the types file instead of importing `InvitationActor` from `issue.ts`: the S4 rule-2 scan forbids any non-(admin) importer of `issue.ts`, and the library sits in `src/lib/onboarding/`. The shape is identical.
+3. **No `DB_ERROR_COPY` in the copy file.** The action file's own constant is reused, as designed; the copy file documents that.
+4. **Build and e2e ran in a scratch copy.** `next dev` and `next build` inside this worktree fail on `Can't resolve '@vercel/turbopack-next/internal/font/google/font'` (the known `turbopack.root`-spans-sibling-worktrees flake, `docs/testing.md`, `docs/TODO.md`); every page 500s. I followed the documented recipe: a copy at `/private/tmp/presby-revoke-e2e/app` (rsync of this worktree, hardlinked `node_modules`, same `.env.local` and Neon branch), re-synced before each run. The tested code is byte-identical to this worktree's.
+5. **The e2e spec seeds roles and grants with raw SQL** (`app_roles`, `role_grants` on the owner connection) rather than through the designation flow, to exercise Option A (a dev-seed-style grant with "Granted another way" provenance). The designation-shaped path (bundle plus companion) is covered by the DB suite through the real `presby_accept_invitation`.
+6. **Revoke dialog is one `AlertDialog` per row**, each with its own open state (the body mounts with the dialog content, so the reason and errors reset on every open), rather than one shared dialog.
+7. **`no_organization`** returns `refresh: true` with the shared not-found copy but does not call `revalidatePath` (the design lists the four re-read outcomes as the only revalidating ones); the dialog also calls `router.refresh()` on any `refresh` result.
+
+### Observations for the orchestrator (nothing edited)
+
+- `scripts/designation-revoke/test-rls-60.sql` still needs its one `\ir` line at integration, as Batch A recorded.
+- Retrospective-worthy: the `Turbopack font` worktree flake cost a full e2e cycle again; the self-host-fonts TODO would remove it.
+- A treasurer person-arm grant whose holder's membership ended is, by the count's own membership-awareness, not listed and not revocable (Phase 3 residual, already a TODO line).
+
+### Handoff
+
+Next: **qa** (Phase 5). To check in a browser: `/admin/organizations/<id>` for a congregation with a seeded holder: the holder list, the Revoke dialog (reason required, inline error, dialog stays), a successful revoke (notice, invite form returns), the treasurer variant, a derived-group row with no button, 360 px. Not an auth-touching change (`src/auth.ts`, `src/proxy.ts`, `(auth)`, `api/auth`, `lib/auth` untouched), so the MFA-login e2e gate does not apply.
 
 ---
 

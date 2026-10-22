@@ -5,8 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HydrationGate } from "@/components/shared/hydration-gate";
+import { sectionLead } from "@/lib/onboarding/designation-holder-copy";
+import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
 import { inviteTreasurerAction } from "./actions";
+import { DesignationHolderList } from "./designation-holder-list";
 import { InvitationList } from "./invitation-list";
 import { InvitationSentNotice } from "./invitation-sent-notice";
 import { SendInvitationDialog } from "./send-invitation-dialog";
@@ -21,10 +24,15 @@ interface TreasurerDesignationSectionProps {
   organizationName: string;
   /** Read fresh on every render by `page.tsx` (never cached). */
   canDesignate: boolean;
-  /** Number of people who currently hold `giving.manage`. A count, NEVER names:
-   * who handles a congregation's money is not the platform operator's to read
-   * off a list (the same discipline the founding-administrator section keeps). */
-  currentHolderCount: number;
+  /** People who currently hold `giving.manage`, from the same list read the rows
+   * come from (F169). */
+  holderPeopleCount: number;
+  /** One row per person or group holding the slot, by DISPLAY NAME only, never an
+   * email, and a group's members are never named (DECISION-195, which reverses the
+   * earlier count-only rule: you cannot responsibly revoke an unnamed person, and
+   * the confirm must name them). Naming a holder gives the platform operator no
+   * access to any gift or donor record. */
+  holders: HolderRow[];
   /** This section's invitations (treasurer only), newest first. */
   invitations: InvitationListRow[];
   /** `isLocalLoginEnabled()`, read fresh by `page.tsx` (fails open). */
@@ -44,10 +52,7 @@ interface TreasurerDesignationSectionProps {
  * `page.tsx` renders this ONLY for an applicable organization type
  * (congregation or new worshiping community) — a presbytery sees no section at
  * all. For an applicable org it shows the email control while the holder count
- * is zero and nothing is pending; an open invitation (pending, or expired and
- * still holding the slot) replaces the form with its row, Resend and Revoke
- * (the server allows one open designation per organization); once anyone holds
- * `giving.manage` it collapses to a read-only count with no form. The invitee
+XX The invitee
  * is found by the address on file for a member here, never by account. This
  * component trusts its props for one render only; the server action re-checks
  * the gate itself and answers `has_holders` if the prop went stale — never a
@@ -63,12 +68,16 @@ export function TreasurerDesignationSection({
   organizationId,
   organizationName,
   canDesignate,
-  currentHolderCount,
+  holderPeopleCount,
+  holders,
   invitations,
   localLoginEnabled,
   totpConfigured,
   inviterEmail,
 }: TreasurerDesignationSectionProps) {
+  // The last revoke's sentence, kept here because the row is gone once the list
+  // re-reads and the section outlives every branch below.
+  const [revokeNotice, setRevokeNotice] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const trimmedEmail = email.trim();
   const emailLooksValid = EMAIL_SHAPE_RE.test(trimmedEmail);
@@ -94,6 +103,11 @@ export function TreasurerDesignationSection({
   const sentNotice = flow.result ? (
     <InvitationSentNotice result={flow.result} role="access" />
   ) : null;
+  const revokeStatus = revokeNotice ? (
+    <p role="status" className="mt-3 rounded-md border border-border bg-muted p-3 text-sm">
+      {revokeNotice}
+    </p>
+  ) : null;
 
   if (!canDesignate) {
     return (
@@ -105,11 +119,16 @@ export function TreasurerDesignationSection({
           Treasurer
         </h2>
         <p className="mt-1 text-sm text-foreground">
-          This organization already has{" "}
-          {currentHolderCount === 1 ? "one person" : `${currentHolderCount} people`} who can manage
-          giving — a treasurer has already been designated. They add and remove everyone else from the
-          organization&apos;s own Giving team page.
+          {sectionLead("treasurer", holderPeopleCount)}
         </p>
+        {revokeStatus}
+        <DesignationHolderList
+          organizationId={organizationId}
+          organizationName={organizationName}
+          slot="treasurer"
+          holders={holders}
+          onRevoked={setRevokeNotice}
+        />
         {list}
       </section>
     );
@@ -128,6 +147,7 @@ export function TreasurerDesignationSection({
           An invitation is open. Nobody holds this access until it is accepted. Resend it if the email
           went astray, or revoke it to invite someone else.
         </p>
+        {revokeStatus}
         {sentNotice}
         {list}
       </section>
@@ -147,6 +167,7 @@ export function TreasurerDesignationSection({
         get a link to accept, and nobody holds the access until they do. This can only be done while
         nobody holds that access (it also works as a recovery if the last treasurer is ever removed).
       </p>
+      {revokeStatus}
 
       {!totpConfigured && (
         <p role="alert" className="mt-3 rounded-md border border-destructive p-3 text-sm">

@@ -6,8 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HydrationGate } from "@/components/shared/hydration-gate";
 import type { OrganizationType } from "@/lib/authz";
+import { sectionLead } from "@/lib/onboarding/designation-holder-copy";
+import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
 import { inviteFoundingAdministratorAction } from "./actions";
+import { DesignationHolderList } from "./designation-holder-list";
 import { InvitationList } from "./invitation-list";
 import { InvitationSentNotice } from "./invitation-sent-notice";
 import { SendInvitationDialog } from "./send-invitation-dialog";
@@ -57,7 +60,10 @@ interface FoundingAdministratorSectionProps {
   organizationName: string;
   organizationType: OrganizationType;
   canDesignate: boolean;
-  currentHolderCount: number;
+  /** People who currently hold the slot, from the same list read the rows come from (F169). */
+  holderPeopleCount: number;
+  /** One row per person or group holding the slot: display name only, never an email (DECISION-195). */
+  holders: HolderRow[];
   administrationPermissionKeys: string[];
   officeTemplateName: string | null;
   /** This section's invitations (founding administrator only), newest first. */
@@ -78,7 +84,9 @@ interface FoundingAdministratorSectionProps {
  * or not the address already has an account.
  *
  * Three states, by what is true now:
- *   1. someone can already manage roles: a read-only line (plus any history);
+ *   1. someone can already manage roles: the holders, listed by display name
+ *      with a Revoke on each (lockout recovery, DECISION-194/195), plus any
+ *      invitation history;
  *   2. an invitation is open (pending, or expired and still holding the slot):
  *      its row with Resend and Revoke replaces the form, because the server
  *      allows exactly one open designation per organization;
@@ -97,7 +105,8 @@ export function FoundingAdministratorSection({
   organizationName,
   organizationType,
   canDesignate,
-  currentHolderCount,
+  holderPeopleCount,
+  holders,
   administrationPermissionKeys,
   officeTemplateName,
   invitations,
@@ -105,6 +114,9 @@ export function FoundingAdministratorSection({
   totpConfigured,
   inviterEmail,
 }: FoundingAdministratorSectionProps) {
+  // The last revoke's sentence, kept here (not in the row) because the row is
+  // gone once the list re-reads, and the section outlives every branch below.
+  const [revokeNotice, setRevokeNotice] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -150,6 +162,11 @@ export function FoundingAdministratorSection({
   const sentNotice = flow.result ? (
     <InvitationSentNotice result={flow.result} address={undefined} role="role" />
   ) : null;
+  const revokeStatus = revokeNotice ? (
+    <p role="status" className="mt-3 rounded-md border border-border bg-muted p-3 text-sm">
+      {revokeNotice}
+    </p>
+  ) : null;
 
   if (!canDesignate) {
     return (
@@ -161,11 +178,16 @@ export function FoundingAdministratorSection({
           Founding administrator
         </h2>
         <p className="mt-1 text-sm text-foreground">
-          This organization already has{" "}
-          {currentHolderCount === 1 ? "one person" : `${currentHolderCount} people`} who can manage
-          roles — a founding administrator has already been designated. Grant or revoke roles from the
-          organization&apos;s own Roles page instead.
+          {sectionLead("founding_administrator", holderPeopleCount)}
         </p>
+        {revokeStatus}
+        <DesignationHolderList
+          organizationId={organizationId}
+          organizationName={organizationName}
+          slot="founding_administrator"
+          holders={holders}
+          onRevoked={setRevokeNotice}
+        />
         {list}
       </section>
     );
@@ -184,6 +206,7 @@ export function FoundingAdministratorSection({
           An invitation is open. Nobody holds this role until it is accepted. Resend it if the email went
           astray, or revoke it to invite someone else.
         </p>
+        {revokeStatus}
         {sentNotice}
         {list}
       </section>
@@ -203,6 +226,7 @@ export function FoundingAdministratorSection({
         they get a link to accept, and nobody holds the role until they do. This can only be done while
         nobody can manage roles (so also as a recovery if it ever loses every role-manager).
       </p>
+      {revokeStatus}
 
       {!totpConfigured && (
         <p role="alert" className="mt-3 rounded-md border border-destructive p-3 text-sm">

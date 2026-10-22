@@ -18,7 +18,7 @@
 | 3 — Technical design | tech-lead | Skipped | — | 2026-10-22 |
 | 4 — Implementation | orchestrator | Complete | — | 2026-10-22 |
 | 5 — Verification | qa | Complete | BLOCKED (stale node_modules), cleared by orchestrator re-run → PASS | 2026-10-22 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (both notes applied) | 2026-10-22 |
 
 ---
 
@@ -37,7 +37,7 @@ Skipping Phase 3 — the change is the deletion of one `<p>` element; there is n
 # Phase 4 — Implementation (orchestrator)
 
 - `src/app/(auth)/signin/page.tsx`: deleted the `<p>` carrying the `npm run db:seed` hint under `SignInCredentialsForm`. No test referenced the text.
-- `docs/TODO.md`: the operator-decision line now carries only the OAuth-failure half; the review-polish checklist line drops the sender-name check (the operator confirmed the production sender name is PresbyPortal, 2026-10-22); a new Deployment line asks the operator to set `RESEND_WEBHOOK_SECRET` (the production endpoint answered "Webhook not configured" on 2026-10-22); a Done entry for this change.
+- `docs/TODO.md`: the operator-decision line now carries only the OAuth-failure half; the review-polish checklist line drops the sender-name check (the operator confirmed the production sender name is PresbyPortal, 2026-10-22); a new Deployment line tracks the Resend webhook (the production endpoint answered "Webhook not configured" on 2026-10-22; the operator then created the webhook and the orchestrator set the secret in Vercel, so the line is now "verify after the deploy"); a Done entry for this change.
 - Operator rulings recorded in the same branch (2026-10-22, "go with recommendations"): keep the platform blue on the email button; keep Google's official button style; the "test organization" marker's defaults (see `docs/TODO.md`); `RESEND_WEBHOOK_SECRET` set in Vercel Production by the orchestrator from the value the operator supplied.
 
 ---
@@ -108,3 +108,68 @@ Logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6
 ## Orchestrator note: BLOCKED cleared (2026-10-22)
 
 The block was the main checkout's stale `node_modules` (installed before the giving merge added `stripe`/`pdfkit`). `npm ci` in `/Users/cshenso/git/presby-platform/presby`, then: `npm run typecheck` PASS; `npx vitest run` 492 files passed, 67 skipped, 7263 tests passed, 0 failed; `npm run build` PASS. QA's own criterion ("If those pass, this becomes PASS with no further e2e work needed") is met. **Phase 5: PASS.**
+
+---
+
+# Phase 6 — Shipped vs Intent
+
+**Slug:** `2026-10-22-signin-seed-hint` · **Date:** 2026-10-21 (per environment) · **Branch:** `polish/signin-seed-hint`, HEAD `132bf84`
+
+**VERDICT: SHIP WITH NOTES**
+
+**ONE-LINE TAKE:** The `npm run db:seed` hint is gone from `/signin` and nothing else changed. The TODO reconciliation faithfully records the email-button, test-org and sender-name rulings. It misses on the Google-button ruling and the webhook line, and both are cheap to fix.
+
+### What's Working
+- **The hint is removed.** `git diff main...HEAD` on `src/app/(auth)/signin/page.tsx` is five deleted lines: the `<p>` and its blank line. The credentials form, the Forgot link and the Google button are untouched. A repo grep finds no `db:seed` text in `src/app/(auth)`.
+- **QA's evidence covers the shipped behavior.**
+  - The rendered `/signin` from a real dev server has 0 matches for `db:seed`, `First time` or `seeded admin`.
+  - e2e passed 43 of 43 on a real server, including the MFA-enrolled login path.
+  - After the orchestrator reinstalled dependencies, typecheck, `npx vitest run` and build all passed.
+  - The BLOCKED verdict was an environment fault (stale `node_modules`), and its own clearing criterion was met.
+- **Scope was split honestly.** The OAuth-failure-message half of gap 6 stays a TODO line, with a note that the hint half was ruled and removed.
+- **The email button ruling is recorded correctly.** The open contrast-ruling line is removed. A Done entry says the platform blue stays at 6.84:1, above the 4.5:1 floor. "7:1 waived for mail" is a fair reading of "keep."
+- **The sender-name ruling is recorded correctly.** The `RESEND_FROM_EMAIL` check is dropped from the checklist, with "PresbyPortal confirmed 2026-10-22."
+- **The test-org ruling is recorded as an open pipeline.** The old "needs rulings" line is replaced by a defaults line headed "ready for Phase 1." The defaults are:
+  - set only by a platform admin;
+  - no global-flag bypass, and not itself a global flag;
+  - excluded from statistics, publications and cross-council reports;
+  - a "Test" badge on `/admin/organizations` and in the org's own portal;
+  - not deletable (D10).
+
+  This matches the no-new-platform-flags memory and the open questions in the review-polish Kickoff. I could not independently check that these defaults are the recommendations the operator approved. The only source is the diff's own "go with recommendations" phrasing.
+
+### Intent-vs-Shipped Diff
+
+| Intent | Shipped | Status |
+|---|---|---|
+| Remove the `db:seed` hint from `/signin` | Removed; verified in the rendered page | Met |
+| Operator rulings recorded faithfully in `docs/TODO.md` | Email button, sender name and test-org defaults are correct. Two items are not, see below. | Partial |
+
+- **Google-button ruling not closed.** The Done entry says Google's official style is kept. But the open line "Operator confirmation: the Google button's prominence" is still in Product decisions needed (`docs/TODO.md:213`). It was not removed or resolved in this diff, so the file now says the question is both answered and open.
+- **Webhook line contradicts itself.** The new line begins "secret set in Vercel Production 2026-10-22; verify after the next deploy." It then ends "then put its signing secret in Vercel and redeploy. Until then the endpoint answers 'Webhook not configured'." A reader cannot tell what is still the operator's job: creating the Resend webhook, setting the secret, or just redeploying. The work-log Phase 4 note repeats the confusion: it says a line asks the operator to set the secret, and in the next bullet says the orchestrator already set it.
+- **Setting the secret is not a shipped change.** It is not in the diff and cannot be verified from the repo, so Phase 6 cannot confirm it. The follow-up is the post-deploy check that the endpoint no longer answers "Webhook not configured."
+
+### Edge Cases
+- **Failure path:** no error copy changed. OAuth failures such as `AccessDenied` still render nothing, which is the open TODO line and is not a regression.
+- **Orphaned `db:seed` references:** `e2e/support/seed-users.ts` still tells a developer to run `npm run db:seed` in its own error message. That is correct, because it is developer-facing and never shown to a visitor.
+- **No regression guard:** nothing asserts the hint stays gone. QA already noted this as optional hardening, and I agree it is not worth a test.
+- **Mobile, 2FA gate, audit events:** no effect. This is a copy deletion on an anonymous page, with no redirect or input surface.
+
+### Follow-Ups (to land in `docs/TODO.md` in the same commit, Rule 10)
+1. Delete or resolve the "Operator confirmation: the Google button's prominence" line at `docs/TODO.md:213`. The Done entry already records the ruling.
+2. Rewrite the Resend webhook line to say one thing. Suggested text: "Resend webhook secret set in Vercel Production 2026-10-22. Verify after the next deploy that `/api/webhooks/resend` no longer answers 'Webhook not configured', and that the three events (`email.delivered`, `email.bounced`, `email.complained`) update queue rows." Reconcile the work-log Phase 4 wording to match.
+3. Rule 12: no feedback row originated this work. It came from the operator's production review, not in-app feedback, so there is nothing to mark `done`.
+4. Rule 13: no what's-new entry. The change is removal of a developer hint, with nothing member-visible to announce.
+5. Rules 14 and 15: no functionality-map or architecture change.
+
+**Per-Phase Status row:**
+
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (TODO reconciliation: stale Google-prominence line at `docs/TODO.md:213`; contradictory Resend webhook line) | 2026-10-21 |
+
+**Handoff:** orchestrator. Apply follow-ups 1 and 2 as a docs-only edit in this branch before the user's commit review. Once they land, the work-log can close. No further agent phase is pending.
+
+Files: `/Users/cshenso/git/presby-platform/presby/docs/work-log/2026-10-22-signin-seed-hint.md`, `/Users/cshenso/git/presby-platform/presby/docs/TODO.md`, `/Users/cshenso/git/presby-platform/presby/src/app/(auth)/signin/page.tsx`
+
+## Orchestrator: notes applied (2026-10-22)
+
+Follow-up 1: the stale "Google button's prominence" line is removed from `docs/TODO.md` (the Done entry records the ruling). Follow-up 2: the Resend line now reads only "verify after the 0.37.1 deploy"; the Phase 4 note above is reconciled. 3–5 need no change.

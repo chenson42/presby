@@ -2,8 +2,8 @@
  * The account-invitation email, built in ONE function (DECISION-186,
  * docs/work-log/2026-10-21-invitations.md Phase 3). Every invitation send and
  * every resend goes through `renderInvitationEmail()`; nothing else composes
- * this message, so a layout change (the parallel review-polish pipeline's
- * shared `renderEmail()`) is one edit here.
+ * this message. The layout is the shared `renderEmail()` (DECISION-191), so
+ * the message is a `RenderedEmail` like every other sender's.
  *
  * LINK ORIGIN: `${platformOrigin()}/invite?token=<token>` and nothing else -
  * never the request `Host`, never a church's custom host (a custom host has no
@@ -12,18 +12,19 @@
  * send (`link_origin_unavailable`).
  *
  * THE ACCEPT URL IS EMITTED AS ONE UNCHANGED SUBSTRING in the html (the href
- * AND the printed copy) and in the text, so the post-send scrub, which
- * rewrites the stored body of a credential row (queue.ts
- * CREDENTIAL_TEMPLATE_KEYS), finds it in every part.
+ * AND the printed copy) and in the text (renderEmail's action-URL invariant,
+ * R13; `&` would be written `&amp;` in the html, the token alphabet has none).
+ * The post-send scrub replaces the WHOLE stored body of a credential row with a
+ * marker (queue.ts CREDENTIAL_TEMPLATE_KEYS), so no form of the link survives.
  *
  * NO FREE TEXT from the sender, ever (a phishing channel in platform-domain
  * mail). The only interpolated values are the recipient's first name and the
- * organization name, both capped at 100 characters and `escapeHtml()`'d for the
- * html body. The token is base64url, so it is inert in html and in a URL.
+ * organization name, both capped at 100 characters; `renderEmail()` escapes
+ * them for the html body. The token is base64url, so it is inert in html and in a URL.
  *
  * Pure: no database, no `server-only`. Safe in unit tests.
  */
-import { escapeHtml } from "@/lib/email/escape-html";
+import { renderEmail, type RenderedEmail } from "@/lib/email/render";
 import { platformOrigin } from "@/lib/domains/host";
 import type { AccountInvitationPurpose } from "@/lib/db/domain/invitations";
 
@@ -44,9 +45,8 @@ export interface RenderInvitationEmailInput {
 }
 
 export interface RenderedInvitationEmail {
-  subject: string;
-  html: string;
-  text: string;
+  /** The laid-out message, ready for `insertQueueRowInTx` / `enqueueEmail`. */
+  message: RenderedEmail;
   /** The exact accept URL embedded in the html and the text. */
   url: string;
 }
@@ -97,28 +97,23 @@ export function renderInvitationEmail(
 
   const subject = `You're invited to PresbyPortal for ${organization}`;
 
-  const text = [
-    greeting,
-    "",
-    `A PresbyPortal administrator has invited you to be ${role} for ${organization}.`,
-    grants,
-    "",
-    "Open this link to accept the invitation:",
-    url,
-    "",
-    `The link works once and expires on ${expires}. Nobody holds this role until you accept.`,
-    "If you were not expecting this, you can ignore this message.",
-  ].join("\n");
+  const message = renderEmail({
+    subject,
+    preheader: `Accept your invitation for ${organization}.`,
+    heading: "You're invited to PresbyPortal",
+    blocks: [
+      { kind: "p", text: greeting },
+      {
+        kind: "p",
+        text: `A PresbyPortal administrator has invited you to be ${role} for ${organization}.`,
+      },
+      { kind: "p", text: grants },
+    ],
+    action: { label: "Accept the invitation", href: url },
+    footnote:
+      `The link works once and expires on ${expires}. Nobody holds this role until you accept.\n` +
+      "If you were not expecting this, you can ignore this message.",
+  });
 
-  const html = [
-    `<p>${escapeHtml(greeting)}</p>`,
-    `<p>A PresbyPortal administrator has invited you to be ${role} for <strong>${escapeHtml(organization)}</strong>.</p>`,
-    `<p>${grants}</p>`,
-    `<p><a href="${escapeHtml(url)}">Accept the invitation</a></p>`,
-    `<p>If the button does not work, copy this address into your browser:<br>${escapeHtml(url)}</p>`,
-    `<p>The link works once and expires on ${escapeHtml(expires)}. Nobody holds this role until you accept.</p>`,
-    `<p>If you were not expecting this, you can ignore this message.</p>`,
-  ].join("\n");
-
-  return { subject, html, text, url };
+  return { message, url };
 }

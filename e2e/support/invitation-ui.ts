@@ -6,6 +6,7 @@
 import { expect, type Page } from "@playwright/test";
 import { generateSync } from "otplib";
 import { DEAD_LINK_PHRASE } from "./invitation-observer";
+import { enterTotpCode } from "./totp-page";
 
 export function deadHeading(page: Page) {
   return page.getByRole("heading", { level: 1 }).filter({ hasText: DEAD_LINK_PHRASE });
@@ -27,7 +28,7 @@ export async function signInOnPage(page: Page, email: string, password: string) 
  */
 export async function submitTotp(page: Page, secret: string) {
   for (let attempt = 0; attempt < 2; attempt++) {
-    await page.getByPlaceholder(/123456/).fill(generateSync({ secret }));
+    await enterTotpCode(page, generateSync({ secret }));
     await page.getByRole("button", { name: /^verify$/i }).click();
     await Promise.race([
       page.waitForURL((url) => url.pathname !== "/totp", { timeout: 15_000 }),

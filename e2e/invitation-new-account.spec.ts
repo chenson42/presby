@@ -16,6 +16,7 @@ import {
 } from "./support/invitation-fixture";
 import { DEAD_LINK_PHRASE } from "./support/invitation-observer";
 import { signInOnPage, submitTotp } from "./support/invitation-ui";
+import { enterTotpCode } from "./support/totp-page";
 
 /**
  * The new-invitee path, end to end (DECISION-183/185,
@@ -193,7 +194,8 @@ test("a new invitee: preview consumes nothing, bad passwords are refused inline,
   // The secret is in the <pre> under "Can't scan? Enter manually" (in the DOM whether or not the <details> is open).
   const secret = ((await page.locator("details pre").textContent()) ?? "").trim();
   expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
-  await page.locator("#totp-enroll-code").fill(generateSync({ secret }));
+  // Six labelled digit boxes (review-polish Batch B), typed through the shared helper.
+  await enterTotpCode(page, generateSync({ secret }));
   await page.getByRole("button", { name: "Confirm enrollment" }).click();
   // The enrolment persists, and the page settles on the management view ("You enrolled on ..."). (The one-time
   // "enabled" panel with the recovery codes is replaced by that view as soon as the revalidated server tree

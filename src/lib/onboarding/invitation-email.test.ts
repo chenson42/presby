@@ -33,10 +33,11 @@ describe("renderInvitationEmail", () => {
 
   it("emits the accept URL as an unchanged substring in the href, the printed copy and the text", () => {
     const { rendered } = render();
-    const { url, html, text } = rendered!;
+    const { url } = rendered!;
+    const { html, text } = rendered!.message;
     expect(html).toContain(`href="${url}"`);
-    // href + printed copy: two occurrences in the html.
-    expect(html.split(url).length - 1).toBe(2);
+    // button href, printed link's href, printed link text: three in the html.
+    expect(html.split(url).length - 1).toBe(3);
     expect(text).toContain(url);
     expect(text.split(url).length - 1).toBe(1);
   });
@@ -57,41 +58,50 @@ describe("renderInvitationEmail", () => {
       firstName: `<script>alert(1)</script>${"x".repeat(200)}`,
       organizationName: `<img src=x onerror=alert(1)> & Co ${"y".repeat(200)}`,
     });
-    expect(rendered!.html).not.toContain("<script>");
-    expect(rendered!.html).not.toContain("<img");
-    expect(rendered!.html).toContain("&lt;script&gt;");
-    expect(rendered!.html).toContain("&amp; Co");
+    expect(rendered!.message.html).not.toContain("<script>");
+    expect(rendered!.message.html).not.toContain("<img");
+    expect(rendered!.message.html).toContain("&lt;script&gt;");
+    expect(rendered!.message.html).toContain("&amp; Co");
     // The cap applies to each interpolated name.
-    expect(rendered!.html).not.toMatch(/x{101}/);
-    expect(rendered!.html).not.toMatch(/y{101}/);
+    expect(rendered!.message.html).not.toMatch(/x{101}/);
+    expect(rendered!.message.html).not.toMatch(/y{101}/);
   });
 
   it("strips control characters and newlines from names (header and layout injection)", () => {
     const { rendered } = render({ firstName: "Marie\r\nBcc: x@example.invalid", organizationName: "Org\u0000Name" });
-    expect(rendered!.text.split("\n")[0]).toBe("Hello Marie Bcc: x@example.invalid,");
-    expect(rendered!.subject).not.toMatch(/[\r\n\u0000]/);
+    expect(rendered!.message.text).toContain("\n\nHello Marie Bcc: x@example.invalid,\n\n");
+    expect(rendered!.message.subject).not.toMatch(/[\r\n\u0000]/);
   });
 
   it("falls back to a plain greeting without a name", () => {
-    expect(render({ firstName: null }).rendered!.text.startsWith("Hello,\n")).toBe(true);
-    expect(render({ firstName: "   " }).rendered!.text.startsWith("Hello,\n")).toBe(true);
+    expect(render({ firstName: null }).rendered!.message.text).toContain("\n\nHello,\n\n");
+    expect(render({ firstName: "   " }).rendered!.message.text).toContain("\n\nHello,\n\n");
   });
 
   it("describes the role in plain words per purpose and states that nobody holds it until acceptance", () => {
-    expect(render().rendered!.text).toContain("the first administrator");
-    const treasurer = render({ purpose: "treasurer" }).rendered!;
+    expect(render().rendered!.message.text).toContain("the first administrator");
+    const treasurer = render({ purpose: "treasurer" }).rendered!.message;
     expect(treasurer.text).toContain("the treasurer");
     expect(treasurer.text).toContain("Nobody holds this role until you accept.");
   });
 
   it("states the expiry date in UTC", () => {
     const { rendered } = render();
-    expect(rendered!.text).toContain("expires on October 28, 2026");
+    expect(rendered!.message.text).toContain("expires on October 28, 2026");
+  });
+
+  it("is a branded RenderedEmail: the action button, the printed link, no sender text", () => {
+    const { rendered } = render();
+    const { html, text, subject } = rendered!.message;
+    expect(subject).toBe("You're invited to PresbyPortal for Quillhaven Fellowship");
+    expect(html).toContain("Accept the invitation</a>");
+    expect(html).toContain("copy and paste this link into your browser");
+    expect(text).toContain("Hello Marie,");
   });
 
   it("never contains the invited address (the render takes none)", () => {
     const { rendered } = render();
-    expect(rendered!.html).not.toMatch(/@example\.invalid/);
-    expect(rendered!.text).not.toMatch(/@example\.invalid/);
+    expect(rendered!.message.html).not.toMatch(/@example\.invalid/);
+    expect(rendered!.message.text).not.toMatch(/@example\.invalid/);
   });
 });

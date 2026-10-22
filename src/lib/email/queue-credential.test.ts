@@ -79,6 +79,9 @@ import {
   processQueueBatch,
 } from "./queue";
 import { ACCOUNT_INVITATION_TEMPLATE_KEY } from "@/lib/onboarding/invitation-email";
+import { renderEmail } from "./render";
+
+const MSG = renderEmail({ subject: "s", heading: "h", blocks: [{ kind: "p", text: "p" }] });
 
 const TOKEN_LINK = "https://app.example.invalid/invite?token=abc";
 
@@ -121,7 +124,7 @@ describe("inline send (enqueueEmail)", () => {
   it("redacts both bodies in the SAME update that marks a credential row sent", async () => {
     state.nextRow = row("account_invitation");
     mockSendEmail.mockResolvedValue({ id: "prov-1" });
-    const result = await enqueueEmail({ to: "someone@example.invalid", subject: "s", html: "h", templateKey: "account_invitation" });
+    const result = await enqueueEmail({ to: "someone@example.invalid", message: MSG, templateKey: "account_invitation" });
     expect(result).toEqual({ id: "q-1", sentInline: true });
     expect(calls.updateSets).toHaveLength(1);
     expect(calls.updateSets[0]).toMatchObject({
@@ -134,7 +137,7 @@ describe("inline send (enqueueEmail)", () => {
   it("does not touch the bodies of a non-credential row", async () => {
     state.nextRow = row("password_reset");
     mockSendEmail.mockResolvedValue({ id: "prov-1" });
-    await enqueueEmail({ to: "someone@example.invalid", subject: "s", html: "h", templateKey: "password_reset" });
+    await enqueueEmail({ to: "someone@example.invalid", message: MSG, templateKey: "password_reset" });
     expect(calls.updateSets[0]).toMatchObject({ status: "sent" });
     expect(calls.updateSets[0]).not.toHaveProperty("htmlBody");
     expect(calls.updateSets[0]).not.toHaveProperty("textBody");
@@ -143,10 +146,43 @@ describe("inline send (enqueueEmail)", () => {
   it("leaves a failed inline attempt queued WITH the link (the named residual) for the worker", async () => {
     state.nextRow = row("account_invitation");
     mockSendEmail.mockRejectedValue(new Error("provider down"));
-    const result = await enqueueEmail({ to: "someone@example.invalid", subject: "s", html: "h", templateKey: "account_invitation" });
+    const result = await enqueueEmail({ to: "someone@example.invalid", message: MSG, templateKey: "account_invitation" });
     expect(result.sentInline).toBe(false);
     expect(calls.updateSets[0]).toMatchObject({ status: "queued", failureReason: "provider down" });
     expect(calls.updateSets[0]).not.toHaveProperty("htmlBody");
+  });
+});
+
+describe("a rendered credential link leaves no form behind once sent", () => {
+  // The stored body is replaced WHOLE, so the raw URL and its HTML-escaped form
+  // (a query with `&` is written `&amp;` in the href and the printed copy) both
+  // go. The token alphabet has no `&`; this URL does, to prove both forms anyway.
+  const RAW = "https://app.example.invalid/invite?token=abc&x=1";
+  const ESCAPED = "https://app.example.invalid/invite?token=abc&amp;x=1";
+
+  it("rendered html carries the escaped form (three times), text the raw form (once)", () => {
+    const m = renderEmail({
+      subject: "s", heading: "h", blocks: [], action: { label: "Accept", href: RAW },
+    });
+    expect(m.html.split(ESCAPED).length - 1).toBe(3); // button href, printed href, printed text
+    expect(m.html).toContain(`href="${ESCAPED}"`);
+    expect(m.text.split(RAW).length - 1).toBe(1);
+  });
+
+  it("the sent-update body columns contain neither the raw nor the escaped link", async () => {
+    const m = renderEmail({
+      subject: "s", heading: "h", blocks: [], action: { label: "Accept", href: RAW },
+    });
+    state.nextRow = row("account_invitation", { htmlBody: m.html, textBody: m.text });
+    mockSendEmail.mockResolvedValue({ id: "prov-9" });
+    await enqueueEmail({ to: "someone@example.invalid", message: m, templateKey: "account_invitation" });
+    const set = calls.updateSets[0] as { htmlBody: string; textBody: string };
+    for (const stored of [set.htmlBody, set.textBody]) {
+      expect(stored).toBe(REDACTED_BODY_MARKER);
+      expect(stored).not.toContain(RAW);
+      expect(stored).not.toContain(ESCAPED);
+      expect(stored).not.toContain("token=");
+    }
   });
 });
 
@@ -192,13 +228,13 @@ describe("insertQueueRowInTx", () => {
       update: makeUpdate([], []),
     };
     const inserted = await insertQueueRowInTx(tx as never, {
-      to: "someone@example.invalid", subject: "s", html: "h", text: "t", templateKey: "account_invitation",
+      to: "someone@example.invalid", message: MSG, templateKey: "account_invitation",
     });
     expect(inserted.id).toBe("q-1");
     expect(txInserts).toHaveLength(1);
     expect(calls.insertValues).toHaveLength(0); // never the shared db
     expect(mockSendEmail).not.toHaveBeenCalled();
-    expect(txInserts[0]).toMatchObject({ templateKey: "account_invitation", maxAttempts: 8, textBody: "t" });
+    expect(txInserts[0]).toMatchObject({ templateKey: "account_invitation", maxAttempts: 8, textBody: MSG.text });
   });
 });
 

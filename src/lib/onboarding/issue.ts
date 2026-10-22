@@ -504,9 +504,7 @@ export async function createInvitation(
 
       const queued = await insertQueueRowInTx(tx, {
         to: email,
-        subject: rendered.subject,
-        html: rendered.html,
-        text: rendered.text,
+        message: rendered.message,
         templateKey: ACCOUNT_INVITATION_TEMPLATE_KEY,
       });
 
@@ -682,9 +680,7 @@ export async function resendInvitation(input: {
       // 3. The successor: new token, new queue row, lineage, count + 1.
       const queued = await insertQueueRowInTx(tx, {
         to: email,
-        subject: rendered.subject,
-        html: rendered.html,
-        text: rendered.text,
+        message: rendered.message,
         templateKey: ACCOUNT_INVITATION_TEMPLATE_KEY,
       });
       const [created] = await tx

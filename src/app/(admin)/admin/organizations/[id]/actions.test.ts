@@ -111,6 +111,15 @@ vi.mock("@/lib/onboarding/issue", () => ({
   revokeAllOpenInvitations: (...args: unknown[]) => mockRevokeAll(...args),
 }));
 
+// @/lib/onboarding/designation-holders - mocked wholesale for the same reason:
+// the SQL function, the audit-in-transaction behaviour and the outcome matrix
+// are proven against a real Postgres by designation-holders.db.test.ts and
+// designation-revoke.db.test.ts. This file proves the revoke action's own layer.
+const mockRevokeHolder = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/onboarding/designation-holders", () => ({
+  revokeDesignationHolder: (...args: unknown[]) => mockRevokeHolder(...args),
+}));
+
 // A PRE-EXISTING circular import (org.ts -> schema.ts -> domain/index.ts ->
 // authz.ts -> org.ts) breaks when `@/lib/db/domain/org` is the FIRST module
 // in that cycle to load — authz.ts's top-level `organizationType(...)` call
@@ -137,6 +146,7 @@ import {
   resendInvitationAction,
   revokeInvitationAction,
   revokeAllInvitationsAction,
+  revokeDesignationHolderAction,
 } from "./actions";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { FEATURES } from "@/lib/permissions";
@@ -1338,5 +1348,149 @@ describe("resendInvitationAction / revokeInvitationAction / revokeAllInvitations
     mockRevokeAll.mockResolvedValue({ kind: "db_error" });
     expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG }))).toMatchObject({ ok: false });
     expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// revokeDesignationHolderAction - docs/work-log/2026-10-22-designation-revoke.md,
+// Phase 3 "API Contract". designation-holders.ts is mocked wholesale: this suite
+// proves the action's own layer (the gate, validation, the reason, the result ->
+// copy mapping, revalidation, the actor, no db call).
+// ---------------------------------------------------------------------------
+
+const SUBJECT = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
+const GRANT_A = "88888888-9999-aaaa-bbbb-cccccccccccc";
+const GRANT_B = "99999999-aaaa-bbbb-cccc-dddddddddddd";
+const GOOD_REASON = "Fixture grant left over from the first test setup.";
+
+function revokeForm(overrides: Record<string, string | string[]> = {}): FormData {
+  const fields: Record<string, string | string[]> = {
+    organizationId: VALID_ORG,
+    slot: "founding_administrator",
+    subjectKind: "person",
+    subjectId: SUBJECT,
+    expectedGrantId: [GRANT_A, GRANT_B],
+    reason: GOOD_REASON,
+    ...overrides,
+  };
+  const fd = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    if (Array.isArray(value)) for (const v of value) fd.append(key, v);
+    else fd.set(key, value);
+  }
+  return fd;
+}
+
+describe("revokeDesignationHolderAction", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({
+      user: { id: "operator-1", email: "operator@example.invalid", features: [FEATURES.ADMIN_ORGANIZATIONS] },
+    });
+    mockRevokeHolder.mockResolvedValue({ kind: "revoked", reachedZero: false });
+  });
+
+  it("rejects an unauthenticated caller before anything else", async () => {
+    mockAuth.mockResolvedValue(null);
+    expect(await revokeDesignationHolderAction(revokeForm())).toEqual({ ok: false, error: "Unauthorized." });
+    expect(mockRevokeHolder).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in user lacking admin.organizations", async () => {
+    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
+    expect(await revokeDesignationHolderAction(revokeForm())).toEqual({ ok: false, error: "Forbidden." });
+    expect(mockRevokeHolder).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a malformed organization id", { organizationId: "x" }],
+    ["a malformed subject id", { subjectId: "x" }],
+    ["an unknown slot", { slot: "treasurer_emeritus" }],
+    ["an unknown subject kind", { subjectKind: "everyone" }],
+    ["no expected grant ids", { expectedGrantId: [] as string[] }],
+    ["a malformed expected grant id", { expectedGrantId: [GRANT_A, "nope"] }],
+    ["more than 20 expected grant ids", {
+      expectedGrantId: Array.from({ length: 21 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+    }],
+  ])("returns one neutral 'Invalid request.' for %s", async (_label, overrides) => {
+    expect(await revokeDesignationHolderAction(revokeForm(overrides))).toEqual({ ok: false, error: "Invalid request." });
+    expect(mockRevokeHolder).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty", "", /at least 10 characters/],
+    ["whitespace only", "          ", /at least 10 characters/],
+    ["too short", "too short", /at least 10 characters/],
+    ["a control character", "A reason with a bell \u0007 inside", /can't contain control characters/],
+    ["too long", "x".repeat(501), /500 characters or fewer/],
+  ])("a reason that is %s is a field error and nothing is called", async (_label, reason, copy) => {
+    const out = await revokeDesignationHolderAction(revokeForm({ reason }));
+    expect(out).toMatchObject({ ok: false, field: "reason" });
+    expect((out as { error: string }).error).toMatch(copy);
+    expect(mockRevokeHolder).not.toHaveBeenCalled();
+  });
+
+  it("counts the reason in code points: 500 emoji pass, 501 fail", async () => {
+    expect(await revokeDesignationHolderAction(revokeForm({ reason: "\u{1F600}".repeat(500) }))).toEqual({ ok: true, reachedZero: false });
+    mockRevokeHolder.mockClear();
+    expect(await revokeDesignationHolderAction(revokeForm({ reason: "\u{1F600}".repeat(501) }))).toMatchObject({ ok: false, field: "reason" });
+    expect(mockRevokeHolder).not.toHaveBeenCalled();
+  });
+
+  it("passes the trimmed reason, the ids and the SESSION actor, and revalidates once on revoked", async () => {
+    mockRevokeHolder.mockResolvedValue({ kind: "revoked", reachedZero: true });
+    const fd = revokeForm({ reason: `   ${GOOD_REASON}   `, slot: "treasurer" });
+    // A client-supplied identity is never read.
+    fd.set("userId", "attacker-1");
+    fd.set("actorEmail", "attacker@example.invalid");
+    fd.set("next", "https://evil.example.invalid/");
+    expect(await revokeDesignationHolderAction(fd)).toEqual({ ok: true, reachedZero: true });
+    expect(mockRevokeHolder).toHaveBeenCalledTimes(1);
+    expect(mockRevokeHolder).toHaveBeenCalledWith({
+      organizationId: VALID_ORG,
+      slot: "treasurer",
+      subjectKind: "person",
+      subjectId: SUBJECT,
+      expectedGrantIds: [GRANT_A, GRANT_B],
+      reason: GOOD_REASON,
+      actor: { userId: "operator-1", email: "operator@example.invalid" },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+  });
+
+  it("de-duplicates repeated expected grant ids", async () => {
+    await revokeDesignationHolderAction(revokeForm({ expectedGrantId: [GRANT_A, GRANT_A, GRANT_B] }));
+    expect(mockRevokeHolder.mock.calls[0]![0].expectedGrantIds).toEqual([GRANT_A, GRANT_B]);
+  });
+
+  it.each([
+    [{ kind: "already_removed" }, /already been removed/, true, true],
+    [{ kind: "changed" }, /changed while you were looking/, true, true],
+    [{ kind: "not_a_holder" }, /couldn't find that access/, true, true],
+    [{ kind: "no_organization" }, /couldn't find that access/, true, false],
+    [{ kind: "derived_group_refused" }, /roster comes from the organization's own officers/, false, false],
+    [{ kind: "not_applicable" }, /doesn't apply to this type of organization/, false, false],
+    [{ kind: "db_error" }, /couldn't complete that just now/, false, false],
+  ])("maps %j to its copy (refresh=%s, revalidated=%s)", async (result, copy, refresh, revalidated) => {
+    mockRevokeHolder.mockResolvedValue(result);
+    const out = (await revokeDesignationHolderAction(revokeForm())) as { ok: boolean; error: string; refresh?: boolean };
+    expect(out.ok).toBe(false);
+    expect(out.error).toMatch(copy);
+    expect(Boolean(out.refresh)).toBe(refresh);
+    expect(mockRevalidatePath).toHaveBeenCalledTimes(revalidated ? 1 : 0);
+  });
+
+  it("not_a_holder and no_organization return the SAME string (no oracle on which it was)", async () => {
+    mockRevokeHolder.mockResolvedValue({ kind: "not_a_holder" });
+    const a = await revokeDesignationHolderAction(revokeForm());
+    mockRevokeHolder.mockResolvedValue({ kind: "no_organization" });
+    const b = await revokeDesignationHolderAction(revokeForm());
+    expect((a as { error: string }).error).toBe((b as { error: string }).error);
+  });
+
+  it("writes no audit row from here (the library writes it in the revoke's own transaction)", async () => {
+    await revokeDesignationHolderAction(revokeForm());
+    expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });

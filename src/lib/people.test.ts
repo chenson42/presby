@@ -600,6 +600,10 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         organizationId: orgA,
         personId: result.personId,
         kind: "profession_of_faith",
+        // F173 — regression for createPerson writing a null resulting_roll
+        // (drizzle/0061's CHECK now refuses it; presby_sync_current_roll
+        // would otherwise write current_roll = null on approval).
+        resultingRoll: "active",
         approvalStatus: "pending",
         minuteReference: "Session 2026-01-01, item 3",
         proposedBy: grantingUserId,

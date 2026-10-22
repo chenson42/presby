@@ -282,6 +282,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
           personId: rollSubject,
           kind: "other_participant_enrolled",
           effectiveDate: "2026-01-01",
+          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
           approvalStatus: "pending",
           proposedBy,
         })
@@ -300,6 +301,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         personId: editSubjectAlreadyPending,
         kind: "restoration",
         effectiveDate: "2026-02-01",
+        resultingRoll: "active", // drizzle/0061 roll_actions_resulting_roll_matches_kind
         approvalStatus: "pending",
         proposedBy: proposerUserId2,
       })
@@ -519,6 +521,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
           personId: rollSubject,
           kind: "other_participant_enrolled",
           effectiveDate: "2026-01-01",
+          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
           approvalStatus: "pending",
           proposedBy: approverUserId,
         })
@@ -542,6 +545,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
           personId: rollSubject,
           kind: "other_participant_enrolled",
           effectiveDate: "2026-01-01",
+          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
           approvalStatus: "approved",
           proposedBy: approverUserId,
           approvedBy: approverUserId,

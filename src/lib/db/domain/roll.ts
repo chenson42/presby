@@ -8,7 +8,9 @@ import {
   timestamp,
   index,
   unique,
+  uniqueIndex,
   foreignKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org";
@@ -129,6 +131,51 @@ export const rollActions = pgTable(
     }),
     // B-L6: this FK column had no index at all (measured 2026-09-25).
     index("roll_actions_voids_idx").on(t.voidsActionId),
+
+    // drizzle/0061 section 5 (S2): F173 as a database property.
+    // resulting_roll equals the kind's mapping (src/lib/roll-action-kinds.ts
+    // ROLL_ACTION_KIND_TO_ROLL; a DB test pins the two equal), opening_balance
+    // exempt. Mirrors the migration text; the migration is the ground truth.
+    check(
+      "roll_actions_resulting_roll_matches_kind",
+      sql`kind = 'opening_balance'
+        or resulting_roll is not distinct from case kind
+             when 'profession_of_faith' then 'active'
+             when 'reaffirmation' then 'active'
+             when 'restoration' then 'active'
+             when 'certificate_received' then 'active'
+             when 'other_gain' then 'active'
+             when 'baptized_member_enrolled' then 'baptized'
+             when 'affiliate_received' then 'affiliate'
+             when 'other_participant_enrolled' then 'other_participant'
+             else null end`,
+    ),
+    // drizzle/0061 section 5 (S2): a void, and only a void, cites its target.
+    check(
+      "roll_actions_void_shape",
+      sql`(kind = 'void') = (voids_action_id is not null)`,
+    ),
+    // drizzle/0061 section 5 (S2).
+    check(
+      "roll_actions_approval_status_allowed",
+      sql`approval_status in ('pending', 'approved', 'denied')`,
+    ),
+    // drizzle/0061 section 5 (S3): one live (pending or approved) void per
+    // action; a denied void does not block a later one.
+    uniqueIndex("roll_actions_one_live_void_idx")
+      .on(t.voidsActionId)
+      .where(sql`kind = 'void' and approval_status <> 'denied'`),
+
+    // NOT EXPRESSIBLE HERE (SQL-only, drizzle/0061):
+    //   * section 6, policy roll_actions_insert_pending_only: RESTRICTIVE,
+    //     FOR INSERT, TO presby_app, WITH CHECK (approval_status = 'pending').
+    //     presby_app can insert only pending rows; an approved-at-insert row
+    //     comes only from the definer functions below or the owner (R5).
+    //   * section 7, presby_record_participant_action() and
+    //     presby_void_participant_action(): SECURITY DEFINER, org from
+    //     presby_current_org(), the only tenant path to an on-record
+    //     (approved-at-insert) participant enrolment, removal or void
+    //     (DECISION-198). Called only from src/lib/roll.ts.
   ],
 );
 

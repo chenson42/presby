@@ -11,6 +11,7 @@ import {
   contactMethods,
 } from "@/lib/db/domain/people";
 import { rollActions } from "@/lib/db/domain/roll";
+import { ROLL_ACTION_KIND_TO_ROLL } from "@/lib/roll-action-kinds";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 
 /**
@@ -468,6 +469,11 @@ export async function createPerson(
           personId,
           kind: input.rollAction.kind,
           effectiveDate: input.rollAction.effectiveDate,
+          // F173 bridge (Batch A of 2026-10-22-founding-admin-directory):
+          // drizzle/0061's roll_actions_resulting_roll_matches_kind CHECK
+          // refuses a null resulting_roll for a mapped kind. Batch B replaces
+          // this with deriveRollFields() (resulting_roll AND age_at_action).
+          resultingRoll: ROLL_ACTION_KIND_TO_ROLL[input.rollAction.kind],
           approvalStatus: "pending",
           minuteReference: input.rollAction.minuteReference ?? null,
           proposedBy: actingUserId,

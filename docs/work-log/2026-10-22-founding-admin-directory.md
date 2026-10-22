@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete (revised; reclassified to Feature) | READY WITH NOTES | 2026-10-22 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete (design to R1-R14; S1-S6 ruled; route move designed as its own Batch M) | Design complete; implementers named | 2026-10-22 |
-| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; A, B, C, D pending | — | — |
+| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; B, C, D pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1377,6 +1377,109 @@ None. No migration, no `AUDIT_ACTIONS` key, no env var, no `FEATURES` entry, no 
 ### Handoff
 
 Next: **Batch A** (`database-admin`, migration 0061). Batches B, C and D write at the final `community/` paths. Browser follow-up for QA: signed-out `curl -I` on `/o/<slug>/admin/members/new?x=1` shows `308` and the new `location`, and the Community page at 360px.
+
+---
+
+## Phase 4 — Batch A (migration 0061) — database-admin, 2026-10-22
+
+Migration 0061, its Drizzle mirror, the DB tests, the staged section 61 suite and the `test-rls.sql` integration patch, built to Phase 3's Data Model in its stated order (catalog, clerk template binding, narrowed backfill, F173 repair and stop-block, CHECKs and index, restrictive insert policy, the two helpers and two definer functions, comments). Worked only in `presby-fadir` against Neon branch `pipeline-founding-admin-directory` (`ep-jolly-boat-axklya0l`). Committed as `feat(db): ...`.
+
+### Migration mode
+
+**Hand-written**: `drizzle/0061_presby_participant_roll.sql`, applied with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0061_presby_participant_roll.sql` (owner, direct endpoint). `db:generate` is broken repo-wide (snapshot collision, `docs/TODO.md`). **No `_journal.json` entry**: Rule 16, it is added at integration (`{ idx: 61, tag: "0061_presby_participant_roll" }`).
+
+**Idempotence, whole file, three applies:** first apply exit 0 (`INSERT 0 0` catalog, already seeded by `seed-dev.sql`; `INSERT 0 2` template binding; `INSERT 0 0` backfill, no designation-minted clerk copy on the branch; `UPDATE 0` repair; stop-block passes). Second whole-file apply exit 0 with `INSERT 0 0 / 0 / 0`, `UPDATE 0`, and a before/after snapshot (row counts of `permissions`, `app_role_permissions`, `roll_actions`, `memberships`, plus md5 digests of the full `roll_actions` and `app_role_permissions` contents) **identical**. Third apply exit 0. It was re-applied a further five times as the restore step of the failing-first proofs below, each exit 0.
+
+### Files created
+
+- `drizzle/0061_presby_participant_roll.sql`: the migration. Header records the production clerk-copy count (1, a count only), the deploy order (code first, then 0061) and what the file deliberately does not do.
+- `src/lib/db/domain/participant-roll.db.test.ts`: 42 tests, owner plus `presby_app` connections. Structure (definer, pinned `search_path`, ACLs, the restrictive policy, validated CHECKs, the index, catalog and template); the migration's own sections 3 and 4 re-executed against fixtures inside rolled-back transactions (the backfill touches only a designation-minted copy; sections 1 to 3 replay as no-ops; the F173 repair fills `resulting_roll` and `age_at_action` on pending rows and leaves loss kinds null; the stop-block raises on an approved violator); constraint parity with `ROLL_ACTION_KIND_TO_ROLL` for all 16 non-void kinds; R5; every identity refusal (no GUC, null actor, user without a person, no `roll.propose`, another org's holder, a merged person, an ended membership, the actor under another org's context) as the one literal with SQLSTATE 42501; every record and void outcome with a fixture producing exactly it, and "nothing written" proven by a per-person state snapshot (roll rows, membership end and reason, cache, engagement, derived group row); row shape and replay (SASR participant and Total Adherents +1, no `presby_roll_changes` line, per-person drift 0); removal reflected by `withOrgContext` (throws), `resolveOrgContext` (`ended`, dated) and `getDirectory` (dropped), and the derived group row lapsing; undo of an enrolment and of a removal; `affects_filed_period` true and false and withdrawn (rolled back, with a real `statistical_returns` plus `publications` fixture); two racing enrolments (one `ok`, one `already_participant`) and two racing undos; source scans of the outcome vocabularies, the kind list, the marker, no org parameter, and no `delete` in the file.
+- `scripts/participants/test-rls-61.sql`: the staged section 61 suite, 34 assertions, must run as `presby_app` (header says so and asserts it). Structure; R5 behaviour (approved and denied inserts refused, pending allowed, F173's null-roll shape refused by the CHECK); identity refusals with the exact literal (no org, no `roll.propose`, null actor, the void function, another org's context); the sanctioned path end to end as the seed clerk (enrol, derived fields, cache, `already_participant`, `on_member_roll`, `invalid_kind`, `holds_position` without ending the membership or the grant, undo, the void's `person_id`, `already_voided`, the original frozen). Every writing block rolls back. Uses the existing Alder Creek seed (no seed change).
+- `scripts/participants/test-rls.sql.integration.patch`: unified diff against today's `scripts/test-rls.sql` (`git apply --check` clean, 45 insertions, 10 deletions). It rewrites section 20d's approved insert as insert-pending-then-update (keeping "approved delete is rejected"); the clerk template count 1 to 3, plus two new assertions (holds `roll.propose` and `directory.view`, never `roll.approve`); the 44a office copy count 1 to 3; the 44a F118 split 1 to 2 (staff.manage and roll.propose, never roll.approve) with a new assertion that the bundle itself carries neither roll key; removes `roll.propose` from the "excluded by name" list, with the comments amended; and **appends the `\ir participants/test-rls-61.sql` line with a banner**, so one `git apply` does the whole integration.
+
+### Files modified
+
+- `src/lib/db/domain/roll.ts`: `check()` for the three constraints, the partial `uniqueIndex` for S3, and a comment naming what Drizzle cannot express (the restrictive policy, the two functions) with their migration sections.
+- `src/lib/roll.test.ts`: the four fixture inserts Phase 3 measured (`:279`, `:297`, `:516`, `:539`) now carry the mapped `resultingRoll`.
+- `src/lib/people.ts` and `src/lib/people.test.ts`: **deviation, see below.** `createPerson()` sets `resultingRoll: ROLL_ACTION_KIND_TO_ROLL[kind]` on its pending row; the pending-row assertion pins `resultingRoll: "active"`, named as the F173 regression.
+- `src/lib/onboarding/designation-parity.golden.json`: regenerated with `WRITE_DESIGNATION_GOLDEN=1` under DECISION-199. The diff is exactly the three congregation clerk-office scenarios Phase 3 named (created person, existing person, F109 reuse; the last already held `directory.view` and gains `roll.propose`). Presbytery clerk and treasurer scenarios unchanged.
+- `docs/schema-design.md`: new subsection "Participants on record" under Section D (not a Rule 16 file). `npm run docs:erd` regenerated with no diff (CHECKs and indexes are not drawn).
+
+### Schema changes
+
+- No new table, column or FK. New: three validated CHECKs and one partial unique index on `roll_actions`; policy `roll_actions_insert_pending_only` (restrictive, insert, `presby_app`); functions `presby_deny_participant_action()`, `presby_participant__actor_may_propose(uuid, uuid)` (owner-only), `presby_record_participant_action(...)`, `presby_void_participant_action(...)`; catalog rows `roll.propose`, `roll.approve`; template rows `congregation_stated_clerk` gets `roll.propose` and `directory.view`; a column comment on `memberships.ended_reason` naming the marker.
+- `npm run check:schema-parity`: 85 tables, 0 failing (the 7 allowlisted differences are pre-existing).
+
+### Audit events
+
+None in Batch A. The functions deliberately write no audit row (R8): Batch B writes `ROLL_ACTION_RECORDED` and `ROLL_ACTION_VOIDED` with `insertAuditRow()` in the same transaction. The migration's backfill has no actor and writes none (DECISION-199).
+
+### Gates
+
+- **Apply twice, no-op:** above.
+- **DB tests, serial** (`npx dotenv -e .env.local -- vitest run --no-file-parallelism ...`): `participant-roll.db.test.ts`, `roll.test.ts`, `people.test.ts`, `designation-parity.db.test.ts`, `invitations.db.test.ts`, `accept.db.test.ts`, `issue.db.test.ts`: **240 tests in 7 files.** 237 passed on the first pass. The 3 failures were all `Test timed out in 20000ms` in `invitations.db.test.ts` (`:1058`, `:1073`, `:1081`, the injector-trigger cases; no assertion failed), and that file passed 66/66 on re-run. The new file passed 42/42 on its first run and on the gate run.
+- **Staged test-rls as `presby_app`:** `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/participants/test-rls-61.sql` exits 0 with 34 passes. The **patched full suite** (the patch applied to a scratch copy, with `ON_ERROR_STOP` turned off so every section runs) shows 1120 passes against 1083 before 0061, and **the same three failures as before 0061**. Those three are pre-existing drift on this branch, not caused by 0061: "presbytery: sees only its own members" (the known third membership at Northern Reach), "2fa policy: definer function sees the requirement with no org GUC set", and "DECISION-152: exactly ONE org-owned role holds statistics.publish" (got 2). Note for integration: **the unmodified `scripts/test-rls.sql` with `ON_ERROR_STOP` (its own `\set`, line 13) halts at line 217 on this branch before and after 0061**, so a whole-file green run needs a clean `development` seed.
+- **typecheck, lint, `npm run check` (all eight tripwires), `npm run test`** (493 files passed, 68 skipped, 7268 tests): pass.
+
+### Failing-first proofs (each broken on the branch, tested, then restored by re-applying 0061 and re-tested green)
+
+| Mechanism | How it was broken | Failure observed | Restored |
+|---|---|---|---|
+| R5 restrictive policy | `drop policy roll_actions_insert_pending_only` | Vitest `participant-roll.db.test.ts:433` (`expected ['tenant_isolation'] to deeply equal [...]`) and `:643` (an approved insert as `presby_app` **succeeded**: `approved: expected undefined to be '42501'`); `test-rls-61.sql:59` (61a structure) and, with stop-on-error off, `:114` "FAIL 61b - presby_app inserted an APPROVED roll row directly" | 2/2 green, SQL exit 0 |
+| Actor permission check | dropped `presby_has_permission(..., 'roll.propose')` from the actor helper | `:679` and `:716` "expected the uniform identity refusal: expected undefined to be defined" (the no-permission user recorded and voided); `test-rls-61.sql:171` "FAIL 61c - a member without roll.propose recorded a participant" | 3/3 green |
+| Org from `presby_current_org()` | record function falls back to the target's own org when no GUC is set | `:676` (via `:255`) wrong literal; `test-rls-61.sql:157` "FAIL 61c - wrong literal: presby_effective_permissions: may only be called for the current org context". The existing `presby_effective_permissions` guard also fired; the exact-literal assertion is what catches the break | 3/3 green |
+| Void `person_id` match | the void row takes the actor's person instead of the target's | `:970` "expected {...} to match object { kind: 'void', ... }"; `test-rls-61.sql:276` "FAIL 61d (R10): the void row carries the target's person_id" | 1/1 green |
+| Date bounds | removed the future and pre-1900 bound and the birth-date floor | `:746` (via `:730`) "expected { outcome: 'ok' } to deeply equal { outcome: 'date_out_of_range' }" | 1/1 green |
+
+### Deviations from Phase 3, and why
+
+1. **`createPerson()` F173 bridge pulled forward from Batch B (minimal).** After 0061 the CHECK refuses `createPerson()`'s null `resulting_roll`, so two existing `people.test.ts` cases failed on the branch (measured, against production code, not a fixture). Batch A's gate requires green DB tests, so `createPerson()` now sets `resultingRoll` from the existing `ROLL_ACTION_KIND_TO_ROLL`, a one-line change, and `people.test.ts` pins it. **Batch B still owns the full F173 fix:** `deriveRollFields()`, `age_at_action`, the participant arm through `recordParticipantActionInTx`, and the other `people.test.ts` changes Phase 3 lists (`grantingUserId` linkage, result shapes). The bridge also makes the deploy-order risk in Edge Cases 1 smaller, because the code half of it now exists.
+2. **The integration patch includes the `\ir` line** (with a banner in the 46/47/59 style) instead of leaving it as a separate instruction. Staged path `scripts/participants/`, as Phase 3 named it.
+3. **`already_voided` also covers a live pending void.** The S3 index blocks a second live void, pending included, so the void function catches that `unique_violation` and returns `already_voided`, never a raw error. Phase 3's table described only an approved void.
+4. **The restrictive policy refuses `denied` at insert too**, by construction (pending only), and the tests assert it.
+5. **A column comment on `memberships.ended_reason`** carries the fixed marker (Phase 3's "comments on ... the removal marker").
+6. **Not run: Phase 3's from-scratch recipe** (migrations from empty, then `db:seed`). It needs a second, empty database, and this batch was confined to the pipeline branch. The fresh-install half of F174 is covered by section 1's `on conflict do nothing` insert and the structure test. Phase 5 or the orchestrator should run it on a throwaway branch.
+7. **Test teardown** deletes the `deletable_until`-stamped fixture organizations. Approved roll rows are frozen, so teardown disables `roll_actions_freeze` around that cascade, as `roll.test.ts` and `people.test.ts` already do (and `group_memberships_reject_derived`, as every DB suite does). No production path and no migration deletes anything (R14; a source scan pins that the migration has no `delete`). The `fixture-deletable` leak canary is why teardown cannot simply be skipped. Every other owner-side check runs in a transaction that is always rolled back.
+
+### Environment notes
+
+- My baseline run of `issue.db.test.ts` (before 0061) lost its connection and skipped its teardown, leaving 10 stamped organizations, 4 stamped people and 11 users. That broke an unrelated `test-rls.sql` coverage assertion ("Ruling 7 ... expected 25, got 15"). I removed them through the `deletable_until` path while they were still inside their window. That cascade also explains a `memberships` (-4) and `app_role_permissions` (-2) difference against my post-apply snapshot. `roll_actions` is byte-identical to the post-apply snapshot. After the last run no stamped organization or person remains on the branch.
+- `presby_roll_cache_drift()` baseline on the branch is still the 4 fixture rows Phase 3 measured. All drift assertions are per person.
+
+### Call shapes for Batch B (`src/lib/roll.ts`; nothing outside it may name these functions)
+
+Inside the caller's `withOrgContext` transaction (the GUC is already set; do not pass an org):
+
+```ts
+const r = await tx.execute(sql`
+  select * from presby_record_participant_action(
+    ${personId}::uuid, ${kind}::roll_action_kind, ${effectiveDate}::date,
+    ${minuteReference ?? null}::text, ${actingUserId}::uuid)`);
+// exactly one row: { outcome: string; roll_action_id: string | null;
+//                    membership_ended: boolean; affects_filed_period: boolean }
+
+const v = await tx.execute(sql`
+  select * from presby_void_participant_action(
+    ${rollActionId}::uuid, ${reason}::text, ${actingUserId}::uuid)`);
+// exactly one row: { outcome; void_roll_action_id; voided_action_id;
+//                    voided_kind: 'other_participant_enrolled' | 'other_participant_removed' | null;
+//                    membership_reopened: boolean; affects_filed_period: boolean }
+```
+
+- **Identity refusal** is raised: SQLSTATE `42501`, message exactly `roll_actions: this participant action is not permitted`. Map it to `{ kind: "forbidden" }`. It is checked before everything else, so a bad kind or blank reason from an unauthorized caller still raises.
+- **Record outcomes** (pin `PARTICIPANT_RECORD_REFUSALS` to these; the DB test scans the SQL): `ok`, `invalid_kind`, `date_out_of_range`, `person_not_found`, `person_deceased`, `membership_ended`, `pending_action`, `already_participant`, `on_member_roll`, `not_participant`, `date_before_latest_action`, `holds_position`, `self_target`, `provisioning_incomplete`.
+- **Void outcomes**: `ok`, `reason_required`, `reason_too_long`, `action_not_found`, `not_on_record_kind`, `already_voided`, `not_latest_action`, `membership_changed`, `provisioning_incomplete`.
+- On a non-`ok` outcome the id columns are null, the booleans false, and **nothing was written**. The function's sub-blocks roll back their own partial writes. The caller must still throw to roll back its own transaction (the `CreatePersonAbort` lesson).
+- **Marker:** `PARTICIPANT_REMOVAL_ENDED_REASON = 'other_participant_removed'`. **Kinds:** `ON_RECORD_ROLL_ACTION_KINDS = ['other_participant_enrolled', 'other_participant_removed']`.
+- The function trims the minute reference (blank becomes null) and enforces no length; the action's 200-character cap is TypeScript's. It trims the reason only for its own empty and >500 checks and **does not store it**. Pass the trimmed reason to the audit metadata.
+- `age_at_action` in SQL is `date_part('year', age(effective_date, date_of_birth))::int` on the stored `date_of_birth`, whether or not `birth_year_only` (the year-only flag affects only the date floor, 1 January). `deriveRollFields` must match this table, which the DB test pins: dob 2000-02-29 gives 24 on 2025-02-28, 25 on 2025-03-01, 23 on 2024-02-28, 24 on 2024-02-29; dob 2000-06-15 gives 25 on 2026-06-14 and 26 on 2026-06-15.
+- Dates are bounded by the database `current_date` (UTC). `todayUtcYmd()` must agree.
+- `presby_app` can still insert **pending** rows directly (`recordRollAction()`'s proposal path). Any approved insert from `presby_app` now fails with `42501` "new row violates row-level security policy". The approval `UPDATE` in `decideRollAction()` is unaffected.
+- The `createPerson()` bridge (deviation 1) is the line to replace with `deriveRollFields()`.
+
+### Handoff
+
+Next: **Batch B** (`api-developer`). Local apply for anyone rebuilding the branch: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0061_presby_participant_roll.sql` (idempotent). No seed change. `test-rls` section 61 is added by the staged patch at integration (Rule 16). The orchestrator's integration list gains: the `_journal.json` entry; `git apply scripts/participants/test-rls.sql.integration.patch`, then re-run `scripts/test-rls.sql` as `presby_app` on merged `development`; the from-scratch fresh-install check (deviation 6).
 
 ---
 

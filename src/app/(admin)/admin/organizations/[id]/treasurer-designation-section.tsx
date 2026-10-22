@@ -30,8 +30,8 @@ interface TreasurerDesignationSectionProps {
   /** One row per person or group holding the slot, by DISPLAY NAME only, never an
    * email, and a group's members are never named (DECISION-195, which reverses the
    * earlier count-only rule: you cannot responsibly revoke an unnamed person, and
-   * the confirm must name them). Naming a holder gives the platform operator no
-   * access to any gift or donor record. */
+   * the confirm must name them). A name is directory data; this list carries no gift
+   * or donor record. */
   holders: HolderRow[];
   /** This section's invitations (treasurer only), newest first. */
   invitations: InvitationListRow[];

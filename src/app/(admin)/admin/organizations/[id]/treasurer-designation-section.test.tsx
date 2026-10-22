@@ -92,11 +92,14 @@ describe("TreasurerDesignationSection — holders state", () => {
     expect(screen.getByText(/1 person can manage giving/i)).toBeTruthy();
   });
 
-  it("states that gift and donor records stay and the platform gains no access", () => {
+  it("states that gift and donor records are not changed and that every designation and ending is audited, with no claim about operator access", () => {
     render(
       <TreasurerDesignationSection {...PROPS} canDesignate={false} holderPeopleCount={1} holders={[people[0]!]} />,
     );
-    expect(screen.getByText(/platform operator gains no access to them/i)).toBeTruthy();
+    expect(
+      screen.getByText(/Gift and donor records are not changed by ending access here\. Every designation and every ending of access is recorded in the audit log\./),
+    ).toBeTruthy();
+    expect(screen.queryByText(/gains no access/i)).toBeNull();
   });
 
   it("renders no email address and no group-member names in the holders state", () => {

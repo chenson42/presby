@@ -124,11 +124,13 @@ describe("RevokeHolderDialog - content", () => {
     expect(text).toMatch(/The group and its members are not changed\./);
   });
 
-  it("treasurer wording says donor and gift data stays and the platform operator gains no access", () => {
+  it("treasurer wording says donor and gift data is not changed and points at the audit log, with no claim about operator access", () => {
     renderDialog(holderRow({ roleNames: ["Treasurer"], companionRoleNames: [] }), "treasurer");
     const text = screen.getByRole("alertdialog").textContent ?? "";
     expect(text).toMatch(/manage giving at Alder Creek Presbyterian Church/);
-    expect(text).toMatch(/Gift and donor records are not changed, and ending this gives the platform operator no access to them\./);
+    expect(text).toMatch(/Gift and donor records are not changed\. This is recorded in the audit log\./);
+    expect(text).not.toMatch(/no access to them/i);
+    expect(text).toMatch(/its own Giving team page/);
     expect(text).toMatch(/Nobody will be able to manage giving/);
   });
 

@@ -127,7 +127,7 @@ export function sectionLead(slot: DesignationSlot, holderPeopleCount: number): s
   if (slot === "founding_administrator") {
     return `${n} can manage roles at this organization. When one of its administrators is available, the organization's own Roles page is the better place to change this. End access here to recover from a lockout or a mistaken grant.`;
   }
-  return `${n} can manage giving at this organization. The treasurer changes the giving team from the organization's own Giving team page. End access here to recover from a lockout or a mistaken grant. Gift and donor records stay as they are, and the platform operator gains no access to them.`;
+  return `${n} can manage giving at this organization. The treasurer changes the giving team from the organization's own Giving team page. End access here to recover from a lockout or a mistaken grant. Gift and donor records are not changed by ending access here. Every designation and every ending of access is recorded in the audit log.`;
 }
 
 export const PROVENANCE_COPY = {
@@ -250,9 +250,8 @@ export function revokeDialogContent(
     lastHolderLine,
     treasurerLine:
       slot === "treasurer"
-        ? "Gift and donor records are not changed, and ending this gives the platform operator no access to them."
+        ? "Gift and donor records are not changed. This is recorded in the audit log."
         : null,
-    recordLine:
-      "This is recorded in the audit log with your reason. You can't undo it here; the organization can grant access again from its own Roles page, or you can invite a replacement.",
+    recordLine: `This is recorded in the audit log with your reason. You can't undo it here; the organization can grant access again from its own ${page} page, or you can invite a replacement.`,
   };
 }

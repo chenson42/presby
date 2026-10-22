@@ -20,7 +20,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named (database-admin, then full-stack-developer) | 2026-10-22 |
 | 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batch B) | Complete — Batch A (0060 applied to `pipeline-designation-revoke`) and Batch B (library, action, UI, tests, e2e, browser check) | — | 2026-10-22 |
 | 5 — Verification | qa | Complete | PASS | 2026-10-22 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Reopened to Phase 4 (copy only) | NEEDS REWORK (run 1) | 2026-10-22 |
 
 ---
 
@@ -593,7 +593,7 @@ The function body writes `role_grants` and nothing else (no `officer_terms`, `gr
 *Batch B:*
 - **Library unit/DB (`designation-holders.test.ts`, `designation-holders.db.test.ts`):** list rows for each fixture (person row, both-arm person with `alsoThroughGroupNames`, managed group row, derived group row `revocable:false`, `leavesNoHolders`); **no name or email of any group member appears anywhere in the returned object** (serialize and assert); the select names no contact column (source scan of the file); `revoked` writes exactly one audit row with the right key per slot, in the same transaction (a forced audit-insert failure rolls the `ends_on` back); double submit writes one row; `already_removed`/`changed`/refusals write none; metadata contains `reason`, grant ids, role keys, applied dates, counts and `selfRevoke`, and the **absence of name and email** (assert against the fixture person's name and address strings); `selfRevoke` true when the subject person's `user_id` is the actor.
 - **Action (`actions.test.ts`, extended):** `Unauthorized.` with no session; `Forbidden.` without `ADMIN_ORGANIZATIONS`; invalid uuid/slot/kind/expected-list → `Invalid request.`; reason too short / too long / control character / whitespace-only → `field: "reason"` with the copy; code-point counting (a 500-emoji reason passes, 501 fails); each library result maps to its copy and `refresh` flag; `revalidatePath` only on the four re-read outcomes; no `db.*`; no redirect/`next` input; the actor is taken from the session even if the form carries a `userId`.
-- **Components:** `revoke-holder-dialog.test.tsx` (dialog is an `AlertDialog`; reason required, field error inline with the dialog still open; `leavesNoHolders` sentence; companion line; "will still hold this through" line; group wording; treasurer wording says donor/gift data stays and the platform gains no access; refresh outcomes close and toast; pending state disables both buttons; no native `confirm`). `designation-holder-list.test.tsx` (name only, no email, no member names; derived row has no button and the officers sentence; Revoke has `min-h-11`; very long group name carries `break-words`). Section tests updated: with holders → lead sentence + list + invitation history; zero holders → the unchanged invite form; open invitation + zero holders unchanged.
+- **Components:** `revoke-holder-dialog.test.tsx` (dialog is an `AlertDialog`; reason required, field error inline with the dialog still open; `leavesNoHolders` sentence; companion line; "will still hold this through" line; group wording; treasurer wording says donor/gift data is not changed and points at the audit log (no claim about operator access); refresh outcomes close and toast; pending state disables both buttons; no native `confirm`). `designation-holder-list.test.tsx` (name only, no email, no member names; derived row has no button and the officers sentence; Revoke has `min-h-11`; very long group name carries `break-words`). Section tests updated: with holders → lead sentence + list + invitation history; zero holders → the unchanged invite form; open invitation + zero holders unchanged.
 - **Page (`page.test.tsx`):** props are now `holders` + `holderPeopleCount`; the existing test titled "…the COUNT only (no names are ever passed)" is rewritten to assert the new contract (names yes, emails never, group member names never) rather than deleted; treasurer list read only when `treasurerApplies`; a failed list read throws (no empty all-clear, no invite form).
 - **Source scans (`boundaries.test.ts`):** `designation-holders.ts` is imported only from `src/app/(admin)/` (extends S4 rule 2) and itself holds `getPlatformDb`, never the tenant `db`; no `update role_grants`, `.update(roleGrants)` or `ends_on` write under `src/lib/onboarding/` outside the SQL-calling library, and none under `src/app/(admin)/`; `src/lib/role-grants.ts` never imports `getPlatformDb`; the pure `designation-holder-types.ts`/`-copy.ts` import nothing from `@/lib/db` or `server-only` (they are client-safe).
 - **`audit.test.ts`:** the two new strings.
@@ -611,7 +611,7 @@ All strings live in `designation-holder-copy.ts` (pure, one place). `{name}` is 
 
 **Section lead (replaces the read-only sentence):**
 - Founding administrator: "{N} {person|people} can manage roles at this organization. When one of its administrators is available, the organization's own Roles page is the better place to change this. End access here to recover from a lockout or a mistaken grant."
-- Treasurer: "{N} {person|people} can manage giving at this organization. The treasurer changes the giving team from the organization's own Giving team page. End access here to recover from a lockout or a mistaken grant. Gift and donor records stay as they are, and the platform operator gains no access to them."
+- Treasurer: "{N} {person|people} can manage giving at this organization. The treasurer changes the giving team from the organization's own Giving team page. End access here to recover from a lockout or a mistaken grant. Gift and donor records are not changed by ending access here. Every designation and every ending of access is recorded in the audit log." *(corrected in the Phase 6 run 1 copy fix)*
 - Row: name; "Since {d Mon yyyy}"; provenance "Designated through an invitation" or "Granted another way"; "Roles: {role names}"; person with other routes: "Also holds this through {group names}."; group: "{Group} (group). {n} {person|people} hold this through the group." Derived group (no button): "{Group}. {n} {people} hold this through {group}; the congregation's own officers change this."
 - Button: "Revoke" (aria-label "Revoke access for {name}" / "…for the {group} group").
 
@@ -622,7 +622,7 @@ All strings live in `designation-holder-copy.ts` (pure, one place). `{name}` is 
 4. Group: "{n} {people} hold this access through the {group} group. All of them lose it, unless they hold it another way. The group and its members are not changed."
 5. `alsoThroughGroupNames`: "{name} will still hold this access through {groups}."
 6. `leavesNoHolders`: "{name} is the only person who has this access. Nobody will be able to manage {roles|giving} until you invite a replacement." Otherwise: "Others can still manage {roles|giving} here. If one of them is available, use the organization's own {Roles|Giving team} page instead."
-7. Treasurer: "Gift and donor records are not changed, and ending this gives the platform operator no access to them."
+7. Treasurer: "Gift and donor records are not changed. This is recorded in the audit log." *(corrected in the Phase 6 run 1 copy fix)*
 8. Always: "This is recorded in the audit log with your reason. You can't undo it here; the organization can grant access again from its own Roles page, or you can invite a replacement."
 - Field: label "Reason (kept in the audit log)"; helper "10 to 500 characters. Don't include passwords or personal details."
 - Buttons: "Cancel" / "Yes, end access" (destructive); pending: "Ending…".
@@ -710,7 +710,7 @@ Not api-developer/ux-developer separately: the server and client halves are smal
 
 **Status:** Resolved (reverses the treasurer section's count-only ruling, DECISION-155's shape) · **Date:** 2026-10-22 · **Feature:** `2026-10-22-designation-revoke` (Phase 1 Q3, operator-ruled "display name only"; Phase 2 D8)
 
-You cannot responsibly revoke an unnamed person, and the confirm must name them. A name is tier-1 directory data; the library selects no contact or email column and resolves names for person-arm subjects only, never for the members of a group. The treasurer section's "a count, NEVER names" comment is rewritten to cite this decision. Naming the holder gives the platform operator no access to anything tier 2 or 3.
+You cannot responsibly revoke an unnamed person, and the confirm must name them. A name is tier-1 directory data; the library selects no contact or email column and resolves names for person-arm subjects only, never for the members of a group. The treasurer section's "a count, NEVER names" comment is rewritten to cite this decision. Naming the holder adds no tier 2 or 3 data to the page; it makes no claim about what the platform operator can reach (see the accepted residual, DECISION-194).
 
 **DECISION-194 — A platform admin may end tenant authority, as recovery only: the current holders of the founding-administrator and treasurer slots, behind `FEATURES.ADMIN_ORGANIZATIONS`, with a required reason and an audit row; the revoke-then-self-invite chain is an accepted residual.**
 
@@ -1108,36 +1108,163 @@ The teardown `delete from audit_events` is scoped to the test's own `deletable_u
 
 ---
 
+## Phase 4 — Loop-back (Phase 6 run 1 copy fix)
+
+Copy only; no logic change. Fixes the Phase 6 run 1 blocking finding: the treasurer copy denied the accepted residual (F170, DECISION-194). The strings now state what the act does and point at the audit log, and make no claim about what the platform operator can or cannot reach.
+
+**Final strings** (`src/lib/onboarding/designation-holder-copy.ts`):
+
+- `sectionLead("treasurer", n)`: "{N} {person|people} can manage giving at this organization. The treasurer changes the giving team from the organization's own Giving team page. End access here to recover from a lockout or a mistaken grant. Gift and donor records are not changed by ending access here. Every designation and every ending of access is recorded in the audit log."
+- `treasurerLine`: "Gift and donor records are not changed. This is recorded in the audit log." (founding administrator: still `null`; its lead is unchanged.)
+- `recordLine` (copy nit 8) is now slot-aware: "This is recorded in the audit log with your reason. You can't undo it here; the organization can grant access again from its own {Roles|Giving team} page, or you can invite a replacement." The founding-administrator text is byte-identical to before.
+- Prop comment at `treasurer-designation-section.tsx` (`holders`) softened to claim only that a name is directory data and the list carries no gift or donor record.
+- Work-log only: the draft DECISION-195 sentence "Naming the holder gives the platform operator no access to anything tier 2 or 3" (Phase 3 hand-off) is reworded to say naming adds no tier 2 or 3 data to the page and makes no claim about operator reach, so the orchestrator does not copy the denial into `docs/decisions.md`. The Phase 4 Batch C string listings above are annotated "corrected in the Phase 6 run 1 copy fix".
+
+**Diff sweep:** `git diff main...HEAD` and a grep of `src/`, `e2e/`, `docs/`, `scripts/` for "no access" / "gains no" / "cannot access" / "never reach" about the platform operator found only the three shipped sites above, their five assertion sites, and the work-log mentions listed. The unrelated hits (`domains-*`, `admin/giving`) describe pre-existing platform-axis facts, not these two slots, and were left alone.
+
+**Tests updated:** `designation-holder-copy.test.ts` (lead and `treasurerLine` exact strings, a `not.toMatch(/no access/)` guard, a new test pinning `recordLine` to Roles vs Giving team), `revoke-holder-dialog.test.tsx` (new `treasurerLine`, no-denial guard, Giving team page), `treasurer-designation-section.test.tsx` (new lead, no-denial guard), `e2e/designation-revoke.spec.ts` (lead and dialog line).
+
+**Results:** `npm run typecheck` clean; `npm run lint` clean (0 warnings); the four unit files (copy, dialog, treasurer section, founding-administrator section) 87/87; `e2e/designation-revoke.spec.ts` 8/8 on a real dev server. The in-worktree dev server hit the Turbopack font flake (all 8 failed on `@vercel/turbopack-next/internal/font/google/font`), so the passing run used the docs/testing.md hardlinked scratch copy (removed afterwards). Next: **qa** re-runs the five named files, then **analyst** re-reads the three strings.
+
 # Phase 6 — Shipped vs Intent (analyst)
 
-## VERDICT
+## Run 1 (NEEDS REWORK — copy only)
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+*Recorded verbatim by the orchestrator from the analyst's returned text (read-only agent).*
 
-## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
 
-## What's Working
+**Date:** 2026-10-22. **Reviewed at:** `890ea37`, branch `pipeline/designation-revoke`. I read the work-log (Phases 1–5 and every operator ruling), the diff against main, and the shipped copy file.
 
-- [Specific. The flow that works well and why.]
+### VERDICT
 
-## Intent-vs-Shipped Diff
+**NEEDS REWORK.** The rework is narrow: two copy strings and the five test files that assert them. It reopens at Phase 4, with no design change. The feature itself delivers what Phase 1 promised as modified by the rulings. One piece of shipped copy denies the accepted residual (F170), and you told me nothing may do that.
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+### ONE-LINE TAKE
 
-## Edge Cases
+> A platform admin can now see who holds the founding-administrator and treasurer slots by display name and end them with a required reason and an audit row, as ruled. The treasurer text tells the operator that "the platform operator gains no access" to gift and donor records, and the accepted residual makes that untrue.
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+### The blocking finding: the treasurer copy denies F170
 
-## Follow-Ups (if SHIP WITH NOTES)
+The residual (DECISION-194, the CLAUDE.md sentence) covers both slots. An operator can revoke the treasurer, send a self-addressed treasurer invitation, and accept it. That makes them a `giving.manage` holder, who can view every gift and donor. `issue.ts` computes `selfAddressed` generically for both slots. The path also needs the operator's address on file for a live roster person, so it is narrower than the founding-administrator path. It is still real, and the record admits it.
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Three unqualified claims say the opposite:
 
-## Red Flags (if NEEDS REWORK)
+- `src/lib/onboarding/designation-holder-copy.ts:130` (`sectionLead`, treasurer): "…and the platform operator gains no access to them." It sits permanently on the treasurer section, which is also where an operator clears the slot.
+- `designation-holder-copy.ts:253` (`treasurerLine` in the confirm dialog): "…ending this gives the platform operator no access to them." This one is literally true of the act. In a dialog that reassures the operator while they clear the slot, it reads as a blanket assurance. It is the same defect the 0.25.2 release note had.
+- The prop comment at `treasurer-designation-section.tsx:33-35` ("Naming a holder gives the platform operator no access to any gift or donor record"). It is true of naming, and not user-facing. I'd soften it so nobody copies the claim into the release note.
 
-- [Specific. What has to change before this ships.]
+**Required fix, copy only.** State what the act does, and don't make a claim about what the operator can never reach:
+
+- Lead: "Gift and donor records are not changed by ending access here. Every designation and every ending of access is recorded in the audit log."
+- Dialog line: "Gift and donor records are not changed. This is recorded in the audit log."
+
+Assertions to update:
+
+- `designation-holder-copy.test.ts:96-97` and `:199-202`
+- `revoke-holder-dialog.test.tsx:127-131`
+- `treasurer-designation-section.test.tsx:95-99`
+- `e2e/designation-revoke.spec.ts:278` and `:285`
+
+QA should re-run those five files. A full Phase 5 re-run is not needed, because no logic changes. I will re-confirm the strings and issue the verdict on return. If they are what is described here, it should be SHIP IT, apart from tracked follow-ups.
+
+### What's Working
+
+- **The unnamed-holder problem is fixed.** Both sections now list holders by display name only, with no email and no group member names. Each row carries since-date, provenance, roles and a 44px Revoke. The page derives the count and `canDesignate` from the same read as the rows (F169), so the operator can't see "1 person holds this" with nothing to act on. A failed read throws to the error boundary and never shows an invite form.
+- **Recovery paths are covered, including the one that motivated the pipeline.** The dev-seed-style grant, the ghost holder (clamped to the membership end, F171), a managed group, and the two-grant founding-administrator designation all end together in one transaction.
+- **Safety rules live in the database, not only the UI.**
+  - A derived-group revoke is refused by the function itself (D6).
+  - The dialog's grant ids must match the locked set exactly, so the operator can't end a grant the dialog didn't name.
+  - Stale or double submits return `already_removed` or `changed` with no second audit row.
+  - Nothing is end-dated except `role_grants.ends_on`.
+- **The ruled residual is stated honestly everywhere except the treasurer text above.** The dialog's last line says "recorded in the audit log with your reason", and the reason helper warns against personal details.
+- **Verification is real.** QA ran 37/37 e2e on a real server, 19/19 ACL assertions as `presby_app`, and the unchanged count-pin test. The browser pass found and fixed centre-aligned dialog text at 360px.
+
+### Intent-vs-Shipped Diff
+
+- Phase 1 said: see holders by name with provenance. Shipped: yes (display name only, per the Q3 ruling). **Matches.**
+- Phase 1 said: Revoke with a confirm that names the person, the roles that end, last-holder lockout and a required reason. Shipped: all present, copy human, no constraint names. **Matches.**
+- Phase 1 said: block the revoke → self-invite chain (limit 2). Operator ruled "no block, audit only." Shipped: no block; audit rows `org.*.revoked`, then `invitation.created.selfAddressed`, then `invitation.accepted.inviterIsInvitee`. **Matches the ruling.** The treasurer copy contradicts it, as above.
+- Phase 1 said: Option A scope. Shipped: any effective contributing grant, minus derived groups and officer terms (D6, operator-accepted). **Matches the rulings.**
+- Phase 1 said: notify the revoked person and surviving holders. Operator ruled audit-only. Shipped: no mail. **Matches the ruling.** It must be tracked and stated in the release note.
+- Phase 1 said: the holder row stamps "Self-designated". Shipped: dropped, because an existing e2e strict-mode assertion matches the literal once. Provenance reads "Designated through an invitation" or "Granted another way". **Acceptable drift**, recorded in DECISION-196. The invitation history row still carries the badge.
+- Phase 1 said: G3, G4, G7, G11. Shipped: clamp, no officer-term writes, org lock then row lock, server re-derivation. **Matches.**
+- Phase 1 said: G6, org-side visibility of who ended a grant and why. Shipped: audit-only (Q7 default). **Matches the default**, but the org's own Roles page shows an ended grant with no explanation. The release note should say so.
+- Phase 1 said: G10, record the out-of-band SQL end. Shipped: recorded in the work-log; the backfill question is still open for the operator.
+
+### Edge Cases
+
+- Empty state: pass. Zero holders shows the unchanged invite form, and a new org is unaffected. One narrow case is a gap I would track. A slot held only through a derived group shows the lead and the row text with no Revoke and no invite form. That is deliberate per D6 and never a lockout, but the operator sees no action.
+- Failure microcopy: pass for every outcome. Reason errors are inline with the dialog open, stale and double submits refresh the list, and a database error uses the shared copy. **Fail on the treasurer assurance copy, as above.** A small wording issue: `recordLine` says "its own Roles page" for both slots, but the treasurer section's lead sends people to the Giving team page.
+- Permission gate: pass. `FEATURES.ADMIN_ORGANIZATIONS` is checked in the action and the page, with no flag, no new key and no resolver change.
+- Audit event: pass. One row per revoke, in the same transaction, on `revoked` only. Ids, dates, counts and reason are recorded, with no name or email. A forced audit failure rolls the revoke back.
+- Mobile (360px): pass. Nothing scrolls sideways and the buttons are at least 44px.
+
+### Housekeeping the orchestrator must place (none of it is in the diff)
+
+**CLAUDE.md, "Two Hierarchies Intersect Nowhere".** Add the Phase 2 sentence after the DECISION-183 sentence, unchanged. It already names both slots and calls the chain `paper`. The operator reviews this diff. Add it only after the copy is fixed, so the code and the invariant agree.
+
+**`docs/architecture.md:100`.** It currently ends "…and nothing about the designation lets the platform act inside the organization afterwards." That is now reversed (Rule 15). Suggested replacement for the tail:
+
+> …every subsequent grant flows through the organization's own role administration. The one later platform act is removal, never use: an operator may end the current holder of the first-administrator or treasurer slot as lockout recovery, with a required reason and an audit row (DECISION-194). It never ends a grant held through a derived group or an officer term. A revoke followed by a self-addressed invitation lets the operator clear a slot and then hold it. That sequence is detected by audit and deliberately not prevented.
+
+**Other integration items**
+- DECISION-194, 195 and 196 from the Phase 3 hand-off.
+- The `schema-design-2.md` F169–F171 subsection.
+- The `_journal.json` entry for 0060.
+- The `\ir designation-revoke/test-rls-60.sql` line, then a re-run on `development` after 0060 is applied there.
+- The `docs/product/functionality-map.md` Organizations bullet (about line 129). The "invites a one-time founding administrator…" text should add "lists holders by display name and ends them with a reason".
+- The v0.38.0 release note and `package.json` bump. Confirm the number against whatever ships first.
+- No what's-new entry (Rule 13, internal admin tooling).
+- No feedback row to close (Rule 12): the source was an operator request, not a feedback row.
+
+### Follow-Ups for `docs/TODO.md` (Rule 10)
+
+Each is a tracked line, whatever the verdict.
+1. **Notifications on a platform revoke.** Mail the revoked person (neutral, no reason) and any surviving holders. Operator deferred it (Q6).
+2. **Grant drift (F38-shaped).** `presby_app` and `presby_platform` hold DELETE on `role_grants` though no production code deletes from it. Revoke it or document why. Assign a number outside F169–F171.
+3. **Amend TODO:210** (the founding-administrator count asymmetry). Add: whoever rules on it pairs it with "ghost grants are ended, not hidden". 0060 keeps the asymmetry word for word so ghost holders stay visible and revocable (DECISION-196).
+4. **Invisible treasurer ghosts.** A treasurer `giving.manage` grant whose holder's membership ended is not counted, listed or revocable, and would revive if the membership were restored. Decide whether to end such grants when a membership ends.
+5. **G10.** Ask the operator whether to backfill an audit row for the 2026-10-22 out-of-band SQL end. If yes, make it a one-off row marked out-of-band, not an `org.*.revoked` key.
+6. **QA Observation 1.** Test teardown deletes `audit_events` for its own `deletable_until` fixture orgs, as five existing suites do. The operator should confirm the soft-delete rule exempts fixtures.
+7. **Derived-group-only slot.** A slot held only through a derived group offers neither Revoke nor invite. Decide whether the section should say how to resolve it, for example by pointing to the organization's officers or a support ticket.
+8. **Copy nit.** The treasurer dialog's `recordLine` names the Roles page, and the Giving team page is the treasurer's route.
+9. **Test gaps (QA Observations 3 and 4):**
+   - A named test for a cross-org grant id mixed into an otherwise valid displayed set.
+   - The library's `invalid_input` carries a `message` the design didn't specify.
+   - Batch B recorded no failing-first evidence for the library tests.
+
+### Draft release-note bullets (v0.38.0, plain language)
+
+- **See who holds the top administrator and treasurer roles.** On an organization's page, the platform operator now sees who currently holds each role: names only, with the date they got it and how. Before, the page showed only a count, so a leftover test account could hold a role with no way to tell.
+- **End someone's access when it's needed.** For each holder, the operator can end their access. The operator must give a reason of 10 to 500 characters. A confirmation shows exactly which roles end and warns if that would leave nobody able to manage roles or giving. The operator can then invite a replacement.
+- **Meant for recovery.** The page points to the organization's own Roles and Giving team pages first. This is for lockouts and mistaken grants.
+- **What it does not touch.** It does not change anyone's membership, officer terms, or the Session or Diaconate rosters. Roles held through those groups are shown but cannot be ended here. Gift and donor records are never changed.
+- **Everything is recorded.** Each ending is written to the audit log with the reason. Nobody is emailed yet (the person who lost access and the remaining holders are not told), and the organization's own Roles page shows the access as ended without the reason.
+- **A limit we chose to accept.** Nothing stops an operator from ending a role and then inviting themselves into it. The audit log records the whole sequence, but it is not blocked.
+
+### Red Flags (NEEDS REWORK)
+
+- **Remove the denial of F170 from the treasurer copy** (`designation-holder-copy.ts:130` and `:253`, plus the prop comment). Replace it with a statement of what the act does, plus the audit pointer, per the suggested wording above. Update the five assertion sites listed above. Nothing else in the shipped behaviour needs to change.
+- **After the rework:**
+  - QA re-runs the five test files.
+  - I re-read the three strings and issue SHIP IT or SHIP WITH NOTES.
+  - The housekeeping above lands in the integration commit.
+
+### Per-Phase Status row
+
+| 6 — Shipped vs intent | analyst | Reopened to Phase 4 (copy only) | NEEDS REWORK | 2026-10-22 |
+
+### Handoff
+
+Next: **full-stack-developer** (Phase 4, copy-only fix), then **qa** (re-run the five named test files), then **analyst** (Phase 6 re-confirmation). The orchestrator should hold the CLAUDE.md and `architecture.md` edits and the release note until then.
+
+Files read:
+- `/Users/cshenso/git/presby-platform/presby-revoke/docs/work-log/2026-10-22-designation-revoke.md`
+- `/Users/cshenso/git/presby-platform/presby-revoke/src/lib/onboarding/designation-holder-copy.ts`
+- The diffs of `page.tsx`, `founding-administrator-section.tsx` and `treasurer-designation-section.tsx` under `src/app/(admin)/admin/organizations/[id]/`
+- `/Users/cshenso/git/presby-platform/presby-revoke/docs/architecture.md` (around line 100)
+- `/Users/cshenso/git/presby-platform/presby-revoke/docs/TODO.md` (around line 210)
+- `/Users/cshenso/git/presby-platform/presby-revoke/docs/product/functionality-map.md`
+
+I wrote nothing to disk.

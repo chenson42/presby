@@ -93,8 +93,12 @@ describe("section and row wording", () => {
     expect(sectionLead("treasurer", 2)).toMatch(/^2 people can manage giving at this organization\./);
   });
 
-  it("the treasurer lead says gift and donor records stay and the platform gains no access", () => {
-    expect(sectionLead("treasurer", 1)).toMatch(/Gift and donor records stay as they are, and the platform operator gains no access to them\./);
+  it("the treasurer lead says gift and donor records are unchanged and points at the audit log, with no claim about operator access", () => {
+    const lead = sectionLead("treasurer", 1);
+    expect(lead).toContain(
+      "Gift and donor records are not changed by ending access here. Every designation and every ending of access is recorded in the audit log.",
+    );
+    expect(lead).not.toMatch(/gains no access|no access to them/i);
     expect(sectionLead("founding_administrator", 1)).not.toMatch(/donor/);
   });
 
@@ -196,10 +200,18 @@ describe("revokeDialogContent", () => {
     expect(c.stillHoldsLine).toBeNull();
   });
 
-  it("the treasurer wording states donor and gift data stays and the platform gains no access", () => {
+  it("the treasurer wording states donor and gift data is unchanged and points at the audit log, with no claim about operator access", () => {
     const c = revokeDialogContent("treasurer", "X", row());
     expect(c.intro).toMatch(/manage giving at X\.$/);
-    expect(c.treasurerLine).toBe("Gift and donor records are not changed, and ending this gives the platform operator no access to them.");
+    expect(c.treasurerLine).toBe("Gift and donor records are not changed. This is recorded in the audit log.");
+    expect(c.treasurerLine).not.toMatch(/no access/i);
+    expect(revokeDialogContent("founding_administrator", "X", row()).treasurerLine).toBeNull();
+  });
+
+  it("names the slot's own page in the record line: Roles for the founding administrator, Giving team for the treasurer", () => {
+    expect(revokeDialogContent("founding_administrator", "X", row()).recordLine).toMatch(/its own Roles page/);
+    expect(revokeDialogContent("treasurer", "X", row()).recordLine).toMatch(/its own Giving team page/);
+    expect(revokeDialogContent("treasurer", "X", row()).recordLine).not.toMatch(/Roles page/);
   });
 
   it("always says it is recorded in the audit log with the reason and cannot be undone here", () => {

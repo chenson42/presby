@@ -275,14 +275,16 @@ test.describe("treasurer", () => {
     await page.goto(`/admin/organizations/${org.orgId}`);
     const section = page.getByTestId("treasurer-designation-section");
     await expect(section).toContainText("1 person can manage giving at this organization");
-    await expect(section).toContainText("the platform operator gains no access to them");
+    await expect(section).toContainText(
+      "Gift and donor records are not changed by ending access here. Every designation and every ending of access is recorded in the audit log.",
+    );
     await expect(section.getByTestId("designation-holder-row")).toContainText("Designated through an invitation");
     expect(await page.content()).not.toContain(email);
 
     const dialog = await openDialogFor(page, section, "Ottoline Fairweather");
     await expect(dialog).toContainText(/manage giving at/);
     await expect(dialog).toContainText(
-      "Gift and donor records are not changed, and ending this gives the platform operator no access to them.",
+      "Gift and donor records are not changed. This is recorded in the audit log.",
     );
     await dialog.getByLabel(/reason \(kept in the audit log\)/i).fill(REASON);
     await dialog.getByRole("button", { name: "Yes, end access" }).click();

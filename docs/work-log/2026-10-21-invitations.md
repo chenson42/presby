@@ -1195,6 +1195,25 @@ Phase 3 recorded: "a treasurer accepted from an existing non-2FA account is walk
 
 ---
 
+### Integration: renderEmail adoption (full-stack-developer, 2026-10-21)
+
+Ordered by Phase 2 R13. Review polish (PR #35, v0.36.0) merged to main first, so `origin/main` was merged into `pipeline/invitations` (the local polish branch was merged first, then `origin/main` on top; both merge commits are in history). One conflict, `src/lib/email/queue.ts` (imports only): kept the credential-key imports and re-export AND the `RenderedEmail` type import. `insertQueueRowInTx`, `attemptQueuedSend`, `cancelQueuedEmail` and the redaction auto-merged onto polish's `{ to, message, templateKey }` signature.
+
+**Files changed**
+- `src/lib/onboarding/invitation-email.ts`: builds the message with `renderEmail()` (heading "You're invited to PresbyPortal", greeting and role paragraphs, action button "Accept the invitation" with the printed link, expiry and ignore lines as the footnote). Subject, greeting, no-sender-text, no-address, escaping and the 100-character cap are unchanged. Returns `{ message: RenderedEmail, url }`.
+- `src/lib/onboarding/issue.ts`: both `insertQueueRowInTx` callers (create, resend) pass `message: rendered.message`.
+- Tests: `invitation-email.test.ts` (adapted; the URL appears three times in the html: button href, printed link href, printed link text; once in the text), `queue-credential.test.ts` (new `renderEmail` messages; new block proving that a URL with `&` appears escaped in the html and raw in the text, and that the sent-update bodies contain neither form).
+- `e2e/support/invitation-ui.ts` (`submitTotp`) and `e2e/invitation-new-account.spec.ts` (`/account/2fa` enrolment) now use `enterTotpCode` from `e2e/support/totp-page.ts`: polish replaced the single code field with six digit boxes, so the old placeholder and `#totp-enroll-code` locators timed out. Found by running the specs; not a product defect.
+- This work-log: the operator's own address, which had been written into two Phase 5/6 lines, is replaced with a placeholder (`check:secrets` flagged it; the repo is public).
+
+**Scrub note (deviation from the brief's wording).** The shipped scrub is not a link rewrite: the same UPDATE that marks a credential row `sent` or `failed` (and `cancelQueuedEmail`) replaces the WHOLE `html_body` and `text_body` with `REDACTED_BODY_MARKER`. So no form of the link (raw, HTML-escaped, in the href, the printed copy or the text) can survive, and there is no `replaceAll` to extend. The token alphabet is base64url (no `&`); the new unit test proves both forms are gone anyway with a URL that contains `&`. `credential-keys.ts` is unchanged: Retry refusal (F158) and the queue-page Retry hiding still read the same set (`admin-email-queue` e2e green).
+
+**Results**
+- `npm run typecheck`, `npm run lint`, `npm run check` (all eight tripwires): clean.
+- `npx vitest run` (pure): 492 files passed, 67 skipped; 7263 tests passed, 2018 skipped.
+- DB tests, one file per process with `--no-file-parallelism` and `.env.local`: `issue.db.test.ts` 50, `accept.db.test.ts` 30, `invitations.db.test.ts` 66, `designation-parity.db.test.ts` 12, `giving/statements.db.test.ts` 24 (the notice goes through `renderEmail`), all passed. First runs of `issue.db` (hook timeout) and `statements.db` (ECONNRESET) were Neon flakes and passed on re-run.
+- e2e on a dev server on port 3500 (Playwright started and stopped it; `RATE_LIMIT_DISABLED`, `E2E_ALLOW_SHARED_DB=true`): `invitation-new-account`, `invitation-existing-account` (4), `invitation-fixture-sweep`, `admin-organizations`, `admin-email-queue`, `totp-full-login`, `totp-code-entry`, `totp-recovery-code`: 49 in the first run, 47 passed and 2 failed (the TOTP-locator breakage above); after the e2e fix the three invitation specs pass 6/6.
+
 # Phase 5 — Verification (qa)
 
 **Date:** 2026-10-21

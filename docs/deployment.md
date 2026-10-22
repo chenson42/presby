@@ -606,6 +606,66 @@ cutover is a separate, unbuilt pipeline.
 
 ---
 
+## Account invitations (Increment 1)
+
+A platform operator invites an organization's founding administrator or first
+treasurer by email; the recipient proves the mailbox with a single-use link and
+creates an account or signs in to one. Design:
+`docs/work-log/2026-10-21-invitations.md`; decisions 183-189.
+
+### Configuration
+
+Each missing item changes what an invitation can do:
+
+- **`NEXT_PUBLIC_APP_URL`** must be the production `https` origin. The link is
+  built only from the platform origin; without it a send refuses
+  (`link_origin_unavailable`).
+- **`AUTH_TOTP_ENCRYPTION_KEY`** must be set; without it a send is refused, since
+  the invitee could not enrol in two-factor.
+- **`RESEND_WEBHOOK_SECRET`** must be set, or an invitation stays "Sent" forever and
+  never shows "Delivered" or "Bounced".
+- **`auth.local_login`** must be on for the invitation page to offer a password
+  form (it is read through `isLocalLoginEnabled()`, which fails open).
+
+### Pre-deploy runbook: 0059
+
+Added at integration (v0.37.0). Production is at `0057`; `0058` (Track F mail) is
+reserved and unbuilt, so the gap in the numbering is expected. Confirm first:
+`select to_regclass('organization_domains')` is non-null and
+`select to_regclass('account_invitations')` is null.
+
+1. **Apply 0059 before the merge deploys.** New code reads `account_invitations`
+   and calls the two functions; old code ignores them.
+2. **Snapshot `production` first** (Neon).
+3. **Apply WITH `-1`:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0059_presby_account_invitations.sql`.
+   Unlike `0057`, this file has **no** top-level `begin;`/`commit;`, so `-1` is what
+   makes it atomic. It is idempotent (QA re-applied it twice with only the expected
+   "already exists, skipping" notices).
+4. **Verify:** `account_invitations` has RLS **and** FORCE with one
+   `tenant_isolation` policy; `has_table_privilege('presby_app',
+   'account_invitations', p)` is false for SELECT, INSERT, UPDATE and DELETE;
+   `presby_app` holds EXECUTE on `presby_preview_invitation(text,uuid)` and
+   `presby_accept_invitation(text,uuid,text,text,text)` only, with no PUBLIC
+   EXECUTE; the seven functions are `SECURITY DEFINER` with
+   `search_path = public, pg_temp`; the three guard triggers are enabled; existing
+   row counts are unchanged. **Do not run `scripts/invitations/test-rls-59.sql` or
+   `scripts/invitations/seed-dev-invitations.sql` on production** (test helpers and
+   fixture tokens); run them on `development` after integration.
+5. **On `development`:** apply 0059 the same way, re-apply `scripts/seed-dev.sql`
+   (it now includes the invitations fixture), then run `scripts/test-rls.sql` as
+   `presby_app` and record the total. Also run
+   `src/lib/db/fixture-deletable.test.ts` against it.
+6. **After the deploy,** the regression smoke on the platform host (`/signin`, an
+   MFA login through `/launch`, `/home`, `/admin/organizations/[id]`), then the
+   operator's invitations checklist. Test on a congregation made for testing:
+   accepting creates people, memberships and role grants that cannot be deleted,
+   and an accepted founding administrator or treasurer blocks a later real
+   designation until removed through the role tools. Each recipient address takes
+   at most 3 invitations a day across all organizations, so use plus-addresses.
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

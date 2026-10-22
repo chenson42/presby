@@ -124,7 +124,23 @@ begin;
   -- Role & permissions administration (docs/work-log/2026-08-26-role-
   -- permissions-admin.md): +1 membership (Marisol Windham, the fresh fixture
   -- person role_admin binds to, DECISION-109) = 9.
-  select assert_eq((select count(*) from memberships), 9, 'alder: sees own memberships');
+  -- Counted over the fixture's own people, not every row in the org
+  -- (2026-10-21, invitations integration): `development` carries a demo-account
+  -- membership at Alder Creek, added through the app on 2026-10-14 and not part
+  -- of this fixture, which made a bare count read 10 and stopped the suite here.
+  -- An extra own-org row is not an isolation failure; the foreign-row check
+  -- below is the isolation property and stays a bare count.
+  select assert_eq((select count(*) from memberships
+                    where person_id in ('c0000000-0000-0000-0000-000000000001',
+                                        'c0000000-0000-0000-0000-000000000002',
+                                        'c0000000-0000-0000-0000-000000000003',
+                                        'c0000000-0000-0000-0000-000000000004',
+                                        'c0000000-0000-0000-0000-000000000005',
+                                        'c0000000-0000-0000-0000-000000000006',
+                                        'c0000000-0000-0000-0000-000000000007',
+                                        'c0000000-0000-0000-0000-000000000008',
+                                        'c0000000-0000-0000-0000-000000000009')),
+                   9, 'alder: sees own memberships');
   select assert_eq((select count(*) from memberships where organization_id <> :ALDER), 0,
                    'alder: sees NO foreign memberships');
   -- P9-role-catalog: 5 base + treasurer + installed_pastor = 7. support_contact
@@ -7921,7 +7937,7 @@ commit;
 --     cannot exercise the holder-count gate, and cannot reach the trigger
 --     refusals it maps to named results (person_elsewhere /
 --     membership_ended / provisioning_incomplete) — those are owner-path
---     behaviours and live in src/lib/founding-administrator.test.ts on
+--     behaviours and live in src/lib/onboarding/founding-administrator.test.ts on
 --     PLATFORM_DATABASE_URL, the same split section 41 already documents
 --     for presby_withdraw_publication().
 --
@@ -8536,3 +8552,12 @@ rollback;
 --     needs the test helpers, so it is never run against production.
 -- ===========================================================================
 \ir domains/test-rls-47.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/invitations (integration).
+-- 59. Account invitations (drizzle/0059_presby_account_invitations.sql).
+--     Its own file, as 46 and 47 above; \ir resolves relative to this script.
+--     It needs the test helpers and scripts/invitations/seed-dev-invitations.sql
+--     (included by scripts/seed-dev.sql), so it is never run against production.
+-- ===========================================================================
+\ir invitations/test-rls-59.sql

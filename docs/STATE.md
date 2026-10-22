@@ -7,7 +7,37 @@ Updated 2026-10-21.
 
 ---
 
-## RESUME HERE — 2026-10-21: production is on v0.35.0; review polish is integrated at v0.36.0, PR pending; invitations in Phase 5
+## RESUME HERE — 2026-10-21 (later): production is on v0.36.0; invitations Increment 1 is integrated at v0.37.0, PR pending
+
+**2026-10-21.** Review polish merged (PR #35) and is live as v0.36.0 (Google's own sign-in button, one box per digit on
+`/totp` and `/account/2fa`, every email through `renderEmail()`, the organizations tree; operator checklist section 9).
+`pipeline/invitations` (worktree `presby-invites`) is integrated for its PR to `main`: a platform operator invites a
+congregation's founding administrator or first treasurer by email, and the recipient creates an account or signs in, then
+accepts (migration `0059`, DECISION-183–189, F153–F159 and F166–F168, `docs/work-log/2026-10-21-invitations.md`; QA PASS with
+e2e through both MFA paths; Phase 6 SHIP WITH NOTES, every note a `docs/TODO.md` line). It merged `main` (review polish) and
+renders its email through `renderEmail()`. **What is and is not true of it:** only the two platform designations are
+invitation-based; a church administrator cannot yet invite its own staff (Increment 2, which needs the architect's R10 addendum
+first); every new invitee hits F166 (recovery codes vanish after first 2FA enrolment, one extra `/totp` challenge); Google sign-in
+for invitees and the 90-day address redaction are not built; acceptance creates permanent records.
+
+**Before and at merge** (`docs/deployment.md` → "Pre-deploy runbook: 0059"): confirm production is at `0057` (`0058` is reserved
+for Track F mail and absent); Neon snapshot; apply `0059` to production **with `psql -1`** (no inner transaction, unlike `0057`)
+*before* the merge deploys; confirm `NEXT_PUBLIC_APP_URL`, `AUTH_TOTP_ENCRYPTION_KEY` and `RESEND_WEBHOOK_SECRET` in Production.
+On `development`: apply `0059`, re-apply `scripts/seed-dev.sql` (now includes the invitations fixture), run `scripts/test-rls.sql`
+as `presby_app` and record the total (section 2's Alder Creek count now counts the fixture's own people, so the 2026-10-14 demo
+membership no longer stops the suite), and run `src/lib/db/fixture-deletable.test.ts`.
+
+**Next, in order** (the operator picks the pace):
+1. The F166 bug-fix pipeline, before anyone other than the operator is invited.
+2. Add the invitations steps to the operator's checklist artifact (Phase 6's corrected 11 steps, steps 12-13, the prerequisites).
+3. Invitations Increment 2 (org-level "Invite to sign in"): architect's R10 addendum, then Phase 3.
+4. Operator questions still open: email button contrast (6.84:1, brand blue or navy), the "test organization" flag, the `/signin`
+   developer hint, Google button prominence, the founding-administrator holder-count ruling.
+5. As before: the Vercel token and the Track F acceptance pass, F111, the overdue test-coverage and retrospective reviews.
+
+---
+
+## Previous handoff — 2026-10-21: production is on v0.35.0; review polish is integrated at v0.36.0, PR pending; invitations in Phase 5
 
 **2026-10-21.** Production runs v0.35.0 (custom domains for the web, merged and deployed; the operator is working through the
 production test checklist). `pipeline/review-polish` (worktree `presby-polish`) is integrated for its PR to `main`: the operator's

@@ -407,6 +407,13 @@
       "when": 1787014313186,
       "tag": "0057_presby_org_domains",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787014373186,
+      "tag": "0059_presby_account_invitations",
+      "breakpoints": true
     }
   ]
 }

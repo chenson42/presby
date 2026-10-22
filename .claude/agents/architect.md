@@ -19,6 +19,7 @@ The canonical directory tree lives in `CLAUDE.md` → Project Layout (do not mai
 - `(account)` — auth-only self-serve account surface.
 - `(password-reset)` / `(email-verify)` — public token-consuming flows; enumeration-safe responses.
 - `(statistics-submit)` — the public, token-consuming SASR filing flow (DECISION-147): the token is the credential; no session, no `FEATURES.*` gate, no org context set by the caller; platform palette; exact paths in `src/proxy.ts`'s public list; one uniform response for every failure state including flag-off.
+- `(invite)` — the public, token-consuming account-invitation flow (DECISION-183/185): the token is the credential; signed-in and anonymous visitors both; exact paths in `src/proxy.ts`'s public list; platform palette; no layout or loading boundary; never imports `getPlatformDb()`.
 - `access-pending` — authenticated users with no roles; don't dump them on `/admin`.
 - `api/admin/*` — every handler checks session + the relevant `FEATURES.*` key.
 - `api/webhooks/<provider>` — webhook handlers verify their own signatures; the proxy bypasses them (DECISION-028).

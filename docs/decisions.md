@@ -56,6 +56,93 @@ Google's published fill, stroke, text and "G" colours for the light and dark but
 
 ---
 
+**DECISION-189 — The invitation issue-side protocol: the invitation row and its queue row are written in one platform-connection transaction with the link set at insert; the send happens after commit; credential bodies are scrubbed at `sent`/`failed`/`cancelled`; durable limits bound the sender.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 3, tech-lead; as built in Batch 2)
+
+- `issue.ts` uses `getPlatformDb()` only and never reads `users`, so the sender's screen cannot depend on whether the address has an account (source-scanned). It supersedes the open row before inserting the new one, so both partial unique indexes hold.
+- The queue row (`email_queue`, template key `account_invitation`) is inserted in the same transaction as the invitation, with its body already rendered, and `email_queue_id` is set at insert. The send is attempted after commit; a provider failure leaves the row `queued` with a working link for the worker.
+- When a credential row reaches `sent`, `failed` or `cancelled`, the whole `html_body` and `text_body` are replaced by a marker ("[Removed after delivery: this message contained a one-time sign-in link.]"); revoke or supersede cancels a still-queued row. `retryEmailAction` refuses a scrubbed credential row and points to Resend (F158). The key list is `src/lib/email/credential-keys.ts`; it holds `account_invitation` only (the other credential templates are F154).
+- Durable limits, all rolling 24 h and bounded above by `now()`: 20 per inviter, 10 per organization, 3 per recipient address across all organizations; a 5-minute cooldown per open invitation; at most 5 resends per chain. A resend counts as a send and a revoke refunds nothing. Default lifetime 7 days, 30-day cap enforced by a CHECK.
+- Resend lineage is `resent_from_id` plus `resend_count` on the new row (D-1); a resend never rotates the token in place.
+- The link is built only from `platformOrigin()`; with no https platform origin the send refuses (`link_origin_unavailable`). A send also refuses when TOTP is unconfigured (`AUTH_TOTP_ENCRYPTION_KEY`) for either purpose.
+- **As integrated (DECISION-191):** the invitation email is a `RenderedEmail` built by `renderEmail()` (action button plus the printed link; the accept URL appears unchanged in the button href, the printed link and the text part).
+
+(2026-10-21, Phase 3; amended from Batch 2 and the integration.)
+
+---
+
+**DECISION-188 — `presby_accept_invitation()` returns its outcomes rather than raising them; a terminal refusal commits only `blocked_at`; the apply phase runs in a subtransaction; a successful signed-in accept refreshes the session.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 3 D-5; as built in Batches 1, 2 and 4)
+
+- **Outcomes.** *Uniform:* `dead` (unknown, expired, revoked, superseded, consumed or blocked): one outcome, one row shape, one UI string (the DECISION-147 bucket). *Non-terminal, nothing written, token stays live:* `account_exists`, `email_mismatch`, `account_inactive`. *Terminal:* `blocked`, with `blocked_at` committed and nothing else, and `blocked_reason` from the closed list `has_holders | person_elsewhere | membership_ended | person_merged | person_linked_elsewhere | ambiguous_person | not_applicable | provisioning_incomplete`. *Success:* `accepted`. Non-terminal and `dead` outcomes return `outcome` only, every other column null.
+- **Apply phase.** The founding-administrator and treasurer effects run in a subtransaction through the ungranted helpers `presby_apply_founding_administrator()` and `presby_apply_treasurer()`; a late gate refusal from the real guards rolls back the apply and commits the block, with the marker re-armed on the blocked path (D-5.1). The `account_exists` mapping of a unique violation is scoped to `users_email_unique` (D-5.2; the mapping table is a comment beside the handler in `0059`).
+- **Returned columns.** `person_mode` is `created_person`, `existing_person` or `linked_person`; a trailing OUT column `treasurer_role_id` feeds the `org.treasurer.designated` audit row (the signature, and so the ACL target, is unchanged).
+- **Self-acceptance** is stamped, not refused: `inviter_is_invitee` is returned, written as `inviterIsInvitee: true` on both `invitation.accepted` and the `org.*.designated` audit rows, and the organization page shows "Self-designated" (operator ruling on R9; DECISION-183).
+- **Existence checks are case-blind:** `lower(users.email) = email_normalized` (Phase 2 addendum, contradiction 2).
+- **The session is refreshed after a signed-in accept (F167).** `acceptSignedInAction()` calls `unstable_update({ user: {} })` after a successful accept and before the redirect, inside a `try/catch` (the accept is committed, so a failed refresh logs a fixed string and still redirects). Without it the proxy reads a stale `twoFactorRequired` claim from the cookie and a newly designated treasurer reaches `/o/<slug>` without the 2FA wall until the next sign-in.
+
+(2026-10-21, Phase 3; amended from Batch 1 deviations and Batch 4.)
+
+---
+
+**DECISION-187 — No invitation is applied from the `signIn` or `jwt` callbacks. The token is the sole acceptance credential; OAuth is only a way to be signed in.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2, R3; amends Phase 1 C4, Flow 8, G11, Q8)
+
+`src/auth.ts` and `src/lib/auth/` are unchanged in Increment 1. Google sign-in for an invitee (Increment 3) means configuring Google, adding `email_verified === true` to `evaluateSignIn()`, and a Flow 4 e2e through Google; it never adds an automatic claim to the auth callbacks.
+
+(2026-10-21, Phase 2.)
+
+---
+
+**DECISION-186 — Template key `account_invitation`, class `account`, platform origin only (amends DECISION-182's registry row).**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2)
+
+The queue row is written in the issuing transaction and sent after commit. Bodies of the credential template keys are scrubbed on `sent`, `failed` and `cancelled`; revoke or supersede cancels a still-queued row (DECISION-189). As integrated, the message is rendered by `renderEmail()` (DECISION-191).
+
+(2026-10-21, Phase 2; amended at integration.)
+
+---
+
+**DECISION-185 — New module `src/lib/onboarding/` and new un-brandable route group `(invite)`; the token never rides `callbackUrl`.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2; amended by Phase 2 addendum 2)
+
+- The two designation modules moved to `src/lib/onboarding/` in a pure-move commit. `issue.ts` uses the platform connection only; `accept.ts` uses `presby_app` (`db`) only and writes its audit rows in the same transaction.
+- `(invite)` has exact `PUBLIC_PATHS` entries `/invite` and `/invite/accepted`, renders in the platform palette, has no layout or loading boundary, and never imports `getPlatformDb()`.
+- **Hand-off cookie (amended by addendum 2):** a host-only, `Path=/`, httpOnly, `SameSite=Lax`, 30-minute cookie (`__Host-invite_token` in production, `invite_token` in development) carries the token across sign-in. The path is `/` because a server-action redirect renders its target inside the action's own request, so a `Path=/invite` cookie was invisible on the return from sign-in and the invitee briefly saw the dead-link page (F168). The `RecheckOnce` stopgap is deleted.
+
+(2026-10-21, Phase 2; amended in place by addendum 2.)
+
+---
+
+**DECISION-184 — `account_invitations` (migration `0059`): FORCE RLS, composite tenant keys, one open row per (organization, purpose, address), resend lineage by `resent_from_id`, guards on insert, update and delete, and EXECUTE on two functions as `presby_app`'s only privilege.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2; D-1, D-2 and Batch 1 folded in)
+
+- FORCE RLS with one `tenant_isolation` policy; `unique (id, organization_id)`; the person key is composite to `memberships (person_id, organization_id)`; the resend self-FK is composite; plain FKs to `users` only; `email_queue_id` is a plain uuid.
+- **One open row per (organization, purpose, address)** through the partial unique index `account_invitations_open_designation_uq` (D-2), and **one successor per row** through `account_invitations_resent_from_uq` (D-1). A resend writes a new row naming its parent in `resent_from_id` with `resend_count = parent + 1`, after superseding the parent; the token is never rotated in place.
+- **Guards.** `BEFORE INSERT`: rows are born open (no terminal timestamp, redaction, `accepted_user_id`, `revoked_by_user_id` or `blocked_reason`), a founding-administrator row names no person at insert, and the resend chain is checked. `BEFORE UPDATE`: identity columns are immutable, terminal states are one-way, and the accept and blocked transitions require the marker only the definer arms (`'true'`). `BEFORE DELETE`: rows are permanent; only the fixture-teardown cascade passes. The guards bind the owner connection too.
+- `presby_app` holds **no table privilege**, only EXECUTE on `presby_preview_invitation(text, uuid)` and `presby_accept_invitation(text, uuid, text, text, text)`. The preview takes the raw token (hashed in SQL) and masks the address in SQL; the hash at rest previews nothing.
+- `email_normalized` and `redacted_at` exist for a 90-day redaction after an invitation ends; **the sweep is not built** (S6, tracked) and the column comment says so.
+
+(2026-10-21, Phase 2; amended from the addendum and Batch 1.)
+
+---
+
+**DECISION-183 — An account invitation is a DECISION-147 credential, accepted by one SECURITY DEFINER function on `presby_app` that derives everything from the token's own row.**
+
+**Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2; R9 reversed by the operator; D-5 folded in)
+
+`presby_accept_invitation()` takes the raw token, derives organization, purpose, address and person from its row, and creates or verifies the account, links the person, applies the designation and claims the row in one transaction, with no org GUC. `getPlatformDb()` never appears on the acceptance path. The founding-administrator and treasurer effects moved to ungranted plpgsql helpers, and the TypeScript transactions were retired after a parity test against a committed golden. The holder gates and the founding-administrator bundle are single-sourced in owner-only SQL functions, the TypeScript copy pinned by test. Lock order: organization, invitation, user, person. An existing account must click Accept, and a 2FA-required account needs a verified session. **A self-sent designation is permitted, accepted through the same token, email match and confirmation as any invitee, and audited `inviterIsInvitee`; the platform role confers nothing** (operator ruling 2026-10-21, reversing R9; CLAUDE.md → Two Hierarchies Intersect Nowhere).
+
+(2026-10-21, Phase 2; corrected at integration per the Phase 2 addendum.)
+
+---
+
 **DECISION-182 — Outbound mail goes through a closed sender registry: `account` | `org` | `org_fallback_only` (credential-bearing org mail); an unknown template key is `account`, and a guard test fails any `templateKey` not in the registry.**
 
 **Status:** Accepted design, **not built** (Increment 2, Batches 2a to 2c) · **Date:** 2026-10-19 · **Feature:** `2026-10-19-custom-domains` (Phase 2 draft, Phase 3 refinement). Recorded now so the numbering and the constraints are fixed before the schema work starts; Increment 1 ships none of it, and the `org_portal.mail_domain` toggle is inert.

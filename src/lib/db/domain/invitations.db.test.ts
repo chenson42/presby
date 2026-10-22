@@ -60,6 +60,13 @@ const DEFINER_FUNCTIONS = [
   "presby_apply_treasurer(uuid,uuid,uuid)",
   "presby_preview_invitation(text,uuid)",
   "presby_accept_invitation(text,uuid,text,text,text)",
+  // drizzle/0060 (designation revoke, DECISION-196): owner only, none
+  // executable by presby_app. The two counts above are redefined there over
+  // the two list functions; their pin test below is deliberately unchanged.
+  "presby_founding_administrator_holder_grants(uuid)",
+  "presby_giving_manage_holder_grants(uuid)",
+  "presby_founding_administrator_companion_grants(uuid,uuid)",
+  "presby_revoke_designation_holder(uuid,text,text,uuid,uuid[])",
 ];
 const APP_EXECUTABLE = new Set([
   "presby_preview_invitation(text,uuid)",

@@ -13,7 +13,7 @@
  *   3. Any other thrown error renders the load-error state.
  *   4. `{ kind: "forbidden" }` renders `OfficersForbidden`.
  *   5. `{ kind: "invalid_target" }` calls `notFound()` — a real 404, not a
- *      load error (same discipline `admin/members/[id]/edit/page.tsx`'s
+ *      load error (same discipline `admin/community/[id]/edit/page.tsx`'s
  *      `not_found` branch documents).
  *   6. The ok path renders the history table, using the `?name=` query
  *      param for the heading, falling back to generic copy when absent.

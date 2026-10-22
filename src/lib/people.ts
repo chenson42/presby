@@ -172,7 +172,7 @@ export interface CreatePersonInput {
          * `CreatePersonInput` caller that reaches an end user through a form
          * MUST fix this kind server-side, never trust it from client input —
          * see `admin/staff/actions.ts`'s `createStaffPersonAction()` and the
-         * runtime guard `admin/members/new/actions.ts`'s
+         * runtime guard `admin/community/new/actions.ts`'s
          * `createPersonAction()` added alongside this type change (the
          * member wizard must keep requiring a real roll action; widening
          * this union must not silently let a member-creation caller skip
@@ -429,7 +429,7 @@ export async function createPerson(
           // row with `engagement_status = 'regular'` (their OR-branch,
           // since `current_roll` stays null for this kind by construction);
           // a staff-only anchor row that kept the old hardcoded value would
-          // leak straight into the public directory and the admin/members
+          // leak straight into the public directory and the admin/community
           // roster the moment this branch shipped. Confirmed by reading both
           // predicates directly (`src/lib/directory.ts`, `src/lib/org-portal
           // /find-person.ts`) — see `staff.test.ts`'s and `people.test.ts`'s

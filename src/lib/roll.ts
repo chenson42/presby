@@ -253,7 +253,7 @@ interface PendingRollActionRow {
   preferred_name: string | null;
 }
 
-/** The clerk's session-agenda worklist — future `/admin/members/pending`
+/** The clerk's session-agenda worklist — future `/admin/community/pending`
  * page's data. Gated on `roll.approve`. */
 export async function listPendingRollActions(
   viewerPersonId: string,
@@ -457,7 +457,7 @@ export type PendingRollActionsForPersonResult =
   | { kind: "forbidden" };
 
 /**
- * A small, org-scoped, person-scoped read for `/o/<slug>/admin/members/<id>/
+ * A small, org-scoped, person-scoped read for `/o/<slug>/admin/community/<id>/
  * edit`'s own non-blocking notice — deliberately NOT `listPendingRollActions`
  * (gated on `roll.approve`, the approve worklist's own permission): a clerk
  * who holds `roll.propose` but not `roll.approve` must still see this

@@ -358,7 +358,7 @@ async function seedFlags() {
     },
     {
       key: "org_portal.members_create",
-      // ON: /o/<slug>/admin/members* (create-person wizard + the pending
+      // ON: /o/<slug>/admin/community* (create-person wizard + the pending
       // roll-action approve/deny worklist) is reachable at all — gated
       // ADDITIONALLY by the org-level org_portal.members_create toggle
       // (organization_feature_toggles), per DECISION-097's three-axis gate
@@ -370,13 +370,13 @@ async function seedFlags() {
       // (DECISION-003). Seeded OFF, same "ships dark until the page lands"
       // reasoning as its org_portal.* siblings.
       description:
-        "Member-creation wizard + roll-action approval worklist in (org). OFF = /o/<slug>/admin/members* renders 'isn't turned on yet' regardless of the org toggle or the viewer's grants.",
+        "Member-creation wizard + roll-action approval worklist in (org). OFF = /o/<slug>/admin/community* renders 'isn't turned on yet' regardless of the org toggle or the viewer's grants.",
       enabled: false,
     },
     {
       key: "org_portal.members_roll_action_edit",
       // ON (AND org_portal.members_create's flag+toggle pair, already
-      // required to reach /admin/members/<id>/edit at all, both ALSO on):
+      // required to reach /admin/community/<id>/edit at all, both ALSO on):
       // `RecordRollActionForm` renders on the Edit-person screen, letting a
       // roll.propose holder record a roll action against an ALREADY-
       // EXISTING person, not just at creation time
@@ -516,7 +516,7 @@ async function seedFlags() {
     },
     {
       key: "org_portal.sensitive_info",
-      // ON: /o/<slug>/admin/members/<id>/edit/sensitive is reachable at
+      // ON: /o/<slug>/admin/community/<id>/edit/sensitive is reachable at
       // all — gated ADDITIONALLY by the org-level org_portal.sensitive_info
       // toggle (organization_feature_toggles), per DECISION-097's
       // three-axis gate order: this flag -> the org toggle of the same key
@@ -532,13 +532,13 @@ async function seedFlags() {
       // the four permission checks (DECISION-003). Seeded OFF, same "ships
       // dark until the page lands" reasoning as its org_portal.* siblings.
       description:
-        "Tiered sensitive-info sub-screen (pastoral notes, demographics, medical, disabilities) in (org). OFF = /o/<slug>/admin/members/<id>/edit/sensitive renders 'isn't turned on yet' regardless of the org toggle or the viewer's grants.",
+        "Tiered sensitive-info sub-screen (pastoral notes, demographics, medical, disabilities) in (org). OFF = /o/<slug>/admin/community/<id>/edit/sensitive renders 'isn't turned on yet' regardless of the org toggle or the viewer's grants.",
       enabled: false,
     },
     {
       key: "org_portal.children_ministry",
-      // ON: /o/<slug>/admin/members/children (the children's roster) and
-      // /o/<slug>/admin/members/<id>/edit/guardians (guardian-link
+      // ON: /o/<slug>/admin/community/children (the children's roster) and
+      // /o/<slug>/admin/community/<id>/edit/guardians (guardian-link
       // management) are reachable at all. Checked BARE, no per-org
       // organization_feature_toggles row and no DECISION-026 fail-open
       // wrapper — a toggle, not an auth path (docs/work-log/
@@ -554,7 +554,7 @@ async function seedFlags() {
       // never gates a permission). Seeded OFF, same "ships dark until the
       // page lands" reasoning as its org_portal.* siblings.
       description:
-        "Children's roster + guardian-link management in (org). OFF = /o/<slug>/admin/members/children and .../edit/guardians render 'isn't turned on yet' regardless of the viewer's children.roster grant.",
+        "Children's roster + guardian-link management in (org). OFF = /o/<slug>/admin/community/children and .../edit/guardians render 'isn't turned on yet' regardless of the viewer's children.roster grant.",
       enabled: false,
     },
     {

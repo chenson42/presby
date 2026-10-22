@@ -122,7 +122,7 @@ export const AUDIT_ACTIONS = {
   ORG_FEATURE_CATEGORY_TOGGLED: "tenant.org_feature_category.toggled",
   // Member management, Increment 1 (docs/work-log/
   // 2026-08-25-member-management.md Deliverable B, Phase 2 open-question (b))
-  // — written from src/app/(org)/o/[slug]/admin/members/pending/actions.ts.
+  // — written from src/app/(org)/o/[slug]/admin/community/pending/actions.ts.
   // A roll action outranks a role grant in constitutional weight, so
   // approve/deny get their own audited events even though routine roll-read
   // access does not.
@@ -130,7 +130,7 @@ export const AUDIT_ACTIONS = {
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
   // Member management, Increment 2 (docs/work-log/
   // 2026-08-26-member-management-edit-person.md) — written from
-  // src/app/(org)/o/[slug]/admin/members/[id]/edit/actions.ts. Identity,
+  // src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts. Identity,
   // contact, address, and household are tier-1 data, but still
   // identity-adjacent and worth a record of who changed what and when —
   // same tier as ORG_FEATURE_TOGGLED, not elevated to the roll actions'

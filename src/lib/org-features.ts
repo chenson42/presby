@@ -308,7 +308,7 @@ export function isCategoryAxisOn(): Promise<boolean> {
  * Does NOT read the entry's platform `flag`. That is the call site's job:
  * `entry.flag === null || await isFlagEnabled(entry.flag)`, then this, then the
  * permission. `isOrgFeatureEnabled` itself still reads only the category axis,
- * which is why the existing `admin/members/**` call sites — which already do
+ * which is why the existing `admin/community/**` call sites — which already do
  * `isFlagEnabled(KEY)` first — need no change.
  */
 export async function orgFeatureEnabledInTx(

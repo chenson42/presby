@@ -2,7 +2,7 @@
 /**
  * Orchestration tests for `/o/<slug>/admin/groups/new`'s page.tsx — docs/
  * work-log/2026-08-26-groups-admin.md, Phase 4 commit 2. Mirrors
- * `admin/members/new/page.test.tsx`'s style for the ordering/error-handling
+ * `admin/community/new/page.test.tsx`'s style for the ordering/error-handling
  * contract.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";

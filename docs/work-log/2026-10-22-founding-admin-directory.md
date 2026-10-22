@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete (revised; reclassified to Feature) | READY WITH NOTES | 2026-10-22 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete (design to R1-R14; S1-S6 ruled; route move designed as its own Batch M) | Design complete; implementers named | 2026-10-22 |
-| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | Pending | — | — |
+| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; A, B, C, D pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1328,6 +1328,59 @@ Next: **Phase 4**, serial: **Batch M** (`full-stack-developer`), **Batch A** (`d
 ---
 
 # Phase 4 — Implementation
+
+## Phase 4 — Batch M (route move) — full-stack-developer, 2026-10-22
+
+A pure move: `/o/<slug>/admin/members` becomes `/o/<slug>/admin/community`, with a permanent platform-host-scoped redirect for the old paths. No behaviour, copy, heading, logic, permission or schema change. The tile label stays "Members" (Batch C renames it). Committed as `refactor(community): ...`.
+
+### Files created
+
+- `src/lib/route-move-community.test.ts` — (1) the real `next.config.ts` `redirects()` carries `/o/:slug/admin/members/:path*` as permanent (308), to `/o/:slug/admin/community/:path*`, with the same platform-host `has` value as `/orgs` (F151); (2) a source scan: the old path string appears in no file under `src/`, `scripts/` or `e2e/` except a two-file allowlist (this test and `src/lib/giving/csp.test.ts`); (3) in `next.config.ts` it appears only on the redirect's `source` line; (4) the old route directory no longer exists.
+
+### Files modified
+
+- `next.config.ts` — the redirect entry beside `/orgs`, with a comment naming F151 and DECISION-201.
+- `src/lib/giving/csp.test.ts` — the existing `/orgs` redirect test asserted `rest` was empty; it now asserts the one other redirect is the community move (whose own assertions live in the new test).
+- The route directory, `git mv`'d: `src/app/(org)/o/[slug]/admin/members/` to `.../admin/community/` (56 files: 33 source, 23 colocated tests). Git sees them as renames plus string edits (`git diff -M`).
+- String sweep `admin/members` to `admin/community` in: the moved files (hrefs, `callbackUrl`, `router.push`, `backHref`, `revalidatePath`, test expectations, header comments); `admin/page.test.tsx` (`:143`, `:259`); `admin/credentials/record-{ordination,appointment}-form.tsx` (hrefs); comment-only references in `admin/{groups,staff,officers}/**`; `src/lib/org-portal/tiles.ts` (href only); `src/lib/{roll,roll-action-kinds,people,credentials,audit,audit.test,org-features}.ts` and `src/lib/db/domain/people.ts` (comments); `scripts/seed.ts` (flag description text and comments; the descriptions are only written on a seed run); `scripts/check-giving-boundaries.test.mjs:165` (a path example).
+- One reference the first sweep missed because it is URL-encoded: `admin%2Fmembers` in `community/page.test.tsx:299` (a `callbackUrl` expectation). Found by the unit suite, not by grep for `admin/members`.
+- Not renamed, on purpose: the `members-states.tsx`, `members-list.tsx` and `member-wizard*` file names and component names (Phase 3 keeps them so Batch M stays mechanical); relative imports (`../members-states`) are unchanged because the files moved together; the `members` tile key and the `org_portal.members_create` flag key.
+
+### Schema, audit, env
+
+None. No migration, no `AUDIT_ACTIONS` key, no env var, no `FEATURES` entry, no permission change. No Rule 16 shared file was edited (`drizzle/meta/_journal.json`, `scripts/test-rls.sql`, `scripts/seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `src/lib/db/domain/index.ts`, `CLAUDE.md`).
+
+### Gates run (in the `presby-fadir` worktree)
+
+- `npm run typecheck`, `npm run lint` (`--max-warnings=0`), `npm run check` (all eight tripwires, exit 0): pass.
+- `npm run test`: 492 files passed, 67 skipped (DB-backed, not run here), 0 failed; 7267 tests passed. Two failures surfaced along the way and were fixed in this batch: the URL-encoded `callbackUrl` (above) and `csp.test.ts`'s "no other redirect" assertion.
+- `npm run build`: pass; the route table lists `/o/[slug]/admin/community/**` and nothing under `admin/members`.
+- Grep gate: `grep -rn "admin/members"` outside `docs/` finds only the redirect (`next.config.ts:178`) and the four test files that assert it.
+- Dev server, `curl` (platform host, no session): `/o/alder-creek/admin/members` answers `308 Permanent Redirect` to `/o/alder-creek/admin/community`; `/admin/members/new?x=1&y=2` to `/admin/community/new?x=1&y=2` (query intact); `/admin/members/p-1/edit/guardians` and `/admin/members/pending` redirect with the sub-path; `/orgs` still `308` to `/home`; the new path answers `307` to `/signin?callbackUrl=%2Fo%2Falder-creek%2Fadmin%2Fcommunity` for a signed-out caller. A request with a custom `Host` (`church-one.invalid`) for the old path answers `404`, not the redirect (F151).
+- Browser (Playwright Chromium, 360 x 800, signed in as the seeded `clerk.fixture` at Alder Creek): the Community page loads at `/o/alder-creek/admin/community` with no page errors and no horizontal overflow (scrollWidth 360); "Add person" and every Edit link point at `/admin/community/...`; the admin hub tile points at `/admin/community`; an Edit page loads at the new path; the old path followed in the browser lands on `/admin/community/new?x=1`. The page rendered its list only after turning on `org_portal.members_create` for Alder Creek on the pipeline Neon branch; that toggle row was added for the check and deleted afterwards, so the branch is as it was.
+
+### Implementer notes
+
+- The page's `<h1>` still reads "Members" and its copy is unchanged; Batch C owns the label.
+- Old `/admin/members` URLs are only redirected on platform hosts, by `redirects()`, which runs before the proxy. The proxy needed no change.
+- The sign-in `callbackUrl` after the redirect drops the query string (`sanitizeCallbackUrl`), which is existing behaviour and not part of this batch.
+- Documentation is not swept: work-logs, `docs/decisions.md`, `docs/schema-design-2.md` and the release notes record history under the old path and are left as written.
+
+### For the orchestrator (not edited, per Rule 16)
+
+- **CLAUDE.md:** no mention of the old route (searched `admin/members`, `/members`, `members/**`); nothing to change there.
+- **`docs/TODO.md`:** 11 lines mention `admin/members`; review which are open items that now name a stale path (update at integration).
+- **`docs/decisions.md`:** 5 mentions, all historical; DECISION-201 already records the move.
+- **`docs/product/functionality-map.md`:** 3 mentions; update at ship time (Rule 14) when the label changes in Batch C.
+- `docs/work-log/*` (about 25 older files) and `docs/release-notes/v0.17.md`, `v0.18.md` keep the old path as history.
+
+### Handoff
+
+Next: **Batch A** (`database-admin`, migration 0061). Batches B, C and D write at the final `community/` paths. Browser follow-up for QA: signed-out `curl -I` on `/o/<slug>/admin/members/new?x=1` shows `308` and the new `location`, and the Community page at 360px.
+
+---
+
+## Remaining Phase 4 template (Batches A to D fill this in)
 
 ## Files Created
 

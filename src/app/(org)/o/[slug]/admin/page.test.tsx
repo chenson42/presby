@@ -140,7 +140,7 @@ const ADMINISTER_TILES = [
     key: "members",
     label: "Members",
     description: "Add a person and record roll actions.",
-    href: (slug: string) => `/o/${slug}/admin/members`,
+    href: (slug: string) => `/o/${slug}/admin/community`,
     flagKey: "org_portal.members_create",
     category: "administer" as const,
     domain: "people" as const,
@@ -256,7 +256,7 @@ describe("AdminHubPage — non-negotiable acceptance criterion: no permission pr
     render(el);
 
     expect(screen.getByRole("link", { name: /members/i }).getAttribute("href")).toBe(
-      "/o/alder-creek/admin/members",
+      "/o/alder-creek/admin/community",
     );
     expect(screen.getByRole("link", { name: /^roles/i }).getAttribute("href")).toBe(
       "/o/alder-creek/admin/roles",

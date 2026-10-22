@@ -162,7 +162,7 @@ describe("B3 — no owner connection in the giving money paths", () => {
       "src/lib/organizations.ts",
       "src/app/(admin)/admin/organizations/[id]/actions.ts",
       "src/lib/testing/giving-fixture.ts",
-      "src/app/(org)/o/[slug]/admin/members/page.tsx",
+      "src/app/(org)/o/[slug]/admin/community/page.tsx",
     ]) {
       expect(checkGivingBoundaries([f(p, "const db = getPlatformDb();")]), p).toEqual([]);
     }

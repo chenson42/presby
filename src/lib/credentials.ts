@@ -28,7 +28,7 @@ import { memberships, people } from "@/lib/db/domain/people";
  * to hold a CURRENT `memberships` row at THIS org (F21 shape, same as
  * `startOfficerTerm`/`grantRole`) — never a side-door create-person flow.
  * An empty person-picker in `getCredentialsFormOptions()` is the correct
- * signal, not a bug: the clerk's next step is `/o/[slug]/admin/members`.
+ * signal, not a bug: the clerk's next step is `/o/[slug]/admin/community`.
  *
  * `recordAppointment()`'s PARENT-PATH CHECK (Phase 1's "second org id"
  * adversarial finding, restated in Phase 3's Edge Cases): `servingOrgId` is

@@ -129,11 +129,11 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   ORG_FEATURE_TOGGLED: "tenant.org_feature.toggled",
   ORG_FEATURE_CATEGORY_TOGGLED: "tenant.org_feature_category.toggled",
   // Member management, Increment 1 (2026-08-25) — written from
-  // src/app/(org)/o/[slug]/admin/members/pending/actions.ts
+  // src/app/(org)/o/[slug]/admin/community/pending/actions.ts
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
   // Member management, Increment 2 (2026-08-26) — written from
-  // src/app/(org)/o/[slug]/admin/members/[id]/edit/actions.ts
+  // src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts
   PERSON_UPDATED: "tenant.person.updated",
   // Officer-terms administration (2026-08-26, groups-and-officers) —
   // written from src/app/(org)/o/[slug]/admin/officers/actions.ts

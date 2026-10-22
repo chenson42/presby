@@ -36,7 +36,7 @@ const GROUPS_FLAG = "org_portal.groups";
  * `groups.manage` to succeed at all, so a `forbidden` result short-circuits
  * the whole page before this point (same reasoning `admin/officers/page.tsx`
  * uses for `AddOfficerTermForm` — there is no read-only role for this
- * surface, unlike `admin/members/page.tsx`'s `directory.view`/
+ * surface, unlike `admin/community/page.tsx`'s `directory.view`/
  * `people.manage` split).
  */
 export default async function GroupsPage({

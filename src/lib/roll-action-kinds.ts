@@ -67,7 +67,7 @@ export const ROLL_ACTION_KIND_TO_ROLL: Record<RollActionKind, string | null> = {
 };
 
 /**
- * The edit-time picker's allow-list (`/o/<slug>/admin/members/<id>/edit`'s
+ * The edit-time picker's allow-list (`/o/<slug>/admin/community/<id>/edit`'s
  * `RecordRollActionForm`) — mechanically every kind whose `resultingRoll` is
  * non-null. Nothing that only ADDS to a roll can ever need `officer_terms`/
  * `role_grants`/`group_memberships` to change, so F19 (open, see

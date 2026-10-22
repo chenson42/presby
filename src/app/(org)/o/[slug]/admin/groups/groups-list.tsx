@@ -18,7 +18,7 @@ import type { DerivedGroupListEntry, GroupListEntry } from "@/lib/groups";
  *
  * A Server Component (read-only data), same as `officer-roster.tsx` —
  * embeds no client component of its own; the "New group" CTA lives one
- * level up, in `page.tsx`, gated the same way `admin/members/page.tsx`
+ * level up, in `page.tsx`, gated the same way `admin/community/page.tsx`
  * gates "Add person".
  */
 export function GroupsList({

@@ -4,6 +4,41 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-196 — Designation-holder revoke mechanics: owner-only list functions are the single source for the holder counts, one owner-only revoke function with idempotent outcomes, the membership-end clamp, and a platform-connection library imported only from (admin).**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-designation-revoke` (Phase 2 architect D1/D3/D4/D5/D6; Phase 3 tech-lead)
+
+- **(a) Single source (F169).** `presby_founding_administrator_holder_grants(org)` and `presby_giving_manage_holder_grants(org)` return one row per (contributing grant, holder person); the two existing counts are redefined as `count(distinct holder_person_id)` over them, same signatures. The founding-administrator asymmetry (group arm with no date window, no membership join, merged people counted) is **kept word for word**: it is what makes ghost holders visible and therefore revocable, and changing the gate stays the separate ruling `docs/TODO.md` already tracks, now paired with "ghost grants are ended, not hidden".
+- **(b) One revoke function** `presby_revoke_designation_holder(org, slot, subject_kind, subject_id, expected_grant_ids)`, owner-only, the only platform-side writer of `role_grants.ends_on`. Order: organization-row `FOR UPDATE` first (the accept/issue order), derive, `FOR UPDATE` the contributing grants re-filtering effectiveness, compare as sets against the ids the dialog displayed. Outcomes: `revoked | already_removed | changed | not_a_holder | derived_group_refused | not_applicable | no_organization`. Zero holders is reachable (recovery); the org-side `self_lockout_blocked` rule is not applied. Open invitations are left open. It writes `role_grants` and nothing else; the audit row is written by the library in the same transaction.
+- **(c) Companion grant.** A person revoke on the founding-administrator slot also ends the stated-clerk office grant carrying the designation reason (`…companion_grants`, a separate function so a companion never counts as a holder); the dialog names it.
+- **(d) Derived groups refused in the database** (session, diaconate, `active_membership`), not only hidden in the UI: ending their role grants would be the platform reconfiguring the court's powers (governance), not recovery, and their members are live officers or members who can use the Roles page.
+- **(e) G3 / F171.** A person-arm grant's end date is `least(current_date, membership.ended_on)`. `role_grants_needs_membership` (0014) is untouched; the clamp is its own hint ("record the position as already ended").
+- **(f) Code.** `src/lib/onboarding/designation-holders.ts` (platform connection only, imported only from (admin)); `src/lib/role-grants.ts` stays the tenant module. One server action with a `slot` literal. The page derives the count from the list read. The holder row never carries "Self-designated" (an invitation fact; an existing e2e asserts the literal once). Dates cross the driver as strings; `uuid[]` as a regex-validated text literal.
+- **Consequences:** a treasurer person-arm grant for someone whose membership ended is not counted, listed or revocable (list = count by construction). Tests: list = count equality over the holder shapes, every outcome, the clamp, two-connection races, the ACL.
+
+---
+
+**DECISION-195 — Holder visibility: both designation sections list holders by display name only; group subjects show the group name and a count; derived-group rows are shown with no Revoke.**
+
+**Status:** Resolved (reverses the treasurer section's count-only ruling, DECISION-155's shape) · **Date:** 2026-10-22 · **Feature:** `2026-10-22-designation-revoke` (Phase 1 Q3, operator-ruled "display name only"; Phase 2 D8)
+
+You cannot responsibly revoke an unnamed person, and the confirm must name them. A name is tier-1 directory data; the library selects no contact or email column and resolves names for person-arm subjects only, never for the members of a group. The treasurer section's "a count, NEVER names" comment is rewritten to cite this decision. Naming the holder adds no tier 2 or 3 data to the page; it makes no claim about what the platform operator can reach (see the accepted residual, DECISION-194).
+
+---
+
+**DECISION-194 — A platform admin may end tenant authority, as recovery only: the current holders of the founding-administrator and treasurer slots, behind `FEATURES.ADMIN_ORGANIZATIONS`, with a required reason and an audit row; the revoke-then-self-invite chain is an accepted residual.**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-designation-revoke` (Phase 1 Q1/Q2/Q4, operator rulings; Phase 2 D2/D6)
+
+- **Scope (Option A, narrowed by D6).** Any effective grant that counts toward the slot, including dev-seed and ghost holders, at `/admin/organizations/<id>`. Never a grant held through a derived group, never an officer term.
+- **Gate.** `FEATURES.ADMIN_ORGANIZATIONS` (D2), not the live `is_platform_admin`: the more consequential half of the chain (invite plus self-designate, DECISION-183) already sits at this gate. No flag (operator rule).
+- **Controls.** Reason 10–500 characters, an `org.founding_administrator.revoked` / `org.treasurer.revoked` row in the same transaction. Ids and counts only in the metadata; the reason is stored verbatim.
+- **Accepted residual (operator ruling 2026-10-22, "No block, audit only").** Revoke, then a self-addressed invitation, then self-acceptance lets the platform role clear a slot and then hold it. The analyst's 30-day refusal and the second-admin rule were both declined. The chain is detected by audit (`org.*.revoked`, then `invitation.created` with `selfAddressed`, then `invitation.accepted` with `inviterIsInvitee`) and not prevented. `paper`.
+- **Documentation.** Add the CLAUDE.md Two Hierarchies sentence (Phase 2 proposed text, reviewed by the operator in the diff) and correct `docs/architecture.md:100` at Phase 6.
+- Notifications to the revoked person and surviving holders are a tracked follow-up, not part of this decision.
+
+---
+
 **DECISION-193 — Implementation rulings for the review-polish batches: six real code boxes, a closed email block vocabulary, direct `@/lib/email/render` imports, origin-built mail links, and an always-expanded organizations tree.**
 
 **Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 3, tech-lead; confirmed as shipped in Phase 4)

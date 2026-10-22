@@ -414,6 +414,13 @@
       "when": 1787014373186,
       "tag": "0059_presby_account_invitations",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787100773186,
+      "tag": "0060_presby_designation_revoke",
+      "breakpoints": true
     }
   ]
 }

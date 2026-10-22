@@ -3,38 +3,39 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-21.
+Updated 2026-10-22.
 
 ---
 
-## RESUME HERE — 2026-10-21 (later): production is on v0.36.0; invitations Increment 1 is integrated at v0.37.0, PR pending
+## RESUME HERE — 2026-10-22: v0.38.0 (designation-holder revoke) integrated; Community pipeline in Phase 4
 
-**2026-10-21.** Review polish merged (PR #35) and is live as v0.36.0 (Google's own sign-in button, one box per digit on
-`/totp` and `/account/2fa`, every email through `renderEmail()`, the organizations tree; operator checklist section 9).
-`pipeline/invitations` (worktree `presby-invites`) is integrated for its PR to `main`: a platform operator invites a
-congregation's founding administrator or first treasurer by email, and the recipient creates an account or signs in, then
-accepts (migration `0059`, DECISION-183–189, F153–F159 and F166–F168, `docs/work-log/2026-10-21-invitations.md`; QA PASS with
-e2e through both MFA paths; Phase 6 SHIP WITH NOTES, every note a `docs/TODO.md` line). It merged `main` (review polish) and
-renders its email through `renderEmail()`. **What is and is not true of it:** only the two platform designations are
-invitation-based; a church administrator cannot yet invite its own staff (Increment 2, which needs the architect's R10 addendum
-first); every new invitee hits F166 (recovery codes vanish after first 2FA enrolment, one extra `/totp` challenge); Google sign-in
-for invitees and the 90-day address redaction are not built; acceptance creates permanent records.
+**2026-10-22.** v0.37.0 (invitations, PR #36) and v0.37.1 (sign-in hint removed, PR #37) are live; `0059` is on production.
+`pipeline/designation-revoke` is integrated for its PR as **v0.38.0**: on `/admin/organizations/<id>` the platform operator sees
+founding-administrator and treasurer holders by display name and ends them with a required reason and an audit row, as lockout
+recovery (migration `0060`, DECISION-194–196, F169–F171, `docs/work-log/2026-10-22-designation-revoke.md`; QA PASS, Phase 6
+SHIP WITH NOTES, every note a `docs/TODO.md` line). **Accepted residual (F170, operator ruling):** revoke, then self-invite,
+then self-accept lets the platform role clear and then hold a slot; audited, not prevented (CLAUDE.md, Two Hierarchies).
+`0060` keeps the count signatures, so it can be applied to production before or after the code deploys.
 
-**Before and at merge** (`docs/deployment.md` → "Pre-deploy runbook: 0059"): confirm production is at `0057` (`0058` is reserved
-for Track F mail and absent); Neon snapshot; apply `0059` to production **with `psql -1`** (no inner transaction, unlike `0057`)
-*before* the merge deploys; confirm `NEXT_PUBLIC_APP_URL`, `AUTH_TOTP_ENCRYPTION_KEY` and `RESEND_WEBHOOK_SECRET` in Production.
-`development` already has `0059` and the invitations fixture (2026-10-21). `scripts/test-rls.sql` passes **1092** on a from-empty
-database (the `db.yml` recipe); on `development` itself it still stops at the presbytery member count because of the 2026-10-14
-demo membership (Alder Creek's counts now count the fixture's own people). Still to run: `src/lib/db/fixture-deletable.test.ts`
-on `development`.
+**Production clean-up, 2026-10-22 (out-of-band, operator-instructed, snapshots first; no audit rows — open TODO):** the 68
+`.invalid` test accounts deactivated and stripped; the August synthetic people, roll, households and districts purged (the
+operator's first test congregation now has a clean roster); the congregation's baseline member grant restored after the purge
+removed it. Only the operator's two real accounts are active.
 
-**Next, in order** (the operator picks the pace):
-1. The F166 bug-fix pipeline, before anyone other than the operator is invited.
-2. Add the invitations steps to the operator's checklist artifact (Phase 6's corrected 11 steps, steps 12-13, the prerequisites).
-3. Invitations Increment 2 (org-level "Invite to sign in"): architect's R10 addendum, then Phase 3.
-4. Operator questions still open: email button contrast (6.84:1, brand blue or navy), the "test organization" flag, the `/signin`
-   developer hint, Google button prominence, the founding-administrator holder-count ruling.
-5. As before: the Vercel token and the Track F acceptance pass, F111, the overdue test-coverage and retrospective reviews.
+**In flight:** `pipeline/founding-admin-directory` (worktree `presby-fadir`, Neon `pipeline-founding-admin-directory`),
+reclassified to Feature — the admin "Members" section becomes **Community** at `/admin/community` (moved, permanent redirect):
+visitors, participants enrolled/removed on record without approval (with undo), the clerk can propose member entries,
+`createPerson()` roll-cache fix; migration `0061` (DECISION-197–201, F172–F178). Increment 1 is in Phase 4 (Batches M and A
+done, B running). Increment 2 (Session approval, pending queue) and Increment 3 (visitor follow-ups) follow. Deploy order for
+`0061`: code first, then the migration.
+
+**Next, in order (operator, 2026-10-22: all Community work first):**
+1. Community Increments 1 → 2 → 3.
+2. The F166 bug-fix pipeline (recovery codes vanish after first 2FA enrolment), before anyone other than the operator is invited.
+3. The new pre-cutover fpcw parity tracks (careers — Track L, event sign-ups, public events calendar, parish management, account
+   migration, event import traps; `docs/reviews/2026-10-22-fpcw-parity.md`).
+4. Operator items in `docs/TODO.md` → Deployment: audit backfill question, purge-rehearsal branch deletion, Resend secret
+   rotation, the soft-delete fixture exemption, old `blob_assets`; overdue test-coverage and retrospective reviews.
 
 ---
 

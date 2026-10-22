@@ -1816,6 +1816,16 @@ deliberately ships no writer. What I did, and deliberately did not do:
 
 **F168 — a server-action `redirect()` renders its target inside the action's POST,** so the target page sees only cookies scoped to the action's path. A `Path=/invite` hand-off cookie was therefore invisible on the return from sign-in, and the invitee briefly saw the dead-link page. **Closed** by DECISION-185 as amended: the cookie is host-only `Path=/` (`__Host-invite_token` in production). **General rule:** any hand-off cookie that crosses an auth action must be `Path=/`. Residual (D-6): the dead-link cookie is not cleared, so it now travels on every platform request for up to 30 minutes; it is httpOnly and its token is dead.
 
+## 2t. Designation revoke — findings (F169–F171)
+
+Pipeline `2026-10-22-designation-revoke` (v0.38.0, migration 0060; DECISION-194–196).
+
+**F169 — the holder list and the holder count could drift.** The count gating invitations and the list an operator acts on were two independent expressions of "who holds this slot", and the founding-administrator count counts people (group arm, ended memberships, merged people) that a naive list would omit; the operator would read "1 person holds this" and have no row to act on. **Closed (0060):** list functions are the source and both counts are `count(distinct holder_person_id)` over them; the unchanged pin test and list = count fixtures hold the line.
+
+**F170 — revoke, then self-invite, then self-accept clears and then holds a slot.** Every step is individually authorized (DECISION-183 self-designation is safe only while nobody holds the slot; revoke opens that gate at will). **Accepted residual by operator ruling ("No block, audit only", 2026-10-22):** detected by audit (`org.*.revoked`, `invitation.created.selfAddressed`, `invitation.accepted.inviterIsInvitee`), not prevented; `paper` in `/developer`. Deliberate, not a gap left open by mistake.
+
+**F171 — `role_grants_needs_membership` refuses to end a departed holder's grant to today.** It raises when `ends_on > memberships.ended_on`, so a ghost holder (membership already ended) could not be end-dated to `current_date`: the people most likely to occupy a stuck slot were the ones the tool could not remove. **Closed (0060):** the person-arm end date is `least(current_date, ended_on)`, which the guard accepts; 0014 untouched. Reachability: person-arm ghosts exist only through data written around the DECISION-039 guards; group-arm ghosts are reachable today and are handled as group subjects.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

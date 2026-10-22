@@ -652,10 +652,17 @@ reserved and unbuilt, so the gap in the numbering is expected. Confirm first:
    row counts are unchanged. **Do not run `scripts/invitations/test-rls-59.sql` or
    `scripts/invitations/seed-dev-invitations.sql` on production** (test helpers and
    fixture tokens); run them on `development` after integration.
-5. **On `development`:** apply 0059 the same way, re-apply `scripts/seed-dev.sql`
-   (it now includes the invitations fixture), then run `scripts/test-rls.sql` as
-   `presby_app` and record the total. Also run
-   `src/lib/db/fixture-deletable.test.ts` against it.
+5. **On `development`:** apply 0059 the same way, then apply only
+   `scripts/invitations/seed-dev-invitations.sql` (the whole `seed-dev.sql` is not
+   re-runnable on an already-seeded database: duplicate organization key). Done
+   2026-10-21. `scripts/test-rls.sql` as `presby_app` on `development` still stops
+   in section 3 at "presbytery: sees only its own members" (3, not 2) because of
+   the 2026-10-14 demo-account membership, pre-existing environment drift that the
+   comment at that assertion already names. The gate is a from-empty database (the
+   `db.yml` recipe: `CREATE DATABASE` on a throwaway branch, `db:migrate`,
+   `db:seed`, `seed-dev.sql`, test helpers): **1092 passes, exit 0** (2026-10-21,
+   §59 contributing 36). Also run `src/lib/db/fixture-deletable.test.ts` against
+   `development`.
 6. **After the deploy,** the regression smoke on the platform host (`/signin`, an
    MFA login through `/launch`, `/home`, `/admin/organizations/[id]`), then the
    operator's invitations checklist. Test on a congregation made for testing:

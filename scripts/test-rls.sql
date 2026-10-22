@@ -166,7 +166,24 @@ begin;
   -- Portal home + directory v2, Increment 4: +2 people (Aldous Fennimore,
   -- Wren Thackeray) = 8. Role & permissions administration: +1 person
   -- (Marisol Windham, role_admin's fresh fixture binding, DECISION-109) = 9.
-  select assert_eq((select count(*) from people), 9, 'alder: sees people it holds memberships for');
+  -- Counted the same way as the memberships check above (2026-10-21): the
+  -- fixture's nine people are visible, and every visible person is one Alder
+  -- holds a membership for. A bare count read 10 on `development` because of
+  -- the 2026-10-14 demo-account membership; the equality below is the property.
+  select assert_eq((select count(*) from people
+                    where id in ('c0000000-0000-0000-0000-000000000001',
+                                 'c0000000-0000-0000-0000-000000000002',
+                                 'c0000000-0000-0000-0000-000000000003',
+                                 'c0000000-0000-0000-0000-000000000004',
+                                 'c0000000-0000-0000-0000-000000000005',
+                                 'c0000000-0000-0000-0000-000000000006',
+                                 'c0000000-0000-0000-0000-000000000007',
+                                 'c0000000-0000-0000-0000-000000000008',
+                                 'c0000000-0000-0000-0000-000000000009')),
+                   9, 'alder: sees its fixture people');
+  select assert_eq((select count(*) from people),
+                   (select count(distinct person_id) from memberships),
+                   'alder: sees exactly the people it holds memberships for');
   -- The pastor holds memberships at BOTH the presbytery and Alder Creek.
   select assert_eq((select count(*) from people where id = :PASTOR), 1, 'alder: sees its pastor');
 commit;

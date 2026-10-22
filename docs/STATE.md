@@ -23,9 +23,10 @@ for invitees and the 90-day address redaction are not built; acceptance creates 
 **Before and at merge** (`docs/deployment.md` → "Pre-deploy runbook: 0059"): confirm production is at `0057` (`0058` is reserved
 for Track F mail and absent); Neon snapshot; apply `0059` to production **with `psql -1`** (no inner transaction, unlike `0057`)
 *before* the merge deploys; confirm `NEXT_PUBLIC_APP_URL`, `AUTH_TOTP_ENCRYPTION_KEY` and `RESEND_WEBHOOK_SECRET` in Production.
-On `development`: apply `0059`, re-apply `scripts/seed-dev.sql` (now includes the invitations fixture), run `scripts/test-rls.sql`
-as `presby_app` and record the total (section 2's Alder Creek count now counts the fixture's own people, so the 2026-10-14 demo
-membership no longer stops the suite), and run `src/lib/db/fixture-deletable.test.ts`.
+`development` already has `0059` and the invitations fixture (2026-10-21). `scripts/test-rls.sql` passes **1092** on a from-empty
+database (the `db.yml` recipe); on `development` itself it still stops at the presbytery member count because of the 2026-10-14
+demo membership (Alder Creek's counts now count the fixture's own people). Still to run: `src/lib/db/fixture-deletable.test.ts`
+on `development`.
 
 **Next, in order** (the operator picks the pace):
 1. The F166 bug-fix pipeline, before anyone other than the operator is invited.

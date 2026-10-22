@@ -20,7 +20,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named (database-admin, then full-stack-developer) | 2026-10-22 |
 | 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batch B) | Complete — Batch A (0060 applied to `pipeline-designation-revoke`) and Batch B (library, action, UI, tests, e2e, browser check) | — | 2026-10-22 |
 | 5 — Verification | qa | Complete | PASS | 2026-10-22 |
-| 6 — Shipped vs intent | analyst | Reopened to Phase 4 (copy only) | NEEDS REWORK (run 1) | 2026-10-22 |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (run 2; run 1 NEEDS REWORK copy-only, closed by `a49412c`) | 2026-10-22 |
 
 ---
 
@@ -1354,3 +1354,122 @@ Files read:
 - `/Users/cshenso/git/presby-platform/presby-revoke/docs/product/functionality-map.md`
 
 I wrote nothing to disk.
+
+---
+
+## Run 2 (SHIP WITH NOTES)
+
+*Recorded verbatim by the orchestrator from the analyst's returned text (read-only agent).*
+
+
+
+**Date:** 2026-10-22. **Reviewed at:** `34d2e46` (copy fix `a49412c`, QA re-run record on top), branch `pipeline/designation-revoke`, worktree `/Users/cshenso/git/presby-platform/presby-revoke`. The worktree is clean.
+
+I re-read my run-1 section, the "Phase 4 — Loop-back" subsection, the "Phase 5 — Re-run" section, the three shipped strings, the prop comment, and the reworded draft DECISION-195. I then grepped `src/` and `e2e/` for denial wording.
+
+#### VERDICT
+
+**SHIP WITH NOTES.** Nothing user-facing denies F170 any more. The run-1 blocker is closed. The notes are the run-1 follow-ups plus one new copy nit. Each is a tracked `docs/TODO.md` line, which is why this is not a bare SHIP IT. None of them blocks shipping.
+
+#### ONE-LINE TAKE
+
+> A platform admin sees who holds the founding-administrator and treasurer slots by display name and ends them with a required reason and an audit row. The treasurer text now says what the act does and points at the audit log. It makes no claim about what the operator can or cannot reach.
+
+#### Re-read of the strings
+
+- **Treasurer `sectionLead` (`designation-holder-copy.ts:130`).**
+  - It ends: "End access here to recover from a lockout or a mistaken grant. Gift and donor records are not changed by ending access here. Every designation and every ending of access is recorded in the audit log."
+  - The gift-and-donor sentence is true of the act and scoped to "ending access here". It does not promise the operator can't reach those records.
+  - The audit pointer is accurate. The revoke row, the invitation row and the acceptance row all exist (DECISION-194).
+  - **Confirmed.**
+- **`treasurerLine` (`:253`).** "Gift and donor records are not changed. This is recorded in the audit log." This is act-scoped with no reassurance language. The founding-administrator slot still gets `null`. **Confirmed.**
+- **`recordLine` (`:255`).**
+  - It is now slot-aware: "…the organization can grant access again from its own ${page} page, or you can invite a replacement." `page` is Roles for the founding-administrator slot and Giving team for the treasurer slot. That is the run-1 copy nit (TODO item 8), now closed.
+  - The founding-administrator text is unchanged in substance.
+  - **Confirmed.** One residual wording issue is in the notes below.
+- **Prop comment (`treasurer-designation-section.tsx:33-34`).** "A name is directory data; this list carries no gift or donor record." This claims only what the list contains. It says nothing about operator reach. **Confirmed.**
+- **Draft DECISION-195 (work-log ~`:711`).** "Naming the holder adds no tier 2 or 3 data to the page; it makes no claim about what the platform operator can reach (see the accepted residual, DECISION-194)." The denial is gone and it cross-references the residual. The orchestrator can copy it to `docs/decisions.md` as written. **Confirmed.**
+
+#### Denial sweep
+
+I grepped `src/` and `e2e/` for "no access", "gains no", "cannot access", "never reach" and "operator can't/never". That grep also matches unrelated comments, so I filtered for designation, revoke, treasurer and holder files.
+
+- No shipped string in `src/` or `e2e/` denies F170. The only designation-related hits are `not.toMatch` and `toBeNull` guards in the tests.
+- The old wording remains only as quotations inside the work-log: my run-1 findings and the loop-back and QA records of the fix. Those are history and are not copied into any user-facing or decision document.
+- The unrelated hits (domains, giving, invite, tickets and others) are pre-existing "never reaches the database" comments. They have nothing to do with these two slots.
+- The copy now matches DECISION-194's accepted residual (revoke, then self-addressed invitation, then self-acceptance, detected by audit and not prevented).
+
+#### Phase 1 gaps: final status
+
+- **G1 (revoke exists, with a reason):** shipped.
+- **G2 (F170, self-invite chain):** operator ruled "no block, audit only". It ships as a documented residual, and the copy no longer contradicts it.
+- **G3, G4, G7, G11:** shipped (clamp, no officer-term writes, lock order, server-side re-derivation).
+- **G6 (org-side visibility of who ended a grant and why):** audit only, per the default. It is stated in the release note.
+- **G10 (out-of-band SQL end):** recorded in the work-log. The backfill question is open and is TODO item 5.
+- **Notifications:** deferred by the operator and tracked (TODO item 1).
+
+#### Follow-Ups for `docs/TODO.md` (Rule 10)
+
+Items 1-7 and 9 carry forward from run 1 unchanged. Item 8, the `recordLine` Roles-vs-Giving-team nit, is closed by the fix, so it is not added. Item 10 is new.
+
+1. Notifications on a platform revoke: mail the revoked person (neutral, no reason) and any surviving holders. Operator deferred it (Q6).
+2. Grant drift (F38-shaped): `presby_app` and `presby_platform` hold DELETE on `role_grants`, though no production code deletes from it. Revoke the grant or document why. Assign an F-number outside F169-F171.
+3. Amend TODO:210 (the founding-administrator count asymmetry) with: "pair with 'ghost grants are ended, not hidden'; 0060 keeps the asymmetry word for word (DECISION-196)".
+4. Invisible treasurer ghosts: a treasurer `giving.manage` grant whose holder's membership ended is not counted, listed or revocable, and would revive if the membership were restored. Decide whether ending a membership should end those grants.
+5. G10: ask the operator whether to backfill an audit row for the 2026-10-22 out-of-band SQL end. If yes, make it a one-off row marked out-of-band, not an `org.*.revoked` key.
+6. QA Observation 1: test teardown deletes `audit_events` for its own `deletable_until` fixture orgs. The operator should confirm the soft-delete rule exempts fixtures.
+7. Derived-group-only slot: a slot held only through a derived group offers neither Revoke nor invite. Decide whether the section should point to the officers page or a support ticket.
+8. Test gaps (QA Observations 3 and 4):
+   - A named test for a cross-org grant id mixed into an otherwise valid displayed set.
+   - The library's `invalid_input` carries a `message` that the design did not specify.
+   - Batch B recorded no failing-first evidence for the library tests.
+9. **New: `recordLine` when the revoke leaves nobody.** When `leavesNoHolders` is true, the dialog's `lastHolderLine` says nobody can manage the slot until you invite a replacement. The `recordLine` just below it then says "the organization can grant access again from its own {Roles|Giving team} page". With no holder left, the organization cannot do that. Make the clause conditional, or drop it when the slot empties. Also retitle `e2e/designation-revoke.spec.ts:268` ("the dialog says donor and gift data stays"), which QA flagged as cosmetic, if someone is in the file.
+
+#### Housekeeping the orchestrator places (all unblocked now)
+
+- **`CLAUDE.md`, Two Hierarchies Intersect Nowhere:** the Phase 2 sentence goes in after the DECISION-183 sentence, unchanged. The operator reviews the diff. It names both slots and calls the chain `paper`, which now agrees with the shipped copy.
+- **`docs/architecture.md:100`:** replace the tail with the run-1 suggestion. The old tail ("nothing about the designation lets the platform act inside the organization afterwards") is now false.
+- **`docs/decisions.md`:** DECISION-194, 195 and 196. Use the reworded DECISION-195.
+- **Schema docs and tests:**
+  - the `schema-design-2.md` F169-F171 subsection;
+  - the `drizzle/meta/_journal.json` entry for 0060;
+  - the `\ir designation-revoke/test-rls-60.sql` line, then a re-run on `development` after 0060 is applied there.
+- **`docs/product/functionality-map.md`:** update the Organizations bullet (~line 129), adding "lists holders by display name and ends them with a reason".
+- **Release and TODO:**
+  - the v0.38.0 release note and `package.json` bump, confirming the number against whatever ships first;
+  - the TODO lines above, including the "Done" move, in the same commit (Rule 10).
+- **Not needed:**
+  - No what's-new entry (Rule 13: internal admin tooling).
+  - No feedback row to close (Rule 12: the source was an operator request).
+  - No new flag.
+
+#### Final release-note bullets (v0.38.0)
+
+- **See who holds the top administrator and treasurer roles.** On an organization's page, the platform operator now sees who currently holds each role: names only, with the date they got it and how. Before, the page showed only a count, so a leftover test account could hold a role with no way to tell.
+- **End someone's access when it's needed.** For each holder, the operator can end their access. The operator must give a reason of 10 to 500 characters. A confirmation shows exactly which roles end and warns if that would leave nobody able to manage roles or giving. The operator can then invite a replacement.
+- **Meant for recovery.** The page points to the organization's own Roles and Giving team pages first. This is for lockouts and mistaken grants.
+- **What it does not touch.** It does not change anyone's membership, officer terms, or the Session or Diaconate rosters. Roles held through those groups are shown but cannot be ended here. Gift and donor records are not changed by ending access.
+- **Everything is recorded.** Each ending is written to the audit log with the reason. Nobody is emailed yet: the person who lost access and the remaining holders are not told. The organization's own Roles page shows the access as ended, without the reason.
+- **A limit we chose to accept.** Nothing stops an operator from ending a role and then inviting themselves into it, for either the administrator or the treasurer role. The audit log records the whole sequence, but it is not blocked.
+
+None of these bullets says the platform operator cannot reach gift or donor records. Keep it that way in any edit.
+
+#### Per-Phase Status row
+
+| 6 — Shipped vs intent (run 2) | analyst | Complete | SHIP WITH NOTES (run 1: NEEDS REWORK, copy only, closed by `a49412c`) | 2026-10-22 |
+
+#### Handoff
+
+The pipeline closes on this verdict. Next is the **orchestrator**:
+
+1. Write the housekeeping above in the integration commit.
+2. Add the nine TODO lines and move the shipped line to Done.
+3. Place the v0.38.0 release note and the version bump.
+4. Ask the operator to review the `CLAUDE.md` diff.
+
+The commit goes through `/pre-push` and `/merge-pr` only on the user's say-so (Rule 1).
+
+I wrote nothing to disk. Files read:
+- `/Users/cshenso/git/presby-platform/presby-revoke/docs/work-log/2026-10-22-designation-revoke.md`
+- `/Users/cshenso/git/presby-platform/presby-revoke/src/lib/onboarding/designation-holder-copy.ts`
+- `/Users/cshenso/git/presby-platform/presby-revoke/src/app/(admin)/admin/organizations/[id]/treasurer-designation-section.tsx`

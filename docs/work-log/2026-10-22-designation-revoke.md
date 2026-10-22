@@ -19,7 +19,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementers named (database-admin, then full-stack-developer) | 2026-10-22 |
 | 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batch B) | Complete — Batch A (0060 applied to `pipeline-designation-revoke`) and Batch B (library, action, UI, tests, e2e, browser check) | — | 2026-10-22 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-10-22 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -918,46 +918,193 @@ Next: **qa** (Phase 5). To check in a browser: `/admin/organizations/<id>` for a
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+*Recorded verbatim by the orchestrator from QA's returned text (read-only agent).*
+
+
+
+**Date:** 2026-10-22
 **Verified by:** qa
+
+**Verdict: PASS.** Every required check is green. One DB test timed out on the first run and passed when re-run, so it is a flake, not a failure. One test-teardown pattern needs an operator ruling (Observation 1 below); it does not block the verdict.
+
+Scope: worktree `/Users/cshenso/git/presby-platform/presby-revoke`, branch `pipeline/designation-revoke` at `908cf1c`, Neon branch `pipeline-designation-revoke` (`br-misty-paper-axrm9q7u`, endpoint `ep-small-king-axwxwcgr`). I confirmed the branch id from inside the `presby_app` session.
+
+**Not auth-touching.** `git diff --name-only f4b9de4..HEAD` matches none of `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/` or `src/lib/auth/` (the grep returned nothing). The MFA-login e2e gate does not apply.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+- `npm run typecheck`: PASS (exit 0).
+- `npm run lint` (`--max-warnings=0`): PASS (exit 0).
+- `npm run check`, all eight tripwires: PASS. audit-coverage, sql-date, deps-drift, brand-scope, secrets/PII, hydration-gate, giving-boundaries and proxy-imports each printed "passed".
+- `npm run build`: PASS (exit 0, 24.6 s, compiled with no warnings; `/admin/organizations/[id]` builds as a dynamic route).
+  - The build ran in a scratch copy, as `docs/testing.md` prescribes.
+  - **Why:** I first started `next dev` inside the worktree, and `/signin` returned 500 with `Can't resolve '@vercel/turbopack-next/internal/font/google/font'`. That is the known flake.
+  - **The copy is the same code:** my own fresh copy in my session scratchpad, with hardlinked `node_modules` (link count confirmed). All 1821 tracked files and `.env.local` matched the worktree byte for byte (`cmp`). I removed the copy afterwards.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Full unit suite (`npm run test`):** Total 9425 | Passed 7370 | Failed 0 | Skipped 2055 | Duration 25.95 s
+
+**The skips are DB-gated suites, not missing coverage.**
+- 69 files were skipped in full. 32 of them are not named `*.db.test.*` but skip on `describe.skipIf(!hasDb)`. None of those 32 is in this diff.
+- Seven files were partly skipped. Two of them read the redefined counts: `src/lib/onboarding/founding-administrator.test.ts` (14 skipped) and `treasurer-designation.test.ts` (7 skipped). I ran both against the DB in Run 2.
+
+**Serial DB suites (`dotenv -e .env.local -- vitest run --no-file-parallelism`, pipeline branch):**
+
+| Run | Files | Result | Duration |
+|---|---|---|---|
+| 1 | `designation-revoke.db` (21), `designation-holders.db` (16), `invitations.db` (66), `issue.db` (50), `accept.db` + `designation-parity.db` (42) | 194 passed, **1 failed**, 0 skipped | 478.8 s |
+| 2 (re-run) | `invitations.db` (66), `founding-administrator`, `treasurer-designation`, `role-grants` | **119/119 passed**, 0 skipped | 170.0 s |
+| canary | `src/lib/db/fixture-deletable.test.ts`, after both DB runs and the e2e run | 5/5 passed, no leaked fixture rows | — |
+
+- **Flake, not failure:** `src/lib/db/domain/invitations.db.test.ts:697` ("every dead state returns ONE identical row shape…") hit `Test timed out in 20000ms`. That is a timeout, not an assertion. It passed in Run 2 (66/66).
+- **The count pin is unchanged.** `invitations.db.test.ts` differs from main only by four `DEFINER_FUNCTIONS` entries, and it passed. This is the proof that redefining the counts in 0060 kept their behaviour.
+
+**`scripts/designation-revoke/test-rls-60.sql` as `presby_app`:** 19/19 assertions pass, exit 0.
+- I verified the role first: `current_user = presby_app`, `rolbypassrls = f`.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+Total 37 | Passed 37 | Failed 0 | Skipped 0 | Retries 0 | Duration 4.2 m
+
+- Run against a real dev server that Playwright started in the scratch copy, chromium, one worker.
+- `e2e/designation-revoke.spec.ts`: 8/8.
+- Touched specs: `e2e/admin-organizations.spec.ts` 24/24, `e2e/invitation-existing-account.spec.ts` 4/4, `e2e/invitation-new-account.spec.ts` 1/1.
+- The Playwright-managed server was torn down afterwards; nothing is listening on :3000.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+Each item in the Phase 2 and Phase 3 test plans has a test, written by the implementer. I found no gaps.
+
+**Single source for the counts (F169)**
+- *list = count for both slots across every holder shape; the FA asymmetry is LISTED* — `src/lib/db/domain/designation-revoke.db.test.ts:245` — the holder list and holder count drifting apart.
+- *companion absent from list and count, present in the companion function* — `:319`.
+
+**Revoke outcomes**
+- *revoked (person) … the second identical call is already_removed and writes nothing* — `:347` — double submit at the SQL layer.
+- *revoked (managed group)* — `:371`.
+- *already_removed: org-side end between render and submit* — `:392`.
+- *changed* (displayed id missing, extra grant appeared, companion omitted, compared as a set) — `:404`.
+- *not_a_holder* (holds nothing, cross-org subject, another org's grant id, even an ended one) — `:434`.
+- *a companion grant alone never makes a subject revocable* — `:456` — guards against a general "end any grant" path.
+- *derived_group_refused* for session, diaconate and active_membership, with no row changed — `:469`.
+- *not_applicable / no_organization* — `:498`.
+- *programmer errors raise 22023* — `:511`.
+
+**Clamp, zero holders, invitations**
+- *ghost holder clamp through the real guard* — `:530` — F171.
+- *bundle + companion end together; unrelated grants untouched* — `:584`.
+- *zero is reachable, then the invitation gate opens* — `:611`.
+- *open invitations left open* — `:622`.
+
+**Races and ACL**
+- *revoke holds the org lock, accept waits* — `:646`.
+- *accept holds the lock, revoke waits, then returns changed* — `:678`.
+- *concurrent org-side end: changed or already_removed, no double write, no deadlock* — `:710`.
+- *all six functions definer and owner-only* — `:763`.
+- *refused through presby_app* — `:778`.
+- *revoke body writes role_grants only* — `:789`.
+
+**Library and audit**
+- *exactly one org.founding_administrator.revoked row, ids and reason only* — `src/lib/onboarding/designation-holders.db.test.ts:285`.
+- *treasurer slot writes org.treasurer.revoked* — `:333`.
+- *selfRevoke* — `:386`.
+- *Rule 7: a failed audit insert rolls the revoke back* — `:401`.
+- *a double submit writes exactly one audit row* — `:418`.
+- *refusals write no audit row* — `:431`.
+- *a malformed grant id is a db_error, not an injection* — `:479`.
+
+**Action, source scans, e2e**
+- `revokeDesignationHolderAction` — `src/app/(admin)/admin/organizations/[id]/actions.test.ts:1384–1492`: Unauthorized `:1392`, Forbidden `:1398`, code-point reason `:1433`, session actor `:1440`, one neutral string for not-found `:1484`, no audit from the action `:1492`.
+- Source scans — `src/lib/onboarding/boundaries.test.ts:196–`: imported only from (admin); name select carries no contact column (`:225`); no platform `update role_grants` (`:239`); `role-grants.ts` never imports `getPlatformDb`.
+- e2e: no name or email in audit metadata — `e2e/designation-revoke.spec.ts:172`; second tab gets already-removed and no second audit row — `:219`; derived group shows no button — `:247`; treasurer — `:268`; 360 px — `:315`.
+- Component and page tests: `revoke-holder-dialog.test.tsx`, `designation-holder-list.test.tsx`, `page.test.tsx`, including the rewritten names-yes/emails-never test.
+
+**Failing-first evidence comes from the implementer, not from me.** This is a feature, not a bug fix. Batch A recorded a mutation table: M1 clamp, M2 the D6 check, M3 the lock re-filter, M4 the org lock, plus an ACL grant, each turning its test red. I did not reproduce it, because that means changing the function on the branch, which this role cannot do. I found no failing-first evidence recorded for the Batch B library tests.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+None of these is touched by this diff.
+
+- `src/lib/permissions.ts`: 100% statements, 100% branches (target 100%).
+- `src/lib/two-factor.ts`: 91.3% statements (target 90%+; lines 35–39 uncovered).
+- `src/lib/flags.ts`: 100% statements, 100% branches (target 100%).
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+Verified by reading the bodies, not by trusting green tests.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| server action `revokeDesignationHolderAction` (`src/app/(admin)/admin/organizations/[id]/actions.ts`, appended block) | yes, first statement | yes, before any parsing or library call | `FEATURES.ADMIN_ORGANIZATIONS` |
+| page `/admin/organizations/[id]` (`page.tsx:76–77`; the gate is unchanged, but the page now reads holder names) | yes | yes, before `getPlatformDb()` and both `listDesignationHolders` reads | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `proxy.ts` `/admin` edge gate (complements the handler checks, does not replace them) | edge session | `FEATURES.ADMIN_DASHBOARD` + 2FA | unchanged |
+
+- No `route.ts` was added or changed.
+- **The audit row is in the same transaction as the revoke.** `revokeDesignationHolder` calls `presby_revoke_designation_holder` and then `insertAuditRow(tx, …)` inside one `getPlatformDb().transaction`, and only on `revoked`.
+- The Rule-7 rollback test (`designation-holders.db.test.ts:401`) proves that a failed audit insert undoes the revoke.
+- The action itself makes no `db.*` call and no `recordAudit` call.
+
+### Schema/RLS Audit (live catalog, pipeline branch)
+
+**Function posture.** I read `pg_proc` with `aclexplode(proacl)` on the owner connection, in a read-only transaction.
+- All six functions are `prosecdef = t`, owned by `neondb_owner`, with `search_path=public, pg_temp`. The four new ones are `presby_founding_administrator_holder_grants`, `presby_giving_manage_holder_grants`, `presby_founding_administrator_companion_grants` and `presby_revoke_designation_holder`; the two redefined ones are the holder counts.
+- Each ACL is exactly `neondb_owner:EXECUTE`: no `presby_app`, no `presby_platform`, no PUBLIC.
+- `has_function_privilege` returns false for both `presby_app` and `presby_platform`.
+
+**Security claims, checked directly:**
+
+| Claim | Evidence | Layer that actually refuses |
+|---|---|---|
+| `presby_app` cannot EXECUTE the new functions | A direct call as `presby_app` returned `ERROR: permission denied for function presby_revoke_designation_holder`, and the same for `…_holder_grants` | The function EXECUTE ACL (not RLS, not a trigger) |
+| Revoke refuses derived-group grants | Step 6 of the function body; test `:469` asserts no row changed | The function's own `derived_group_refused` branch |
+| Revoke refuses cross-org subjects | The list functions filter `organization_id = p_org`; test `:434` | The function: neutral `not_a_holder` |
+| Revoke refuses grant-id mismatches | Step 9 compares the locked set with the displayed set; test `:404` | The function: `changed`, no write |
+| A double submit writes one audit row | DB `:347` and `:418`; e2e `:219` asserts exactly one row | The org-row `FOR UPDATE` serializes; the second call sees nothing effective and returns `already_removed`, so no audit row |
+| No name or email in audit metadata | Library metadata holds ids, counts, dates and reason only; asserted at DB `:285` and e2e `:212–216` | — |
+| No hard delete | No `delete`, `truncate` or `drop` on any added line outside tests. The revoke body's only write is `update role_grants set ends_on` (scan at `:789`) | — |
+
+- The actor's email goes to the standard audit actor field (`actor_email`), as on every audit row. It is not in metadata.
+- `role_grants` keeps RLS enabled and forced, and stays isolated per org from `presby_app` (test-rls-60 §60c, including a cross-org write probe that changed 0 rows).
+- 0060 adds no table grant.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**PASS**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+Not auth-touching, so the MFA e2e gate does not apply. All required checks are green:
+- typecheck, lint and the eight tripwires;
+- the unit suite;
+- the DB suites relevant to 0060 (the one timeout is a confirmed flake);
+- test-rls-60 as `presby_app`;
+- the build;
+- 37/37 e2e against a real dev server;
+- the feature-gate audit and the live-catalog probes.
+
+**Observations for the orchestrator (non-blocking):**
+
+1. **Operator ruling needed: a hard delete in test teardown.** `src/lib/onboarding/designation-holders.db.test.ts:153` runs `delete from audit_events where metadata->>'organizationId' = <fixture org>` in `afterAll`.
+   - It follows an existing pattern in `issue.db.test.ts:202`, `accept.db.test.ts:131` and three `src/lib/domains/*.db.test.ts` files.
+   - It is limited to the test's own `deletable_until` fixture orgs, on the pipeline branch.
+   - Production code in this diff deletes nothing. But it is a hard delete, so the operator should say whether the "all deletes are soft" rule covers test teardown.
+2. **Already a TODO, not new here:** `presby_app` and `presby_platform` still hold DELETE on `role_grants`, as the architect noted. 0060 does not add it, and it is already slated for `docs/TODO.md` at integration.
+3. **Covered by construction, not by a named test:** a cross-org grant id mixed into an otherwise valid displayed set yields `changed`, because the set comparison and the `organization_id = p_org` lock filter handle it. No test names that case.
+4. **Small type difference from the design:** the library's `invalid_input` result also carries `message`, which the Phase 3 type did not have.
+5. **Left in the worktree:** my in-worktree `next dev` attempt wrote to the gitignored `.next/`. `git status` is clean.
+
+### Per-Phase Status row
+
+| 5 — Verification | qa | Complete | PASS | 2026-10-22 |
+
+### Handoff
+
+Next: **analyst** (Phase 6, shipped vs intent). Bring forward Observation 1 for an operator ruling. Phase 6 housekeeping still includes `docs/architecture.md:100`, the CLAUDE.md "Two Hierarchies Intersect Nowhere" sentence, and a release note that must not deny the accepted residual (F170).
+
+Logs from this run are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/qa/` (`unit.log`, `db1.log`, `db2.log`, `rls60.log`, `build.log`, `e2e1.log`).
+
+### Orchestrator note on QA Observation 1
+
+The teardown `delete from audit_events` is scoped to the test's own `deletable_until` fixture orgs on a pipeline branch, and follows five existing suites. The orchestrator treats it as within the fixture exemption that already applies to `deletable_until` people and orgs, not as product behaviour. A TODO line at integration asks the operator to confirm that the soft-delete rule exempts test fixtures.
 
 ---
 

@@ -35,6 +35,9 @@ import {
   type ResendInvitationResult,
 } from "@/lib/onboarding/issue";
 import { INVITATION_RATE_LIMIT_COPY } from "@/lib/onboarding/labels";
+import { revokeDesignationHolder } from "@/lib/onboarding/designation-holders";
+import { OUTCOME_COPY, parseReason } from "@/lib/onboarding/designation-holder-copy";
+import type { RevokeHolderActionResult } from "@/lib/onboarding/designation-holder-types";
 import { slugSitePath } from "@/lib/site-urls";
 
 /**
@@ -1006,4 +1009,99 @@ export async function revokeAllInvitationsAction(
   if (result.kind === "db_error") return { ok: false, error: DB_ERROR_COPY };
   revalidatePath(`/admin/organizations/${organizationId}`);
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Revoke a designation holder (docs/work-log/2026-10-22-designation-revoke.md,
+// Phase 3; DECISION-194/195/196). Lockout recovery: a platform admin ends the
+// current holders of an organization's founding-administrator or treasurer slot.
+// Same chain as every action above, and the same discipline: NO `db.*` CALL IN
+// THIS FILE and no recordAudit(): `designation-holders.ts` runs the owner-only
+// SQL function and inserts the `org.*.revoked` audit row in ONE transaction, so
+// a failed audit insert rolls the revoke back. That is why `check:audit` has
+// nothing to see here; Rule 7 is proven by designation-holders.db.test.ts.
+//
+// The client supplies only the organization id, the slot, the subject and the
+// grant ids its dialog displayed. The ACTOR comes only from `auth()` (a
+// `userId` in the form is never read), and no redirect target is accepted. The
+// database refuses any grant the dialog did not name (`changed`), any grant that
+// is not a counted holder of this slot at this organization (`not_a_holder`),
+// and a derived group's roster (`derived_group_refused`), so this action can
+// never become a general "end any grant" tool.
+// ---------------------------------------------------------------------------
+
+const revokeHolderFieldsSchema = z.object({
+  organizationId: z.string().regex(UUID_RE),
+  slot: z.enum(["founding_administrator", "treasurer"]),
+  subjectKind: z.enum(["person", "group"]),
+  subjectId: z.string().regex(UUID_RE),
+  expectedGrantIds: z.array(z.string().regex(UUID_RE)).min(1).max(20),
+});
+
+/**
+ * FormData fields: `organizationId`, `slot` (`founding_administrator` |
+ * `treasurer`), `subjectKind` (`person` | `group`), `subjectId`,
+ * `expectedGrantId` (repeated, 1 to 20: exactly the ids the dialog displayed,
+ * contributing plus companion) and `reason`.
+ */
+export async function revokeDesignationHolderAction(
+  formData: FormData,
+): Promise<RevokeHolderActionResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: OUTCOME_COPY.unauthorized };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: OUTCOME_COPY.forbidden };
+  }
+
+  const expectedGrantIds = formData.getAll("expectedGrantId").map((v) => String(v));
+  const fields = revokeHolderFieldsSchema.safeParse({
+    organizationId: String(formData.get("organizationId") ?? ""),
+    slot: String(formData.get("slot") ?? ""),
+    subjectKind: String(formData.get("subjectKind") ?? ""),
+    subjectId: String(formData.get("subjectId") ?? ""),
+    expectedGrantIds: [...new Set(expectedGrantIds.map((id) => id.toLowerCase()))],
+  });
+  if (!fields.success) return { ok: false, error: OUTCOME_COPY.invalid };
+
+  const reason = parseReason(formData.get("reason"));
+  if (!reason.ok) return { ok: false, error: reason.message, field: "reason" };
+
+  const { organizationId, slot, subjectKind, subjectId } = fields.data;
+  const result = await revokeDesignationHolder({
+    organizationId,
+    slot,
+    subjectKind,
+    subjectId,
+    expectedGrantIds: fields.data.expectedGrantIds,
+    reason: reason.reason,
+    actor: { userId: session.user.id, email: session.user.email ?? null },
+  });
+
+  const refreshed = (error: string): RevokeHolderActionResult => {
+    revalidatePath(`/admin/organizations/${organizationId}`);
+    return { ok: false, error, refresh: true };
+  };
+
+  switch (result.kind) {
+    case "revoked":
+      revalidatePath(`/admin/organizations/${organizationId}`);
+      return { ok: true, reachedZero: result.reachedZero };
+    case "already_removed":
+      return refreshed(OUTCOME_COPY.already_removed);
+    case "changed":
+      return refreshed(OUTCOME_COPY.changed);
+    case "not_a_holder":
+      return refreshed(OUTCOME_COPY.not_found);
+    case "no_organization":
+      // Same string as not_a_holder (no oracle), and the same re-read prompt.
+      return { ok: false, error: OUTCOME_COPY.not_found, refresh: true };
+    case "derived_group_refused":
+      return { ok: false, error: OUTCOME_COPY.derived_group_refused };
+    case "not_applicable":
+      return { ok: false, error: OUTCOME_COPY.not_applicable };
+    case "invalid_input":
+      return { ok: false, error: result.message, field: result.field };
+    case "db_error":
+      return { ok: false, error: DB_ERROR_COPY };
+  }
 }

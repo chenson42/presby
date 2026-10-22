@@ -3,11 +3,12 @@
  * Orchestration test for `/admin/organizations/<id>`'s page.tsx —
  * docs/work-log/2026-09-28-founding-administrator.md Phase 4 Batch C.
  *
- * Pins the one thing this batch adds to the page: `countFoundingAdministrator
- * Holders()` and `foundingAdministratorPlan()` are read fresh on every
- * render (never cached) and their results are threaded into
- * `<FoundingAdministratorSection>`'s gate props (`canDesignate`,
- * `currentHolderCount`, `administrationPermissionKeys`,
+ * Pins the one thing this batch adds to the page: `listDesignationHolders()`
+ * (docs/work-log/2026-10-22-designation-revoke.md: the holder list, from which
+ * the SQL count is derived) and `foundingAdministratorPlan()` are read fresh on
+ * every render (never cached) and their results are threaded into
+ * `<FoundingAdministratorSection>`'s props (`canDesignate`, `holderPeopleCount`,
+ * `holders`, `administrationPermissionKeys`,
  * `officeTemplateName`) exactly as Phase 3's design specifies. Every other
  * collaborator on this page (brand, profile, sites, service times) is
  * mocked at its existing boundary — this file does not re-test them.
@@ -57,11 +58,18 @@ vi.mock("@/lib/db", async () => {
 const mockAuth = vi.hoisted(() => vi.fn());
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-const mockCountHolders = vi.hoisted(() => vi.fn());
 const mockPlan = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/onboarding/founding-administrator", () => ({
-  countFoundingAdministratorHolders: (...args: unknown[]) => mockCountHolders(...args),
   foundingAdministratorPlan: (...args: unknown[]) => mockPlan(...args),
+}));
+
+// The holder LIST is the page's one read per slot (drizzle/0060: the count is
+// derived from it). One mock per slot, keyed by the slot argument.
+const mockListFounding = vi.hoisted(() => vi.fn());
+const mockListGiving = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/onboarding/designation-holders", () => ({
+  listDesignationHolders: (db: unknown, orgId: string, slot: string) =>
+    slot === "treasurer" ? mockListGiving(db, orgId) : mockListFounding(db, orgId),
 }));
 
 const foundingSectionSpy = vi.hoisted(() => vi.fn());
@@ -72,9 +80,7 @@ vi.mock("./founding-administrator-section", () => ({
   },
 }));
 
-const mockCountGiving = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/onboarding/treasurer-designation", () => ({
-  countGivingManageHolders: (...args: unknown[]) => mockCountGiving(...args),
   // The real predicate is a one-line allow-list; restated here so the page's
   // branching is exercised, not the mock's.
   treasurerDesignationApplies: (t: string) =>
@@ -158,14 +164,19 @@ vi.mock("@/lib/sites", () => ({
 }));
 
 import { FEATURES } from "@/lib/permissions";
+import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
+import { derivedGroupHolderRow, groupHolderRow, holderRow } from "./holder-row.fixture";
 import OrganizationBrandDetailPage from "./page";
 
 const ORG_ID = "e0000000-0000-0000-0000-000000000001";
 
+/** The list read's result: a count and rows (display names only, never an email). */
+const holdersOf = (count: number, rows: HolderRow[] = []) => ({ holderPeopleCount: count, rows });
+
 beforeEach(() => {
   mockReadDomains.mockResolvedValue({ groups: [], siteStatus: null, toggles: {}, daysInState: {}, history: [] });
   mockGetAffiliation.mockResolvedValue(null);
-  mockCountGiving.mockResolvedValue(0);
+  mockListGiving.mockResolvedValue(holdersOf(0));
   mockListHealth.mockResolvedValue([]);
   mockListInvitations.mockResolvedValue([]);
 });
@@ -176,10 +187,10 @@ afterEach(() => {
   domainsSectionSpy.mockReset();
   mockGetAffiliation.mockReset();
   mockAuth.mockReset();
-  mockCountHolders.mockReset();
+  mockListFounding.mockReset();
   mockPlan.mockReset();
   foundingSectionSpy.mockReset();
-  mockCountGiving.mockReset();
+  mockListGiving.mockReset();
   treasurerSectionSpy.mockReset();
   mockListHealth.mockReset();
   healthSectionSpy.mockReset();
@@ -205,7 +216,7 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
       organizationType: "congregation",
       platformStatus: "managed",
     };
-    mockCountHolders.mockResolvedValue(0);
+    mockListFounding.mockResolvedValue(holdersOf(0));
     mockPlan.mockReturnValue({
       administration: {
         key: "founding_administrator",
@@ -218,7 +229,7 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
     const el = await OrganizationBrandDetailPage({ params: makeParams() });
     render(el);
 
-    expect(mockCountHolders).toHaveBeenCalledWith(expect.anything(), ORG_ID);
+    expect(mockListFounding).toHaveBeenCalledWith(expect.anything(), ORG_ID);
     expect(mockPlan).toHaveBeenCalledWith("congregation");
     expect(foundingSectionSpy).toHaveBeenCalledTimes(1);
     const props = foundingSectionSpy.mock.calls[0][0];
@@ -226,7 +237,8 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
     expect(props.organizationName).toBe("Alder Creek Presbyterian Church");
     expect(props.organizationType).toBe("congregation");
     expect(props.canDesignate).toBe(true);
-    expect(props.currentHolderCount).toBe(0);
+    expect(props.holderPeopleCount).toBe(0);
+    expect(props.holders).toEqual([]);
     expect(props.administrationPermissionKeys).toEqual(["people.manage", "roles.manage"]);
     expect(props.officeTemplateName).toBe("Congregation Stated Clerk");
   });
@@ -241,7 +253,7 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
       organizationType: "synod",
       platformStatus: "managed",
     };
-    mockCountHolders.mockResolvedValue(2);
+    mockListFounding.mockResolvedValue(holdersOf(2, [holderRow(), holderRow({ key: "person:2", subjectId: "p2", displayName: "Barnaby Quill" })]));
     mockPlan.mockReturnValue({
       administration: {
         key: "founding_administrator",
@@ -256,7 +268,8 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
 
     const props = foundingSectionSpy.mock.calls[0][0];
     expect(props.canDesignate).toBe(false);
-    expect(props.currentHolderCount).toBe(2);
+    expect(props.holderPeopleCount).toBe(2);
+    expect(props.holders.map((h: HolderRow) => h.displayName)).toEqual(["Perpetua Ashgrove", "Barnaby Quill"]);
     expect(props.officeTemplateName).toBeNull();
   });
 });
@@ -272,7 +285,7 @@ describe("OrganizationBrandDetailPage — treasurer-designation gate props (onli
       organizationType,
       platformStatus: "managed",
     };
-    mockCountHolders.mockResolvedValue(0);
+    mockListFounding.mockResolvedValue(holdersOf(0));
     mockPlan.mockReturnValue({
       administration: { key: "founding_administrator", name: "x", permissionKeys: [] },
       officeTemplateKey: null,
@@ -281,16 +294,17 @@ describe("OrganizationBrandDetailPage — treasurer-designation gate props (onli
 
   it("a congregation with no giving.manage holder gets canDesignate: true and a fresh count of 0", async () => {
     arrangeOrg("congregation");
-    mockCountGiving.mockResolvedValue(0);
+    mockListGiving.mockResolvedValue(holdersOf(0));
     render(await OrganizationBrandDetailPage({ params: makeParams() }));
-    expect(mockCountGiving).toHaveBeenCalledWith(expect.anything(), ORG_ID);
+    expect(mockListGiving).toHaveBeenCalledWith(expect.anything(), ORG_ID);
     expect(treasurerSectionSpy).toHaveBeenCalledTimes(1);
     const props = treasurerSectionSpy.mock.calls[0][0];
     expect(props).toEqual({
       organizationId: ORG_ID,
       organizationName: "Alder Creek Presbyterian Church",
       canDesignate: true,
-      currentHolderCount: 0,
+      holderPeopleCount: 0,
+      holders: [],
       invitations: [],
       localLoginEnabled: true,
       totpConfigured: true,
@@ -298,16 +312,19 @@ describe("OrganizationBrandDetailPage — treasurer-designation gate props (onli
     });
   });
 
-  it("a congregation that already has holders gets canDesignate: false and the COUNT only (no names are ever passed)", async () => {
+  it("a congregation that already has holders gets canDesignate: false, the count and the holder rows (names yes, emails never, group member names never)", async () => {
     arrangeOrg("congregation");
-    mockCountGiving.mockResolvedValue(2);
+    const rows = [holderRow({ displayName: "Ottoline Fairweather" }), groupHolderRow()];
+    mockListGiving.mockResolvedValue(holdersOf(4, rows));
     render(await OrganizationBrandDetailPage({ params: makeParams() }));
     const props = treasurerSectionSpy.mock.calls[0][0];
     expect(props.canDesignate).toBe(false);
-    expect(props.currentHolderCount).toBe(2);
+    expect(props.holderPeopleCount).toBe(4);
+    expect(props.holders).toEqual(rows);
     expect(Object.keys(props).sort()).toEqual([
       "canDesignate",
-      "currentHolderCount",
+      "holderPeopleCount",
+      "holders",
       "invitations",
       "inviterEmail",
       "localLoginEnabled",
@@ -315,6 +332,36 @@ describe("OrganizationBrandDetailPage — treasurer-designation gate props (onli
       "organizationName",
       "totpConfigured",
     ]);
+    // Names are passed; no email address and no group-member name ever is.
+    const serialized = JSON.stringify(props.holders);
+    expect(serialized).toContain("Ottoline Fairweather");
+    expect(serialized).not.toMatch(/@/);
+    expect(Object.keys(props.holders[0]).sort()).not.toContain("email");
+  });
+
+  it("derives canDesignate and the count from the SAME list read, with no second count query (F169)", async () => {
+    arrangeOrg("congregation");
+    mockListGiving.mockResolvedValue(holdersOf(1, [derivedGroupHolderRow()]));
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(mockListGiving).toHaveBeenCalledTimes(1);
+    const props = treasurerSectionSpy.mock.calls[0][0];
+    expect(props.canDesignate).toBe(false);
+    expect(props.holderPeopleCount).toBe(1);
+  });
+
+  it("a failed list read throws (the error boundary shows): no empty all-clear and no invite form", async () => {
+    arrangeOrg("congregation");
+    mockListFounding.mockRejectedValue(new Error("db down"));
+    await expect(OrganizationBrandDetailPage({ params: makeParams() })).rejects.toThrow("db down");
+    expect(foundingSectionSpy).not.toHaveBeenCalled();
+    expect(treasurerSectionSpy).not.toHaveBeenCalled();
+  });
+
+  it("a failed treasurer list read throws too", async () => {
+    arrangeOrg("congregation");
+    mockListGiving.mockRejectedValue(new Error("db down"));
+    await expect(OrganizationBrandDetailPage({ params: makeParams() })).rejects.toThrow("db down");
+    expect(treasurerSectionSpy).not.toHaveBeenCalled();
   });
 
   it("a new worshiping community renders the section", async () => {
@@ -324,13 +371,13 @@ describe("OrganizationBrandDetailPage — treasurer-designation gate props (onli
   });
 
   it.each(["presbytery", "synod", "general_assembly"])(
-    "a %s renders NO treasurer section and the page does not even read the holder count",
+    "a %s renders NO treasurer section and the page does not even read the treasurer holder list",
     async (type) => {
       arrangeOrg(type);
       render(await OrganizationBrandDetailPage({ params: makeParams() }));
       expect(treasurerSectionSpy).not.toHaveBeenCalled();
       expect(screen.queryByTestId("treasurer-section")).toBeNull();
-      expect(mockCountGiving).not.toHaveBeenCalled();
+      expect(mockListGiving).not.toHaveBeenCalled();
     },
   );
 
@@ -369,7 +416,7 @@ describe("OrganizationBrandDetailPage — payment-notice health section (online 
       organizationType,
       platformStatus: "managed",
     };
-    mockCountHolders.mockResolvedValue(0);
+    mockListFounding.mockResolvedValue(holdersOf(0));
     mockPlan.mockReturnValue({
       administration: { key: "founding_administrator", name: "x", permissionKeys: [] },
       officeTemplateKey: null,
@@ -419,7 +466,7 @@ describe("OrganizationBrandDetailPage — council affiliation section", () => {
       organizationType: "congregation",
       platformStatus: "managed",
     };
-    mockCountHolders.mockResolvedValue(0);
+    mockListFounding.mockResolvedValue(holdersOf(0));
     mockPlan.mockReturnValue({
       administration: { key: "founding_administrator", name: "x", permissionKeys: [] },
       officeTemplateKey: null,
@@ -478,7 +525,7 @@ describe("OrganizationBrandDetailPage - the Domains section (Track F, Batch 1d)"
       organizationType: "congregation",
       platformStatus: "managed",
     };
-    mockCountHolders.mockResolvedValue(0);
+    mockListFounding.mockResolvedValue(holdersOf(0));
     mockPlan.mockReturnValue({
       administration: { key: "founding_administrator", name: "Founding Administrator", permissionKeys: [] },
       officeTemplateKey: null,
@@ -521,7 +568,7 @@ describe("OrganizationBrandDetailPage — invitations (account-invitations Batch
       organizationType: "congregation",
       platformStatus: "managed",
     };
-    mockCountHolders.mockResolvedValue(0);
+    mockListFounding.mockResolvedValue(holdersOf(0));
     mockPlan.mockReturnValue({
       administration: { key: "founding_administrator", name: "x", permissionKeys: [] },
       officeTemplateKey: null,

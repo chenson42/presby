@@ -17,6 +17,17 @@
  *      `auth()` session - never from form data, the query or a cookie.
  *   4. The `(invite)` route group has no layout and no loading boundary (a
  *      Suspense boundary would flush a 200 before a page that redirects).
+ *   6. DESIGNATION HOLDERS (docs/work-log/2026-10-22-designation-revoke.md,
+ *      DECISION-194/196). `designation-holders.ts` is the platform-connection
+ *      library for the holder list and the revoke: imported only from (admin),
+ *      holds `getPlatformDb` and never the tenant `db`, selects no contact or
+ *      email column. The platform side never writes `role_grants.ends_on`
+ *      except through the owner-only SQL function (no `update role_grants`, no
+ *      `.update(roleGrants)`, no `ends_on` assignment under `src/lib/onboarding/`
+ *      or `src/app/(admin)/`); `src/lib/role-grants.ts` (the tenant module)
+ *      never imports `getPlatformDb`; and the two pure files the client
+ *      components read (`-types`, `-copy`, plus `-rows`) import nothing from
+ *      the database, `server-only` or the library.
  *   5. THE HAND-OFF COOKIE IS NAMED ONLY WHERE IT IS READ OR WRITTEN (Phase 2
  *      addendum 2). It is `Path=/` now, so every platform request carries it for
  *      up to 30 minutes; only this scan keeps the reading of it confined to
@@ -179,5 +190,104 @@ describe("addendum 2: the hand-off cookie's name is referenced only where it is 
     expect(importers.map(rel).sort()).toEqual(
       [path.join(INVITE_TREE, "actions.ts"), path.join(INVITE_TREE, "invite", "page.tsx")].map(rel).sort(),
     );
+  });
+});
+
+describe("S4: designation-holders.ts is imported only from (admin) code (DECISION-196)", () => {
+  const LIB = path.join(SRC, "lib/onboarding/designation-holders.ts");
+
+  it("every non-test importer of the library lives under src/app/(admin)/", () => {
+    const importers = NON_TEST.filter((f) => {
+      if (f === LIB) return false;
+      const code = read(f);
+      return (
+        /from\s+"@\/lib\/onboarding\/designation-holders"/.test(code) ||
+        (f.startsWith(path.join(SRC, "lib/onboarding") + path.sep) && /from\s+"\.\/designation-holders"/.test(code))
+      );
+    });
+    const outside = importers
+      .filter((f) => !f.startsWith(path.join(SRC, "app", "(admin)") + path.sep))
+      .map(rel);
+    expect(outside).toEqual([]);
+    // And it IS used from (admin): the guard is not vacuous.
+    const names = importers.map(rel);
+    expect(names).toContain(rel(path.join(SRC, "app/(admin)/admin/organizations/[id]/actions.ts")));
+    expect(names).toContain(rel(path.join(SRC, "app/(admin)/admin/organizations/[id]/page.tsx")));
+  });
+
+  it("holds the platform connection and never the tenant one", () => {
+    const code = read(LIB);
+    expect(code).toMatch(/getPlatformDb/);
+    expect(code).not.toMatch(/import\s*\{[^}]*\bdb\b[^}]*\}\s*from\s*"@\/lib\/db"/);
+    expect(code).not.toMatch(/withOrgContext/);
+  });
+
+  it("the name select names no contact or email column, and no group member is name-resolved", () => {
+    const code = read(LIB);
+    expect(code).not.toMatch(/contactMethods|contact_methods/);
+    // The only people columns selected are the three name columns plus the id.
+    const select = /\.select\(\{([\s\S]*?)\}\)\s*\.from\(people\)/.exec(code);
+    expect(select, "the people name select").not.toBeNull();
+    const columns = [...select![1]!.matchAll(/(\w+)\s*:/g)].map((m) => m[1]).sort();
+    expect(columns).toEqual(["firstName", "id", "lastName", "preferredName"]);
+    // Names are resolved for the person-arm subject ids only.
+    expect(code).toMatch(/inArray\(people\.id,\s*personSubjectIds\)/);
+    // No SQL here selects an email column.
+    expect(code).not.toMatch(/select[^;`]*\bemail\b/i);
+  });
+
+  it("the platform side never writes role_grants.ends_on: no update of role_grants under src/lib/onboarding/ or src/app/(admin)/", () => {
+    const scoped = NON_TEST.filter(
+      (f) =>
+        f.startsWith(path.join(SRC, "lib/onboarding") + path.sep) ||
+        f.startsWith(path.join(SRC, "app", "(admin)") + path.sep),
+    );
+    expect(scoped.length).toBeGreaterThan(0);
+    const offenders = scoped
+      .filter((f) => {
+        const code = read(f);
+        return (
+          /update\s+role_grants/i.test(code) ||
+          /\.update\(\s*roleGrants\s*\)/.test(code) ||
+          /\bends_on\s*=(?!=)/.test(code)
+        );
+      })
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it("src/lib/role-grants.ts (the tenant module) never imports getPlatformDb", () => {
+    expect(read(path.join(SRC, "lib/role-grants.ts"))).not.toMatch(/getPlatformDb/);
+  });
+
+  it("the pure files the client components read import nothing from the database, server-only or the library", () => {
+    for (const name of [
+      "designation-holder-types.ts",
+      "designation-holder-copy.ts",
+      "designation-holder-rows.ts",
+    ]) {
+      const code = read(path.join(SRC, "lib/onboarding", name));
+      expect(code, name).not.toMatch(/@\/lib\/db/);
+      expect(code, name).not.toMatch(/server-only/);
+      expect(code, name).not.toMatch(/designation-holders"/);
+      expect(code, name).not.toMatch(/audit-tx|getPlatformDb/);
+    }
+    // The types file has NO imports at all (client-safe by construction).
+    expect(read(path.join(SRC, "lib/onboarding/designation-holder-types.ts"))).not.toMatch(/^\s*import\b/m);
+  });
+
+  it("the client components import types and copy, never the server-only library", () => {
+    const dir = path.join(SRC, "app/(admin)/admin/organizations/[id]");
+    for (const name of [
+      "designation-holder-list.tsx",
+      "revoke-holder-dialog.tsx",
+      "founding-administrator-section.tsx",
+      "treasurer-designation-section.tsx",
+    ]) {
+      const code = read(path.join(dir, name));
+      expect(code, name).toMatch(/^"use client"|^\s*"use client"/m);
+      expect(code, name).not.toMatch(/onboarding\/designation-holders"/);
+      expect(code, name).not.toMatch(/@\/lib\/db/);
+    }
   });
 });

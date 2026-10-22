@@ -8578,3 +8578,11 @@ rollback;
 --     (included by scripts/seed-dev.sql), so it is never run against production.
 -- ===========================================================================
 \ir invitations/test-rls-59.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/designation-revoke (integration).
+-- 60. Designation-holder revoke (drizzle/0060_presby_designation_revoke.sql).
+--     Its own file, as 46, 47 and 59 above; \ir resolves relative to this
+--     script. It needs the test helpers, so it is never run against production.
+-- ===========================================================================
+\ir designation-revoke/test-rls-60.sql

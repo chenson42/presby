@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { emailQueue } from "@/lib/db/schema";
 import { FEATURES, hasFeature } from "@/lib/permissions";
+import { isCredentialTemplateKey } from "@/lib/email/credential-keys";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ import { RetryButton } from "./retry-button";
 // Constants
 // ---------------------------------------------------------------------------
 
-const VALID_STATUSES = new Set(["all", "queued", "processing", "sent", "failed"]);
+const VALID_STATUSES = new Set(["all", "queued", "processing", "sent", "failed", "cancelled"]);
 const LIMIT = 50;
 
 // Status colors are pre-existing palette literals retained at the call site
@@ -34,6 +35,7 @@ const STATUS_BADGE: Record<string, string> = {
   processing: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
   sent: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-200",
   failed: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+  cancelled: "bg-muted text-muted-foreground",
 };
 
 // ---------------------------------------------------------------------------
@@ -139,7 +141,7 @@ export default async function AdminEmailQueuePage({
       {/* Count summary strip */}
       {totalCount > 0 && (
         <div className="flex flex-wrap gap-2">
-          {(["queued", "processing", "sent", "failed"] as const).map((s) => {
+          {(["queued", "processing", "sent", "failed", "cancelled"] as const).map((s) => {
             const n = countsByStatus[s] ?? 0;
             if (n === 0) return null;
             return (
@@ -166,7 +168,7 @@ export default async function AdminEmailQueuePage({
 
       {/* Status filter tabs */}
       <div className="flex flex-wrap gap-2 border-b border-border pb-3">
-        {["all", "queued", "processing", "sent", "failed"].map((s) => (
+        {["all", "queued", "processing", "sent", "failed", "cancelled"].map((s) => (
           <Button
             key={s}
             asChild
@@ -304,7 +306,15 @@ export default async function AdminEmailQueuePage({
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
-                      {row.status === "failed" && <RetryButton id={row.id} />}
+                      {row.status === "failed" &&
+                        (isCredentialTemplateKey(row.templateKey) ? (
+                          <span className="text-xs text-muted-foreground">
+                            Can&apos;t be retried (one-time link removed). Use Resend on the
+                            organization page.
+                          </span>
+                        ) : (
+                          <RetryButton id={row.id} />
+                        ))}
                     </div>
                   </TableCell>
                 </TableRow>

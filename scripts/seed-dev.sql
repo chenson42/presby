@@ -1949,3 +1949,8 @@ commit;
 -- Custom-domains fixture (drizzle/0057). Its own file and transaction, so it
 -- runs AFTER the final commit above, after giving's include.
 \ir domains/seed-dev-domains.sql
+
+-- Account-invitations fixture (drizzle/0059). Its own file, run AFTER every
+-- organization, person, membership and user it references exists (so last);
+-- idempotent, synthetic tokens only. scripts/invitations/test-rls-59.sql needs it.
+\ir invitations/seed-dev-invitations.sql

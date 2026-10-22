@@ -40,9 +40,16 @@ const siteEntry = (entries: HeaderEntry[]) =>
   entries.find((e) => e.headers.some((h) => h.key === "Content-Security-Policy-Report-Only"))!;
 
 describe("next.config.ts headers(): the enforced CSP on the give routes", () => {
-  it("has the site-wide entry, the two host-split HSTS entries, and one enforced entry per give route, and no other", async () => {
+  it("has the site-wide entry, the two host-split HSTS entries, the two exact-path invitation entries (DECISION-185: no-referrer / no-store / noindex, no CSP), and one enforced entry per give route, and no other", async () => {
     const entries = await loadHeaders("production");
-    expect(entries.map((e) => e.source)).toEqual(["/(.*)", "/(.*)", "/(.*)", ...GIVE_SOURCES]);
+    expect(entries.map((e) => e.source)).toEqual([
+      "/(.*)", "/(.*)", "/(.*)", "/invite", "/invite/accepted", ...GIVE_SOURCES,
+    ]);
+    // The invitation entries add no policy of their own: only the three referrer/cache/robots headers.
+    for (const source of ["/invite", "/invite/accepted"]) {
+      const entry = entries.find((e) => e.source === source)!;
+      expect(entry.headers.map((h) => h.key).sort()).toEqual(["Cache-Control", "Referrer-Policy", "X-Robots-Tag"]);
+    }
     expect(giveEntries(entries).map((e) => e.source)).toEqual(GIVE_SOURCES);
   });
 

@@ -38,7 +38,7 @@ import type {
 } from "./adapters/hosting";
 import type { ProbeClient, ProbeOutcome } from "./adapters/probe";
 import { buildActivity, type ActivityItem } from "./activity";
-import { AUDIT_ACTIONS, insertAuditRow } from "./audit-tx";
+import { AUDIT_ACTIONS, insertAuditRow } from "@/lib/audit-tx";
 import {
   buildChecklist,
   readObservation,

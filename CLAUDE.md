@@ -498,6 +498,11 @@ in any authority check. Publication is an immutable event (`publications`)
 referencing an immutable artifact; a recipient reads the published artifact,
 not the source's live state.
 
+A platform admin acquires tenant authority only as any person does — by
+accepting an invitation addressed to their own email; a self-sent designation
+is permitted and audited as such, and the platform role itself confers nothing
+(DECISION-183).
+
 ### The Roll Is the System of Record
 
 `roll_actions` is append-only; an approved action is frozen by trigger and
@@ -537,6 +542,11 @@ user do this?* — `hasFeature(session.user.features, FEATURES.KEY)`, catalog in
 `src/lib/permissions.ts`. A **flag** answers *is this behavior on at all?* —
 `isFlagEnabled(key)` against `feature_flags`. A flag never grants access; a
 permission never stages a rollout. A gated feature asks both questions.
+
+A credential (hashed, single-use, expiring; DECISION-147, DECISION-183) is a
+third mechanism: it authorizes only the act its own row names, inside SECURITY
+DEFINER functions that derive org and purpose from that row, and is never mapped
+into `FEATURES.*`, a session claim or the resolver.
 
 `isFlagEnabled()` returns `false` on a missing row or a DB error — right for a
 toggle, wrong for a flag that gates an auth path, where `false` means "deny
@@ -621,7 +631,7 @@ exactly the two layouts listed in `scripts/check-brand-scope.mjs`.
 church's custom domain renders through that same `(public)/site/[slug]` tree —
 there is no third group, and `check:brand-scope` is unchanged.
 Everything else — `(auth)`, `(account)`, `(member)`, `(admin)`, `(statistics-submit)`,
-`(email-verify)`, `(password-reset)`, `access-pending`, `/launch`,
+`(invite)`, `(email-verify)`, `(password-reset)`, `access-pending`, `/launch`,
 `/no-organization`, `/developer` — renders in the platform palette. A branded
 403 tells a prober the org is a configured tenant (DECISION-047).
 

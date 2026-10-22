@@ -1,0 +1,586 @@
+{
+  "fa-created-congregation": {
+    "roles": [
+      {
+        "key": "congregation_stated_clerk",
+        "name": "Stated Clerk",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "statistics.publish"
+        ]
+      },
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "domains.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "congregation_stated_clerk",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      },
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "staff",
+      "currentRoll": null,
+      "endedOn": null
+    }
+  },
+  "fa-created-general_assembly": {
+    "roles": [
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "domains.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "staff",
+      "currentRoll": null,
+      "endedOn": null
+    }
+  },
+  "fa-created-new_worshiping_community": {
+    "roles": [
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "domains.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "staff",
+      "currentRoll": null,
+      "endedOn": null
+    }
+  },
+  "fa-created-presbytery": {
+    "roles": [
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "congregation_oversight.manage",
+          "domains.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      },
+      {
+        "key": "presbytery_stated_clerk",
+        "name": "Stated Clerk",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "credentials.manage",
+          "per_capita.manage",
+          "statistics.manage"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      },
+      {
+        "roleKey": "presbytery_stated_clerk",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "staff",
+      "currentRoll": null,
+      "endedOn": null
+    }
+  },
+  "fa-created-synod": {
+    "roles": [
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "domains.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "staff",
+      "currentRoll": null,
+      "endedOn": null
+    }
+  },
+  "fa-existing-person-congregation": {
+    "roles": [
+      {
+        "key": "congregation_stated_clerk",
+        "name": "Stated Clerk",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "statistics.publish"
+        ]
+      },
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "domains.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "congregation_stated_clerk",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      },
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "regular",
+      "currentRoll": "active",
+      "endedOn": null
+    }
+  },
+  "fa-f109-congregation": {
+    "roles": [
+      {
+        "key": "congregation_stated_clerk",
+        "name": "Clerk of Session",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "directory.view",
+          "statistics.publish"
+        ]
+      },
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "domains.manage",
+          "events.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "congregation_stated_clerk",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      },
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "staff",
+      "currentRoll": null,
+      "endedOn": null
+    }
+  },
+  "fa-f109-presbytery": {
+    "roles": [
+      {
+        "key": "founding_administrator",
+        "name": "Founding Administrator",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "congregation_oversight.manage",
+          "domains.manage",
+          "groups.manage",
+          "officers.manage",
+          "org_features.manage",
+          "people.manage",
+          "role_grants.manage",
+          "roles.manage",
+          "staff.manage",
+          "tickets.file"
+        ]
+      },
+      {
+        "key": "presbytery_stated_clerk",
+        "name": "Stated Clerk (renamed)",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "credentials.manage",
+          "per_capita.manage",
+          "statistics.manage"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "founding_administrator",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      },
+      {
+        "roleKey": "presbytery_stated_clerk",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "founding administrator designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Marisol",
+      "lastName": "Quenby",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "staff",
+      "currentRoll": null,
+      "endedOn": null
+    }
+  },
+  "tr-congregation": {
+    "roles": [
+      {
+        "key": "giving_recorder",
+        "name": "Giving Recorder",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "giving.record"
+        ]
+      },
+      {
+        "key": "treasurer",
+        "name": "Treasurer",
+        "roleKind": "constitutional",
+        "isProtected": true,
+        "active": true,
+        "permissions": [
+          "giving.manage",
+          "giving.record",
+          "giving.view"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "treasurer",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "treasurer designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Odalys",
+      "lastName": "Pennick",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "regular",
+      "currentRoll": "active",
+      "endedOn": null
+    }
+  },
+  "tr-f109-congregation": {
+    "roles": [
+      {
+        "key": "giving_recorder",
+        "name": "Giving Recorder (ours)",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "giving.record"
+        ]
+      },
+      {
+        "key": "treasurer",
+        "name": "Treasurer",
+        "roleKind": "constitutional",
+        "isProtected": true,
+        "active": true,
+        "permissions": [
+          "directory.view",
+          "giving.manage",
+          "giving.record",
+          "giving.view"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "treasurer",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "treasurer designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Odalys",
+      "lastName": "Pennick",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "regular",
+      "currentRoll": "active",
+      "endedOn": null
+    }
+  },
+  "tr-new_worshiping_community": {
+    "roles": [
+      {
+        "key": "giving_recorder",
+        "name": "Giving Recorder",
+        "roleKind": "custom",
+        "isProtected": false,
+        "active": true,
+        "permissions": [
+          "giving.record"
+        ]
+      },
+      {
+        "key": "treasurer",
+        "name": "Treasurer",
+        "roleKind": "constitutional",
+        "isProtected": true,
+        "active": true,
+        "permissions": [
+          "giving.manage",
+          "giving.record",
+          "giving.view"
+        ]
+      }
+    ],
+    "grants": [
+      {
+        "roleKey": "treasurer",
+        "principal": "designee",
+        "grantedBy": "operator",
+        "grantReason": "treasurer designation",
+        "startsOn": "today",
+        "endsOn": null
+      }
+    ],
+    "designee": {
+      "firstName": "Odalys",
+      "lastName": "Pennick",
+      "linkedToAccount": true,
+      "merged": false
+    },
+    "membership": {
+      "engagementStatus": "regular",
+      "currentRoll": "active",
+      "endedOn": null
+    }
+  }
+}

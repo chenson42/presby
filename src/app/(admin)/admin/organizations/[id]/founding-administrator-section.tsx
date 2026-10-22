@@ -1,31 +1,23 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HydrationGate } from "@/components/shared/hydration-gate";
 import type { OrganizationType } from "@/lib/authz";
-import {
-  designateFoundingAdministratorAction,
-  type PolicyResult,
-} from "./actions";
+import type { InvitationListRow } from "@/lib/onboarding/issue";
+import { inviteFoundingAdministratorAction } from "./actions";
+import { InvitationList } from "./invitation-list";
+import { InvitationSentNotice } from "./invitation-sent-notice";
+import { SendInvitationDialog } from "./send-invitation-dialog";
+import { useSendInvitation } from "./use-send-invitation";
 
 /**
  * Human-friendly labels for the administration half of the founding-
  * administrator bundle (`foundingAdministratorPlan()`'s `permissionKeys`,
  * work-log Phase 2 Ruling 3). Kept here, not imported from
- * `@/lib/founding-administrator` — that module transitively imports
+ * `@/lib/onboarding/founding-administrator` — that module transitively imports
  * `@/lib/db`, whose module-scope pool construction throws without
  * `DATABASE_URL` (Batch B's own discovery, restated in its header comment);
  * a client component must not pull that module into the browser bundle.
@@ -68,23 +60,37 @@ interface FoundingAdministratorSectionProps {
   currentHolderCount: number;
   administrationPermissionKeys: string[];
   officeTemplateName: string | null;
+  /** This section's invitations (founding administrator only), newest first. */
+  invitations: InvitationListRow[];
+  /** `isLocalLoginEnabled()`, read fresh by `page.tsx` (fails open). */
+  localLoginEnabled: boolean;
+  /** `isTotpConfigured()`: without it a new account would be stranded at the 2FA wall (G8). */
+  totpConfigured: boolean;
+  /** The signed-in operator's own address, to detect a self-addressed send (R9 reversal). */
+  inviterEmail: string | null;
 }
 
 /**
- * `/admin/organizations/<id>`'s founding-administrator section
- * (docs/work-log/2026-09-28-founding-administrator.md Phase 3, "Component /
- * Page Plan"). One email input, no person picker — the database chooses the
- * branch (Phase 2 Ruling 4). Structural match to `neutralize-dialog.tsx`
- * (AlertDialog confirm, called directly rather than via a raw form submit —
- * Workflow Rule 2, this act originates access) crossed with
- * `profile-form.tsx` (inline result banner, never toast-only feedback).
+ * `/admin/organizations/<id>`'s founding-administrator section. The operator
+ * invites ONE person by email (plus their name, so the email greets them and
+ * the account is named correctly); the person accepts through `/invite`. The
+ * send step never looks the address up, so this screen reads the same whether
+ * or not the address already has an account.
  *
- * `page.tsx` computes `canDesignate`/`currentHolderCount` fresh on every
- * render (never cached — `countFoundingAdministratorHolders()`'s own
- * discipline) and this component trusts those props for exactly one render;
- * a stale prop from a slow client only ever causes an extra round trip to
- * the server action, which re-checks the gate itself and returns
- * `has_holders` if it has gone stale — never a client-side-only guard.
+ * Three states, by what is true now:
+ *   1. someone can already manage roles: a read-only line (plus any history);
+ *   2. an invitation is open (pending, or expired and still holding the slot):
+ *      its row with Resend and Revoke replaces the form, because the server
+ *      allows exactly one open designation per organization;
+ *   3. otherwise the form: email, first and last name, confirm `AlertDialog`
+ *      (Workflow Rule 2) naming the organization, the address and what the role
+ *      grants, plus the self-address / local-login-off / do-not-contact
+ *      sentences when they apply.
+ *
+ * `page.tsx` computes everything fresh on every render and this component
+ * trusts it for one render; the server action re-checks every gate itself.
+ * Not a `useForm` root (controlled state), wrapped in `<HydrationGate>` anyway
+ * so nothing typed before hydration is lost (DECISION-159).
  */
 export function FoundingAdministratorSection({
   organizationId,
@@ -94,13 +100,20 @@ export function FoundingAdministratorSection({
   currentHolderCount,
   administrationPermissionKeys,
   officeTemplateName,
+  invitations,
+  localLoginEnabled,
+  totpConfigured,
+  inviterEmail,
 }: FoundingAdministratorSectionProps) {
   const [email, setEmail] = useState("");
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<PolicyResult | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
 
-  const emailLooksValid = EMAIL_SHAPE_RE.test(email.trim());
+  const trimmedEmail = email.trim();
+  const formValid =
+    EMAIL_SHAPE_RE.test(trimmedEmail) && firstName.trim() !== "" && lastName.trim() !== "";
+  const selfAddressed =
+    inviterEmail !== null && trimmedEmail.toLowerCase() === inviterEmail.toLowerCase();
 
   // `organizationType` is accepted as a prop (and threaded through, per the
   // page-gate contract) but is not read directly here: the presbytery-only
@@ -111,122 +124,174 @@ export function FoundingAdministratorSection({
   void organizationType;
   const permissionSummary = summarizePermissions(administrationPermissionKeys);
 
-  function handleConfirm() {
-    const trimmedEmail = email.trim();
-    startTransition(async () => {
+  const flow = useSendInvitation({
+    send: (acknowledge) => {
       const fd = new FormData();
       fd.set("organizationId", organizationId);
       fd.set("email", trimmedEmail);
-      const outcome = await designateFoundingAdministratorAction(fd);
-      setResult(outcome);
-      setConfirmOpen(false);
-      if (outcome.ok) {
-        toast.success(`${trimmedEmail} is now ${organizationName}'s founding administrator.`);
-        setEmail("");
-      } else {
-        toast.error(outcome.error);
-      }
-    });
-  }
+      fd.set("firstName", firstName.trim());
+      fd.set("lastName", lastName.trim());
+      if (acknowledge) fd.set("acknowledge", "true");
+      return inviteFoundingAdministratorAction(fd);
+    },
+    successToast: `Invitation to ${trimmedEmail} sent.`,
+    onSent: () => {
+      setEmail("");
+      setFirstName("");
+      setLastName("");
+    },
+  });
+
+  const hasOpen = invitations.some((i) => i.status === "pending" || i.status === "expired");
+  const list = (
+    <InvitationList organizationId={organizationId} invitations={invitations} role="role" />
+  );
+  // The result of the last send, kept after the form gives way to the open row.
+  const sentNotice = flow.result ? (
+    <InvitationSentNotice result={flow.result} address={undefined} role="role" />
+  ) : null;
 
   if (!canDesignate) {
     return (
-      <section className="mt-8 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <section
+        data-testid="founding-administrator-section"
+        className="mt-8 rounded-lg border border-border bg-card p-4 text-card-foreground"
+      >
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Founding administrator
         </h2>
         <p className="mt-1 text-sm text-foreground">
           This organization already has{" "}
-          {currentHolderCount === 1
-            ? "one person"
-            : `${currentHolderCount} people`}{" "}
-          who can manage roles — a founding administrator has already been
-          designated. Grant or revoke roles from the organization&apos;s own
-          Roles page instead.
+          {currentHolderCount === 1 ? "one person" : `${currentHolderCount} people`} who can manage
+          roles — a founding administrator has already been designated. Grant or revoke roles from the
+          organization&apos;s own Roles page instead.
         </p>
+        {list}
+      </section>
+    );
+  }
+
+  if (hasOpen) {
+    return (
+      <section
+        data-testid="founding-administrator-section"
+        className="mt-8 rounded-lg border border-border bg-card p-4 text-card-foreground"
+      >
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Founding administrator
+        </h2>
+        <p className="mt-1 text-sm text-foreground">
+          An invitation is open. Nobody holds this role until it is accepted. Resend it if the email went
+          astray, or revoke it to invite someone else.
+        </p>
+        {sentNotice}
+        {list}
       </section>
     );
   }
 
   return (
-    <section className="mt-8 rounded-lg border border-blue-200 bg-blue-50 px-4 py-4 dark:border-blue-900 dark:bg-blue-950">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-blue-900 dark:text-blue-200">
+    <section
+      data-testid="founding-administrator-section"
+      className="mt-8 rounded-lg border border-border bg-card p-4 text-card-foreground"
+    >
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         Founding administrator
       </h2>
-      <p className="mt-1 text-sm text-blue-900/80 dark:text-blue-200/80">
-        This organization has no one yet who can manage roles. Designate one
-        person by email to hand it over — this can only be done once per
-        organization (or again if it ever loses every role-manager).
+      <p className="mt-1 text-sm text-foreground">
+        This organization has no one yet who can manage roles. Invite one person by email to hand it over:
+        they get a link to accept, and nobody holds the role until they do. This can only be done while
+        nobody can manage roles (so also as a recovery if it ever loses every role-manager).
       </p>
 
-      {result && !result.ok && (
-        <div
-          role="status"
-          className="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
-        >
-          {result.error}
-        </div>
-      )}
-      {result && result.ok && (
-        <div
-          role="status"
-          className="mt-3 rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
-        >
-          Founding administrator designated.
-        </div>
-      )}
-
-      <div className="mt-4 max-w-sm">
-        <Label htmlFor="foundingAdministratorEmail">Email address</Label>
-        <Input
-          id="foundingAdministratorEmail"
-          name="email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="clerk@example.org"
-          disabled={isPending}
-        />
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          The person must sign up for a platform account first — they&apos;ll
-          land on a page saying they have no organizations yet — then you
-          designate them here by that same email address.
+      {!totpConfigured && (
+        <p role="alert" className="mt-3 rounded-md border border-destructive p-3 text-sm">
+          Two-factor sign-in isn&apos;t set up on this deployment, so an invitation can&apos;t be sent yet.
+          Ask an engineer to configure it.
         </p>
-      </div>
+      )}
+      {sentNotice}
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <Button
-          type="button"
-          className="mt-4 min-h-[44px]"
-          disabled={!emailLooksValid || isPending}
-          onClick={() => setConfirmOpen(true)}
+      <HydrationGate className="mt-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (formValid && totpConfigured) flow.setConfirmOpen(true);
+          }}
+          className="max-w-sm"
         >
-          {isPending ? "Designating…" : "Designate founding administrator"}
-        </Button>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Designate {email.trim()} as {organizationName}&apos;s founding
-              administrator?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              They will be able to manage {permissionSummary}
-              {officeTemplateName
-                ? `, plus this organization's constitutional ${officeTemplateName} office`
-                : ""}
-              . This can only be done once — the organization&apos;s own
-              administrators grant everyone after this through the ordinary
-              Roles page.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm} disabled={isPending}>
-              {isPending ? "Designating…" : "Yes, designate"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          <div>
+            <Label htmlFor="foundingAdministratorEmail">Email address</Label>
+            <Input
+              id="foundingAdministratorEmail"
+              name="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="clerk@example.org"
+              autoComplete="off"
+              disabled={flow.isPending}
+              className="mt-1 h-11"
+            />
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              The person does not need an account yet. The link in the email lets them create one, or
+              sign in to the one they have, and accept.
+            </p>
+          </div>
+          <div className="mt-3 grid gap-3">
+            <div>
+              <Label htmlFor="foundingAdministratorFirstName">First name</Label>
+              <Input
+                id="foundingAdministratorFirstName"
+                name="firstName"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                disabled={flow.isPending}
+                className="mt-1 h-11"
+              />
+            </div>
+            <div>
+              <Label htmlFor="foundingAdministratorLastName">Last name</Label>
+              <Input
+                id="foundingAdministratorLastName"
+                name="lastName"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                disabled={flow.isPending}
+                className="mt-1 h-11"
+              />
+            </div>
+          </div>
+
+          <Button
+            type="submit"
+            className="mt-4 min-h-11"
+            disabled={!formValid || !totpConfigured || flow.isPending}
+          >
+            {flow.isPending ? "Sending…" : "Send invitation"}
+          </Button>
+        </form>
+
+        <SendInvitationDialog
+          open={flow.confirmOpen}
+          onOpenChange={flow.setConfirmOpen}
+          title={`Invite ${trimmedEmail} to be ${organizationName}'s founding administrator?`}
+          address={trimmedEmail}
+          selfAddressed={selfAddressed}
+          localLoginEnabled={localLoginEnabled}
+          acknowledgement={flow.acknowledgement}
+          pending={flow.isPending}
+          onConfirm={flow.confirm}
+        >
+          Once they accept, they will be able to manage {permissionSummary}
+          {officeTemplateName
+            ? `, plus this organization's constitutional ${officeTemplateName} office`
+            : ""}
+          . After this, the organization&apos;s own administrators grant everyone through the ordinary
+          Roles page.
+        </SendInvitationDialog>
+      </HydrationGate>
+      {list}
     </section>
   );
 }

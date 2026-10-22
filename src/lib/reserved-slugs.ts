@@ -13,6 +13,11 @@
  * (`src/proxy.ts`, P5 subdomain routing) without pulling in a server-action
  * or database module.
  *
+ * `reserved-slugs.test.ts` walks `src/app` and fails when a live top-level
+ * segment is missing from the set (F157: `file-statistics` drifted out
+ * unnoticed). A route that must be reserved before it exists (`invite`) is
+ * added by hand and pinned there by name.
+ *
  * This is a `paper` invariant (architect's own labeling, Phase 2 "Invariants
  * Touched"): nothing in the schema enforces it. `organizations_slug_format`
  * is the DB-backed CHECK (shape only); this list is pure application logic,
@@ -51,6 +56,10 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "api",
   "launch",
   "no-organization",
+  "file-statistics",
+  // The account-invitation route group's path (DECISION-185); reserved ahead
+  // of the route landing so no organization can take the slug first.
+  "invite",
   // Infra labels reserved for P5's <slug>.presby.app subdomain scheme, not
   // yet live app routes.
   "www",

@@ -7,7 +7,16 @@ export { escapeHtml } from "./escape-html";
 
 // enqueueEmail is the canonical entry point for all outbound email.
 // Do NOT call sendEmail() directly from server actions or pages — see DECISION-018.
-export { enqueueEmail, recordDeliveryEvent } from "./queue";
+export {
+  enqueueEmail,
+  recordDeliveryEvent,
+  insertQueueRowInTx,
+  attemptQueuedSend,
+  cancelQueuedEmail,
+  CREDENTIAL_TEMPLATE_KEYS,
+  REDACTED_BODY_MARKER,
+  isCredentialTemplateKey,
+} from "./queue";
 export type { EnqueueEmailInput, BatchResult, DeliveryEventType } from "./queue";
 
 // renderEmail builds the only message shape enqueueEmail accepts (DECISION-191).

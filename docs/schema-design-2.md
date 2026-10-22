@@ -1772,6 +1772,50 @@ deliberately ships no writer. What I did, and deliberately did not do:
 
 **F165 — `tickets-notifications.ts` and `feedback/actions.ts` put relative hrefs** (`/admin/tickets/{id}`, `/o/{slug}/tickets/{id}`, `/admin/feedback`) into outbound mail, where a relative URL resolves to nothing. **Closed** by DECISION-191 (an absolute `http(s)` `href` is required) and DECISION-193 (d): links are built from `platformOrigin()` and the button is omitted when it is `null`. Regression coverage: `feedback/actions.test.ts:489` and five cases in `tickets-notifications.test.ts`.
 
+## 2s. Invitations — findings (F153–F159, F166–F168)
+
+*(2026-10-21, `docs/work-log/2026-10-21-invitations.md` Phases 2–6; migration `0059_presby_account_invitations`, DECISION-183–189; recorded by the orchestrator at integration. F153 to F157 are Phase 2 findings, F158 and F159 Phase 3, F166 and F167 were found by Batch 4's end-to-end specs, and F168 is the architect's addendum-2 finding. F160–F165 belong to the parallel review-polish pipeline, section 2r.)*
+
+### F153 — a submission grant's hash at rest is itself a bearer credential
+
+**F153 — DECISION-147's functions take `p_token_hash`,** and `presby_app` holds SELECT on `statistics_submission_grants.token_hash` and EXECUTE on `presby_submit_granted_return` (verified live), so the stored hash works as a bearer credential for any tenant session at the issuing presbytery. Low severity (the issuer already chooses the recipient). **Not repeated** by invitations: `presby_preview_invitation` and `presby_accept_invitation` take the raw token and hash it in SQL, and the hash previews nothing (QA probe). **Open** for statistics grants: raw-token signatures.
+
+### F154 — credential links sit at rest in the email queue
+
+**F154 — `email_queue` keeps credential links indefinitely** for `password_reset`, `email_change_verify` and `statistics_submission_grant`, with no RLS and full `presby_app` DML including DELETE (verified). Invitations close it for `account_invitation` only: its bodies are scrubbed at `sent`, `failed` and `cancelled` (DECISION-189), and the link is at rest only while a row is `queued`. **Open** for the other three keys; one edit to `src/lib/email/credential-keys.ts` also makes Retry refuse them.
+
+### F155 — a cross-organization limit would be an oracle on org-originated sends
+
+**F155 — a per-recipient limit evaluated across organizations** on a send an organization initiates tells the sender "another organization recently invited this address." Increment 1's sends are platform-originated, so the 3-per-address limit leaks nothing to a tenant. **Binding on Increment 2:** no sender-visible signal may depend on another organization's rows.
+
+### F156 — the token in `callbackUrl`
+
+**F156 — Phase 1's Flow 4 carried the token in `callbackUrl`,** which would have put it in NextAuth's callback-url cookie, `/totp` URLs and logs. **Closed** by R6: the token rides only an httpOnly hand-off cookie (DECISION-185), and the e2e asserts it is in no URL, no `audit_events` row and no `email_queue` row.
+
+### F157 — reserved slugs had drifted from the route tree
+
+**F157 — `RESERVED_SLUGS` lacked `file-statistics`** (DECISION-147) and had to gain `invite`; nothing tied the list to the route tree. **Closed** in Batch 0 (`fix(slugs)`), with a route-tree test and named pins in `src/lib/reserved-slugs.test.ts`.
+
+### F158 — Retry would re-send a scrubbed credential row
+
+**F158 — `retryEmailAction` reset any `failed` row to `queued`,** which for a credential row whose body was scrubbed would send the marker text, or re-arm a link. **Closed:** Retry refuses every key in `CREDENTIAL_TEMPLATE_KEYS` and points the operator to Resend.
+
+### F159 — the treasurer flow depends on emails no fixture carried
+
+**F159 — the roster-resolved treasurer invitation needs a `contact_methods` email** on a person with an active membership; no seed or e2e fixture carried one, and production data may lack it for the first treasurer. **Closed** for fixtures (the invitations seed and the e2e fixture supply them); the operator checklist names the production prerequisite.
+
+### F166 — first 2FA enrolment loses the recovery codes and `callbackUrl`
+
+**F166 — `/account/2fa` first-time enrolment ends with `revalidatePath("/account/2fa")`,** and the revalidated server tree replaces the client "enabled" panel with the management view within about a second: the recovery codes vanish, the "Continue" link and its preserved `callbackUrl` are lost, and the fresh-codes cookie is read only on the next load. Enrolling also does not verify the session, so the account answers one more `/totp` challenge. **Pre-existing, not fixed here**; every new invitee goes through it. Tracked as its own bug-fix pipeline, to land before the first non-operator invitee.
+
+### F167 — a newly designated treasurer reached the portal without the 2FA wall
+
+**F167 — accepting a treasurer invitation while signed in added giving keys** (arm B of `presby_two_factor_required`) to an account whose session cookie still said "2FA not required." `jwt()` recomputes the claim, but the proxy reads it from the cookie, and only a session update re-issues the cookie, so the edge wall was missing until the next sign-in. The giving pages gate 2FA from a fresh `auth()` themselves (R4), so tier-2 data was not exposed. **Closed:** `acceptSignedInAction()` calls `unstable_update()` after a successful accept (DECISION-188); unit and e2e regressions failed first.
+
+### F168 — a server action's redirect renders inside the action's own request
+
+**F168 — a server-action `redirect()` renders its target inside the action's POST,** so the target page sees only cookies scoped to the action's path. A `Path=/invite` hand-off cookie was therefore invisible on the return from sign-in, and the invitee briefly saw the dead-link page. **Closed** by DECISION-185 as amended: the cookie is host-only `Path=/` (`__Host-invite_token` in production). **General rule:** any hand-off cookie that crosses an auth action must be `Path=/`. Residual (D-6): the dead-link cookie is not cleared, so it now travels on every platform request for up to 30 minutes; it is httpOnly and its token is dead.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

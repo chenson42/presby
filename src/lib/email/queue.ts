@@ -5,6 +5,15 @@ import { emailQueue, auditEvents } from "@/lib/db/schema";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { sql, and, eq, lt } from "drizzle-orm";
 import { sendEmail } from "./send";
+import {
+  CREDENTIAL_TEMPLATE_KEYS,
+  REDACTED_BODY_MARKER,
+  isCredentialTemplateKey,
+} from "./credential-keys";
+
+// Re-exported so existing importers of "./queue" keep working; the set itself
+// lives in credential-keys.ts (dependency-free, shared with the Retry action).
+export { CREDENTIAL_TEMPLATE_KEYS, REDACTED_BODY_MARKER, isCredentialTemplateKey };
 import type { RenderedEmail } from "./render";
 
 // ----- recordDeliveryEvent -------------------------------------------------
@@ -192,6 +201,28 @@ function warnIfDevVarsInProd(): void {
   }
 }
 
+// ----- Credential bodies ---------------------------------------------------
+// A message whose body carries a one-time credential link (an account
+// invitation) must not sit in this table forever: email_queue has no RLS and
+// presby_app holds full DML on it (F154). For every template key in
+// CREDENTIAL_TEMPLATE_KEYS the SAME UPDATE that moves a row to `sent` or
+// `failed` (inline path, worker path, permanent failure) also replaces
+// html_body and text_body with REDACTED_BODY_MARKER, so there is no window in
+// which a delivered row still carries the link. A row stuck `queued` through
+// retries (at most about three hours at the existing backoff) does carry it -
+// a named residual (DECISION-186). `password_reset`, `email_change_verify` and
+// `statistics_submission_grant` are NOT in the set yet (F154 follow-up).
+//
+// Consequence: a redacted row cannot be re-sent. The admin Retry action
+// refuses rows in this set (F158); the way to re-send is a fresh invitation.
+
+/** The body columns to add to a terminal-status UPDATE for this template key. */
+function redactionFor(templateKey: string): { htmlBody?: string; textBody?: string } {
+  return isCredentialTemplateKey(templateKey)
+    ? { htmlBody: REDACTED_BODY_MARKER, textBody: REDACTED_BODY_MARKER }
+    : {};
+}
+
 // ----- Low-level send attempt (used by both inline and worker paths) -------
 
 async function attemptSend(
@@ -227,12 +258,24 @@ async function attemptSend(
 // ----- enqueueEmail --------------------------------------------------------
 // Persist-first: insert the row, attempt inline send, update status.
 // Always returns; never throws on send failure.
+//
+// Composed of two exported halves so a caller that must write the queue row
+// INSIDE its own transaction (an account invitation: the invitation row, its
+// queue row and the link between them commit together) can do so, and send
+// only after that transaction commits:
+//   insertQueueRowInTx(tx, input)  - the INSERT, on whatever transaction the
+//                                    caller holds (never sends);
+//   attemptQueuedSend(id)          - the post-commit inline send attempt.
+// enqueueEmail() is their composition on the shared `db`; behaviour unchanged.
 
-export async function enqueueEmail(
+type QueueWriter = Pick<typeof db, "insert" | "update">;
+
+export async function insertQueueRowInTx(
+  tx: QueueWriter,
   input: EnqueueEmailInput,
-): Promise<{ id: string; sentInline: boolean }> {
-  // 1. Insert with status='queued', nextAttemptAt=null (eligible immediately)
-  const [row] = await db
+): Promise<typeof emailQueue.$inferSelect> {
+  // status='queued', nextAttemptAt=null (eligible immediately)
+  const [row] = await tx
     .insert(emailQueue)
     .values({
       toEmail: input.to,
@@ -245,12 +288,21 @@ export async function enqueueEmail(
       maxAttempts: input.maxAttempts ?? 8,
     })
     .returning();
+  return row;
+}
 
-  // 2. Attempt inline send
+/**
+ * Attempt the inline send of a row, then record the outcome. Success marks it
+ * sent (and redacts a credential body in the same UPDATE); failure leaves it
+ * queued with the first backoff for the worker.
+ */
+async function sendQueuedRow(
+  row: typeof emailQueue.$inferSelect,
+): Promise<{ id: string; sentInline: boolean }> {
   const outcome = await attemptSend(row);
 
   if ("providerMessageId" in outcome) {
-    // 3a. Success: mark sent
+    // Success: mark sent
     await db
       .update(emailQueue)
       .set({
@@ -261,11 +313,12 @@ export async function enqueueEmail(
         lastAttemptAt: new Date(),
         failureReason: null,
         updatedAt: new Date(),
+        ...redactionFor(row.templateKey),
       })
       .where(eq(emailQueue.id, row.id));
     return { id: row.id, sentInline: true };
   } else {
-    // 3b. Failure: stay queued, schedule first retry in 1 minute
+    // Failure: stay queued, schedule first retry in 1 minute
     await db
       .update(emailQueue)
       .set({
@@ -279,6 +332,51 @@ export async function enqueueEmail(
       .where(eq(emailQueue.id, row.id));
     return { id: row.id, sentInline: false };
   }
+}
+
+/**
+ * The post-commit send attempt for a row inserted with `insertQueueRowInTx`.
+ * Never throws on a send failure (the row stays `queued` for the worker). A
+ * row that is gone or no longer `queued` (cancelled by a revoke that raced the
+ * commit) is not sent.
+ */
+export async function attemptQueuedSend(id: string): Promise<{ sentInline: boolean }> {
+  const [row] = await db.select().from(emailQueue).where(eq(emailQueue.id, id)).limit(1);
+  if (!row || row.status !== "queued") return { sentInline: false };
+  const { sentInline } = await sendQueuedRow(row);
+  return { sentInline };
+}
+
+/**
+ * Cancel a still-`queued` row inside the caller's transaction (a revoked or
+ * superseded invitation whose email has not left yet). A credential row's body
+ * is redacted in the same UPDATE. Returns whether a row was cancelled; a row
+ * already `processing`, `sent` or `failed` is left alone (one already
+ * processing arrives dead - its token is revoked or superseded).
+ */
+export async function cancelQueuedEmail(tx: QueueWriter, id: string): Promise<boolean> {
+  const keys = sql.join(
+    [...CREDENTIAL_TEMPLATE_KEYS].map((k) => sql`${k}`),
+    sql`, `,
+  );
+  const cancelled = await tx
+    .update(emailQueue)
+    .set({
+      status: "cancelled",
+      updatedAt: new Date(),
+      htmlBody: sql`case when ${emailQueue.templateKey} in (${keys}) then ${REDACTED_BODY_MARKER} else ${emailQueue.htmlBody} end`,
+      textBody: sql`case when ${emailQueue.templateKey} in (${keys}) then ${REDACTED_BODY_MARKER} else ${emailQueue.textBody} end`,
+    })
+    .where(and(eq(emailQueue.id, id), eq(emailQueue.status, "queued")))
+    .returning({ id: emailQueue.id });
+  return cancelled.length > 0;
+}
+
+export async function enqueueEmail(
+  input: EnqueueEmailInput,
+): Promise<{ id: string; sentInline: boolean }> {
+  const row = await insertQueueRowInTx(db, input);
+  return sendQueuedRow(row);
 }
 
 // ----- processQueueBatch ---------------------------------------------------
@@ -366,6 +464,7 @@ export async function processQueueBatch(limit = 25): Promise<BatchResult> {
           attemptCount: newAttemptCount,
           failureReason: null,
           updatedAt: new Date(),
+          ...redactionFor(row.templateKey),
         })
         .where(eq(emailQueue.id, row.id));
       sent++;
@@ -378,6 +477,7 @@ export async function processQueueBatch(limit = 25): Promise<BatchResult> {
           attemptCount: newAttemptCount,
           failureReason: outcome.error,
           updatedAt: new Date(),
+          ...redactionFor(row.templateKey),
         })
         .where(eq(emailQueue.id, row.id));
       failed++;

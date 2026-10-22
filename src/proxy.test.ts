@@ -201,6 +201,31 @@ describe("proxy — /site/* (public organization websites, DECISION-085)", () =>
   });
 });
 
+describe("proxy — /invite (account invitations, DECISION-183/185)", () => {
+  // Exact-path entries in PUBLIC_PATHS, like /file-statistics: the token rides
+  // the query string or the host-only Path=/ hand-off cookie, so no prefix bypass.
+
+  it("admits /invite and /invite/accepted with no auth() call at all", async () => {
+    for (const path of ["/invite", "/invite?token=abc123", "/invite/accepted"]) {
+      const res = await proxy(request(path));
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get("location"), path).toBeNull();
+    }
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("does NOT admit /invite/anything-else or look-alikes - exact paths only", async () => {
+    for (const path of ["/invite/x", "/invite/accepted/x", "/invitex", "/invite-me"]) {
+      auth.mockResolvedValueOnce(null as unknown as Awaited<ReturnType<typeof edgeAuth>>);
+      const res = await proxy(request(path));
+      expect(res.status, path).toBe(307);
+      const location = new URL(res.headers.get("location") as string);
+      expect(location.pathname, path).toBe("/signin");
+      expect(location.searchParams.get("callbackUrl"), path).toBe(path);
+    }
+  });
+});
+
 describe("proxy — /file-statistics (submission grants, D16/DECISION-147)", () => {
   // EXACT-PATH entries in PUBLIC_PATHS (a Set, not a prefix match) — the
   // deliberate amendment over /site/*'s startsWith bypass (Phase 2 BINDING,

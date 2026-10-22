@@ -59,7 +59,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 const mockCountHolders = vi.hoisted(() => vi.fn());
 const mockPlan = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/founding-administrator", () => ({
+vi.mock("@/lib/onboarding/founding-administrator", () => ({
   countFoundingAdministratorHolders: (...args: unknown[]) => mockCountHolders(...args),
   foundingAdministratorPlan: (...args: unknown[]) => mockPlan(...args),
 }));
@@ -73,7 +73,7 @@ vi.mock("./founding-administrator-section", () => ({
 }));
 
 const mockCountGiving = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/treasurer-designation", () => ({
+vi.mock("@/lib/onboarding/treasurer-designation", () => ({
   countGivingManageHolders: (...args: unknown[]) => mockCountGiving(...args),
   // The real predicate is a one-line allow-list; restated here so the page's
   // branching is exercised, not the mock's.
@@ -86,6 +86,20 @@ vi.mock("./treasurer-designation-section", () => ({
   TreasurerDesignationSection: (props: unknown) => {
     treasurerSectionSpy(props);
     return <div data-testid="treasurer-section" />;
+  },
+}));
+
+const mockListInvitations = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/onboarding/issue", () => ({
+  listInvitationsForOrg: (...args: unknown[]) => mockListInvitations(...args),
+}));
+vi.mock("@/lib/auth/local-login", () => ({ isLocalLoginEnabled: async () => true }));
+vi.mock("@/lib/two-factor", () => ({ isTotpConfigured: () => true }));
+const revokeAllSpy = vi.hoisted(() => vi.fn());
+vi.mock("./revoke-all-invitations", () => ({
+  RevokeAllInvitations: (props: unknown) => {
+    revokeAllSpy(props);
+    return <div data-testid="revoke-all" />;
   },
 }));
 
@@ -153,6 +167,7 @@ beforeEach(() => {
   mockGetAffiliation.mockResolvedValue(null);
   mockCountGiving.mockResolvedValue(0);
   mockListHealth.mockResolvedValue([]);
+  mockListInvitations.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -168,6 +183,8 @@ afterEach(() => {
   treasurerSectionSpy.mockReset();
   mockListHealth.mockReset();
   healthSectionSpy.mockReset();
+  mockListInvitations.mockReset();
+  revokeAllSpy.mockReset();
   orgRowRef.current = null;
   brandRowRef.current = null;
   selectCallCount.current = 0;
@@ -247,7 +264,7 @@ describe("OrganizationBrandDetailPage — founding-administrator gate props", ()
 describe("OrganizationBrandDetailPage — treasurer-designation gate props (online giving, R2)", () => {
   function arrangeOrg(organizationType: string) {
     mockAuth.mockResolvedValue({
-      user: { features: [FEATURES.ADMIN_ORGANIZATIONS] },
+      user: { features: [FEATURES.ADMIN_ORGANIZATIONS], email: "operator@example.invalid" },
     });
     orgRowRef.current = {
       id: ORG_ID,
@@ -274,6 +291,10 @@ describe("OrganizationBrandDetailPage — treasurer-designation gate props (onli
       organizationName: "Alder Creek Presbyterian Church",
       canDesignate: true,
       currentHolderCount: 0,
+      invitations: [],
+      localLoginEnabled: true,
+      totpConfigured: true,
+      inviterEmail: "operator@example.invalid",
     });
   });
 
@@ -287,8 +308,12 @@ describe("OrganizationBrandDetailPage — treasurer-designation gate props (onli
     expect(Object.keys(props).sort()).toEqual([
       "canDesignate",
       "currentHolderCount",
+      "invitations",
+      "inviterEmail",
+      "localLoginEnabled",
       "organizationId",
       "organizationName",
+      "totpConfigured",
     ]);
   });
 
@@ -482,5 +507,67 @@ describe("OrganizationBrandDetailPage - the Domains section (Track F, Batch 1d)"
     expect(screen.queryByTestId("domains-section")).toBeNull();
     expect(foundingSectionSpy).toHaveBeenCalled();
     expect(document.body.textContent).not.toMatch(/connection terminated/);
+  });
+});
+
+describe("OrganizationBrandDetailPage — invitations (account-invitations Batch 3)", () => {
+  function arrange() {
+    mockAuth.mockResolvedValue({
+      user: { features: [FEATURES.ADMIN_ORGANIZATIONS], email: "operator@example.invalid" },
+    });
+    orgRowRef.current = {
+      id: ORG_ID,
+      name: "Alder Creek Presbyterian Church",
+      organizationType: "congregation",
+      platformStatus: "managed",
+    };
+    mockCountHolders.mockResolvedValue(0);
+    mockPlan.mockReturnValue({
+      administration: { key: "founding_administrator", name: "x", permissionKeys: [] },
+      officeTemplateKey: null,
+    });
+  }
+  const row = (id: string, purpose: string, status: string) => ({ id, purpose, status });
+
+  it("reads the org's invitations once and hands each section only its own purpose", async () => {
+    arrange();
+    mockListInvitations.mockResolvedValue([
+      row("a", "founding_administrator", "pending"),
+      row("b", "treasurer", "accepted"),
+      row("c", "founding_administrator", "revoked"),
+    ]);
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(mockListInvitations).toHaveBeenCalledTimes(1);
+    expect(mockListInvitations).toHaveBeenCalledWith(ORG_ID);
+    expect(foundingSectionSpy.mock.calls[0][0].invitations.map((r: { id: string }) => r.id)).toEqual(["a", "c"]);
+    expect(treasurerSectionSpy.mock.calls[0][0].invitations.map((r: { id: string }) => r.id)).toEqual(["b"]);
+  });
+
+  it("renders Revoke-all only when at least one invitation is open (pending or expired), with the count", async () => {
+    arrange();
+    mockListInvitations.mockResolvedValue([
+      row("a", "founding_administrator", "expired"),
+      row("b", "treasurer", "pending"),
+      row("c", "treasurer", "accepted"),
+    ]);
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(screen.getByTestId("revoke-all")).toBeTruthy();
+    expect(revokeAllSpy.mock.calls[0][0]).toMatchObject({ organizationId: ORG_ID, openCount: 2 });
+  });
+
+  it("renders no Revoke-all when nothing is open", async () => {
+    arrange();
+    mockListInvitations.mockResolvedValue([row("c", "treasurer", "accepted")]);
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(screen.queryByTestId("revoke-all")).toBeNull();
+  });
+
+  it("a failed invitations read says so (never an empty, all-clear list) and the page still renders", async () => {
+    arrange();
+    mockListInvitations.mockRejectedValue(new Error("boom"));
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(screen.getByRole("alert").textContent).toMatch(/couldn.t load this organization.s invitations/i);
+    expect(screen.getByTestId("founding-section")).toBeTruthy();
+    expect(foundingSectionSpy.mock.calls[0][0].invitations).toEqual([]);
   });
 });

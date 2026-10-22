@@ -246,6 +246,12 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   DOMAIN_CANONICAL_CHANGED: "domain.canonical_changed",
   DOMAIN_HOLD_SET: "domain.hold_set",
   DOMAIN_HOLD_CLEARED: "domain.hold_cleared",
+  INVITATION_CREATED: "invitation.created",
+  INVITATION_RESENT: "invitation.resent",
+  INVITATION_REVOKED: "invitation.revoked",
+  INVITATION_ACCEPTED: "invitation.accepted",
+  INVITATION_ACCEPT_BLOCKED: "invitation.accept_blocked",
+  USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

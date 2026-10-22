@@ -21,12 +21,15 @@ import {
 import {
   countFoundingAdministratorHolders,
   foundingAdministratorPlan,
-} from "@/lib/founding-administrator";
+} from "@/lib/onboarding/founding-administrator";
 import {
   countGivingManageHolders,
   treasurerDesignationApplies,
-} from "@/lib/treasurer-designation";
+} from "@/lib/onboarding/treasurer-designation";
 import { listIngestHealth, type IngestHealthRow } from "@/lib/admin/giving-ingest-health";
+import { isLocalLoginEnabled } from "@/lib/auth/local-login";
+import { isTotpConfigured } from "@/lib/two-factor";
+import { listInvitationsForOrg, type InvitationListRow } from "@/lib/onboarding/issue";
 import { getOrganizationAffiliationAdminDetail } from "@/lib/org-provisioning";
 import { readOrgDomainsForPlatform } from "@/lib/domains/platform-read";
 import { BrandForm } from "./brand-form";
@@ -39,9 +42,10 @@ import { TreasurerDesignationSection } from "./treasurer-designation-section";
 import { IngestHealthSection } from "./ingest-health-section";
 import { AffiliationSection } from "./affiliation-section";
 import { DomainsSection } from "./domains-section";
+import { RevokeAllInvitations } from "./revoke-all-invitations";
 
 // officeTemplateKey -> display name. Not exported by
-// `@/lib/founding-administrator` — that module returns the key only
+// `@/lib/onboarding/founding-administrator` — that module returns the key only
 // (work-log Phase 4 Batch B's "Contract Batch C consumes"); the human name
 // is this page's own display concern.
 const OFFICE_TEMPLATE_DISPLAY_NAMES: Record<string, string> = {
@@ -137,6 +141,27 @@ export default async function OrganizationBrandDetailPage({
     }
   }
 
+  // Invitations for the two designation sections (read fresh; a failed read is
+  // `null`, rendered as "can't load", never as an empty, all-clear list: an
+  // operator who cannot see a pending invitation might send a duplicate). The
+  // two config reads fail open/closed by their own helpers.
+  let invitations: InvitationListRow[] | null;
+  try {
+    invitations = await listInvitationsForOrg(id);
+  } catch {
+    invitations = null;
+  }
+  const localLoginEnabled = await isLocalLoginEnabled();
+  const totpConfigured = isTotpConfigured();
+  const inviterEmail = session?.user?.email ?? null;
+  const foundingInvitations = (invitations ?? []).filter(
+    (row) => row.purpose === "founding_administrator",
+  );
+  const treasurerInvitations = (invitations ?? []).filter((row) => row.purpose === "treasurer");
+  const openInvitationCount = (invitations ?? []).filter(
+    (row) => row.status === "pending" || row.status === "expired",
+  ).length;
+
   const affiliation = await getOrganizationAffiliationAdminDetail(id);
 
   // Custom domains (Track F, Batch 1d). A failed read is `null`: the section
@@ -222,6 +247,10 @@ export default async function OrganizationBrandDetailPage({
         currentHolderCount={foundingAdministratorHolderCount}
         administrationPermissionKeys={plan.administration.permissionKeys}
         officeTemplateName={officeTemplateName}
+        invitations={foundingInvitations}
+        localLoginEnabled={localLoginEnabled}
+        totpConfigured={totpConfigured}
+        inviterEmail={inviterEmail}
       />
 
       {treasurerApplies && (
@@ -230,6 +259,25 @@ export default async function OrganizationBrandDetailPage({
           organizationName={org.name}
           canDesignate={givingManageHolderCount === 0}
           currentHolderCount={givingManageHolderCount}
+          invitations={treasurerInvitations}
+          localLoginEnabled={localLoginEnabled}
+          totpConfigured={totpConfigured}
+          inviterEmail={inviterEmail}
+        />
+      )}
+
+      {invitations === null && (
+        <p role="alert" className="mt-8 rounded-md border border-destructive p-3 text-sm">
+          We couldn&apos;t load this organization&apos;s invitations just now. Reload before sending
+          another one: an invitation may already be pending.
+        </p>
+      )}
+
+      {openInvitationCount > 0 && (
+        <RevokeAllInvitations
+          organizationId={id}
+          organizationName={org.name}
+          openCount={openInvitationCount}
         />
       )}
 

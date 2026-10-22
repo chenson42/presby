@@ -9,7 +9,7 @@ import { rowsOf } from "./db-util";
  * (F138, DECISION-170), Phase 3 P3-18 and the Phase 3 API contract "team.ts".
  *
  * WHY THIS MODULE EXISTS. After the platform operator designates the first
- * treasurer (`treasurer-designation.ts`), the ordinary tenant paths cannot
+ * treasurer (`onboarding/treasurer-designation.ts`), the ordinary tenant paths cannot
  * delegate giving: `adoptTemplate()` needs `roles.manage` and `grantRole()`
  * needs `role_grants.manage`, each ALSO requires the actor to hold every key
  * being delegated - and no one holds both kinds of key (the founding

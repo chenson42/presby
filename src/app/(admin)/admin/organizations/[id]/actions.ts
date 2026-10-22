@@ -26,8 +26,15 @@ import {
   setOrganizationProfile,
   replaceOrganizationServiceTimes,
 } from "@/lib/sites";
-import { designateFoundingAdministrator } from "@/lib/founding-administrator";
-import { designateTreasurer } from "@/lib/treasurer-designation";
+import {
+  createInvitation,
+  resendInvitation,
+  revokeInvitation,
+  revokeAllOpenInvitations,
+  type CreateInvitationResult,
+  type ResendInvitationResult,
+} from "@/lib/onboarding/issue";
+import { INVITATION_RATE_LIMIT_COPY } from "@/lib/onboarding/labels";
 import { slugSitePath } from "@/lib/site-urls";
 
 /**
@@ -675,227 +682,328 @@ export async function setOrganizationServiceTimesAction(
 }
 
 // ---------------------------------------------------------------------------
-// designateFoundingAdministratorAction — docs/work-log/
-// 2026-09-28-founding-administrator.md, DECISION-155. Hands a freshly
-// created (or already-existing-but-headless) organization to its first real
-// tenant administrator. Exact structural match to
-// setOrganizationBrandAction/setOrganizationProfileAction above: auth() ->
-// hasFeature(ADMIN_ORGANIZATIONS) -> field validation -> the lib function
-// (getPlatformDb() throughout, never withOrgContext() — see this file's own
-// header and src/lib/founding-administrator.ts's) -> recordAudit() only on
-// success (a refusal mutates nothing) -> revalidatePath.
+// The invitation actions - docs/work-log/2026-10-21-invitations.md, Phase 3
+// section 3 (DECISION-183/186/189). They REPLACE designateFoundingAdministrator-
+// Action and designateTreasurerAction: designating a person by email no longer
+// looks anyone up by account (an account that did not exist yet was the
+// production blocker of 2026-10-21, and a mistyped address that matched a real
+// account silently received administrator authority). A designation is now an
+// INVITATION to an email address; it takes effect only when the email's owner
+// accepts through `/invite` (src/app/(invite)/), and the designation audit
+// event is written at acceptance.
+//
+// Every action: auth() -> hasFeature(ADMIN_ORGANIZATIONS) -> zod/field
+// validation -> src/lib/onboarding/issue.ts (getPlatformDb() throughout, never
+// withOrgContext()) -> revalidatePath. NO `db.*` CALL IN THIS FILE and no
+// recordAudit(): issue.ts inserts every audit row (invitation.created /
+// resent / revoked) inside the mutation's own transaction, so a failed audit
+// insert rolls the change back. That is why `check:audit` has nothing to see
+// here; Rule 7 is proven by src/lib/onboarding/issue.db.test.ts, one test per
+// outcome (R7).
+//
+// Refusal copy describes the organization or the roster, NEVER whether an
+// address has an account (the send step reads no `users` row).
 // ---------------------------------------------------------------------------
 
 const designeeEmailSchema = z.string().trim().toLowerCase().email().max(320);
+const inviteeNameSchema = z.string().trim().min(1).max(100);
 
-/**
- * FormData fields: `organizationId` (uuid), `email`. The database chooses
- * every subsequent branch (created_person vs. existing_person vs. one of
- * the named refusals) — there is no person-picker on this form
- * (work-log Phase 2 Ruling 4).
- */
-export async function designateFoundingAdministratorAction(
-  formData: FormData,
-): Promise<PolicyResult> {
-  const session = await auth();
-  if (!session?.user) return { ok: false, error: "Unauthorized." };
-  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
-    return { ok: false, error: "Forbidden." };
-  }
-
-  const organizationId = String(formData.get("organizationId") ?? "");
-  if (!UUID_RE.test(organizationId)) {
-    return { ok: false, error: "Invalid organization." };
-  }
-
-  const parsedEmail = designeeEmailSchema.safeParse(formData.get("email"));
-  if (!parsedEmail.success) {
-    return { ok: false, error: "Enter a valid email address." };
-  }
-
-  const result = await designateFoundingAdministrator(
-    organizationId,
-    parsedEmail.data,
-    session.user.id,
-  );
-
-  switch (result.kind) {
-    case "no_such_user":
-      return {
-        ok: false,
-        error:
-          "No platform account exists for that email yet. Ask them to sign up first (they'll land on a page saying they have no organizations), then designate them here.",
-      };
-    case "user_inactive":
-      return { ok: false, error: "That account has been deactivated." };
-    case "person_elsewhere":
-      return {
-        ok: false,
-        error:
-          "That account is already linked to a person at a different organization. Cross-organization transfers go through the certificate/transfer process, not this designation.",
-      };
-    case "membership_ended":
-      return {
-        ok: false,
-        error:
-          result.endedOn === "unknown"
-            ? "That person's relationship with this organization has ended."
-            : `That person's relationship with this organization ended on ${result.endedOn}.`,
-      };
-    case "has_holders":
-      return {
-        ok: false,
-        error:
-          "This organization already has someone who can manage roles — designation is only available while nobody does (including as a lockout recovery).",
-      };
-    case "provisioning_incomplete":
-      return {
-        ok: false,
-        error:
-          "This organization is missing its baseline setup — contact an engineer before designating an administrator.",
-      };
-    case "race":
-      return {
-        ok: false,
-        error:
-          "Someone just designated a founding administrator for this organization — refresh the page.",
-      };
-    case "db_error":
-      return {
-        ok: false,
-        error: "We couldn't complete that just now — try again in a moment.",
-      };
-    case "ok": {
-      await recordAudit({
-        action: AUDIT_ACTIONS.ORG_FOUNDING_ADMINISTRATOR_DESIGNATED,
-        resourceType: "organization",
-        resourceId: organizationId,
-        metadata: {
-          organizationId,
-          personId: result.personId,
-          userId: result.userId,
-          mode: result.mode,
-          officeRoleKey: result.officeRoleKey,
-          administrationRoleKey: result.administrationRoleKey,
-          permissionKeys: result.permissionKeys,
-          priorHolderCount: result.priorHolderCount,
-        },
-      });
-      revalidatePath(`/admin/organizations/${organizationId}`);
-      return { ok: true };
+export type InvitationActionResult =
+  | {
+      ok: true;
+      invitationId?: string;
+      /** ISO timestamp. */
+      expiresAt?: string;
+      delivery?: "sent" | "queued";
+      selfAddressed?: boolean;
     }
-  }
+  | { ok: false; error: string; needsAcknowledgement?: "do_not_contact" };
+
+const DB_ERROR_COPY = "We couldn't complete that just now — try again in a moment.";
+
+function holdersCopy(purpose: "founding_administrator" | "treasurer"): string {
+  return purpose === "founding_administrator"
+    ? "This organization already has someone who can manage roles — an invitation is only available while nobody does (including as a lockout recovery)."
+    : "This organization already has someone who can manage giving — an invitation is only available while nobody does (including as a lockout recovery).";
 }
 
-// ---------------------------------------------------------------------------
-// designateTreasurerAction — docs/work-log/2026-10-15-online-giving.md, Phase 2
-// R2 / Phase 3 "Designation". DECISION-155's shape for the first holder of
-// `giving.manage` at a congregation or new worshiping community. Same
-// structure as designateFoundingAdministratorAction above: auth() ->
-// hasFeature(ADMIN_ORGANIZATIONS) -> field validation -> the lib function
-// (getPlatformDb() throughout, never withOrgContext()) -> recordAudit() ONLY on
-// success (a refusal mutates nothing) -> revalidatePath. It neither requires
-// nor flips the org_portal.giving toggle, writes no giving table, and does
-// not touch the founding administrator's bundle.
-// ---------------------------------------------------------------------------
-
-/**
- * FormData fields: `organizationId` (uuid), `email`. There is no person
- * picker: the lib resolves the user's person at THIS organization and creates
- * neither a person nor a membership.
- */
-export async function designateTreasurerAction(
-  formData: FormData,
-): Promise<PolicyResult> {
-  const session = await auth();
-  if (!session?.user) return { ok: false, error: "Unauthorized." };
-  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
-    return { ok: false, error: "Forbidden." };
-  }
-
-  const organizationId = String(formData.get("organizationId") ?? "");
-  if (!UUID_RE.test(organizationId)) {
-    return { ok: false, error: "Invalid organization." };
-  }
-
-  const parsedEmail = designeeEmailSchema.safeParse(formData.get("email"));
-  if (!parsedEmail.success) {
-    return { ok: false, error: "Enter a valid email address." };
-  }
-
-  const result = await designateTreasurer(
-    organizationId,
-    parsedEmail.data,
-    session.user.id,
-  );
-
+function createFailure(
+  result: Exclude<CreateInvitationResult, { kind: "ok" }>,
+  purpose: "founding_administrator" | "treasurer",
+): InvitationActionResult {
   switch (result.kind) {
+    case "has_holders":
+      return { ok: false, error: holdersCopy(purpose) };
+    case "already_pending":
+      return {
+        ok: false,
+        error: result.expired
+          ? "An invitation is already pending and has expired. Resend or revoke it."
+          : "An invitation is already pending. Resend or revoke it.",
+      };
     case "not_applicable":
       return {
         ok: false,
         error:
-          "Giving applies to congregations and new worshiping communities only.",
-      };
-    case "no_such_user":
-      return {
-        ok: false,
-        error:
-          "No platform account exists for that email yet. Ask them to sign up first, then designate them here.",
-      };
-    case "user_inactive":
-      return { ok: false, error: "That account has been deactivated." };
-    case "not_a_member":
-      return {
-        ok: false,
-        error:
-          "That account is not a member of this organization. Designation never adds anyone — the organization's administrator enrols them first, then you designate them here.",
-      };
-    case "membership_ended":
-      return {
-        ok: false,
-        error:
-          result.endedOn === "unknown"
-            ? "That person's relationship with this organization has ended."
-            : `That person's relationship with this organization ended on ${result.endedOn}.`,
-      };
-    case "has_holders":
-      return {
-        ok: false,
-        error:
-          "This organization already has someone who can manage giving — designation is only available while nobody does (including as a lockout recovery).",
+          purpose === "treasurer"
+            ? "Giving applies to congregations and new worshiping communities only."
+            : "That role does not apply to this organization.",
       };
     case "provisioning_incomplete":
       return {
         ok: false,
         error:
-          "This organization is missing its baseline setup or the treasurer role template — contact an engineer before designating a treasurer.",
+          "This organization is missing its baseline setup or a role template — contact an engineer before sending an invitation.",
       };
-    case "race":
+    case "no_matching_person":
       return {
         ok: false,
         error:
-          "Someone just designated a treasurer for this organization — refresh the page.",
+          "Nobody enrolled at this congregation has that email on file. The congregation's administrator enrols them first.",
       };
-    case "db_error":
+    case "ambiguous_person":
       return {
         ok: false,
-        error: "We couldn't complete that just now — try again in a moment.",
+        error:
+          "More than one person at this congregation has that email on file. The congregation's administrator corrects the roster first.",
       };
-    case "ok": {
-      // Ids only — never the designee's email or name (Phase 3 metadata).
-      await recordAudit({
-        action: AUDIT_ACTIONS.ORG_TREASURER_DESIGNATED,
-        resourceType: "organization",
-        resourceId: organizationId,
-        metadata: {
-          organizationId,
-          personId: result.personId,
-          roleId: result.treasurerRoleId,
-          permissionKeys: result.permissionKeys,
-        },
-      });
-      revalidatePath(`/admin/organizations/${organizationId}`);
-      return { ok: true };
-    }
+    case "membership_ended":
+      return { ok: false, error: "That person's relationship with this organization has ended." };
+    case "needs_acknowledgement":
+      return {
+        ok: false,
+        error:
+          "That address is marked do not contact. An invitation is account mail, not marketing — confirm to send it anyway.",
+        needsAcknowledgement: result.reason,
+      };
+    case "totp_unavailable":
+      return {
+        ok: false,
+        error:
+          "Two-factor sign-in is not configured on this deployment, so an invitee could not finish signing in. Contact an engineer.",
+      };
+    case "link_origin_unavailable":
+      return {
+        ok: false,
+        error:
+          "The platform's public address is not configured, so a safe invitation link can't be built. Contact an engineer.",
+      };
+    case "rate_limited":
+      return { ok: false, error: INVITATION_RATE_LIMIT_COPY };
+    case "invalid_input":
+      return {
+        ok: false,
+        error:
+          result.field === "email"
+            ? "Enter a valid email address."
+            : result.field === "firstName"
+              ? "Enter a first name (up to 100 characters)."
+              : result.field === "lastName"
+                ? "Enter a last name (up to 100 characters)."
+                : "Invalid organization.",
+      };
+    case "db_error":
+      return { ok: false, error: DB_ERROR_COPY };
   }
+}
+
+function acknowledged(formData: FormData): boolean {
+  const raw = formData.get("acknowledge");
+  return raw === "true" || raw === "on";
+}
+
+/**
+ * FormData fields: `organizationId` (uuid), `email`, `firstName`, `lastName`,
+ * optional `acknowledge`. There is no person-picker: the invitee confirms
+ * their own name at acceptance and the database links an existing person at
+ * the org by on-file email or creates one.
+ */
+export async function inviteFoundingAdministratorAction(
+  formData: FormData,
+): Promise<InvitationActionResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) return { ok: false, error: "Invalid organization." };
+
+  const email = designeeEmailSchema.safeParse(formData.get("email"));
+  if (!email.success) return { ok: false, error: "Enter a valid email address." };
+  const firstName = inviteeNameSchema.safeParse(formData.get("firstName"));
+  if (!firstName.success) return { ok: false, error: "Enter a first name (up to 100 characters)." };
+  const lastName = inviteeNameSchema.safeParse(formData.get("lastName"));
+  if (!lastName.success) return { ok: false, error: "Enter a last name (up to 100 characters)." };
+
+  const result = await createInvitation({
+    organizationId,
+    purpose: "founding_administrator",
+    email: email.data,
+    firstName: firstName.data,
+    lastName: lastName.data,
+    inviter: { userId: session.user.id, email: session.user.email ?? null },
+    acknowledgeDoNotContact: acknowledged(formData),
+  });
+
+  if (result.kind !== "ok") return createFailure(result, "founding_administrator");
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  return {
+    ok: true,
+    invitationId: result.invitationId,
+    expiresAt: result.expiresAt.toISOString(),
+    delivery: result.delivery,
+    selfAddressed: result.selfAddressed,
+  };
+}
+
+/**
+ * FormData fields: `organizationId` (uuid), `email`, optional `acknowledge`.
+ * The address must match exactly one live person with an active membership at
+ * THIS organization (the roster is resolved first, C6); nothing is created.
+ */
+export async function inviteTreasurerAction(
+  formData: FormData,
+): Promise<InvitationActionResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) return { ok: false, error: "Invalid organization." };
+
+  const email = designeeEmailSchema.safeParse(formData.get("email"));
+  if (!email.success) return { ok: false, error: "Enter a valid email address." };
+
+  const result = await createInvitation({
+    organizationId,
+    purpose: "treasurer",
+    email: email.data,
+    inviter: { userId: session.user.id, email: session.user.email ?? null },
+    acknowledgeDoNotContact: acknowledged(formData),
+  });
+
+  if (result.kind !== "ok") return createFailure(result, "treasurer");
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  return {
+    ok: true,
+    invitationId: result.invitationId,
+    expiresAt: result.expiresAt.toISOString(),
+    delivery: result.delivery,
+    selfAddressed: result.selfAddressed,
+  };
+}
+
+function resendFailure(result: Exclude<ResendInvitationResult, { kind: "ok" }>): InvitationActionResult {
+  switch (result.kind) {
+    case "not_found":
+      return { ok: false, error: "That invitation no longer exists." };
+    case "not_open":
+      return { ok: false, error: "That invitation has already ended. Send a new one." };
+    case "has_holders":
+      return {
+        ok: false,
+        error: "Someone has gained this access since the invitation was sent, so it can't be resent.",
+      };
+    case "link_origin_unavailable":
+      return {
+        ok: false,
+        error:
+          "The platform's public address is not configured, so a safe invitation link can't be built. Contact an engineer.",
+      };
+    case "rate_limited":
+      return { ok: false, error: INVITATION_RATE_LIMIT_COPY };
+    case "db_error":
+      return { ok: false, error: DB_ERROR_COPY };
+  }
+}
+
+/** FormData fields: `organizationId`, `invitationId`. The invitation must belong to that organization. */
+export async function resendInvitationAction(
+  formData: FormData,
+): Promise<InvitationActionResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  const invitationId = String(formData.get("invitationId") ?? "");
+  if (!UUID_RE.test(organizationId) || !UUID_RE.test(invitationId)) {
+    return { ok: false, error: "Invalid invitation." };
+  }
+
+  const result = await resendInvitation({
+    organizationId,
+    invitationId,
+    actor: { userId: session.user.id, email: session.user.email ?? null },
+  });
+  if (result.kind !== "ok") return resendFailure(result);
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  return {
+    ok: true,
+    invitationId: result.invitationId,
+    expiresAt: result.expiresAt.toISOString(),
+    delivery: result.delivery,
+  };
+}
+
+/** FormData fields: `organizationId`, `invitationId`. Revoke is terminal. */
+export async function revokeInvitationAction(
+  formData: FormData,
+): Promise<InvitationActionResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  const invitationId = String(formData.get("invitationId") ?? "");
+  if (!UUID_RE.test(organizationId) || !UUID_RE.test(invitationId)) {
+    return { ok: false, error: "Invalid invitation." };
+  }
+
+  const result = await revokeInvitation({
+    organizationId,
+    invitationId,
+    actor: { userId: session.user.id, email: session.user.email ?? null },
+  });
+  switch (result.kind) {
+    case "not_found":
+      return { ok: false, error: "That invitation no longer exists." };
+    case "not_open":
+      return { ok: false, error: "That invitation has already ended." };
+    case "db_error":
+      return { ok: false, error: DB_ERROR_COPY };
+    case "ok":
+      revalidatePath(`/admin/organizations/${organizationId}`);
+      return { ok: true, invitationId };
+  }
+}
+
+/** FormData fields: `organizationId`. The abuse takedown: revokes every open invitation of the organization. */
+export async function revokeAllInvitationsAction(
+  formData: FormData,
+): Promise<InvitationActionResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Unauthorized." };
+  if (!hasFeature(session.user.features, FEATURES.ADMIN_ORGANIZATIONS)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!UUID_RE.test(organizationId)) return { ok: false, error: "Invalid organization." };
+
+  const result = await revokeAllOpenInvitations({
+    organizationId,
+    actor: { userId: session.user.id, email: session.user.email ?? null },
+  });
+  if (result.kind === "db_error") return { ok: false, error: DB_ERROR_COPY };
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  return { ok: true };
 }

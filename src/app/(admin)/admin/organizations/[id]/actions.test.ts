@@ -93,25 +93,22 @@ vi.mock("@/lib/sites", () => ({
     mockReplaceOrganizationServiceTimes(...args),
 }));
 
-// @/lib/founding-administrator — mocked wholesale, same principle as
-// @/lib/sites above: SQL/trigger correctness (the full result-variant
-// matrix) is proven by founding-administrator.test.ts against a real
-// Postgres connection. This file proves only designateFoundingAdministratorAction's
-// own layer — auth/feature gate, zod validation, the result -> copy switch,
-// and that recordAudit()/revalidatePath() fire exactly once, only on `ok`.
-const mockDesignateFoundingAdministrator = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/founding-administrator", () => ({
-  designateFoundingAdministrator: (...args: unknown[]) =>
-    mockDesignateFoundingAdministrator(...args),
-}));
-
-// @/lib/treasurer-designation — mocked wholesale for the same reason (online
-// giving, R2): the full result-variant matrix is proven against a real Postgres
-// by src/lib/treasurer-designation.test.ts; this file proves only
-// designateTreasurerAction's own layer.
-const mockDesignateTreasurer = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/treasurer-designation", () => ({
-  designateTreasurer: (...args: unknown[]) => mockDesignateTreasurer(...args),
+// @/lib/onboarding/issue - mocked wholesale, same principle as @/lib/sites
+// above: the SQL, the audit-in-transaction behaviour and the full outcome
+// matrix are proven against a real Postgres by src/lib/onboarding/
+// issue.db.test.ts. This file proves only the invitation actions' own layer:
+// the auth/feature gate, zod validation, the result -> copy switch, and that
+// revalidatePath fires exactly once, only on `ok` (and that no recordAudit()
+// is called from here: issue.ts writes the audit rows in its own transaction).
+const mockCreateInvitation = vi.hoisted(() => vi.fn());
+const mockResendInvitation = vi.hoisted(() => vi.fn());
+const mockRevokeInvitation = vi.hoisted(() => vi.fn());
+const mockRevokeAll = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/onboarding/issue", () => ({
+  createInvitation: (...args: unknown[]) => mockCreateInvitation(...args),
+  resendInvitation: (...args: unknown[]) => mockResendInvitation(...args),
+  revokeInvitation: (...args: unknown[]) => mockRevokeInvitation(...args),
+  revokeAllOpenInvitations: (...args: unknown[]) => mockRevokeAll(...args),
 }));
 
 // A PRE-EXISTING circular import (org.ts -> schema.ts -> domain/index.ts ->
@@ -135,8 +132,11 @@ import {
   setSiteStatusAction,
   setOrganizationProfileAction,
   setOrganizationServiceTimesAction,
-  designateFoundingAdministratorAction,
-  designateTreasurerAction,
+  inviteFoundingAdministratorAction,
+  inviteTreasurerAction,
+  resendInvitationAction,
+  revokeInvitationAction,
+  revokeAllInvitationsAction,
 } from "./actions";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { FEATURES } from "@/lib/permissions";
@@ -1099,327 +1099,244 @@ describe("setOrganizationServiceTimesAction — kind and rows parsing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// designateFoundingAdministratorAction — docs/work-log/
-// 2026-09-28-founding-administrator.md, DECISION-155. designateFoundingAdministrator()
-// itself is mocked wholesale (see the top of this file) — its own SQL/
-// trigger-driven correctness is proven by founding-administrator.test.ts
-// against a real Postgres connection. This suite proves only this action's
-// own layer: auth/feature gate, zod email validation, the full result ->
-// copy switch, and that recordAudit()/revalidatePath() fire exactly once,
-// only on `ok`.
+// The invitation actions - docs/work-log/2026-10-21-invitations.md, Phase 3
+// section 3. issue.ts is mocked wholesale (see the top of this file). This
+// suite proves only the actions' own layer.
 // ---------------------------------------------------------------------------
 
 const VALID_EMAIL = "designee@example.invalid";
+const VALID_INVITATION = "66666666-7777-8888-9999-000000000000";
+const EXPIRES = new Date("2026-10-28T12:00:00Z");
 
-describe("designateFoundingAdministratorAction — authorization", () => {
-  it("rejects an unauthenticated caller without calling designateFoundingAdministrator", async () => {
+const FA_FIELDS = { organizationId: VALID_ORG, email: VALID_EMAIL, firstName: "Marisol", lastName: "Quenby" };
+const TR_FIELDS = { organizationId: VALID_ORG, email: VALID_EMAIL };
+const INVITE_OK = { kind: "ok", invitationId: VALID_INVITATION, expiresAt: EXPIRES, delivery: "sent", selfAddressed: false };
+
+const ALL_ACTIONS: Array<[string, (fd: FormData) => Promise<unknown>, Record<string, string>, ReturnType<typeof vi.fn>]> = [
+  ["inviteFoundingAdministratorAction", inviteFoundingAdministratorAction, FA_FIELDS, mockCreateInvitation],
+  ["inviteTreasurerAction", inviteTreasurerAction, TR_FIELDS, mockCreateInvitation],
+  ["resendInvitationAction", resendInvitationAction, { organizationId: VALID_ORG, invitationId: VALID_INVITATION }, mockResendInvitation],
+  ["revokeInvitationAction", revokeInvitationAction, { organizationId: VALID_ORG, invitationId: VALID_INVITATION }, mockRevokeInvitation],
+  ["revokeAllInvitationsAction", revokeAllInvitationsAction, { organizationId: VALID_ORG }, mockRevokeAll],
+];
+
+describe.each(ALL_ACTIONS)("%s - authorization", (_name, action, fields, issueMock) => {
+  it("rejects an unauthenticated caller without calling issue.ts", async () => {
     mockAuth.mockResolvedValue(null);
-    const result = await designateFoundingAdministratorAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: "Unauthorized." });
-    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+    expect(await action(formData(fields))).toEqual({ ok: false, error: "Unauthorized." });
+    expect(issueMock).not.toHaveBeenCalled();
   });
 
   it("rejects a signed-in user lacking admin.organizations", async () => {
     mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
-    const result = await designateFoundingAdministratorAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: "Forbidden." });
-    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+    expect(await action(formData(fields))).toEqual({ ok: false, error: "Forbidden." });
+    expect(issueMock).not.toHaveBeenCalled();
   });
 });
 
-describe("designateFoundingAdministratorAction — input validation", () => {
-  it("rejects an invalid organizationId without calling designateFoundingAdministrator", async () => {
-    const result = await designateFoundingAdministratorAction(
-      formData({ organizationId: "not-a-uuid", email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: "Invalid organization." });
-    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+describe("inviteFoundingAdministratorAction", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ user: { id: "operator-1", email: "operator@example.invalid", features: [FEATURES.ADMIN_ORGANIZATIONS] } });
   });
 
   it.each([
-    ["missing", ""],
-    ["not an email", "not-an-email"],
-    ["too long", `${"a".repeat(310)}@example.invalid`],
-  ])("rejects an invalid email (%s) without calling designateFoundingAdministrator", async (_label, email) => {
-    const result = await designateFoundingAdministratorAction(
-      formData({ organizationId: VALID_ORG, email }),
-    );
-    expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
-    expect(mockDesignateFoundingAdministrator).not.toHaveBeenCalled();
+    ["an invalid organizationId", { ...FA_FIELDS, organizationId: "not-a-uuid" }, "Invalid organization."],
+    ["a missing email", { ...FA_FIELDS, email: "" }, "Enter a valid email address."],
+    ["a malformed email", { ...FA_FIELDS, email: "nope" }, "Enter a valid email address."],
+    ["a missing first name", { ...FA_FIELDS, firstName: "  " }, "Enter a first name (up to 100 characters)."],
+    ["an over-long last name", { ...FA_FIELDS, lastName: "x".repeat(101) }, "Enter a last name (up to 100 characters)."],
+  ])("rejects %s without calling issue.ts", async (_label, fields, error) => {
+    expect(await inviteFoundingAdministratorAction(formData(fields))).toEqual({ ok: false, error });
+    expect(mockCreateInvitation).not.toHaveBeenCalled();
   });
 
-  it("normalizes the email (trim + lowercase) before calling designateFoundingAdministrator", async () => {
-    mockDesignateFoundingAdministrator.mockResolvedValue({ kind: "no_such_user" });
-    await designateFoundingAdministratorAction(
-      formData({ organizationId: VALID_ORG, email: "  Designee@Example.INVALID  " }),
+  it("normalizes the email and passes the session user as inviter (never form data)", async () => {
+    mockCreateInvitation.mockResolvedValue(INVITE_OK);
+    await inviteFoundingAdministratorAction(
+      formData({ ...FA_FIELDS, email: "  Designee@Example.INVALID ", inviter: "forged" }),
     );
-    expect(mockDesignateFoundingAdministrator).toHaveBeenCalledWith(
-      VALID_ORG,
-      "designee@example.invalid",
-      "operator-1",
-    );
+    expect(mockCreateInvitation).toHaveBeenCalledWith({
+      organizationId: VALID_ORG,
+      purpose: "founding_administrator",
+      email: "designee@example.invalid",
+      firstName: "Marisol",
+      lastName: "Quenby",
+      inviter: { userId: "operator-1", email: "operator@example.invalid" },
+      acknowledgeDoNotContact: false,
+    });
   });
-});
 
-describe("designateFoundingAdministratorAction — result mapping", () => {
-  it.each([
-    [
-      "no_such_user",
-      { kind: "no_such_user" },
-      "No platform account exists for that email yet. Ask them to sign up first (they'll land on a page saying they have no organizations), then designate them here.",
-    ],
-    [
-      "user_inactive",
-      { kind: "user_inactive" },
-      "That account has been deactivated.",
-    ],
-    [
-      "person_elsewhere",
-      { kind: "person_elsewhere" },
-      "That account is already linked to a person at a different organization. Cross-organization transfers go through the certificate/transfer process, not this designation.",
-    ],
-    [
-      "membership_ended (a real date)",
-      { kind: "membership_ended", endedOn: "2020-06-15" },
-      "That person's relationship with this organization ended on 2020-06-15.",
-    ],
-    [
-      "membership_ended (unknown — the trigger backstop, no date available)",
-      { kind: "membership_ended", endedOn: "unknown" },
-      "That person's relationship with this organization has ended.",
-    ],
-    [
-      "has_holders",
-      { kind: "has_holders", holderCount: 1 },
-      "This organization already has someone who can manage roles — designation is only available while nobody does (including as a lockout recovery).",
-    ],
-    [
-      "provisioning_incomplete",
-      { kind: "provisioning_incomplete" },
-      "This organization is missing its baseline setup — contact an engineer before designating an administrator.",
-    ],
-    [
-      "race",
-      { kind: "race" },
-      "Someone just designated a founding administrator for this organization — refresh the page.",
-    ],
-    [
-      "db_error",
-      { kind: "db_error" },
-      "We couldn't complete that just now — try again in a moment.",
-    ],
-  ])("maps %s to a client-visible error, writes no audit row", async (_label, mockResult, expectedError) => {
-    mockDesignateFoundingAdministrator.mockResolvedValue(mockResult);
-    const result = await designateFoundingAdministratorAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: expectedError });
+  it("passes the do-not-contact acknowledgement through", async () => {
+    mockCreateInvitation.mockResolvedValue(INVITE_OK);
+    await inviteFoundingAdministratorAction(formData({ ...FA_FIELDS, acknowledge: "true" }));
+    expect(mockCreateInvitation).toHaveBeenCalledWith(expect.objectContaining({ acknowledgeDoNotContact: true }));
+  });
+
+  it("on ok returns the contract shape, revalidates once, and writes no audit row from this file", async () => {
+    mockCreateInvitation.mockResolvedValue({ ...INVITE_OK, delivery: "queued", selfAddressed: true });
+    const result = await inviteFoundingAdministratorAction(formData(FA_FIELDS));
+    expect(result).toEqual({
+      ok: true,
+      invitationId: VALID_INVITATION,
+      expiresAt: EXPIRES.toISOString(),
+      delivery: "queued",
+      selfAddressed: true,
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
     expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ kind: "has_holders" }, /already has someone who can manage roles/],
+    [{ kind: "already_pending", invitationId: VALID_INVITATION, expired: false }, /^An invitation is already pending\. Resend or revoke it\.$/],
+    [{ kind: "already_pending", invitationId: VALID_INVITATION, expired: true }, /pending and has expired/],
+    [{ kind: "not_applicable" }, /does not apply/],
+    [{ kind: "provisioning_incomplete" }, /baseline setup/],
+    [{ kind: "totp_unavailable" }, /Two-factor sign-in is not configured/],
+    [{ kind: "link_origin_unavailable" }, /public address is not configured/],
+    [{ kind: "rate_limited" }, /^Too many invitations right now\. Try again later\.$/],
+    [{ kind: "invalid_input", field: "email" }, /valid email/],
+    [{ kind: "db_error" }, /couldn't complete that just now/],
+  ])("maps %j to its copy and does not revalidate", async (result, copy) => {
+    mockCreateInvitation.mockResolvedValue(result);
+    const out = await inviteFoundingAdministratorAction(formData(FA_FIELDS));
+    expect(out).toMatchObject({ ok: false });
+    expect((out as { error: string }).error).toMatch(copy);
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
-  it("on success, writes ORG_FOUNDING_ADMINISTRATOR_DESIGNATED with ids-only metadata and revalidates the admin page", async () => {
-    mockDesignateFoundingAdministrator.mockResolvedValue({
-      kind: "ok",
-      mode: "created_person",
-      personId: "person-1",
-      userId: "user-1",
-      administrationRoleId: "admin-role-1",
-      administrationRoleKey: "founding_administrator",
-      officeRoleId: "office-role-1",
-      officeRoleKey: "congregation_stated_clerk",
-      // F118 — staff.manage joins the administration half; included here so
-      // this mock reflects the real bundle shape the audit row records.
-      permissionKeys: ["people.manage", "staff.manage", "statistics.publish"],
-      priorHolderCount: 0,
+  it("never says anything about account existence, and no copy tells anyone to sign up first (C5)", async () => {
+    const kinds = ["has_holders", "already_pending", "not_applicable", "provisioning_incomplete", "no_matching_person",
+      "ambiguous_person", "membership_ended", "needs_acknowledgement", "totp_unavailable", "link_origin_unavailable",
+      "rate_limited", "db_error"];
+    for (const kind of kinds) {
+      mockCreateInvitation.mockResolvedValue({ kind, invitationId: VALID_INVITATION, expired: false, reason: "do_not_contact" });
+      const out = (await inviteFoundingAdministratorAction(formData(FA_FIELDS))) as { error?: string };
+      expect(out.error ?? "").not.toMatch(/sign up|account (exists|did not)|no platform account|already has an account/i);
+    }
+  });
+});
+
+describe("inviteTreasurerAction", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ user: { id: "operator-1", email: null, features: [FEATURES.ADMIN_ORGANIZATIONS] } });
+  });
+
+  it("rejects an invalid organizationId or email without calling issue.ts", async () => {
+    expect(await inviteTreasurerAction(formData({ ...TR_FIELDS, organizationId: "x" }))).toEqual({ ok: false, error: "Invalid organization." });
+    expect(await inviteTreasurerAction(formData({ ...TR_FIELDS, email: "nope" }))).toEqual({ ok: false, error: "Enter a valid email address." });
+    expect(mockCreateInvitation).not.toHaveBeenCalled();
+  });
+
+  it("calls issue.ts with the treasurer purpose, no names, and the session inviter", async () => {
+    mockCreateInvitation.mockResolvedValue(INVITE_OK);
+    const result = await inviteTreasurerAction(formData({ ...TR_FIELDS, firstName: "ignored" }));
+    expect(result).toMatchObject({ ok: true, invitationId: VALID_INVITATION });
+    expect(mockCreateInvitation).toHaveBeenCalledWith({
+      organizationId: VALID_ORG,
+      purpose: "treasurer",
+      email: VALID_EMAIL,
+      inviter: { userId: "operator-1", email: null },
+      acknowledgeDoNotContact: false,
     });
-
-    const result = await designateFoundingAdministratorAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-
-    expect(result).toEqual({ ok: true });
-    expect(mockRecordAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: AUDIT_ACTIONS.ORG_FOUNDING_ADMINISTRATOR_DESIGNATED,
-        resourceType: "organization",
-        resourceId: VALID_ORG,
-        metadata: {
-          organizationId: VALID_ORG,
-          personId: "person-1",
-          userId: "user-1",
-          mode: "created_person",
-          officeRoleKey: "congregation_stated_clerk",
-          administrationRoleKey: "founding_administrator",
-          permissionKeys: ["people.manage", "staff.manage", "statistics.publish"],
-          priorHolderCount: 0,
-        },
-      }),
-    );
-    // Ids only — the designee's email is never logged in audit metadata.
-    const call = mockRecordAudit.mock.calls[0]?.[0];
-    expect(JSON.stringify(call)).not.toContain(VALID_EMAIL);
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// designateTreasurerAction — docs/work-log/2026-10-15-online-giving.md, R2.
-// designateTreasurer() is mocked wholesale; this suite proves only the
-// action's own layer: auth/feature gate, zod validation, the result -> copy
-// switch, and that recordAudit()/revalidatePath() fire exactly once, only on
-// `ok`, with ids-only metadata.
-// ---------------------------------------------------------------------------
-
-describe("designateTreasurerAction — authorization", () => {
-  it("rejects an unauthenticated caller without calling designateTreasurer", async () => {
-    mockAuth.mockResolvedValue(null);
-    const result = await designateTreasurerAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: "Unauthorized." });
-    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
-  });
-
-  it("rejects a signed-in user lacking admin.organizations", async () => {
-    mockAuth.mockResolvedValue(sessionWith([FEATURES.ADMIN_DASHBOARD]));
-    const result = await designateTreasurerAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: "Forbidden." });
-    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
     expect(mockRecordAudit).not.toHaveBeenCalled();
-  });
-});
-
-describe("designateTreasurerAction — input validation", () => {
-  it("rejects an invalid organizationId without calling designateTreasurer", async () => {
-    const result = await designateTreasurerAction(
-      formData({ organizationId: "not-a-uuid", email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: "Invalid organization." });
-    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["missing", ""],
-    ["not an email", "not-an-email"],
-    ["too long", `${"a".repeat(310)}@example.invalid`],
-  ])("rejects an invalid email (%s) without calling designateTreasurer", async (_label, email) => {
-    const result = await designateTreasurerAction(
-      formData({ organizationId: VALID_ORG, email }),
-    );
-    expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
-    expect(mockDesignateTreasurer).not.toHaveBeenCalled();
-  });
-
-  it("normalizes the email (trim + lowercase) and passes the operator's user id", async () => {
-    mockDesignateTreasurer.mockResolvedValue({ kind: "no_such_user" });
-    await designateTreasurerAction(
-      formData({ organizationId: VALID_ORG, email: "  Designee@Example.INVALID  " }),
-    );
-    expect(mockDesignateTreasurer).toHaveBeenCalledWith(
-      VALID_ORG,
-      "designee@example.invalid",
-      "operator-1",
-    );
-  });
-});
-
-describe("designateTreasurerAction — result mapping", () => {
-  it.each([
-    [
-      "not_applicable",
-      { kind: "not_applicable" },
-      "Giving applies to congregations and new worshiping communities only.",
-    ],
-    [
-      "no_such_user",
-      { kind: "no_such_user" },
-      "No platform account exists for that email yet. Ask them to sign up first, then designate them here.",
-    ],
-    ["user_inactive", { kind: "user_inactive" }, "That account has been deactivated."],
-    [
-      "not_a_member",
-      { kind: "not_a_member" },
-      "That account is not a member of this organization. Designation never adds anyone — the organization's administrator enrols them first, then you designate them here.",
-    ],
-    [
-      "membership_ended (a real date)",
-      { kind: "membership_ended", endedOn: "2020-06-15" },
-      "That person's relationship with this organization ended on 2020-06-15.",
-    ],
-    [
-      "membership_ended (unknown)",
-      { kind: "membership_ended", endedOn: "unknown" },
-      "That person's relationship with this organization has ended.",
-    ],
-    [
-      "has_holders",
-      { kind: "has_holders", holderCount: 1 },
-      "This organization already has someone who can manage giving — designation is only available while nobody does (including as a lockout recovery).",
-    ],
-    [
-      "provisioning_incomplete",
-      { kind: "provisioning_incomplete" },
-      "This organization is missing its baseline setup or the treasurer role template — contact an engineer before designating a treasurer.",
-    ],
-    [
-      "race",
-      { kind: "race" },
-      "Someone just designated a treasurer for this organization — refresh the page.",
-    ],
-    [
-      "db_error",
-      { kind: "db_error" },
-      "We couldn't complete that just now — try again in a moment.",
-    ],
-  ])("maps %s to a client-visible error, writes no audit row", async (_label, mockResult, expectedError) => {
-    mockDesignateTreasurer.mockResolvedValue(mockResult);
-    const result = await designateTreasurerAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-    expect(result).toEqual({ ok: false, error: expectedError });
-    expect(mockRecordAudit).not.toHaveBeenCalled();
+    [{ kind: "has_holders" }, /already has someone who can manage giving/],
+    [{ kind: "not_applicable" }, /^Giving applies to congregations and new worshiping communities only\.$/],
+    [{ kind: "no_matching_person" }, /^Nobody enrolled at this congregation has that email on file\. The congregation's administrator enrols them first\.$/],
+    [{ kind: "ambiguous_person" }, /More than one person at this congregation has that email on file/],
+    [{ kind: "membership_ended" }, /relationship with this organization has ended/],
+    [{ kind: "rate_limited" }, /Too many invitations/],
+    [{ kind: "db_error" }, /couldn't complete that just now/],
+  ])("maps %j to its copy", async (result, copy) => {
+    mockCreateInvitation.mockResolvedValue(result);
+    const out = await inviteTreasurerAction(formData(TR_FIELDS));
+    expect((out as { error: string }).error).toMatch(copy);
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
-  it("on success, writes ORG_TREASURER_DESIGNATED with ids-only metadata (no email, no name) and revalidates the admin page", async () => {
-    mockDesignateTreasurer.mockResolvedValue({
-      kind: "ok",
-      personId: "person-1",
-      userId: "user-1",
-      treasurerRoleId: "role-1",
-      recorderRoleId: "role-2",
-      permissionKeys: ["giving.manage", "giving.record", "giving.view"],
-      priorHolderCount: 0,
+  it("a do-not-contact refusal carries the flag so the UI can ask for confirmation, and an acknowledged retry passes it on", async () => {
+    mockCreateInvitation.mockResolvedValue({ kind: "needs_acknowledgement", reason: "do_not_contact" });
+    expect(await inviteTreasurerAction(formData(TR_FIELDS))).toMatchObject({ ok: false, needsAcknowledgement: "do_not_contact" });
+    mockCreateInvitation.mockResolvedValue(INVITE_OK);
+    await inviteTreasurerAction(formData({ ...TR_FIELDS, acknowledge: "true" }));
+    expect(mockCreateInvitation).toHaveBeenLastCalledWith(expect.objectContaining({ acknowledgeDoNotContact: true }));
+  });
+});
+
+describe("resendInvitationAction / revokeInvitationAction / revokeAllInvitationsAction", () => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ user: { id: "operator-1", email: "operator@example.invalid", features: [FEATURES.ADMIN_ORGANIZATIONS] } });
+  });
+  const FIELDS = { organizationId: VALID_ORG, invitationId: VALID_INVITATION };
+
+  it("reject malformed ids without calling issue.ts", async () => {
+    expect(await resendInvitationAction(formData({ ...FIELDS, invitationId: "x" }))).toEqual({ ok: false, error: "Invalid invitation." });
+    expect(await revokeInvitationAction(formData({ ...FIELDS, organizationId: "x" }))).toEqual({ ok: false, error: "Invalid invitation." });
+    expect(await revokeAllInvitationsAction(formData({ organizationId: "x" }))).toEqual({ ok: false, error: "Invalid organization." });
+    expect(mockResendInvitation).not.toHaveBeenCalled();
+    expect(mockRevokeInvitation).not.toHaveBeenCalled();
+    expect(mockRevokeAll).not.toHaveBeenCalled();
+  });
+
+  it("resend passes the organization AND the invitation (the invitation must belong to the organization) and the session actor", async () => {
+    mockResendInvitation.mockResolvedValue({ kind: "ok", invitationId: "new-id", expiresAt: EXPIRES, delivery: "sent" });
+    const out = await resendInvitationAction(formData(FIELDS));
+    expect(out).toEqual({ ok: true, invitationId: "new-id", expiresAt: EXPIRES.toISOString(), delivery: "sent" });
+    expect(mockResendInvitation).toHaveBeenCalledWith({
+      organizationId: VALID_ORG, invitationId: VALID_INVITATION,
+      actor: { userId: "operator-1", email: "operator@example.invalid" },
     });
-
-    const result = await designateTreasurerAction(
-      formData({ organizationId: VALID_ORG, email: VALID_EMAIL }),
-    );
-
-    expect(result).toEqual({ ok: true });
-    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
-    expect(mockRecordAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: AUDIT_ACTIONS.ORG_TREASURER_DESIGNATED,
-        resourceType: "organization",
-        resourceId: VALID_ORG,
-        metadata: {
-          organizationId: VALID_ORG,
-          personId: "person-1",
-          roleId: "role-1",
-          permissionKeys: ["giving.manage", "giving.record", "giving.view"],
-        },
-      }),
-    );
-    const call = mockRecordAudit.mock.calls[0]?.[0];
-    expect(JSON.stringify(call)).not.toContain(VALID_EMAIL);
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+  });
+
+  it.each([
+    [{ kind: "not_found" }, /no longer exists/],
+    [{ kind: "not_open" }, /already ended/],
+    [{ kind: "has_holders" }, /gained this access/],
+    [{ kind: "link_origin_unavailable" }, /public address/],
+    [{ kind: "rate_limited" }, /^Too many invitations right now\. Try again later\.$/],
+    [{ kind: "db_error" }, /couldn't complete that just now/],
+  ])("resend maps %j", async (result, copy) => {
+    mockResendInvitation.mockResolvedValue(result);
+    const out = await resendInvitationAction(formData(FIELDS));
+    expect((out as { error: string }).error).toMatch(copy);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("revoke succeeds, revalidates, and maps each refusal", async () => {
+    mockRevokeInvitation.mockResolvedValue({ kind: "ok" });
+    expect(await revokeInvitationAction(formData(FIELDS))).toEqual({ ok: true, invitationId: VALID_INVITATION });
+    expect(mockRevokeInvitation).toHaveBeenCalledWith({
+      organizationId: VALID_ORG, invitationId: VALID_INVITATION,
+      actor: { userId: "operator-1", email: "operator@example.invalid" },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
+    mockRevalidatePath.mockClear();
+    mockRevokeInvitation.mockResolvedValue({ kind: "not_found" });
+    expect(await revokeInvitationAction(formData(FIELDS))).toMatchObject({ ok: false, error: expect.stringMatching(/no longer exists/) });
+    mockRevokeInvitation.mockResolvedValue({ kind: "not_open" });
+    expect(await revokeInvitationAction(formData(FIELDS))).toMatchObject({ ok: false, error: expect.stringMatching(/already ended/) });
+    mockRevokeInvitation.mockResolvedValue({ kind: "db_error" });
+    expect(await revokeInvitationAction(formData(FIELDS))).toMatchObject({ ok: false, error: expect.stringMatching(/couldn't complete/) });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("revoke-all revokes the organization's open invitations and revalidates; a failure does not", async () => {
+    mockRevokeAll.mockResolvedValue({ kind: "ok", revoked: 2 });
+    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG }))).toEqual({ ok: true });
+    expect(mockRevokeAll).toHaveBeenCalledWith({
+      organizationId: VALID_ORG,
+      actor: { userId: "operator-1", email: "operator@example.invalid" },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+    mockRevalidatePath.mockClear();
+    mockRevokeAll.mockResolvedValue({ kind: "db_error" });
+    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG }))).toMatchObject({ ok: false });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });

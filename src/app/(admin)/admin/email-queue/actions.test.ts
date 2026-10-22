@@ -189,6 +189,41 @@ describe("retryEmailAction — successful retry", () => {
   });
 });
 
+describe("retryEmailAction — credential rows are refused (F158)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUpdateWhere.mockReturnValue({ returning: mockUpdateReturning });
+    mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
+    mockUpdate.mockReturnValue({ set: mockUpdateSet });
+  });
+
+  it("refuses to retry a failed account_invitation row (its body was redacted; a retry would send the marker) and never updates it", async () => {
+    const { auth } = await import("@/auth");
+    (auth as ReturnType<typeof vi.fn>).mockResolvedValue(sessionWithFeature);
+    mockHasFeature.mockReturnValue(true);
+    mockFindFirst.mockResolvedValue({ id: "row-inv", status: "failed", templateKey: "account_invitation" });
+
+    const result = await retryEmailAction("row-inv");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/can't be retried/i);
+      expect(result.error).toMatch(/Resend on the organization/i);
+    }
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still retries a failed non-credential row (password_reset)", async () => {
+    const { auth } = await import("@/auth");
+    (auth as ReturnType<typeof vi.fn>).mockResolvedValue(sessionWithFeature);
+    mockHasFeature.mockReturnValue(true);
+    mockFindFirst.mockResolvedValue({ id: "row-pw", status: "failed", templateKey: "password_reset" });
+
+    expect((await retryEmailAction("row-pw")).ok).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledOnce();
+  });
+});
+
 describe("retryEmailAction — row not found", () => {
   beforeEach(() => {
     vi.clearAllMocks();

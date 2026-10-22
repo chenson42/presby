@@ -153,6 +153,9 @@ export default async function NoOrganizationPage() {
             Ask your church administrator
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
+            If you were invited, open the link in your invitation email.
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">
             If your church already uses presby, someone there with administrator
             access can add you. They will need the email address you signed in
             with

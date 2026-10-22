@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete (revised; reclassified to Feature) | READY WITH NOTES | 2026-10-22 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete (design to R1-R14; S1-S6 ruled; route move designed as its own Batch M) | Design complete; implementers named | 2026-10-22 |
-| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; B, C, D pending | — | — |
+| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; Batch B (server: lib, actions, audit) complete 2026-10-22; C, D pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1480,6 +1480,104 @@ const v = await tx.execute(sql`
 ### Handoff
 
 Next: **Batch B** (`api-developer`). Local apply for anyone rebuilding the branch: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0061_presby_participant_roll.sql` (idempotent). No seed change. `test-rls` section 61 is added by the staged patch at integration (Rule 16). The orchestrator's integration list gains: the `_journal.json` entry; `git apply scripts/participants/test-rls.sql.integration.patch`, then re-run `scripts/test-rls.sql` as `presby_app` on merged `development`; the from-scratch fresh-install check (deviation 6).
+
+---
+
+## Phase 4 — Batch B (server: lib, actions, audit) — api-developer, 2026-10-22
+
+The library, the audit rows and the server actions for participants on record, visitors, Community readers and the F173 fix, built to Phase 3's "Library" and "Server actions" sections and Batch A's call shapes. No schema, no UI, no `FEATURES` entry, no new flag. Committed as `feat(community): ...`.
+
+### Files created
+
+- `src/lib/ymd.ts` — `isRealYmd()` (shape plus calendar round trip: `2026-02-30` refused) and `todayUtcYmd()` (the database's `current_date`, UTC).
+- `src/lib/is-uuid.ts` — `isUuid()`, so a malformed id is "not found" and never a Postgres cast error.
+- `src/lib/community-labels.ts` — pure: `COMMUNITY_VIEWS`, `parseCommunityView()`, `Connection`, `CONNECTION_LABELS`, `deriveConnection()` (precedence: ended / former participant, member roll, participant roll, engagement visitor, engagement staff, listed), `alreadyHereSentence()` (the Phase 3 "already here" copy).
+- `src/lib/community.ts` — `server-only`; `listVisitors`, `listStaff`, `listFormerParticipants`, `getCommunityBadges`, `getCommunityStatus`; every one gated on `people.manage`; read-only.
+- `src/app/(org)/o/[slug]/admin/community/participant-copy.ts` — the one copy table (`PARTICIPANT_COPY: Record<refusal | "forbidden", string>`, plus `VALIDATION_COPY`, `SUCCESS_COPY`, `CREATE_COPY`).
+- Tests: `src/lib/ymd.test.ts`, `src/lib/community-labels.test.ts`, `src/lib/participant-boundaries.test.ts` (source scans), `src/lib/community.db.test.ts`, `src/lib/roll-derive-parity.db.test.ts`, `.../community/participant-copy.test.ts`.
+
+### Files modified
+
+- `src/lib/roll-action-kinds.ts` — `ON_RECORD_ROLL_ACTION_KINDS` (pinned to the SQL's `p_kind not in (...)` by a source scan), `isOnRecordKind()`, `PARTICIPANT_REMOVAL_ENDED_REASON`, `PARTICIPANT_RECORD_REFUSALS` / `PARTICIPANT_VOID_REFUSALS` (each pinned to its function's `outcome := '...'` literals), and `deriveRollFields(kind, dob, effectiveDate)`, which replaces `roll.ts`'s private `ageAsOf`.
+- `src/lib/roll.ts` — `recordParticipantActionInTx()`, `recordParticipantAction()`, `voidParticipantAction()`; `recordRollAction()` reworked (below). The only file that names the two definer functions.
+- `src/lib/people.ts` — `createPerson()` (F173 fix, visitor arm, participant arm, `already_here`, `roll_refused`, new result shape, optional fifth `opts`); `matchPerson()` annotates `alreadyHere`.
+- `src/lib/directory.ts` — exactly one new option, `rollStatuses`; the privacy predicate is otherwise untouched.
+- `src/lib/audit.ts` — `ROLL_ACTION_RECORDED: "tenant.roll_action.recorded"`, `ROLL_ACTION_VOIDED: "tenant.roll_action.voided"`.
+- `.../community/new/actions.ts`, `.../community/[id]/edit/actions.ts` — the actions below. `.../admin/staff/actions.ts` — two new `createPerson()` result variants handled so its switch stays exhaustive (it still pins `rollAction` to `none`).
+- Tests changed: `audit.test.ts`, `roll-action-kinds.test.ts`, `roll.test.ts`, `people.test.ts`, `directory.test.ts`, both actions test files.
+
+### Contract for Batches C and D
+
+**Gate for every action:** `auth()` (401-equivalent copy "You must be signed in to do that."), `resolveOrgContext(session.user.id, slug)` re-run in the body (else "You don't have access to that organization."), `organizationId` and `personId` from the resolved context, never from the client. The permission is checked inside the lib's transaction. `ActionResult<T>` everywhere. The acting email goes to the audit row only.
+
+| Action (file) | Permission checked in the lib | Success data | Revalidates |
+|---|---|---|---|
+| `createPersonAction(slug, input: CreatePersonInput)` (`new/actions.ts`) | `people.manage` always; `roll.propose` for `profession_of_faith` and `other_participant_enrolled` (not `visitor`) | `{ personId, rollActionId: string \| null, effect: "none" \| "pending" \| "recorded", affectsFiledPeriod }` | community, community/pending |
+| `matchPersonAction(slug, input)` (`new/actions.ts`) | `people.manage` | `{ candidates: MatchCandidate[] }`, each with `alreadyHere: { connection, endedOn } \| null` | none |
+| `removeParticipantAction(slug, { personId, effectiveDate, minuteReference? })` (`[id]/edit/actions.ts`) | `roll.propose` + the definer function's own check | `{ rollActionId, affectsFiledPeriod }` | community, the person's edit page, directory |
+| `undoParticipantEntryAction(slug, { rollActionId, reason })` (`[id]/edit/actions.ts`) | `roll.propose` + the function's check | `{ voidRollActionId, membershipReopened, affectsFiledPeriod, undoneKind }` | community, edit pages, directory |
+| `recordRollActionAction(slug, input: RecordRollActionInput)` (`[id]/edit/actions.ts`, extended) | `roll.propose` | `{ rollActionId, effect: "pending" \| "recorded", affectsFiledPeriod, shadowed: { kind, effectiveDate } \| null }` | community, pending, the person's edit page |
+
+- The removal's kind is fixed inside `removeParticipantAction`; nothing in a payload chooses it. `createPersonAction` and `recordRollActionAction` rebuild `rollAction` / the input from known fields, so a stray property (an approval flag, an organization id) never reaches the lib. `createPersonAction` accepts exactly `profession_of_faith`, `other_participant_enrolled` and `visitor`; `none` and anything else is refused with "A connection is required to add a new person."
+- Validation before the lib (a message, never a 500): real `YYYY-MM-DD` dates; a participant enrolment and a removal may not be dated after today (UTC), a proposal may be dated ahead (the Session decides it, F29); minute reference at most 200; how-heard at most 200; first visit not after today; reason 1 to 500 after trimming; ids must be UUIDs.
+- **The client-side copy source for toasts is `participant-copy.ts`** (`PARTICIPANT_COPY`, `SUCCESS_COPY`, `CREATE_COPY`, `VALIDATION_COPY`); `SUCCESS_COPY.filedPeriodWarning` and `.shadowedProposal` are the two warning texts for `affectsFiledPeriod` and `shadowed`. Every refusal code has a string (a type error otherwise, and a runtime test over the arrays).
+- `affectsFiledPeriod` and `shadowed` are returned on `ok`; the UI shows them as a second `toast.warning`.
+
+**Library signatures** (all take `actingPersonId, organizationId, actingUserId`, then input, then `opts?: { actingUserEmail?: string \| null }`):
+
+```ts
+recordParticipantAction(..., { personId, kind: OnRecordRollActionKind, effectiveDate, minuteReference? }): Promise<
+  { kind: "ok"; rollActionId; membershipEnded; affectsFiledPeriod } | { kind: "forbidden" } | { kind: "refused"; reason: ParticipantRecordRefusal }>
+voidParticipantAction(..., { rollActionId, reason }): Promise<
+  { kind: "ok"; voidRollActionId; voidedActionId; voidedKind; membershipReopened; affectsFiledPeriod } | { kind: "forbidden" } | { kind: "refused"; reason: ParticipantVoidRefusal }>
+recordRollAction(..., input, opts?): ok | forbidden | not_found | invalid_kind | { kind: "refused"; reason }
+createPerson(..., input, opts?): ok{personId, rollActionId|null, effect, affectsFiledPeriod} | forbidden | existing_member_elsewhere | already_here | invalid_household | { kind: "roll_refused"; reason }
+matchPerson(...): candidates carry alreadyHere
+getDirectory(personId, orgId, { rollStatuses?: readonly DirectoryStatus[], ... })
+listVisitors / listStaff / listFormerParticipants(viewerPersonId, orgId, { search?, page, pageSize }): { kind: "ok"; rows: CommunityRow[]; pagination } | { kind: "forbidden" }
+getCommunityBadges(viewerPersonId, orgId, personIds): Record<personId, "active"|"baptized"|"affiliate"|"participant"|"visitor"|"waiting">   // {} without people.manage
+getCommunityStatus(viewerPersonId, orgId, personId): ok{status} | forbidden | not_found
+```
+
+`CommunityRow = { personId, displayName, email, firstVisitDate, positions: string[], endedOn }`. `CommunityStatus = { personId, connection, currentRoll, currentRollSince, endedOn, hasOpenStaffPosition, pendingCount, latestAction: { id, kind, effectiveDate, onRecordKind } \| null }`. `rollStatuses` for the Members view is `['active','baptized','affiliate']`; an empty set matches nothing.
+
+**Data gating per DECISION-197 (the data half; the page composition is Batch C):** `getDirectory()` still returns `forbidden` without `directory.view`; the three admin lists, the badges and the status are gated on `people.manage` instead and never on `directory.view`. So for a `people.manage` holder without `directory.view`, the Directory-backed views (Everyone, Members, Participants) are `forbidden` while Visitors, Staff and Former return `ok` (a DB test pins both). A caller with neither gets `forbidden` from every reader and `{}` from badges. The page's `MembersLimited` / `MembersForbidden` choice is a one-line branch on those results.
+
+### How a non-ok result is handled
+
+Every non-`ok` outcome rolls the caller's whole transaction back (the `CreatePersonAbort` lesson: an early `return` from `db.transaction()` commits). `recordParticipantActionInTx()` returns the typed result; its callers (`recordParticipantAction`, `recordRollAction`, `createPerson`) each throw an internal abort and translate it back. A SQLSTATE 42501 whose message is the function's one literal maps to `forbidden`; any other error rethrows. A throw from `insertAuditRow` rolls the whole act back.
+
+### Schema, audit, env
+
+- **Schema:** none. **Env / `FEATURES` / flags:** none. No Rule 16 shared file edited (`drizzle/meta/_journal.json`, `scripts/test-rls.sql`, `scripts/seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `src/lib/db/domain/index.ts`, `CLAUDE.md`).
+- **Audit events** (written by `src/lib/roll.ts` with `insertAuditRow(tx, ...)` in the SAME transaction as the roll row; ids only, no names):
+  - `tenant.roll_action.recorded`, resource `roll_action` = the new roll action: `organizationId, rollActionId, kind, effectiveDate, membershipEnded`. Written for an enrolment or removal, whether through `createPerson()`, `recordRollAction()` or `recordParticipantAction()`.
+  - `tenant.roll_action.voided`, resource = the void row: `organizationId, voidRollActionId, voidsActionId, voidedKind, reason, membershipReopened` (the trimmed reason; `roll_actions` has no void-reason column).
+  - Never `tenant.roll_action.approved` (a test scans for it). A pending proposal and a visitor write no audit row (unchanged posture). `npm run check:audit` passes **vacuously** for these (the tripwire only reads `db.*` calls in `actions.ts`, Phase 3 Measurement 14), so coverage is proven by tests: exact metadata keys, one row per `ok`, the rollback on a forced audit failure for record, removal, void and `createPerson()`, and a source scan that the keys go through `insertAuditRow`, never `recordAudit`.
+
+### Implementer notes and deviations from Phase 3
+
+1. **`already_here` result added to `CreatePersonResult`** (not in Phase 3's union). A membership at THIS organization is visible through the org-scoped transaction, so `createPerson()` with `identity.mode === "existing"` now checks it before the insert and returns `{ kind: "already_here" }` (message "That person is already in this community. Open their record instead."). Without it, a client that posts the confirm for someone already here still reached `memberships_guard_insert` and got the old wrong "belongs to another organization" text (F178). The cross-org case is unchanged (still the catch-based `existing_member_elsewhere`; the RLS-blind pre-check comment in the code explains why that one cannot be a SELECT).
+2. **`createPersonAction` copy for `kind: "none"`** is now "A connection is required to add a new person." (was "A roll action is required to add a new member."), since Visitor is a valid connection without a roll action.
+3. **Participant enrolment dates are bounded in the action; proposals are not.** A proposal may be dated ahead (the Session decides it; the daily reconcile moves the cache when the date arrives, F29). This is deliberately not symmetrical with the on-record kinds.
+4. **Search in `community.ts` escapes `\`, `%` and `_`** and uses `escape '\'`. Phase 3 said "as `getDirectory()` does", but `getDirectory()` does not escape (a `%` matches everything there). The new lists treat a search term literally; a test pins it. `getDirectory()` is untouched (pre-existing behaviour, not widened here).
+5. **`rollStatuses` plus `status`** intersect (Phase 3 left the combination open); an empty array matches nothing; values outside `DIRECTORY_STATUSES` are dropped before the SQL.
+6. **A proposal's minute reference is trimmed** (blank becomes null) and capped at 200 in the lib as well as the action.
+7. **`recordRollAction()` and `createPerson()` take the actor's `users.id` as before**; for an on-record kind the definer function additionally requires that user's own person to hold `roll.propose`, so a fixture that calls `createPerson()` with a participant kind needs `people.user_id` linked to the acting person (`people.test.ts`'s `managerPerson` now is).
+8. **`src/lib/people.ts` now imports `src/lib/roll.ts`** (for `recordParticipantActionInTx`); `roll.ts` does not import `people.ts`, so there is no cycle.
+9. **The Community page (`page.tsx`), the wizard, the edit page and the tile label were not touched** (Batch C). The page still calls `getDirectory()` with `status`; Batch C wires `rollStatuses`, the admin lists and the limited state from the contract above.
+10. **Test-only cleanup note.** The directory test's `rollStatuses` case inserts one membership into a fixture shared with the exact-count pagination tests; it ends that membership (`ended_on`, never a delete) in a `finally`, because a derived group row references it.
+
+### Gates run (in the `presby-fadir` worktree, against Neon branch `pipeline-founding-admin-directory`)
+
+- `npm run typecheck`, `npm run lint` (`--max-warnings=0`): pass. `npm run check`: all eight tripwires pass (`check:audit` vacuous, see above).
+- `npm run test` (unit, DB suites skipped): 497 files passed, 70 skipped, 0 failed; 7412 tests passed.
+- DB-backed, serial (`npx dotenv -e .env.local -- vitest run --no-file-parallelism ...`): `roll.test.ts` 47/47, `people.test.ts` 33/33 (from 25), `community.db.test.ts` 15/15, `directory.test.ts` 99/99, `roll-derive-parity.db.test.ts` 1/1, and in one run `staff.test.ts`, the staff actions test, `src/lib/org-portal/*`, `participant-roll.db.test.ts` (42) and `children.test.ts`: 20 files, 304/304. No slow-branch timeouts this session. After the runs: no stamped organization, no fixture person, no `tenant.roll_action.recorded|voided` audit row left on the branch.
+- Failing-first, by breaking the code and watching the named tests fail, then restoring (the files diff clean against the backups): (a) `createPerson()` returning a refusal instead of throwing: `people.test.ts` "a refusal by the roll function ... rolls back" and "a future date ... rolls everything back" fail (the person committed; the orphan row was cleaned by hand through the stamp path, and the sweep list now covers every rolled-back variant); (b) swallowing the `insertAuditRow` failure: `roll.test.ts` "a failed audit insert rolls back ..." fails.
+
+### Handoff
+
+Next: **Batch C** (`ux-developer`): the Community page (wire `parseCommunityView`, `getDirectory({ rollStatuses })`, the three lists, `getCommunityBadges`, the limited state on `forbidden` plus `people.manage`), the wizard Connection step and the already-here step (`MatchCandidate.alreadyHere`, `alreadyHereSentence`), the edit page's Connection card (`getCommunityStatus`), the Remove and Undo dialogs, the labels, and the toasts from `participant-copy.ts`. Then Batch D (e2e). The orchestrator records this section and the status row; nothing in a Rule 16 file changed.
 
 ---
 

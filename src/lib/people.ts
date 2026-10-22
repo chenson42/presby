@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { db } from "@/lib/db";
 import { withOrgContext } from "@/lib/authz";
 import {
@@ -11,7 +11,16 @@ import {
   contactMethods,
 } from "@/lib/db/domain/people";
 import { rollActions } from "@/lib/db/domain/roll";
-import { ROLL_ACTION_KIND_TO_ROLL } from "@/lib/roll-action-kinds";
+import {
+  deriveRollFields,
+  type ParticipantRecordRefusal,
+} from "@/lib/roll-action-kinds";
+import {
+  recordParticipantActionInTx,
+  type ActingOptions,
+} from "@/lib/roll";
+import { deriveConnection, type Connection } from "@/lib/community-labels";
+import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 
 /**
@@ -64,6 +73,16 @@ export interface MatchCandidate {
   personId: string;
   displayName: string;
   confidence: "exact" | "high" | "medium" | "low";
+  /**
+   * F178: non-null when this candidate ALREADY has a membership at THIS
+   * organization (a visitor, participant, member, staff anchor, listed or
+   * ended person). The wizard then links to their record instead of offering a
+   * "same person?" confirm that could only fail. Read from this org's own
+   * RLS-scoped `memberships`, so it discloses nothing a `people.manage` holder
+   * could not already read here; a candidate who belongs only elsewhere is
+   * `null`, exactly as before.
+   */
+  alreadyHere: { connection: Connection; endedOn: string | null } | null;
 }
 
 export type MatchPersonResult =
@@ -110,14 +129,49 @@ export async function matchPerson(
     `);
     const rows = (result as unknown as { rows?: MatchPersonRow[] }).rows ?? [];
 
-    return {
-      kind: "ok",
-      candidates: rows.map((row) => ({
-        personId: row.person_id,
-        displayName: row.display_name,
-        confidence: row.confidence as MatchCandidate["confidence"],
-      })),
-    };
+    // F178: one RLS-scoped read of THIS organization's memberships for the
+    // candidate ids (ended rows included), inside the same transaction.
+    const here = new Map<string, { connection: Connection; endedOn: string | null }>();
+    if (rows.length > 0) {
+      const hereRows = await tx
+        .select({
+          personId: memberships.personId,
+          endedOn: memberships.endedOn,
+          endedReason: memberships.endedReason,
+          currentRoll: memberships.currentRoll,
+          engagementStatus: memberships.engagementStatus,
+        })
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            inArray(
+              memberships.personId,
+              rows.map((row) => row.person_id),
+            ),
+          ),
+        );
+      for (const m of hereRows) {
+        here.set(m.personId, {
+          connection: deriveConnection(m),
+          endedOn: m.endedOn,
+        });
+      }
+    }
+
+    const candidates: MatchCandidate[] = rows.map((row) => ({
+      personId: row.person_id,
+      displayName: row.display_name,
+      confidence: row.confidence as MatchCandidate["confidence"],
+      alreadyHere: here.get(row.person_id) ?? null,
+    }));
+    // Already-here candidates first, the function's own order otherwise
+    // (Array.prototype.sort is stable).
+    candidates.sort(
+      (a, b) => Number(b.alreadyHere !== null) - Number(a.alreadyHere !== null),
+    );
+
+    return { kind: "ok", candidates };
   });
 }
 
@@ -180,14 +234,46 @@ export interface CreatePersonInput {
          * one).
          */
         kind: "none";
+      }
+    | {
+        /**
+         * DECISION-200 (`docs/work-log/2026-10-22-founding-admin-directory.
+         * md`) — a VISITOR: a person with a live membership, engagement
+         * `'visitor'` and NO roll row. `people.manage` only (no `roll.
+         * propose`: nothing here touches the roll). Never in the member
+         * Directory (its predicate already excludes a `visitor` with a null
+         * roll); listed by the admin-only `src/lib/community.ts`. Both fields
+         * are optional and validated: `firstVisitDate` a real 'YYYY-MM-DD'
+         * not after today (UTC), `howHeard` at most 200 characters, blanks
+         * become null. `admin/community/new/actions.ts` accepts this kind
+         * explicitly and still rejects `"none"`.
+         */
+        kind: "visitor";
+        firstVisitDate?: string;
+        howHeard?: string;
       };
 }
 
 export type CreatePersonResult =
-  | { kind: "ok"; personId: string; rollActionId: string | null }
+  | {
+      kind: "ok";
+      personId: string;
+      /** Null for `visitor` and `none` (no roll row is ever written). */
+      rollActionId: string | null;
+      /** `recorded` = a participant enrolment that took effect on record;
+       * `pending` = a proposal waiting for the Session; `none` = no roll row. */
+      effect: "none" | "pending" | "recorded";
+      affectsFiledPeriod: boolean;
+    }
   | { kind: "forbidden" }
   | { kind: "existing_member_elsewhere" }
-  | { kind: "invalid_household" };
+  /** The matched person already has a membership at THIS organization (F178):
+   * confirming a "same person?" match on someone already here. */
+  | { kind: "already_here" }
+  | { kind: "invalid_household" }
+  /** The participant enrolment was refused by the database function (a date
+   * before the birth date, for instance); the whole transaction rolled back. */
+  | { kind: "roll_refused"; reason: ParticipantRecordRefusal };
 
 /**
  * Internal control-flow signal, NOT exported. Thrown from inside the
@@ -211,7 +297,8 @@ class CreatePersonAbort extends Error {
   }
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_HOW_HEARD = 200;
+const MAX_MINUTE_REFERENCE = 200;
 
 /** Concatenates `err.message` with every `.cause` in the chain — Drizzle's
  * `DrizzleQueryError` wraps the driver's actual Postgres error as `.cause`,
@@ -225,20 +312,29 @@ function errorMessageChain(err: unknown, depth = 0): string {
 
 /**
  * Creates a person (or attaches an existing, still-unaffiliated one),
- * optionally a household, a `memberships` row, and — unless `rollAction.kind
- * === "none"` (DECISION-128) — the initial `pending` `roll_actions` row. ONE
- * `withOrgContext()` transaction, per Phase 1's "no URL-skip / no partial
- * submit" wizard requirement.
+ * optionally a household, a `memberships` row, and the initial roll fact the
+ * `rollAction` kind names. ONE `withOrgContext()` transaction, per Phase 1's
+ * "no URL-skip / no partial submit" wizard requirement. The four kinds
+ * (docs/work-log/2026-10-22-founding-admin-directory.md, DECISION-198/200):
+ *   - `profession_of_faith`: a `pending` proposal for the Session, with
+ *     `resulting_roll` and `age_at_action` from `deriveRollFields()` (F173);
+ *   - `other_participant_enrolled`: takes effect ON RECORD, through
+ *     `recordParticipantActionInTx()` (the definer function writes the
+ *     approved row; the audit row is written in this same transaction);
+ *   - `visitor` (DECISION-200): engagement `'visitor'`, no roll row;
+ *   - `none` (DECISION-128): the staff anchor, engagement `'staff'`, no roll row.
+ * What takes effect on record is decided by the KIND alone, here and in the
+ * database function, never by a client flag.
  *
  * GATING SPLIT (DECISION-128 ruling 1, DECISION-129): `people.manage` is
  * required UNCONDITIONALLY — creating a `people` row is a People-domain
  * action regardless of which module's UI triggers it. `roll.propose` is
- * required ONLY when `rollAction.kind !== "none"` — requiring it for a call
+ * required ONLY for the two roll-bearing kinds — requiring it for a call
  * that writes no `roll_actions` row makes no sense, and a `staff.manage`-only
- * caller attaching a position to a brand-new person must not ALSO need
- * `roll.propose`, a permission with no bearing on what it's actually doing.
- * Both checks still run before any write, same "gate first" discipline as
- * `role-grants.ts`.
+ * caller attaching a position to a brand-new person (or a `people.manage`-only
+ * caller adding a visitor) must not ALSO need `roll.propose`, a permission
+ * with no bearing on what it's actually doing. Both checks still run before
+ * any write, same "gate first" discipline as `role-grants.ts`.
  *
  * ORDER OF OPERATIONS (Phase 3's design, each step named because a reorder
  * would reopen a finding):
@@ -258,8 +354,9 @@ function errorMessageChain(err: unknown, depth = 0): string {
  *      construction the person here always has zero memberships anywhere
  *      (a brand-new person, or an `existing` person already proven clear
  *      in step 1).
- *   4. `rollAction.kind !== "none"`: insert `roll_actions` (`approvalStatus:
- *      "pending"`). MUST run after step 3 — `roll_actions_person_fk`
+ *   4. `profession_of_faith`: insert `roll_actions` (`approvalStatus:
+ *      "pending"`); `other_participant_enrolled`: the definer function
+ *      inserts the approved row. MUST run after step 3 — `roll_actions_person_fk`
  *      composite-FKs into `(memberships.personId, memberships.
  *      organizationId)`, which does not exist until the membership row
  *      lands. `rollAction.kind === "none"` (DECISION-128): this step is
@@ -272,23 +369,56 @@ export async function createPerson(
   organizationId: string,
   actingUserId: string,
   input: CreatePersonInput,
+  opts?: ActingOptions,
 ): Promise<CreatePersonResult> {
-  if (
-    input.rollAction.kind !== "none" &&
-    !DATE_RE.test(input.rollAction.effectiveDate)
-  ) {
-    // Genuine bad input, not a denial — thrown, matching grantRole's own
-    // "malformed startsOn" contract.
-    throw new Error(
-      `createPerson: rollAction.effectiveDate must be 'YYYY-MM-DD', got ${JSON.stringify(
-        input.rollAction.effectiveDate,
-      )}`,
-    );
+  // Bad INPUT is thrown (a caller bug, never a denial): the server actions
+  // pre-validate so an end user sees a message instead.
+  let visitorFirstVisitDate: string | null = null;
+  let visitorHowHeard: string | null = null;
+  if (input.rollAction.kind === "visitor") {
+    const rawVisit = input.rollAction.firstVisitDate?.trim();
+    if (rawVisit) {
+      if (!isRealYmd(rawVisit) || rawVisit > todayUtcYmd()) {
+        throw new Error(
+          `createPerson: rollAction.firstVisitDate must be a real 'YYYY-MM-DD' not after today, got ${JSON.stringify(
+            input.rollAction.firstVisitDate,
+          )}`,
+        );
+      }
+      visitorFirstVisitDate = rawVisit;
+    }
+    const rawHeard = input.rollAction.howHeard?.trim();
+    if (rawHeard) {
+      if (rawHeard.length > MAX_HOW_HEARD) {
+        throw new Error(
+          `createPerson: rollAction.howHeard must be at most ${MAX_HOW_HEARD} characters`,
+        );
+      }
+      visitorHowHeard = rawHeard;
+    }
+  } else if (input.rollAction.kind !== "none") {
+    if (!isRealYmd(input.rollAction.effectiveDate)) {
+      // Genuine bad input, not a denial — thrown, matching grantRole's own
+      // "malformed startsOn" contract.
+      throw new Error(
+        `createPerson: rollAction.effectiveDate must be 'YYYY-MM-DD', got ${JSON.stringify(
+          input.rollAction.effectiveDate,
+        )}`,
+      );
+    }
+    if (
+      input.rollAction.minuteReference !== undefined &&
+      input.rollAction.minuteReference.trim().length > MAX_MINUTE_REFERENCE
+    ) {
+      throw new Error(
+        `createPerson: rollAction.minuteReference must be at most ${MAX_MINUTE_REFERENCE} characters`,
+      );
+    }
   }
   if (
     input.identity.mode === "new" &&
     input.identity.dateOfBirth !== undefined &&
-    !DATE_RE.test(input.identity.dateOfBirth)
+    !isRealYmd(input.identity.dateOfBirth)
   ) {
     throw new Error(
       `createPerson: identity.dateOfBirth must be 'YYYY-MM-DD', got ${JSON.stringify(
@@ -301,14 +431,19 @@ export async function createPerson(
     return await withOrgContext(actingPersonId, organizationId, async (tx) => {
       // DECISION-128 ruling 1 / DECISION-129: people.manage is required
       // UNCONDITIONALLY; roll.propose is required ONLY when a roll_actions
-      // row will actually be written. Short-circuits to `true` (no DB round
-      // trip) when rollAction.kind === "none" rather than skipping the
-      // Promise.all entry, so the two checks stay structurally parallel.
+      // row will actually be written (profession_of_faith, or a participant
+      // enrolment on record). `none` (the staff anchor) and `visitor` (no roll
+      // row, DECISION-200) need people.manage alone. Short-circuits to `true`
+      // (no DB round trip) rather than skipping the Promise.all entry, so the
+      // two checks stay structurally parallel. The definer function re-checks
+      // roll.propose by the actor's users.id for a participant enrolment.
+      const writesRoll =
+        input.rollAction.kind !== "none" && input.rollAction.kind !== "visitor";
       const [canManagePeople, canProposeRoll] = await Promise.all([
         hasPermission(tx, actingPersonId, organizationId, PEOPLE_MANAGE),
-        input.rollAction.kind === "none"
-          ? Promise.resolve(true)
-          : hasPermission(tx, actingPersonId, organizationId, ROLL_PROPOSE),
+        writesRoll
+          ? hasPermission(tx, actingPersonId, organizationId, ROLL_PROPOSE)
+          : Promise.resolve(true),
       ]);
       if (!canManagePeople || !canProposeRoll) {
         throw new CreatePersonAbort({ kind: "forbidden" });
@@ -380,7 +515,29 @@ export async function createPerson(
         // `presby_guard_membership_insert` (SECURITY DEFINER, genuinely
         // cross-org-visible) caught it, as a raw exception. See this
         // function's own step-3 catch below for the actual mechanism.
+        //
+        // F178 is the one exception, and it is safe: a membership at THIS
+        // organization IS visible through this org-scoped transaction, so
+        // "the matched person is already here" is answerable without any
+        // cross-org read. Without it, confirming a match on someone already
+        // here reached `memberships_guard_insert` and surfaced as "belongs to
+        // another organization", which is wrong. The wizard now links to their
+        // record instead; this is the server-side backstop for a client that
+        // posts the confirm anyway.
         personId = input.identity.matchedPersonId;
+        const [alreadyHere] = await tx
+          .select({ id: memberships.id })
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.organizationId, organizationId),
+              eq(memberships.personId, personId),
+            ),
+          )
+          .limit(1);
+        if (alreadyHere) {
+          throw new CreatePersonAbort({ kind: "already_here" });
+        }
       }
 
       let householdId: string | null = null;
@@ -435,7 +592,16 @@ export async function createPerson(
           // predicates directly (`src/lib/directory.ts`, `src/lib/org-portal
           // /find-person.ts`) — see `staff.test.ts`'s and `people.test.ts`'s
           // own regression tests proving the literal-string exclusion holds.
-          engagementStatus: input.rollAction.kind === "none" ? "staff" : "regular",
+          engagementStatus:
+            input.rollAction.kind === "none"
+              ? "staff"
+              : input.rollAction.kind === "visitor"
+                ? "visitor"
+                : "regular",
+          // DECISION-200: the visitor arm's pastoral fields (null for every
+          // other kind, which never reads them).
+          firstVisitDate: visitorFirstVisitDate,
+          howHeard: visitorHowHeard,
         });
       } catch (err) {
         // Drizzle wraps the underlying pg error as `DrizzleQueryError`,
@@ -452,15 +618,75 @@ export async function createPerson(
         throw err;
       }
 
-      // DECISION-128: rollAction.kind === "none" skips step 4 entirely — no
-      // roll_actions row, ever, for this kind. Checked as a plain `if` (not
-      // folded into the try/catch above) so TypeScript narrows
-      // `input.rollAction` to the two roll-bearing kinds for the insert
-      // below — the discriminant check inside the earlier Promise.all
-      // ternary does NOT persist narrowing past that expression.
-      if (input.rollAction.kind === "none") {
-        return { kind: "ok", personId, rollActionId: null };
+      // DECISION-128 / DECISION-200: `none` and `visitor` skip step 4 entirely
+      // — no roll_actions row, ever, for those kinds. Checked as a plain `if`
+      // (not folded into the try/catch above) so TypeScript narrows
+      // `input.rollAction` to the two roll-bearing kinds below.
+      if (input.rollAction.kind === "none" || input.rollAction.kind === "visitor") {
+        return {
+          kind: "ok",
+          personId,
+          rollActionId: null,
+          effect: "none",
+          affectsFiledPeriod: false,
+        };
       }
+
+      if (input.rollAction.kind === "other_participant_enrolled") {
+        // R4: the KIND decides, never a client flag. A participant enrolment
+        // takes effect on record through the definer function, which writes
+        // the approved row, and `recordParticipantActionInTx` writes the audit
+        // row in this same transaction. A refusal throws, so the person,
+        // contact rows, household and membership roll back together.
+        const recorded = await recordParticipantActionInTx(
+          tx,
+          {
+            organizationId,
+            actingPersonId,
+            actingUserId,
+            actingUserEmail: opts?.actingUserEmail ?? null,
+          },
+          {
+            personId,
+            kind: "other_participant_enrolled",
+            effectiveDate: input.rollAction.effectiveDate,
+            minuteReference: input.rollAction.minuteReference,
+          },
+        );
+        if (recorded.kind === "forbidden") {
+          throw new CreatePersonAbort({ kind: "forbidden" });
+        }
+        if (recorded.kind === "refused") {
+          throw new CreatePersonAbort({
+            kind: "roll_refused",
+            reason: recorded.reason,
+          });
+        }
+        return {
+          kind: "ok",
+          personId,
+          rollActionId: recorded.rollActionId,
+          effect: "recorded",
+          affectsFiledPeriod: recorded.affectsFiledPeriod,
+        };
+      }
+
+      // profession_of_faith: a PENDING proposal for the Session, with
+      // resulting_roll AND age_at_action from the one shared derivation
+      // (F173). The membership now exists, so the person is visible through
+      // this org's RLS and their birth date can be read back (for
+      // `identity.mode === "existing"` it was not known before step 3).
+      const [birth] = await tx
+        .select({ dateOfBirth: people.dateOfBirth })
+        .from(people)
+        .where(eq(people.id, personId))
+        .limit(1);
+      const { resultingRoll, ageAtAction } = deriveRollFields(
+        input.rollAction.kind,
+        birth?.dateOfBirth ?? null,
+        input.rollAction.effectiveDate,
+      );
+      const proposalMinute = input.rollAction.minuteReference?.trim() || null;
 
       const [rollAction] = await tx
         .insert(rollActions)
@@ -469,18 +695,21 @@ export async function createPerson(
           personId,
           kind: input.rollAction.kind,
           effectiveDate: input.rollAction.effectiveDate,
-          // F173 bridge (Batch A of 2026-10-22-founding-admin-directory):
-          // drizzle/0061's roll_actions_resulting_roll_matches_kind CHECK
-          // refuses a null resulting_roll for a mapped kind. Batch B replaces
-          // this with deriveRollFields() (resulting_roll AND age_at_action).
-          resultingRoll: ROLL_ACTION_KIND_TO_ROLL[input.rollAction.kind],
+          resultingRoll,
+          ageAtAction,
           approvalStatus: "pending",
-          minuteReference: input.rollAction.minuteReference ?? null,
+          minuteReference: proposalMinute,
           proposedBy: actingUserId,
         })
         .returning({ id: rollActions.id });
 
-      return { kind: "ok", personId, rollActionId: rollAction!.id };
+      return {
+        kind: "ok",
+        personId,
+        rollActionId: rollAction!.id,
+        effect: "pending",
+        affectsFiledPeriod: false,
+      };
     });
   } catch (err) {
     if (err instanceof CreatePersonAbort) {

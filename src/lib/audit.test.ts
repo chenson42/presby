@@ -132,6 +132,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // src/app/(org)/o/[slug]/admin/community/pending/actions.ts
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+  // Participant enrolment/removal/undo on record (2026-10-22, DECISION-198)
+  // — written from src/lib/roll.ts, in the same transaction as the roll row
+  ROLL_ACTION_RECORDED: "tenant.roll_action.recorded",
+  ROLL_ACTION_VOIDED: "tenant.roll_action.voided",
   // Member management, Increment 2 (2026-08-26) — written from
   // src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts
   PERSON_UPDATED: "tenant.person.updated",

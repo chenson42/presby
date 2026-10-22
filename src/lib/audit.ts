@@ -128,6 +128,16 @@ export const AUDIT_ACTIONS = {
   // access does not.
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+  // Participant enrolment/removal and its undo take effect ON RECORD, with no
+  // Session approval (docs/work-log/2026-10-22-founding-admin-directory.md,
+  // DECISION-198, R8) — written by src/lib/roll.ts with insertAuditRow() in
+  // the SAME transaction as the roll row, so a constitutional record written
+  // without approval never commits without its audit row. Deliberately NOT
+  // ROLL_ACTION_APPROVED: "the Session approved" and "recorded without
+  // approval" must stay distinguishable in the trail. Metadata carries ids
+  // only, never names.
+  ROLL_ACTION_RECORDED: "tenant.roll_action.recorded",
+  ROLL_ACTION_VOIDED: "tenant.roll_action.voided",
   // Member management, Increment 2 (docs/work-log/
   // 2026-08-26-member-management-edit-person.md) — written from
   // src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts. Identity,

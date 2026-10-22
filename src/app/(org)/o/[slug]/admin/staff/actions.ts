@@ -277,6 +277,16 @@ export async function createStaffPersonAction(
         ok: false,
         error: "That household no longer exists. Choose another or leave it unset.",
       };
+    case "already_here":
+      return {
+        ok: false,
+        error: "That person is already in this community. Choose them from the list instead.",
+      };
+    case "roll_refused":
+      // Unreachable for this action (rollAction is pinned to { kind: "none" }
+      // above, which never calls the participant function); typed so the
+      // switch stays exhaustive.
+      return { ok: false, error: "That person could not be added." };
     case "ok":
       break;
   }

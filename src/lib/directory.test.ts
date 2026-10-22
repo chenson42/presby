@@ -1749,6 +1749,97 @@ describe.skipIf(!hasDb)(
       });
     });
 
+    describe("rollStatuses filter (Community Members view, DECISION-197/201)", () => {
+      it("narrows to a SET of roll values: the Members view is active, baptized and affiliate, never a participant", async () => {
+        const result = await getDirectory(viewerA, orgA, {
+          rollStatuses: ["active", "baptized", "affiliate"],
+        });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        const ids = result.entries.map((e) => e.personId).sort();
+        expect(ids).toEqual([viewerA, active1, active2, baptized1, affiliate1].sort());
+        expect(ids).not.toContain(otherParticipant1);
+      });
+
+      it("replaces the default branch: a 'regular' person with no roll yet is NOT admitted by it (a proposal waiting for the Session is not a member)", async () => {
+        const platform = getPlatformDb();
+        const [p] = await platform
+          .insert(people)
+          .values({ firstName: "Waiting", lastName: "ForSession", deletableUntil: fixtureDeletableUntil() })
+          .returning({ id: people.id });
+        allPeople.push(p!.id);
+        try {
+          await platform.insert(memberships).values({
+            organizationId: orgA,
+            personId: p!.id,
+            engagementStatus: "regular",
+          });
+          const unfiltered = await getDirectory(viewerA, orgA);
+          const filtered = await getDirectory(viewerA, orgA, {
+            rollStatuses: ["active", "baptized", "affiliate"],
+          });
+          if (unfiltered.kind !== "ok" || filtered.kind !== "ok") throw new Error("expected ok");
+          expect(unfiltered.entries.map((e) => e.personId)).toContain(p!.id);
+          expect(filtered.entries.map((e) => e.personId)).not.toContain(p!.id);
+        } finally {
+          // This fixture is shared with the pagination tests below (their row
+          // counts are exact), so the extra person LEAVES the live roll with
+          // the test: ended, never deleted (a derived group row references
+          // the membership, and ending is the soft path anyway). The fixture
+          // teardown removes the rows.
+          await platform.execute(
+            sql`update memberships set ended_on = current_date where person_id = ${p!.id}::uuid`,
+          );
+        }
+      });
+
+      it("an EMPTY set matches nothing (never 'no filter', never an `in ()` syntax error); unknown values are dropped", async () => {
+        const empty = await getDirectory(viewerA, orgA, { rollStatuses: [] });
+        if (empty.kind !== "ok") throw new Error("expected ok");
+        expect(empty.entries).toEqual([]);
+        const emptyPaged = await getDirectory(viewerA, orgA, { rollStatuses: [], page: 1, pageSize: 10 });
+        expect(emptyPaged.kind === "ok" && emptyPaged.pagination).toMatchObject({ total: 0, totalPages: 1 });
+
+        const junk = await getDirectory(viewerA, orgA, {
+          rollStatuses: ["visitor", "staff", "'; drop table memberships; --"] as never,
+        });
+        if (junk.kind !== "ok") throw new Error("expected ok");
+        expect(junk.entries).toEqual([]);
+
+        const mixed = await getDirectory(viewerA, orgA, {
+          rollStatuses: ["baptized", "visitor"] as never,
+        });
+        expect(mixed.kind === "ok" && mixed.entries.map((e) => e.personId)).toEqual([baptized1]);
+      });
+
+      it("with status as well, the two intersect (status keeps its meaning)", async () => {
+        const both = await getDirectory(viewerA, orgA, {
+          status: "baptized",
+          rollStatuses: ["active", "baptized"],
+        });
+        expect(both.kind === "ok" && both.entries.map((e) => e.personId)).toEqual([baptized1]);
+        const disjoint = await getDirectory(viewerA, orgA, {
+          status: "other_participant",
+          rollStatuses: ["active", "baptized", "affiliate"],
+        });
+        expect(disjoint.kind === "ok" && disjoint.entries).toEqual([]);
+      });
+
+      it("the paginated count agrees with the rows, and another organization's people never appear", async () => {
+        const result = await getDirectory(viewerA, orgA, {
+          rollStatuses: ["active", "baptized", "affiliate"],
+          page: 1,
+          pageSize: 2,
+        });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        expect(result.pagination).toMatchObject({ total: 5, totalPages: 3 });
+        expect(result.entries).toHaveLength(2);
+        const all = await getDirectory(viewerA, orgA, {
+          rollStatuses: ["active", "baptized", "affiliate"],
+        });
+        expect(all.kind === "ok" && all.entries.map((e) => e.personId)).not.toContain(orgBPerson);
+      });
+    });
+
     describe("pagination", () => {
       it("returns the correct slice and pagination metadata for page 1", async () => {
         const result = await getDirectory(viewerA, orgA, {

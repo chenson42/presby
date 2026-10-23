@@ -2114,6 +2114,18 @@ Files referenced, all under `/Users/cshenso/git/presby-platform/presby-fadir`:
 
 ---
 
+## Integration (orchestrator, 2026-10-23)
+
+- Commits `59e3845` (integration docs, journal entry 61, the applied test-rls patch) and `8289e6e` (0.39.0 release notes and version).
+- Pre-push on `8289e6e`:
+  - typecheck, lint, all eight tripwires and the unit suite (7603 passed) pass;
+  - `npm run build` passes;
+  - `npm audit` shows 3 high and 9 moderate advisories, all in dev or test tooling (WARN; TODO line added).
+- Full patched `scripts/test-rls.sql` as `presby_app` on the pipeline branch halts at line 217 ("presbytery: sees only its own members", expected 2, got 3). That is the same documented fixture-count drift that halts it on `development`, so it is not caused by this diff. `scripts/participants/test-rls-61.sql` passes on its own (QA run 1, 34 passes). The Rule 16 post-merge run on `development` is still owed after 0061 is applied there.
+- **Deploy order:** code first, then 0061 on production after a snapshot.
+
+---
+
 # Increment 2 — Session approval, pending queue, elder sign-in invites
 
 > **Pre-assigned numbers (Rule 16):** DECISION-202–205 · F179–F185 · migration 0062 (provisional; re-checked at kickoff of Phase 4 against main).

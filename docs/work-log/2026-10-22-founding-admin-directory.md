@@ -20,8 +20,8 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete (design to R1-R14; S1-S6 ruled; route move designed as its own Batch M) | Design complete; implementers named | 2026-10-22 |
 | 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; Batch B (server: lib, actions, audit) complete 2026-10-22; Batches C and D (UI, e2e, 360px pass) complete 2026-10-22 — Phase 4 Complete for Increment 1 | — | — |
-| 5 — Verification | qa | Run 1 FAIL (stale integration patch only; all code checks green); fixed; re-verification pending | FAIL → pending | 2026-10-23 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1 FAIL on the stale integration patch only; run 2 PASS) | PASS | 2026-10-23 |
+| 6 — Shipped vs intent | analyst | In progress | — | — |
 | Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
@@ -1853,6 +1853,50 @@ Files referenced:
 
 - `scripts/participants/test-rls.sql.integration.patch` regenerated against the current `scripts/test-rls.sql` (hunks 1–7 unchanged; the section-61 banner and `\ir` now follow section 60). `git apply --check` is clean.
 - The `— regression for founding administrator cannot reach Add person (F172)` suffix was added to `page.test.tsx:244` and `e2e/community-participants.spec.ts:280`. `page.test.tsx`: 32/32 pass.
+
+---
+
+## Run 2 (2026-10-23), recorded verbatim from qa's returned text
+
+**Date:** 2026-10-23 · **HEAD:** 881d444 (`presby-fadir`) · **Verified by:** qa
+
+**Scope check:** `git diff b899ec2 881d444 --stat` shows the work-log plus exactly three files: the integration patch, `page.test.tsx` and `e2e/community-participants.spec.ts`. No product code changed, so none of run 1's other results needed re-running.
+
+### Item 1: the integration patch (blocking in run 1). Resolved.
+- `git apply --check scripts/participants/test-rls.sql.integration.patch`: applies cleanly (45 insertions, 10 deletions).
+- **The diff:**
+  - The last hunk is now `@@ -8586,3 +8612,12 @@`, anchored on `\ir designation-revoke/test-rls-60.sql`. Its banner reads "as 46, 47, 59 and 60 above".
+  - The 7873 hunk was regenerated with different context lines: the `roll.approve` = 0 assertion is the same, only placed differently within the hunk.
+- **Equivalence check:** in scratch copies I applied run 1's hunks 1–7 plus a section-61 append after the 60 line, and separately the regenerated patch. The two resulting files are **byte-identical**. After patching, the file still includes section 60, and section 61 comes after it. Nothing was applied in the worktree.
+
+### Item 2: the regression-test names. Resolved.
+- `src/app/(org)/o/[slug]/admin/community/page.test.tsx:244` and `e2e/community-participants.spec.ts:280` now end in "— regression for founding administrator cannot reach Add person (F172)".
+- `page.test.tsx` passes, 32/32.
+- I didn't re-run the e2e because only its title changed. `playwright test --list` shows the new title at `:280:9`, and run 1 passed that test in a real browser.
+- Unchanged from run 1: the failing-before-fix property was confirmed by reading origin/main's page, not by running the tests against the old code.
+
+### Verdict
+
+**PASS.** Both run-1 items are resolved, and everything run 1 verified still holds because no product code changed.
+
+Notes the next phases should carry, unchanged from run 1:
+- **Increment 2:** `presby_app` can still insert a pending row and UPDATE it to approved (R5 covers INSERT only).
+- **Integration:**
+  - add the `_journal.json` entry for 0061;
+  - apply the patch;
+  - re-run `scripts/test-rls.sql` as `presby_app` on merged `development`. That run is still the only full patched run since the origin/main merge: my run-1 attempt didn't finish.
+- **Pipeline branch** (throwaway):
+  - two expired fixture rows keep `fixture-deletable.test.ts` red there;
+  - the members flags and the e2e-alpha toggle were left on;
+  - the fresh-install branch is still there for the orchestrator to delete.
+
+The worktree is clean and the scratch copies are removed.
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (Increment 1, run 2) | PASS | 2026-10-23 |
+
+**Handoff:** next is **analyst** (Phase 6, shipped vs intent).
 
 ---
 

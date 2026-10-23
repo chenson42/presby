@@ -18,7 +18,7 @@
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | In progress | — | — |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -263,6 +263,13 @@ Phase 2 may not be skippable: the new shared structure is a structural change, b
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
 
 Files read (all under `/Users/cshenso/git/presby-platform/presby-nav/`): `docs/work-log/2026-10-23-portal-sitemap-footer.md`, `src/lib/org-portal/tiles.ts`, `src/lib/org-portal/tiles.test.ts`, `src/lib/org-portal/visible-tiles.ts`, `src/app/(org)/o/[slug]/portal-nav.tsx`, `portal-nav-links.tsx`, `portal-nav.test.tsx`, `src/components/org-portal/portal-footer.tsx`, `portal-footer.test.tsx`, `src/app/(org)/o/[slug]/page.tsx`, `admin/page.tsx`, `layout.tsx`, `src/components/shared/domain-tile-sections.tsx`, `src/lib/org-features.ts`, `src/lib/org-feature-categories.ts`, `src/lib/community-labels.ts`, `docs/ui-standards.md`, `e2e/member-calendar.spec.ts`, `e2e/community-participants.spec.ts`.
+
+---
+
+## Operator rulings (2026-10-23)
+
+- **Q1, Administration column:** **"Heading + overview link".** The footer's Administration column shows its plain-text heading and one link, "Administration overview", to `/o/<slug>/admin`. It does not list the individual administer tiles. The column appears under the same rule as the nav's Administration entry (Note 3). No new permission gate (DECISION-003/162 stand).
+- **Q2, two "Community" items:** **"Accept it."** The `people` domain label becomes "Community". The tile and its page stay "Community". Footer column headings are plain text, not links. The home page's pill-versus-card pair is an accepted residual.
 
 ---
 

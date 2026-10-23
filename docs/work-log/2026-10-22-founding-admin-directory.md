@@ -28,6 +28,7 @@
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete (design to R19-R36 and G1-G9; Note 3 measured; three departures from R21/R23/R24 named for the architect; F177 options presented, Option 3 recommended pending operator choice; F198-F199 added). Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete; implementers named | 2026-10-22 |
+| Inc 2b · 3a — Architect review of design departures | architect | Complete. R23/R21 amended (A1–A5), R24 accepted with E1; F177 Option 3 endorsed; operator chose Option 3 | Approved with suggestions | 2026-10-22 |
 
 ---
 
@@ -4127,3 +4128,111 @@ Written for a non-engineer; the note must not deny a residual the decision recor
 ## Handoff
 
 Next: **Phase 4**, only after Increment 2's Phase 4 commits, serial: **Batch A** (`database-admin`, 0064, rehearsed on a throwaway Neon child branch with the FA and treasurer parity golden and `test-rls.sql` before the pipeline branch), **Batch B** (`api-developer`), **Batches C and D** (`ux-developer`). The orchestrator records this section and the status row and the integration hand-offs above, and confirms: migration 0064; DECISION-207 and 208; F186, F187, F192 to F199; **Increment 3 begins at F200 and DECISION-209**. Before Phase 4: the operator's F177 choice (Option 3 unless told otherwise) and read of the Copy; the architect's sight of the three departures; the production count of case-duplicate emails; Increment 2's final banner and connection-card files in hand; the live preview and accept definitions diffed against 0059.
+
+---
+
+# Increment 2b — Phase 3a addendum: departures from R21, R23 and R24 (architect)
+
+*Recorded verbatim by the orchestrator from the architect's returned text.*
+
+## Verdict
+
+**Approved with suggestions.** I accept all three departures, each with an amendment, so there is no loop-back to Phase 2. The tech-lead is right on the core point of R23. My marker ruling copied the 0059 idiom, and that idiom only works on `account_invitations` because `presby_app` holds no privilege on that table. On `people`, `presby_app` holds UPDATE, including column-level UPDATE on `user_id`. I measured that on the branch, so any `presby_app` statement could arm the marker itself. Phase 4 Batch A may start once the amendments below are written into the design. The tech-lead or the orchestrator can do that in place, with no new phase.
+
+## Rulings
+
+### R23: the user-link guard. Amended: refuse every non-owner role, not just `presby_app`
+
+- **Accepted:** no marker. The guard binds the tenant connection, the owner path is left unbound, and R36 holds without any change, because the accept function is a definer and runs as the owner.
+- **Amendment A1, the trigger condition:**
+  - Refuse when `current_user` is **not the table owner**. Do not test `current_user = 'presby_app'`.
+  - The catalog shows why. `presby_platform` also holds INSERT and UPDATE on `people`, including on `user_id`. It is NOLOGIN today, but 0043, 0044 and 0059 all expect it to become a real login one day.
+  - Naming one role leaves every other non-owner role able to write the link, including any role added later. Deny-by-default costs the same: fixtures, the FK `SET NULL` action and the definers all run as owner.
+  - Owner lookup: `pg_class.relowner` for `TG_RELID`, compared with `current_user`'s oid.
+- **Amendment A2, a cheap check on the owner path:**
+  - Binding the owner with a marker would only ever have caught mistakes, since the owner can disable the trigger anyway. So use a source scan instead, at no fixture cost.
+  - Add it to `boundaries.test.ts`: no non-test file under `src/` writes `userId` in a `people` insert or update, apart from the testing fixtures.
+  - Record it as the mitigation for the owner-path paper residual in DECISION-208.
+- **Amendment A3, release-note honesty (the 0.25.2 lesson):** "the connection between a sign-in and a person can now be made only by accepting an invitation" claims more than the record admits, because the owner path is open. Suggested wording: *"…can now be made from a congregation's side only by accepting an invitation."*
+
+### R24: users email uniqueness. Accepted: replace the revoke with `users_email_lower_uq`, plus one required edit
+
+- **Why I accept it:** the seven `presby_app` writers and the adapter rule out the revoke. A trigger cannot tell a real email-change update from a forged one, because `presby_app` can write the verification table too.
+- **The index helps more than the tech-lead claimed:**
+  - The 0059 comment at `drizzle/0059_presby_account_invitations.sql:1056–1060` names a race that is open today. In new-account mode the `lower(email)` existence check is not a lock, and `users_email_unique` only stops exact-case collisions.
+  - The new index closes that race.
+  - It also makes the identity match in acceptance step 3 deterministic.
+- **Branch measurement:** 95 users and 95 distinct lowered emails. That is higher than the design's 31, still with no duplicates.
+- **Required edit E1, the step-5 error mapping:**
+  - The re-created `presby_accept_invitation` maps `unique_violation` by constraint name, and only `users_email_unique` (line 1280) maps to `account_exists`.
+  - After 0064, the race above raises `users_email_lower_uq`, which would be re-raised and surface as `db_error`.
+  - Add `users_email_lower_uq` to that arm, for all purposes. Pin it with the existing source-scan or DB-test mapping table.
+  - Doing this inside the full re-creation is safe. The FA and treasurer parity golden does not exercise this race.
+- **Behaviour change to record in DECISION-208:** a Google sign-in whose address is a case-variant of an existing account now fails at the adapter's insert, instead of quietly creating a second account. That is the intended direction.
+  - The verify-email path already catches any 23505 by error code (`verify-email/[token]/page.tsx:96`), so nothing changes there.
+- **Suggestion S10, F187's status:** do not narrow the finding's title. F187 as raised was "`presby_app` keeps DML on `users`, which undermines the email match".
+  - Record it as **narrowed**, not closed: the case-variant is closed and the definer-mediated email change stays open (TODO).
+  - DECISION-208's drafted text is otherwise accurate.
+
+### R21: the sender authority check. Amended: the widening is right, but apply the same time window to every source
+
+- **Why the widening is right:** stating T in permissions over every source that is not a derived group fits "authority you could have created yourself" better than a list of sources.
+- **The derived-group exclusions are sound:**
+  - Excluding `active_membership` is exactly correct. The sender is an active member holding `people.manage`, so they hold every permission granted through `active_membership` as well. T minus that baseline loses nothing.
+  - Excluding `session` and `diaconate` depends on `officers.manage`. That matches Increment 2's self-constitution residual: an `officers.manage` holder can already create the officer term that gives that authority.
+  - Known consequence, to record in DECISION-207 rather than turn into a new rule: a tenant role bound to the Session group reaches an invitee through a sender who holds `officers.manage` but not that role's keys.
+- **Amendment A4, the time window:**
+  - The design counts future-dated **person** grants but computes the rest of T "as of today". If T is built from `presby_effective_permissions(…, current_date)`, it misses future-dated managed-group grants and future-dated managed-group memberships. The resolver's `starts_on <= p_as_of` filters them out.
+  - Build T directly from `role_grants` (both the person arm and the managed-group arm) joined to `group_memberships` for managed groups, using `ends_on is null or ends_on > current_date` on every row and **no `starts_on` bound**.
+  - The sender's own set stays as of today: you may not lend authority you do not yet hold.
+  - The branch has 0 such future-dated rows today, so this is about getting the shape right.
+- **Amendment A5, which groups count as derived:**
+  - Identify derived groups by a closed list: `membership_source = 'derived' and derived_from in ('active_membership','session','diaconate')`.
+  - Any new derived kind then falls into T (fails closed) until someone classifies it. Pin the list by test.
+  - The commission and delegation sources (resolver arms 3 and 4) reach only people with a membership at another organisation. R31 (`needs_support`, check 4) refuses those before checks 5 and 6, so T need not model them. State this in the design and let the R31 test cover it.
+
+## F177, Option 3: view
+
+Option 3 is architecturally sound, and I prefer it to Option 1 for this increment.
+
+- **It fits recorded decisions.** DECISION-065 names visitors as grantees of the ability to browse the directory, so a visitor login reading tier-1 directory data, privacy-filtered, is inside the tier model. Option 1 reverses a recorded decision and needs a visitor baseline role designed alongside it.
+- **The acknowledgement is a disclosure, not a control.** It reduces no exposure, so DECISION-207 and the release note must say so plainly, which the draft does.
+- **I accept it on four conditions:**
+  1. The definer enforces `needs_acknowledgement`, not the UI (as designed).
+  2. The audit row records `acknowledged` in the same transaction.
+  3. The visitor test is pinned equal to the Community Visitors list's test.
+  4. F177 stays **open**, with Option 1 plus a visitor baseline role as the first item of Increment 3's Phase 2.
+- **Two notes for the record:**
+  - F177 also covered staff anchors with no roll. Option 3 asks for an acknowledgement for visitors only. DECISION-207 should say that staff anchors reading the directory is accepted on purpose (it is part of their job), not overlooked.
+  - When Option 1 lands it will take directory access away from visitors who accepted under Option 3. The release note's "narrower view in a later release" already sets that expectation; keep that sentence.
+
+## Invariants touched
+
+- **Isolation and the link as a database property:** stronger with A1, since every non-owner role is refused.
+- **Permissions vs flags, and credentials:** unchanged. The credential still grants nothing.
+- **Two hierarchies:** respected. R31 sits ahead of the authority checks.
+- **No real data:** respected. Counts only.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 3a — Architect review of design departures | architect | Complete. R23 amended (refuse any non-owner role; owner-path source scan; release-note wording); R24 accepted with E1 (map `users_email_lower_uq` to `account_exists` in step 5) and F187 recorded as narrowed (S10); R21 amended (no `starts_on` bound on any non-derived source; closed list of derived kinds; commission and delegation left to R31); F177 Option 3 endorsed on four conditions. No new numbers. | Approved with suggestions | 2026-10-22 |
+
+## Handoff
+
+Next agent: the **tech-lead** folds A1–A5 and E1 into the design and DECISION-207/208 in place, with no new phase. Then **Phase 4 Batch A (database-admin)**, after Increment 2's Phase 4 commits, as already sequenced. The operator's choice on F177 is still needed before Phase 4.
+
+I wrote nothing. My only database access was read-only (`default_transaction_read_only=on`) against the pipeline branch `ep-jolly-boat-axklya0l`: roles and role memberships, owners, RLS flags, grants on `people` and `users`, column grants on `people.user_id`, triggers, the `users` indexes and the case-duplicate count, group sources, future-dated authority rows, and `presby_effective_permissions`. Nothing touched production or `development`.
+
+Files read:
+- `/Users/cshenso/git/presby-platform/presby-fadir/docs/work-log/2026-10-22-founding-admin-directory.md`
+- `/Users/cshenso/git/presby-platform/presby-fadir/drizzle/0059_presby_account_invitations.sql`
+- `/Users/cshenso/git/presby-platform/presby-fadir/drizzle/0061_presby_participant_roll.sql`
+- `/Users/cshenso/git/presby-platform/presby-fadir/src/app/(email-verify)/account/verify-email/[token]/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-fadir/src/auth.ts`
+
+### Operator ruling on F177 (2026-10-22)
+
+- **"Warn and confirm."** Option 3: inviting a visitor needs an audited acknowledgement from the sender that the visitor will be able to see the directory. Narrowing `active_membership` is deferred to Increment 3. Production measurement (orchestrator, read-only, 2026-10-22): 0 case-duplicate email groups in `users`, so `users_email_lower_uq` applies cleanly.
+

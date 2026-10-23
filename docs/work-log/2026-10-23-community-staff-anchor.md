@@ -19,7 +19,7 @@
 | 3 — Technical design | orchestrator | Complete (brief, below) | — | 2026-10-23 |
 | 4 — Implementation | full-stack-developer | Complete | — | 2026-10-23 |
 | 5 — Verification | qa | Complete (run 1 FAIL on the copy; run 2 PASS) | PASS | 2026-10-23 |
-| 6 — Shipped vs intent | analyst | In progress | — | — |
+| 6 — Shipped vs intent | analyst | Complete; follow-ups to TODO | SHIP WITH NOTES | 2026-10-23 |
 
 ## Phase 1 — bug confirmed (orchestrator)
 
@@ -274,3 +274,99 @@ The scratch copy is removed, nothing is left on port 3113, and the worktree is c
 | 5 — Verification | qa | Complete (run 2) | PASS | 2026-10-23 |
 
 **Handoff:** to analyst (Phase 6). Please carry the heading note above into the shipped-vs-intent review.
+
+
+# Phase 6 — Shipped vs Intent (analyst)
+
+*Recorded verbatim.*
+
+**Date:** 2026-10-23
+**Reviewed:** `git diff origin/main...HEAD` at `497ceee`, with the shipped code at `4b5a1c1`. I read the diff and the work-log. I ran no suites and no browser. For behavior, I rely on QA runs 1 and 2, which I checked against the code.
+
+### Bug 1: a person who joined by invitation is invisible in Community
+
+**Delivered.**
+- **Root cause.** The root cause named in Phase 3 is real. No view owned a live `engagement_status = 'staff'` membership with no roll and no open position. The Staff view was position-only, and Everyone is Directory-backed (DECISION-129).
+- **The fix.** The `staff` list predicate in `src/lib/community.ts` is now "live, not merged, not deceased, and (engagement `staff` or an open position)". The founding administrator or treasurer now appears under Staff.
+- **What the operator sees.**
+  - The row reads "No position yet".
+  - An "Add a position" link shows only for someone who can use the Staff page (the `org_portal.staff` flag on and `staff.manage`). A `people.manage` holder without `staff.manage` sees the note and no link, which is better than a link to a forbidden page.
+- **Gate and visibility.** The `people.manage` gate and the query path are unchanged. The anchor still does not appear in Everyone or the Directory (DECISION-129). The public staff listing goes through `staff.ts`, which is not in the diff, so the anchor cannot surface publicly.
+- **Evidence.**
+  - The DB invariant test covers every live-membership shape (roll member, participant, visitor, staff with a position, staff anchor without a position, ended). It was run red then green by both the implementer and QA.
+  - An e2e anchor spec passes at desktop and 360px. It checks the anchor is listed under Staff and absent from Everyone.
+  - The implementer looked at 360px in a real browser: no overflow.
+- **A durable fix.** The invariant test means the next membership shape that falls through fails a test instead of reaching production.
+
+### Bug 2: `/no-organization` false promise and "presby"
+
+**Delivered.**
+- **Old promise removed.** The old promise ("someone there with administrator access can add you… the email address you signed in with") is gone. The page no longer suggests that a contact email connects an account.
+- **Current copy.** The page now says "If you were invited, open the link in your invitation email". It adds that signing in doesn't connect you, that only an invitation link does, and that it works while you are signed in with the address it was sent to. It then says "You are signed in as <email>" when an email exists.
+- **True against the code.** QA checked each claim: `presby_accept_invitation` is the only writer of `people.user_id`, and a different account address returns `email_mismatch`.
+- **Edge cases.** The null-email case ends the sentence cleanly, and a unit test pins it. A test also asserts that "arrange" and "can add you" do not appear.
+- **Rename.** Every product-name "presby" on the page is now "PresbyPortal". The only remaining matches are "presbytery". The e2e locators were updated, and `:83` and `:219` pass at both viewports.
+- **Gates.** There is no auth-path change and no schema change. QA run 2 is PASS.
+
+### The heading ruling: "Ask your church administrator"
+
+**Ruling: it does not block this release. It becomes a follow-up.**
+
+- **Why it is no longer the operator's bug.** The operator's complaint was a false, specific promise, and that is fixed. The heading is older than this pipeline. It sits above a paragraph that now correctly says "open the invitation link", so the section no longer instructs anyone to do something impossible. A heading that nudges toward the wrong person is still a real inaccuracy, but a smaller one than the one just removed.
+- **Why waiting is better than fixing now.** The right wording depends on a product decision that is open and already tracked: auto-connecting a verified sign-in to the person record with a matching on-file address, in Community 2b. If auto-connect ships, "ask your church administrator" may become correct again, because an admin could then add the email. Rewording now risks churning the heading twice. It also touches the e2e locator at `post-login-routing.spec.ts:83`.
+- **What ships meanwhile.** The paragraph under the heading is true and carries the load.
+- **What would reverse this.** If the heading were the only text on the page, or the paragraph still promised something, I would block.
+
+### What's-new entry (Rule 13)
+
+**Not warranted.**
+- Both changes are bug fixes, which Rule 13 excludes.
+- The Staff-view change is admin-facing and shows only an extra row, not a new capability.
+- The `/no-organization` change corrects copy and adds no behavior.
+
+### Phase 1 gap check
+
+| Gap | Status |
+|---|---|
+| Staff-anchor invisibility | Fixed in code, with a regression test |
+| Other live-membership shapes falling through | Covered by the invariant test |
+| Directory/Everyone exclusion (DECISION-129) | Unchanged and asserted |
+| `/no-organization` false promise | Fixed and pinned by tests |
+| Auto-connect by on-file email | Deferred and tracked (see follow-ups) |
+| Warning when an invited address is already on a person who signs in | Deferred and tracked (see follow-ups) |
+| "Ask your church administrator" heading | Deferred and tracked (see follow-ups) |
+| Staff empty-state headline ("No one holds a staff position yet") | Deliberately unchanged, noted below |
+
+### Verdict: SHIP WITH NOTES
+
+Both bugs no longer show up for the operator. The notes below ship as tracked follow-ups.
+
+### Follow-ups
+
+Each of these goes into `docs/TODO.md` at integration, per Rule 10.
+
+1. **Reword the `/no-organization` heading "Ask your church administrator"**, and update the `post-login-routing.spec.ts:83` locator with it. Settle it together with the auto-connect decision (follow-up 2). Church administrators currently cannot issue invitations. The platform operator issues them, and only for founding-administrator and treasurer purposes.
+2. **Auto-connect a verified sign-in to the person whose on-file address matches.** Operator-requested, and it folds into Community Increment 2b.
+3. **Warn on the platform invitation screen when the invited address is already on a person who signs in.** This folds into the multiple-emails pipeline.
+4. **Staff empty-state copy.** "No one holds a staff position yet" is now reachable only when there is no anchor either. It is not wrong. Revisit it when someone next edits that view.
+5. **Concurrent e2e hazard.** `community-participants.spec.ts` sweeps `E2ECommunity` people, so two worktrees running it on one shared Neon branch delete each other's fixtures. Either scope the sweep per run or document the rule in `docs/testing.md`.
+
+### Housekeeping at integration
+
+- **Rule 12:** the source was operator production testing, not an in-app feedback row, so there is no row to mark `done`.
+- **Rule 14:** update the Community Staff-view line in `docs/product/functionality-map.md`. Staff now means an open position or a live staff anchor.
+- **Rule 15:** no `architecture.md` change.
+- **Rule 10:** move this fix to Done in `docs/TODO.md` and add the follow-ups above.
+- **Release notes:** write them for a non-engineer. They must not claim that invitations can be arranged by a church administrator.
+
+### Per-Phase Status row
+
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-23 |
+
+**Handoff:** to the orchestrator for integration: the Rule 10 and 14 housekeeping, the release notes, and the PR via `/merge-pr` after the user's approval to commit and push. No agent needed beyond that. No loop-back is needed, because the open heading question is a product decision gated on follow-up 2.
+
+Files:
+- /Users/cshenso/git/presby-platform/presby-fix/docs/work-log/2026-10-23-community-staff-anchor.md
+- /Users/cshenso/git/presby-platform/presby-fix/src/lib/community.ts
+- /Users/cshenso/git/presby-platform/presby-fix/src/app/no-organization/page.tsx
+- /Users/cshenso/git/presby-platform/presby-fix/e2e/post-login-routing.spec.ts

@@ -130,6 +130,10 @@
 
 - [Thing that could fail or that needs special handling]
 
+## Copy
+
+- [Every user-facing string, checked against the accepted residuals: copy may not deny a residual the record admits]
+
 ## Implementer
 
 [database-admin | api-developer | ux-developer | full-stack-developer]
@@ -158,6 +162,11 @@
 ## Implementer Notes
 
 [Tradeoffs taken, anything that diverged from the design and why.]
+
+*Keep Phase 4 sections short: files, deviations from the design, gates with
+counts, and anything the next phase must know. Leave out narration of how
+the work went; git history already records it. Judgment output (analyst,
+architect, qa) is still recorded verbatim.*
 
 ---
 

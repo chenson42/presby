@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 import { getPortalMenu, type TileViewer } from "@/lib/org-portal/visible-tiles";
 import type { OrganizationType } from "@/lib/authz";
 import type { OrgProfileForFooter } from "@/lib/sites";
@@ -127,7 +128,7 @@ export async function PortalFooter({
         )}
         <nav aria-label="Footer" className="space-y-4">
           {home && (
-            <Link href={home.href} className={LINK_CLASS}>
+            <Link href={home.href} className={cn(LINK_CLASS, "w-fit")}>
               {home.label}
             </Link>
           )}

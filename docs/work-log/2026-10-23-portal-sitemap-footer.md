@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named | 2026-10-23 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green; see Phase 4 | 2026-10-23 |
 | 5 — Verification | qa | Complete | PASS | 2026-10-23 |
-| 6 — Shipped vs intent | analyst | In progress | — | — |
+| 6 — Shipped vs intent | analyst | Complete; follow-up 1 folded in | SHIP WITH NOTES | 2026-10-23 |
 
 ---
 
@@ -781,34 +781,133 @@ Relevant files:
 
 # Phase 6 — Shipped vs Intent (analyst)
 
-## VERDICT
+*Recorded verbatim.*
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+Pipeline `2026-10-23-portal-sitemap-footer`, Phase 4 commit 354547c. I read the Phase 1–5 sections, the operator rulings, the footer source and the QA record. I did not re-run the suites or open a browser; I'm relying on QA's six-combination DOM check for the browser evidence.
 
-## ONE-LINE TAKE
+### VERDICT
 
-> [The shipped feature in one honest sentence.]
+**SHIP WITH NOTES.** All four operator asks are delivered and no Phase 1 gap was dropped. The notes are small follow-ups, and none of them blocks the ship.
 
-## What's Working
+### ONE-LINE TAKE
 
-- [Specific. The flow that works well and why.]
+> The portal menu and the footer now render one structure, so their titles match by construction. The footer is a wrapping site-map grid, "Community" replaces "People & Membership", and Administration is a heading plus one overview link.
 
-## Intent-vs-Shipped Diff
+### What's Working
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **"Community" replaces "People & Membership"** (`tiles.ts:123`). The `people` key and the `#domain-people` anchor are unchanged. The tile and the page stay "Community", and the home page's pill-and-card pair is the residual the operator accepted (Q2).
+- **Site-map footer with columns** (`portal-footer.tsx`).
+  - It uses a wrapping `grid-cols-2 sm:grid-cols-3 lg:grid-cols-4` grid with real `<h2>` headings and `<ul aria-labelledby>` lists. Per Phase 1 Note 7, it has no `<details>` and no forced seven-column row.
+  - Home is a standalone link.
+  - Headings are plain text, never links, so the footer has no duplicate "Community" link.
+  - Columns with no children are not rendered, so there is no heading without items.
+  - Contact info, `tel:` and copyright are untouched.
+- **One data structure** (`portal-menu.ts`, `getPortalMenu`).
+  - The nav maps every entry, and the footer renders Home plus every entry with children.
+  - `portal-menu-parity.test.tsx` and QA's live DOM comparison agree: the nav and the footer headings matched on all six page and width combinations.
+  - The three hard-coded literals from Phase 1 Note 2 (nav Home, nav Administration, footer Home) are gone.
+- **Administration is a heading plus one overview link.**
+  - Its only child is "Administration overview" pointing to `/o/<slug>/admin`.
+  - `administerTiles` is used only for `.length`, so the operator's Q1 ruling is a property of the data.
+  - One rule now governs both surfaces: `admin_hub` on and at least one administer tile visible. The Phase 1 divergence (the nav showed Administration with zero tiles) is closed.
+  - The administer read is skipped when the hub is off.
+- **No new gate** (DECISION-003/162). The footer is rendered only inside the `resolved.kind === "ok"` branch (DECISION-040), and `layout.test.tsx` is unchanged and green. `check:brand-scope` passes with semantic tokens only.
+- **Tests.**
+  - The e2e locator collisions Phase 1 predicted (`community-participants`, `member-calendar`) were fixed.
+  - A new `portal-footer-sitemap.spec.ts` gives the footer its first e2e floor, including 360px no-horizontal-scroll.
+  - The new modules have 100% coverage.
 
-## Edge Cases
+### Intent-vs-Shipped Diff
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Phase 1 said: rename the label only, keep the `people` key. Shipped: label only. **Matches.**
+- Phase 1 said: Home and Administration must be first-class members of the structure. Shipped: both are. **Matches.**
+- Phase 1 Note 3 said: one Administration rule in both places. Shipped: `portal-menu.ts:118`. **Matches.**
+- Operator Q1 said: the Administration column is the heading plus the overview link. Shipped: exactly that. **Matches.**
+- Operator Q2 said: accept the two "Community" items. Shipped: accepted, with plain-text footer headings. **Matches.**
+- Phase 1 Note 4 said: stay permission-blind and record a "can administer" follow-up. Shipped: permission-blind. The follow-up TODO is still to be written (see below). **Matches, with a TODO outstanding.**
+- Phase 1 Note 5 said: the existing tests and e2e would break. Shipped: all updated. **Matches.**
+- Phase 1 Note 8 said: no `*-brand` utilities, no `bg-primary` in the footer, no `<details>`. Shipped: clean. **Matches.**
+- The Features page category header now reads "Community". Phase 1 and Phase 2 both flagged this as a consequence of the rename. **Acceptable drift.**
 
-## Follow-Ups (if SHIP WITH NOTES)
+### Edge Cases
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+- **Empty state:** pass. With no visible tiles the footer shows Home, contact info and copyright. Domains with no tiles are omitted.
+- **Failure microcopy:** pass. `getPortalMenu` never throws, so a failed read hides a tile or Administration and does not take the chrome down.
+- **Permission gate:** pass. The footer is rendered only for a resolved member, so forbidden, ended, not-found and signed-out visitors never reach it. There is no new permission check, as designed.
+- **Audit event:** not applicable. The change is read-only.
+- **Mobile (360px):** pass. QA's browser check and the e2e smoke show no horizontal scroll, and the columns wrap.
 
-## Red Flags (if NEEDS REWORK)
+### Rulings on QA's notes
 
-- [Specific. What has to change before this ships.]
+1. **Home link click target (full-row width): follow-up, not a blocker.**
+   - It is cosmetic: it enlarges the hit area on an otherwise empty row, and it does not hide, mislabel or break anything.
+   - It is a one-token fix (`w-fit` on the Home link, as the phone link already has).
+   - If the orchestrator is already in the file before commit, adding `w-fit` is a pure class change. I recommend folding it in, then re-running `portal-footer.test.tsx`. If not, it becomes a TODO line.
+2. **Possible leftover toggle row on `pipeline-fixes-and-nav`: environment only, noted.**
+   - The `org_portal.members_create` row for e2e-alpha may read `enabled=true` after community run 1's afterAll aborted. QA had no pre-run snapshot, so the prior value is unknown.
+   - It does not affect the shipped code.
+   - The orchestrator should delete the row if it did not exist before. No follow-up is needed beyond that.
+
+### What's-new (Rule 13)
+
+**Warranted.** Both the rename and the footer are member-visible, and Phase 1 already named this. Suggested entry, with no real data in it:
+
+> **A clearer menu and a footer map.** The "People & Membership" section is now called "Community". The footer at the bottom of every portal page now lists each section of the menu in columns, so the menu and the footer always use the same names.
+
+Publish it at `/admin/whats-new`. Use a version number and date consistent with the 0.39.x release.
+
+### Functionality map updates (Rule 14)
+
+Both lines are in `docs/product/functionality-map.md`.
+
+- **Line 27 (presby: portal IA).**
+  - Replace "People & Membership" in the domain list with "Community" (the `people` key is unchanged).
+  - Replace "the nav row shows one anchor entry per domain…" with a statement that nav and footer both render one pure menu structure (`src/lib/org-portal/portal-menu.ts`, `getPortalMenu()` in `visible-tiles.ts`).
+    - The entries are Home, one per non-empty operate domain, and Administration.
+    - Administration appears when `org_portal.admin_hub` is on and at least one administer tile is visible.
+  - Add that the footer renders the same entries as a wrapping site-map grid, with plain-text column headings and a single "Administration overview" link under Administration.
+- **Line 72 (per-org feature administration).** In the category-picker list, replace "People & Membership" with "Community". Leave the rest alone.
+
+No `docs/architecture.md` change (Rule 15). This is a feature-level refactor, not a new subsystem.
+
+### Follow-Ups (SHIP WITH NOTES)
+
+Each goes into `docs/TODO.md` in the same commit (Rule 10).
+
+1. **Home link `w-fit`** in `portal-footer.tsx`. Skip this line if it is folded in before commit.
+2. **A "can administer" signal** so the footer and nav can hide Administration from viewers who cannot use it. This is a larger decision against DECISION-003/162 and would be its own pipeline (Phase 1 Note 4 and Q1).
+3. **Members tile and the `members_create` toggle.** The tile ignores the toggle and can land on an "off" state. The footer now repeats it on every page. Existing behaviour (Phase 1 item 5).
+4. **Category axis effect on the menu.** Only the toggle-gated tiles (Calendar, Giving, Manage giving, Website domain) vary per organization, and the Features page category switches do not remove Directory, Groups and the other flag-only tiles from the menu.
+5. **Test robustness**, from QA's TODO candidates:
+   - a per-test timeout for the two `org-features.test.ts:532` cases;
+   - the F172 assertion at `community-participants.spec.ts:291`, whose 5 s window is too short on a slow branch (this is pre-existing, and it fails the same way on `origin/main`).
+
+**Close-out housekeeping still outstanding** (Phase 4 and QA both list these):
+- release notes;
+- DECISION-220, 221 and 222;
+- the what's-new entry;
+- the functionality-map lines above;
+- the TODO lines above.
+
+There is no feedback row to mark done (Rule 12): the source was a direct operator request, not an in-app feedback row.
+
+### Red Flags
+
+None.
+
+**Per-Phase Status row:**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-23 |
+
+**Handoff:** the pipeline closes once the orchestrator records this section and finishes the housekeeping above. After that, the user reviews the diff and approves the commit. Nothing is committed or pushed automatically (Rule 1). There is no further agent hand-off.
+
+Relevant files:
+- `/Users/cshenso/git/presby-platform/presby-nav/docs/work-log/2026-10-23-portal-sitemap-footer.md`
+- `/Users/cshenso/git/presby-platform/presby-nav/src/components/org-portal/portal-footer.tsx`
+- `/Users/cshenso/git/presby-platform/presby-nav/src/lib/org-portal/portal-menu.ts`
+- `/Users/cshenso/git/presby-platform/presby-nav/src/lib/org-portal/visible-tiles.ts`
+- `/Users/cshenso/git/presby-platform/presby-nav/docs/product/functionality-map.md`
+
+**Orchestrator, after Phase 6:** follow-up 1 is folded in. The footer Home link now carries `w-fit` (`portal-footer.tsx`); `portal-footer.test.tsx` 18/18, typecheck and lint pass.

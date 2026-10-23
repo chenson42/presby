@@ -41,7 +41,7 @@ const TOGGLE: FeatureToggleEntry = {
   updatedAt: null,
   updatedByEmail: null,
   category: "people",
-  categoryLabel: "People & Membership",
+  categoryLabel: "Community",
   categoryEnabled: true,
 };
 
@@ -113,7 +113,7 @@ describe("FeaturesList — category-off state (Phase 1 Gap 4/5)", () => {
     // name for screen-reader users) — assert at least one match rather than
     // a single getByText, which is ambiguous by design here.
     expect(
-      screen.getAllByText(/turn on people & membership above to enable this/i)
+      screen.getAllByText(/turn on community above to enable this/i)
         .length,
     ).toBeGreaterThanOrEqual(1);
   });

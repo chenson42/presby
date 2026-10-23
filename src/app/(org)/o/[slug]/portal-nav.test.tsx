@@ -1,69 +1,24 @@
 // @vitest-environment jsdom
 /**
- * Tests for `PortalNav`'s server-side entry construction — portal-chrome
- * pipeline (docs/work-log/2026-08-25-portal-chrome.md, Phase 3), updated by
- * the portal-reorg pipeline for the "Administration" hub entry, the
- * credentials-tile-org-type bug fix for the required `organizationType`
- * prop, and — this commit — the product-IA scaffold's domain-anchor
- * computation (docs/work-log/2026-08-27-product-ia-scaffold.md Phase 3 §4,
- * DECISION-117): one nav entry per `PortalDomain` with at least one
- * flag-visible `"operate"` tile for this org's type, replacing the old
- * one-entry-per-tile row.
+ * Tests for `PortalNav`'s mapping — portal-sitemap-footer pipeline
+ * (docs/work-log/2026-10-23-portal-sitemap-footer.md, DECISION-220).
  *
- * `visiblePortalTiles()` is mocked; its own flag-filtering and org-type-
- * scoping behavior is pinned by `src/lib/org-portal/tiles.test.ts`. What
- * THIS file pins is the entry-construction contract: Home is hardcoded and
- * unconditional and `exact`; domain-anchor entries appear in `DOMAIN_ORDER`
- * order, are `exact: true`, and point at `/o/<slug>#domain-<key>`; the
- * `"administration"` domain is EXCLUDED from this computation even if a
- * misconfigured tile would otherwise qualify; "Administration" is appended
- * last, gated solely on `org_portal.admin_hub`; and `organizationType` is
- * forwarded to `visiblePortalTiles()` unchanged. Active-state styling itself
- * is `PortalNavLinks`' job (portal-nav-links.test.tsx).
+ * The entry construction (Home, domain anchors, the Administration rule, the
+ * `administration`-domain exclusion, icon keys) moved to `buildPortalMenu()`
+ * and is pinned by `src/lib/org-portal/portal-menu.test.ts`. What THIS file
+ * pins is the thin layer left: `getPortalMenu()` receives the slug,
+ * organizationType and viewer unchanged; each menu entry is mapped to exactly
+ * `label/href/exact/icon` (`key` and `children` are not passed on); and the
+ * result renders through `PortalNavLinks`. Active-state styling is
+ * `PortalNavLinks`' job (portal-nav-links.test.tsx).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { PortalTile } from "@/lib/org-portal/tiles";
 
-const visiblePortalTiles = vi.fn();
-// `portal-nav.tsx` imports the REAL `DOMAIN_LABELS`/`DOMAIN_ORDER` runtime
-// values from `@/lib/org-portal/tiles` — that module itself imports
-// `server-only` and `@/lib/flags` (transitively `@/lib/db`), which cannot
-// load in this jsdom test environment. Mocked here with the same literal
-// values `tiles.ts` declares (independently pinned by `tiles.test.ts`'s own
-// DOMAIN_ORDER/DOMAIN_LABELS shape assertion).
-vi.mock("@/lib/org-portal/tiles", () => ({
-  DOMAIN_LABELS: {
-    people: "People & Membership",
-    worship: "Worship & Events",
-    giving: "Giving & Finance",
-    governance: "Governance & Courts",
-    reports: "Reports & Insights",
-    communications: "Communications",
-    administration: "Administration",
-  },
-  DOMAIN_ORDER: [
-    "people",
-    "worship",
-    "giving",
-    "governance",
-    "reports",
-    "communications",
-    "administration",
-  ],
-}));
-
+const getPortalMenu = vi.fn();
 vi.mock("@/lib/org-portal/visible-tiles", () => ({
-  visiblePortalTiles: (
-    category: string,
-    organizationType: string,
-    viewer: unknown,
-  ) => visiblePortalTiles(category, organizationType, viewer),
-}));
-
-const isFlagEnabled = vi.fn();
-vi.mock("@/lib/flags", () => ({
-  isFlagEnabled: (key: string) => isFlagEnabled(key),
+  getPortalMenu: (slug: string, organizationType: string, viewer: unknown) =>
+    getPortalMenu(slug, organizationType, viewer),
 }));
 
 const linksSpy = vi.fn();
@@ -80,251 +35,85 @@ const VIEWER = { personId: "person-1", organizationId: "org-1" };
 
 afterEach(() => {
   cleanup();
-  visiblePortalTiles.mockReset();
-  isFlagEnabled.mockReset();
+  getPortalMenu.mockReset();
   linksSpy.mockReset();
 });
 
-function tile(overrides: Partial<PortalTile> & Pick<PortalTile, "key" | "domain">): PortalTile {
-  return {
-    label: overrides.key,
-    description: `${overrides.key} description.`,
-    href: (slug: string) => `/o/${slug}/${overrides.key}`,
-    flagKey: `org_portal.${overrides.key}`,
-    category: "operate",
-    ...overrides,
-  };
-}
+const MENU = [
+  {
+    key: "home",
+    label: "Home",
+    href: "/o/acme",
+    exact: true,
+    icon: "home",
+    children: [],
+  },
+  {
+    key: "people",
+    label: "Community",
+    href: "/o/acme#domain-people",
+    exact: true,
+    icon: "people",
+    children: [
+      { key: "directory", label: "Directory", href: "/o/acme/admin/directory", comingSoon: false },
+    ],
+  },
+  {
+    key: "administration",
+    label: "Administration",
+    href: "/o/acme/admin",
+    exact: false,
+    icon: "administration",
+    children: [
+      { key: "administration-overview", label: "Administration overview", href: "/o/acme/admin", comingSoon: false },
+    ],
+  },
+];
 
-describe("PortalNav — entry construction", () => {
-  it("renders only Home when every tile flag and the admin-hub flag are off", async () => {
-    visiblePortalTiles.mockResolvedValue([]);
-    isFlagEnabled.mockResolvedValue(false);
+describe("PortalNav — maps the menu to nav entries", () => {
+  it("passes exactly label/href/exact/icon per entry, in menu order, and drops key and children", async () => {
+    getPortalMenu.mockResolvedValue(MENU);
 
     const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
     expect(screen.getByTestId("portal-nav-links-stub")).toBeTruthy();
     expect(linksSpy).toHaveBeenCalledWith({
+      entries: [
+        { label: "Home", href: "/o/acme", exact: true, icon: "home" },
+        { label: "Community", href: "/o/acme#domain-people", exact: true, icon: "people" },
+        { label: "Administration", href: "/o/acme/admin", exact: false, icon: "administration" },
+      ],
+    });
+  });
+
+  it("renders only Home when the menu holds only Home", async () => {
+    getPortalMenu.mockResolvedValue([MENU[0]]);
+
+    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
+    render(tree);
+
+    expect(linksSpy).toHaveBeenCalledWith({
       entries: [{ label: "Home", href: "/o/acme", exact: true, icon: "home" }],
     });
   });
 
-  it("calls visiblePortalTiles with the 'operate' category, never 'administer'", async () => {
-    visiblePortalTiles.mockResolvedValue([]);
-    isFlagEnabled.mockResolvedValue(false);
-
-    await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "congregation", VIEWER);
-  });
-
-  it("forwards organizationType to visiblePortalTiles() unchanged — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", async () => {
-    visiblePortalTiles.mockResolvedValue([]);
-    isFlagEnabled.mockResolvedValue(false);
+  it("forwards slug, organizationType and viewer to getPortalMenu() unchanged — bug fix, docs/work-log/2026-08-27-credentials-tile-org-type.md", async () => {
+    getPortalMenu.mockResolvedValue([MENU[0]]);
 
     await PortalNav({ slug: "northern-reach", organizationType: "presbytery", viewer: VIEWER });
 
-    expect(visiblePortalTiles).toHaveBeenCalledWith("operate", "presbytery", VIEWER);
+    expect(getPortalMenu).toHaveBeenCalledWith("northern-reach", "presbytery", VIEWER);
   });
 
-  it("produces one anchor entry per domain with a visible tile, in DOMAIN_ORDER order, each pointing at /o/<slug>#domain-<key> and exact:true", async () => {
-    visiblePortalTiles.mockResolvedValue([
-      tile({ key: "events", domain: "worship" }),
-      tile({ key: "directory", domain: "people" }),
-      tile({ key: "officers", domain: "governance" }),
-    ]);
-    isFlagEnabled.mockResolvedValue(false);
+  it("hands the client leaf plain data only (survives a JSON round trip: no functions, no components)", async () => {
+    getPortalMenu.mockResolvedValue(MENU);
 
     const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
     render(tree);
 
-    expect(linksSpy).toHaveBeenCalledWith({
-      entries: [
-        { label: "Home", href: "/o/acme", exact: true, icon: "home" },
-        {
-          label: "People & Membership",
-          href: "/o/acme#domain-people",
-          exact: true,
-          icon: "people",
-        },
-        {
-          label: "Worship & Events",
-          href: "/o/acme#domain-worship",
-          exact: true,
-          icon: "worship",
-        },
-        {
-          label: "Governance & Courts",
-          href: "/o/acme#domain-governance",
-          exact: true,
-          icon: "governance",
-        },
-      ],
-    });
-  });
-
-  it("a domain with no visible tile for this org type produces no anchor entry", async () => {
-    // Simulates a congregation with Officers off and no other governance
-    // tile visible — Governance & Courts must not appear.
-    visiblePortalTiles.mockResolvedValue([
-      tile({ key: "directory", domain: "people" }),
-    ]);
-    isFlagEnabled.mockResolvedValue(false);
-
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-    render(tree);
-
-    const entries = linksSpy.mock.calls[0][0].entries;
-    expect(
-      entries.some((e: { label: string }) => e.label === "Governance & Courts"),
-    ).toBe(false);
-  });
-
-  it("collapses multiple tiles in the same domain to ONE anchor entry, not one per tile", async () => {
-    visiblePortalTiles.mockResolvedValue([
-      tile({ key: "directory", domain: "people" }),
-      tile({ key: "members", domain: "people" }),
-      tile({ key: "groups", domain: "people" }),
-    ]);
-    isFlagEnabled.mockResolvedValue(false);
-
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-    render(tree);
-
-    const entries = linksSpy.mock.calls[0][0].entries;
-    const peopleEntries = entries.filter(
-      (e: { label: string }) => e.label === "People & Membership",
-    );
-    expect(peopleEntries).toHaveLength(1);
-  });
-
-  it("EXCLUDES the 'administration' domain from anchor computation even when a misconfigured tile carries it with category:'operate' — proving the collision-avoidance rule (DECISION-117)", async () => {
-    visiblePortalTiles.mockResolvedValue([
-      // This tile should never exist in the real registry (every
-      // "administration"-domain tile is category: "administer"), but
-      // visiblePortalTiles() is mocked here specifically to prove the nav
-      // itself enforces the exclusion rule, not merely benefiting from
-      // today's data shape by accident.
-      tile({ key: "rogue-admin-tile", domain: "administration" }),
-    ]);
-    isFlagEnabled.mockResolvedValue(false);
-
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-    render(tree);
-
-    expect(linksSpy).toHaveBeenCalledWith({
-      entries: [{ label: "Home", href: "/o/acme", exact: true, icon: "home" }],
-    });
-  });
-
-  it("appends 'Administration' last when org_portal.admin_hub is on, after every domain anchor", async () => {
-    visiblePortalTiles.mockResolvedValue([
-      tile({ key: "directory", domain: "people" }),
-    ]);
-    isFlagEnabled.mockImplementation(async (key: string) =>
-      key === "org_portal.admin_hub",
-    );
-
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-    render(tree);
-
-    expect(linksSpy).toHaveBeenCalledWith({
-      entries: [
-        { label: "Home", href: "/o/acme", exact: true, icon: "home" },
-        {
-          label: "People & Membership",
-          href: "/o/acme#domain-people",
-          exact: true,
-          icon: "people",
-        },
-        {
-          label: "Administration",
-          href: "/o/acme/admin",
-          exact: false,
-          icon: "administration",
-        },
-      ],
-    });
-  });
-
-  it("attaches an icon KEY per entry — 'home' for Home, the domain string itself for every domain anchor, 'administration' for the hub entry (docs/work-log/2026-08-28-directory-visual-refresh.md, Phase 4, item 3)", async () => {
-    // Deliberately a STRING key, not an icon component reference — see
-    // `PortalNavEntry.icon`'s own doc comment in `portal-nav-links.tsx` for
-    // why passing the component itself across this Server->Client boundary
-    // is a confirmed-live 500, not a style preference. `PortalNavLinks`
-    // (its own test file) is what pins that the key actually RESOLVES to
-    // the same icon `NAV_DOMAIN_ICONS`/`TILE_ICONS` use.
-    visiblePortalTiles.mockResolvedValue(
-      (["people", "worship", "giving", "governance", "reports", "communications"] as const).map(
-        (domain) => tile({ key: domain, domain }),
-      ),
-    );
-    isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.admin_hub");
-
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-    render(tree);
-
-    const entries = linksSpy.mock.calls[0][0].entries as Array<{
-      label: string;
-      icon?: string;
-    }>;
-    const byLabel = Object.fromEntries(entries.map((e) => [e.label, e.icon]));
-
-    expect(byLabel["Home"]).toBe("home");
-    expect(byLabel["People & Membership"]).toBe("people");
-    expect(byLabel["Worship & Events"]).toBe("worship");
-    expect(byLabel["Giving & Finance"]).toBe("giving");
-    expect(byLabel["Governance & Courts"]).toBe("governance");
-    expect(byLabel["Reports & Insights"]).toBe("reports");
-    expect(byLabel["Communications"]).toBe("communications");
-    expect(byLabel["Administration"]).toBe("administration");
-  });
-
-  it("omits 'Administration' when org_portal.admin_hub is off, regardless of visible tiles", async () => {
-    visiblePortalTiles.mockResolvedValue([
-      tile({ key: "directory", domain: "people" }),
-    ]);
-    isFlagEnabled.mockResolvedValue(false);
-
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-    render(tree);
-
-    const entries = linksSpy.mock.calls[0][0].entries;
-    expect(
-      entries.some((e: { label: string }) => e.label === "Administration"),
-    ).toBe(false);
-  });
-
-  it("checks isFlagEnabled with the exact org_portal.admin_hub key", async () => {
-    visiblePortalTiles.mockResolvedValue([]);
-    isFlagEnabled.mockResolvedValue(false);
-
-    await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-
-    expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.admin_hub");
-  });
-});
-
-describe("PortalNav — a presbytery-only domain absent for a congregation", () => {
-  it("produces no anchor entry when visiblePortalTiles() (mocking the real org-type-scoping behavior) returns nothing for that domain", async () => {
-    // visiblePortalTiles() itself owns orgTypeScope filtering (pinned in
-    // tiles.test.ts); this proves PortalNav correctly omits the domain when
-    // the (mocked) tile list simply doesn't include it for this org type.
-    visiblePortalTiles.mockResolvedValue([
-      tile({ key: "directory", domain: "people" }),
-      // No governance-domain tile returned — as would be the case for a
-      // congregation when officers/credentials/committees/oversight are all
-      // either off or presbytery-scoped.
-    ]);
-    isFlagEnabled.mockResolvedValue(false);
-
-    const tree = await PortalNav({ slug: "acme", organizationType: "congregation", viewer: VIEWER });
-    render(tree);
-
-    const entries = linksSpy.mock.calls[0][0].entries;
-    expect(
-      entries.some((e: { label: string }) => e.label === "Governance & Courts"),
-    ).toBe(false);
+    const { entries } = linksSpy.mock.calls[0][0];
+    expect(JSON.parse(JSON.stringify(entries))).toEqual(entries);
+    for (const entry of entries) expect(typeof entry.icon).toBe("string");
   });
 });

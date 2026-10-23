@@ -63,7 +63,7 @@ const visiblePortalTiles = vi.fn();
 // module replaces ALL of its exports, not just the one named.
 vi.mock("@/lib/org-portal/tiles", () => ({
   DOMAIN_LABELS: {
-    people: "People & Membership",
+    people: "Community",
     worship: "Worship & Events",
     giving: "Giving & Finance",
     governance: "Governance & Courts",
@@ -293,7 +293,7 @@ describe("AdminHubPage — domain sections (commit 2, docs/work-log/2026-08-27-p
     render(el);
 
     expect(
-      screen.getByRole("heading", { name: "People & Membership" }),
+      screen.getByRole("heading", { name: "Community" }),
     ).toBeTruthy();
     expect(
       screen.getByRole("heading", { name: "Governance & Courts" }),

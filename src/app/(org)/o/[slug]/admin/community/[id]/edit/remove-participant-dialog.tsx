@@ -108,7 +108,7 @@ export function RemoveParticipantDialog({
           <AlertDialogDescription className="break-words">
             This ends {personName}&apos;s connection to {orgName} from the date
             you choose. They leave the Directory and lose access if they have an
-            account. You can undo it afterward.
+            account. You can usually undo it afterward.
           </AlertDialogDescription>
         </AlertDialogHeader>
 

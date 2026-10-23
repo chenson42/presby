@@ -96,7 +96,7 @@ export const SUCCESS_COPY = {
 
 /** The two extra messages the wizard's create action adds on top of the table. */
 export const CREATE_COPY = {
-  forbidden: "You don't have permission to add members here.",
+  forbidden: "You don't have permission to add people here.",
   existingElsewhere:
     "That person already belongs to another organization. This step can't attach them here yet — contact support about a transfer.",
   alreadyHere:

@@ -759,8 +759,11 @@ create index on roll_actions (organization_id, effective_date, kind) where appro
 
 D5 said `other_participant_enrolled` bypasses approval. Until 0061 that was paper: nothing in the
 database distinguished "the Session approved" from "the row was inserted as approved", and any
-`presby_app` path could do the second. 0061 makes it a database property
-(`docs/work-log/2026-10-22-founding-admin-directory.md`; DECISION-198, DECISION-199; F173-F175).
+`presby_app` path could do the second. 0061 makes the insert half a database property: an
+approved row can be inserted only by the participant function. The approval `UPDATE` of a pending
+row is still gated only in the application (on `roll.approve`) until Community Increment 2's
+lockdown migration revokes it (
+`docs/work-log/2026-10-22-founding-admin-directory.md`; DECISION-198, DECISION-199; F173-F175).
 
 - **Two writers, function-mediated.** `presby_record_participant_action(person, kind, date,
   minute, recorded_by)` records `other_participant_enrolled` or `other_participant_removed` approved

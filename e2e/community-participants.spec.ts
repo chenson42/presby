@@ -135,7 +135,7 @@ test.describe("Community", () => {
         await remove.click();
         const dialog = page.getByRole("alertdialog");
         await expect(dialog).toBeVisible();
-        await expect(dialog).toContainText("You can undo it afterward.");
+        await expect(dialog).toContainText("You can usually undo it afterward.");
         // The dialog fits the viewport and its buttons are reachable.
         const box = await dialog.boundingBox();
         expect(box).not.toBeNull();

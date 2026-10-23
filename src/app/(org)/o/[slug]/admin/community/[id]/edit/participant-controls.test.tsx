@@ -96,7 +96,7 @@ describe("Remove as participant dialog", () => {
     expect(screen.getByRole("heading", { name: /remove as participant\?/i })).toBeTruthy();
     expect(
       screen.getByText(
-        /ends nora ashgrove's connection to alder creek presbyterian church from the date you choose\. they leave the directory and lose access if they have an account\. you can undo it afterward\./i,
+        /ends nora ashgrove's connection to alder creek presbyterian church from the date you choose\. they leave the directory and lose access if they have an account\. you can usually undo it afterward\./i,
       ),
     ).toBeTruthy();
     const date = screen.getByLabelText(/effective date/i) as HTMLInputElement;

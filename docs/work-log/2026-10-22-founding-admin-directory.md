@@ -21,7 +21,7 @@
 | 3 — Technical design | tech-lead | Complete (design to R1-R14; S1-S6 ruled; route move designed as its own Batch M) | Design complete; implementers named | 2026-10-22 |
 | 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; Batch B (server: lib, actions, audit) complete 2026-10-22; Batches C and D (UI, e2e, 360px pass) complete 2026-10-22 — Phase 4 Complete for Increment 1 | — | — |
 | 5 — Verification | qa | Complete (run 1 FAIL on the stale integration patch only; run 2 PASS) | PASS | 2026-10-23 |
-| 6 — Shipped vs intent | analyst | In progress | — | — |
+| 6 — Shipped vs intent | analyst | Complete (Increment 1); follow-ups 1–8 to TODO; release-note conditions A, B and wording fix C | SHIP WITH NOTES | 2026-10-23 |
 | Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
@@ -1902,37 +1902,215 @@ The worktree is clean and the scratch copies are removed.
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Increment 1. Recorded verbatim by the orchestrator from the analyst's returned text.*
+
+I read the Phase 1 revised return, the operator rulings, Phases 2 and 3, Phase 4 Batches M, A, B and C+D, and QA runs 1 and 2. I also read the shipped code: the Community page, nav, wizard, edit page, copy table, and the 0061 header and comments. I did not re-run any suite; I rely on QA's PASS (run 2, HEAD 881d444, no product code changed since run 1).
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.**
+
+Every operator ruling and every Phase 1 verb is delivered. The four known items are ruled below, and none of them blocks. The notes fall into three groups:
+- conditions on the release copy, which has not been written yet;
+- one overclaiming sentence in `docs/schema-design.md`;
+- tracked follow-ups.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A founding administrator or clerk can now open Community, add a visitor or participant on record and undo it, and propose a member. The member half cannot complete until Increment 2 gives someone `roll.approve`, so the release must say so.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The original bug is fixed at the user's level.** A `people.manage` holder without `directory.view` keeps the header, Add person, the nav and the Visitors, Staff and Former views. The limited state names the missing permission. Without `people.manage`, the forbidden body is unchanged and byte-identical.
+  - Covered by `page.test.tsx:244` and the 360px e2e at `community-participants.spec.ts:280`.
+  - 0061 also puts `directory.view` and `roll.propose` on the clerk template, so a designated administrator gains both through the office role.
+- **Participants are on record.** Enrol and remove are function-mediated (`presby_record_participant_action`) and need no approval.
+  - The kind alone decides, so a forged membership kind stays pending.
+  - Dates are bounded, and filed returns are warned about but never changed.
+  - Audit rows are written in the same transaction under `tenant.roll_action.recorded` and `.voided`, never `.approved`.
+- **Undo is a void.** The void is a new row. Only the latest on-record entry can be undone. Voiding a removal reopens the membership only on the removal's own marker. A reason is required and goes into the audit row.
+- **All deletes are soft.** Removal sets `ended_on` and `ended_reason`, and a void is a new row. A source scan pins that 0061 contains no delete. Test teardown is the only delete, which is the fixture exemption.
+- **The visitor path exists.** The wizard offers Visitor with `people.manage` alone. Visitors are admin-only and never in the Directory. A source scan and a DB test pin that.
+- **The match step now says "already here".** Duplicates are redirected to the person's record. This closes F178.
+- **Reachability.**
+
+  | Path | How the user gets there | Status |
+  |---|---|---|
+  | visitor → participant | Edit page, "Record a roll action", `other_participant_enrolled` | Takes effect now |
+  | visitor → member | Edit page, a gain kind | Proposal only |
+  | participant → member | Edit page, a gain kind; the Connection card says no removal is needed | Proposal only |
+
+  The two member paths are proposals and complete only when Increment 2 ships approval.
+- **Rename and move.** The section is "Community", with filters Everyone, Members, Participants, Visitors, Staff and Former.
+  - `/admin/members/:path*` is a permanent (308) redirect to `/admin/community`.
+  - The redirect is scoped to platform hosts (F151).
+  - Query and sub-paths are preserved and a custom host still gets a neutral 404. All of this is browser- and e2e-verified.
+  - The route move is its own mechanical batch and commit, as the operator asked, so the security diff stayed reviewable.
+- **The Staff page stays.** It is unchanged apart from handling the two new `createPerson()` result variants. Community's Staff filter comes from open positions, as ruled, and the Directory exclusion stands (DECISION-129).
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Participants on record with no approval.**
+  - Phase 1 said: effective at record, with `roll.propose` checked in the same transaction.
+  - Shipped: matches, and is stronger than Phase 1. A restrictive insert policy makes the function the only way to insert an approved row.
+  - Verdict: matches.
+- **Undo for a mistaken entry (F175).** Shipped as a void with a required reason. Verdict: matches.
+- **Removal (the operator's Q2 "yes, include now").** Shipped: removal ends the membership, with `holds_position`, `self_target`, `pending_action` and `not_participant` refusals. Verdict: matches the Phase 2 rulings.
+- **F173 (`createPerson()` wrote null roll fields).** Fixed in TypeScript, repaired in 0061, and enforced by a CHECK. Verdict: matches.
+- **Founding administrator without `directory.view` reaches Add person.** Delivered. Add person gates on `people.manage` alone. Verdict: matches.
+- **Phase 1's "fail before the wizard starts, not at the end."**
+  - Phase 2 R10 replaced the Phase 1 point-to-Staff fallback with a button-level gate.
+  - The `/new` page itself has no `people.manage` check, so a deep link walks the wizard and fails at the last step ("You don't have permission to add members here.").
+  - Verdict: acceptable drift, filed as follow-up 7.
+- **Phase 1 said: member proposals queue for the Session, and "the copy says so".**
+  - Shipped: the copy says "needs Session approval", "Waiting for the Session to approve" and "once the Session approves".
+  - It never says that approval is not yet possible, or that the proposer cannot see the queue, since `/pending` needs `roll.approve`.
+  - Verdict: partial. It is honest as far as it goes, but a user would read it as approval being possible. The release copy must carry the gap (condition A).
+- **Phase 1's "SASR participant count and gain/loss lines".** Participants raise the count and Total Adherents with no gain or loss line, as designed. Verdict: matches.
+
+## Rulings on the four known items
+
+1. **360px nav clipping: acceptable drift, filed as follow-up 1.**
+   - Nothing overflows the page. Every view is reachable by swiping, and it is the shared `ButtonGroup` working as documented.
+   - It is still weak for the people this increment is for:
+     - Visitors, Staff and Former are the 4th to 6th segments, entirely off-screen at 360px.
+     - After adding a visitor, the wizard lands on `?view=visitors`, so the active pill is off-screen.
+     - The clipped third tab, "Parti…", is the only hint that anything follows.
+   - Do not hold the ship for it. Fix by scrolling the active segment into view and adding an edge fade.
+   - Consider the same for the Directory's own nav, which shares the component.
+2. **F183, the stranded proposal: accept as a known residual, ship with a note, under two conditions.**
+   - What happens: a Member proposal that nobody can approve or withdraw also blocks enrol and remove for that person, because of `pending_action`. The operator is the only production user and knows this.
+   - Condition A: the release notes must say so plainly, in the same release as the Member option.
+   - Condition B: Increment 2 (withdrawal, `roll.approve` home, queue visibility) is the next pipeline, not a someday item.
+   - Filed as follow-up 2. If Increment 2 slips beyond the first real congregation's data entry, add one line under the wizard's Member option ("No one can approve yet.").
+3. **P5, `presby_app` can insert pending and UPDATE it to approved: accept as a documented residual.**
+   - It is recorded in R5, DECISION-198(b), the 0061 header and the policy comment. Increment 2's lockdown (the `UPDATE` clause, designed as 0063) closes it.
+   - Its practical exposure is low, because nobody holds `roll.approve` and it needs an application bug to exploit.
+   - The "database property" claim is true only of the insert half. See condition C and follow-up 3.
+4. **Post-submit landing: acceptable drift, keep it.**
+   - After submit it routes to `?view=participants`, `?view=visitors`, or Everyone for a member proposal. It sends the user to the list that now holds the new person.
+   - One persona gap: a degraded user without `directory.view` who adds a participant or member lands on the limited state and cannot see who they just added. Landing on the person's own edit page would serve them better.
+   - Filed as follow-up 5, low. In practice the clerk-template grant makes this rare.
+
+## Reading the release-facing copy against the accepted residuals
+
+The release notes, functionality-map line and what's-new entry are not drafted yet. I read everything that exists: in-app copy, the tile and toggle descriptions, the 0061 comments, `docs/schema-design.md` and the drafted decisions. That is the 0.25.2/F170 check.
+
+- **Denies a residual (fix): `docs/schema-design.md`, "Participants on record".**
+  - The first paragraph says "0061 makes it a database property". The sentence before it calls the old state "any `presby_app` path could" insert approved.
+  - That is true only of the insert path. Pending-then-UPDATE to approved is still open, and the admission comes two bullets later.
+  - Reword the opening to say 0061 closes the approved-at-insert half and that the approval `UPDATE` remains application-gated until Increment 2. This one wording fix is a condition (C).
+- **In-app copy that is accurate but absolute.**
+  - The remove dialog says "You can undo it afterward." Undo can refuse with `membership_changed`, `not_latest_action` or `provisioning_incomplete`. Prefer "You can usually undo it afterward."
+  - The limited state says "Visitors and Staff above still work" and omits Former. Cosmetic.
+- **Guardrails for the release notes (condition A).** They must not say or imply:
+  - that Members can be approved yet, or that the Session approval queue is visible to the clerk (it is not);
+  - that "everything is undoable" or "nothing is ever deleted". Undo covers participant entries only, and F176's hard-delete paths remain;
+  - that approval, or participant audit, is database-enforced. Audit is written in TypeScript, so a direct SQL caller skips it, as DECISION-198(g) admits;
+  - that visitors are fully walled off from member access. Visitors are never in the Directory, but they are in the `active_membership` derived group (F177), so a visitor who ever had a linked account would receive the baseline member grant. Today only invitation acceptance links an account, so nothing is exposed, but 2b makes that reachable and must close it first.
+  - They should state: the code deploys first and 0061 is applied after; Community replaces Members; the old URL redirects; and the filed return is never altered.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state: pass, with one note.**
+  - Each of the six views has its own wording, and a search miss is told apart from a view that is genuinely empty.
+  - "Everyone" excludes visitors and staff, because it is the Directory-backed list. After adding only a visitor, Everyone reads "No one yet. Add your first person to get started." That contradicts what the user just did. See follow-up 4.
+- **Failure microcopy: pass.**
+  - Every typed outcome has one human sentence, and the table is type-exhaustive.
+  - A database failure shows "We couldn't load this right now."
+  - The wizard's forbidden toast still says "add members", though it now also adds visitors. See follow-up 7.
+- **Permission gate: pass.**
+  - A caller without `people.manage` gets the unchanged forbidden body, and admin views are refused server-side.
+  - Remove and Undo need the roll-action-edit flag plus `roll.propose`, and the definer function re-checks the actor.
+  - `organizationId` comes from the resolved context, never from the client.
+- **Audit event: pass.**
+  - One row per on-record act, in the same transaction, with ids only.
+  - A forced audit failure rolls back the whole act, and e2e asserts the persisted rows.
+  - The two keys are pinned as distinct from `.approved`.
+- **Mobile (360px): pass with the nav note.**
+  - Zero horizontal overflow on every page and both dialogs.
+  - 44px targets, and the pre-hydration controls are disabled (hydration spec).
+  - The exception is the nav affordance in follow-up 1.
+- **Adversarial pass: pass.**
+  - Forged kinds stay pending, `kind: "none"` is refused, and malformed ids are "not found".
+  - The target-is-actor check and cross-organization derivation are covered.
+  - No redirect target is user-controlled; the redirect is a fixed same-origin rewrite.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Each goes to `docs/TODO.md` in the integration commit (Rule 10).
 
-## Red Flags (if NEEDS REWORK)
+1. **Community nav at 360px.**
+   - Scroll the active segment into view and add a scroll affordance such as an edge fade.
+   - Apply the same fix to the Directory nav, which shares `ButtonGroup`.
+   - Do it before Increment 3 adds more segments.
+2. **F183 and Increment 2.** The next pipeline, specifically:
+   - withdrawal of a mistaken proposal;
+   - the Session role carrying `roll.approve`;
+   - queue visibility for `roll.propose` holders;
+   - the F185 "Member only where a Session exists" rule.
 
-- [Specific. What has to change before this ships.]
+   If it slips, add the one-line "No one can approve yet" to the wizard and the Connection card.
+3. **Wording fixes.**
+   - `docs/schema-design.md` opening paragraph, so it does not overclaim (condition C).
+   - The remove dialog: "usually undo".
+   - The `MembersLimited` line that omits Former.
+   - Both are one-line copy changes.
+4. **"Everyone" vs. visitors and staff.**
+   - Either relabel it, or change the Everyone empty state and add a hint such as "Visitors and staff are listed separately."
+   - This is the same family as the already-filed S6 relabel of the Directory's "Members" tab, so decide both labels together.
+5. **Landing for a user without `directory.view`.** Route to the new person's edit page instead of a limited-state list.
+6. **P5 and the Increment 2 lockdown.**
+   - The approval `UPDATE` is still application-gated until Increment 2's lockdown migration, designed as 0063.
+   - Track it explicitly so the restrictive policy is not mistaken for the whole control.
+   - The F177 closure (the `active_membership` group admits visitors and staff anchors) belongs to 2b and must land before any sign-in invite to a visitor.
+7. **Wizard deep-link gate and copy.**
+   - `/community/new` renders the wizard for anyone in the org with the flag on, and the failure comes at the last step.
+   - Gate the page on `people.manage`, per Phase 1 gap 7.
+   - Change `CREATE_COPY.forbidden` to "add people".
+8. **Integration chores (orchestrator).** These are already in the Phase 3 hand-off list; they must happen in the integration commit:
+   - the `_journal.json` entry for 0061;
+   - `git apply scripts/participants/test-rls.sql.integration.patch`, then a full `scripts/test-rls.sql` run as `presby_app` on merged `development`. That is the only full patched run still outstanding;
+   - the TODO lines from Phase 3, including closing F173, rewriting the F111/F118 line, and the Increment 2 and 3 pointers;
+   - the Rule 14 functionality-map line: Members becomes Community, including the old toggle name "Add & approve members" and the roughly three `admin/members` mentions;
+   - decisions DECISION-197 to DECISION-201 and findings F172 to F178;
+   - release notes v0.39.0 under conditions A and B.
+
+## Workflow Rule 12 and 13
+
+- **Rule 12:** the Source is an operator report, not an in-app feedback row, so there is no row to mark `done`.
+- **Rule 13:** Community is admin-only tooling, so a what's-new entry is not required. Skip it, or write at most one line for administrators after Increment 2 lands.
+- **Rule 15:** nothing architectural changed, so `docs/architecture.md` stays as is.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent (Increment 1) | analyst | Complete; follow-ups 1–8 to `docs/TODO.md` at integration; release-note conditions A and B and wording fix C required | SHIP WITH NOTES | 2026-10-23 |
+
+## Handoff
+
+Next is the **orchestrator**, then the operator. Order of work:
+1. Apply the schema-design wording fix (C).
+2. Write the release notes under conditions A and B.
+3. Run the integration list (follow-up 8).
+4. Reconcile the TODO.
+
+The pipeline closes at integration. Increment 2 is the next pipeline; its Phase 4 starts only after Increment 1 merges. Increment 2 closes F183, P5 and F185. Increment 2b closes F177 and completes the visitor and participant sign-in path.
+
+Files referenced, all under `/Users/cshenso/git/presby-platform/presby-fadir`:
+- `docs/work-log/2026-10-22-founding-admin-directory.md`
+- `docs/schema-design.md` (section "Participants on record")
+- `drizzle/0061_presby_participant_roll.sql`
+- `next.config.ts`
+- `src/app/(org)/o/[slug]/admin/community/page.tsx`
+- `src/app/(org)/o/[slug]/admin/community/community-nav.tsx`
+- `src/app/(org)/o/[slug]/admin/community/community-empty-state.tsx`
+- `src/app/(org)/o/[slug]/admin/community/participant-copy.ts`
+- `src/app/(org)/o/[slug]/admin/community/new/connection-step.tsx`
+- `src/app/(org)/o/[slug]/admin/community/new/page.tsx`
+- `src/app/(org)/o/[slug]/admin/community/[id]/edit/connection-card.tsx`
+- `src/components/shared/button-group.tsx`
 
 ---
 

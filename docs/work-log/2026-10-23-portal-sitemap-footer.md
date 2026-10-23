@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-23 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named | 2026-10-23 |
-| 4 — Implementation | full-stack-developer | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Complete | Gates green; see Phase 4 | 2026-10-23 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -564,26 +564,50 @@ Listing individual administer tiles in the footer (Q1 ruled); permission-aware m
 
 ## Files Created
 
-- `path/to/file` — purpose
+- `src/lib/org-portal/portal-menu.ts` — pure `buildPortalMenu()` plus the `PortalMenu*` types; Home, domain entries, and the one Administration rule (DECISION-220).
+- `src/lib/org-portal/portal-menu.test.ts` — 17 pure tests (truth table, ordering, Q1, serializability, label uniqueness over the real registry).
+- `src/components/org-portal/portal-menu-parity.test.tsx` — render parity (nav labels equal Home plus footer headings, four menu shapes) and anchor parity against `DomainTileSections`.
+- `e2e/portal-footer-sitemap.spec.ts` — footer at 360 and 1024, 44px targets, Administration column, hub-off, hub-on-with-no-administer-tile.
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `src/lib/org-portal/tiles.ts` — `DOMAIN_LABELS.people` is now "Community" (key unchanged); `PortalDomain` doc and two tile comments rewritten.
+- `src/lib/org-portal/visible-tiles.ts` — added `getPortalMenu()`; skips the administer read when `org_portal.admin_hub` is off.
+- `src/app/(org)/o/[slug]/portal-nav.tsx` — now a thin map of `getPortalMenu()` to `PortalNavEntry`; header rewritten.
+- `src/components/org-portal/portal-footer.tsx` — site-map footer (Home link, wrapping 2/3/4-column grid, plain `<h2>` headings, `aria-labelledby` lists, "Coming soon").
+- `src/lib/org-features.ts` (comment), `src/lib/org-features.test.ts:470` ("Community").
+- Tests: `portal-footer.test.tsx` rewritten; `portal-nav.test.tsx` shrunk to the mapping; `visible-tiles.test.ts` extended with `getPortalMenu` cases; "Community" fixture renames in seven other test files.
+- e2e: `community-participants.spec.ts:283` tightened to `level: 1`; `member-calendar.spec.ts:159` scoped to `main` (see deviations).
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- None. No migration, no Neon branch.
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+- None (read-only).
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+Deviations from the Phase 3 design:
 
----
+1. **One more e2e locator needed tightening than Phase 3 predicted.** `e2e/member-calendar.spec.ts:159` used `getByRole("heading", { level: 2 })` unscoped and hit a strict-mode violation (7 elements) once the footer carried `<h2>` headings. Scoped to `getByRole("main")`. The Phase 3 grep looked at name locators only. I re-grepped for unnamed heading, `h2` and `ul` locators; `portal-home-cards.spec.ts:116` (`slice(0, 2)`) and `:223` (`.first()`) are safe.
+2. `portal-nav.test.tsx` and the footer test mock `getPortalMenu` directly (as designed). The parity test mocks only the loader and runs the REAL `buildPortalMenu()`.
+3. The e2e nav-Administration checks use a CSS locator (`nav[aria-label="Portal"] a`) because the nav links are `display:none` behind the Menu button at 360px.
+
+Gates (worktree `presby-nav`):
+
+- `npm run typecheck`: clean. `npm run lint`: clean (`--max-warnings=0`). `npm run check`: all eight tripwires pass, including `check:brand-scope`.
+- `npm run test`: 506 files passed, 72 skipped (DB-backed); 7629 tests passed, 2158 skipped, 0 failed. New: 17 (menu) + 4 (loader) + 11 (footer) + 4 (nav) + 5 (parity).
+- DB-backed `src/lib/org-features.test.ts` plus `src/lib/org-portal` (shared pipeline Neon branch, `--no-file-parallelism`): 155 passed, 2 failed. The two failures are 20 s timeouts in the "every axis x category x toggle combination" cases for `members_create` and `calendar`. They exercise the resolver, not labels, and are not touched by this change; the `categoryLabel` "Community" assertion at `:470` passed. Not re-run on a baseline.
+- e2e, from a hardlinked scratch copy outside `~/git/presby-platform` on its own dev server (port 3111), chromium project:
+  - `portal-footer-sitemap.spec.ts`: 6 passed (360 and 1024, plus 3 Administration cases).
+  - `community-participants.spec.ts` (desktop and 360): 9 passed on the third run. The first two runs each failed one different test at a cold first-touch compile (30 s `connection-card` wait; 5 s "name & birth date" wait); a warm third run was green. Treat as dev-compile flake.
+  - `member-calendar.spec.ts` (after the fix) and `portal-home-cards.spec.ts`: 26 passed together. `branded-signin.spec.ts` and `giving-admin.spec.ts`: passed (31 passed across the first three-spec run, with the one `member-calendar` failure fixed above).
+  - Flags changed by the specs (`chrome_v2/v3`, `admin_hub`, tile flags) are captured and restored with SELECT verification; scratch copy and server removed.
+- Browser look (real Chromium, 360x900 and 1280x900, home and `/directory`, most tile flags on): `scrollWidth - clientWidth = 0` on all four; 11 footer links, minimum height 44px; columns wrap (two at 360, four at 1280); long labels wrap; screenshots read correctly.
+
+Not done here (orchestrator, Rule 16): release notes, what's-new, functionality map (`docs/product/functionality-map.md` lines 27 and 72 still say "People & Membership"), DECISION-220/221/222, and the three TODO lines.
 
 # Phase 5 — Verification (qa)
 

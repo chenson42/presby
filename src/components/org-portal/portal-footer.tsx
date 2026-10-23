@@ -1,28 +1,29 @@
 import Link from "next/link";
-import {
-  visiblePortalTiles,
-  type TileViewer,
-} from "@/lib/org-portal/visible-tiles";
+import { getPortalMenu, type TileViewer } from "@/lib/org-portal/visible-tiles";
 import type { OrganizationType } from "@/lib/authz";
 import type { OrgProfileForFooter } from "@/lib/sites";
+
+const LINK_CLASS =
+  "flex min-h-11 items-center hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 /**
  * The portal footer — Increment 3 of docs/work-log/
  * 2026-08-26-portal-fpcw-directory-ux.md. Server Component, no `'use
  * client'`: nothing here needs interactivity.
  *
- * INDEPENDENT READ, LIKE `PortalNav`'s OWN PRECEDENT: calls
- * `visiblePortalTiles()` itself rather than accepting it as a prop from
- * `layout.tsx`/`PortalNav` — the same "self-sufficient, independently-read
- * chrome" shape `PortalNav`'s own header documents ("a degraded switcher
- * does not take this row down, and vice versa"). This means the cheap,
- * DB-free, flag-table-backed `visiblePortalTiles()` read runs twice per
- * request when `org_portal.chrome_v3` is on (once for `PortalNav`, once
- * here) — named, not hidden. Since member-calendar (R1) the read is also
- * org-scoped (the per-org calendar toggle), which is exactly the case this
- * note anticipated: it stays cheap because `visiblePortalTiles()` resolves
- * each tile through a `cache()`-keyed read on primitive ids, so the second and
- * third callers in a request cost nothing.
+ * ONE STRUCTURE WITH THE NAV (portal-sitemap-footer pipeline, docs/work-log/
+ * 2026-10-23-portal-sitemap-footer.md, DECISION-220/221): the footer renders
+ * the same `PortalMenu` the nav row does (`buildPortalMenu()` in
+ * `src/lib/org-portal/portal-menu.ts`), so a title can never differ between
+ * them. Home, the domain entries and the Administration rule all live in that
+ * builder, not here.
+ *
+ * INDEPENDENT READ, LIKE `PortalNav`'s OWN PRECEDENT: calls `getPortalMenu()`
+ * itself rather than accepting the menu as a prop from `layout.tsx`/
+ * `PortalNav` — the "self-sufficient, independently-read chrome" shape both
+ * components document (a degraded footer does not take the nav down, and
+ * vice versa). The reads underneath are `cache()`-keyed on primitive ids, so
+ * the second caller in a request costs nothing.
  *
  * THREE BLOCKS, IN ORDER, per Phase 3's Component Plan:
  *
@@ -39,13 +40,23 @@ import type { OrgProfileForFooter } from "@/lib/sites";
  *      div's ambient `text-sm` — `TYPE_SCALE` itself forbids `dense`/
  *      `text-sm` for a paragraph a member needs to read (docs/work-log/
  *      2026-08-26-portal-visual-modernization.md Phase 3). The org-name
- *      label, the nav recap, and the copyright line stay `text-sm` — all
+ *      label, the site map, and the copyright line stay `text-sm` — all
  *      legitimate label/metadata/legal-boilerplate uses `TYPE_SCALE`'s
  *      `dense` role explicitly permits.
- *   2. Nav recap — `<nav aria-label="Footer">`, plain `<Link>`s, Home
- *      prepended unconditionally (matching `PortalNav`'s own "Home is
- *      hardcoded, not a PORTAL_TILES row" convention) followed by
- *      `visiblePortalTiles()`'s flag-filtered entries. No active-state
+ *   2. Site map — `<nav aria-label="Footer">`. Home is a leading plain link
+ *      row, NOT a column. Every other menu entry with at least one child is a
+ *      column: a plain-text `<h2>` heading (never a link, so the footer holds
+ *      one "Community" link, to the page, and no second one to an anchor) and
+ *      a `<ul aria-labelledby>` of the entry's children. An entry with no
+ *      children renders no column — never a heading without items, never an
+ *      empty `<ul>`. Administration's only child is "Administration
+ *      overview" (operator ruling Q1: the footer never lists individual
+ *      administer tiles). A `comingSoon` child shows the words "Coming soon"
+ *      as plain muted text. The columns sit in a WRAPPING grid (2 / 3 / 4
+ *      columns at the base / `sm` / `lg` breakpoints) rather than a fixed
+ *      count, labels wrap (`min-w-0`, `break-words`), and links keep the 44px
+ *      target. NEVER `<details>`: the iOS `<details>`/`<summary>` failure is
+ *      recorded in CLAUDE.md's Verify-in-a-Browser invariant. No active-state
  *      styling — this is a footer, not the persistent nav row.
  *   3. Copyright line.
  *
@@ -66,22 +77,12 @@ import type { OrgProfileForFooter } from "@/lib/sites";
  * behind `org_portal.chrome_v3` — this component itself performs no
  * membership or flag check, matching `PortalNav`'s own division of labor.
  *
- * CALLS `visiblePortalTiles("operate")`, NOT `"administer"` (portal-reorg
- * pipeline, docs/work-log/2026-08-26-portal-reorg-and-modernization.md) — a
- * fourth call site the Phase 3 design didn't separately enumerate, updated
- * here for the same reason `PortalNav`'s own persistent-nav call was: the
- * footer recap is a day-to-day-tools surface, matching what `PortalNav` and
- * the main portal page show, not the permission-gated setup tools now on the
- * `/o/<slug>/admin` hub.
- *
  * `organizationType` (bug fix, docs/work-log/
  * 2026-08-27-credentials-tile-org-type.md): a REQUIRED prop, threaded from
  * `layout.tsx`'s `resolved.kind === "ok"` branch alongside `footerProfile`/
- * `footerOrgName` — the same resolve, no new query. This is the FOURTH call
- * site `visiblePortalTiles()`'s signature change touches; missed in this bug
- * fix's initial pass (the work-log named three) and caught by `tsc`, which
- * is exactly the failure mode the required (non-defaulted) parameter exists
- * to surface before shipping.
+ * `footerOrgName` — the same resolve, no new query, and the reason the menu is
+ * never read for a forbidden, ended, not-found or signed-out visitor
+ * (DECISION-040).
  */
 export async function PortalFooter({
   slug,
@@ -98,8 +99,12 @@ export async function PortalFooter({
   viewer: TileViewer;
   profile: OrgProfileForFooter | null;
 }) {
-  const tiles = await visiblePortalTiles("operate", organizationType, viewer);
+  const menu = await getPortalMenu(slug, organizationType, viewer);
   const hasContactInfo = Boolean(profile?.address || profile?.phone);
+  const home = menu.find((entry) => entry.key === "home");
+  const columns = menu.filter(
+    (entry) => entry.key !== "home" && entry.children.length > 0,
+  );
 
   return (
     <footer className="border-t border-border">
@@ -120,27 +125,41 @@ export async function PortalFooter({
             )}
           </div>
         )}
-        <nav aria-label="Footer">
-          <ul className="flex flex-wrap gap-x-4 gap-y-2">
-            <li>
-              <Link
-                href={`/o/${slug}`}
-                className="flex min-h-11 items-center hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                Home
-              </Link>
-            </li>
-            {tiles.map((tile) => (
-              <li key={tile.key}>
-                <Link
-                  href={tile.href(slug)}
-                  className="flex min-h-11 items-center hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                >
-                  {tile.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
+        <nav aria-label="Footer" className="space-y-4">
+          {home && (
+            <Link href={home.href} className={LINK_CLASS}>
+              {home.label}
+            </Link>
+          )}
+          {columns.length > 0 && (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
+              {columns.map((entry) => (
+                <div key={entry.key} className="min-w-0">
+                  <h2
+                    id={`footer-menu-${entry.key}`}
+                    className="break-words text-sm font-semibold text-foreground"
+                  >
+                    {entry.label}
+                  </h2>
+                  <ul aria-labelledby={`footer-menu-${entry.key}`}>
+                    {entry.children.map((child) => (
+                      <li key={child.key}>
+                        <Link
+                          href={child.href}
+                          className={`${LINK_CLASS} flex-wrap gap-x-2 py-1 break-words`}
+                        >
+                          {child.label}
+                          {child.comingSoon && (
+                            <span className="text-sm">Coming soon</span>
+                          )}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
         </nav>
         <p>
           © {new Date().getFullYear()} {organizationName}. All rights

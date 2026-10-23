@@ -24,7 +24,7 @@ interface OrgTileFixture extends TileLike<OrgDomain> {
 
 const ORG_DOMAIN_ORDER: readonly OrgDomain[] = ["people", "worship", "governance"];
 const ORG_DOMAIN_LABELS: Record<OrgDomain, string> = {
-  people: "People & Membership",
+  people: "Community",
   worship: "Worship & Events",
   governance: "Governance & Courts",
 };
@@ -57,7 +57,7 @@ describe("DomainTileSections — org-portal axis (slug-closure getHref)", () => 
 
     const headings = screen.getAllByRole("heading", { level: 2 });
     expect(headings.map((h) => h.textContent)).toEqual([
-      "People & Membership",
+      "Community",
       "Worship & Events",
       "Governance & Courts",
     ]);

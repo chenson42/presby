@@ -71,7 +71,7 @@ vi.mock("@/lib/calendar", () => ({
 
 const visiblePortalTiles = vi.fn();
 vi.mock("@/lib/org-portal/tiles", () => ({
-  DOMAIN_LABELS: { people: "People & Membership" },
+  DOMAIN_LABELS: { people: "Community" },
   DOMAIN_ORDER: ["people"],
 }));
 
@@ -298,7 +298,7 @@ describe("OrgPage — DomainTileSections wiring (commit 1, docs/work-log/2026-08
     expect(props.tiles).toBe(tiles);
     expect(props.getHref(tiles[0])).toBe("/o/alder-creek/directory");
     expect(props.domainOrder).toEqual(["people"]);
-    expect(props.domainLabels).toEqual({ people: "People & Membership" });
+    expect(props.domainLabels).toEqual({ people: "Community" });
   });
 });
 

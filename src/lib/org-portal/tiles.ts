@@ -90,28 +90,28 @@ export type PortalTileCategory = "operate" | "administer";
 /**
  * The seven-domain taxonomy (DECISION-117) every `PortalTile` is bucketed
  * into for presentation — which labeled `<section>` it renders under on the
- * home page (`DomainTileSections`, commit 2) and the admin hub, and which
- * nav anchor entry it contributes to (`portal-nav.tsx`, commit 2). Closed
- * union, not a free string — a typo'd domain fails at `tsc`, not silently at
- * render time.
+ * home page (`DomainTileSections`) and the admin hub, and which menu entry
+ * it contributes to (`buildPortalMenu()` in `portal-menu.ts`, which the nav
+ * row and the footer site map both render). Closed union, not a free string —
+ * a typo'd domain fails at `tsc`, not silently at render time.
  *
  * `"administration"` is special: it exists ONLY to bucket
  * Roles/Features/Branding/Tickets on the admin hub's own domain grouping. It
- * is EXCLUDED from the persistent nav row's domain-anchor computation
- * (`portal-nav.tsx`, commit 2) — the nav's existing hardcoded
- * "Administration" entry (unchanged, points at `/o/<slug>/admin`) already
- * owns that concept, and a second, anchor-based "Administration" entry
- * pointing at `/o/<slug>#domain-administration` would collide on the
- * identical label with a different destination. No current tile actually
- * forces this collision (every `"administration"`-domain tile below is
- * `category: "administer"`, so it never reaches the nav's operate-only
- * computation anyway), but the exclusion is a standing rule for commit 2's
- * `portal-nav.tsx` to implement, not an accident of today's data — a future
- * operate-category tile must not be assigned `domain: "administration"`
- * without revisiting this.
+ * is never a domain entry in the menu — `buildPortalMenu()` owns the one
+ * "Administration" entry (points at `/o/<slug>/admin`, present only when the
+ * admin hub is on and at least one administer tile is visible), and a second,
+ * anchor-based "Administration" entry pointing at
+ * `/o/<slug>#domain-administration` would collide on the identical label with
+ * a different destination. That exclusion is a standing rule enforced once,
+ * in `portal-menu.ts`; a future operate-category tile must not be assigned
+ * `domain: "administration"` without revisiting it.
+ *
+ * The domain KEYS are stable identifiers (the `#domain-<key>` anchor, the nav
+ * icon key, the `organization_feature_categories.category` CHECK value);
+ * only the LABELS below are display copy.
  */
 export type PortalDomain =
-  | "people" // People & Membership
+  | "people" // Community
   | "worship" // Worship & Events
   | "giving" // Giving & Finance
   | "governance" // Governance & Courts
@@ -120,7 +120,7 @@ export type PortalDomain =
   | "administration"; // Administration
 
 export const DOMAIN_LABELS: Record<PortalDomain, string> = {
-  people: "People & Membership",
+  people: "Community",
   worship: "Worship & Events",
   giving: "Giving & Finance",
   governance: "Governance & Courts",
@@ -275,7 +275,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     category: "operate",
     // docs/work-log/2026-08-27-product-ia-scaffold.md, Phase 3: the
     // architect's Phase 2 taxonomy table left `groups` unassigned. Tech-lead
-    // call — People & Membership, not Governance & Courts: committees, small
+    // call — the people domain (Community), not Governance & Courts: committees, small
     // groups, choirs, and teams are day-to-day people-organizing, not
     // constitutional office (Governance & Courts is reserved for
     // officer/credential/committee-of-the-court structures).
@@ -293,7 +293,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     // Recording who's on payroll is routine record-keeping, not org setup —
     // same DECISION-105 test "members"/"groups"/"officers" already passed.
     category: "operate",
-    // People & Membership, not Governance & Courts — staff are not a
+    // The people domain (Community), not Governance & Courts — staff are not a
     // constitutional office structure (Phase 1 point 4: staff_positions is
     // deliberately orthogonal to the ordination/officer register), same
     // reasoning "groups" already used.

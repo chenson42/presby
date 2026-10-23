@@ -156,7 +156,7 @@ test.describe("Member calendar", () => {
         await expect(page.getByText("Nothing is scheduled for January 2000.")).toBeVisible();
         await expect(page.getByRole("navigation", { name: "Month" })).toBeVisible();
         await page.goto(`${CALENDAR}?month=0000-01&types=not-a-uuid`);
-        await expect(page.getByRole("heading", { level: 2 })).toBeVisible();
+        await expect(page.getByRole("main").getByRole("heading", { level: 2 })).toBeVisible();
         await expect(page.getByTestId("calendar-grid")).toBeVisible();
       });
     });

@@ -467,7 +467,7 @@ describe.skipIf(!hasDb)(
         const entry = result.toggles.find((t) => t.key === KEY);
         expect(entry!.categoryEnabled).toBe(true);
         expect(entry!.category).toBe("people");
-        expect(entry!.categoryLabel).toBe("People & Membership");
+        expect(entry!.categoryLabel).toBe("Community");
       });
 
       it("axis flag ON + category OFF: categoryEnabled is false for the affected entry", async () => {

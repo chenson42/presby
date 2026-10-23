@@ -299,7 +299,7 @@ describe("FeaturesPage — category-picker section (docs/work-log/2026-08-27-fea
         updatedAt: null,
         updatedByEmail: null,
         category: "people",
-        categoryLabel: "People & Membership",
+        categoryLabel: "Community",
         categoryEnabled: true,
       },
     ],
@@ -330,7 +330,7 @@ describe("FeaturesPage — category-picker section (docs/work-log/2026-08-27-fea
         categories: [
           {
             category: "people",
-            label: "People & Membership",
+            label: "Community",
             enabled: true,
             updatedAt: null,
             updatedByEmail: null,

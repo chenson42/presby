@@ -67,7 +67,7 @@ export const ORG_FEATURE_CATALOG = [
     description:
       "Lets this organization's admins add people, record participants and propose roll actions.",
     // Feature-categories axis (docs/work-log/2026-08-27-feature-categories.md,
-    // Phase 3) — People & Membership.
+    // Phase 3) — the people domain (labelled Community).
     category: "people" as const,
     // The platform flag that kill-switches this feature globally. Call sites
     // gate on `entry.flag === null || await isFlagEnabled(entry.flag)`, THEN

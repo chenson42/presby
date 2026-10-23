@@ -18,7 +18,7 @@
 | 2 — Architectural review | — | Skipped: no schema, permission, route or invariant change; one reader's predicate widens inside the existing `people.manage` gate | — | 2026-10-23 |
 | 3 — Technical design | orchestrator | Complete (brief, below) | — | 2026-10-23 |
 | 4 — Implementation | full-stack-developer | Complete | — | 2026-10-23 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 FAIL (no-organization copy and two e2e locators; Community fix passed); fixed; re-verification pending | FAIL → pending | 2026-10-23 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ## Phase 1 — bug confirmed (orchestrator)
@@ -88,3 +88,121 @@ The operator signed in with an address that was on their person record but not c
 - **Follow-ups (recorded in TODO at integration):**
   - Auto-connect a verified sign-in to the person whose on-file address matches. This was operator-requested and folds into Community Increment 2b.
   - The platform invitation screen should warn when the invited address is already on a person who signs in. This folds into the multiple-emails pipeline.
+
+
+---
+
+# Phase 5 — Verification (qa), run 1
+
+*Recorded verbatim.*
+
+**Date:** 2026-10-23
+**Verified by:** qa
+
+**Scope run.**
+- **In full:** typecheck, lint, `npm run check` (8 tripwires), and the unit suite.
+- **DB-backed:** `src/lib/community.db.test.ts` only. No migration, `src/lib/authz.ts`, `src/lib/db/` or shared fixture is in the diff.
+- **e2e:** `e2e/community-participants.spec.ts` (which contains the new staff-anchor spec, at desktop and 360px) and `e2e/post-login-routing.spec.ts` (desktop, and 360px through a scratch-only config override). The full suite was not run; the diff touches no proxy, auth, layout, `e2e/support/` beyond one added helper, or shared component.
+- **Where it ran:** a `git archive HEAD` scratch copy outside the repo, with APFS-cloned `node_modules`, on a private port (3113).
+- **Database:** all DB and e2e runs used the replacement branch `pipeline-fixes-and-nav` (ep-lively-union). Nothing ran against `pipeline-person-emails`, so nothing needed re-running after the coordinator's switch. Community e2e runs were held until no other Playwright run was active.
+
+## Type Check
+
+`npm run typecheck`: PASS. `npm run lint`: PASS. `npm run check`: PASS (all eight tripwires).
+
+## Unit Tests
+
+Total: 9769 | Passed: 7608 | Failed: 0 | Skipped: 2161 (72 files) | Duration: 29s
+
+- The run had no DB env. The 72 skipped files are DB-guarded (79 files carry `skipIf(!hasDb)`), and the diff adds no `.skip` or `.only`.
+- 7608 is two more than the work-log's 7606. The difference is the two `/no-organization` cases added in the later commit.
+- **DB-backed:** `src/lib/community.db.test.ts` passed 18 of 18 (`--no-file-parallelism`, default 20 s test timeout, 47 s). Its fixtures were torn down: 0 `community-test-%` orgs remain.
+
+## End-to-End Tests
+
+Total: 23 run at desktop+360 (Community 11, post-login 12), plus 12 post-login at 360 | Passed: 31 | Failed: 4 | Duration: 6.0 min + 0.9 min
+
+| Spec | Result |
+|---|---|
+| `community-participants.spec.ts`, all 11 (both viewports, plus the DECISION-197 degrade) | Pass, counting one re-run |
+| New anchor spec `community-participants.spec.ts:250` | Pass at desktop and 360px |
+| Visitor spec `community-participants.spec.ts:183` at 360px | Failed once, passed on re-run |
+| `post-login-routing.spec.ts:73` (test 2), desktop and 360px | **FAIL** |
+| `post-login-routing.spec.ts:209` (test 8), desktop and 360px | **FAIL** |
+| Other 10 `post-login-routing.spec.ts` tests | Pass at both viewports |
+
+- **Visitor spec at 360px.** The first run timed out at `:214`; the screenshot shows the search still showing "Searching…" during a dev-server cold compile. On re-run it passed at both viewports, so it is not a defect.
+- **`post-login-routing.spec.ts:83`, regression.** `getByText(/ask your church administrator/i)` resolved to 2 elements: the `<h2>Ask your church administrator</h2>` and the new `<p>Signing in doesn't connect…</p>`. Run 1 failed at desktop and run 2 at 360px; the failure is deterministic. With origin/main's `page.tsx` and spec, the same test passes.
+- **`post-login-routing.spec.ts:219`, regression.** It asserts `/isn't set up on presby yet/i`, which this diff rewrote to "PresbyPortal". It fails at desktop and 360px and passes with origin/main's page and spec.
+
+## Regression Tests Added
+
+Red/green was checked by swapping origin/main's fix files into the scratch copy, running, then restoring HEAD byte-identically. The worktree was never modified.
+
+- **"each person lands in at least one of the six views…" — `src/lib/community.db.test.ts:507`.** Guards against a live-membership shape that no Community view lists.
+  - On origin/main's `community.ts`: **4 failed, 14 passed**, including this test with "staff anchor without a position: expected [] to not deeply equal []".
+  - The work-log records 3 failed and 15 passed. The fourth failure is "counts, search and order stay coherent", whose search for "Kit" returns `[]` before the fix. That is the right reason to fail.
+  - On HEAD: 18 of 18 pass. Confirmed red then green.
+- **"Staff: an anchor with no position reads 'No position yet'…" — `members-list.test.tsx:155`.** Guards the anchor row's note and the link gate. Fails on origin/main's row components and passes on HEAD. Confirmed.
+- **"says signing in alone does not connect you…" — `src/app/no-organization/page.test.tsx:32`.** Fails on origin/main's page and passes on HEAD. Confirmed.
+- **"names the product PresbyPortal, not presby" — `page.test.tsx:40`.** Fails on origin/main's page and passes on HEAD. Confirmed.
+- **e2e anchor spec — `e2e/community-participants.spec.ts:250`.** Passes on HEAD. I did not run it against the pre-fix reader; the DB invariant test above gives the red/green evidence for this behaviour.
+
+## Coverage on Critical Modules
+
+Not measured. The diff touches none of `permissions.ts`, `two-factor.ts` or `flags.ts`, so this is deferred to the release-slot test-coverage review.
+
+## Feature-Gate Audit
+
+No API route or server action was added or changed. This was checked by reading the files.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|-----------------|-------------------|----------------------------|----------------------------|
+| `listRows("staff")` via `listStaff`, `src/lib/community.ts:152-155` | n/a, tenant reader | n/a: `canManagePeople` (`people.manage`) inside `withOrgContext`, on the RLS `db` connection, unchanged | n/a (tenant axis) |
+| "Add a position" link, `community-rows-list.tsx:78-95` | n/a | Shown only when `canStaffLink` (`page.tsx:199-201`: flag `org_portal.staff` and `staff.manage`) | n/a (tenant axis). Same gate the Staff page enforces on the server (`admin/staff/page.tsx:101`, plus the `staff.manage` reader). The link is a convenience, not the guard |
+
+`listStaff` has one caller, the Community page. The public staff listing goes through `src/lib/staff.ts`, which is not in the diff, so the widened predicate cannot surface anchors publicly.
+
+**Unchanged-behaviour checks.**
+- `src/lib/directory.ts` and the Directory pages are not in the diff.
+- The invariant test asserts the anchor appears in `["staff"]` only, never in Everyone, Members or Participants.
+- The e2e anchor spec asserts it is absent from Everyone at both viewports. DECISION-129 holds.
+
+**Copy truthfulness (asked to check). The new paragraph over-claims.**
+- **True:** "Signing in doesn't connect you". `presby_accept_invitation` is the only writer of `people.user_id`.
+- **True:** "an invitation link sent to the email address you signed in with". Existing-account acceptance returns `email_mismatch` on a different address (`drizzle/0059_presby_account_invitations.sql`, `lower(v_user_email) <> v_inv.email_normalized`).
+- **Not true:** "Ask your church administrator to arrange one". Invitations are issued only by a platform operator from `(admin)` (`src/lib/onboarding/issue.ts`, `getPlatformDb()` only). `account_invitations.purpose` is CHECK-limited to `founding_administrator` or `treasurer`. A church administrator cannot issue or arrange an invitation for an ordinary member, and no other join path exists today. The page tells exactly the person it is for, an ordinary member, to take a step that cannot happen.
+- **Minor:** when `session.user.email` is null the sentence ends "…arrange one for." with no object.
+
+**Schema/RLS audit:** not applicable, no schema change.
+
+**Auth-touching gate:** not triggered. The diff touches no `src/auth.ts`, `(auth)`, `api/auth` or `src/lib/auth/`.
+
+**Hygiene.**
+- 0 of 73 user triggers disabled before and after my runs.
+- My fixtures were swept by spec teardown. One `E2ECommunity SpecDPart` row seen at the end was created at 18:17:23 UTC, five seconds before my check. It belongs to another agent's `community-participants.spec.ts` run that started after mine finished, so I left it alone.
+- The scratch copy is removed and the worktree is clean.
+
+## Verdict
+
+**FAIL.** Return to full-stack-developer (Phase 4).
+
+1. `e2e/post-login-routing.spec.ts:83`: strict-mode violation caused by the new copy. Fix either the locator (for example, the heading role) or the copy.
+2. `e2e/post-login-routing.spec.ts:219`: a stale "presby" locator the rename broke.
+3. `src/app/no-organization/page.tsx:159-161`: the copy directs ordinary members to an invitation route that church administrators cannot provide. The wording should be settled with the operator (it is product copy), then pinned by the unit test. The null-email "…for." ending should be fixed in the same change.
+
+The Community staff-anchor fix passes on its own: unit, DB invariant (red then green confirmed), e2e at both viewports, the link gate, and DECISION-129 unchanged. After the fix, re-verification can be limited to `post-login-routing.spec.ts` (desktop and 360px) and `src/app/no-organization/page.test.tsx`.
+
+---
+
+**Per-Phase Status row**
+
+| 5 — Verification | qa | Complete | FAIL | 2026-10-23 |
+
+**Handoff:** to full-stack-developer (Phase 4), citing `e2e/post-login-routing.spec.ts:83`, `e2e/post-login-routing.spec.ts:219` and `src/app/no-organization/page.tsx:159-161`. The finding about who can issue an invitation needs an operator wording decision before the copy is rewritten. Escalating to tech-lead is not needed; there is no design flaw.
+
+## Fix after run 1 (orchestrator, 2026-10-23)
+
+- The paragraph now states only what is true today: "Signing in doesn't connect you to a congregation by itself. Only an invitation link does, and it works while you are signed in with the address it was sent to. You are signed in as <email>." It contains no instruction to ask anyone to arrange an invitation, and with no email the sentence ends cleanly.
+- `e2e/post-login-routing.spec.ts:219` now expects "PresbyPortal". The paragraph no longer contains "Ask your church administrator", so `:83` resolves to the heading alone.
+- `page.test.tsx` gained a no-email case and asserts that neither "arrange" nor "can add you" appears. 4/4 pass.

@@ -216,7 +216,7 @@ test("8 — a relationship at a non-tenant congregation is not a card", async ({
 
   expect(new URL(page.url()).pathname).toBe("/no-organization");
   await expect(page.getByText(E2E_ORGS.gamma.name)).toBeVisible();
-  await expect(page.getByText(/isn't set up on presby yet/i)).toBeVisible();
+  await expect(page.getByText(/isn't set up on PresbyPortal yet/i)).toBeVisible();
 });
 
 test.describe("9 — the four-way miss response (DECISION-040)", () => {

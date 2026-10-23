@@ -156,19 +156,18 @@ export default async function NoOrganizationPage() {
             If you were invited, open the link in your invitation email.
           </p>
           <p className="mt-2 text-sm text-muted-foreground">
-            Signing in doesn&apos;t connect you to a congregation by itself. You
-            join by opening an invitation link sent to the email address you
-            signed in with. Ask your church administrator to arrange one for
+            Signing in doesn&apos;t connect you to a congregation by itself. Only an
+            invitation link does, and it works while you are signed in with the
+            address it was sent to.
             {session.user.email ? (
               <>
-                :{" "}
+                {" "}You are signed in as{" "}
                 <span className="font-medium text-foreground">
                   {session.user.email}
                 </span>
+                .
               </>
-            ) : (
-              "."
-            )}
+            ) : null}
           </p>
         </section>
 

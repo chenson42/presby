@@ -33,6 +33,7 @@ describe("/no-organization", () => {
     mockAuth.mockResolvedValue({ user: { id: "u1", email: "someone@example.invalid" } });
     render(await NoOrganizationPage());
     expect(screen.getByText(/signing in doesn.t connect you to a congregation by itself/i)).toBeTruthy();
+    expect(screen.queryByText(/arrange|can add you/i)).toBeNull();
     expect(screen.queryByText(/someone there with administrator access can add you/i)).toBeNull();
     expect(screen.getByText("someone@example.invalid")).toBeTruthy();
   });
@@ -42,5 +43,11 @@ describe("/no-organization", () => {
     const { container } = render(await NoOrganizationPage());
     expect(container.textContent).not.toMatch(/\bpresby\b/);
     expect(screen.getByRole("link", { name: /read about presbyportal/i })).toBeTruthy();
+  });
+
+  it("ends the sentence cleanly when the session has no email", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u1", email: null } });
+    const { container } = render(await NoOrganizationPage());
+    expect(container.textContent).toMatch(/address it was sent to\./);
   });
 });

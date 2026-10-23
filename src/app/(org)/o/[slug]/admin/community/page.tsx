@@ -16,8 +16,10 @@ import {
   type CommunityListResult,
 } from "@/lib/community";
 import { parseCommunityView } from "@/lib/community-labels";
+import { countPendingRollActions } from "@/lib/roll";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import {
@@ -201,6 +203,19 @@ export default async function CommunityPage({
       ? await hasPermission(personId, organizationId, "staff.manage")
       : false;
 
+  // The "N waiting" link: holders of either roll key (`roll.approve` or
+  // `roll.propose`), decided inside the lib. A failed count hides the count,
+  // never the page.
+  let pendingLink: { count: number } | null = null;
+  try {
+    const counted = await countPendingRollActions(personId, organizationId);
+    if (counted.kind === "ok") pendingLink = { count: counted.count };
+  } catch (err) {
+    if (err instanceof OrgAccessError) {
+      throw err;
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -215,6 +230,23 @@ export default async function CommunityPage({
             <Button asChild variant="outline" className="min-h-11">
               <Link href={`/o/${slug}/admin/community/children`}>
                 Children&apos;s roster
+              </Link>
+            </Button>
+          )}
+          {pendingLink && (
+            <Button asChild variant="outline" className="min-h-11">
+              <Link
+                href={`/o/${slug}/admin/community/pending`}
+                aria-label={
+                  pendingLink.count > 0
+                    ? `Pending approvals, ${pendingLink.count} waiting`
+                    : "Pending approvals"
+                }
+              >
+                Pending approvals
+                {pendingLink.count > 0 && (
+                  <Badge className="ml-2">{pendingLink.count} waiting</Badge>
+                )}
               </Link>
             </Button>
           )}

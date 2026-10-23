@@ -17,7 +17,9 @@
  *     and ABSENT from Everyone (never in the member Directory);
  *   - the match step says "already here" and links to the record instead of
  *     offering the confirm that could only fail (F178);
- *   - a Member is a proposal: it waits for the Session and shows that badge;
+ *   - a Member is a proposal: it waits for the Session and shows that badge (the
+ *     fixture gives alpha an empty Session, which is what R15 requires for the
+ *     Member choice to be offered; e2e/community-approval.spec.ts covers the queue);
  *   - the degrade (DECISION-197): with directory.view removed the page keeps
  *     Add person and Visitors and names the missing permission;
  *   - nothing overflows horizontally at 360px.
@@ -233,7 +235,11 @@ test.describe("Community", () => {
         await expect(page.getByText(/the session must approve before they count as a member/i)).toBeVisible();
         await page.getByLabel(/^effective date/i).fill("2026-06-01");
         await page.getByRole("button", { name: /^next$/i }).click();
-        await expect(page.getByText(/will wait for the session to approve/i)).toBeVisible();
+        // The fixture's Session roster is empty (Flow 7), so the review note is the
+        // honest one: this will wait because no one on the Session can approve yet.
+        await expect(
+          page.getByText(/this person's roll action will wait\. no one on your session can approve yet/i),
+        ).toBeVisible();
         await page.getByRole("button", { name: /add person/i }).click();
 
         // Stays on Everyone; the person is listed with the waiting badge and is not a member yet.

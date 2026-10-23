@@ -141,3 +141,58 @@ describe("OfficerRoster — public listing control (docs/work-log/2026-08-27-pub
     );
   });
 });
+
+describe("OfficerRoster — Session-office markers and grouping (S2, DECISION-206)", () => {
+  const PASTOR_ENTRY: OfficerRosterEntry = {
+    ...ELDER_ENTRY,
+    termId: "term-9",
+    personId: "person-9",
+    displayName: "Rowan Thistlewood",
+    office: "installed_pastor",
+    selfRecorded: true,
+  };
+
+  it("marks a self-recorded Session-office row, and only that row", () => {
+    render(<OfficerRoster slug="alder-creek" entries={[ELDER_ENTRY, PASTOR_ENTRY]} />);
+    expect(screen.getAllByText("Self-recorded")).toHaveLength(1);
+    const row = screen.getByText("Rowan Thistlewood").closest("tr");
+    expect(row?.textContent).toContain("Self-recorded");
+  });
+
+  it("labels the three pastor offices", () => {
+    render(
+      <OfficerRoster
+        slug="alder-creek"
+        entries={[
+          { ...PASTOR_ENTRY, termId: "a", office: "installed_pastor", selfRecorded: false },
+          { ...PASTOR_ENTRY, termId: "b", office: "co_pastor", selfRecorded: false },
+          { ...PASTOR_ENTRY, termId: "c", office: "associate_pastor", selfRecorded: false },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Installed Pastor")).toBeTruthy();
+    expect(screen.getByText("Co-Pastor")).toBeTruthy();
+    expect(screen.getByText("Associate Pastor")).toBeTruthy();
+  });
+
+  it("groups by office in the vocabulary's order, pastors beside ruling elders", () => {
+    render(
+      <OfficerRoster
+        slug="alder-creek"
+        entries={[
+          DEACON_ENTRY,
+          { ...PASTOR_ENTRY, selfRecorded: false },
+          ELDER_ENTRY,
+        ]}
+      />,
+    );
+    const offices = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => r.querySelector("td")?.textContent ?? "");
+    expect(offices[0]).toMatch(/Ruling Elder/);
+    expect(offices[1]).toMatch(/Installed Pastor/);
+    expect(offices[2]).toMatch(/Deacon/);
+  });
+});
+

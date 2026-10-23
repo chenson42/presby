@@ -15,6 +15,7 @@ import {
 } from "./officers-states";
 import { OfficerRoster } from "./officer-roster";
 import { AddOfficerTermForm } from "./add-officer-term-form";
+import { SessionNote } from "./session-note";
 
 /**
  * `/o/<slug>/admin/officers` — the roster/recording surface for who holds
@@ -152,6 +153,7 @@ export default async function OfficersPage({
 
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">Current roster</h2>
+        <SessionNote />
         <OfficerRoster entries={rosterResult.data} slug={slug} />
       </div>
 
@@ -162,7 +164,11 @@ export default async function OfficersPage({
           (Administration → Roles) is done separately — recording someone
           here does not, by itself, change what they can do in the app.
         </p>
-        <AddOfficerTermForm slug={slug} options={optionsResult.data} />
+        <AddOfficerTermForm
+          slug={slug}
+          options={optionsResult.data}
+          viewerPersonId={resolved.org.personId}
+        />
       </div>
     </section>
   );

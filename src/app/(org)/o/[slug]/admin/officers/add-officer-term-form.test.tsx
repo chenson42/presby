@@ -323,3 +323,56 @@ describe("AddOfficerTermForm — unsaved-changes guard (H3)", () => {
     expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull();
   });
 });
+
+describe("AddOfficerTermForm — pastor offices and the self note (DECISION-205, DECISION-206)", () => {
+  it("offers the three pastor offices", () => {
+    render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
+    const labels = screen
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(labels).toEqual(
+      expect.arrayContaining(["Installed Pastor", "Co-Pastor", "Associate Pastor"]),
+    );
+  });
+
+  it("shows the pastor helper only while a pastor office is chosen", () => {
+    render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
+    expect(screen.queryByTestId("pastor-helper")).toBeNull();
+    fireEvent.change(screen.getByLabelText(/^office/i), {
+      target: { value: "associate_pastor" },
+    });
+    expect(screen.getByTestId("pastor-helper").textContent).toBe(
+      "A pastor's membership is held by the presbytery, so a pastor is recorded here without a roll membership. If they aren't in the list, add them from the Staff page first.",
+    );
+    fireEvent.change(screen.getByLabelText(/^office/i), {
+      target: { value: "ruling_elder" },
+    });
+    expect(screen.queryByTestId("pastor-helper")).toBeNull();
+  });
+
+  it("names self-recording only when the actor picks themselves for a Session office", () => {
+    render(
+      <AddOfficerTermForm
+        slug="alder-creek"
+        options={OPTIONS}
+        viewerPersonId="person-1"
+      />,
+    );
+    // Default: person-1 (the viewer) and ruling elder (a Session office).
+    expect(screen.getByTestId("self-note").textContent).toBe(
+      "You're recording yourself as a member of the Session. That's allowed, and the record will show it as self-recorded.",
+    );
+    fireEvent.change(screen.getByLabelText(/^office/i), { target: { value: "treasurer" } });
+    expect(screen.queryByTestId("self-note")).toBeNull();
+    fireEvent.change(screen.getByLabelText(/^office/i), { target: { value: "installed_pastor" } });
+    expect(screen.getByTestId("self-note")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/^person/i), { target: { value: "person-2" } });
+    expect(screen.queryByTestId("self-note")).toBeNull();
+  });
+
+  it("shows no self note without a viewer id", () => {
+    render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
+    expect(screen.queryByTestId("self-note")).toBeNull();
+  });
+});
+

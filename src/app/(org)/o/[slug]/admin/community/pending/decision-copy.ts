@@ -76,3 +76,27 @@ export const DECISION_VALIDATION_COPY = {
   signedOut: "You must be signed in to do that.",
   noAccess: "You don't have access to that organization.",
 } as const;
+
+/**
+ * Success and warning strings (Phase 3 "Copy", toasts). The names are added by
+ * the caller (the action's payload carries none). The date-bearing variant
+ * ("It takes effect on {date}") is composed in `decision-toasts.tsx` so the date
+ * goes through `<FormattedDate>`, never `toLocale*()`.
+ */
+export const DECISION_SUCCESS_COPY = {
+  approved: (name: string) => `${name}'s roll action approved.`,
+  approvedFutureLead: (name: string) => `${name}'s roll action approved. It takes effect on `,
+  bulkApproved: (n: number) => `${n} roll ${n === 1 ? "action" : "actions"} approved.`,
+  bulkPartial: (approved: number, failed: number) =>
+    `${approved} approved, ${failed} need attention.`,
+  denied: (name: string) => `${name}'s roll action denied.`,
+  withdrawn: (name: string) =>
+    `Proposal withdrawn. ${name} is no longer waiting for the Session.`,
+  shadowed: (name: string) =>
+    `Approved. Note: this is dated before ${name}'s latest roll entry, so it doesn't change their current status.`,
+  filedPeriod:
+    "This changes a year that has already been filed. The filed return is not changed. If it needs correcting, file a correcting return.",
+  bulkShadowed:
+    "Some of these are dated before a person's latest roll entry, so they don't change that person's current status.",
+  genericFailure: "We couldn't do that right now. Try again in a moment.",
+} as const;

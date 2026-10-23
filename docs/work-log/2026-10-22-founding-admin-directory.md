@@ -25,7 +25,7 @@
 | Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
-| Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23; Batch B (server: library, actions, in-transaction audit; 0063 applied to the pipeline branch, twice, so the branch is in the lockdown state) complete 2026-10-23 | — | — |
+| Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23; Batch B (server: library, actions, in-transaction audit; 0063 applied to the pipeline branch, twice, so the branch is in the lockdown state) complete 2026-10-23; Batches C and D (UI, e2e, hydration, 360px pass) complete 2026-10-23 — Phase 4 Complete for Increment 2 | — | — |
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
@@ -4883,3 +4883,52 @@ Each mechanism was broken in the source, the focused tests were run, and the fil
 - `EndTermDialog` still takes a `personId` prop it no longer uses; drop it when convenient.
 - `e2e/community-participants.spec.ts:228` and the e2e fixtures still need a Session group at `alpha` (Batch D); `createOrganization` now also creates a `session_member` role for every congregation, which any e2e role-count assertion would see.
 - Rule 16, unchanged by this batch: the journal entries, the `test-rls.sql` integration patch and the other shared files stay with the orchestrator (Batch A's hand-offs stand). `docs/TODO.md` follow-ups from Phase 3 are still the orchestrator's.
+
+## Batches C and D (UI, e2e, hydration) — ux-developer, 2026-10-23
+
+Worktree `presby-fadir`, branch `pipeline/session-approval`. Built to Phase 3's Component Plan and Copy (verbatim) and Batch B's contract. Neither migration touched; the branch stays in the lockdown state.
+
+### What was built
+
+- **Pending queue (`community/pending/`).**
+  - `page.tsx` switches on `mode`. A propose-only holder gets read mode: no checkbox, Approve or Deny, the "Only members of the Session can approve" subtitle, Withdraw, and the Flow 7 banner in every state.
+  - Decide mode shows the banner only for `no_session`.
+  - `?page=` pages the queue 50 at a time through the shared `Pagination` (page 1 is the bare URL; garbage falls back to 1).
+  - New files: `pending-row.tsx`, `approve-roll-action-dialog.tsx`, `deny-roll-action-dialog.tsx`, `bulk-approve-dialog.tsx`, `session-state-banner.tsx` (the five states; `NO_SIGN_IN_INVITE_LINE` is the one constant 2b replaces), `recently-decided.tsx`, `decision-toasts.tsx`, and `community/withdraw-proposal-dialog.tsx` (shared with the edit page).
+  - All dialogs are AlertDialogs with plain action Buttons, so a typed refusal leaves the dialog open. Every trigger and checkbox is `disabled` until `useHydrated()`.
+  - Selection excludes rows approval would refuse outright (ended, deceased, non-approvable kind). The sticky bar has safe-area padding and each row `scroll-mb-28`.
+  - Toasts are in `decision-copy.ts` (`DECISION_SUCCESS_COPY`); the future-dated one renders its date through `<FormattedDate>`.
+- **Community header.** "Pending approvals" link with a "N waiting" badge, accessible name "Pending approvals, N waiting". A failed count hides the count, never the page.
+- **Officers.** `SessionNote`, the three pastor offices (grouped by vocabulary order in the roster), the pastor helper, the self-recording note (needs the new `viewerPersonId` prop), and the "Self-recorded" badge. The typed-error copy was already in Batch B's action.
+- **Edit page and wizard.** `ConnectionCard` gains Withdraw proposal and the "No one can approve yet. See why..." link (the Session state is read only when a proposal is waiting). The wizard hides Member when `getSessionApprovalState` says `no_session`, shows the Phase 3 note, and the review step says the proposal will wait when the Session cannot approve yet.
+- **Badges.** "Self-approved" (Recently decided, approvals only) and "Self-recorded" (S2), plus "You proposed this", "Connection ended", "Recorded as deceased" and "Takes effect {date}".
+
+### Tests
+
+- **Unit.** Rewritten `pending/page.test.tsx` and `pending-worklist.test.tsx`; new `session-state-banner.test.tsx` and `new/connection-step.test.tsx`; extended community, new, edit, officers page, roster and add-form tests. Full suite: 509 files, 7740 tests passed.
+- **e2e.**
+  - `e2e/community-approval.spec.ts`, 13 tests at 1280 and 360px, covering Phase 3 items 1-7 with persisted-row and audit assertions.
+  - `e2e/hydration/community-approval-controls.spec.ts`: dev lane and `test:e2e:prod` both pass.
+  - `e2e/support/community-fixture.ts` ensures alpha has a Session group (removed only if the fixture made it), adds `e2e_session_approver`, `setRollApprove`, `createProposalViaSql`, and sweeps decided rows and their audit.
+  - Blast radius fixed: `community-participants.spec.ts` (the empty Session now gives the honest review note); the whole spec passes at both widths.
+- **Negative controls.**
+  - Approve trigger un-gated: the hydration spec fails at `toBeDisabled()`.
+  - `scroll-mb-28` removed: the sticky-bar test fails (computed scroll margin 0 against a 97px bar). Chromium centres a focused off-screen element, so the geometry check alone cannot catch it; the margin assertion is what discriminates.
+- Run from a hardlinked scratch copy outside `~/git/presby-platform`. Two early runs failed on Neon `fetch failed` network drops and a slow dev `router.refresh()` (5s default); the spec now uses a 30s expect timeout, and both widths passed on re-run.
+
+### Gates
+
+typecheck, lint and `npm run check` clean; unit suite green; real-browser pass at 360 and 1280 (queue decide and read, selected bar, bulk, deny, withdraw dialogs, header, edit notice, officers) with screenshots kept in the scratchpad, none committed.
+
+### Hand-offs
+
+- **Reviewer click-through** (alpha, clerk): propose a Member in the wizard, open Pending approvals, select two rows, bulk approve; deny with a long reason; withdraw from the edit page; drop to read mode.
+- **Copy for a branding pass:** Phase 3 Copy verbatim, plus the approve dialog's description (unchanged from Increment 1) and the "N selected" bar label.
+- **Tradeoffs:**
+  - Withdraw shows for every `roll.propose` holder on every row, not only their own (Phase 3 wording).
+  - The Flow 7 `no_sign_in` count uses `startingLater` when no seat is live yet.
+  - Roster grouping is a client-side sort by vocabulary order.
+  - Not changed: `record-roll-action-form.tsx` already surfaces `pending_exists` and `no_session` through the action's `error`; no code change needed.
+- **Not run:** the whole e2e suite beyond the community, hydration and prod-lane specs; QA should run it, because the shared fixture file changed.
+- **Next:** qa (Phase 5). Rule 16 files untouched; AGENTS.md was not regenerated in the worktree.
+

@@ -8,7 +8,7 @@ import {
 import { EMAIL_COPY, emailRefusalMessage } from "./copy";
 
 const ID = "11111111-1111-4111-8111-111111111111";
-const ROW = { value: "a@b.co", subtype: "work" as const, isPrimary: true, doNotContact: false };
+const ROW = { value: "a@b.invalid", subtype: "work" as const, isPrimary: true, doNotContact: false };
 
 describe("parseUpdateEmails", () => {
   it("accepts rows and the ids the form loaded, and rebuilds them", () => {

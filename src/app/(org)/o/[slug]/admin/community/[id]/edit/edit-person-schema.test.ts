@@ -3,7 +3,7 @@ import { editPersonSchema } from "./edit-person-schema";
 
 const BASE = {
   identity: { firstName: "Nora", lastName: "Ashgrove" },
-  contact: {},
+  contact: { emails: [] },
   address: {},
   household: { mode: "none" as const },
 };

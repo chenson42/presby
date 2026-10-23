@@ -13,7 +13,13 @@ import { RequiredMark } from "@/components/shared/required-mark";
 import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type { PersonForEdit, UpdatePersonInput } from "@/lib/people";
-import type { EmailRowInput } from "@/lib/contact-methods/types";
+import { EmailAddressesEditor } from "@/components/org-portal/email-addresses-editor";
+import {
+  emailRowsFromSaved,
+  knownEmailIds,
+  toEmailRowInputs,
+} from "@/components/org-portal/email-addresses-form";
+import { notifySaved } from "@/components/org-portal/person-save-notes";
 import { editPersonSchema, type EditPersonValues } from "./edit-person-schema";
 import { updatePersonAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
@@ -57,9 +63,7 @@ export function EditPersonForm({
         suffix: person.suffix ?? "",
       },
       contact: {
-        // INTERIM (Batch 2): the single field edits the MAIN address. Batch 3
-        // replaces it with the address list editor (DECISION-216).
-        email: person.emails[0]?.value ?? "",
+        emails: emailRowsFromSaved(person.emails),
         phone: person.phone ?? "",
       },
       address: {
@@ -102,7 +106,10 @@ export function EditPersonForm({
         suffix: values.identity.suffix || undefined,
       },
       contact: {
-        emails: interimEmailsPayload(person.emails, values.contact.email),
+        emails: {
+          rows: toEmailRowInputs(values.contact.emails),
+          knownIds: knownEmailIds(person.emails),
+        },
         phone: values.contact.phone || undefined,
       },
       address:
@@ -130,7 +137,7 @@ export function EditPersonForm({
     setSubmitting(false);
 
     if (result.ok) {
-      toast.success("Person updated.");
+      notifySaved("Person updated.", result.data?.notes);
       router.push(`/o/${slug}/admin/community`);
     } else {
       // NO reset here — see this component's own header (req 9).
@@ -152,7 +159,12 @@ export function EditPersonForm({
 
         <div className="space-y-4">
           <h2 className="text-lg font-medium">Contact & address</h2>
-          <TextField id="email" label="Email (optional)" type="email" register={register} name="contact.email" />
+          <EmailAddressesEditor
+            form={form}
+            idPrefix="edit-person"
+            personName={`${person.firstName} ${person.lastName}`}
+            savedRows={person.emails}
+          />
           <TextField id="phone" label="Phone (optional)" type="tel" register={register} name="contact.phone" />
           <TextField id="line1" label="Address (optional)" register={register} name="address.line1" />
           <TextField id="city" label="City" register={register} name="address.city" />
@@ -308,33 +320,4 @@ function TextField({
       )}
     </div>
   );
-}
-
-/**
- * INTERIM (Batch 2, replaced by the address list editor in Batch 3): the form
- * still has one email field. It edits the person's MAIN address (the first
- * active row, canonical order) and re-submits every other address exactly as
- * loaded, so saving never ends an address the form cannot show. A blank field
- * removes the main address (the oldest remaining one becomes the main, Q3).
- */
-function interimEmailsPayload(
-  loaded: PersonForEdit["emails"],
-  typed: string | undefined,
-): { rows: EmailRowInput[]; knownIds: string[] } {
-  const value = (typed ?? "").trim();
-  const main = loaded[0];
-  const rows: EmailRowInput[] = [];
-  for (const row of loaded) {
-    if (main && row.id === main.id) {
-      if (value !== "") {
-        rows.push({ id: row.id, value, subtype: row.subtype, isPrimary: true, doNotContact: row.doNotContact });
-      }
-      continue;
-    }
-    rows.push({ id: row.id, value: row.value, subtype: row.subtype, isPrimary: false, doNotContact: row.doNotContact });
-  }
-  if (!main && value !== "") {
-    rows.push({ value, subtype: null, isPrimary: true, doNotContact: false });
-  }
-  return { rows, knownIds: loaded.map((row) => row.id) };
 }

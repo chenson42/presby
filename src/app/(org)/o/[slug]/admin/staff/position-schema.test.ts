@@ -93,6 +93,7 @@ describe("newStaffPersonSchema — required fields", () => {
     const result = newStaffPersonSchema.safeParse({
       firstName: "Marisol",
       lastName: "Windham",
+      contact: { emails: [] },
     });
     expect(result.success).toBe(true);
   });
@@ -101,6 +102,7 @@ describe("newStaffPersonSchema — required fields", () => {
     const result = newStaffPersonSchema.safeParse({
       firstName: "  Marisol  ",
       lastName: "  Windham  ",
+      contact: { emails: [] },
     });
     expect(result.success).toBe(true);
     if (result.success) {

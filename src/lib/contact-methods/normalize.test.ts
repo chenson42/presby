@@ -22,7 +22,7 @@ describe("normalizeEmail", () => {
 
 describe("isValidEmailShape", () => {
   const good = [
-    "a@b.co",
+    "a@b.invalid",
     "nora@example.invalid",
     "first.last+tag@sub.example.invalid",
     "o'brien@example.invalid",
@@ -51,9 +51,9 @@ describe("isValidEmailShape", () => {
   it.each(bad)("refuses %j", (v) => expect(isValidEmailShape(v)).toBe(false));
 
   it("enforces the 254-character cap at the boundary", () => {
-    const local = "a".repeat(EMAIL_MAX - "@b.co".length);
-    expect(isValidEmailShape(`${local}@b.co`)).toBe(true);
-    expect(isValidEmailShape(`${local}a@b.co`)).toBe(false);
+    const local = "a".repeat(EMAIL_MAX - "@b.invalid".length);
+    expect(isValidEmailShape(`${local}@b.invalid`)).toBe(true);
+    expect(isValidEmailShape(`${local}a@b.invalid`)).toBe(false);
   });
 });
 

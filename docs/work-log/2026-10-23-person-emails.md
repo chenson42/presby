@@ -22,7 +22,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
 | 2 — Architectural review | architect | Complete. ER1–ER24; migration 0064 (2b moves to 0065); new module `src/lib/contact-methods/`; DECISION-215–218; F210–F214 | Approved with suggestions | 2026-10-23 |
 | 3 — Technical design | tech-lead | Complete. Designed to ER1–ER3b and ER11–ER23b (the text has no ER4–ER10 or ER24); S1–S4 ruled; Note 1 measured (0 CHECK violations; `seed-dev.sql` writes no contact rows; `invitations.db.test.ts:644` and `seed-dev-invitations.sql` need changes); D1–D15 additions, none needing a Phase 2 loop-back; F215–F217; DECISION-219 drafted; giving left unwired (D7, operator to be told) | Design complete; implementers named | 2026-10-23 |
-| 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | In progress: Batch A (0064, Drizzle mirror, DB tests, staged section 64 and seed patches) complete 2026-10-23; Batch 2 (server: `contact-methods/` module, `updatePerson`/`createPerson` rewired, readers, audit keys, actions, scans, signed-in-address warning) complete 2026-10-23; Batch 3 (UI) next | — | 2026-10-23 |
+| 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | In progress: Batch A (0064, Drizzle mirror, DB tests, staged section 64 and seed patches) complete 2026-10-23; Batch 2 (server: `contact-methods/` module, `updatePerson`/`createPerson` rewired, readers, audit keys, actions, scans, signed-in-address warning) complete 2026-10-23; Batch 3 (UI: editor, three hosts, directory Work line, invitation notice, e2e and hydration specs) complete 2026-10-23 | — | 2026-10-23 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1203,6 +1203,36 @@ Added to `docs/deployment.md` at integration in the style of the 0059 runbook.
 | Warning not scoped to this organization | `issue.db` "is scoped to THIS organization's roster" |
 
 **Next:** ux-developer (Batch 3): the address list editor on the edit page and the wizard's contact step, the staff form, the review step, the directory Work line, the `InvitationSentNotice` warning, the notes toasts (promotion, shared address), `e2e/person-emails.spec.ts`, and the 360px browser check. Replace the three interim adapters.
+
+## Batch 3 — ux-developer (2026-10-23)
+
+**Files created**
+- `src/components/org-portal/email-addresses-editor.tsx`: one `useFieldArray` over `contact.emails`, hosted inside each host form's own gated root (no second `HydrationGate`, no `<legend>`). Stacked card per address: heading with `Main` / `Don't send` badges and Remove, address, label select, Main radio, "Don't send mail to this address". Remove of a saved address opens an `AlertDialog`; an address typed this session is dropped without one. All copy is Phase 3 verbatim.
+- `src/components/org-portal/email-addresses-form.ts` (pure): `contactEmailsSchema` (field errors from `EMAIL_COPY`), `effectiveMainIndex`, `toEmailRowInputs` / `toNewPersonEmailInputs`, `describeRemoval`, `reviewEmailLines`.
+- `src/components/org-portal/person-save-notes.ts`: `notifySaved` (success, with "Now the main address: …" after an automatic promotion, then one 10-second "Also on file for …" toast per shared address).
+- Tests: `email-addresses-form.test.ts`, `person-save-notes.test.ts`, `invitation-sent-notice.test.tsx`; `e2e/person-emails.spec.ts` (5 tests x desktop and 360px), `e2e/hydration/person-emails-editor.spec.ts`, `e2e/support/person-emails-fixture.ts`.
+
+**Files modified**: edit form and schema, wizard schema / contact step / review step / wizard, staff quick-add form and schema, directory `person-card`, `directory-list` and `[personId]/page` (`Work: {address}` mailto line), platform `invitation-sent-notice.tsx` (each `warnings` entry renders as a "Note." paragraph inside the status region), and their tests. The three Batch 2 interim adapters are gone.
+
+**Deviations**
+1. **Staff form uses the full editor** (operator instruction for this batch), not Phase 3 D14's single field. Its values are `{ firstName, lastName, phone, contact: { emails } }` so the one editor path works. `createStaffPersonAction` still returns no `notes`, so a shared address raises no toast there.
+2. **Badges are in the editor only** (Phase 3 S3). There is no Community card that lists addresses, so none was built.
+3. **Address inputs are `type="text" inputMode="email"`**, not `type="email"`: native validation would pre-empt the inline messages and block the submit.
+4. **Main is derived in the editor** (`effectiveMainIndex`). When the Main row is removed, the form sends no main and the server promotes the oldest (so the promotion toast fires); the editor already shows who will be Main, and the Remove dialog names that address.
+5. Toast title for three or more people is `A, B and N other(s)` ("1 other" singular); Phase 3 gave only the many-people form.
+6. **Batch 2 test files edited** (`email-plan`, `email-rows-schema`, `normalize` tests): `npm run check` failed on `check:secrets` (38 `@b.co` / `@x.co` fixture addresses, outside the safe-domain list) at HEAD. Domains changed to `.invalid`; the 254-character boundary test follows. No assertion changed.
+7. Wizard match step still takes one address (D6); contact row 1 is pre-filled from it unless something was typed since.
+
+**Gates**
+- `typecheck` clean; `eslint --max-warnings=0 src e2e` clean; `npm run check` all eight pass (incl. `check:hydration-gate`).
+- Unit suite: 513 files passed, 75 skipped; 7822 tests passed, 2313 skipped. No DB-backed file was touched, so none re-run (Batch 2's stand).
+- E2E in a hardlinked scratch copy outside `~/git/presby-platform`, against the pipeline Neon branch: `person-emails.spec.ts` 10/10 (desktop and 360px, run 4); `community-participants.spec.ts` 9/9 (guard spec, unchanged); `hydration/community-participant-dialogs` and `person-emails-editor` pass; `admin-organizations`, `designation-revoke`, `invitation-existing-account`, `invitation-new-account` pass (45 passed in that run, 3 `community-participants` failures that run were leftover `E2ECommunity` people from an earlier sweep cut off by a dropped Neon connection; cleaned, then 9/9).
+- `npm run test:e2e:prod`: 75 passed, including the new hydration spec. Negative control: with `HydrationGate` removed from the edit form in the copy, the spec goes red at the pre-release `toBeDisabled()`; restored.
+- Real browser (Chromium via Playwright) at 360px and 1280px: edit page with two addresses, the Remove dialog (main address), the wizard contact step, and the directory person page all rendered and screenshotted; one column, no sideways scroll, 44px targets, dialog inside the viewport.
+
+**For review / branding pass:** all strings are in Phase 3 Copy; the only new ones are the "Note." prefix on the platform invitation warning and the "1 other" singular. Click through: edit a person, add a Work address, switch Main, remove the Main (toast names the new one), save an address another person holds (note toast), Add person wizard contact step and review, directory person page for a staff member with a Work address, and send a platform invitation to a signed-in person's address.
+
+**Next:** qa (Phase 5).
 
 ---
 

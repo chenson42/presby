@@ -27,8 +27,8 @@ const N = () => row("newer", { subtype: "other" });
 
 describe("planEmailSave — adding", () => {
   it("the first address becomes the main address, automatically", () => {
-    const p = plan([], [fresh("a@b.co")]);
-    expect(p.insert).toEqual([{ value: "a@b.co", subtype: null, isPrimary: true, doNotContact: false }]);
+    const p = plan([], [fresh("a@b.invalid")]);
+    expect(p.insert).toEqual([{ value: "a@b.invalid", subtype: null, isPrimary: true, doNotContact: false }]);
     expect(p.primary).toEqual({ fromId: null, toExistingId: null, toInsertIndex: 0, automatic: true });
     expect(primaryChanged(p)).toBe(false);
     expect(p.end).toEqual([]);
@@ -38,20 +38,20 @@ describe("planEmailSave — adding", () => {
   });
 
   it("the first address of several is the main; later ones are not", () => {
-    const p = plan([], [fresh("a@b.co"), fresh("c@d.co", { subtype: "work" })]);
+    const p = plan([], [fresh("a@b.invalid"), fresh("c@d.invalid", { subtype: "work" })]);
     expect(p.insert.map((i) => i.isPrimary)).toEqual([true, false]);
   });
 
   it("an explicitly flagged new row is the main, not the first", () => {
-    const p = plan([], [fresh("a@b.co"), fresh("c@d.co", { isPrimary: true })]);
+    const p = plan([], [fresh("a@b.invalid"), fresh("c@d.invalid", { isPrimary: true })]);
     expect(p.insert.map((i) => i.isPrimary)).toEqual([false, true]);
     expect(p.primary).toMatchObject({ toInsertIndex: 1, automatic: false });
   });
 
   it("adding a non-main address leaves the main alone", () => {
     const m = M();
-    const p = plan([m], [same(m), fresh("x@y.co", { subtype: "work" })]);
-    expect(p.insert).toEqual([{ value: "x@y.co", subtype: "work", isPrimary: false, doNotContact: false }]);
+    const p = plan([m], [same(m), fresh("x@y.invalid", { subtype: "work" })]);
+    expect(p.insert).toEqual([{ value: "x@y.invalid", subtype: "work", isPrimary: false, doNotContact: false }]);
     expect(p.demote).toEqual([]);
     expect(p.promote).toEqual([]);
     expect(p.end).toEqual([]);
@@ -85,7 +85,7 @@ describe("planEmailSave — changing the main address", () => {
 
   it("a new row flagged main demotes a kept old main", () => {
     const m = M();
-    const p = plan([m], [same(m, { isPrimary: false }), fresh("new@x.co", { isPrimary: true })]);
+    const p = plan([m], [same(m, { isPrimary: false }), fresh("new@x.invalid", { isPrimary: true })]);
     expect(p.demote).toEqual(["m"]);
     expect(p.promote).toEqual([]);
     expect(p.insert[0]!.isPrimary).toBe(true);
@@ -178,29 +178,29 @@ describe("planEmailSave — replacing (a typo fix) is end-and-replace, never an 
 
   it("the replacement takes exactly what the form submitted: the label and flag can change at the same time", () => {
     const m = row("m", { subtype: "work", main: true, dnc: true });
-    const p = plan([m], [same(m, { value: "x@y.co", subtype: "personal", doNotContact: false })]);
+    const p = plan([m], [same(m, { value: "x@y.invalid", subtype: "personal", doNotContact: false })]);
     expect(p.insert[0]).toMatchObject({ subtype: "personal", doNotContact: false });
   });
 
   it("verified_at never appears in a plan: there is nowhere for it to travel", () => {
     const m = M();
-    const p = plan([m], [same(m, { value: "x@y.co" })]);
+    const p = plan([m], [same(m, { value: "x@y.invalid" })]);
     expect(JSON.stringify(p)).not.toMatch(/verified/i);
   });
 
   it("replacing a non-main address leaves the main alone", () => {
     const m = M();
     const o = O();
-    const p = plan([m, o], [same(m), same(o, { value: "fixed@x.co" })]);
+    const p = plan([m, o], [same(m), same(o, { value: "fixed@x.invalid" })]);
     expect(p.end).toEqual([{ id: "older", subtype: "work", wasPrimary: false, replacedByInsert: 0 }]);
-    expect(p.insert[0]).toMatchObject({ value: "fixed@x.co", isPrimary: false, replacesId: "older" });
+    expect(p.insert[0]).toMatchObject({ value: "fixed@x.invalid", isPrimary: false, replacesId: "older" });
     expect(primaryChanged(p)).toBe(false);
   });
 
   it("replacing the main without flagging it hands the main to the oldest remaining row (automatic)", () => {
     const m = M();
     const o = O();
-    const p = plan([m, o], [same(m, { value: "fixed@x.co", isPrimary: false }), same(o)]);
+    const p = plan([m, o], [same(m, { value: "fixed@x.invalid", isPrimary: false }), same(o)]);
     expect(p.promote).toEqual(["older"]);
     expect(p.insert[0]!.isPrimary).toBe(false);
     expect(p.primary).toMatchObject({ fromId: "m", toExistingId: "older", automatic: true });
@@ -208,25 +208,25 @@ describe("planEmailSave — replacing (a typo fix) is end-and-replace, never an 
 
   it("replacing the only address without flagging it makes the replacement the main (automatic)", () => {
     const m = M();
-    const p = plan([m], [same(m, { value: "fixed@x.co", isPrimary: false })]);
+    const p = plan([m], [same(m, { value: "fixed@x.invalid", isPrimary: false })]);
     expect(p.insert[0]!.isPrimary).toBe(true);
     expect(p.primary).toMatchObject({ fromId: "m", toInsertIndex: 0, automatic: true });
   });
 
   it("swapping two addresses in one save ends both rows and inserts both (no duplicate refusal)", () => {
-    const a = row("a", { value: "one@x.co", main: true });
-    const b = row("b", { value: "two@x.co" });
-    const p = plan([a, b], [same(a, { value: "two@x.co" }), same(b, { value: "one@x.co" })]);
+    const a = row("a", { value: "one@x.invalid", main: true });
+    const b = row("b", { value: "two@x.invalid" });
+    const p = plan([a, b], [same(a, { value: "two@x.invalid" }), same(b, { value: "one@x.invalid" })]);
     expect(p.end.map((e) => e.id).sort()).toEqual(["a", "b"]);
-    expect(p.insert.map((i) => i.value)).toEqual(["two@x.co", "one@x.co"]);
+    expect(p.insert.map((i) => i.value)).toEqual(["two@x.invalid", "one@x.invalid"]);
     expect(p.insert.map((i) => i.replacesId)).toEqual(["a", "b"]);
   });
 
   it("a new row may reuse the address of a row that is being ended in the same save", () => {
-    const a = row("a", { value: "one@x.co", main: true });
-    const p = plan([a], [fresh("one@x.co", { isPrimary: true })]); // a is not submitted, so it is ended
+    const a = row("a", { value: "one@x.invalid", main: true });
+    const p = plan([a], [fresh("one@x.invalid", { isPrimary: true })]); // a is not submitted, so it is ended
     expect(p.end.map((e) => e.id)).toEqual(["a"]);
-    expect(p.insert[0]).toMatchObject({ value: "one@x.co", isPrimary: true });
+    expect(p.insert[0]).toMatchObject({ value: "one@x.invalid", isPrimary: true });
     expect(p.insert[0]!.replacesId).toBeUndefined();
   });
 
@@ -299,20 +299,20 @@ describe("planEmailSave — refusals (nothing is planned)", () => {
   it.each([
     ["no at sign", "plain"],
     ["no dot in the domain", "a@b"],
-    ["two at signs", "a@b@c.co"],
-    ["whitespace inside", "a b@c.co"],
-    ["a comma list", "a@x.co, b@y.co"],
+    ["two at signs", "a@b@c.invalid"],
+    ["whitespace inside", "a b@c.invalid"],
+    ["a comma list", "a@x.invalid, b@y.invalid"],
   ])("invalid_shape: %s", (_name, value) => {
     expect(refusal([], [fresh(value)])).toEqual({ reason: "invalid_shape", index: 0 });
   });
 
   it("too_long past 254 characters", () => {
-    const long = `${"a".repeat(250)}@b.co`;
+    const long = `${"a".repeat(250)}@b.invalid`;
     expect(refusal([], [fresh(long)])).toEqual({ reason: "too_long", index: 0 });
   });
 
   it("duplicate within one submission, after normalization, points at the later row", () => {
-    expect(refusal([], [fresh("a@b.co"), fresh(" A@B.CO ")])).toEqual({ reason: "duplicate", index: 1 });
+    expect(refusal([], [fresh("a@b.invalid"), fresh(" A@B.invalid ")])).toEqual({ reason: "duplicate", index: 1 });
   });
 
   it("an existing row and a new row with the same address are a duplicate", () => {
@@ -320,25 +320,25 @@ describe("planEmailSave — refusals (nothing is planned)", () => {
   });
 
   it("the same existing id submitted twice is refused as a duplicate", () => {
-    expect(refusal([m], [same(m), same(m, { value: "other@x.co" })])).toEqual({ reason: "duplicate", index: 1 });
+    expect(refusal([m], [same(m), same(m, { value: "other@x.invalid" })])).toEqual({ reason: "duplicate", index: 1 });
   });
 
   it("an unknown id means the form is stale: emails_changed", () => {
-    expect(refusal([m], [same(m), { ...fresh("a@b.co"), id: "not-in-the-list" }])).toEqual({
+    expect(refusal([m], [same(m), { ...fresh("a@b.invalid"), id: "not-in-the-list" }])).toEqual({
       reason: "emails_changed",
       index: 1,
     });
   });
 
   it("a subtype outside the vocabulary is bad_subtype (home is a phone label, not an email one)", () => {
-    expect(refusal([], [fresh("a@b.co", { subtype: "home" as never })])).toEqual({ reason: "bad_subtype", index: 0 });
-    expect(refusal([], [fresh("a@b.co", { subtype: "" as never })])).toEqual({ reason: "bad_subtype", index: 0 });
+    expect(refusal([], [fresh("a@b.invalid", { subtype: "home" as never })])).toEqual({ reason: "bad_subtype", index: 0 });
+    expect(refusal([], [fresh("a@b.invalid", { subtype: "" as never })])).toEqual({ reason: "bad_subtype", index: 0 });
   });
 
   it("ten addresses are allowed, eleven are too_many, and blank rows do not count", () => {
-    const ten = Array.from({ length: 10 }, (_v, i) => fresh(`a${i}@b.co`));
+    const ten = Array.from({ length: 10 }, (_v, i) => fresh(`a${i}@b.invalid`));
     expect(plan([], ten).insert).toHaveLength(10);
-    const eleven = [...ten, fresh("a10@b.co")];
+    const eleven = [...ten, fresh("a10@b.invalid")];
     expect(refusal([], eleven)).toEqual({ reason: "too_many" });
     expect(plan([], [...ten, fresh(""), fresh("  ")]).insert).toHaveLength(10);
   });

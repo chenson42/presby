@@ -229,7 +229,7 @@ export default async function PersonDetailPage({
         </div>
       </div>
 
-      {(entry.email || entry.phone || entry.address || entry.dateOfBirth) && (
+      {(entry.email || entry.workEmail || entry.phone || entry.address || entry.dateOfBirth) && (
         <div className="space-y-2">
           <h2 className="text-xl font-semibold">Contact</h2>
           <div className="space-y-1">
@@ -239,6 +239,14 @@ export default async function PersonDetailPage({
                 className="flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 {entry.email}
+              </a>
+            )}
+            {entry.workEmail && (
+              <a
+                href={`mailto:${entry.workEmail}`}
+                className="flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                {`Work: ${entry.workEmail}`}
               </a>
             )}
             {entry.phone && (

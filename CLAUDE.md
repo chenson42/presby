@@ -502,6 +502,15 @@ A platform admin acquires tenant authority only as any person does — by
 accepting an invitation addressed to their own email; a self-sent designation
 is permitted and audited as such, and the platform role itself confers nothing
 (DECISION-183).
+A platform admin may also end the current holders of an organization's
+founding-administrator or treasurer slot from `/admin/organizations/<id>`, as
+lockout recovery (DECISION-194). It never ends a grant held through a derived
+group and never touches an officer term, and it requires a reason and writes an
+audit row. **Accepted residual:** a revoke followed by a self-addressed
+designation lets the platform role clear a slot and then hold it. That chain is
+detected by audit (`org.*.revoked`, then `invitation.created` with
+`selfAddressed`) and is not prevented (operator ruling 2026-10-22). This is
+`paper`.
 
 ### The Roll Is the System of Record
 

@@ -343,8 +343,11 @@ export const AUDIT_ACTIONS = {
   // designateFoundingAdministratorAction(). Platform-actor axis (`org.*`),
   // same precedent as ORG_CREATED/ORG_BRAND_SET: a platform act against a
   // tenant carries that tenant's organizationId as resourceId. One key
-  // only — revocation rides the existing TENANT_ROLE_REVOKED path, since
-  // the founding grant is an ordinary role_grants row once minted. A
+  // only — the TENANT's own revocation rides the existing
+  // TENANT_ROLE_REVOKED path, since the founding grant is an ordinary
+  // role_grants row once minted; the PLATFORM's recovery revoke has its own
+  // keys, ORG_FOUNDING_ADMINISTRATOR_REVOKED / ORG_TREASURER_REVOKED (below,
+  // DECISION-194). A
   // REFUSED designation writes no audit row (it mutates nothing).
   // Metadata: { organizationId, personId, userId, mode, officeRoleKey,
   // administrationRoleKey, permissionKeys, priorHolderCount }. Ids only —
@@ -482,6 +485,26 @@ export const AUDIT_ACTIONS = {
   INVITATION_ACCEPTED: "invitation.accepted",
   INVITATION_ACCEPT_BLOCKED: "invitation.accept_blocked",
   USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
+  // ---------------------------------------------------------------------------
+  // APPENDED — pipeline/designation-revoke, 2026-10-22 (DECISION-194/196).
+  // A platform admin ends the current holders of an organization's
+  // founding-administrator or treasurer slot, as lockout recovery. Written by
+  // src/lib/onboarding/designation-holders.ts with insertAuditRow(tx, ...) in the
+  // SAME transaction as presby_revoke_designation_holder() (a failed audit insert
+  // undoes the revoke), only on outcome `revoked`; a refused or idempotent call
+  // mutates nothing and writes no row. The `org.*` axis, the
+  // ORG_*_DESIGNATED precedent: a platform act against a tenant carries that
+  // tenant's organizationId as resourceId. NOT TENANT_ROLE_REVOKED (the tenant's
+  // own self-service axis).
+  // Metadata (ids, counts, dates and the operator's free-text reason ONLY - never
+  // a name, never an email): { organizationId, slot, arm: 'person' | 'group',
+  // personId | groupId, grantIds, roleKeys, appliedEndsOn, clampedToMembershipEnd,
+  // companionGrantIds, reason, holderCountBefore, holderCountAfter, reachedZero,
+  // selfRevoke, openInvitationIds }.
+  // The accepted residual (F170) is reconstructable from these rows plus
+  // invitation.created.selfAddressed and invitation.accepted.inviterIsInvitee.
+  ORG_FOUNDING_ADMINISTRATOR_REVOKED: "org.founding_administrator.revoked",
+  ORG_TREASURER_REVOKED: "org.treasurer.revoked",
   // ---------------------------------------------------------------------------
 } as const;
 

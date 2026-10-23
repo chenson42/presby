@@ -202,6 +202,8 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Online giving (2026-10-15, docs/work-log/2026-10-15-online-giving.md) — every
   // key of every batch, declared up front in Batch 1b.
   ORG_TREASURER_DESIGNATED: "org.treasurer.designated",
+  ORG_FOUNDING_ADMINISTRATOR_REVOKED: "org.founding_administrator.revoked",
+  ORG_TREASURER_REVOKED: "org.treasurer.revoked",
   ORG_GIVING_EVENT_REQUEUED: "org.giving_event.requeued",
   GIVING_CONNECTION_CREATED: "tenant.giving_connection.created",
   GIVING_CONNECTION_STATUS_CHANGED: "tenant.giving_connection.status_changed",

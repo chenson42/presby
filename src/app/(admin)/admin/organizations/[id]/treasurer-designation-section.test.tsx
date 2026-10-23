@@ -5,7 +5,8 @@
  * (the real module pulls `@/lib/db` into the graph).
  *
  * Pins: the control renders only while `canDesignate`, and the collapsed state
- * shows a COUNT and never a name; the confirm is an AlertDialog (Workflow Rule
+ * lists the holders by DISPLAY NAME (DECISION-195, reversing the earlier
+ * count-only rule) and never an email, with a Revoke on each revocable row; the confirm is an AlertDialog (Workflow Rule
  * 2); the trigger is disabled until the email looks valid; the action receives
  * the organization id and the trimmed email; the action's error copy renders
  * inline verbatim; no native dialog is ever invoked.
@@ -14,6 +15,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
 import { invitationRow } from "./invitation-row.fixture";
+import { derivedGroupHolderRow, groupHolderRow, holderRow } from "./holder-row.fixture";
+import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
 
 const mockDesignate = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
@@ -37,7 +40,8 @@ const PROPS = {
   organizationId: "org-1",
   organizationName: "Alder Creek Presbyterian Church",
   canDesignate: true,
-  currentHolderCount: 0,
+  holderPeopleCount: 0,
+  holders: [] as HolderRow[],
   invitations: [] as InvitationListRow[],
   localLoginEnabled: true,
   totpConfigured: true,
@@ -63,24 +67,58 @@ const typeEmail = (value: string) =>
     target: { value },
   });
 
-describe("TreasurerDesignationSection — collapsed state", () => {
-  it("shows a COUNT (plural) and no form when holders already exist", () => {
-    render(<TreasurerDesignationSection {...PROPS} canDesignate={false} currentHolderCount={2} />);
-    expect(screen.getByText(/2 people/i)).toBeTruthy();
+describe("TreasurerDesignationSection — holders state", () => {
+  const people = [
+    holderRow({ roleNames: ["Treasurer"], companionRoleNames: [], displayName: "Ottoline Fairweather" }),
+    holderRow({ key: "person:2", subjectId: "p2", roleNames: ["Treasurer"], companionRoleNames: [], displayName: "Barnaby Quill" }),
+  ];
+
+  it("lists the holders by name and renders no form when holders already exist", () => {
+    render(
+      <TreasurerDesignationSection {...PROPS} canDesignate={false} holderPeopleCount={2} holders={people} />,
+    );
+    expect(screen.getByText(/2 people can manage giving/i)).toBeTruthy();
+    expect(screen.getByText("Ottoline Fairweather")).toBeTruthy();
+    expect(screen.getByText("Barnaby Quill")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^revoke access for/i })).toHaveLength(2);
     expect(screen.queryByLabelText(/email address/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /send invitation/i })).toBeNull();
   });
 
   it("says one person, singular", () => {
-    render(<TreasurerDesignationSection {...PROPS} canDesignate={false} currentHolderCount={1} />);
-    expect(screen.getByText(/one person/i)).toBeTruthy();
+    render(
+      <TreasurerDesignationSection {...PROPS} canDesignate={false} holderPeopleCount={1} holders={[people[0]!]} />,
+    );
+    expect(screen.getByText(/1 person can manage giving/i)).toBeTruthy();
   });
 
-  it("renders no names or emails at all in the collapsed state (a count only)", () => {
+  it("states that gift and donor records are not changed and that every designation and ending is audited, with no claim about operator access", () => {
+    render(
+      <TreasurerDesignationSection {...PROPS} canDesignate={false} holderPeopleCount={1} holders={[people[0]!]} />,
+    );
+    expect(
+      screen.getByText(/Gift and donor records are not changed by ending access here\. Every designation and every ending of access is recorded in the audit log\./),
+    ).toBeTruthy();
+    expect(screen.queryByText(/gains no access/i)).toBeNull();
+  });
+
+  it("renders no email address and no group-member names in the holders state", () => {
     const { container } = render(
-      <TreasurerDesignationSection {...PROPS} canDesignate={false} currentHolderCount={3} />,
+      <TreasurerDesignationSection
+        {...PROPS}
+        canDesignate={false}
+        holderPeopleCount={5}
+        holders={[people[0]!, groupHolderRow(), derivedGroupHolderRow()]}
+      />,
     );
     expect(container.textContent).not.toMatch(/@/);
+    expect(screen.getByText("Office Volunteers (group)")).toBeTruthy();
+  });
+
+  it("zero holders is the unchanged invite form", () => {
+    render(<TreasurerDesignationSection {...PROPS} />);
+    expect(screen.getByLabelText(/treasurer.s email address/i)).toBeTruthy();
+    expect(screen.queryByTestId("designation-holder-list")).toBeNull();
   });
 });
 

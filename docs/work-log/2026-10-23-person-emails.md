@@ -8,7 +8,7 @@
 > **Pipeline mode:** Full
 > **Source:** operator, 2026-10-23: "we need to support multiple emails per person. staff members will have personal emails and work emails. we'll need to take into account which emails to use when sending emails throughout the app. record the fact that thought needs to go into that. go ahead and add support for multiple emails."
 > **What exists:** `contact_methods` already allows several rows per person, with `kind` (email | phone), `subtype` (mobile | home | work), `is_primary` and `do_not_contact`. The person form and most readers handle one email only (`edit-person-form.tsx` maps a single `person.email`).
-> **Pre-assigned numbers (Rule 16):** DECISION-215–219 · F210–F219 · migration 0065 if needed (0062–0064 are reserved for Community Increments 2 and 2b) · worktree `presby-emails` · Neon branch `pipeline-person-emails` (`br-proud-lake-axcms7o7`, 1–4 CU). Community Increment 3 keeps DECISION-209–214 and F200–F209.
+> **Pre-assigned numbers (Rule 16):** DECISION-215–219 · F210–F219 · migration **0064** (re-reserved at Phase 2, ER2: Community Increment 2 keeps 0062/0063 and 2b moves to 0065; merge order Increment 2, then emails, then 2b) · worktree `presby-emails` · Neon branch `pipeline-person-emails` (`br-proud-lake-axcms7o7`, 1–4 CU). Community Increment 3 keeps DECISION-209–214 and F200–F209.
 > **Interaction:** Community Increment 2b (sign-in invitations) reads "the primary email on file" and refuses `several_emails_none_primary` and `address_shared`. This pipeline settles the rules 2b relies on, so it should implement before 2b's Phase 4.
 
 > **Recorded concern (operator, 2026-10-23): which address the app sends to.** Once a person can have a personal and a work address, every place the app sends email has to choose one. Examples: invitations, giving receipts and statements, event notices, support-ticket replies, and future newsletters. A staff member's role mail may belong at the work address, and their personal mail at the personal one. Phase 1 inventories every send path and proposes a rule for each. Anything not settled in this pipeline is recorded as a tracked follow-up, not dropped.
@@ -20,8 +20,8 @@
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
-| 2 — Architectural review | architect | In progress | — | — |
-| 3 — Technical design | tech-lead | Pending | — | — |
+| 2 — Architectural review | architect | Complete. ER1–ER24; migration 0064 (2b moves to 0065); new module `src/lib/contact-methods/`; DECISION-215–218; F210–F214 | Approved with suggestions | 2026-10-23 |
+| 3 — Technical design | tech-lead | In progress | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -340,23 +340,308 @@ Files read (all under `/Users/cshenso/git/presby-platform/presby-emails/`): `doc
 
 # Phase 2 — Architectural Review (architect)
 
+*To be recorded verbatim by the orchestrator. I wrote nothing. My only database access was read-only (`default_transaction_read_only=on`) against the pipeline branch endpoint `ep-winter-leaf-axct4hlj`. Nothing touched production or `development`.*
+
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
+**Approved with suggestions.**
+
+The feature shape is right, and the operator's rulings can be built without a structural change. Reading the live catalog turned up one premise the Phase 1 text does not state: **`contact_methods` has no `created_at` column.** So "promote the oldest remaining address" (the operator's Q3 ruling) cannot be built on today's table. The current readers' `order by is_primary desc, id` sorts by a random UUID. This pipeline's migration adds the column (F210). The catalog also showed that `presby_platform` holds DELETE on the table as well as `presby_app` (the F38 grant residue), and that the in-place value edit leaves `verified_at` asserting proof for a mailbox it never proved (F214).
+
+The rulings below are numbered **ER1–ER24** so they don't collide with Community's R-numbers.
 
 ## Placement
 
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
+- **Directory placement: a new module, `src/lib/contact-methods/`.** This is an architectural entry (DECISION-216).
+  - `normalize.ts` is pure, with no `server-only` and no runtime imports. It holds `normalizeEmail()`, `isValidEmailShape()` (mirroring the SQL CHECK exactly) and the `EMAIL_SUBTYPES` and `PHONE_SUBTYPES` vocabularies.
+  - `email-routing.ts` is pure. It holds `EMAIL_PURPOSES = ['credential','role','personal']`, `chooseEmail(active, purpose)`, `nextPrimaryAfterRemoval(active)`, and the one ordering constant they share.
+  - `email-audience.ts` is pure. It is a closed `Record<templateKey, Audience>` registry (ER14).
+  - `sql.ts` is server-only. It exports the RLS-side SQL fragments for the active-primary lateral and the staff-Work lateral. `directory.ts`, `community.ts` and the card then share one copy of the `ended_at` predicate and the order.
+  - `store.ts` is server-only. It is **the only writer of `contact_methods`** in `src/`, for both kinds: add, end, replace, set primary, relabel, set `do_not_contact`. It runs inside the caller's `withOrgContext` transaction and writes its audit rows with `insertAuditRow` in that same transaction. `updatePerson()` and `createPerson()` call it; `upsertPrimaryContactMethod` is deleted. This follows the `domains/service.ts` "only writer" precedent.
+  - `reader.ts` is server-only. It is a thin wrapper over the SQL reader (ER11) for senders.
+- **SQL:** one migration, **0064** (ER2). There is a staged suite, `scripts/person-emails/test-rls-64.sql`, run as `presby_app` (Rule 16: `test-rls.sql` is patched at integration only).
+- **Server vs Client split:**
+  - The edit form is already a client `useForm` root with `<HydrationGate>`. The address list becomes a `useFieldArray` inside that same root, with no second form root.
+  - Removing an address uses the generated `AlertDialog`, with no native `confirm`.
+  - The Community card, the directory and the find-person results stay Server Components.
+  - The wizard's list editor is the same client component, reused.
+- **Dependencies:** none. Validation is a regex mirrored from the CHECK; zod is already present. No new package.
+
+## Rulings on the analyst's handoff items
+
+### 1. Soft removal, delete revoked, edit means end-and-replace
+
+- **ER1. Columns.** Add `created_at timestamptz not null default now()` (F210) and `ended_at timestamptz` (null means active). **No `ended_by`.**
+  - The audit row is written in the same transaction (ER20), and it is the authoritative "who".
+  - An FK from this global person table to `users` would add a second identity edge for no gain.
+  - Existing rows get the migration timestamp. The order is always `(created_at, id)`, so ties are deterministic. Production has 0 rows; the branch is dev data.
+- **ER1a. One shared order.** Wherever "oldest" or "first" is needed: `is_primary desc, created_at, id` for display, and `created_at, id` for promotion. The constant lives in `email-routing.ts` and is mirrored in SQL. A test pins the two.
+- **ER1b. Revoke DELETE from `presby_app` and `presby_platform`.** There is **no BEFORE DELETE trigger.**
+  - `presby_guard_people_delete` says in its own comment (0048) that a delete guard on any of `people`'s six cascade children forces arming in that function.
+  - The `deletable_until` fixture cascade and the e2e fixture deletes (`e2e/support/community-fixture.ts:187`, `invitation-fixture.ts:316`) run as the owner and stay unaffected.
+  - The owner path is a `paper` residual. Its mitigation is a source scan: no `delete(contactMethods)` or `delete from contact_methods` in non-test `src/`.
+- **ER1c. A guard makes end-and-replace a database property.** Add `contact_methods_guard_write`, an invoker function on BEFORE INSERT OR UPDATE that binds every role. It refuses:
+  - any change to `value`, `kind`, `person_id` or `created_at`;
+  - any change to a row whose `ended_at` is already set (an ended row is frozen, so there is no un-ending and no re-dating);
+  - a non-owner setting or changing `verified_at` on insert or update. It uses the A1 idiom: `pg_class.relowner` for `TG_RELID` compared with `current_user`'s oid, with no role named. Only the acceptance definer proves an address. A replacement or a re-added address therefore always starts unverified (F214, and the "resurrection" probe).
+  - Phase 3 measures fixture writers first. The grep finds only `update … set do_not_contact` (`issue.db.test.ts:497`), which stays legal.
+- **ER1d. CHECK `ended_at is null or not is_primary`.** Ending the primary clears the flag in the same statement. Promotion is a separate, explicit write.
+- **ER1e. In-place changes are limited** to `subtype`, `do_not_contact`, `is_primary` and the end itself (null to a timestamp).
+  - A typo fix ends the row and inserts a new one. My lean: it carries the label but not `do_not_contact` or `verified_at`. Phase 3 decides `do_not_contact`.
+  - Phones follow the same path. That closes the `contact_methods` arm of F176. **F176 stays open** for `addresses` (`people.ts:941`) and the other tables it lists, so the release note must not claim otherwise.
+
+### 2. Migration numbering, and running in parallel
+
+- **ER2. Numbers:**
+  - Increment 2 keeps **0062** and **0063**. Its staged suite is already named `test-rls-62.sql`, and 0063 is the post-deploy lockdown, so renumbering it costs the most.
+  - **This pipeline takes 0064.**
+  - **2b moves to 0065.**
+  - The intended merge order, which is also the numeric order: **Increment 2, then emails, then 2b.**
+  - No swap. Increment 2 has written no `0062` file yet (checked in `presby-fadir`), but it is two phases ahead and will normally merge first. If emails is ready first, it waits for Increment 2's merge; Rule 16 serializes integration anyway. Only the operator, explicitly, can choose a swap.
+- **ER2a. Increment 2 and emails may run Phase 4 in parallel.**
+  - Their SQL objects don't overlap. Increment 2 changes `roll_actions`, `officer_terms`, groups and grants. Emails changes `contact_methods` and re-creates preview and accept, which Increment 2 doesn't touch.
+  - They do share code files outside Rule 16: `src/lib/people.ts`, `src/lib/audit.ts`, `community/new/*` and `community/[id]/edit/page.tsx`. Emails merges second, so it rebases and resolves.
+  - At integration, before 0064 runs on `development`, the orchestrator diffs `pg_get_functiondef` for `presby_preview_invitation` and `presby_accept_invitation` on `development` against the emails branch. They must be identical.
+- **ER2b. 2b's Phase 4 starts after emails merges.** Its SQL references `ended_at` and the reader. Its design text must change from 0064 to 0065, including `test-rls-64.sql` becoming `-65`. Its "derive bodies from the LIVE definitions" rule already covers re-creating the functions emails will have just replaced.
+- **ER2c. One migration, applied before the code deploy.** The column must exist before the code, and the revoke would ideally follow it. I checked every way the old code meets the new schema, and each one fails closed:
+  - a mixed-case insert fails the CHECK (old code doesn't lowercase);
+  - an in-place value update fails the guard;
+  - a blank-field delete fails the revoke.
+
+  No row is corrupted, production has 0 rows, and the window lasts minutes. A second lockdown number isn't worth it. The deployment runbook and the release note carry this paragraph.
+
+### 3. Fix-forward of the shipped readers, and the scan
+
+- **ER3. 0064 re-creates `presby_preview_invitation` and `presby_accept_invitation`** from the live definitions, with signatures unchanged so their ACLs survive. It adds `and cm.ended_at is null` at the four sites and changes nothing else:
+  - the preview's address match;
+  - accept's match count;
+  - accept's `limit 1` select;
+  - accept's `verified_at` update.
+
+  The live catalog confirms these are the only functions that read `contact_methods`; `presby_guard_people_delete` names it in a comment only. The FA and treasurer parity golden must stay byte-identical. This is F211. Without it, a removed address would still resolve a founding-administrator or treasurer acceptance and still receive `verified_at`. Today a removed address is deleted, so this pipeline would *introduce* that regression.
+- **ER3a. TypeScript readers.** `issue.ts`'s `resolveTreasurerPerson` and `hasDoNotContact` gain the predicate; an ended row with `do_not_contact` must not warn. `people.ts`'s edit-form read becomes a list of active rows. `directory.ts` and `community.ts` move to the `sql.ts` fragments.
+- **ER3b. Scan.** A file-level "names `contact_methods`, so it must name `ended_at`" check is satisfied by one mention, so I'm strengthening it into three controls:
+  - **TS allow-list.** Under non-test `src/`, only `src/lib/contact-methods/*`, `directory.ts`, `community.ts`, `people.ts` and `onboarding/issue.ts` may name `contact_methods` or `contactMethods`. Each must also name `ended_at` or import from `contact-methods/sql`. Comment-only files (`children.ts`, `staff-directory.tsx`, `dev-docs.ts`) carry `// contact-methods-scan-ok: <reason>`.
+  - **Catalog DB test.** It runs `select proname from pg_proc where prosrc ilike '%contact_methods%' and prosrc not ilike '%ended_at%'` minus an allow-list of `presby_guard_people_delete`. Historical migrations are immutable, so the live catalog is the right target for SQL.
+  - **Behavioural tests per site.** An ended address must not appear in the preview, must not resolve at accept, must not get `verified_at`, must not match a treasurer, and must not trigger the `do_not_contact` warning. These tests are the real control; the scans are tripwires.
+
+### 4. Where the resolver and routing live, and how 2b uses them
+
+- **ER11. SQL reader.** `presby_person_email(p_person_id uuid, p_purpose text) returns table (contact_method_id uuid, address text, subtype text, do_not_contact boolean)`, returning zero or one row.
+  - It is `language sql stable`, **security invoker**, with `set search_path = public, pg_temp`. It does `revoke all from public, presby_platform` and `grant execute to presby_app`.
+  - Being invoker, it adds no authority and does no scoping. On `presby_app` it sees what RLS shows. Called from inside a definer, it sees what the definer has already scoped.
+  - An unknown purpose raises `internal_error`, following R35's explicit-routing rule.
+- **ER12. Purpose rules,** stated as filter then order, with the same text in SQL and TypeScript:
+
+  | Purpose | Filter | Order | `do_not_contact` |
+  |---|---|---|---|
+  | `credential` | the active primary | — | returned, not skipped. The caller acknowledges it, matching 2b's check 10. |
+  | `role` | active, not `do_not_contact` | `subtype = 'work'` first, then `is_primary desc, created_at, id` | skipped |
+  | `personal` | active, not `do_not_contact`, `subtype` not `work` (null counts as non-work) | `is_primary desc, created_at, id` | skipped |
+
+  - A matrix DB test runs the same fixture rows through `chooseEmail()` and the SQL reader and asserts identical output. **SQL is authoritative for any credential**: R20's address is read in SQL and never trusted from TypeScript. TypeScript is for UI previews and for senders that already hold RLS-read rows.
+- **ER13. 2b's consequences** (folded into its Phase 3; my addendum rulings stand otherwise):
+  - The issue and resend core call `presby_person_email(person, 'credential')`. No row means `no_email_on_file`.
+  - **`address_ambiguous` becomes unreachable and is dropped from `SIGN_IN_REFUSALS`.** ER15 makes "exactly one active primary" a database property, and an unreachable pinned literal can't be tested.
+  - R27, `address_current` and R29 `address_shared` all gain `ended_at is null`. "Any on-file email" now means any *active* email.
+  - R27's `FOR SHARE` reasoning still holds. Ending an address is a non-key UPDATE, so it blocks on the share lock, and READ COMMITTED's re-check finds the row ended and returns `dead`.
+  - **S9's index moves here.** 2b removes `contact_methods_email_norm_idx` from its migration.
+  - The `do_not_contact` acknowledgement reads the flag the reader returns.
+  - 2b's `address_invalid` (320 characters) stays as a defensive branch. ER16's 254-character shape is a strict subset of `account_invitations_email_shape`, so every contact address can always be inserted as `email_normalized`. A test pins that subset.
+- **ER14. "Wire every send path" (operator Q2) becomes a closed audience registry.**
+  - `email-audience.ts` maps every `templateKey` literal in `src/` to one of: `account` (`users.email`, never `contact_methods`), `typed`, `donor`, or `person:<purpose>`.
+  - A source scan fails on any template key that isn't classified. So the "which address" question is asked mechanically for every future sender.
+  - Today's classification:
+    - `password_reset`, `email_change_verify`, `feedback_notification`, the `ticket_*` keys and `domain_notification` are `account`.
+    - `account_invitation`, `treasurer` and `statistics_submission_grant` are `typed`. Matching to a person uses active addresses (ER3).
+    - The giving statement notice is `donor`.
+    - 2b's `account_sign_in_invitation` is `person:credential`.
+  - **Giving is the only existing path where wiring would change behaviour:** falling back to `personal` for a linked donor with no donor email. I'm allowing it only on these conditions:
+    - at statement-snapshot time only, so the address is frozen into `delivery_email`;
+    - linked donors with a null donor email only;
+    - only through `contact-methods/reader.ts`, never by naming `contact_methods` inside `src/lib/giving`;
+    - never a Work address.
+
+    If Phase 3 can't specify the copy and flow without the analyst, it files a TODO rather than inventing them. Giving is tier 2, and a new recipient is a functional decision.
+  - **Auth paths never read contact emails.** This is a source scan over `src/auth.ts`, `src/lib/auth/`, `(auth)`, `(password-reset)`, `(email-verify)` and `api/auth`.
+
+### 5. Database enforcement
+
+- **ER15. Primary:**
+  - **At most one:** a unique index on `(person_id, kind) where is_primary and ended_at is null`. It covers phones too; the branch has 0 phones with several primaries.
+  - **At least one**, for email: a `DEFERRABLE INITIALLY DEFERRED` constraint trigger. It is **SECURITY DEFINER** (F26: it must count every row the person has, whatever org context or RLS view the caller has), with a pinned `search_path`. At commit it refuses a person who has active email rows and no active primary. It only checks; it never writes.
+  - Together they make "exactly one active primary whenever any active email exists" a database property, and 2b relies on that.
+  - Partial unique indexes can't be deferred, so the store must demote or end the old primary before it promotes the new one.
+- **ER16. Shape:**
+  - `kind in ('email','phone')`.
+  - For email: `value = lower(btrim(value)) and char_length(value) <= 254 and value ~ '^[^@[:space:],]+@[^@[:space:],]+\.[^@[:space:],]+$'`. This allows exactly one `@` and rejects whitespace and commas, which kills `"a@x, b@y"`.
+  - For phone: `value = btrim(value) and value <> ''`.
+  - **Normalize on write** (the `account_invitations` and `giving_donors` precedent). Stored values are already normalized, so every existing `lower(btrim(cm.value))` comparison keeps working unchanged.
+- **ER17. Uniqueness within a person:** a unique index on `(person_id, lower(btrim(value))) where kind = 'email' and ended_at is null`.
+  - Re-adding an ended address inserts a new row.
+  - Duplicates within one submission are refused in the store before they reach the index.
+  - The global lookup index (S9) is `(lower(btrim(value))) where kind = 'email' and ended_at is null`.
+- **ER18. Subtypes.**
+  - Email: `personal`, `work`, `other`, or null (shown as "Email").
+  - **Store `personal`, and migrate `home` to `personal`** for `kind = 'email'` in 0064, before the CHECK. It is a label change, so updating in place is legal.
+  - Phone keeps `mobile`, `home`, `work`, or null.
+  - A per-kind CHECK enforces both.
+  - `scripts/seed-dev.sql` and `scripts/invitations/seed-dev-invitations.sql` must be updated at integration to write normalized values (`lower(btrim(u.email))`) and the new labels, or a re-seed fails the CHECK.
+- **ER19. Applying the constraints.** Production has 0 rows and the branch measures 0 violations. So 0064 runs a **stop-block** that counts, without ever selecting a value: bad shape, untrimmed or mixed-case values, unknown kind or subtype, several primaries, duplicates within a person, and active emails with no primary. Any non-zero count raises. Then it adds each CHECK `NOT VALID` and runs `VALIDATE` in the same file. Every other environment is still guarded by the stop-block.
+- **ER19a. Auto-promotion is done by the application, not a trigger.**
+  - `store.ts` uses `nextPrimaryAfterRemoval()`: the oldest active row by `(created_at, id)`, whatever its label. It writes the promotion and the audit row with `automatic: true`, and returns the promoted row so the toast can say "Now the main address: …".
+  - A writing trigger couldn't hand the promoted row back to the action, and it couldn't write a typed audit row in the same transaction.
+  - ER15's deferred check is the backstop if any writer forgets.
+  - A posted submission with active addresses and no primary is normalized by the same rule, giving one rule and not two. More than one primary is an input error.
+  - The store takes `people … FOR UPDATE` before touching any contact row. That serializes concurrent saves and keeps R27's lock order (person before contact).
+  - **Named tension:** auto-promotion can make a Work address the Main one, so credential mail goes there. The operator ruled for this. `personal` routing still keeps giving mail away from Work whatever the Main is.
+
+### 6. Global-table residual (Gap 10) and `person_identifiers` (Gap 11)
+
+- **ER21. Accept and record, `paper` (DECISION-218).**
+  - `contact_methods` stays global and FORCE RLS, with person-level policies. Organization B's `people.manage` can see, end, relabel or re-primary an address that organization A entered for a person who belongs to both.
+  - With ER19a, B ending the Main address also changes A's routing.
+  - **Bounded for credentials:** R31 refuses a `sign_in` invitation to anyone with any membership elsewhere, live or ended.
+  - **Detected:** every change writes `tenant.person_email.*` with the acting `organizationId`.
+  - Scoping contact data per organization is a D-level redesign and a TODO, not this pipeline. The branch has 3 people with more than one membership, all fixtures.
+- **ER22. `person_identifiers` stays separate.**
+  - The form never writes it. A congregation typing an address is not proof of control.
+  - Ending a contact address does not touch identifiers.
+  - Two TODOs:
+    - unverify or flag a verified identifier whose address has been ended everywhere;
+    - giving link proposals don't see contact addresses.
+  - The wizard passes **all** typed addresses to `presby_match_person()`, which already takes an array.
+
+### 7. Find-person, directory search, and the staff Work address
+
+- **ER23. Member directory display** (operator Q1):
+  - Show the active Main address.
+  - Also show the active Work address when the person holds an **open staff position at the current organization**: `starts_on <= current_date and (ends_on is null or ends_on > current_date)`, read on the RLS connection. Several Work rows: take the first by `is_primary desc, created_at, id`. If the Main address *is* the Work address, show it once.
+  - `hide_email` nulls both.
+  - The public staff directory is unchanged. 0041's comment requires a pipeline of its own to widen it.
+- **ER23a. Search matches only what is shown (F212).**
+  - `findDirectoryPersonIds` and the directory's `search` match names, plus the displayed emails when `hide_email` is false, plus the primary phone when `hide_phone` is false. Ended rows never match.
+  - This reverses the earlier "raw value may match" design noted at `directory.ts:153`.
+  - **Admin surfaces** (Community search, gated by `people.manage`) may match every active address of the person, because the card shows them all.
+- **ER23b. The "Also on file for {Name}" note** uses R29's predicate: another live, unmerged person with a **live** membership at `presby_current_org()`, on the RLS connection. RLS alone would also show people whose membership has ended. A test pins the note's predicate equal to 2b's `address_shared`. It is never checked across organizations.
+
+### 8. Audit
+
+- **ER20. Keys, all written with `insertAuditRow` in the save transaction:**
+  - `tenant.person_email.added`: `{organizationId, contactMethodId, subtype, isPrimary, replacesId?}`
+  - `tenant.person_email.ended`: `{organizationId, contactMethodId, subtype, wasPrimary, replacedById?}`
+  - `tenant.person_email.primary_changed`: `{organizationId, fromContactMethodId, toContactMethodId, automatic}`
+  - `resourceId` is the person id. **No address value, partial address or domain in any metadata.** A test asserts that no metadata value matches an `@`.
+  - **Suggested fourth key:** `tenant.person_email.updated`, `{fields: ['subtype' | 'do_not_contact']}`. The routing contract makes `do_not_contact` decide whether an address is used.
+  - Phone changes ride `tenant.person.updated` with `phoneChanged`.
+  - **Moving `person.updated` into the transaction (F199) remains 2b's.** Phase 3 may pull it forward, since `updatePerson` is being rewritten anyway; if it does, it tells 2b.
 
 ## Invariants Touched
 
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
+- **Isolation Is a Database Property:**
+  - `contact_methods` stays FORCE RLS with unchanged policies.
+  - The one trigger that must see all of a person's rows (ER15) is SECURITY DEFINER (F26). The guard (ER1c) reads nothing and stays invoker.
+  - The reader is invoker and adds no authority.
+  - Verified against `pg_class`, `pg_policies` and `aclexplode` on the branch.
+- **Never hard-delete / all deletes are soft:**
+  - DELETE is revoked from `presby_app` and `presby_platform`. Removal is `ended_at`.
+  - The F176 `contact_methods` arm closes; F176 stays open for `addresses` and the rest.
+  - The owner path is `paper`, mitigated by a source scan.
+- **Permissions vs Flags, and credentials:**
+  - No new `FEATURES.*` key: `people.manage` covers every write, and the existing read gates are unchanged. No flag: the Community toggle gates the surfaces.
+  - **A contact email authenticates nothing.** It is never read by sign-in, password reset or email verification (scan). It becomes a credential's *destination* only inside 2b's definer, through the SQL reader.
+- **Two Hierarchies:** no platform predicate is involved. ER21's cross-org reach is ecclesiastically flat and audited.
+- **Composite Tenant Keys:** no new tenant table. `contact_methods` is a global person child; its FK to `people` is unchanged.
+- **The Brand Is a Cascade Override:** unaffected. Everything is in `(org)`, which is brandable, and `(invite)`'s functions change, not its group.
+- **Verify in a Browser / HydrationGate:** the list editor stays inside the existing gated root. Check at 360px: stacked cards, a `min-h-11` remove target, and the AlertDialog.
+- **CLAUDE.md change, for operator review:** add a Project Layout line for `src/lib/contact-methods/`, and one sentence under Permissions vs Flags: "a contact email authenticates nothing; only a definer reading it through `presby_person_email` may address a credential to it."
 
-## Notes
+## Notes (Phase 3 must honour)
 
-[Anything Phase 3 must honor.]
+1. **Measure before DDL:**
+   - every owner-side and `presby_app`-side fixture that inserts `contact_methods`. Each must insert normalized values and exactly one primary per person with emails, or ER15 fails at commit;
+   - every fixture that updates `value`;
+   - the `subtype` values in all seeds.
+2. **0064's internal order:**
+   - stop-block;
+   - columns;
+   - the `home` to `personal` update;
+   - CHECKs (`NOT VALID`, then `VALIDATE`);
+   - indexes;
+   - guard and deferred triggers;
+   - revoke;
+   - reader;
+   - preview and accept replacements, last.
+
+   Apply it twice on a throwaway branch, then run the parity golden and `test-rls.sql` before it reaches the pipeline branch.
+3. **Pin by test:**
+   - the SQL and TypeScript matrix (ER12);
+   - the order constant;
+   - the shape CHECK against `isValidEmailShape()`, and the contact shape as a subset of the invitation shape;
+   - the subtype vocabularies;
+   - full classification of the audience registry;
+   - no addresses in audit metadata;
+   - the ER23b predicate equal to R29;
+   - each of the four ended-address behaviours (ER3b);
+   - delete refused, value update refused, `verified_at` write refused (as `presby_app`), second active primary refused, and an ended row being primary refused.
+4. **Staged for integration, not edited mid-pipeline (Rule 16):** the `test-rls.sql` patch, the `seed-dev.sql` and `seed-dev-invitations.sql` changes, the journal entry, TODO, decisions and STATE.
+5. **Drizzle mirror:** `src/lib/db/domain/people.ts` gets the columns, CHECKs and indexes, plus `check:schema-parity`. Then `npm run docs:erd`.
+
+## Suggestions (Phase 3's call)
+
+- **S1.** Add the `tenant.person_email.updated` key (ER20).
+- **S2.** Drop `contact_methods_value_idx`, the unused `lower(value)` index, once nothing plans on it.
+- **S3.** Have the Community card show "Don't send mail here" and "Main" badges, so an administrator can see why a send skipped an address.
+- **S4.** Pull F199 forward, since `updatePerson` is being rewritten (ER20).
+
+## Decisions proposed (the orchestrator records them; DECISION-219 stays unassigned)
+
+- **DECISION-215: contact methods are end-dated, never deleted, and their identity is immutable.** It covers ER1–ER1e, ER15–ER19a, the single-migration deploy (ER2c), and auto-promotion by the oldest active row, done in the application, audited, with a database backstop.
+- **DECISION-216: one place decides which address a person's mail uses.** It covers the `src/lib/contact-methods/` module and its only-writer rule, the invoker SQL reader `presby_person_email` as the credential authority, the three purpose classes (ER12), the closed template-key audience registry (ER14), and the rule that contact emails authenticate nothing.
+- **DECISION-217: the member directory shows the Main address plus an open staff member's Work address, and search matches only what is shown** (ER23–ER23b; this reverses the raw-value-match behaviour).
+- **DECISION-218: accepted residuals.** It covers the global contact table's cross-organization reach (ER21, `paper`, bounded by R31, detected by audit) and the separation from `person_identifiers` (ER22).
+
+## Findings (F210–F214; the rest of the range is unused)
+
+- **F210:** `contact_methods` has no creation time. "First" and "oldest" are decided by a random UUID, so the directory shows an arbitrary address for a person with several and none primary, and the operator's promotion rule can't be built. Closed by ER1 and ER1a.
+- **F211:** The four shipped 0059 reader sites, and `issue.ts`'s treasurer match and `do_not_contact` warning, would treat an ended address as on file, resolve a person by it, and stamp it verified. This is latent until `ended_at` exists, so it must be fixed in the same migration. Closed by ER3 and ER3a.
+- **F212:** Find-a-person and directory search match hidden and undisplayed addresses and phones. That oracle widens with several addresses per person. Closed by ER23a.
+- **F213:** There is no database constraint on `kind`, `subtype`, value shape, a single primary, or uniqueness within a person. Closed by ER15–ER18.
+- **F214:** `verified_at` isn't bound to the mailbox it proved. `updatePerson()` edits the value in place, so the proof carries over to a different address, and `presby_app` can set `verified_at` directly. Closed by ER1c and ER1e.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 2 — Architectural review | architect | Complete. ER1–ER24 ruled on all eight handoff items. Migration 0064 for this pipeline, with 2b moving to 0065 and Increment 2 keeping 0062/0063; Phase 4 may run alongside Increment 2; merge order Increment 2, then emails, then 2b. New module `src/lib/contact-methods/`; no dependencies. DECISION-215–218, F210–F214. Missing `created_at` found in the live catalog. | Approved with suggestions | 2026-10-23 |
+
+## Handoff
+
+**Next agent: tech-lead (Phase 3).** Design to ER1–ER24, take the Note 1 measurements first, and rule on S1–S4.
+
+The orchestrator should:
+- re-reserve the migrations: this pipeline 0064, Increment 2b 0065, Increment 2 unchanged at 0062/0063;
+- update this work-log's header line ("0065 if needed") and the 2b design's references from 0064 to 0065, including `test-rls-64.sql`, and its Phase 4 gate (after emails merges);
+- send 2b's tech-lead the ER13 consequences:
+  - drop `address_ambiguous`;
+  - every `contact_methods` predicate gains `ended_at is null`;
+  - S9 moves here;
+  - the credential address comes from `presby_person_email(…, 'credential')`.
+
+Files read, all under `/Users/cshenso/git/presby-platform/presby-emails/`:
+- `docs/work-log/2026-10-23-person-emails.md`, `docs/work-log/_template.md`, and `docs/work-log/2026-10-22-founding-admin-directory.md` (Increment 2's Phase 2 R19–R26 and its Phase 3 plan, 2b's Phase 2 R27–R36, and 2b's Phase 3 through the 0064 contract)
+- `drizzle/0008_presby_domain.sql`, `drizzle/0028_presby_people_write_rls_fix.sql`, `drizzle/0059_presby_account_invitations.sql` (lines 850–885, 1155–1245), `drizzle/meta/_journal.json`
+- `src/lib/directory.ts`, `src/lib/community.ts`, `src/lib/people.ts`, `src/lib/onboarding/issue.ts`, `src/lib/email/credential-keys.ts`, `src/lib/giving/statements.ts`, `src/lib/db/domain/giving.ts`, `src/lib/db/domain/invitations.ts`, `src/lib/audit.ts`, `src/lib/audit-tx.ts`
+- `scripts/invitations/seed-dev-invitations.sql`, `src/lib/testing/invitation-fixture.ts`
+- `/Users/cshenso/git/presby-platform/presby/docs/deployment.md` (Migrations)
+
+Live catalog read on `ep-winter-leaf-axct4hlj`, read-only:
+- `contact_methods`: columns, constraints, indexes, triggers (none), policies, `aclexplode` grants;
+- RLS flags on `contact_methods`, `person_identifiers`, `staff_positions` and `person_privacy`;
+- the `presby_guard_people_delete` body;
+- every `pg_proc` body that names `contact_methods`;
+- the `staff_positions` and `person_privacy` columns;
+- aggregate counts by kind and subtype, shape, primaries and multiple rows. No values were selected.
 
 ---
 

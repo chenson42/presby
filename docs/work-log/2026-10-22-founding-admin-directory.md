@@ -22,6 +22,8 @@
 | 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; Batch B (server: lib, actions, audit) complete 2026-10-22; Batches C and D (UI, e2e, 360px pass) complete 2026-10-22 — Phase 4 Complete for Increment 1 | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
+| Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
+| Inc 2 · 2 — Architectural review | architect | In progress | — | — |
 
 ---
 
@@ -1743,3 +1745,341 @@ Failures: [...]
 ## Red Flags (if NEEDS REWORK)
 
 - [Specific. What has to change before this ships.]
+
+---
+
+# Increment 2 — Session approval, pending queue, elder sign-in invites
+
+> **Pre-assigned numbers (Rule 16):** DECISION-202–205 · F179–F185 · migration 0062 (provisional; re-checked at kickoff of Phase 4 against main).
+> **Status:** Phase 1 complete (READY WITH NOTES, operator rulings recorded below); Phase 2 in progress. Increment 1 Phases 5–6 run in parallel; Increment 2 Phase 4 does not start until Increment 1 merges.
+
+*Recorded verbatim by the orchestrator from the analyst's returned text (the analyst is read-only).*
+
+
+
+I read the whole work-log, then the code in the `presby-fadir` working tree. That tree includes Batch B's uncommitted changes to `roll.ts`, `roll-action-kinds.ts` and `people.ts`. Increment 2 touches the same files, so see the sequencing note under Handoff. I read `decideRollAction()`, `listPendingRollActions()`, the pending page and actions, `startOfficerTerm()`, `org-provisioning.ts`'s baseline seed, `presby_sync_derived_group`, `presby_sync_current_roll`, the `memberships_guard_insert` trigger, `follow_ups`, and the dev seed's `session_member` fixture. I ran no database queries and wrote nothing.
+
+### VERDICT
+
+**READY WITH NOTES.** Phase 2 is mandatory. It must rule on the five architect items below, and the operator must answer the ten open questions, three of which change scope.
+
+### ONE-LINE TAKE
+
+> A congregation needs a Session that can actually approve what the clerk proposes. That means a baseline role, a queue everyone involved can see, and an approval that is checked in the database. Today the Session can't be reached, the queue has no link anywhere, and approving a proposal can double-count a member in the filed statistics.
+
+### The central finding: the Session role is real, but there may be nobody who can use it
+
+Three facts from the code and the TODO line up.
+
+1. **The Session roster does not require a login.** `startOfficerTerm()` requires only a live membership, and the roster trigger fills the derived Session group from `ruling_elder` terms. So `officers.manage` can fill the Session with people who have no account.
+2. **No path links a user to a person except platform invitations.** "Invitations Increment 2" (org-level invite to sign in) is unbuilt, and `docs/TODO.md:238` says so. A person recorded as an elder cannot sign in, so they cannot approve.
+3. **The only person with `officers.manage` and a login at a new congregation is the founding administrator.** They also carry the clerk office, so they hold `roll.propose`. If they record themselves as a ruling elder, they become a Session approver. One platform-designated person would then hold both `roll.propose` and `roll.approve`, which is exactly what DECISION-155 and F118 refused to hand out in a bundle.
+
+This is not a blocker, but Phase 2 and the operator must rule on it knowingly. It also means the empty-Session state has three distinct cases, not one (see Flow 7).
+
+### Pass 1 — User verbs
+
+| Surface | Verb | Cadence |
+|---|---|---|
+| Admin, clerk (`roll.propose`) | See every pending proposal at the congregation, read-only | on demand, daily at set-up |
+| Admin, clerk | See what happened to a proposal (approved, denied, withdrawn) and why | after each Session meeting |
+| Admin, clerk | Withdraw a proposal made in error | on demand |
+| Admin, Session member (`roll.approve`) | Open the queue from Community or the admin hub | per Session meeting |
+| Admin, Session member | Approve one proposal, or select several and approve with one minute reference | per Session meeting |
+| Admin, Session member | Deny a proposal with a reason | per Session meeting |
+| Admin, founding administrator (`officers.manage`) | Record elders, see whether the Session can act yet | one-time at set-up |
+| Admin (`people.manage`) | See "waiting for the Session" on a person and on the Community list | on demand |
+| Platform | Provisioning seeds the role. A migration backfills existing congregations | one-time |
+
+No anonymous or no-role surface is touched. Every surface above is under `/o/<slug>/admin/community`.
+
+### Pass 2 — Flows
+
+**Flow 1, queue visibility for a proposer.**
+Entry points are a "N waiting" link in the Community header and the pending page itself.
+- **What exists today:** nothing links to `/admin/community/pending`. A repo-wide search finds no link, only `revalidatePath` calls.
+- **What exists for proposers:** a per-person amber notice on the edit page (`getPendingRollActionsForPerson`). There is no organization-wide view.
+- **New read gate:** `roll.approve` or `roll.propose`. A proposer gets a read-only list with no Approve or Deny buttons.
+- **Decided history:** a "Recently decided" section, approved or denied, newest first, with the reason on a denial. Today a denied proposal vanishes from every screen.
+- Failure: a database error shows the existing load-error state. A viewer with neither key gets the existing forbidden body, unchanged.
+
+**Flow 2, approve (single and bulk).**
+Entry is the pending page. The viewer picks "Approve", optionally enters a minute reference, and submits.
+- **Single approval:** one row, one confirmation.
+- **Bulk approval:** select rows, one minute reference, "Approve N". Each row is decided and audited individually in one request.
+- **Success:** the row moves to Recently decided, and the person appears under Members. A warning appears if the effective date falls in a filed year.
+- Failure: one typed refusal per row, in plain language (copy table below). A bulk run reports "N approved, M need attention" and lists the M with reasons. It never half-commits silently.
+
+**Flow 3, deny.**
+The reason is required, trimmed, and capped at 500 characters server-side. The row becomes `denied`, with the actor and date recorded on the row.
+- Failure: the same refusals as approval (`already_decided`, `not_found`).
+
+**Flow 4, withdraw a mistaken proposal.**
+Entry is the queue row (proposer view) or the person's edit page. The clerk picks "Withdraw proposal" and gives a reason.
+- Under the soft-delete ruling the row is never deleted.
+- The proposer can withdraw. The person is released from the `pending_action` block that Increment 1 added.
+- Failure: if the Session decided it first, the user sees "already decided". Withdrawing is allowed for the proposer or any `roll.propose` holder (Open Question 3).
+
+**Flow 5, visitor to member.**
+- The clerk adds a visitor, or opens an existing one.
+- The clerk records "Received as a member" (profession of faith or another gain), which creates a pending row.
+- The person shows "Waiting for the Session" under Everyone. They stay under Visitors until approval, because lists derive from the roll first.
+- Approval sets `current_roll`, so the person moves to Members and leaves Visitors with no engagement write.
+- Failure: a refusal (ended membership, deceased, already on that roll) leaves the row pending for the Session to deny.
+
+**Flow 6, participant to member.**
+This is the same as Flow 5 on the same membership row.
+- Replay supersedes the participant roll with the active roll.
+- The participant count drops, the gain is counted, and the 17/18 age split uses the `age_at_action` derived at proposal time.
+- The person's Connection card changes from "Participant" to "Member", and the Remove-as-participant control disappears.
+- A person who is a participant and has a pending member proposal cannot be removed (`pending_action`, Increment 1). That is correct, but see F183.
+
+**Flow 7, the Session cannot act yet.** There are four distinct states, and the copy must tell them apart.
+
+| State | What the queue shows | Who sees the link |
+|---|---|---|
+| (a) No Session body to approve (non-congregation org, or no Session group seeded) | "This organization has no Session to approve roll actions." No Member option offered | everyone |
+| (b) Session roster empty | "Your Session roster is empty, so member proposals wait. Record your ruling elders under Officers." | link for `officers.manage` holders. Others: "Ask an administrator to record your elders." |
+| (c) Elders recorded, none can sign in (or none has a term in effect today) | "N elders are recorded, but none has signed in to PresbyPortal yet, so no one can approve." Plus "term begins {date}" when future-dated | a pointer to invitations if org-level invites exist, otherwise a support ticket |
+| (d) At least one approver exists | normal | n/a |
+
+The counts come from the Session group's live rows today and whether each has a linked user. They are admin-only data at the viewer's own organization.
+
+**Flow 8, provisioning and backfill.**
+- A new congregation gets a `session_member` role (`roll.approve` only), bound to its derived Session group.
+- Backfill for existing congregations:
+  - It skips an organization that already has an org-owned role under that key, because the dev fixture already has one.
+  - It touches only organizations that have a Session derived group.
+  - It uses the role key as the discriminator, never a reason text (the purge lesson).
+
+### Pass 3 — Permissions and flags
+
+- **Permission keys:** no new key and no new `FEATURES.*`. `roll.approve` already exists, and 0061 seeds it into the catalog.
+- **Read gate widens** to `roll.approve` or `roll.propose`.
+- **Withdraw** gates on `roll.propose`.
+- **Default roles:**
+  - `session_member` holds `roll.approve` only. The dev fixture's role also carries `directory.view`, which is redundant, because every live membership already gets `directory.view` through the baseline `member` role.
+  - No role carries both `roll.propose` and `roll.approve` as a bundle. A clerk who is also an elder holds both through two roles, as in real life. The wildcard invariant holds.
+  - The founding-administrator bundle is unchanged.
+- **Flags:** none new. This follows the operator's rule against new platform flags before go-live. The existing `org_portal.members_create` flag and toggle still gate the page.
+- **A naming snag to record:** a congregation that turns the "create" toggle off also blocks its Session from the approval queue.
+- **Rollback:** the role and its grant are data and can be ended with `ends_on`. The functions and policy are droppable.
+
+### Pass 4 — Edge cases the request didn't mention
+
+- **2FA gate.** `/o/*` already enforces it in the proxy. An approver who is 2FA-required but not enrolled is pushed to `/totp`. The org setting `require_two_factor` defaults to false, so a Session can approve the roll without 2FA at most congregations. Say so in the decision. Do not change it here.
+- **Audit.** Approve and deny are security-sensitive. The current code writes their audit rows after commit through `recordAudit()`, which opens its own connection and swallows failures (F180). Increment 1 fixed this class for on-record acts with `insertAuditRow()` in the same transaction.
+  - New key for withdrawal: `tenant.roll_action.withdrawn`.
+  - Approve metadata should add `selfApproved`, `minuteReference` and `affectsFiledPeriod`.
+  - A denied row records no actor today. Only `audit_events` knows who denied it.
+- **Empty state, brand-new install.** The queue empty state must differ by viewer and by Flow 7 state. Today it reads "Nothing waiting for your approval. Roll actions proposed by admins will show up here." For a proposer with nothing pending, say "Nothing is waiting. Member proposals you make appear here until the Session decides them."
+- **Failure microcopy.** Every approval refusal needs a human string. The proposed table follows.
+- **Mobile at 360px.**
+  - Bulk-select checkboxes need 44px targets.
+  - The approve and deny dialogs must fit the viewport.
+  - The sticky "Approve N" bar must not cover the last row.
+  - Run the browser check Increment 1 specified.
+- **Deploy ordering is the reverse of Increment 1.**
+  - Moving approval into a function and tightening the UPDATE policy breaks the old code's `UPDATE` the moment the migration lands.
+  - Code first breaks the new code until the function exists.
+  - The cheapest safe sequence is a migration that only adds the role and the functions, then the code switch, then the restrictive UPDATE policy as a later section or follow-up. Production has 0 roll rows and one user, so any order is survivable. Phase 3 should still pick one on purpose.
+- **Proposals and approvals dated in a filed year.** Increment 1 warns on on-record acts (`affects_filed_period`). Approving a back-dated gain changes past-year counts and gains the same way. The approval result needs the same warning.
+- **Future-dated proposals.** Approval before the effective date leaves the cache until the daily reconcile (F29). The row should say "takes effect {date}".
+- **Pending queue growth.** `listPendingRollActions()` has no limit or pagination. A new congregation entering its whole roll queues hundreds. Bulk approve and pagination are in scope, not polish (Open Question 4).
+- **Names in the queue.** The queue shows names of people hidden from the Directory (`directory_hidden`) to approvers today. Approvers need identity to decide, and `roll.propose` holders typed the person in. State it in the decision.
+
+### Pass 5 — Adversarial
+
+- **Redirect targets.** None new. The actions take a slug, and `callbackUrl` handling is unchanged.
+- **State-machine shortcuts.**
+  - The approve action posts a client-supplied roll action id with no UUID validation (a malformed id gives a raw database error).
+  - A client can call approve on a row the viewer never saw.
+  - Today a `denied` row can be updated back to `approved` or deleted by `presby_app`. The freeze trigger covers only `approved` rows.
+  - The tightened UPDATE policy plus a terminal rule for decided rows closes both.
+- **Enumeration.** A row id from another organization must look identical to a missing id (`not_found`). The function derives the organization from `presby_current_org()` and takes no organization parameter, as in Increment 1 (R2).
+- **Cross-tenant disclosure through a typed refusal.**
+  - `memberships_one_active_roll_idx` fires only when a person is `active` at two organizations. Linked persons exist (ministers, transfer claims), so it is reachable but rare.
+  - A refusal that says "active elsewhere" tells one congregation that a person is on another congregation's active roll. Use generic copy with a support-ticket path, never the other organization's name.
+- **Input boundaries.**
+  - The approve and deny actions I read pass the reason and minute reference through with no server-side length cap and no required reason (F184). The client dialog may require a reason, but the server does not.
+  - Caps proposed: reason 1–500, minute reference at most 200, matching Increment 1.
+- **Self-targeting.**
+  - An approver may approve their own proposal or their own membership. This is permitted by design today and surfaced with a "You proposed this" badge. It is not blocked.
+  - Blocking it would deadlock a one-person bootstrap.
+  - Default: stamp it (`selfApproved: true` on the audit row, badge kept), as DECISION-183 stamps self-designation.
+  - The self-constitution path is the same shape. `startOfficerTerm()` has no self-target check, so the founding administrator can record themselves as an elder and then approve their own proposals. Default: allow, stamp the audit row `selfRecorded`, and name the residual in the decision (F182).
+- **Privilege escalation through `role_grants`.**
+  - `role_grants.manage` plus the subset check means the founding administrator cannot grant `roll.approve` to themselves, because they do not hold it.
+  - The `officers.manage` to Session group to `session_member` path is the real escalation route (F182).
+  - Ruling needed on whether a `ruling_elder` term must carry a minute reference. Default: optional but prompted, since historical entry may lack one.
+- **Duplicate proposals double-count a gain.**
+  - Nothing stops two pending `profession_of_faith` rows for one person at proposal time.
+  - `presby_roll_changes` counts gains from effective rows by `effective_date` and `age_at_action`, so approving both, or approving a gain for someone already active, inflates the SASR gain line.
+  - Default: at approval, refuse a gain whose resulting roll already equals the person's replay roll as of the effective date (`already_on_roll`).
+- **Loss kinds.** The edit-time picker offers only gain kinds, so no approvable loss kind is reachable today. Keep that allow-list as a pinned test when approval moves into a function.
+
+### Increment 2 scope, ruled item by item
+
+| Operator ruling | What Phase 1 says |
+|---|---|
+| Baseline Session role carrying `roll.approve`, seeded and backfilled | Needs its own decision (DECISION-202). It revisits DECISION-100's "do not add a conditional branch pre-emptively": `baselineRoleSeedPlan` becomes type-varying, and a congregation gets a second role bound to the `session` derived group. The decision should also record that the Session roster is constituted by `officers.manage`, not by the roll (F182). |
+| Pending-queue visibility for `roll.propose` as well as approvers | In scope. It needs an entry point (F179), a read-only mode, and a decided-history view, because proposers currently never see denials. |
+| Complete visitor to member and participant to member through approval | Mostly follows from approval working. The remaining pieces: the Connection card and the lists update on approval, the Remove control disappears, and the already-on-roll refusal keeps gains honest (F181). |
+| Move approval into a definer function and extend the restrictive policy to UPDATE | Recommend yes. Today "who may approve" is a paper property enforced only in `decideRollAction()`. Increment 1 closed the same gap for approved-at-insert. The function also lets approval take the membership lock Increment 1 introduced, so it cannot race a removal. It writes the audit row in the same transaction (F180). |
+| Approval refuses on an ended membership or a shadowing later action | Refuse for an ended membership and for a deceased person. For a later-dated effective action, warn rather than refuse, consistent with Phase 3's S1 ruling: a 2018 profession entered after a 2020 opening balance is legitimate history. Return `shadowed_by` as Increment 1's S1 does. |
+| `memberships_one_active_roll_idx` mapped to a typed result | Yes, with generic copy and no other organization named (see Pass 5). |
+| Empty-Session-roster copy | Four states, Flow 7. |
+| Soft-delete rule, F176's pending-row DELETE | See F183 and Open Question 3. Recommend revoking `DELETE` on `roll_actions` from `presby_app`, and making `denied` and `withdrawn` rows terminal. |
+
+**Proposed approval refusal copy (Phase 3 finalizes):**
+
+| Code | Copy |
+|---|---|
+| `forbidden` | You don't have permission to approve or deny roll actions here. |
+| `not_found` | That roll action could not be found. |
+| `already_decided` | Someone already decided this one. Refresh to see the current status. |
+| `membership_ended` | This person's connection to this congregation has ended, so this can't be approved. Deny it instead. |
+| `person_deceased` | This person is recorded as deceased. Deny this action or correct the record first. |
+| `already_on_roll` | This person is already on that roll as of the effective date. Approving would count them twice. Deny the duplicate. |
+| `active_elsewhere` | This can't be approved right now. Send us a support ticket and we'll look into it. |
+| `reason_required` | Say why you're denying this. |
+| `reason_too_long` | Keep the reason under 500 characters. |
+| `provisioning_incomplete` | This organization's membership setup isn't finished, so this can't be decided yet. Send us a support ticket. |
+
+### Gaps the request didn't address (findings numbered from F179)
+
+- **F179. The pending queue has no entry point, and only approvers can read it.** Nothing links to `/admin/community/pending`. A proposer sees one person's pending row at a time on the edit page and nothing organization-wide. A proposer also never learns that a proposal was denied, or why.
+- **F180. Approval is application-gated, and its audit is written outside the transaction.**
+  - `decideRollAction()` issues a plain `UPDATE` as `presby_app`, so any bug elsewhere could approve a row.
+  - `approveRollAction()` and `denyRollAction()` write their audit rows afterward through `recordAudit()`, which swallows failures. A constitutional act can commit with no audit row.
+  - A denied row records no actor, and `denied` rows are neither frozen nor delete-guarded.
+- **F181. Approval has no state checks.**
+  - It does not refuse an ended membership or a deceased person.
+  - A duplicate gain, or a gain for someone already on that roll, is counted a second time in `presby_roll_changes`.
+  - A cross-organization active-roll collision raises a raw unique violation.
+  - A back-dated approval changes a filed year with no warning.
+- **F182. The Session is constituted by `officers.manage`, and a rostered elder may be unable to sign in.**
+  - The founding administrator can record themselves as an elder and approve their own proposals.
+  - `startOfficerTerm()` has no self-target check, and the minute reference is optional.
+  - Elders recorded with no account cannot approve, and the invitation path for them (Invitations Increment 2) is unbuilt.
+  - Only `ruling_elder` maps to the Session group, so an installed pastor serving as moderator is not an approver. This is not checked against polity (Open Question 6).
+- **F183. A mistaken proposal cannot be withdrawn, and with no approvers it blocks the person.**
+  - Only `roll.approve` can deny, and nobody holds it yet at a new congregation.
+  - Increment 1's `pending_action` refusal then blocks any on-record participant act for that person (enrol, remove).
+  - **The first real congregation is in this state the moment Increment 1 ships.** Either ship Increment 2's withdrawal path with or soon after Increment 1, or warn in the Increment 1 release notes.
+  - The pending-row DELETE (F176) remains reachable by any `presby_app` path until it is revoked.
+- **F184. The approve and deny actions have no server-side input bounds.** No required reason, no length caps, and the roll action id is not validated as a UUID.
+- **F185. Organizations with no Session can queue member proposals nobody can approve.** Only congregations get a Session derived group. A new worshiping community, presbytery, synod or general assembly has none. The wizard offers the Member choice by `roll.propose` alone.
+  - Default: offer Member only where a Session exists. Participant-on-record is unaffected.
+
+### Out of scope (confirm)
+
+- The Invitations Increment 2 build (org-level "Invite to sign in", "No login yet" markers). It is a separate pipeline. Increment 2 surfaces the symptom (Flow 7, state c) but does not fix it.
+- Email or push notification to approvers when proposals queue. Sessions check an agenda per meeting. File as a follow-up.
+- Approving loss, transfer-out and removal kinds, and the F19 membership-ending trigger for them. The edit-time allow-list stays gain-only.
+- Closing F177 (the `active_membership` group admitting visitors). It becomes urgent when member self-service sign-in starts, not now.
+- Org-wide hard-delete cleanup (rest of F176): the `contact_methods` and `addresses` blanking paths and the other tables' `DELETE` grants stay filed. Only `roll_actions` is in scope here.
+- Requiring 2FA for approvers (org setting `require_two_factor` stays as is).
+- A minute-reference requirement on approval, and Session quorum or vote counts. Approval stays one authorized person's act, as DECISION-078 and DECISION-066 already settled.
+
+### Open questions
+
+1. **Self-constitution and self-approval (F182).** Allow and stamp the audit row, or block? *Default: allow and stamp. The founding administrator is often the clerk and an elder at a one-person start, and a block would deadlock the bootstrap.*
+2. **Elders without logins.** Pull Invitations Increment 2 ahead of Increment 3, or accept that approval works only for people who already have an account? *Default: ship Increment 2 with the honest Flow 7 copy. The operator ordered all Community work first, so Invitations Increment 2 would come after Increment 3, and elders other than the founder cannot approve until then.*
+3. **Withdrawal semantics.** The operator ruled "denied, never deleted". Should a withdrawn proposal be `denied` with a distinct audit key, or its own `withdrawn` status? *Default: a distinct `withdrawn` status plus audit key, because "the Session said no" and "the clerk fixed a typo" are different facts. If the operator prefers the literal ruling, `denied` plus the new audit key works, but the row still needs an actor column.*
+4. **Bulk approval.** Include select-and-approve with one minute reference now? *Default: yes, capped (50 per submit). A congregation entering a real roll otherwise needs hundreds of single approvals.*
+5. **Non-congregation organizations.** Hide the Member choice where there is no Session? *Default: yes. A new worshiping community has no Session, so who approves there is its own question.*
+6. **The pastor.** Should an installed pastor or moderator be able to approve? Only ruling elders are in the derived Session group today. This is not verified against polity, so the question goes to the operator, not to an analyst assumption.
+7. **Minute reference at approval.** Optional but prompted, or required? *Default: optional, so historical entries aren't blocked.*
+8. **Proposer view scope.** All pending proposals at the congregation, or only the viewer's own? *Default: all. The clerk keeps the register.*
+9. **Denial reasons.** Show them to roll proposers? A reason is free text that elders type about a person. *Default: yes, to `roll.propose` and `roll.approve` holders only.*
+10. **Already-on-roll refusal.** Refuse at approval when the person is already on that roll as of the effective date? *Default: yes (F181).*
+
+### Numbers
+
+- **Decisions (proposed):**
+  - DECISION-202: the congregation baseline `session_member` role carrying `roll.approve` (revisits DECISION-100), including who constitutes the Session.
+  - DECISION-203: approval, denial and withdrawal through definer functions, with the restrictive UPDATE policy, same-transaction audit, and decided rows terminal.
+  - DECISION-204: pending-queue visibility and decided history for `roll.propose` holders.
+  - DECISION-205: the Session-roster bootstrap rules (self-recording stamp, approver-status copy, non-congregation org types).
+- **Findings:** F179–F185 above.
+- **Migration:** the orchestrator assigns it. Expect 0062, with 0060 on the parallel pipeline and 0058 reserved.
+
+### Handoff to architect (Phase 2)
+
+Rulings needed:
+1. **Definer function versus application check for decide and withdraw.** Include the restrictive UPDATE policy, the one-live-decision rule, and whether `denied` and `withdrawn` rows join the freeze trigger. Also rule on a `denied_by` and `denied_on` pair, or a single actor column.
+2. **The second baseline role.** How `baselineRoleSeedPlan` varies by organization type, whether backfill skips orgs with an existing `session_member`, and whether the role carries `roll.approve` only.
+3. **The self-constitution residual (F182).** Is "allow and stamp" acceptable, or does the Two Hierarchies invariant demand a gate?
+4. **Withdrawal status versus reusing `denied`.** This extends the vocabulary CHECK that 0061 added.
+5. **The deploy sequence** for moving approval into a function.
+
+**Sequencing.** Increment 2's Phases 1–3 can run now, because judgment agents never conflict. Phase 4 must wait until Increment 1's Phase 4 batches are committed. They rewrite `roll.ts` and `people.ts`, and Increment 2's migration depends on 0061's functions and policy. The Rule 16 shared files stay orchestrator-only.
+
+Files read (all under `/Users/cshenso/git/presby-platform/presby-fadir`): `docs/work-log/2026-10-22-founding-admin-directory.md`, `docs/work-log/_template.md`, `src/lib/roll.ts`, `src/lib/roll-action-kinds.ts`, `src/lib/officers.ts`, `src/lib/org-provisioning.ts`, `src/lib/audit-tx.ts`, `src/lib/audit.ts`, `src/lib/role-grants.ts`, `src/lib/onboarding/founding-administrator.ts`, `src/lib/db/domain/person-ext.ts`, `src/lib/db/domain/roll.ts`, the community pending `page.tsx`, `actions.ts` and `pending-worklist.tsx`, the officers states file, `drizzle/0009`, `0012`, `0017`, `0028`, `scripts/seed-dev.sql`, `docs/decisions.md`, `docs/TODO.md`.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Increment 2 — 1 Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-22 |
+
+---
+
+## Increment 3 — scoping note (visitor follow-ups)
+
+**Can it follow Increment 2 directly? Yes.**
+
+It has no schema or function dependency on Increment 2. Follow-ups hang off `memberships`, not the roll. The one coupling is soft: an automatic "new member" follow-up when the Session approves. Leave that manual in the first cut so the approval function stays free of side effects.
+
+It does not reuse Increment 1 or 2's tables, so it needs its own full pipeline, with Phase 1 and a Phase 2 run (new table, new permission). It also needs its own migration and its own numbers (DECISION-206 onward, F186 onward).
+
+Two parallelism options for the orchestrator:
+- **Serial.** Inc 2 finishes Phase 6, then Inc 3 starts. Simplest, and fits "finish Community first".
+- **Overlapped.** Inc 3's Phases 1–3 run during Inc 2's Phase 4, since judgment agents never conflict. Inc 3's Phase 4 starts after Inc 2 commits. `roll.ts` is untouched by Inc 3, so the only collisions are the migration number and the shared files.
+
+**Scope as the operator stated it:** the `follow_ups` table as the visitor-to-member funnel, a first-visit workflow, and an engagement editor changing visitor, regular, inactive and moved away.
+
+**What Phase 1 for Increment 3 must resolve (from reading `follow_ups`, `memberships.engagement_status`, and Increment 1's lists):**
+
+1. **The table is thin.**
+   - It has `workflow`, `step`, `status`, `assigned_to_person_id`, `due_on`, `completed_at` and free-text `notes`.
+   - It has no `created_by`, no `created_at`, no status vocabulary CHECK, and no `unique (id, organization_id)`.
+   - `presby_app` holds `DELETE` on it (an F176 case), and a hard-deleted follow-up violates the soft-delete ruling.
+   - Workflows must be a fixed catalog (no custom fields, D8). The table's own comment names four: `first_visit`, `new_member`, `inactive_outreach` and `care`. Step lists are code constants.
+2. **Sensitivity.**
+   - Free-text follow-up notes about a visitor are pastoral in practice (tier 3).
+   - Either leave notes out of the first cut, or gate them behind a pastoral permission.
+   - A new permission needs DECISION-078's binding test. Candidate: the Board of Deacons, whose mercy-and-visitation duty passed that test in an earlier decision. Phase 2 verifies, not the analyst.
+3. **Assignees need a login to see "my follow-ups".** This is the same dependency as Increment 2's elders (Invitations Increment 2, unbuilt). An admin-managed list works without it.
+4. **The engagement editor creates invisible people.**
+   - Increment 1's Visitors list is `engagement_status = 'visitor' and current_roll is null and ended_on is null`.
+   - A visitor changed to `inactive` or `moved_away` leaves that list and appears in no other view. The Directory predicate admits `regular` or any roll, not those two.
+   - Under the soft-delete rule, "set status, never delete" is meaningless if the person disappears. The editor needs views for Inactive and Moved away, or a visible filter on Everyone.
+   - `engagement_status` is free text with no CHECK, so a vocabulary constraint belongs in the migration.
+5. **Engagement versus the roll.** Engagement is the pastoral axis and must stay separate. Ruling needed:
+   - whether the editor refuses to change a person who is on a member roll;
+   - whether "moved away" means anything for membership end. The soft-archive for a visitor is `ended_on` with a fixed reason marker, in the same pattern as Increment 1's removal, and needs a reopen path.
+   - A member with engagement `visitor` is a display oddity after approval. Increment 1's `deriveConnection` handles it by roll-first precedence. The editor should not rewrite it silently.
+6. **F177.** The `active_membership` group admits visitors. If follow-up volunteers or visitors ever sign in, the baseline member role reaches a visitor with an account. Increment 3 does not need to close F177, but its Phase 2 must restate the exposure.
+7. **First-visit workflow trigger.** Start with a one-click "Start first-visit follow-up" on a new visitor. Auto-creation inside `createPerson()` is a hidden write and belongs in a later ruling, not the first cut.
+8. **Funnel metrics.** `first_visit_date` and `how_heard` already exist from Increment 1. A visitor-to-participant-to-member view is derivable from `roll_actions` dates, but a count that crosses into the SASR must not. Engagement is never reported.
+
+**Estimated size:** medium to large. One migration (follow-ups columns, CHECKs, delete guard, permission), one library, three pages, one new permission, and the biggest unknown is the sensitivity ruling in item 2.
+
+**Operator questions Increment 3 will need answered:**
+- Who assigns and works follow-ups: deacons, the clerk, any member with a role?
+- Are free-text notes in the first cut?
+- Should a visitor archive be in scope?
+- Is a dedicated Inactive and Moved away view acceptable?
+
+Increment 3 gets its own Phase 1 at kickoff. Numbers should be reserved at `/new-feature` kickoff per Rule 16, not now.
+---
+
+### Operator rulings on the Increment 2 open questions (2026-10-22)
+
+- **Q1, self-constitution and self-approval (F182):** **allow and stamp.** The audit marks `selfRecorded` and `selfApproved`.
+- **Q2, elders without logins:** **"Add invites into Community".** An org-level "invite this elder or member to sign in" path, the Invitations Increment 2 shape, moves INTO the Community work so a real Session can approve. Scope it as part of Increment 2, or as Increment 2b ahead of Increment 3.
+- **Q3, withdrawal:** **its own `withdrawn` status**, with an actor and a distinct audit key. Never deleted.
+- **Q6, the pastor:** the operator asked "what does the book of order say?" The orchestrator answered from the PC(USA) Book of Order: the session is composed of the ruling elders in active service together with all installed pastors and associate pastors (G-3.0201), and the pastor is its moderator. Receiving members is the session's act. Proposed default, pending operator confirmation: installed pastors and associate pastors count as Session approvers alongside ruling elders. **Caveat for Phase 2:** a teaching elder's membership is with the presbytery, not the congregation. The derived Session group is built from `ruling_elder` officer_terms and requires a congregation membership, so including installed pastors needs a data-model ruling (pastoral relationship/appointment records → session composition) and must not invent a congregation membership.
+- **Q4, Q5, Q7–Q10:** not put to the operator. The analyst defaults stand: bulk approve capped at 50; Member is offered only where a Session exists; the minute reference is optional; proposers see all pending proposals; denial reasons are visible to roll.propose and roll.approve holders; refuse an approval that would put someone on a roll they are already on.

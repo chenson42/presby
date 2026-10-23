@@ -43,7 +43,7 @@ interface FormValues {
  * validator (`docs/ui-standards.md` "Forms — State Patterns"); this schema
  * only saves the visitor a round trip for an out-of-range value.
  */
-function buildSchema(groups: SasrFieldGroup[], bounds: Record<string, SasrFieldBounds>) {
+export function buildSchema(groups: SasrFieldGroup[], bounds: Record<string, SasrFieldBounds>) {
   const fieldsShape: Record<string, z.ZodTypeAny> = {};
   for (const group of groups) {
     for (const field of group.fields) {

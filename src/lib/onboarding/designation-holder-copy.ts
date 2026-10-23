@@ -65,6 +65,22 @@ export function parseReason(raw: unknown): ReasonResult {
 }
 
 // ---------------------------------------------------------------------------
+// The revoke action's form fields. Lives here (not in the "use server" actions
+// file, which can export only async functions) so a test can reach it. Size
+// checks come first on the array, before any refinement.
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const revokeHolderFieldsSchema = z.object({
+  organizationId: z.string().regex(UUID_RE),
+  slot: z.enum(["founding_administrator", "treasurer"]),
+  subjectKind: z.enum(["person", "group"]),
+  subjectId: z.string().regex(UUID_RE),
+  expectedGrantIds: z.array(z.string().regex(UUID_RE)).min(1).max(20),
+});
+
+// ---------------------------------------------------------------------------
 // Outcomes (the action's `error` / the toast). The database-error sentence is
 // the action file's own DB_ERROR_COPY, shared with the invitation actions.
 // ---------------------------------------------------------------------------

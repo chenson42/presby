@@ -36,7 +36,11 @@ import {
 } from "@/lib/onboarding/issue";
 import { INVITATION_RATE_LIMIT_COPY } from "@/lib/onboarding/labels";
 import { revokeDesignationHolder } from "@/lib/onboarding/designation-holders";
-import { OUTCOME_COPY, parseReason } from "@/lib/onboarding/designation-holder-copy";
+import {
+  OUTCOME_COPY,
+  parseReason,
+  revokeHolderFieldsSchema,
+} from "@/lib/onboarding/designation-holder-copy";
 import type { RevokeHolderActionResult } from "@/lib/onboarding/designation-holder-types";
 import { slugSitePath } from "@/lib/site-urls";
 
@@ -1029,14 +1033,6 @@ export async function revokeAllInvitationsAction(
 // and a derived group's roster (`derived_group_refused`), so this action can
 // never become a general "end any grant" tool.
 // ---------------------------------------------------------------------------
-
-const revokeHolderFieldsSchema = z.object({
-  organizationId: z.string().regex(UUID_RE),
-  slot: z.enum(["founding_administrator", "treasurer"]),
-  subjectKind: z.enum(["person", "group"]),
-  subjectId: z.string().regex(UUID_RE),
-  expectedGrantIds: z.array(z.string().regex(UUID_RE)).min(1).max(20),
-});
 
 /**
  * FormData fields: `organizationId`, `slot` (`founding_administrator` |

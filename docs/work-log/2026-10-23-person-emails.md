@@ -327,6 +327,17 @@ Files read (all under `/Users/cshenso/git/presby-platform/presby-emails/`): `doc
 
 ---
 
+## Operator rulings on the Phase 1 questions (2026-10-23)
+
+- **Q1, directory:** **"Main plus staff work email."** Members see the Main address. A person with an open staff position also shows their Work address in the member directory, even when Personal is Main. `hide_email` still hides both.
+- **Q2, sending:** **"Build per-purpose rules now."** The routing contract (credential / role / personal, with `do_not_contact` skipped) is built in this pipeline as one pure function and one SQL reader. Every existing send path is wired to the rule for its purpose class, rather than deferring routing until the first new sender.
+- **Q3, removing the Main address:** **"Promote the oldest automatically."** When the Main address is removed and others remain, the oldest remaining active address becomes Main without asking. The audit row records the promotion (`primary_changed` with `automatic: true`). This overrides the analyst's no-auto-promotion default. Phase 3 should still make the change visible to the admin, for example "Now the main address: …" in the save toast.
+- **Q4, the same address on two people:** **allowed, with a note** ("Also on file for {Name}"), checked within the current organization only.
+- **Q5, self-service:** not asked. The default stands: administrators only.
+- **Production pre-flight (orchestrator, read-only, 2026-10-23):** production has 0 `contact_methods` rows in total, so 0 people with several primaries, none with no primary, and none with several rows. The new indexes and CHECKs apply cleanly.
+
+---
+
 # Phase 2 — Architectural Review (architect)
 
 ## Verdict

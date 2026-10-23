@@ -346,3 +346,44 @@ describe("no end-user copy leaks provider text, a token, or another organization
     expect(outputs).toHaveLength(10);
   });
 });
+
+// ---------------------------------------------------------------------------
+// zod 4 characterization (docs/work-log/2026-10-23-zod-4.md, Phase 3 "Tests" 2):
+// the id schema accepts the project's non-RFC ids (the built-in role ids in
+// shipped migrations and the seeded fixtures) and rejects a malformed one. The
+// refusal text is the action's fixed copy, pinned exactly.
+// ---------------------------------------------------------------------------
+describe("id inputs accept non-RFC ids and refuse malformed ones", () => {
+  const NON_RFC = ["00000000-0000-0000-0000-000000000005", "d9100000-0000-0000-0000-000000000010"];
+
+  it.each(NON_RFC)("changeCanonicalAction passes %s to the service", async (id) => {
+    signedIn();
+    svc.changeCanonical.mockResolvedValueOnce({ kind: "ok", changed: true });
+    expect(await changeCanonicalAction("alder-creek", id)).toEqual({ ok: true });
+    expect(svc.changeCanonical).toHaveBeenCalledWith(ACTOR, "org-1", id);
+  });
+
+  it.each(NON_RFC)("removeClaimAction forwards %s as the promotion target", async (id) => {
+    signedIn();
+    svc.removeClaim.mockResolvedValueOnce({ kind: "ok", removed: [], promoted: null });
+    expect(await removeClaimAction("alder-creek", "church-one.invalid", id)).toEqual({ ok: true });
+    expect(svc.removeClaim).toHaveBeenCalledWith(ACTOR, "org-1", "church-one.invalid", id);
+  });
+
+  it("refuses a malformed id with the fixed copy and no service call", async () => {
+    signedIn();
+    expect(await changeCanonicalAction("alder-creek", "not-a-uuid")).toEqual({
+      ok: false,
+      code: "not_found",
+      error: "We couldn't find that domain.",
+    });
+    signedIn();
+    expect(await removeClaimAction("alder-creek", "church-one.invalid", "not-a-uuid")).toEqual({
+      ok: false,
+      code: "invalid_target",
+      error: "Choose one of your live addresses as the new main address.",
+    });
+    expect(svc.changeCanonical).not.toHaveBeenCalled();
+    expect(svc.removeClaim).not.toHaveBeenCalled();
+  });
+});

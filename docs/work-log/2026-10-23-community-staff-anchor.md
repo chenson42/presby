@@ -18,8 +18,8 @@
 | 2 — Architectural review | — | Skipped: no schema, permission, route or invariant change; one reader's predicate widens inside the existing `people.manage` gate | — | 2026-10-23 |
 | 3 — Technical design | orchestrator | Complete (brief, below) | — | 2026-10-23 |
 | 4 — Implementation | full-stack-developer | Complete | — | 2026-10-23 |
-| 5 — Verification | qa | Run 1 FAIL (no-organization copy and two e2e locators; Community fix passed); fixed; re-verification pending | FAIL → pending | 2026-10-23 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1 FAIL on the copy; run 2 PASS) | PASS | 2026-10-23 |
+| 6 — Shipped vs intent | analyst | In progress | — | — |
 
 ## Phase 1 — bug confirmed (orchestrator)
 
@@ -206,3 +206,71 @@ The Community staff-anchor fix passes on its own: unit, DB invariant (red then g
 - The paragraph now states only what is true today: "Signing in doesn't connect you to a congregation by itself. Only an invitation link does, and it works while you are signed in with the address it was sent to. You are signed in as <email>." It contains no instruction to ask anyone to arrange an invitation, and with no email the sentence ends cleanly.
 - `e2e/post-login-routing.spec.ts:219` now expects "PresbyPortal". The paragraph no longer contains "Ask your church administrator", so `:83` resolves to the heading alone.
 - `page.test.tsx` gained a no-email case and asserts that neither "arrange" nor "can add you" appears. 4/4 pass.
+
+
+# Phase 5 — Verification (qa), run 2
+
+*Recorded verbatim.*
+
+**Date:** 2026-10-23
+**Verified by:** qa
+**HEAD:** `4b5a1c1` ("no-organization copy states only what is true; update the stale e2e locator"). It changes `src/app/no-organization/page.tsx`, its unit test, and `e2e/post-login-routing.spec.ts:219`.
+
+**Scope run.**
+- **Re-verified:** the three run-1 items only, plus `src/app/no-organization/page.test.tsx` and `e2e/post-login-routing.spec.ts`.
+- **Where it ran:** a fresh `git archive HEAD` scratch copy on port 3113, on the same branch as run 1 (`pipeline-fixes-and-nav`, ep-lively-union). It ran after another agent's Community e2e run had exited.
+- **Not re-run:** everything else. The new commit changes no Community, DB or gate code, so those rest on run 1, which passed them.
+
+### Unit Tests
+
+`src/app/no-organization/page.test.tsx`: 4 of 4 pass on HEAD.
+
+Red check against run 1's page (`6899783`): 2 failed and 2 passed, so the new assertions catch the old copy.
+- The new `queryByText(/arrange|can add you/i)` check fails on the old copy.
+- The new case "ends the sentence cleanly when the session has no email" (`page.test.tsx:48`) also fails on it.
+
+The scratch file was restored byte-identical to HEAD.
+
+### End-to-End Tests
+
+`e2e/post-login-routing.spec.ts`:
+
+| Viewport | Result |
+|---|---|
+| Desktop | 12 of 12 pass |
+| 360px, first run | 6 passed, 2 failed, 4 did not run |
+| 360px, single re-run | 12 of 12 pass |
+
+**First 360px run, environmental.** Both failures were database connection problems, not copy assertions:
+- Test 7 timed out in `signInAndLand` at `post-login-routing.spec.ts:51`.
+- Test 8 failed with `NeonDbError: … fetch failed` in the fixture-invariant hook (`e2e/support/assert-fixture-invariants.ts:57`).
+
+**Run-1 items:**
+- **`:83`** (test 2) passes at both viewports. The paragraph no longer repeats the heading's text, so the locator matches one element.
+- **`:219`** (test 8) passes at both viewports with the "PresbyPortal" locator.
+
+### Copy Truthfulness
+
+The new paragraph: "Signing in doesn't connect you to a congregation by itself. Only an invitation link does, and it works while you are signed in with the address it was sent to. You are signed in as <email>."
+
+- **"Only an invitation link does": true.** `presby_accept_invitation` is the only writer of `people.user_id` (checked in run 1).
+- **"works while you are signed in with the address it was sent to": true for the signed-in reader.** Existing-account acceptance returns `email_mismatch` when the account address differs (`drizzle/0059_presby_account_invitations.sql`). The link can also create a new account when opened signed out, but the sentence doesn't deny that, so it isn't untrue.
+- **No "ask" or "arrange" promise remains.** With no email, the text ends "…address it was sent to." and the unit test pins that.
+
+**Note for Phase 6 (not blocking).** The section heading "Ask your church administrator" (`page.tsx:152-154`) is older than this pipeline and unchanged. Church administrators still cannot issue invitations; only a platform operator can, and only for founding-administrator or treasurer. The heading now makes no specific promise, but it still points readers at someone who cannot act. `post-login-routing.spec.ts:83` pins it, and it overlaps the auto-connect and invitation follow-ups already recorded.
+
+### Hygiene
+
+The scratch copy is removed, nothing is left on port 3113, and the worktree is clean at `4b5a1c1`. The run made no writes beyond what the spec's own globalSetup and teardown do.
+
+### Verdict
+
+**PASS.** Combined with run 1, every required check is green. Auth-touching gate: not triggered.
+
+---
+
+**Per-Phase Status row**
+
+| 5 — Verification | qa | Complete (run 2) | PASS | 2026-10-23 |
+
+**Handoff:** to analyst (Phase 6). Please carry the heading note above into the shipped-vs-intent review.

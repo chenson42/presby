@@ -23,7 +23,9 @@
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 | Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
-| Inc 2 · 2 — Architectural review | architect | In progress | — | — |
+| Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
+| Inc 2 · 3 — Technical design | tech-lead | In progress | — | — |
+| Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | In progress | — | — |
 
 ---
 
@@ -2083,3 +2085,393 @@ Increment 3 gets its own Phase 1 at kickoff. Numbers should be reserved at `/new
 - **Q3, withdrawal:** **its own `withdrawn` status**, with an actor and a distinct audit key. Never deleted.
 - **Q6, the pastor:** the operator asked "what does the book of order say?" The orchestrator answered from the PC(USA) Book of Order: the session is composed of the ruling elders in active service together with all installed pastors and associate pastors (G-3.0201), and the pastor is its moderator. Receiving members is the session's act. Proposed default, pending operator confirmation: installed pastors and associate pastors count as Session approvers alongside ruling elders. **Caveat for Phase 2:** a teaching elder's membership is with the presbytery, not the congregation. The derived Session group is built from `ruling_elder` officer_terms and requires a congregation membership, so including installed pastors needs a data-model ruling (pastoral relationship/appointment records → session composition) and must not invent a congregation membership.
 - **Q4, Q5, Q7–Q10:** not put to the operator. The analyst defaults stand: bulk approve capped at 50; Member is offered only where a Session exists; the minute reference is optional; proposers see all pending proposals; denial reasons are visible to roll.propose and roll.approve holders; refuse an approval that would put someone on a roll they are already on.
+
+---
+
+# Increment 2 — Phase 2: Architectural Review (architect)
+
+*Returned as text. The architect is read-only, so the orchestrator records this verbatim.*
+
+## Verdict
+
+**Approved with suggestions.**
+
+Increment 2 goes to Phase 3. It covers Session approval, the queue, withdrawal, and installed pastors and associate pastors as Session members. Phase 3 must design to R1–R18 below. The suggestions S1–S5 are Phase 3's call.
+
+**Elder sign-in invites are split out as Increment 2b.** It has its own migration, its own decision numbers, and a short analyst Phase 1 addendum before its Phase 3. Phase 1 marked invites out of scope and never refined them. R19–R26 below set the architectural limits for 2b now, so its design does not need a second Phase 2 unless it departs from them.
+
+The pastor ruling assumes the operator confirms the proposed default. If the operator declines, R10 drops cleanly: one CASE arm and three vocabulary values.
+
+## Placement
+
+- **Directory placement (Increment 2):**
+  - `drizzle/0062_presby_session_approval.sql`. Additive only: columns, the status vocabulary, a terminal-state freeze, the `session_member` role and its backfill, the derived-Session mapping for pastors, the office vocabulary CHECK, and the three definer functions. Old code keeps working after it is applied.
+  - `drizzle/0063_presby_roll_decide_lockdown.sql`. Removes `presby_app`'s UPDATE and DELETE on `roll_actions` and narrows the insert policy. It needs the new code to be deployed first (R16).
+  - `src/lib/roll.ts`:
+    - `approveRollAction`, `denyRollAction` and a new `withdrawRollAction` become thin callers of the definers.
+    - `listPendingRollActions` widens its read gate.
+    - New: `listRecentlyDecidedRollActions`, and the Flow 7 reader `getSessionApprovalState`. It sits in `roll.ts` because the queue is its only consumer.
+    - This file stays the only one that names the decide and withdraw functions (source scan, as in Increment 1).
+  - `src/lib/roll-action-kinds.ts`: `APPROVABLE_ROLL_ACTION_KINDS`, plus `ROLL_DECISION_REFUSALS` and `ROLL_WITHDRAW_REFUSALS`. Each is pinned to the SQL literals.
+  - `src/lib/officers.ts`:
+    - `OFFICER_OFFICES` gains `installed_pastor`, `co_pastor` and `associate_pastor`.
+    - New `SESSION_OFFICES`, pinned to the trigger's CASE.
+    - `selfRecorded` is added.
+    - Session-office audit moves into the same transaction (R13).
+  - `src/lib/org-provisioning.ts`: `baselineRoleSeedPlan` becomes type-varying, and `boundToDerivedFrom` widens to include `"session"`.
+  - `src/lib/audit.ts`: `ROLL_ACTION_WITHDRAWN: "tenant.roll_action.withdrawn"`.
+  - UI:
+    - `src/app/(org)/o/[slug]/admin/community/pending/**`: read and decide modes, Recently decided, bulk approve, withdraw.
+    - The Community header gets an "N waiting" link.
+    - The Officers page gets the pastor offices and the Flow 7 copy.
+  - No new top-level module and no new route group.
+- **Directory placement (2b):**
+  - `src/lib/onboarding/org-invite.ts`: the issue side on `presby_app` through `withOrgContext`. A source scan pins that it never imports `getPlatformDb()`. This is the deliberate opposite of `issue.ts`.
+  - `accept.ts`, `status.ts` and `labels.ts` are extended.
+  - A new template key goes in the email registry and in `credential-keys.ts`.
+  - The "Invite to sign in" card goes under `community/[id]/edit/`.
+  - Acceptance stays in `(invite)`, unchanged.
+  - The migration is its own, 0064 (provisional).
+- **Server vs Client split:**
+  - The pending page and the Community header count stay Server Components.
+  - `pending-worklist.tsx` is already a client component. It gains the bulk selection: 44px targets, a sticky "Approve N" bar that does not cover the last row, and dialogs that fit at 360px.
+  - Approve, deny and withdraw use the generated `AlertDialog` primitive (Rule 2).
+  - Any `useForm` root renders `<HydrationGate>` (`check:hydration-gate`). Any dialog without `useForm` gets a hydration spec, as Increment 1's dialogs did.
+  - Server actions stay in the co-located `actions.ts`.
+- **Dependencies:** none.
+
+## Rulings
+
+### 1. The five analyst items
+
+**1a. Decide and withdraw go through SECURITY DEFINER functions (DECISION-203, F180).**
+
+Live catalog on the pipeline branch:
+- `roll_actions` is FORCE RLS.
+- It has the permissive `tenant_isolation` policy plus 0061's restrictive pending-only insert policy.
+- `presby_app` holds SELECT, INSERT, UPDATE and DELETE.
+- The only application UPDATE anywhere is `decideRollAction()` (`roll.ts:135`).
+- `presby_freeze_approved_roll_action` freezes `approved` rows only.
+
+So "who may approve" is paper today.
+
+- **R1. Two functions:**
+  - `presby_decide_roll_action(p_roll_action_id uuid, p_decision text, p_minute_reference text, p_reason text, p_decided_by uuid)`, where `p_decision` is `approve` or `deny`.
+  - `presby_withdraw_roll_action(p_roll_action_id uuid, p_reason text, p_withdrawn_by uuid)`.
+  - Both use Increment 1's R1–R3 shape:
+    - `security definer`, `set search_path = public, pg_temp`, revoke from public, execute to `presby_app` only;
+    - the org comes from `presby_current_org()`, with no org parameter;
+    - the actor is a `users.id` resolved to a live, unmerged person with an active membership who holds the key: `roll.approve` for decide, `roll.propose` for withdraw;
+    - an identity refusal raises one uniform `insufficient_privilege` literal;
+    - state refusals come back as typed outcomes, exactly one row per call.
+  - Generalising Increment 1's actor helper into `presby_roll__actor_holds(org, user, key)` is acceptable.
+- **R2. Lock order is membership, then roll action**, the same as Increment 1's R6:
+  1. read the row to learn the person;
+  2. `for update` the membership;
+  3. re-read the roll action `for update`;
+  4. re-check that it is pending.
+- **R3. Approve checks, in order:**
+  - identity;
+  - `not_found` (another org's id looks the same);
+  - `already_decided`;
+  - `not_approvable_kind`: only kinds with a non-null mapped `resulting_roll` (the DECISION-107 rule). Loss kinds, `void` and `opening_balance` are refused, and a test pins the list;
+  - `person_deceased`, `person_merged`;
+  - `membership_ended`;
+  - `holds_pastoral_office` (R12);
+  - `already_on_roll` (R6);
+  - the UPDATE in a sub-block:
+    - a `unique_violation` on `memberships_one_active_roll_idx` becomes `active_elsewhere`, with generic copy that never names the other org;
+    - the S4 `foreign_key_violation` becomes `provisioning_incomplete`;
+    - anything else re-raises.
+  - It returns `affects_filed_period` (0061's predicate), `shadowed_by_kind` and `shadowed_by_date` (a warning, never a refusal, per Increment 1's S1), `self_approved` and `self_target`.
+  - It sets `approved_by` and `approved_on` as today, plus `decided_by` and `decided_at` (R5).
+  - When supplied, the minute reference overwrites the proposer's, as today.
+- **R4. Input bounds are enforced in the database too (closes F184):**
+  - the reason for deny and withdraw is required and 1–500 characters after trimming;
+  - the minute reference is at most 200;
+  - TypeScript validates the UUID shape before the call, so a malformed id is `not_found`.
+- **R5. Columns (additive, 0062):**
+  - `decided_by uuid references users(id)` and `decided_at timestamptz`, set by the definers on every terminal transition;
+  - `withdrawal_reason text`;
+  - CHECKs:
+    - `denial_reason is null or approval_status = 'denied'`;
+    - `withdrawal_reason is null or approval_status = 'withdrawn'`;
+    - a row with `approval_status in ('denied','withdrawn')` has `decided_at` and `decided_by`.
+  - `approved_by` and `approved_on` are kept, because replay, seeds and tests read them. Existing approved rows are backfilled `decided_by = approved_by` and `decided_at = approved_on::timestamptz`. Production has 0 rows; the branch has 0 denied.
+  - This settles the analyst's "one actor column or a pair" question: one generic pair for all terminal states, not `denied_by` plus `withdrawn_by`.
+- **R6. The double-count guard (F181, Q10 default).** The rule is that **an approval must not leave two consecutive effective rows with the same `resulting_roll` where both are counted gain kinds**.
+  - Refuse `already_on_roll` when the person's replay roll as of `effective_date`, excluding this row, already equals its `resulting_roll`.
+  - Refuse it also when the *next* effective row after this one has the same `resulting_roll` and is a counted gain kind. `presby_roll_changes` counts every effective gain row, so a later duplicate would be counted again.
+  - A following `opening_balance` is not counted, so it gives the shadow warning only. That keeps "a 2018 profession entered after a 2020 opening balance" legitimate.
+  - Test both directions against `presby_roll_changes`.
+- **R7. One pending action per person.** Add `roll_actions_one_pending_per_person` as a partial unique index on `(organization_id, person_id) where approval_status = 'pending'`. This closes the duplicate-pending half of F181 structurally, and withdrawal is now the remedy for a mistake.
+  - Measured on the branch: 1 pending row, 0 duplicates. Production: 0 rows.
+  - Proposals map the `unique_violation` to a typed `pending_exists` with copy that points at the existing proposal.
+  - If Phase 3 finds a real multi-pending case the edit picker can reach, fall back to R6 alone and record why. Today the picker offers gain kinds only, so none is reachable.
+- **R8. Decided rows are terminal.** In 0062, `presby_freeze_approved_roll_action` refuses UPDATE or DELETE when `old.approval_status in ('approved','denied','withdrawn')`. Approved rows keep their existing message. This binds the owner too.
+  - Fixture teardown already disables this trigger.
+  - `test-rls.sql` §20d and the assertions near lines 258, 275, 1421 and 1432 are patched at integration.
+
+**1b. The second baseline role (DECISION-202).**
+
+DECISION-100's comment anticipated this exact case: the function is "ready to branch the day a genuinely type-varying baseline role is proposed". Branching it is the planned extension, not a reversal.
+
+- **R9.** `baselineRoleSeedPlan("congregation")` returns `member`, plus `session_member` with name "Session member", `roll.approve` **only**, constitutional, protected, bound to the `session` derived group. Every other org type is unchanged.
+  - The dev fixture's extra `directory.view` on `session_member` is not copied. The baseline `member` grant already covers it, and the queue reads are gated on the roll keys, not `directory.view`.
+- **0062 backfill**, idempotent, with the role key as the discriminator (never a reason text):
+  - It covers congregations that have a `session` derived group and no org-owned `session_member`. It inserts the role, its single permission row, and a group-arm `role_grants` row in the same statement block.
+  - It **skips** any organisation that already has an org-owned `session_member`, and never modifies it. That follows the respect for tenant-held roles in 0052's note 5.
+  - **Missing court groups:** on the branch only 3 of 9 congregations have a `session` group, and `startOfficerTerm('ruling_elder')` raises a raw FK error at the rest. 0062 seeds the missing `session` and `diaconate` groups for congregations in the `groupSeedPlan` shape, then binds the role.
+    - An empty derived group grants nothing until the congregation's own officer records fill it, so this is provisioning, not authority.
+    - The header records the measured production counts before deploy, as counts with no slugs.
+  - Non-congregations get nothing (F185, R15).
+
+**1c. The self-constitution residual (F182, DECISION-205).**
+
+The operator's "allow and stamp" is acceptable under Two Hierarchies. The authority comes from the congregation's own officer record, entered by a tenant permission (`officers.manage`). No platform predicate takes part in any check. The bootstrap would deadlock under a block.
+
+The chain is still the one DECISION-155 refused to bundle: a platform designation leads to `officers.manage`, a self-recorded elder or pastor term, and then `roll.approve`. Name it the way DECISION-194 named its residual:
+- **Paper**, detected by audit and not prevented: `invitation.accepted` (founding_administrator), then `officer_term.started` with `selfRecorded: true` on a Session office, then `tenant.roll_action.approved` with `selfApproved`.
+- Proposed CLAUDE.md sentence for the operator to review in the diff (Two Hierarchies section): *"A founding administrator who records themselves as a ruling elder or installed pastor becomes a Session approver. This is permitted, stamped `selfRecorded` and `selfApproved`, and `paper`."*
+
+**1d. `withdrawn` is its own status (operator Q3, DECISION-203).**
+
+- 0062 drops and re-adds `roll_actions_approval_status_allowed` with `('pending','approved','denied','withdrawn')`. Do not reach back into 0061: by Increment 2's Phase 4 it will have merged and may have shipped.
+- **The S3 index predicate must change.** `roll_actions_one_live_void_idx` is `where kind = 'void' and approval_status <> 'denied'`, so a withdrawn void would count as live. Re-create it in 0062 with `approval_status in ('pending','approved')`, and fix the Drizzle mirror at `src/lib/db/domain/roll.ts:167`.
+- `presby_effective_roll_actions`, the reporting index and Increment 1's `pending_action` all key on `= 'approved'` or `= 'pending'`, so withdrawn rows drop out of replay and release the person with no further change. Verified against the live view definition.
+- Withdraw needs `roll.propose`, and any holder may withdraw (the clerk keeps the register). Audit metadata stamps `selfProposed`.
+
+**1e. The deploy sequence (R16).**
+
+This is the reverse of Increment 1, on purpose:
+1. **0062** (additive: old code stays compatible, because pending-to-denied and pending-to-approved still work and the new columns are nullable).
+2. **Code**: the definers become the only decide path.
+3. **0063**: `revoke update, delete on roll_actions from presby_app`, and narrow `roll_actions_insert_pending_only` to `approval_status = 'pending' and kind = any(<approvable kinds>)` (F191).
+
+Revoking is stronger and simpler than a restrictive UPDATE policy, because no application path updates or deletes a roll row once `decideRollAction()` is gone. The repo-wide search found only `roll.ts:135`. If Phase 3 finds an edit-a-proposal need, the fallback is a restrictive UPDATE policy that keeps pending rows pending.
+
+Production has 0 roll rows and one user, so the window is survivable either way. The point is to choose the order deliberately. Removing DELETE also closes the `roll_actions` part of F176.
+
+### 2. Pastors as Session approvers (DECISION-206)
+
+I checked the composition against a PC(USA) summary of the session article. G-3.0201 composes the session of ruling elders elected to active service plus "all installed pastors and associate pastors". G-3.0204 makes the session keep "registers of baptisms, installed pastors". The installed pastor moderates. Temporary relationships (stated supply, interim, temporary supply), parish associates, and a designated moderator during a vacancy are **not** in that composition and are not mapped.
+
+**Which existing record carries "installed pastor of this congregation":**
+
+| Record | Verdict | Why |
+|---|---|---|
+| `appointments` (presbytery-owned, `serving_org_id`) | **Not the source** | Its `organization_id` is the presbytery, forced by D1 and F2. Having a presbytery row write the congregation's Session roster would be authority flowing *down* by inheritance, which Two Hierarchies forbids. DECISION-112 deferred any congregation-side read of it to a publication mechanism. Most congregations' presbyteries will not be on the platform. It stays the presbytery's own record. Reconciling against a published appointment is a follow-up. |
+| `staff_positions` | No | Personnel, and it grants nothing by design (schema-design §Staff, DECISION-128). |
+| `role_grants` (`installed_pastor` role) | No | That role is a software permission set (`pastoral_notes.manage`, DECISION-108). Court composition must stay an officer fact, not a role fact (F3, The Court Is Not a Group). |
+| **`officer_terms` at the congregation** | **The carrier** | Already the schema's intent (schema-design: "installed pastors from `officer_terms`"). It matches G-3.0204's register, which the session keeps. The live branch already holds one `installed_pastor` term, and it sits on a congregation membership with `current_roll` null. |
+
+**No congregation membership is invented.** In this schema a `memberships` row is the person-to-organisation *link* (D1). Polity membership is the roll: `current_roll` and `roll_actions`. A pastor's link row carries no roll fact:
+- no `roll_actions` row and a null `current_roll`;
+- so no SASR count, because `presby_roll_counts_as_of` replays the roll only;
+- and no Directory listing through the roll.
+
+That is the same anchor shape DECISION-128 built for staff and `presby_accept_invitation` writes for designees (`engagement_status = 'staff'`). The pastor needs that link anyway to enter `/o/<slug>` at all: `withOrgContext` and `presby_has_permission` both require `presby_membership_is_active`.
+
+- **R10. Data model (0062):**
+  - `presby_sync_derived_group`'s CASE maps `ruling_elder`, `installed_pastor`, `co_pastor` and `associate_pastor` to `'session'`.
+  - `moderator` stays unmapped: a moderator who is not a pastor has no vote.
+  - Add `officer_terms_office_allowed`, a validated CHECK over the app vocabulary:
+    - existing: `ruling_elder`, `deacon`, `clerk_of_session`, `moderator`, `treasurer`, `trustee`;
+    - new: `installed_pastor`, `co_pastor`, `associate_pastor`.
+  - The branch's distinct offices are all inside that set. Measure production before deploy.
+  - Re-materialise existing pastor-office terms with a no-op touch, `update officer_terms set ends_on = ends_on where office in (...)`. That re-fires the AFTER UPDATE trigger, and no direct `group_memberships` write is needed.
+  - This **is** "The Court Is Not a Group" applied correctly: the roster is still materialised from `officer_terms` by trigger, and today's mapping is the incomplete one.
+- **R11. Pastor offices are congregation-only and recorded with `officers.manage`.**
+  - The app refuses them at other org types with a typed outcome, because the trigger raises when the target group is missing.
+  - The anchor must carry no roll. `startOfficerTerm` refuses a pastor office for a person with a non-null `current_roll` at the org (`on_member_roll`). A teaching elder's membership is with the presbytery.
+  - The anchor is created through the existing staff-anchor path. Using Visitor or Participant is forbidden, because that would invent a pastoral or roll fact. A dedicated "Clergy" connection is optional future polish.
+- **R12. The reverse guard.** The approve function refuses a member-roll gain for a person holding an open pastor-office term (`holds_pastoral_office`).
+- **Consequence to state in DECISION-206:** any role a tenant has bound to its Session group now reaches installed pastors too, which is correct polity. On the branch the only such grant is the fixture `session_member`. Measure production.
+- **Known limit, not fixed here:** if the pastor already exists on the platform at the presbytery, `memberships_guard_insert` refuses a congregation link ("link through presby_claim_person()"), and that function does not exist. The congregation gets the existing `existing_member_elsewhere` copy. The cross-org claim path is a follow-up, not Increment 2.
+- **Migration fit:** all of R10 is `create or replace`, one CHECK and one touch statement. It belongs in **0062**, which already settles who constitutes the Session.
+
+### 3. Elder sign-in invites: Increment 2b (DECISION-207, DECISION-208)
+
+**Split it.**
+- It is a different subsystem: onboarding, the credential table, the email queue and `(invite)`.
+- It modifies the single acceptance function, which DECISION-183 made the security core of onboarding.
+- Increment 1's reviewability concern applies with more force: the approval definers and an acceptance-path change should not share a diff.
+- Increment 2 works without it for a one-person start (the founding administrator records themselves, R-1c), with honest copy for Flow 7 state (c).
+
+2b runs after Increment 2's Phase 4 commits, ahead of Increment 3, and gets its own migration (0064, provisional).
+
+- **R19. Reuse the credential.**
+  - Same table, `account_invitations`, with a new `purpose = 'sign_in'` and `origin = 'org'`. The origin column exists for exactly this case.
+  - `person_id` is required at insert, as for treasurer. No names are carried.
+  - Add a partial unique index: one open `sign_in` row per `(organization_id, person_id)`. The existing `open_designation_uq` already leaves non-designation purposes out by its predicate.
+  - It stays hashed, single-use and expiring. It is never a `FEATURES.*` key, a session claim or a resolver input (DECISION-147, DECISION-183).
+  - Resend makes a new row (D-1).
+- **R20. Issue through a definer.** `presby_app` holds no table privilege on `account_invitations`, so issue and revoke go through new definers, e.g. `presby_issue_sign_in_invitation(p_person_id, p_token_hash, p_expires_at, p_issued_by)`:
+  - the org comes from `presby_current_org()`;
+  - the actor is the bounded `users.id` claim;
+  - the **address is read from the person's on-file primary email in SQL and never typed by the sender**;
+  - refusals:
+    - `already_signs_in` (the person's `user_id` is not null);
+    - `person_merged`, `person_deceased`, `membership_ended`;
+    - `no_email_on_file`;
+    - `address_is_yours`: the on-file address equals the sender's own account email while the person is not the sender. Comparing to your own row is not an enumeration oracle.
+  - Like `issue.ts`, it **never reads other `users` rows**, so the sender's screen cannot reveal whether an address has an account (DECISION-189). Account collisions surface only at acceptance.
+  - The queue row is written in the same transaction (`presby_app` holds INSERT on `email_queue`) under a new template key: class `account`, platform sender, because org-class mail (DECISION-182) is unbuilt. It is listed in `credential-keys.ts` so the body is scrubbed after sending.
+  - The link comes from `platformOrigin()` only. The DECISION-189 durable limits apply, but the per-org bucket is split by origin so tenant invites cannot use up the platform's designation sends.
+- **R21. Who may send: you may bind a login only to a record whose authority you could have created yourself.**
+  - **`people.manage`** is required for every invite. That key governs the person record and its contact data. No new key.
+  - If the person holds an open Session or diaconate office term, the sender also needs **`officers.manage`**: the court's authority is constituted by officer records.
+  - If the person holds person-arm `role_grants`, those grants' permissions must be a **subset** of the sender's, the same posture as DECISION-106 and `assertPermissionSubset`.
+  - All three checks happen in the definer.
+  - This lets the founding administrator invite elders, which is the purpose of 2b. It stops a `people.manage`-only holder from claiming an elder's or a treasurer's record.
+  - **Residual, `paper`:** a sender with `people.manage` can rewrite an unlinked person's email to an accomplice's address and then invite. Detected by audit: the person update, then `invitation.created`, then `invitation.accepted`. Not prevented. State it in DECISION-207.
+- **R22. Acceptance is a new `sign_in` branch in `presby_accept_invitation`.** One acceptance function, signature unchanged, and the FA and treasurer parity golden must stay byte-identical.
+  - The person is taken from the token's row only. The invitee cannot pick a different person, because nothing they send names a person.
+  - It reuses the treasurer branch's gates verbatim: `person_merged`, `membership_ended`, `person_linked_elsewhere` (the person already has a different user), and `person_elsewhere` or `ambiguous_person` (the accepting account is already linked to another live person, F110/F112).
+  - It adds `person_deceased` to the blocked-reason CHECK.
+  - On success it creates the account if needed and links `people.user_id`. **Nothing else is applied**: no role grant, no designation. Authority arrives only through the records the person already has.
+  - Audit `invitation.accepted` with `purpose: 'sign_in'`. The session refresh after a signed-in accept (F167) applies.
+- **R23. The user-to-person link becomes a database property (F186).** `people.user_id` is the identity binding: `presby_user_organizations` resolves user to person to memberships. Today `presby_app` can UPDATE it freely, through the `visible_via_membership_update` policy with no guard. 0064 adds `people_guard_user_link` (BEFORE UPDATE OF `user_id`). It refuses unless a definer-armed marker naming that person is set, the 0059 marker idiom, and it binds the owner too.
+  - Phase 3 measures every current writer of `people.user_id`, including merges, before it lands.
+- **R24. The email match must be trustworthy (F187).** `presby_app` still holds INSERT, UPDATE and DELETE on `users`. `users` has no RLS. This is the F38 blanket-grant residue named in 0044. Acceptance's identity control is `lower(users.email) = email_normalized`, and 2b makes the tenant connection an issuer for the first time.
+  - Phase 3 measures `presby_app`-side writers of `users`.
+  - 0064 revokes those privileges if none exist. The definers run as owner.
+  - Otherwise it at least guards `users.email` with a trigger.
+  - Check whether this is already tracked. If it is, cite the existing number instead of F187.
+- **R25.** `(invite)` is unchanged: platform palette, exact `PUBLIC_PATHS`, no layout or loading boundary, never imports `getPlatformDb()`. No new flag. The send card rides the Community toggle (operator memory: no new platform flags before go-live).
+- **R26.** On the Community list, the "Can't sign in yet" marker is admin-only (`people.manage`). Flow 7 state (c) links to the invite card once 2b ships.
+
+### 4. Self-approval, withdrawal, database-enforced approval, statistics
+
+- **R13. Stamps.**
+  - Approve metadata: `organizationId`, `rollActionId`, `kind`, `effectiveDate`, `minuteReference`, `selfApproved` (proposer is the approver), `selfTarget` (the approver is the subject), `affectsFiledPeriod`, `shadowedBy`.
+  - Deny metadata: `reason`.
+  - Withdraw metadata: `reason`, `selfProposed`.
+  - All three are written with `insertAuditRow()` in the **same transaction** (F180), using the keys `tenant.roll_action.approved`, `.denied` and the new `.withdrawn`. Ids only, no names.
+  - Officer-term start and end for a **Session or diaconate office** also move to an in-transaction audit row with `selfRecorded` (the target person's `user_id` equals the actor). Such a term is now equivalent to granting `roll.approve`, and grants are audited in-transaction.
+  - The "You proposed this" badge stays.
+- **Database enforcement:** R1, plus 0063's revoke. After 0063, the only way any `presby_app` caller can move a row out of `pending` is a definer that checked the key in the same transaction.
+- **R14. Filed statistics.**
+  - A filed return is a frozen snapshot (`statistical_returns_freeze`, publication immutability), so approval never changes it.
+  - The live risk is a back-dated approval making the next year's opening count disagree with the filed year. The function returns `affects_filed_period` and the UI warns, with the same copy as Increment 1.
+  - R6 and R7 remove the double-count of gains.
+  - Participant to member drops the participant count with no loss line, which matches 0012's model.
+- **R15. Non-congregations (F185, Q5 default).** Offer the Member choice only where the org has a `session` derived group. The wizard and `recordRollAction()` refuse with `no_session` server-side. Participant-on-record is unaffected.
+- **R17. Queue reads.**
+  - `listPendingRollActions` gates on `roll.approve` or `roll.propose` and returns `mode: 'decide' | 'read'`.
+  - Recently decided shows denial and withdrawal reasons to holders of those two keys only. They are free text about a person, so the lib filters; RLS cannot do it per column.
+  - Names of `directory_hidden` people appear to these holders, by design. Record that in DECISION-204.
+  - Known coupling, recorded: turning off the Community toggle (`org_portal.members_create`) also hides the approval queue.
+- **R18. Bulk approve.**
+  - At most 50 per submit.
+  - **One transaction per row, sequential**, each its own definer call and audit row. The result is the per-row "N approved, M need attention".
+  - No cross-row atomicity is claimed, and one long transaction must not hold 50 membership locks.
+
+### 5. Sequencing and numbers
+
+- **Increment 2:**
+  - Phase 3 may start now.
+  - Phase 4 waits for Increment 1 to merge: `roll.ts`, `roll-action-kinds.ts`, `people.ts`, `community/pending/**` and 0061's functions and CHECK.
+  - 0062 is written against merged `main` and never edits 0061 in place.
+  - Rule 16 shared files stay orchestrator-only: the journal, `test-rls.sql` (stage `scripts/session-approval/test-rls-62.sql` plus a patch for §20d and lines ~258/275/1421/1432), `seed-dev.sql` (the fixture `stated_clerk` and `session_member` drift, F190, is integration's call), TODO, decisions, STATE.
+- **F183 still bites Increment 1.** The first real congregation can strand a mistaken member proposal, and with it any participant act for that person, until Increment 2 ships withdrawal. Put a warning line in the Increment 1 release notes, or keep the gap between the two short.
+- **Migrations:** **0062** (additive), **0063** (lockdown, after the code deploy) and **0064** (2b). The orchestrator reserves all three and re-checks them against `main` at each Phase 4 kickoff.
+- **Decisions:** DECISION-202–205 as the analyst proposed, plus **DECISION-206** (pastors) for Increment 2. 2b needs **DECISION-207** (the org-issued sign-in credential: purpose, issue definer, sender rule, acceptance branch) and **DECISION-208** (the user-to-person link and `users` writes are definer-only). Increment 3 therefore moves to DECISION-209 onward.
+- **Findings:** F179–F185 (analyst) plus **F186–F191** below. Increment 3 moves to F192 onward.
+
+## Invariants Touched
+
+- **The Roll Is the System of Record:** respected.
+  - Decisions are state transitions on pending rows. Decided rows become terminal (R8).
+  - Replay is unchanged: withdrawn and denied rows never enter `presby_effective_roll_actions`.
+  - Pastors carry no roll fact.
+  - Gains cannot be double-counted (R6, R7).
+- **The Court Is Not a Group:** strengthened.
+  - The Session is still materialised from `officer_terms` by trigger, now with G-3.0201's full composition (R10).
+  - Approval authority is a role bound to the derived group, so the resolver sees it (F3).
+- **Two Hierarchies Intersect Nowhere:** respected.
+  - `appointments` is deliberately **not** the source, so no downward write.
+  - The backfill is constitutional baseline provisioning keyed by role key. It skips tenant-held `session_member` roles and grants authority only to whoever the congregation's own records constitute.
+  - The self-constitution chain is a named `paper` residual with audit detection. A CLAUDE.md sentence is proposed for operator review.
+- **Isolation Is a Database Property / F26:** every definer takes the org from `presby_current_org()`, pins `search_path` with `pg_temp` last, and touches only that org's rows. An id from another org is `not_found`.
+- **Permissions vs Flags / credentials:**
+  - No new `FEATURES.*` key, no new tenant permission and no new flag.
+  - The 2b invitation is a third-mechanism credential that never maps into keys, claims or the resolver.
+- **No Role Carries a Wildcard:**
+  - `session_member` carries `roll.approve` only.
+  - No template or baseline role holds both roll keys. A clerk who is also an elder holds them through two roles.
+  - The fixture `stated_clerk` holding both is drift (F190), not a template.
+- **Composite Tenant Keys:** no new tenant table. The 2b partial unique sits on the existing composite-keyed table.
+- **Never hard-delete / all deletes are soft:** 0063 removes DELETE on `roll_actions`, and withdrawal replaces deletion.
+- **The Brand Is a Cascade Override:** unaffected. Increment 2 is in `(org)`; 2b's acceptance stays in un-brandable `(invite)`.
+- **Verify in a Browser / HydrationGate:** apply to the bulk worklist, the three dialogs, the Officers page changes and the 2b invite card, at 360px.
+
+## Findings (new numbers requested)
+
+- **F186:** `people.user_id`, the identity binding, can be updated by `presby_app` with no guard. Closed by R23 in 2b.
+- **F187:** `presby_app` keeps INSERT, UPDATE and DELETE on `users`, which has no RLS (the F38 blanket-grant residue). It undermines the invitation email match. Closed by R24 in 2b. Use the existing number if this is already tracked.
+- **F188:** G-3.0201's installed pastors and associate pastors are absent from the derived Session group. `installed_pastor` is used as an office in the seed but is missing from `OFFICER_OFFICES`, and `officer_terms.office` has no vocabulary CHECK. Closed by R10 and R11.
+- **F189:** 6 of 9 congregations on the branch have no `session` derived group, so recording a ruling elder there raises a raw FK error. Closed by the 0062 group seed. Measure production.
+- **F190:** fixture drift. The dev `stated_clerk` role holds both `roll.propose` and `roll.approve`, and the dev `session_member` holds `directory.view`. Neither is a template. Fix at integration or record it.
+- **F191:** 0061's restrictive insert policy allows `presby_app` to insert a **pending** `void`, loss or `opening_balance` row. No definer will ever approve it, and it blocks the person through `pending_action`. With R7 it would also block every proposal. Closed by 0063's narrowed policy.
+
+## Suggestions (Phase 3's call)
+
+- **S1:** A BEFORE INSERT OR UPDATE trigger on `officer_terms` that refuses a pastor office for a person with a non-null `current_roll` at the org. This turns R11's app check into a database property.
+- **S2:** Show "Self-recorded" on the Session roster row and "Self-approved" in Recently decided, matching DECISION-188's "Self-designated" marker.
+- **S3:** A "Clergy" anchor connection in the wizard, instead of sending pastors through the staff anchor path.
+- **S4:** Have the Flow 7 reader count Session members (elders plus pastors) and linked accounts in one query, and use "members of the Session" in the copy rather than "elders".
+- **S5:** A follow-up to reconcile a congregation's pastor term against a *published* presbytery appointment, once DECISION-112's publication mechanism exists.
+
+## Notes (Phase 3 must honour)
+
+Measure these read-only before any DDL:
+1. production congregations without a `session` or `diaconate` group;
+2. production org-owned `session_member` roles;
+3. role grants bound to Session groups;
+4. distinct `officer_terms.office` values;
+5. pending duplicates per person;
+6. every writer of `people.user_id` and of `users` on the `presby_app` side (for 2b).
+
+Pin these by test:
+- `APPROVABLE_ROLL_ACTION_KINDS` against both the decide function and 0063's insert policy;
+- `SESSION_OFFICES` against the trigger CASE;
+- both refusal vocabularies against the SQL literals.
+
+Run the from-scratch install check Increment 1 deferred, on a throwaway branch, before 0062 is applied.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2 · 2 — Architectural review | architect | Complete. R1–R18 for Increment 2, including pastors as Session members. Invites split to Increment 2b with limits R19–R26. Migrations 0062, 0063 and 0064 requested; DECISION-202–208; F186–F191 | Approved with suggestions | 2026-10-22 |
+
+## Handoff
+
+Next agent: **tech-lead (Increment 2, Phase 3)**. Design to R1–R18, rule on S1–S5, and take the measurements listed under Notes first. The operator's confirmation of the pastor default (DECISION-206) should be on record before Phase 4; R10 is easy to remove if it is declined.
+
+The orchestrator should also:
+- reserve migrations 0062, 0063 and 0064, DECISION-206–208 and F186–F191, and move Increment 3 to DECISION-209 and F192 onward;
+- open a short **analyst Phase 1 addendum for Increment 2b**: flows for issue, resend, revoke and accept, already-linked, wrong address and deceased, plus copy. 2b's Phase 3 then designs to R19–R26.
+
+I wrote nothing. The only database access was read-only queries against the pipeline branch (`ep-jolly-boat-axklya0l`, with `default_transaction_read_only=on`). Nothing touched production or `development`.
+
+Files and catalog read (all under `/Users/cshenso/git/presby-platform/presby-fadir`):
+- `docs/work-log/2026-10-22-founding-admin-directory.md`
+- `docs/work-log/_template.md`
+- `docs/decisions.md` (DECISION-183 to 196)
+- `docs/schema-design.md` (D1, §B, §E, Staff)
+- `drizzle/0044_presby_org_lifecycle.sql`
+- `drizzle/0059_presby_account_invitations.sql`
+- `src/lib/roll.ts`
+- `src/lib/roll-action-kinds.ts`
+- `src/lib/officers.ts`
+- `src/lib/credentials.ts`
+- `src/lib/org-provisioning.ts`
+- `src/lib/authz.ts`
+- `src/lib/db/domain/officers.ts`
+- `scripts/seed-dev.sql`
+- Live catalog: `presby_sync_derived_group`, `presby_guard_membership_insert`, `presby_guard_position_needs_membership`, `presby_officer_roster`, `presby_roll_changes`, the `presby_effective_roll_actions` view, the `roll_actions` columns, constraints, partial indexes, policies and freeze trigger, the `officer_terms` constraints and triggers, `aclexplode` grants for `presby_app`, RLS flags, derived-group counts by org type, and role bindings.
+
+Sources:
+- [The Session and the New Form of Government (PC(USA))](https://pcusa.org/sites/default/files/nfog-session.pdf)

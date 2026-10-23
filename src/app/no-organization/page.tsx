@@ -97,13 +97,13 @@ export default async function NoOrganizationPage() {
       ) : notTenants.length > 0 ? (
         <>
           <h1 className="text-2xl font-semibold">
-            Your congregation isn&apos;t on presby yet
+            Your congregation isn&apos;t on PresbyPortal yet
           </h1>
           <ul className="mt-3 space-y-1">
             {notTenants.map((org) => (
               <li key={org.organizationId} className="text-sm text-muted-foreground">
                 {org.name} is in our records through its presbytery, but
-                isn&apos;t set up on presby yet.
+                isn&apos;t set up on PresbyPortal yet.
               </li>
             ))}
           </ul>
@@ -156,9 +156,9 @@ export default async function NoOrganizationPage() {
             If you were invited, open the link in your invitation email.
           </p>
           <p className="mt-2 text-sm text-muted-foreground">
-            If your church already uses presby, someone there with administrator
-            access can add you. They will need the email address you signed in
-            with
+            Signing in doesn&apos;t connect you to a congregation by itself. You
+            join by opening an invitation link sent to the email address you
+            signed in with. Ask your church administrator to arrange one for
             {session.user.email ? (
               <>
                 :{" "}
@@ -174,14 +174,14 @@ export default async function NoOrganizationPage() {
 
         <section>
           <h2 className="text-base font-semibold">
-            Is your church not on presby?
+            Is your church not on PresbyPortal?
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             We are setting up congregations, presbyteries, and synods now.
           </p>
           <Button asChild variant="outline" className="mt-3 min-h-11">
             {/* Points at the backbone page until P2 builds the request form. */}
-            <Link href="/">Read about presby</Link>
+            <Link href="/">Read about PresbyPortal</Link>
           </Button>
         </section>
       </div>

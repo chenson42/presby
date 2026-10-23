@@ -76,3 +76,15 @@ So a founding administrator or treasurer who joins by invitation is invisible in
 **Incident, cleaned up.** I once ran `npm test` in a shell that had `.env.local` exported, so the whole DB-backed suite ran in parallel against `pipeline-person-emails` and many suites timed out before their teardown. That left 328 fixture organizations, 413 people and 160 users created in that window. I removed exactly those rows (counts verified before commit: 343 to 15, 1098 to 685, 190 to 30). The purge disabled user triggers inside its transaction, which committed that state; I found 69 triggers left disabled and re-enabled them all (73 of 73 enabled, none were disabled beforehand). Leftover counts for this test's fixtures are now 0.
 
 **Handoff.** Next is qa (Phase 5). Browser check: as a founding administrator at a congregation, `/o/<slug>/admin/community?view=staff` lists them with "No position yet", and with `org_portal.staff` on and `staff.manage`, an "Add a position" link. They stay absent from Everyone. No schema, env var, flag or `FEATURES` change.
+
+---
+
+## Added to this fix: the no-organization page copy (operator, production, 2026-10-23)
+
+The operator signed in with an address that was on their person record but not connected to their account. They landed on `/no-organization`, which said "If your church already uses presby, someone there with administrator access can add you. They will need the email address you signed in with." That is not true: a contact email never connects an account (only accepting an invitation does). The page also said "presby" where DECISION-126 requires PresbyPortal.
+
+- **Fix:** `src/app/no-organization/page.tsx` now says "Signing in doesn't connect you to a congregation by itself. You join by opening an invitation link sent to the email address you signed in with. Ask your church administrator to arrange one for: <email>". Every "presby" on the page is now "PresbyPortal".
+- **Regression tests:** two cases in `src/app/no-organization/page.test.tsx`. Both failed on the old copy (watched) and pass on the new. `e2e/post-login-routing.spec.ts:84`'s locator was updated to "Read about PresbyPortal".
+- **Follow-ups (recorded in TODO at integration):**
+  - Auto-connect a verified sign-in to the person whose on-file address matches. This was operator-requested and folds into Community Increment 2b.
+  - The platform invitation screen should warn when the invited address is already on a person who signs in. This folds into the multiple-emails pipeline.

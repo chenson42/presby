@@ -81,7 +81,7 @@ test("2 — a signed-in user with no congregation lands on /no-organization", as
   ).toBeVisible();
   // The funnel, not a dead end: both doors must be on the page.
   await expect(page.getByText(/ask your church administrator/i)).toBeVisible();
-  await expect(page.getByRole("link", { name: /read about presby/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /read about presbyportal/i })).toBeVisible();
 });
 
 test("3 — an MFA-required user is walked from /admin into enrolment", async ({

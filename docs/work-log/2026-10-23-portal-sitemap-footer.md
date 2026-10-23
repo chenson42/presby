@@ -18,8 +18,8 @@
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
-| 2 — Architectural review | architect | In progress | — | — |
-| 3 — Technical design | tech-lead | Pending | — | — |
+| 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-23 |
+| 3 — Technical design | tech-lead | In progress | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -275,23 +275,116 @@ Files read (all under `/Users/cshenso/git/presby-platform/presby-nav/`): `docs/w
 
 # Phase 2 — Architectural Review (architect)
 
+*Recorded verbatim by the orchestrator.*
+
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
+**Approved with suggestions.** The design needs no new dependency, no new directory and no schema change. It adds one new module inside the existing `src/lib/org-portal/`, which is a structural change, so Phase 2 is not skipped. The design stays inside DECISION-003, DECISION-117, DECISION-125, DECISION-162 and F135. Phase 3 proceeds and must follow the rulings below.
 
 ## Placement
 
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
+- **Where the pure builder lives: a new file, `src/lib/org-portal/portal-menu.ts`.** It must not go in `tiles.ts`.
+  - It exports `buildPortalMenu(input)`, the `PortalMenu` and `PortalMenuEntry` types, and nothing else.
+  - It has no `server-only` marker, no React and no database import. The precedent is `main-row.ts`.
+  - It imports `DOMAIN_LABELS` and `DOMAIN_ORDER` from `tiles.ts` at runtime, and `type PortalTile` as a type only. Labels are not passed in as an argument, so there is no second copy of them that could drift.
+  - The import goes one way only: `portal-menu.ts` imports `tiles.ts`, and **`tiles.ts` must never import `portal-menu.ts`**. The F135 cycle runs tiles → org-features → org-feature-categories → tiles. `portal-menu.ts` sits outside that cycle and imports nothing from `org-features`.
+  - `tiles.ts` loads `server-only`, so the builder's test mocks it with one line, `vi.mock("server-only", () => ({}))`. `tiles.test.ts:41` already does this. No other mocks are needed.
+- **Where the reads live: one loader, `getPortalMenu(slug, organizationType, viewer)`, added to `src/lib/org-portal/visible-tiles.ts`.** That file is already the server-only half that evaluates tiles.
+  - The loader reads the operate tiles, `org_portal.admin_hub`, and the administer tiles only when `admin_hub` is on. It then calls the builder.
+  - The nav and the footer each call the loader. Neither repeats the reads or the Administration rule itself.
+  - This keeps each piece of chrome independent, which both component headers document (a degraded footer must not take the nav down, and the reverse). It also means the two read through one code path.
+  - The loader does not need `cache()`, because every read under it is already cached. If Phase 3 adds a cache, it must use primitive arguments, because an object argument defeats `cache()` (see the `visible-tiles.ts` header).
+- **Builder input:** `{ slug, operateTiles, administerTiles, adminHubEnabled }`.
+- **Builder output must be plain, serializable data**: strings and booleans only, with every `href` already turned into a string.
+  - Each entry is `{ key: "home" | PortalDomain, label, href, exact, icon, children: { key, label, href, comingSoon }[] }`.
+  - No `href(slug)` function and no icon component may appear in the output. The nav hands its data to the `'use client'` component `PortalNavLinks`, and a non-plain object crossing that boundary has already caused a live 500 once (see the `portal-nav-links.tsx` comment on `icon`).
+  - The builder defines its own types and must not import `PortalNavEntry` from the client file. `portal-nav.tsx` converts menu entries into `PortalNavEntry` with a one-line map.
+- **Server vs client split:** no change. `portal-nav.tsx` stays a Server Component with the existing client component for active state. `portal-footer.tsx` stays a Server Component, because nothing in the site map is interactive. The builder is never imported by a client component.
+- **Dependencies:** none.
+
+## Rulings on the questions put to Phase 2
+
+1. **Home and Administration become first-class entries in the menu.** This removes the three hard-coded literals at `portal-nav.tsx:116,123-132` and `portal-footer.tsx:125-132`.
+   - Home comes first, always shows, and has no children. The footer renders it as a link, not as a column.
+   - Administration comes last. Its label comes from `DOMAIN_LABELS.administration`.
+   - Under operator ruling Q1, Administration's `children` is exactly one link, "Administration overview", pointing to `/o/<slug>/admin`.
+   - The builder uses `administerTiles` only to check that at least one exists. It never copies an administer tile into `children`. That makes the Q1 ruling a property of the data, not something the footer has to remember.
+2. **One Administration rule (Note 3):** Administration is present if and only if `adminHubEnabled` is on **and** `administerTiles.length > 0`.
+   - The rule lives only in `buildPortalMenu`.
+   - This changes the nav's behaviour on purpose. The `portal-nav.test.tsx` test pinning "gated solely on `admin_hub`" gets rewritten, and the header comments that say so must be corrected (`portal-nav.tsx` and the `tiles.ts` comment on `PortalDomain`).
+   - `/o/<slug>/admin` itself is unchanged. It keeps its own `admin_hub` gate and its "Nothing is turned on here yet." empty state for anyone who goes there directly.
+   - Showing Administration still checks no permissions (DECISION-003/162 reaffirmed). The menu must never gain a `hasFeature` call or a check on the viewer's grants.
+3. **The `administration` domain never becomes a domain entry.** The builder applies this standing rule, so it now lives in one place instead of a filter in `portal-nav.tsx`.
+4. **Rename only the `DOMAIN_LABELS.people` value**, from "People & Membership" to "Community". The key `people` stays.
+   - The key is the `#domain-people` anchor, the icon map key, and the value stored as `organization_feature_categories.category`.
+   - I checked that the label text is stored nowhere in the database: "People & Membership" appears only in `tiles.ts`, in a comment at `org-features.ts:70`, and in `docs/product/functionality-map.md`. No migration is needed, and no catalog read on a live branch is needed because no schema, RLS policy or grant changes.
+   - Also update the trailing comment on the `PortalDomain` union, and update the functionality map at ship time (Rule 14).
+   - The Features-page category header will also read "Community". That follows from the operator's Q2 ruling, so it is not a defect.
+5. **`domain-tile-sections.tsx` does not share the builder.**
+   - It is generic over its domain type and serves three callers, including the platform `/admin` with its own taxonomy (DECISION-125). Making it read an org-portal menu would undo that.
+   - Its headings already match because the home page gives it the same `DOMAIN_ORDER` and `DOMAIN_LABELS` and the same operate tiles.
+   - Parity is covered by a test instead (item 6).
+6. **The parity test has two parts.**
+   - **`src/lib/org-portal/portal-menu.test.ts`, pure, with no mocks besides `server-only`.** It must cover:
+     - the Note 3 truth table: hub off or on, crossed with zero or at least one administer tile;
+     - the `administration` domain never appearing as a domain entry;
+     - an empty domain being left out;
+     - domain order following `DOMAIN_ORDER`;
+     - `comingSoon` carried through to children;
+     - top-level labels being unique;
+     - Home first and Administration last;
+     - no administer tile label appearing in any `children` (Q1);
+     - every `href` being a string.
+   - **A render parity test.** Give the nav and the footer the same mocked `getPortalMenu` result. Assert that the nav's labels, in order, equal the footer's Home link followed by its column headings, in order.
+   - **Optional third assertion, which I recommend.** For one operate-tile fixture, every domain entry's `#domain-<key>` fragment matches a `<section id>` that `DomainTileSections` renders for the same tiles. That pins the anchor link to its target without coupling the two components.
+7. **Per-request read cost: this corrects Phase 1.** Phase 1 said the administer pass costs "no extra queries". That holds only on `/o/<slug>/admin`, which already reads those tiles.
+   - Each call to `isFlagEnabled` is one row read per key, cached per key within one render (`flags.ts:19`). On every other portal page, Note 3 adds:
+     - about 6 flag reads not cached today (`roles`, `tickets`, `features`, `branding`, `events`, plus `reports` or `filings` depending on org type);
+     - one per-org toggle read inside `withOrgContext` (`org_portal.domains`). The `org_portal.giving` read is already cached by the operate Giving tile.
+   - The reads run in parallel on the WebSocket pool, are deduplicated across nav, footer and page, and happen only inside the `resolved.kind === "ok"` branch. I accept the cost.
+   - **Required mitigation:** the loader skips the administer read entirely when `admin_hub` is off.
+   - If the cost ever matters, the fix is a single cached read of all flags in `flags.ts`. That is out of scope, so log a TODO line only if Phase 3 measures a problem.
 
 ## Invariants Touched
 
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
+- **Permissions vs Flags (DECISION-003/162):** kept. The menu remains flag-, toggle- and org-type-gated, and each destination stays the only authority on permissions. The analyst's Note 4 "can administer" follow-up stays a TODO line, not part of this pipeline.
+- **Enumeration safety (DECISION-040):** kept, provided the nav and footer, and so `getPortalMenu`, are only rendered inside the `layout.tsx` `resolved.kind === "ok"` branch. The existing `layout.test.tsx` pins for forbidden, ended, not-found and no-session cases must stay green.
+- **The Brand Is a Cascade Override (DECISION-047):** kept. The footer stays under `src/components/org-portal/` and uses semantic tokens only, with no `*-brand` utility and no `bg-primary` fill. `check:brand-scope` must pass.
+- **Verify in a Browser:** the 360px layout check and the rule against collapsing columns with `<details>` (Note 7) are binding on Phase 4.
+- **F135 (import cycle):** kept by the one-way import rule above.
+- No invariant changes, so `CLAUDE.md` needs no edit.
 
 ## Notes
 
-[Anything Phase 3 must honor.]
+- **Proposed DECISION-220 (architectural, from the pre-assigned range):** "The org portal's menu is one pure structure, `buildPortalMenu()` in `src/lib/org-portal/portal-menu.ts`, which the nav and the site-map footer both render through `getPortalMenu()`. Home and Administration are members of it, not literals in the components. Administration is present if and only if `org_portal.admin_hub` is on and at least one administer tile is visible, and in the footer it carries only the 'Administration overview' link. The structure checks no permissions (DECISION-003/162). `tiles.ts` never imports it (F135). `DomainTileSections` stays generic and is held to the menu by a parity test, not by sharing the builder." Tech-lead may use DECISION-221/222 for implementation entries.
+- State the "no two top-level entries share a label" rule once, in the header of `portal-menu.ts`. The home page's "Community" pill and "Community" card are the accepted residual from operator ruling Q2.
+- Phase 1 Notes 5–7 are carried forward unchanged: the e2e locator tightening at `community-participants.spec.ts:283`, `branded-signin.spec.ts:253` and `member-calendar.spec.ts:260`; one new footer e2e smoke at 360px; the wrapping grid; and no empty `<ul>` or heading without items.
+- The analyst flagged the `tel:` link and the Members-tile toggle mismatch. Both stay out of scope.
+
+**Per-Phase Status row (for the orchestrator to record):**
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-23 |
+
+**Handoff:** next agent is **tech-lead** (Phase 3). The design doc must name `portal-menu.ts` and the `getPortalMenu` loader, implement Rulings 1–7, and pick the implementer. My expectation is full-stack-developer, since the change spans one lib module and two server components and is small.
+
+Files reviewed (all under `/Users/cshenso/git/presby-platform/presby-nav/`):
+- `docs/work-log/2026-10-23-portal-sitemap-footer.md`
+- `src/lib/org-portal/tiles.ts`
+- `src/lib/org-portal/visible-tiles.ts`
+- `src/lib/org-portal/main-row.ts`
+- `src/lib/flags.ts`
+- `src/lib/org-features.ts`
+- `src/app/(org)/o/[slug]/portal-nav.tsx`
+- `src/app/(org)/o/[slug]/portal-nav-links.tsx`
+- `src/app/(org)/o/[slug]/layout.tsx`
+- `src/app/(org)/o/[slug]/page.tsx`
+- `src/app/(org)/o/[slug]/admin/page.tsx`
+- `src/components/org-portal/portal-footer.tsx`
+- `src/components/shared/domain-tile-sections.tsx`
+- `vitest.config.ts`
+- `drizzle/` (grep for the stored-label check)
 
 ---
 

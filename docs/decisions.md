@@ -4,6 +4,44 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-222 — `getPortalMenu()` skips the administer-tile read when `org_portal.admin_hub` is off, and adds no `cache()` of its own.**
+
+**Status:** Resolved · **Date:** 2026-10-23 · **Feature:** `2026-10-23-portal-sitemap-footer` (Phase 3; integrated 2026-10-23)
+
+- The loader reads the operate tiles and `org_portal.admin_hub` in parallel, then reads the administer tiles only if the hub flag is on. With the hub off, the Administration rule (DECISION-220) cannot be met, so the read would be wasted.
+- It makes no new `cache()`. The per-tile and per-flag reads under it are already cached on primitive arguments, so the nav, the footer and the page share them. If a cache is ever added it must take primitive arguments, because an object argument defeats `cache()` (the `visible-tiles.ts` header says so).
+- **Cost accepted.** With the hub on, every portal page now does about six uncached flag reads (`roles`, `tickets`, `features`, `branding`, `events`, and `reports` or `filings` by organization type) and one per-org toggle read (`org_portal.domains`), in parallel on the WebSocket pool and only inside the `resolved.kind === "ok"` branch. Not measured as a problem. Revisit with a single cached all-flags read in `flags.ts` if it ever is.
+- The loader never throws: `isFlagEnabled` returns false on error and `visiblePortalTiles` swallows gate failures, so a failed read hides a tile or Administration and never takes the chrome down.
+
+---
+
+**DECISION-221 — The portal footer is a site map built from `PortalMenu`: a plain-text `<h2>` per column, a wrapping grid, never collapsible.**
+
+**Status:** Resolved · **Date:** 2026-10-23 · **Feature:** `2026-10-23-portal-sitemap-footer` (Phase 3; integrated 2026-10-23)
+
+- Home is a leading link, not a column. Every other entry with children is a column whose heading is a plain-text `<h2>` (never a link) and whose list is `aria-labelledby` that heading. An entry with no children renders no column, so there is never a heading without items or an empty `<ul>`.
+- The grid wraps (2, 3 and 4 columns at the base, `sm` and `lg` breakpoints) instead of fixing a column count. Columns are never collapsible, because of the iOS `<details>`/`<summary>` failure recorded under Verify in a Browser. A `comingSoon` child renders the words "Coming soon" as plain text, with no badge fill.
+- Rationale: the headings equal the nav's labels by construction; only one link in the footer is named "Community" (the page), so the pill-and-card pair on the home page (operator ruling Q2) does not repeat there; and the layout cannot hide a link on a phone. Semantic tokens only, no `*-brand` utility, no `bg-primary` fill.
+- Consequence for tests: headings in the footer are real `<h2>` elements, so an unscoped `getByRole("heading")` locator in e2e now matches footer headings too. Two specs were tightened (`community-participants`: `level: 1`; `member-calendar`: scoped to `main`).
+- Revisit if a presbytery's footer grows past about eight columns.
+
+---
+
+**DECISION-220 — The org portal's menu is one pure structure, `buildPortalMenu()`, which the nav and the site-map footer both render through `getPortalMenu()`.**
+
+**Status:** Resolved · **Date:** 2026-10-23 · **Feature:** `2026-10-23-portal-sitemap-footer` (Phase 2 ruling, operator rulings Q1 and Q2; integrated 2026-10-23)
+
+- **Where it lives.** `src/lib/org-portal/portal-menu.ts` is pure (no `server-only`, no React, no database; the `main-row.ts` precedent). It imports `DOMAIN_LABELS` and `DOMAIN_ORDER` from `tiles.ts`, and `tiles.ts` never imports it back, so the F135 cycle (tiles, org-features, org-feature-categories) is not closed. The loader `getPortalMenu(slug, organizationType, viewer)` is in `visible-tiles.ts`; the nav and the footer each call it, so each stays independent of the other's failure.
+- **What is in it.** Home first, one entry per domain with at least one visible operate tile (in `DOMAIN_ORDER`, never `administration`), and Administration last. Home and Administration are members of the structure, not literals in the components. The output is strings and booleans only, because the nav hands it to a client component.
+- **One Administration rule.** Present if and only if `org_portal.admin_hub` is on **and** at least one administer tile is visible. The nav used to show it whenever the hub was on; that divergence is closed on purpose. In the menu it carries exactly one child, "Administration overview", at `/o/<slug>/admin`; the builder uses `administerTiles` only for `.length`, so the operator's Q1 ruling ("heading plus overview link") is a property of the data. `/o/<slug>/admin` itself keeps its own hub gate and its empty state.
+- **No permission check (DECISION-003, DECISION-162).** The menu is gated by flags, per-org toggles and organization type, never by `hasFeature` or the viewer's grants; each destination stays the only authority. Everyone who can see the portal sees Administration when it is shown. A "can administer" signal is a separate decision (TODO).
+- **Label.** `DOMAIN_LABELS.people` reads "Community"; the `people` key, the `#domain-people` anchor, the icon key and the stored `organization_feature_categories.category` value are unchanged (the label text is stored nowhere, so no migration). The Features page category header follows.
+- **`DomainTileSections` stays generic** (it serves three callers including the platform `/admin`, DECISION-125) and is held to the menu by a parity test, not by sharing the builder.
+- **Accepted residual (operator ruling Q2).** On the portal home page the "Community" menu item (scrolls to the section) and the "Community" card (opens `/admin/community`) are two links with the same name and different destinations. "No two top-level entries share a label" is stated once, in the header of `portal-menu.ts`.
+- Enumeration safety (DECISION-040) holds: nav, footer and loader run only inside the `resolved.kind === "ok"` branch of the layout.
+
+---
+
 **DECISION-201 — The admin people section is "Community" and its route is `/o/<slug>/admin/community`, moved in the same pipeline as its own mechanical batch with a permanent, platform-host-scoped redirect.**
 
 **Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (Phase 2 R-numbers, operator ruling "Move it now", Phase 3; integrated 2026-10-23)

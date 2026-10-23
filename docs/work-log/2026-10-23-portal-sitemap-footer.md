@@ -911,3 +911,28 @@ Relevant files:
 - `/Users/cshenso/git/presby-platform/presby-nav/docs/product/functionality-map.md`
 
 **Orchestrator, after Phase 6:** follow-up 1 is folded in. The footer Home link now carries `w-fit` (`portal-footer.tsx`); `portal-footer.test.tsx` 18/18, typecheck and lint pass.
+
+---
+
+# Integration and release (tech-lead, 2026-10-23)
+
+Merged `origin/main` (0.39.1, 0.39.2, the CI changes) into the branch: no conflicts; `npm run typecheck` clean afterwards. Rule 16 shared docs edited at integration, by authorization of the orchestrator.
+
+**Done in this section:**
+
+- `docs/decisions.md`: DECISION-220 (menu structure, architectural), DECISION-221 (footer layout), DECISION-222 (loader read and cost), newest first.
+- `docs/TODO.md`: Done line (2026-10-23), plus five Next Up lines: the "can administer" signal, the Members tile versus `members_create`, the category axis, the two slow `org-features.test.ts:532` cases, and the F172 `community-participants.spec.ts:291` window. Phase 6 follow-up 1 (`w-fit`) was folded in before commit, so it has no line.
+- `docs/product/functionality-map.md`: the portal IA bullet (nav and footer one structure, Administration rule, "Community"), the portal chrome v3 mentions of the footer, the per-org features category list, and the version stamp (`0.40.0`).
+- `docs/release-notes/v0.40.md` (new, 0.40.0, Feature), `v0.39.md` links forward; `package.json` and `package-lock.json` at `0.40.0`. The admin docs viewer reads the directory, so no allowlist change.
+- `docs/STATE.md`: a short RESUME block; the Community block is demoted to "Previous handoff".
+- `docs/architecture.md`: unchanged (Rule 15; a feature-level refactor, no new subsystem). `CLAUDE.md`: no user-visible surface changes.
+
+**What's-new entry, for the orchestrator to publish at `/admin/whats-new` (Rule 13; nothing was written to any database):**
+
+> **Title:** A clearer menu and a footer map
+>
+> **Body:** The "People & Membership" section is now called "Community." The footer at the bottom of every portal page now lists each section of the menu in columns, so the menu and the footer always use the same names.
+
+Read against the accepted residuals: it does not say Administration is hidden from anyone, and it names no feature that is off. The footer appears only where `org_portal.chrome_v3` is on; publish when that holds for the audience, as the other `chrome_v3` posts in `docs/TODO.md` ("Owed what's-new posts") are held.
+
+**Per-Phase Status:** Integration and release docs complete; awaiting the orchestrator's commit and the operator's review.

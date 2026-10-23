@@ -257,6 +257,11 @@ describe.skipIf(!hasDb)(
 
     afterAll(async () => {
       const platform = getPlatformDb();
+      // The email audit rows createStaffPersonAction() now writes (in the
+      // create's own transaction) carry the organization id.
+      await platform.execute(
+        sql`delete from audit_events where metadata->>'organizationId' = ${orgA}`,
+      );
       // Same ordering hazard `people.test.ts`'s own afterAll documents:
       // group_memberships_reject_derived would otherwise block the cascading
       // delete of this fixture's own Active Membership derived group row.
@@ -342,7 +347,16 @@ describe.skipIf(!hasDb)(
           firstName: "Marisol",
           lastName: `StaffHireAction${stamp}`,
         },
-        contact: { email: `staff-hire-action-${stamp}@example.invalid` },
+        contact: {
+          emails: [
+            {
+              value: `staff-hire-action-${stamp}@example.invalid`,
+              subtype: null,
+              isPrimary: true,
+              doNotContact: false,
+            },
+          ],
+        },
         household: { mode: "none" },
         rollAction: { kind: "none" },
       });
@@ -374,6 +388,68 @@ describe.skipIf(!hasDb)(
         .from(rollActions)
         .where(eq(rollActions.personId, personId));
       expect(rollActionRows).toHaveLength(0);
+    });
+
+    it("the staff form's single address is stored as the person's main address, audited with the SESSION user (person-emails, D14)", async () => {
+      sessionFor(bothPermissionsPerson);
+      const address = `staff-main-${stamp}@example.invalid`;
+      const result = await createStaffPersonAction(SLUG, {
+        identity: { mode: "new", firstName: "Odessa", lastName: `StaffMain${stamp}` },
+        contact: { emails: [{ value: address.toUpperCase(), subtype: null, isPrimary: true, doNotContact: false }] },
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok || !result.data) return;
+      trackedPeopleIds.push(result.data.personId);
+      const platform = getPlatformDb();
+      const rows = (
+        await platform.execute(
+          sql`select value, is_primary, verified_at, ended_at from contact_methods where person_id = ${result.data.personId} and kind = 'email'`,
+        )
+      ).rows;
+      expect(rows).toEqual([{ value: address, is_primary: true, verified_at: null, ended_at: null }]);
+      const audit = (
+        await platform.execute(
+          sql`select action, actor_user_id, actor_email from audit_events where resource_id = ${result.data.personId}`,
+        )
+      ).rows;
+      expect(audit).toEqual([
+        { action: "tenant.person_email.added", actor_user_id: grantingUserId, actor_email: "fixture@example.invalid" },
+      ]);
+    });
+
+    it("a bad address is refused with its Copy string and no person is created (nothing orphaned)", async () => {
+      sessionFor(bothPermissionsPerson);
+      const result = await createStaffPersonAction(SLUG, {
+        identity: { mode: "new", firstName: "Nadine", lastName: `StaffBadEmail${stamp}` },
+        contact: { emails: [{ value: "not-an-address", subtype: null, isPrimary: true, doNotContact: false }] },
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      });
+      expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
+      const platform = getPlatformDb();
+      const [orphan] = await platform
+        .select({ id: people.id })
+        .from(people)
+        .where(eq(people.lastName, `StaffBadEmail${stamp}`))
+        .limit(1);
+      expect(orphan).toBeUndefined();
+    });
+
+    it("a forged row (an id, a verified flag) is refused before createPerson", async () => {
+      sessionFor(bothPermissionsPerson);
+      const result = await createStaffPersonAction(SLUG, {
+        identity: { mode: "new", firstName: "Forge", lastName: `StaffForged${stamp}` },
+        contact: {
+          emails: [
+            { id: "11111111-1111-4111-8111-111111111111", value: "forged@example.invalid", subtype: null, isPrimary: true, doNotContact: false },
+          ],
+        },
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      } as never);
+      expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
     });
 
     // -----------------------------------------------------------------

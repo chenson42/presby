@@ -32,7 +32,16 @@ const PERSON: PersonForEdit = {
   middleName: null,
   preferredName: null,
   suffix: null,
-  email: "nora@example.invalid",
+  emails: [
+    {
+      id: "c-1",
+      value: "nora@example.invalid",
+      subtype: null,
+      isPrimary: true,
+      doNotContact: false,
+      createdAt: "2026-01-01T00:00:00.000000Z",
+    },
+  ],
   phone: null,
   address: { line1: "1 Main St", city: "Springfield", region: null, postalCode: null },
   householdId: null,
@@ -70,6 +79,66 @@ describe("EditPersonForm — prefill", () => {
     expect(
       (screen.getByRole("radio", { name: /existing household/i }) as HTMLInputElement).checked,
     ).toBe(true);
+  });
+});
+
+describe("EditPersonForm — the interim email payload (until the address list editor)", () => {
+  const TWO = {
+    ...PERSON,
+    emails: [
+      { id: "c-1", value: "nora@example.invalid", subtype: "personal" as const, isPrimary: true, doNotContact: false, createdAt: "2026-01-01T00:00:00.000000Z" },
+      { id: "c-2", value: "nora.work@example.invalid", subtype: "work" as const, isPrimary: false, doNotContact: true, createdAt: "2026-01-02T00:00:00.000000Z" },
+    ],
+  };
+  const submitted = () => mockUpdatePersonAction.mock.calls[0]![1].contact.emails;
+
+  it("the single field edits the MAIN address; every other address is re-sent exactly as loaded, with the ids the form read", async () => {
+    mockUpdatePersonAction.mockResolvedValueOnce({ ok: true, data: { personId: "p-1" } });
+    render(<EditPersonForm slug="alder-creek" person={TWO} households={[]} />);
+    fireEvent.change(screen.getByLabelText(/^email/i), { target: { value: "  nora.new@example.invalid " } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(mockUpdatePersonAction).toHaveBeenCalled());
+    expect(submitted()).toEqual({
+      rows: [
+        { id: "c-1", value: "nora.new@example.invalid", subtype: "personal", isPrimary: true, doNotContact: false },
+        { id: "c-2", value: "nora.work@example.invalid", subtype: "work", isPrimary: false, doNotContact: true },
+      ],
+      knownIds: ["c-1", "c-2"],
+    });
+  });
+
+  it("saving without touching the field re-sends the list unchanged (nothing is ended behind the form's back)", async () => {
+    mockUpdatePersonAction.mockResolvedValueOnce({ ok: true, data: { personId: "p-1" } });
+    render(<EditPersonForm slug="alder-creek" person={TWO} households={[]} />);
+    fireEvent.change(screen.getByLabelText(/^first name/i), { target: { value: "Nora-Jean" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(mockUpdatePersonAction).toHaveBeenCalled());
+    expect(submitted().rows.map((r: { id: string; value: string }) => [r.id, r.value])).toEqual([
+      ["c-1", "nora@example.invalid"],
+      ["c-2", "nora.work@example.invalid"],
+    ]);
+  });
+
+  it("a blank field removes the main address only; the rest stay (the oldest becomes the main, server-side)", async () => {
+    mockUpdatePersonAction.mockResolvedValueOnce({ ok: true, data: { personId: "p-1" } });
+    render(<EditPersonForm slug="alder-creek" person={TWO} households={[]} />);
+    fireEvent.change(screen.getByLabelText(/^email/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(mockUpdatePersonAction).toHaveBeenCalled());
+    expect(submitted().rows.map((r: { id: string }) => r.id)).toEqual(["c-2"]);
+    expect(submitted().knownIds).toEqual(["c-1", "c-2"]);
+  });
+
+  it("a person with no address and a typed one sends a single new main row", async () => {
+    mockUpdatePersonAction.mockResolvedValueOnce({ ok: true, data: { personId: "p-1" } });
+    render(<EditPersonForm slug="alder-creek" person={{ ...PERSON, emails: [] }} households={[]} />);
+    fireEvent.change(screen.getByLabelText(/^email/i), { target: { value: "nora@example.invalid" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(mockUpdatePersonAction).toHaveBeenCalled());
+    expect(submitted()).toEqual({
+      rows: [{ value: "nora@example.invalid", subtype: null, isPrimary: true, doNotContact: false }],
+      knownIds: [],
+    });
   });
 });
 

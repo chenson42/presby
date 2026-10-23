@@ -13,6 +13,7 @@ import { RequiredMark } from "@/components/shared/required-mark";
 import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type { PersonForEdit, UpdatePersonInput } from "@/lib/people";
+import type { EmailRowInput } from "@/lib/contact-methods/types";
 import { editPersonSchema, type EditPersonValues } from "./edit-person-schema";
 import { updatePersonAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
@@ -56,7 +57,9 @@ export function EditPersonForm({
         suffix: person.suffix ?? "",
       },
       contact: {
-        email: person.email ?? "",
+        // INTERIM (Batch 2): the single field edits the MAIN address. Batch 3
+        // replaces it with the address list editor (DECISION-216).
+        email: person.emails[0]?.value ?? "",
         phone: person.phone ?? "",
       },
       address: {
@@ -99,7 +102,7 @@ export function EditPersonForm({
         suffix: values.identity.suffix || undefined,
       },
       contact: {
-        email: values.contact.email || undefined,
+        emails: interimEmailsPayload(person.emails, values.contact.email),
         phone: values.contact.phone || undefined,
       },
       address:
@@ -305,4 +308,33 @@ function TextField({
       )}
     </div>
   );
+}
+
+/**
+ * INTERIM (Batch 2, replaced by the address list editor in Batch 3): the form
+ * still has one email field. It edits the person's MAIN address (the first
+ * active row, canonical order) and re-submits every other address exactly as
+ * loaded, so saving never ends an address the form cannot show. A blank field
+ * removes the main address (the oldest remaining one becomes the main, Q3).
+ */
+function interimEmailsPayload(
+  loaded: PersonForEdit["emails"],
+  typed: string | undefined,
+): { rows: EmailRowInput[]; knownIds: string[] } {
+  const value = (typed ?? "").trim();
+  const main = loaded[0];
+  const rows: EmailRowInput[] = [];
+  for (const row of loaded) {
+    if (main && row.id === main.id) {
+      if (value !== "") {
+        rows.push({ id: row.id, value, subtype: row.subtype, isPrimary: true, doNotContact: row.doNotContact });
+      }
+      continue;
+    }
+    rows.push({ id: row.id, value: row.value, subtype: row.subtype, isPrimary: false, doNotContact: row.doNotContact });
+  }
+  if (!main && value !== "") {
+    rows.push({ value, subtype: null, isPrimary: true, doNotContact: false });
+  }
+  return { rows, knownIds: loaded.map((row) => row.id) };
 }

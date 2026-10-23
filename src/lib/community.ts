@@ -8,6 +8,7 @@ import {
 } from "@/lib/roll-action-kinds";
 import { deriveConnection, type Connection } from "@/lib/community-labels";
 import { isUuid } from "@/lib/is-uuid";
+import { ACTIVE_MAIN_EMAIL_LATERAL, anyActiveEmailLikeSql } from "@/lib/contact-methods/sql";
 
 /**
  * The admin Community readers that the member-facing Directory must never
@@ -59,7 +60,7 @@ async function canManagePeople(
 export interface CommunityRow {
   personId: string;
   displayName: string;
-  /** Primary email (admin surface: not subject to `hide_email`). */
+  /** The active main email (admin surface: not subject to `hide_email`). */
   email: string | null;
   /** 'YYYY-MM-DD'. */
   firstVisitDate: string | null;
@@ -146,25 +147,23 @@ async function listCommunity(
       return { kind: "forbidden" };
     }
 
+    // ER23a: the admin search matches EVERY active address of the person (the
+    // card an administrator opens shows them all), and no ended one. The
+    // member directory's search is narrower on purpose (F212).
     const term = opts.search?.trim();
     const searchSql = term
       ? sql`and (
           p.first_name ilike ${likePattern(term)} escape '\\'
           or p.last_name ilike ${likePattern(term)} escape '\\'
           or p.preferred_name ilike ${likePattern(term)} escape '\\'
-          or cm_email.value ilike ${likePattern(term)} escape '\\'
+          or ${anyActiveEmailLikeSql(likePattern(term))}
         )`
       : sql``;
 
     const fromWhere = sql`
         from memberships m
         join people p on p.id = m.person_id
-        left join lateral (
-          select value from contact_methods
-           where person_id = p.id and kind = 'email'
-           order by is_primary desc, id
-           limit 1
-        ) cm_email on true
+        ${ACTIVE_MAIN_EMAIL_LATERAL}
        where m.organization_id = ${organizationId}::uuid
          and ${listPredicate(kind)}
          ${searchSql}

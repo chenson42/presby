@@ -235,7 +235,11 @@ export function MemberWizard({
               dateOfBirth: values.identity.dateOfBirth || undefined,
             },
       contact: {
-        email: values.contact.email || undefined,
+        // INTERIM (Batch 2): one unlabelled main address; Batch 3 replaces the
+        // field with the address list editor.
+        emails: values.contact.email
+          ? [{ value: values.contact.email, subtype: null, isPrimary: true, doNotContact: false }]
+          : undefined,
         phone: values.contact.phone || undefined,
       },
       address:

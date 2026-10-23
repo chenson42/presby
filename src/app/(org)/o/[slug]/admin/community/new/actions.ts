@@ -11,6 +11,9 @@ import {
   type MatchPersonInput,
 } from "@/lib/people";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
+import { emailRefusalMessage } from "@/lib/contact-methods/copy";
+import { parseNewPersonEmails } from "@/lib/contact-methods/email-rows-schema";
+import type { PersonSaveNotes } from "@/lib/contact-methods/types";
 import type { ActionResult } from "@/types/actions";
 import {
   CREATE_COPY,
@@ -174,6 +177,7 @@ export async function createPersonAction(
     rollActionId: string | null;
     effect: "none" | "pending" | "recorded";
     affectsFiledPeriod: boolean;
+    notes?: PersonSaveNotes;
   }>
 > {
   const identity = await resolveActingIdentity(slug);
@@ -194,11 +198,21 @@ export async function createPersonAction(
     return { ok: false, error: VALIDATION_COPY.badBirthDate };
   }
 
+  // The posted email rows are parsed and rebuilt: nothing but the known
+  // fields reaches createPerson() (a Server Action's types are no boundary).
+  const contact: CreatePersonInput["contact"] = {};
+  if (typeof input.contact?.phone === "string") contact.phone = input.contact.phone;
+  if (input.contact?.emails !== undefined) {
+    const emails = parseNewPersonEmails(input.contact.emails);
+    if (!emails.ok) return { ok: false, error: emails.error };
+    contact.emails = emails.value;
+  }
+
   const result = await createPerson(
     identity.personId,
     identity.organizationId,
     identity.userId,
-    { ...input, rollAction: checked.rollAction },
+    { ...input, contact, rollAction: checked.rollAction },
     { actingUserEmail: identity.email },
   );
 
@@ -213,6 +227,8 @@ export async function createPersonAction(
       return { ok: false, error: CREATE_COPY.invalidHousehold };
     case "roll_refused":
       return { ok: false, error: PARTICIPANT_COPY[result.reason] };
+    case "email_refused":
+      return { ok: false, error: emailRefusalMessage(result.refusal) };
     case "ok":
       break;
   }
@@ -236,6 +252,7 @@ export async function createPersonAction(
       rollActionId: result.rollActionId,
       effect: result.effect,
       affectsFiledPeriod: result.affectsFiledPeriod,
+      ...(result.notes ? { notes: result.notes } : {}),
     },
   };
 }

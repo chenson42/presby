@@ -645,8 +645,13 @@ describe.skipIf(!hasDb)("drizzle/0059 account_invitations (Postgres-backed)", ()
       // padded upper-case form this test used to insert (to prove the match
       // ignored case and spaces) is now refused at the door. The match is
       // still lower(btrim(...)) on both sides.
-      await expectRaise(fx.addEmail(p, `  ${s.address.toUpperCase()} `), /contact_methods_value_shape|23514/);
-      await fx.addEmail(p, s.address);
+      // (The fixture's addEmail() now normalizes too, so the refusal is proven with a raw insert.)
+      await expectRaise(
+        q(sql`insert into contact_methods (person_id, kind, value, is_primary)
+              values (${p}, 'email', ${`  ${s.address.toUpperCase()} `}, true)`),
+        /contact_methods_value_shape|23514/,
+      );
+      await fx.addEmail(p, `  ${s.address.toUpperCase()} `); // normalized by the fixture: stored as s.address
       expect((await fx.preview(s.token))[0]!.person_display_name).toBe("Rosamund Tilbury");
     });
 

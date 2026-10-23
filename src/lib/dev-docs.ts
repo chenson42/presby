@@ -1,3 +1,4 @@
+// contact-methods-scan-ok: the /developer schema reference describes the table in prose; it runs no query
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";

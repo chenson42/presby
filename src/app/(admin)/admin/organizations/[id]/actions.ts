@@ -32,6 +32,7 @@ import {
   revokeInvitation,
   revokeAllOpenInvitations,
   type CreateInvitationResult,
+  type InvitationWarning,
   type ResendInvitationResult,
 } from "@/lib/onboarding/issue";
 import { INVITATION_RATE_LIMIT_COPY } from "@/lib/onboarding/labels";
@@ -719,8 +720,32 @@ export type InvitationActionResult =
       expiresAt?: string;
       delivery?: "sent" | "queued";
       selfAddressed?: boolean;
+      /**
+       * Non-blocking notes on a SENT invitation (operator ruling 2026-10-23).
+       * Present only when non-empty. The invitation was created; these tell the
+       * operator what may go wrong at acceptance. `message` is the sentence to show.
+       */
+      warnings?: Array<{ code: InvitationWarning; message: string }>;
     }
   | { ok: false; error: string; needsAcknowledgement?: "do_not_contact" };
+
+/**
+ * The copy for each warning. Describes this organization's roster only, never
+ * whether the address has an account anywhere (`users` is not read).
+ */
+const INVITATION_WARNING_COPY: Record<InvitationWarning, string> = {
+  address_on_signed_in_person:
+    "That address is already on file for a person here who signs in. The invitation was sent, but it will be refused unless the invitee accepts while signed in to that person's own account.",
+};
+
+function warningsFor(
+  warnings: InvitationWarning[] | undefined,
+): { warnings: Array<{ code: InvitationWarning; message: string }> } | Record<string, never> {
+  if (!warnings || warnings.length === 0) return {};
+  return {
+    warnings: warnings.map((code) => ({ code, message: INVITATION_WARNING_COPY[code] })),
+  };
+}
 
 const DB_ERROR_COPY = "We couldn't complete that just now — try again in a moment.";
 
@@ -858,6 +883,7 @@ export async function inviteFoundingAdministratorAction(
     expiresAt: result.expiresAt.toISOString(),
     delivery: result.delivery,
     selfAddressed: result.selfAddressed,
+    ...warningsFor(result.warnings),
   };
 }
 
@@ -897,6 +923,7 @@ export async function inviteTreasurerAction(
     expiresAt: result.expiresAt.toISOString(),
     delivery: result.delivery,
     selfAddressed: result.selfAddressed,
+    ...warningsFor(result.warnings),
   };
 }
 

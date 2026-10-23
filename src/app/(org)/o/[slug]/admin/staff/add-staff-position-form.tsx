@@ -155,7 +155,10 @@ export function AddStaffPositionForm({
         lastName: values.lastName,
       },
       contact: {
-        email: values.email || undefined,
+        // D14: one unlabelled main address (a label is one edit away later).
+        emails: values.email
+          ? [{ value: values.email, subtype: null, isPrimary: true, doNotContact: false }]
+          : undefined,
         phone: values.phone || undefined,
       },
       household: { mode: "none" },

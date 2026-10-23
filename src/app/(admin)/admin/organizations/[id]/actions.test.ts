@@ -1276,6 +1276,44 @@ describe("inviteTreasurerAction", () => {
     await inviteTreasurerAction(formData({ ...TR_FIELDS, acknowledge: "true" }));
     expect(mockCreateInvitation).toHaveBeenLastCalledWith(expect.objectContaining({ acknowledgeDoNotContact: true }));
   });
+
+  // Operator ruling 2026-10-23 (person-emails): a SENT invitation to an address on a person who
+  // already signs in carries a non-blocking warning. The action only maps it to a sentence.
+  describe("the signed-in-address warning is a non-blocking note on a SENT invitation", () => {
+    const WARNING_COPY =
+      "That address is already on file for a person here who signs in. The invitation was sent, but it will be refused unless the invitee accepts while signed in to that person's own account.";
+
+    it.each([
+      ["inviteTreasurerAction", inviteTreasurerAction, TR_FIELDS],
+      ["inviteFoundingAdministratorAction", inviteFoundingAdministratorAction, FA_FIELDS],
+    ] as const)("%s maps the code to its sentence, still ok:true, still revalidates", async (_name, action, fields) => {
+      mockCreateInvitation.mockResolvedValue({ ...INVITE_OK, warnings: ["address_on_signed_in_person"] });
+      const out = await action(formData(fields));
+      expect(out).toEqual({
+        ok: true,
+        invitationId: VALID_INVITATION,
+        expiresAt: EXPIRES.toISOString(),
+        delivery: "sent",
+        selfAddressed: false,
+        warnings: [{ code: "address_on_signed_in_person", message: WARNING_COPY }],
+      });
+      expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+    });
+
+    it.each([
+      ["inviteTreasurerAction", inviteTreasurerAction, TR_FIELDS],
+      ["inviteFoundingAdministratorAction", inviteFoundingAdministratorAction, FA_FIELDS],
+    ] as const)("%s adds no `warnings` key when there is none (the result shape is unchanged)", async (_name, action, fields) => {
+      mockCreateInvitation.mockResolvedValue(INVITE_OK);
+      expect(await action(formData(fields))).not.toHaveProperty("warnings");
+      mockCreateInvitation.mockResolvedValue({ ...INVITE_OK, warnings: [] });
+      expect(await action(formData(fields))).not.toHaveProperty("warnings");
+    });
+
+    it("the copy describes the roster and the sign-in, never account existence elsewhere or any other organization", () => {
+      expect(WARNING_COPY).not.toMatch(/another (congregation|organization)|exists|users?\b/i);
+    });
+  });
 });
 
 describe("resendInvitationAction / revokeInvitationAction / revokeAllInvitationsAction", () => {

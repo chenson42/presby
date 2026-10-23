@@ -212,7 +212,16 @@ const PERSON = {
   middleName: null,
   preferredName: null,
   suffix: null,
-  email: "nora@example.invalid",
+  emails: [
+    {
+      id: "c-1",
+      value: "nora@example.invalid",
+      subtype: null,
+      isPrimary: true,
+      doNotContact: false,
+      createdAt: "2026-01-01T00:00:00.000000Z",
+    },
+  ],
   phone: null,
   address: null,
   householdId: null,

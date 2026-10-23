@@ -1,3 +1,4 @@
+// contact-methods-scan-ok: a comment only; the public staff directory never selects contact data
 import { StaffList, type StaffPerson } from "presby-site-kit";
 import { getPublicStaffRoster, type PublicStaffRosterFilter } from "@/lib/sites";
 import type { SiteUrls } from "@/lib/site-urls";

@@ -22,7 +22,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
 | 2 — Architectural review | architect | Complete. ER1–ER24; migration 0064 (2b moves to 0065); new module `src/lib/contact-methods/`; DECISION-215–218; F210–F214 | Approved with suggestions | 2026-10-23 |
 | 3 — Technical design | tech-lead | Complete. Designed to ER1–ER3b and ER11–ER23b (the text has no ER4–ER10 or ER24); S1–S4 ruled; Note 1 measured (0 CHECK violations; `seed-dev.sql` writes no contact rows; `invitations.db.test.ts:644` and `seed-dev-invitations.sql` need changes); D1–D15 additions, none needing a Phase 2 loop-back; F215–F217; DECISION-219 drafted; giving left unwired (D7, operator to be told) | Design complete; implementers named | 2026-10-23 |
-| 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | In progress: Batch A (0064, Drizzle mirror, DB tests, staged section 64 and seed patches) complete 2026-10-23; Batch 2 next | — | 2026-10-23 |
+| 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | In progress: Batch A (0064, Drizzle mirror, DB tests, staged section 64 and seed patches) complete 2026-10-23; Batch 2 (server: `contact-methods/` module, `updatePerson`/`createPerson` rewired, readers, audit keys, actions, scans, signed-in-address warning) complete 2026-10-23; Batch 3 (UI) next | — | 2026-10-23 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1140,6 +1140,69 @@ Added to `docs/deployment.md` at integration in the style of the 0059 runbook.
   - the guard's error tokens: "is ended and cannot change", "are immutable", "verified_at is set only by";
   - the deferred check's token, "no main address", raised as SQLSTATE 23514 at commit;
   - DELETE is gone, and a write must demote or end the old main before it promotes another (the partial unique index cannot be deferred).
+
+## Batch 2 — api-developer (2026-10-23)
+
+**Files created.** `src/lib/contact-methods/`:
+- Pure: `types.ts`, `normalize.ts`, `email-routing.ts` (`chooseEmail`, `nextPrimaryAfterRemoval`, `sortEmailRows`, the order constants), `email-plan.ts` (`planEmailSave`, `primaryChanged`), `email-audience.ts` (closed registry), `email-rows-schema.ts` (zod plus `parseUpdateEmails` / `parseNewPersonEmails`), `copy.ts` (`EMAIL_COPY`, `emailRefusalMessage`).
+- Server-only: `sql.ts` (active-main, active-phone and staff-Work laterals, the admin any-active-email predicate), `store.ts` (the only writer: `listActiveEmails`, `getPrimaryPhone`, `saveEmails`, `createContactsForNewPerson`, `savePrimaryPhone`, `findSharedAddressNotes`), `reader.ts` (`getPersonEmail`, the only TypeScript name of `presby_person_email`).
+- Tests: `normalize`, `email-routing`, `email-plan`, `email-audience`, `email-rows-schema`, `scan` (unit); `store.db`, `matrix.db`, `readers.db` (DB-backed); `test-rows.ts` is the row builder they share.
+
+**Files modified.** `people.ts` (`createPerson`, `updatePerson`, `getPersonForEdit`; `upsertPrimaryContactMethod` deleted; the file no longer names the contact table), `directory.ts` (shared fragments, `workEmail`, one search predicate for the directory and Find a person), `community.ts` (shared active-main lateral; admin search matches any active address), `onboarding/issue.ts` (`ended_at` on the treasurer match and the do-not-contact warning, plus the warning below), `audit.ts` (four keys), the three actions (`edit`, `new`, `staff`) and the platform `organizations/[id]/actions.ts`, `testing/invitation-fixture.ts` and `e2e/support/invitation-fixture.ts` (normalize), `// contact-methods-scan-ok:` on `children.ts`, `staff-directory.tsx`, `dev-docs.ts`.
+
+**Contract for Batch 3** (no new route handlers; no `FEATURES` or seed change; gates unchanged: `auth()` then `resolveOrgContext()`, then `people.manage` inside the library):
+- `updatePersonAction(slug, input: UpdatePersonInput): ActionResult<{ personId: string; notes?: PersonSaveNotes }>`. `input.contact` is `{ emails?: { rows: EmailRowInput[]; knownIds: string[] }; phone?: string }`. Omitting `emails` leaves addresses untouched; `phone` blank or absent clears it. The actor comes from the session. Errors are the `EMAIL_COPY` strings (`src/lib/contact-methods/copy.ts`), including `emails_changed` and the fixed "We couldn't save. Nothing was changed. Try again." for any thrown database error (logged by error class only).
+- `createPersonAction(slug, input)` and `createStaffPersonAction(slug, input)`: `input.contact` is `{ emails?: EmailRowInput[] (no ids); phone?: string }`. `createPersonAction`'s data gains optional `notes`. Both now map `email_refused` to the same Copy strings.
+- `PersonSaveNotes = { promoted?: { address }; shared?: { address; names: string[] (at most 3); more: number }[] }`, present only when non-empty.
+- `PersonForEdit.emails: ActiveEmailRow[]` replaces `email`: active rows only, canonical order (main first, then oldest), `createdAt` an ISO string with microseconds.
+- `DirectoryEntry.workEmail?: string | null` (null when none, when the main address IS the Work address, and when `hide_email` is set). Batch 3 renders the Work line.
+- `createInvitation` (platform) ok result gains optional `warnings: ["address_on_signed_in_person"]`; `InvitationActionResult` ok gains `warnings?: { code; message }[]`. **Batch 3 must render it** in `InvitationSentNotice` (`src/app/(admin)/admin/organizations/[id]/invitation-sent-notice.tsx`).
+- Pure files safe for the client: `types`, `normalize` (`EMAIL_SUBTYPE_LABELS`, `isValidEmailShape`), `email-routing` (`nextPrimaryAfterRemoval`, `sortEmailRows`), `copy`.
+
+**Operator addition (2026-10-23): the signed-in-address warning.** Deviation and addition, platform side only. `issue.ts` reads `people.user_id` (never `users`; the existing "never reads the users table" test still passes). It warns, without blocking, when the invited address is an ACTIVE address of a live person on THIS organization's roster whose `user_id` is set, because acceptance would then be refused as `person_linked_elsewhere` for any account but theirs. Founding administrator and treasurer both. The invitation, queue row and audit row are exactly those of an unwarned send. Tests: 8 in `issue.db.test.ts` (created with the warning for each purpose; absent when unlinked, when the address is on nobody, when the signed-in copy ended, for a signed-in person at another organization, and for a merged person; "changes nothing else"), 5 at the action layer (both actions, with and without a warning, and the copy).
+
+**Deviations from Phase 3**
+1. **Interim UI adapters.** Changing `CreatePersonInput.contact` and `PersonForEdit` broke typecheck in three client components, so each got a payload-only change: the edit form's single field edits the MAIN address and re-sends every other address as loaded (so a save never ends an address it cannot show; a blank field removes the main one); the wizard and staff form send one unlabelled main address. Their fixtures changed to match, and `edit-person-form.test.tsx` gained 4 tests pinning the interim payload. Batch 3 replaces all three.
+2. **Action tests moved to Batch 2.** The edit, new and staff `actions.test.ts` changes are here (the actions are Batch 2's), not Batch 3 as the blast-radius table said.
+3. **Reader tests are in a new file.** `readers.db.test.ts` holds the directory, Find a person and Community cases (Work display, search tightening, ended rows, hidden email and phone, admin search), on its own fixture, rather than widening the 1900-line `directory.test.ts` fixture. `directory.test.ts` keeps only the reversal of the F212 raw-value test plus one hidden-phone case. `find-person.test.ts` and `community.db.test.ts` are unchanged and still pass.
+4. **`planEmailSave` returns `{ kind: "plan" | "refused" }`** rather than `EmailPlan | EmailRefusal` (clearer than `"reason" in x`). New small pure files: `copy.ts` (the strings, shared by the form and the actions), `test-rows.ts`.
+5. **`updatePerson` and `createPerson` carry the actor** from the session through the actions (`createStaffPersonAction` now passes `actingUserEmail` too, so its email audit rows carry the actor's email). The edit action also revalidates `/o/<slug>/directory`.
+6. **The edit action rebuilds its input** from known fields, so a stray `actor` or other property cannot reach `updatePerson`.
+7. **A Batch A test changed.** `invitations.db.test.ts` proved the CHECK refuses a padded upper-case address through `fx.addEmail`; that fixture now normalizes (the Phase 3 plan), so the refusal is proven with a raw insert. Same assertion, same file.
+8. **`createdAt`** is read as `to_char(... 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`, microsecond ISO text, so `sortEmailRows` can parse it and order still comes from SQL.
+
+**For the orchestrator and analyst**
+- **Release-note line overstated.** Community's Members, All and Participants views are served by `getDirectory()`, so their search is the tightened member search (shown values only). Only the admin Visitors, Staff and Former lists match every active address. The Phase 3 line "Community search, for people managers, matches every address on file" should say "the Visitors, Staff and Former lists" (or the Members views should move to an admin reader; that is a decision, not made here).
+- **2b:** F199 is closed for `updatePerson` (the `tenant.person.updated` row is in-transaction, `{organizationId, emailChanged, phoneChanged}`); F216 is closed (household validated before any write, every refusal aborts by sentinel).
+- No Rule 16 file, `CLAUDE.md`, `docs/TODO.md` or the staged patches were touched.
+
+**Gates**
+- `typecheck` clean; `eslint --max-warnings=0` clean; `npm run check` all eight pass; `check:schema-parity` 85 tables, 0 failing.
+- Unit suite (`vitest run`, DB-backed files skip): 510 files passed, 75 skipped; 7769 tests passed, 2313 skipped. New: 142 tests in 6 files under `contact-methods/` (normalize, routing, planner, audience registry, rows schema, scans), plus the action, form and organizations-action additions.
+- DB-backed, serial (`--no-file-parallelism`), 20 files, the touched ones plus `accept`, `designation-parity`, `designation-holders`, `designation-revoke`, `invitations`, `participant-roll`, `roll-derive-parity`, `staff`, `home-data`, `contact-methods` (Batch A): 613 tests. First pass 610; three tests dropped the Neon websocket ("Connection terminated unexpectedly", a 60 s timeout) late in a 20-minute run, and both files (107 tests) pass when run alone. `participant-roll` dropped the same way once earlier and passed on rerun. The suites are slow on this link (hook timeouts raised on the command line, not in config).
+- **Parity golden byte-identical** (`designation-parity.golden.json` not in the diff; `designation-parity.db.test.ts` passes).
+- New DB suites: `store.db` 32, `matrix.db` 22, `readers.db` 24; `people-update` 22 (the Batch A "4 planned failures" now pass, plus the F216 and F199 regressions), `people` +6 `createPerson` cases, `issue.db` +12.
+
+**Failing-first for the security tests.** Each mechanism was broken on the tree, the named test failed, and the source was restored from a backup (verified with `cmp`/`git diff`):
+
+| Mutation | Test that failed |
+|---|---|
+| A second file inserts into the contact table | `scan`: allow-list and single-writer |
+| An auth file names the table | `scan`: allow-list and "auth never reads contact emails" |
+| A sender with an unclassified `templateKey` | `email-audience`: "classify this sender" |
+| An address added to audit metadata | `scan` item 5 (no addresses in audit metadata) |
+| `store.ts` deletes a row | `scan`: no delete anywhere |
+| Household validated after the writes, returning instead of throwing (the F216 shape) | `people-update`: "invalid_household writes NOTHING ... regression for F216" |
+| Person audit insert wrapped in try/catch | `people-update`: "a FAILED in-transaction person audit insert rolls the whole save back (F199)" (the first version of this test did NOT catch it, because the email change failed earlier in the store's own audit insert; fixed to a name-only change and re-verified) |
+| Stale-form guard removed | `store.db` (3 cases) and `people-update` "stale form" |
+| Person lock removed | `store.db` "two simultaneous saves" |
+| `m2.ended_on is null` removed from the shared note | `store.db` "never names ... an ended membership" |
+| `hide_email` gate removed from the search | `readers.db` (hidden email, Find a person, member vs admin search) |
+| `ended_at` removed from the Work lateral | `readers.db` (ended Work address shown, ended address matches) |
+| `ended_at` removed from the treasurer match | `issue.db` (ended address, ended copy ambiguity, ended signed-in copy) |
+| Warning not scoped to this organization | `issue.db` "is scoped to THIS organization's roster" |
+
+**Next:** ux-developer (Batch 3): the address list editor on the edit page and the wizard's contact step, the staff form, the review step, the directory Work line, the `InvitationSentNotice` warning, the notes toasts (promotion, shared address), `e2e/person-emails.spec.ts`, and the 360px browser check. Replace the three interim adapters.
 
 ---
 

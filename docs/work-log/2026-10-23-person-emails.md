@@ -22,7 +22,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
 | 2 — Architectural review | architect | Complete. ER1–ER24; migration 0064 (2b moves to 0065); new module `src/lib/contact-methods/`; DECISION-215–218; F210–F214 | Approved with suggestions | 2026-10-23 |
 | 3 — Technical design | tech-lead | Complete. Designed to ER1–ER3b and ER11–ER23b (the text has no ER4–ER10 or ER24); S1–S4 ruled; Note 1 measured (0 CHECK violations; `seed-dev.sql` writes no contact rows; `invitations.db.test.ts:644` and `seed-dev-invitations.sql` need changes); D1–D15 additions, none needing a Phase 2 loop-back; F215–F217; DECISION-219 drafted; giving left unwired (D7, operator to be told) | Design complete; implementers named | 2026-10-23 |
-| 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | Pending | — | — |
+| 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | In progress: Batch A (0064, Drizzle mirror, DB tests, staged section 64 and seed patches) complete 2026-10-23; Batch 2 next | — | 2026-10-23 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1069,26 +1069,77 @@ Added to `docs/deployment.md` at integration in the style of the 0059 runbook.
 
 # Phase 4 — Implementation
 
-## Files Created
+## Batch A — database-admin (2026-10-23)
 
-- `path/to/file` — purpose
+**Files created**
+- `drizzle/0064_presby_person_emails.sql`: sections 1–11 in the Phase 2 Note 2 order. Section 10 is 0059's preview and accept text, which is identical to the live `pg_get_functiondef`, with `ended_at is null` added at the four sites. `diff` against the pre-apply live definitions shows exactly 4 changed lines.
+- `src/lib/db/domain/contact-methods.db.test.ts`: 45 tests (structure, guard, delete, primary, uniqueness, deferred check including F26, 36 CHECK samples plus the subset pin, the reader matrix, the four F211 sites, the stop-block and a whole-file re-apply).
+- `scripts/person-emails/test-rls-64.sql`: the staged section 64, run as `presby_app`, 47 passes.
+- `scripts/person-emails/seed-dev-person-emails.sql`: contact rows only, added to existing Alder Creek people. Marisol Windham gets an ended row, a Personal main and a Work row, and holds an open staff position. Tobias Renwick and Priya Balakrishnan share one main. Desmond Okonkwo's main is `do_not_contact`.
+- Staged patches (Rule 16; each passes `git apply --check`):
+  - `scripts/person-emails/test-rls.sql.integration.patch`
+  - `scripts/person-emails/seed-dev.sql.integration.patch`
+  - `scripts/person-emails/seed-dev-invitations.sql.integration.patch`
 
-## Files Modified
+**Files modified**
+- `src/lib/db/domain/people.ts`: `contactMethods` gains `createdAt`, `endedAt`, the four CHECKs and the three partial indexes. The `lower(value)` index is dropped. Comments point at the 0064 sections for what Drizzle cannot express.
+- `src/lib/dev-docs.ts`: the `contact_methods` description.
+- `src/lib/db/domain/invitations.db.test.ts:644`: now inserts the normalized address, and asserts that the padded upper-case insert is refused (`contact_methods_value_shape`).
 
-- `path/to/file` — what changed
+**Schema changes.** Hand-written migration `drizzle/0064_presby_person_emails.sql`, applied with `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f …` to `pipeline-person-emails` only.
+- Idempotence proof: a dry run of two whole-file applies inside one rolled-back transaction, then two real whole-file applies. Both exited 0. Rows went 34 → 34 → 34. The only data change was 11 email `home` labels becoming `personal` on run 1; run 2 changed nothing.
+- The seed was applied twice; both runs exited 0 and left 6 rows.
+- `_journal.json` is not touched (Rule 16). Phase 3 integration step 3 already holds the entry.
 
-## Schema Changes
+**Audit events.** None in this batch. A migration has no actor, and the keys are Batch 2's.
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+**Deviations**
+1. The migration went straight onto the pipeline branch, as instructed, after a rolled-back dry run. Phase 3 had asked for a throwaway branch first.
+2. The `seed-dev-invitations.sql` fix is staged as a patch, as instructed, rather than edited in Batch 1. It also gains `ended_at is null` on the F159 guard and `is_primary and ended_at is null` on the treasurer select. The patched file applies twice cleanly. Its fresh-insert path was checked in a rolled-back transaction.
+3. Two Phase 3 test-plan items are Batch 2's, because their TypeScript doesn't exist yet:
+   - the one-way `isValidEmailShape` pin. The subset pin against `account_invitations_email_shape` is done here.
+   - the TypeScript halves of ER3b (`issue.ts`'s treasurer match and its `do_not_contact` warning).
+   I read "the four ended-address behaviours" as the four 0064 SQL sites.
+4. Site 3 (accept's `limit 1`) has no scenario of its own. With site 2 in place, an address held only as ended counts zero, so site 3 can only be seen when an active copy and an ended copy compete. The test names say "sites 2 and 3".
+5. Section 1's stop-block adds one counter, `ended_and_primary`, which applies on a re-apply.
+6. `docs:erd` produced no diagram change, because the diagrams don't list these columns.
 
-## Audit Events
+**Gates**
+- `test-rls-64.sql` as `presby_app`: exit 0, 47 passes.
+- Vitest `contact-methods.db.test.ts`: 45/45.
+- Parity golden: `designation-parity.golden.json` is byte-identical, and `designation-parity`, `invitations`, `accept`, `issue`, `designation-holders` and `designation-revoke` pass 195/195.
+- `check:schema-parity`: 85 tables, 0 failing.
+- `typecheck` clean, `eslint` clean on the changed files, `npm run check` all eight pass.
+- Full `scripts/test-rls.sql` as `presby_app`, run as a non-stopping copy because the file halts at line 217 on this branch: 1136 passes and 5 failures, the same before and after 0064. The failures are existing drift: line 217, line 505, line 7916, 46i and 46j.
+- Patched full suite with section 64: 1183 passes (1136 + 47) and the same 5 failures. A first patched run showed a sixth failure, line 7375 (organizations against canonical name rows, 17 vs 15). My own Vitest fixture orgs, which were alive during that run, explain it; a re-run with nothing concurrent was clean.
 
-- [Action key written when the security-sensitive mutation fires]
+**Failing-first.** Each mechanism was broken on the branch, then restored by re-applying 0064, which exited 0 every time. In every window the matching 64a structure assertion also failed.
 
-## Implementer Notes
+| Mechanism broken | Failed in `test-rls-64.sql` | Failed in Vitest |
+|---|---|---|
+| `grant delete` to `presby_app` | 64c | both delete cases |
+| guard trigger disabled | 64b (in-place value change) | 4 guard cases, including the separate `verified_at` case |
+| `contact_methods_one_primary_uq` dropped | 64d (second main) | second-primary case |
+| `contact_methods_ended_not_primary` dropped | 64d (ended main) | ended-primary case |
+| deferred trigger disabled | both 64d deferred blocks | 3 deferred cases, including the real commit |
+| deferred function made `security invoker` | only the F26 block | only the F26 case |
+| preview site reverted | 64f | site 1 |
+| accept count site reverted | — | both accept-resolution cases |
+| accept `limit 1` site reverted | — | the competing-copy case (the ended holder won) |
+| `verified_at` site reverted | — | site 4 |
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+**Known state for Batch 2 (designed, ER2c).** On this branch the old `people.ts` now fails closed. `people-update.test.ts` has 4 failures: an in-place value update refused by the guard, and three deletes refused by the revoke. Editing a person's email in the running app fails the same way until Batch 2 replaces `upsertPrimaryContactMethod`. `people.test.ts`, `community.db.test.ts`, `directory.test.ts` and `find-person.test.ts` pass.
+
+**Next:** api-developer (Batch 2).
+- Local rebuild:
+  - `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0064_presby_person_emails.sql`
+  - then `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/person-emails/seed-dev-person-emails.sql`
+- Available to Batch 2:
+  - `contact_methods.created_at` (default `clock_timestamp()`, forced for non-owners) and `ended_at`;
+  - `presby_person_email(person, purpose)`;
+  - the guard's error tokens: "is ended and cannot change", "are immutable", "verified_at is set only by";
+  - the deferred check's token, "no main address", raised as SQLSTATE 23514 at commit;
+  - DELETE is gone, and a write must demote or end the old main before it promotes another (the partial unique index cannot be deferred).
 
 ---
 

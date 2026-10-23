@@ -641,7 +641,12 @@ describe.skipIf(!hasDb)("drizzle/0059 account_invitations (Postgres-backed)", ()
       const s = await faScene();
       const p = await fx.makePerson("Rosamund", "Tilbury");
       await fx.addMember(s.org, p);
-      await fx.addEmail(p, `  ${s.address.toUpperCase()} `);
+      // drizzle/0064 (ER16): contact emails are stored normalized, so the
+      // padded upper-case form this test used to insert (to prove the match
+      // ignored case and spaces) is now refused at the door. The match is
+      // still lower(btrim(...)) on both sides.
+      await expectRaise(fx.addEmail(p, `  ${s.address.toUpperCase()} `), /contact_methods_value_shape|23514/);
+      await fx.addEmail(p, s.address);
       expect((await fx.preview(s.token))[0]!.person_display_name).toBe("Rosamund Tilbury");
     });
 

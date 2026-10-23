@@ -10,6 +10,7 @@ import {
   index,
   unique,
   uniqueIndex,
+  check,
   foreignKey,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -346,7 +347,32 @@ export const addresses = pgTable(
   (t) => [index("addresses_person_idx").on(t.personId)],
 );
 
-/** GLOBAL, for the same reason as addresses. */
+/**
+ * GLOBAL, for the same reason as addresses.
+ *
+ * End-dated, never deleted, identity immutable (DECISION-215,
+ * drizzle/0064_presby_person_emails.sql). Removing an address sets `ended_at`;
+ * editing one ends the row and inserts a replacement, so `verified_at` never
+ * travels to a different mailbox (F214). Every reader filters
+ * `ended_at is null`. `src/lib/contact-methods/store.ts` is the only writer in
+ * `src/`.
+ *
+ * What this builder cannot express, and where it is enforced:
+ *   - `contact_methods_guard_write` (0064 section 6): BEFORE INSERT OR UPDATE,
+ *     every role. id, person_id, kind, value and created_at are immutable; an
+ *     ended row is frozen; a non-owner may not set or change `verified_at`,
+ *     may not insert an ended row, and has `created_at` forced to
+ *     clock_timestamp().
+ *   - `contact_methods_primary_required` (0064 section 7): a DEFERRABLE
+ *     INITIALLY DEFERRED, SECURITY DEFINER constraint trigger. At commit, a
+ *     person with active email rows must have an active main one. With
+ *     `contact_methods_one_primary_uq` below, "exactly one active main" holds
+ *     at every commit.
+ *   - DELETE is revoked from presby_app and presby_platform (0064 section 8).
+ *     The owner keeps it (fixture cascades), a `paper` residual.
+ *   - FORCE RLS and the four person-level policies (0009, 0028), unchanged.
+ *   - The `presby_person_email(person, purpose)` reader (0064 section 9).
+ */
 export const contactMethods = pgTable(
   "contact_methods",
   {
@@ -354,16 +380,48 @@ export const contactMethods = pgTable(
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull(), // email | phone
-    subtype: text("subtype"), // mobile | home | work
+    kind: text("kind").notNull(), // email | phone (contact_methods_kind_check)
+    // Email: personal | work | other | null. Phone: mobile | home | work | null.
+    subtype: text("subtype"),
+    // Email values are stored normalized (lower, trimmed): see the shape CHECK.
     value: text("value").notNull(),
     isPrimary: boolean("is_primary").notNull().default(false),
     doNotContact: boolean("do_not_contact").notNull().default(false),
+    // Owner path only, in practice presby_accept_invitation (guard, above).
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    // The database default is clock_timestamp() (0064 section 2, D2); the
+    // guard forces it on every non-owner insert. Order: is_primary desc,
+    // created_at, id (display); created_at, id (promotion).
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp()`),
+    // Null = active.
+    endedAt: timestamp("ended_at", { withTimezone: true }),
   },
   (t) => [
     index("contact_methods_person_idx").on(t.personId),
-    index("contact_methods_value_idx").on(sql`lower(${t.value})`),
+    uniqueIndex("contact_methods_one_primary_uq")
+      .on(t.personId, t.kind)
+      .where(sql`is_primary and ended_at is null`),
+    uniqueIndex("contact_methods_person_email_uq")
+      .on(t.personId, sql`lower(btrim(${t.value}))`)
+      .where(sql`kind = 'email' and ended_at is null`),
+    index("contact_methods_email_norm_idx")
+      .on(sql`lower(btrim(${t.value}))`)
+      .where(sql`kind = 'email' and ended_at is null`),
+    check("contact_methods_kind_check", sql`${t.kind} in ('email', 'phone')`),
+    check(
+      "contact_methods_subtype_check",
+      sql`(${t.kind} = 'email' and (${t.subtype} is null or ${t.subtype} in ('personal', 'work', 'other'))) or (${t.kind} = 'phone' and (${t.subtype} is null or ${t.subtype} in ('mobile', 'home', 'work')))`,
+    ),
+    check(
+      "contact_methods_value_shape",
+      sql`(${t.kind} = 'email' and ${t.value} = lower(btrim(${t.value})) and char_length(${t.value}) <= 254 and ${t.value} ~ '^[^@[:space:],]+@[^@[:space:],]+\\.[^@[:space:],]+$') or (${t.kind} = 'phone' and ${t.value} = btrim(${t.value}) and ${t.value} <> '')`,
+    ),
+    check(
+      "contact_methods_ended_not_primary",
+      sql`${t.endedAt} is null or not ${t.isPrimary}`,
+    ),
   ],
 );
 

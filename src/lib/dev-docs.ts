@@ -177,7 +177,7 @@ const BESPOKE_POLICIES: Record<string, string> = {
   addresses:
     "GLOBAL. An address is the person's, not a congregation's record of it. Visible when the current org holds a membership for that person.",
   contact_methods:
-    "GLOBAL, same rule as addresses. Not duplicated per org, so an installed pastor's phone cannot diverge between presbytery and congregation.",
+    "GLOBAL, same rule as addresses. Not duplicated per org, so an installed pastor's phone cannot diverge between presbytery and congregation. Several emails per person, labelled personal/work/other, exactly one active main (a partial unique index plus a deferred SECURITY DEFINER check). End-dated, never deleted: removal sets ended_at, an edit ends the row and inserts a replacement, identity and ended rows are frozen by trigger, verified_at is owner-path only (drizzle/0064). presby_person_email(person, purpose) decides which address a person's mail uses.",
   person_relationships:
     "GLOBAL. A parent is a parent regardless of which church is looking.",
   person_identifiers:

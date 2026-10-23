@@ -712,7 +712,7 @@ export async function setOrganizationServiceTimesAction(
 // address has an account (the send step reads no `users` row).
 // ---------------------------------------------------------------------------
 
-const designeeEmailSchema = z.string().trim().toLowerCase().email().max(320);
+const designeeEmailSchema = z.string().trim().toLowerCase().pipe(z.email().max(320));
 const inviteeNameSchema = z.string().trim().min(1).max(100);
 
 export type InvitationActionResult =

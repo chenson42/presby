@@ -123,7 +123,7 @@ const claimInputSchema = z.object({
   canonical: z.enum(["www", "apex"]),
 });
 const claimNameSchema = z.string().min(1).max(253);
-const uuidSchema = z.string().uuid();
+const uuidSchema = z.guid();
 
 const page = (slug: string) => `/o/${slug}/admin/domains`;
 

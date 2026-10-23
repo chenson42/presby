@@ -46,7 +46,7 @@ const optionalShortText = (max: number, tooLong: string) =>
     .transform((v) => (v === undefined || v === null || v === "" ? null : v));
 
 const donorChoice = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("existing"), donorId: z.string().uuid("Choose a donor") }),
+  z.object({ mode: z.literal("existing"), donorId: z.guid("Choose a donor") }),
   z.object({
     mode: z.literal("new"),
     displayName: donorDisplayNameSchema,
@@ -59,7 +59,7 @@ export type DonorChoice = z.input<typeof donorChoice>;
 export const offlineGiftSchema = z
   .object({
     donor: donorChoice,
-    fundId: z.string().uuid("Choose a fund"),
+    fundId: z.guid("Choose a fund"),
     occurredOn: z
       .string()
       .refine(isRealIsoDate, "Enter the date as year-month-day, like 2026-04-12"),
@@ -135,7 +135,7 @@ export function offlineAmountCents(amount: string): number {
 
 /** Voiding a gift: a reason of 3-200 characters (the DB trims; this bounds). */
 export const voidGiftSchema = z.object({
-  giftId: z.string().uuid(),
+  giftId: z.guid(),
   reason: z
     .string()
     .trim()

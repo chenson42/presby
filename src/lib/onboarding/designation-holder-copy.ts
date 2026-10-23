@@ -45,14 +45,14 @@ export const reasonSchema = z
   .trim()
   .superRefine((value, ctx) => {
     if (CONTROL_RE.test(value)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: REASON_COPY.control });
+      ctx.addIssue({ code: "custom", message: REASON_COPY.control });
       return;
     }
     const length = codePointLength(value);
     if (length < REASON_MIN) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: REASON_COPY.short });
+      ctx.addIssue({ code: "custom", message: REASON_COPY.short });
     } else if (length > REASON_MAX) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: REASON_COPY.long });
+      ctx.addIssue({ code: "custom", message: REASON_COPY.long });
     }
   });
 

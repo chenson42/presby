@@ -25,8 +25,8 @@ import {
  * reuses `ROLE_DEFINITION_ADOPTED_FROM_TEMPLATE` with the same `path`.
  */
 
-const grantSchema = z.object({ roleId: z.string().uuid(), personId: z.string().uuid() });
-const revokeSchema = z.object({ grantId: z.string().uuid() });
+const grantSchema = z.object({ roleId: z.guid(), personId: z.guid() });
+const revokeSchema = z.object({ grantId: z.guid() });
 const ensureSchema = z.object({ templateKey: z.enum(GIVING_TEMPLATE_KEYS) });
 
 function revalidate(slug: string) {

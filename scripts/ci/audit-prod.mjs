@@ -11,17 +11,9 @@
  */
 import { execFileSync } from "node:child_process";
 
-const ACCEPTED = [
-  {
-    id: "GHSA-mrhx-c7xc-m3w5",
-    pkg: "zod",
-    reason:
-      "zod <4.6.6 can exhaust memory on oversized constrained collections. No 3.x fix exists; " +
-      "the zod 4 upgrade is in progress (docs/work-log/2026-10-23-zod-4.md). Server-action and " +
-      "route bodies are capped at 1 MB, which bounds the input. Operator ruling 2026-10-23.",
-    expires: "2026-11-13",
-  },
-];
+// Intentionally empty. An entry needs an id, the package, a reason and an expiry date;
+// an expired entry fails the job (see the header).
+const ACCEPTED = [];
 
 const today = new Date().toISOString().slice(0, 10);
 const expired = ACCEPTED.filter((a) => a.expires < today);

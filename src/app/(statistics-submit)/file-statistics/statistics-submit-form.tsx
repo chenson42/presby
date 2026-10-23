@@ -44,7 +44,7 @@ interface FormValues {
  * only saves the visitor a round trip for an out-of-range value.
  */
 export function buildSchema(groups: SasrFieldGroup[], bounds: Record<string, SasrFieldBounds>) {
-  const fieldsShape: Record<string, z.ZodTypeAny> = {};
+  const fieldsShape: Record<string, z.ZodString> = {};
   for (const group of groups) {
     for (const field of group.fields) {
       const b = bounds[field.key];

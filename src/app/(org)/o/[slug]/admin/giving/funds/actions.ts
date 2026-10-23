@@ -21,7 +21,7 @@ import { createFund, reactivateFund, retireFund, updateFund } from "@/lib/giving
  * The audit metadata is ids and flags only: never a fund's name or description.
  */
 
-const idSchema = z.object({ fundId: z.string().uuid() });
+const idSchema = z.object({ fundId: z.guid() });
 
 function revalidate(slug: string) {
   revalidatePath(`/o/${slug}/admin/giving/funds`);

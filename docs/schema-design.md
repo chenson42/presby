@@ -755,6 +755,57 @@ create index on roll_actions (organization_id, effective_date, kind) where appro
   The cache serves the directory; the replay serves every report. Review pass 3 must prove they
   agree for `on_date = today`.
 
+### Participants on record (added 2026-10-22, `drizzle/0061_presby_participant_roll.sql`)
+
+D5 said `other_participant_enrolled` bypasses approval. Until 0061 that was paper: nothing in the
+database distinguished "the Session approved" from "the row was inserted as approved", and any
+`presby_app` path could do the second. 0061 makes the insert half a database property: an
+approved row can be inserted only by the participant function. The approval `UPDATE` of a pending
+row is still gated only in the application (on `roll.approve`) until Community Increment 2's
+lockdown migration revokes it (
+`docs/work-log/2026-10-22-founding-admin-directory.md`; DECISION-198, DECISION-199; F173-F175).
+
+- **Two writers, function-mediated.** `presby_record_participant_action(person, kind, date,
+  minute, recorded_by)` records `other_participant_enrolled` or `other_participant_removed` approved
+  at insert; `presby_void_participant_action(roll_action_id, reason, recorded_by)` undoes one by
+  recording a `void`. Both are `SECURITY DEFINER`, `search_path = public, pg_temp`, executable by
+  `presby_app` only. The organization is `presby_current_org()` (no parameter, the confused-deputy
+  rule); `recorded_by` is a `users.id` bound server-side, and its live, unmerged person must be an
+  active member holding `roll.propose`, checked inside the caller's own transaction
+  (`presby_participant__actor_may_propose`, owner-only). An identity failure raises one literal
+  (`insufficient_privilege`); every state refusal is returned as a closed outcome vocabulary, one
+  row per call, so callers never parse messages.
+- **A restrictive insert policy** (`roll_actions_insert_pending_only`, `as restrictive for insert to
+  presby_app with check (approval_status = 'pending')`) means the only way to insert an approved row
+  is those functions or the owner (fixtures, `scripts/seed-dev.sql`). The approval `UPDATE` stays
+  application-gated on `roll.approve`; Increment 2 owns moving it into a function.
+- **Removal ends the membership** in the same transaction (`ended_on` = the effective date,
+  `ended_reason = 'other_participant_removed'`, a fixed marker). `memberships_guard_end` still
+  applies: an open officer term or role grant, or an open `staff_positions` row, refuses with
+  `holds_position`, and nothing ends a term on the caller's behalf. Never future-dated, because
+  `ended_on is null` is the sole "current" predicate.
+- **Undo** voids only the person's latest effective action, only of an on-record kind; the void row
+  carries the target's `person_id` (the composite voids FK does not enforce it), and voiding a
+  removal reopens the membership only when `ended_on` and `ended_reason` still match the removal's
+  own. The reason lives in the audit row, written by `src/lib/roll.ts` in the same transaction.
+- **Dates:** not after `current_date` (the same UTC date the sync trigger uses, so the cache never
+  drifts on these rows), not before 1900-01-01 or the birth date, never before the person's latest
+  effective action. `recorded_at = clock_timestamp()` so replay order is strict inside one
+  transaction. The functions return `affects_filed_period` when a live filed return covers a year
+  on or after the pivot date; filed returns are never altered.
+- **Constraints (F173 as a database property):** `roll_actions_resulting_roll_matches_kind`
+  (`resulting_roll` equals `ROLL_ACTION_KIND_TO_ROLL`, `opening_balance` exempt),
+  `roll_actions_void_shape`, `roll_actions_approval_status_allowed`, and the partial unique index
+  `roll_actions_one_live_void_idx`. The `withdrawn` status sketched in the DDL above was never
+  used and is not in the vocabulary.
+- **Catalog and binding:** `roll.propose` and `roll.approve` enter `permissions` by migration (F174);
+  the `congregation_stated_clerk` template carries `statistics.publish`, `roll.propose` and
+  `directory.view`; org-owned copies are topped up only where a `founding_administrator` role marks
+  them as designation-minted. `roll.approve` has no role until Increment 2.
+
+Proven by `src/lib/db/domain/participant-roll.db.test.ts` (owner connection, every outcome) and
+`scripts/participants/test-rls-61.sql` (as `presby_app`, section 61 at integration).
+
 ### Two-sided transfers (F9)
 
 Neither congregation can write into the other, so a transfer is a claimable certificate rather than

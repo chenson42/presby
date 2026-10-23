@@ -8,6 +8,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "directory.view",
+          "roll.propose",
           "statistics.publish"
         ]
       },
@@ -262,6 +264,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "directory.view",
+          "roll.propose",
           "statistics.publish"
         ]
       },
@@ -324,6 +328,7 @@
         "active": true,
         "permissions": [
           "directory.view",
+          "roll.propose",
           "statistics.publish"
         ]
       },

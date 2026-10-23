@@ -74,7 +74,7 @@ export function RecordOrdinationForm({
         No one available to record. A minister must hold membership at this
         presbytery first —{" "}
         <a
-          href={`/o/${slug}/admin/members`}
+          href={`/o/${slug}/admin/community`}
           className="text-primary underline-offset-4 hover:underline"
         >
           add them via Members

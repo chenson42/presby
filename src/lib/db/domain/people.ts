@@ -249,7 +249,7 @@ export const memberships = pgTable(
     // distinct from "visitor"'s pastoral-care connotations, and DELIBERATELY
     // excluded from getDirectory()'s/findPersonMatches()'s 'regular'-only OR
     // branch so a staff-only anchor row never leaks into the public
-    // directory or the admin/members roster).
+    // directory or the admin/community roster).
     engagementStatus: text("engagement_status").notNull().default("visitor"),
     firstVisitDate: date("first_visit_date"),
     howHeard: text("how_heard"),

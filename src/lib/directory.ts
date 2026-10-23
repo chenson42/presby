@@ -179,6 +179,19 @@ export interface GetDirectoryOptions {
    */
   status?: DirectoryStatus;
   /**
+   * Founding-admin-directory pipeline (DECISION-197/201): narrows to a SET of
+   * `current_roll` values, for the admin Community page's Members view
+   * (`['active','baptized','affiliate']`). Like `status` it replaces the
+   * default OR-of-four eligibility branch for this call and does not also
+   * admit `engagement_status = 'regular'`. If `status` is ALSO given the two
+   * intersect (`status` keeps its meaning). An EMPTY array matches nothing
+   * (never an `in ()` syntax error, never "no filter"); values outside
+   * `DIRECTORY_STATUSES` are dropped. The privacy predicate (hidden, merged,
+   * deceased, ended) is untouched, and nothing here can admit a visitor or a
+   * staff anchor: both have a null `current_roll`.
+   */
+  rollStatuses?: readonly DirectoryStatus[];
+  /**
    * Increment 5. Both `page` and `pageSize` must be given together to
    * paginate at all — omitting either is byte-identical to omitting both,
    * which returns every eligible row with no LIMIT, exactly as every
@@ -197,7 +210,7 @@ export interface GetDirectoryOptions {
  * existing `@/lib/directory` caller (this file's own server-side readers)
  * sees no difference. */
 export { DIRECTORY_STATUSES, type DirectoryStatus } from "./directory-status";
-import type { DirectoryStatus } from "./directory-status";
+import { DIRECTORY_STATUSES, type DirectoryStatus } from "./directory-status";
 
 /** `Parameters<Parameters<typeof db.transaction>[0]>[0]` — see authz.ts. */
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -252,7 +265,25 @@ const UUID_RE =
 function directoryEligibilityWhereSql(
   includeHidden: boolean,
   status?: DirectoryStatus,
+  rollStatuses?: readonly DirectoryStatus[],
 ) {
+  // `rollStatuses`: a closed, allow-listed `in (...)`. Empty (or all values
+  // off the list) matches nothing rather than producing `in ()`.
+  const rollSet =
+    rollStatuses === undefined
+      ? undefined
+      : rollStatuses.filter((value) =>
+          (DIRECTORY_STATUSES as readonly string[]).includes(value),
+        );
+  const rollSetSql =
+    rollSet === undefined
+      ? sql`true`
+      : rollSet.length === 0
+        ? sql`false`
+        : sql`m.current_roll in (${sql.join(
+            rollSet.map((value) => sql`${value}`),
+            sql`, `,
+          )})`;
   return sql`
     ${includeHidden ? sql`true` : sql`coalesce(pp.directory_hidden, false) = false`}
     and p.merged_into_id is null
@@ -261,11 +292,14 @@ function directoryEligibilityWhereSql(
     and ${
       status
         ? sql`m.current_roll = ${status}`
-        : sql`(
+        : rollSet !== undefined
+          ? sql`true`
+          : sql`(
       m.current_roll in ('active', 'baptized', 'affiliate', 'other_participant')
       or m.engagement_status = 'regular'
     )`
     }
+    and ${rollSetSql}
   `;
 }
 
@@ -280,6 +314,8 @@ interface QueryDirectoryRowsOptions {
   includeHidden?: boolean;
   /** Increment 5 — see `GetDirectoryOptions.status`. */
   status?: DirectoryStatus;
+  /** See `GetDirectoryOptions.rollStatuses`. */
+  rollStatuses?: readonly DirectoryStatus[];
   /** Increment 5 — see `GetDirectoryOptions.page`/`pageSize`. Both required
    * together to actually LIMIT/OFFSET; either alone is ignored. */
   page?: number;
@@ -323,7 +359,7 @@ function directoryFromWhereSql(
          limit 1
       ) addr on true
      where m.organization_id = ${organizationId}::uuid
-       and ${directoryEligibilityWhereSql(Boolean(opts.includeHidden), opts.status)}
+       and ${directoryEligibilityWhereSql(Boolean(opts.includeHidden), opts.status, opts.rollStatuses)}
        ${
          trimmedSearch
            ? sql`and (
@@ -703,6 +739,7 @@ export async function getDirectory(
       const rows = await queryDirectoryRows(tx, organizationId, {
         search: opts?.search,
         status: opts?.status,
+        rollStatuses: opts?.rollStatuses,
         includeHidden,
       });
       return { kind: "ok", entries: rows.map(mapRow) };
@@ -712,6 +749,7 @@ export async function getDirectory(
     const total = await countDirectoryRows(tx, organizationId, {
       search: opts?.search,
       status: opts?.status,
+      rollStatuses: opts?.rollStatuses,
       includeHidden,
     });
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -720,6 +758,7 @@ export async function getDirectory(
     const rows = await queryDirectoryRows(tx, organizationId, {
       search: opts?.search,
       status: opts?.status,
+      rollStatuses: opts?.rollStatuses,
       includeHidden,
       page,
       pageSize,

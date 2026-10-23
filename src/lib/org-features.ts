@@ -63,9 +63,9 @@ const ORG_FEATURES_MANAGE = "org_features.manage";
 export const ORG_FEATURE_CATALOG = [
   {
     key: "org_portal.members_create",
-    name: "Add & approve members",
+    name: "Community: add people and record roll actions",
     description:
-      "Lets this organization's admins create people and approve roll actions.",
+      "Lets this organization's admins add people, record participants and propose roll actions.",
     // Feature-categories axis (docs/work-log/2026-08-27-feature-categories.md,
     // Phase 3) — People & Membership.
     category: "people" as const,
@@ -308,7 +308,7 @@ export function isCategoryAxisOn(): Promise<boolean> {
  * Does NOT read the entry's platform `flag`. That is the call site's job:
  * `entry.flag === null || await isFlagEnabled(entry.flag)`, then this, then the
  * permission. `isOrgFeatureEnabled` itself still reads only the category axis,
- * which is why the existing `admin/members/**` call sites — which already do
+ * which is why the existing `admin/community/**` call sites — which already do
  * `isFlagEnabled(KEY)` first — need no change.
  */
 export async function orgFeatureEnabledInTx(

@@ -39,14 +39,14 @@ import { AddStaffPositionForm } from "./add-staff-position-form";
  *
  * `canCreatePeople` (`hasPermission(..., "people.manage")`) IS COMPUTED
  * HERE AND PASSED DOWN, not inferred inside the client form — mirrors
- * `admin/members/page.tsx`'s own `canCreate` shape for the identical
+ * `admin/community/page.tsx`'s own `canCreate` shape for the identical
  * permission key. This is what makes the architect's Phase 2/3 ruling
  * ("`staff.manage` alone must not reach the inline 'add a new person'
  * affordance") visible in the UI rather than merely enforced silently by
  * `createStaffPersonAction`'s own server-side gate.
  *
  * `?includeEnded=1` is a plain query-string toggle (zero client JS needed
- * for the roster itself) — mirrors `admin/members/page.tsx`'s own
+ * for the roster itself) — mirrors `admin/community/page.tsx`'s own
  * `search`/`status`/`page` query-param shape, not a new client-state
  * mechanism. `listStaffRoster()`'s `includeEnded` option already exists on
  * the read contract (Phase 3's API table); this page is the only caller.
@@ -156,7 +156,7 @@ export default async function StaffPage({
   // Independent awaited call, not merged into the roster/options
   // Promise chain — a `people.manage` check failing has nothing to do with
   // whether `staff.manage` reads succeeded, same "don't cross-contaminate
-  // independent checks" discipline `admin/members/page.tsx`'s own header
+  // independent checks" discipline `admin/community/page.tsx`'s own header
   // documents for its analogous `canCreate`/`canViewChildrenRoster` pair.
   const canCreatePeople = await hasPermission(
     resolved.org.personId,

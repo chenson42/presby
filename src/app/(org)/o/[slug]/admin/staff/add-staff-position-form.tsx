@@ -61,7 +61,7 @@ const EMPTY_NEW_PERSON: NewStaffPersonFormValues = {
  * requires `people.manage`). A `staff.manage`-only holder never sees the
  * "Can't find them? Add a new person" affordance at all — `page.tsx` computes
  * `canCreatePeople` server-side via `hasPermission(..., "people.manage")`
- * and passes it down, matching `admin/members/page.tsx`'s own `canCreate`
+ * and passes it down, matching `admin/community/page.tsx`'s own `canCreate`
  * shape for the identical permission key. `createStaffPersonAction()`'s own
  * server-side gate (inside `createPerson()`) is the actual enforcement —
  * this prop only decides whether the UI offers a path that would fail
@@ -71,7 +71,7 @@ const EMPTY_NEW_PERSON: NewStaffPersonFormValues = {
  * `presby_match_person()`) IN THIS FORM — a deliberate reading of Phase 3's
  * Component/Page Plan, which describes exactly two states (the bounded
  * current-members picker, and a direct "add a new person" fallback) and
- * names no intermediate broader-search step, unlike `admin/members/new`'s
+ * names no intermediate broader-search step, unlike `admin/community/new`'s
  * own dedup-search wizard. `src/lib/staff.ts`'s own header flagged this as
  * an open plumbing question for this slice to resolve; resolved here in
  * favor of the design text's literal, simpler two-state shape rather than

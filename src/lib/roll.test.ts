@@ -26,6 +26,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, and, ne, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
+import {
+  EDIT_TIME_ROLL_ACTION_KINDS,
+  ROLL_ACTION_KIND_TO_ROLL,
+} from "@/lib/roll-action-kinds";
 
 vi.mock("server-only", () => ({}));
 
@@ -34,9 +38,26 @@ vi.mock("@/lib/audit", () => ({
   AUDIT_ACTIONS: {
     ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
     ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+    ROLL_ACTION_RECORDED: "tenant.roll_action.recorded",
+    ROLL_ACTION_VOIDED: "tenant.roll_action.voided",
   },
   recordAudit: (...args: unknown[]) => mockRecordAudit(...args),
 }));
+
+// The on-record paths write their audit row with the REAL insertAuditRow() in
+// the same transaction as the roll row (R8); this wrapper only lets a test
+// force that insert to throw, to prove the whole act rolls back with it.
+const auditControl = vi.hoisted(() => ({ fail: false }));
+vi.mock("@/lib/audit-tx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit-tx")>();
+  return {
+    ...actual,
+    insertAuditRow: async (...args: Parameters<typeof actual.insertAuditRow>) => {
+      if (auditControl.fail) throw new Error("audit insert failed (test-injected)");
+      return actual.insertAuditRow(...args);
+    },
+  };
+});
 
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
@@ -84,6 +105,42 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   let editSubjectAlreadyPending: string; // membership at orgA, one pre-existing pending row
   let personWithNoMembership: string; // exists, but no membership row at orgA
   let preexistingPendingId: string;
+  // People created by the on-record describes below; swept in afterAll.
+  const extraPeople: string[] = [];
+
+  /** A person with a live membership at orgA (and optionally a birth date). */
+  async function mkPerson(
+    first: string,
+    last: string,
+    opts: { dob?: string; engagement?: string } = {},
+  ): Promise<string> {
+    const platform = getPlatformDb();
+    const [p] = await platform
+      .insert(people)
+      .values({
+        firstName: first,
+        lastName: `${last}${stamp}`,
+        dateOfBirth: opts.dob ?? null,
+        deletableUntil: fixtureDeletableUntil(),
+      })
+      .returning({ id: people.id });
+    extraPeople.push(p!.id);
+    await platform.insert(memberships).values({
+      organizationId: orgA,
+      personId: p!.id,
+      engagementStatus: opts.engagement ?? "regular",
+    });
+    return p!.id;
+  }
+
+  /** audit_events rows (owner read) for one roll action id. */
+  async function auditRowsFor(rollActionId: string): Promise<Array<Record<string, unknown>>> {
+    const platform = getPlatformDb();
+    const result = await platform.execute(
+      sql`select * from audit_events where resource_id = ${rollActionId} order by created_at`,
+    );
+    return (result as unknown as { rows: Array<Record<string, unknown>> }).rows;
+  }
 
   beforeAll(async () => {
     ({
@@ -282,6 +339,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
           personId: rollSubject,
           kind: "other_participant_enrolled",
           effectiveDate: "2026-01-01",
+          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
           approvalStatus: "pending",
           proposedBy,
         })
@@ -300,6 +358,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         personId: editSubjectAlreadyPending,
         kind: "restoration",
         effectiveDate: "2026-02-01",
+        resultingRoll: "active", // drizzle/0061 roll_actions_resulting_roll_matches_kind
         approvalStatus: "pending",
         proposedBy: proposerUserId2,
       })
@@ -354,6 +413,15 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     await platform.delete(people).where(eq(people.id, editSubjectNoBirthdate));
     await platform.delete(people).where(eq(people.id, editSubjectAlreadyPending));
     await platform.delete(people).where(eq(people.id, personWithNoMembership));
+    for (const id of extraPeople) {
+      await platform.delete(people).where(eq(people.id, id));
+    }
+    // The on-record paths write REAL audit rows (insertAuditRow, same tx);
+    // audit_events is append-only for presby_app, so the owner connection
+    // clears this fixture's rows by its organization id.
+    await platform.execute(
+      sql`delete from audit_events where metadata->>'organizationId' = ${orgA}`,
+    );
     await platform.delete(users).where(eq(users.id, approverUserId));
     await platform.delete(users).where(eq(users.id, proposerUserId2));
     // proposerUserId was never tracked in a `let` — sweep by email instead.
@@ -519,6 +587,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
           personId: rollSubject,
           kind: "other_participant_enrolled",
           effectiveDate: "2026-01-01",
+          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
           approvalStatus: "pending",
           proposedBy: approverUserId,
         })
@@ -542,6 +611,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
           personId: rollSubject,
           kind: "other_participant_enrolled",
           effectiveDate: "2026-01-01",
+          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
           approvalStatus: "approved",
           proposedBy: approverUserId,
           approvedBy: approverUserId,
@@ -753,18 +823,25 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       expect(row?.resultingRoll).toBe("active");
     });
 
-    it("ok: resultingRoll reflects a non-active-roll gain (other_participant_enrolled -> other_participant)", async () => {
+    it("a participant enrolment through the edit path TAKES EFFECT ON RECORD: approved at insert, resulting_roll and the cache set, audited", async () => {
+      const subject = await mkPerson("Ludovic", "Penhallow", { dob: "1975-09-02" });
       const result = await recordRollAction(
         proposerPerson,
         orgA,
         proposerUserId2,
         {
-          personId: editSubjectNoBirthdate,
+          personId: subject,
           kind: "other_participant_enrolled",
           effectiveDate: "2026-03-02",
         },
+        { actingUserEmail: "recorder@example.invalid" },
       );
-      expect(result.kind).toBe("ok");
+      expect(result).toMatchObject({
+        kind: "ok",
+        effect: "recorded",
+        affectsFiledPeriod: false,
+        shadowedBy: null,
+      });
       if (result.kind !== "ok") return;
 
       const platform = getPlatformDb();
@@ -772,7 +849,131 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         .select()
         .from(rollActions)
         .where(eq(rollActions.id, result.rollActionId));
-      expect(row?.resultingRoll).toBe("other_participant");
+      expect(row).toMatchObject({
+        kind: "other_participant_enrolled",
+        resultingRoll: "other_participant",
+        ageAtAction: 50,
+        approvalStatus: "approved",
+        approvedBy: proposerUserId2,
+        proposedBy: proposerUserId2,
+      });
+      const [m] = await platform
+        .select({ currentRoll: memberships.currentRoll })
+        .from(memberships)
+        .where(and(eq(memberships.personId, subject), eq(memberships.organizationId, orgA)));
+      expect(m?.currentRoll).toBe("other_participant");
+      const audits = await auditRowsFor(result.rollActionId);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: "tenant.roll_action.recorded",
+        actor_user_id: proposerUserId2,
+        actor_email: "recorder@example.invalid",
+        resource_type: "roll_action",
+      });
+    });
+
+    it("FORGERY: no membership kind can ever take effect on record — every other edit-time kind is a pending proposal with its derived roll", async () => {
+      const subject = await mkPerson("Ottilie", "Brackwater", { dob: "1990-01-20" });
+      const platform = getPlatformDb();
+      const kinds = EDIT_TIME_ROLL_ACTION_KINDS.filter(
+        (kind) => kind !== "other_participant_enrolled",
+      );
+      expect(kinds.length).toBeGreaterThan(0);
+      for (const kind of kinds) {
+        const result = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind,
+          effectiveDate: "2026-03-03",
+        });
+        expect(result, kind).toMatchObject({ kind: "ok", effect: "pending" });
+        if (result.kind !== "ok") continue;
+        const [row] = await platform
+          .select()
+          .from(rollActions)
+          .where(eq(rollActions.id, result.rollActionId));
+        expect(row?.approvalStatus, kind).toBe("pending");
+        expect(row?.approvedBy, kind).toBeNull();
+        expect(row?.resultingRoll, kind).toBe(ROLL_ACTION_KIND_TO_ROLL[kind]);
+        expect(row?.ageAtAction, kind).toBe(36);
+        expect((await auditRowsFor(result.rollActionId)).length, kind).toBe(0);
+      }
+      const [m] = await platform
+        .select({ currentRoll: memberships.currentRoll })
+        .from(memberships)
+        .where(and(eq(memberships.personId, subject), eq(memberships.organizationId, orgA)));
+      expect(m?.currentRoll).toBeNull();
+    });
+
+    it("a removal kind or a void through the edit path is invalid_kind and writes nothing", async () => {
+      const subject = await mkPerson("Perpetua", "Hargreave");
+      for (const kind of ["other_participant_removed", "void", "death"] as const) {
+        const result = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: kind as never,
+          effectiveDate: "2026-03-03",
+        });
+        expect(result, kind).toEqual({ kind: "invalid_kind" });
+      }
+      const platform = getPlatformDb();
+      const rows = await platform.select().from(rollActions).where(eq(rollActions.personId, subject));
+      expect(rows).toHaveLength(0);
+    });
+
+    it("S1: a proposal dated before the person's latest effective action is allowed, with shadowedBy naming it", async () => {
+      const subject = await mkPerson("Rowan", "Ellsworth");
+      const platform = getPlatformDb();
+      // An approved action dated 2026-02-01, inserted by the owner (fixture).
+      await platform.insert(rollActions).values({
+        organizationId: orgA,
+        personId: subject,
+        kind: "baptized_member_enrolled",
+        effectiveDate: "2026-02-01",
+        resultingRoll: "baptized",
+        approvalStatus: "approved",
+        approvedBy: proposerUserId2,
+        proposedBy: proposerUserId2,
+      });
+      const shadowed = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-01-15",
+      });
+      expect(shadowed).toMatchObject({
+        kind: "ok",
+        effect: "pending",
+        shadowedBy: { kind: "baptized_member_enrolled", effectiveDate: "2026-02-01" },
+      });
+      const same = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-02-01",
+      });
+      expect(same).toMatchObject({ kind: "ok", shadowedBy: null });
+      const later = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-04-01",
+      });
+      expect(later).toMatchObject({ kind: "ok", shadowedBy: null });
+    });
+
+    it("an enrolment refused by the database function comes back as a typed refusal and leaves no row", async () => {
+      const subject = await mkPerson("Tamsin", "Quarrington");
+      const first = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "other_participant_enrolled",
+        effectiveDate: "2026-03-02",
+      });
+      expect(first.kind).toBe("ok");
+      const second = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "other_participant_enrolled",
+        effectiveDate: "2026-03-05",
+      });
+      expect(second).toEqual({ kind: "refused", reason: "already_participant" });
+      const platform = getPlatformDb();
+      const rows = await platform.select().from(rollActions).where(eq(rollActions.personId, subject));
+      expect(rows).toHaveLength(1);
     });
   });
 
@@ -898,6 +1099,546 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         .returning({ id: rollActions.id });
       expect(voided?.id).toBeDefined();
       await platform.delete(rollActions).where(eq(rollActions.id, voided!.id));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recordParticipantAction / voidParticipantAction — participants take effect
+  // ON RECORD (docs/work-log/2026-10-22-founding-admin-directory.md, R1-R12,
+  // DECISION-198). The SQL outcomes themselves are proven exhaustively by
+  // participant-roll.db.test.ts; this block proves the TypeScript layer: the
+  // identity mapping, the typed results, the audit row in the SAME transaction,
+  // and the rollback when that audit insert fails.
+  // -------------------------------------------------------------------------
+  describe("participant actions on record", () => {
+    let recordParticipantAction: typeof import("./roll").recordParticipantAction;
+    let voidParticipantAction: typeof import("./roll").voidParticipantAction;
+
+    beforeAll(async () => {
+      ({ recordParticipantAction, voidParticipantAction } = await import("./roll"));
+    });
+
+    afterEach(() => {
+      auditControl.fail = false;
+    });
+
+    const ENROL = "other_participant_enrolled" as const;
+    const REMOVE = "other_participant_removed" as const;
+
+    async function snapshot(personId: string) {
+      const platform = getPlatformDb();
+      const rows = await platform.select().from(rollActions).where(eq(rollActions.personId, personId));
+      const [m] = await platform
+        .select({
+          currentRoll: memberships.currentRoll,
+          endedOn: memberships.endedOn,
+          endedReason: memberships.endedReason,
+        })
+        .from(memberships)
+        .where(and(eq(memberships.personId, personId), eq(memberships.organizationId, orgA)));
+      return { rollRows: rows.length, ...m };
+    }
+
+    it("enrols: approved at insert, audited with exactly the documented metadata, ids only", async () => {
+      const subject = await mkPerson("Wilfred", "Ashdown", { dob: "1980-04-10" });
+      const result = await recordParticipantAction(
+        proposerPerson,
+        orgA,
+        proposerUserId2,
+        { personId: subject, kind: ENROL, effectiveDate: "2026-05-01", minuteReference: "  note  " },
+        { actingUserEmail: "recorder@example.invalid" },
+      );
+      expect(result).toMatchObject({ kind: "ok", membershipEnded: false, affectsFiledPeriod: false });
+      if (result.kind !== "ok") return;
+
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, result.rollActionId));
+      expect(row).toMatchObject({
+        personId: subject,
+        kind: ENROL,
+        resultingRoll: "other_participant",
+        ageAtAction: 46,
+        approvalStatus: "approved",
+        approvedBy: proposerUserId2,
+        proposedBy: proposerUserId2,
+        minuteReference: "note",
+      });
+      const audits = await auditRowsFor(result.rollActionId);
+      expect(audits).toHaveLength(1);
+      const [audit] = audits;
+      expect(audit).toMatchObject({
+        action: "tenant.roll_action.recorded",
+        actor_user_id: proposerUserId2,
+        actor_email: "recorder@example.invalid",
+        resource_type: "roll_action",
+        resource_id: result.rollActionId,
+      });
+      expect(audit!.action).not.toBe("tenant.roll_action.approved");
+      expect(audit!.metadata).toEqual({
+        organizationId: orgA,
+        rollActionId: result.rollActionId,
+        kind: ENROL,
+        effectiveDate: "2026-05-01",
+        membershipEnded: false,
+      });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("removes: ends the membership with the fixed marker, audits membershipEnded, and the person leaves the live roll", async () => {
+      const subject = await mkPerson("Hester", "Moorcroft");
+      const enrol = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: ENROL,
+        effectiveDate: "2026-02-01",
+      });
+      expect(enrol.kind).toBe("ok");
+      const removal = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: REMOVE,
+        effectiveDate: "2026-04-01",
+        minuteReference: "Session 2026-04-01",
+      });
+      expect(removal).toMatchObject({ kind: "ok", membershipEnded: true });
+      if (removal.kind !== "ok") return;
+
+      expect(await snapshot(subject)).toMatchObject({
+        rollRows: 2,
+        currentRoll: null,
+        endedOn: "2026-04-01",
+        endedReason: "other_participant_removed",
+      });
+      const [audit] = await auditRowsFor(removal.rollActionId);
+      expect(audit).toMatchObject({ action: "tenant.roll_action.recorded" });
+      expect(audit!.metadata).toMatchObject({ kind: REMOVE, membershipEnded: true, effectiveDate: "2026-04-01" });
+    });
+
+    it("forbidden without roll.propose: typed, and nothing is written or audited", async () => {
+      const subject = await mkPerson("Ignatius", "Holloway");
+      const result = await recordParticipantAction(outsiderPerson, orgA, approverUserId, {
+        personId: subject,
+        kind: ENROL,
+        effectiveDate: "2026-05-01",
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(await snapshot(subject)).toMatchObject({ rollRows: 0, currentRoll: null });
+    });
+
+    it("the database's identity refusal (a user who is not the acting person's) maps to forbidden and rolls back — the SQLSTATE 42501 path", async () => {
+      const subject = await mkPerson("Lavinia", "Cresswell");
+      // proposerPerson holds roll.propose (the TypeScript pre-check passes),
+      // but approverUserId belongs to a person who does not: the function
+      // raises its one literal.
+      const result = await recordParticipantAction(proposerPerson, orgA, approverUserId, {
+        personId: subject,
+        kind: ENROL,
+        effectiveDate: "2026-05-01",
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(await snapshot(subject)).toMatchObject({ rollRows: 0, currentRoll: null });
+    });
+
+    it("a forged kind never reaches the database: a membership kind is invalid_kind, not approved", async () => {
+      const subject = await mkPerson("Barnaby", "Whitlow");
+      for (const kind of ["profession_of_faith", "baptized_member_enrolled", "void", "death", "nonsense"]) {
+        const result = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: kind as never,
+          effectiveDate: "2026-05-01",
+        });
+        expect(result, kind).toEqual({ kind: "refused", reason: "invalid_kind" });
+      }
+      expect(await snapshot(subject)).toMatchObject({ rollRows: 0, currentRoll: null });
+    });
+
+    it("a non-UUID person id is person_not_found, never a cast error", async () => {
+      const result = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+        personId: "not-a-uuid",
+        kind: ENROL,
+        effectiveDate: "2026-05-01",
+      });
+      expect(result).toEqual({ kind: "refused", reason: "person_not_found" });
+    });
+
+    it("throws on a malformed or impossible date and on an over-long minute reference (genuine bad input)", async () => {
+      const subject = await mkPerson("Cordelia", "Fenwick");
+      for (const effectiveDate of ["05/01/2026", "2026-02-30", ""]) {
+        await expect(
+          recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            personId: subject,
+            kind: ENROL,
+            effectiveDate,
+          }),
+        ).rejects.toThrow(/effectiveDate/);
+      }
+      await expect(
+        recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: ENROL,
+          effectiveDate: "2026-05-01",
+          minuteReference: "m".repeat(201),
+        }),
+      ).rejects.toThrow(/minuteReference/);
+      expect(await snapshot(subject)).toMatchObject({ rollRows: 0 });
+    });
+
+    it.each([
+      ["a future date", "2999-01-01", "date_out_of_range"],
+      ["before 1900", "1899-12-31", "date_out_of_range"],
+    ])("refuses %s", async (_label, effectiveDate, reason) => {
+      const subject = await mkPerson("Evander", "Pellham");
+      const result = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: ENROL,
+        effectiveDate,
+      });
+      expect(result).toEqual({ kind: "refused", reason });
+      expect(await snapshot(subject)).toMatchObject({ rollRows: 0 });
+    });
+
+    it("refuses a second enrolment (already_participant), an enrolment over a pending action, and a removal of a non-participant", async () => {
+      const platform = getPlatformDb();
+      const subject = await mkPerson("Marguerite", "Dunmore");
+      const first = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: ENROL,
+        effectiveDate: "2026-02-01",
+      });
+      expect(first.kind).toBe("ok");
+      expect(
+        await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: ENROL,
+          effectiveDate: "2026-03-01",
+        }),
+      ).toEqual({ kind: "refused", reason: "already_participant" });
+
+      const pending = await mkPerson("Anselm", "Treadgold");
+      await platform.insert(rollActions).values({
+        organizationId: orgA,
+        personId: pending,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-03-01",
+        resultingRoll: "active",
+        approvalStatus: "pending",
+        proposedBy: proposerUserId2,
+      });
+      expect(
+        await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: pending,
+          kind: ENROL,
+          effectiveDate: "2026-04-01",
+        }),
+      ).toEqual({ kind: "refused", reason: "pending_action" });
+
+      const never = await mkPerson("Philippa", "Gaunt");
+      expect(
+        await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: never,
+          kind: REMOVE,
+          effectiveDate: "2026-04-01",
+        }),
+      ).toEqual({ kind: "refused", reason: "not_participant" });
+    });
+
+    it("refuses to enrol anyone on a member roll (on_member_roll): no Session act, no loss line", async () => {
+      const platform = getPlatformDb();
+      const member = await mkPerson("Octavia", "Strangways");
+      await platform.insert(rollActions).values({
+        organizationId: orgA,
+        personId: member,
+        kind: "baptized_member_enrolled",
+        effectiveDate: "2025-01-01",
+        resultingRoll: "baptized",
+        approvalStatus: "approved",
+        approvedBy: proposerUserId2,
+        proposedBy: proposerUserId2,
+      });
+      expect(
+        await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: member,
+          kind: ENROL,
+          effectiveDate: "2026-03-01",
+        }),
+      ).toEqual({ kind: "refused", reason: "on_member_roll" });
+      expect(await snapshot(member)).toMatchObject({ rollRows: 1, currentRoll: "baptized" });
+    });
+
+    it("refuses to remove the acting person themselves (self_target)", async () => {
+      // proposerPerson is the actor: enrolling oneself as a participant is
+      // harmless (a participant row is not a membership), removing oneself is not.
+      const enrol = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+        personId: proposerPerson,
+        kind: ENROL,
+        effectiveDate: "2026-02-01",
+      });
+      expect(enrol.kind).toBe("ok");
+      expect(
+        await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: proposerPerson,
+          kind: REMOVE,
+          effectiveDate: "2026-03-01",
+        }),
+      ).toEqual({ kind: "refused", reason: "self_target" });
+      expect(await snapshot(proposerPerson)).toMatchObject({ endedOn: null, currentRoll: "other_participant" });
+    });
+
+    it("refuses a removal while a staff position is open (holds_position) and leaves the membership live", async () => {
+      const platform = getPlatformDb();
+      const subject = await mkPerson("Dorothea", "Wexcombe");
+      expect(
+        (
+          await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            personId: subject,
+            kind: ENROL,
+            effectiveDate: "2026-02-01",
+          })
+        ).kind,
+      ).toBe("ok");
+      await platform.execute(sql`
+        insert into staff_positions (organization_id, person_id, position, position_key, starts_on)
+        values (${orgA}::uuid, ${subject}::uuid, 'Sexton', 'sexton', '2026-01-01')
+      `);
+      expect(
+        await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: REMOVE,
+          effectiveDate: "2026-04-01",
+        }),
+      ).toEqual({ kind: "refused", reason: "holds_position" });
+      expect(await snapshot(subject)).toMatchObject({ endedOn: null, currentRoll: "other_participant", rollRows: 1 });
+      await platform.execute(sql`delete from staff_positions where person_id = ${subject}::uuid`);
+    });
+
+    it("a failed audit insert rolls back the roll row, the cache and the membership change — a constitutional record never commits without its audit row", async () => {
+      const subject = await mkPerson("Gideon", "Applethwaite");
+      auditControl.fail = true;
+      await expect(
+        recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: ENROL,
+          effectiveDate: "2026-05-01",
+        }),
+      ).rejects.toThrow(/audit insert failed/);
+      expect(await snapshot(subject)).toMatchObject({ rollRows: 0, currentRoll: null });
+
+      // And a removal: the roll row, the end date and the marker all roll back.
+      auditControl.fail = false;
+      expect(
+        (
+          await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            personId: subject,
+            kind: ENROL,
+            effectiveDate: "2026-02-01",
+          })
+        ).kind,
+      ).toBe("ok");
+      auditControl.fail = true;
+      await expect(
+        recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: REMOVE,
+          effectiveDate: "2026-04-01",
+        }),
+      ).rejects.toThrow(/audit insert failed/);
+      expect(await snapshot(subject)).toMatchObject({
+        rollRows: 1,
+        currentRoll: "other_participant",
+        endedOn: null,
+        endedReason: null,
+      });
+    });
+
+    describe("voidParticipantAction (undo, F175)", () => {
+      async function enrolled(first: string) {
+        const subject = await mkPerson(first, "Undoable", { dob: "1985-03-03" });
+        const enrol = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: ENROL,
+          effectiveDate: "2026-02-01",
+        });
+        if (enrol.kind !== "ok") throw new Error("fixture enrol failed");
+        return { subject, enrolId: enrol.rollActionId };
+      }
+
+      it("undoes an enrolment: a void row (never an update), the person back to no roll, the original frozen, audited with the trimmed reason", async () => {
+        const { subject, enrolId } = await enrolled("Ambrose");
+        const result = await voidParticipantAction(
+          proposerPerson,
+          orgA,
+          proposerUserId2,
+          { rollActionId: enrolId, reason: "  Entered against the wrong person.  " },
+          { actingUserEmail: "recorder@example.invalid" },
+        );
+        expect(result).toMatchObject({
+          kind: "ok",
+          voidedActionId: enrolId,
+          voidedKind: ENROL,
+          membershipReopened: false,
+        });
+        if (result.kind !== "ok") return;
+
+        const platform = getPlatformDb();
+        const [voidRow] = await platform.select().from(rollActions).where(eq(rollActions.id, result.voidRollActionId));
+        expect(voidRow).toMatchObject({
+          kind: "void",
+          voidsActionId: enrolId,
+          personId: subject,
+          approvalStatus: "approved",
+          resultingRoll: null,
+        });
+        const [original] = await platform.select().from(rollActions).where(eq(rollActions.id, enrolId));
+        expect(original).toMatchObject({ approvalStatus: "approved", kind: ENROL });
+        expect(await snapshot(subject)).toMatchObject({ currentRoll: null, rollRows: 2 });
+
+        const [audit] = await auditRowsFor(result.voidRollActionId);
+        expect(audit).toMatchObject({
+          action: "tenant.roll_action.voided",
+          actor_user_id: proposerUserId2,
+          actor_email: "recorder@example.invalid",
+        });
+        expect(audit!.metadata).toEqual({
+          organizationId: orgA,
+          voidRollActionId: result.voidRollActionId,
+          voidsActionId: enrolId,
+          voidedKind: ENROL,
+          reason: "Entered against the wrong person.",
+          membershipReopened: false,
+        });
+      });
+
+      it("undoes a removal: the membership reopens and the person is a participant again", async () => {
+        const { subject } = await enrolled("Bartholomew");
+        const removal = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: REMOVE,
+          effectiveDate: "2026-04-01",
+        });
+        if (removal.kind !== "ok") throw new Error("fixture removal failed");
+        const result = await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          rollActionId: removal.rollActionId,
+          reason: "Removed in error.",
+        });
+        expect(result).toMatchObject({ kind: "ok", voidedKind: REMOVE, membershipReopened: true });
+        expect(await snapshot(subject)).toMatchObject({
+          currentRoll: "other_participant",
+          endedOn: null,
+          endedReason: null,
+        });
+      });
+
+      it("refuses a second undo (already_voided), an undo of anything but the latest entry, and a missing or blank reason", async () => {
+        const { subject, enrolId } = await enrolled("Cuthbert");
+        const removal = await recordParticipantAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: REMOVE,
+          effectiveDate: "2026-04-01",
+        });
+        if (removal.kind !== "ok") throw new Error("fixture removal failed");
+
+        // The enrolment is no longer the latest entry.
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: enrolId,
+            reason: "Too early.",
+          }),
+        ).toEqual({ kind: "refused", reason: "not_latest_action" });
+
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: removal.rollActionId,
+            reason: "   ",
+          }),
+        ).toEqual({ kind: "refused", reason: "reason_required" });
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: removal.rollActionId,
+            reason: "r".repeat(501),
+          }),
+        ).toEqual({ kind: "refused", reason: "reason_too_long" });
+
+        expect(
+          (
+            await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+              rollActionId: removal.rollActionId,
+              reason: "First undo.",
+            })
+          ).kind,
+        ).toBe("ok");
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: removal.rollActionId,
+            reason: "Second undo.",
+          }),
+        ).toEqual({ kind: "refused", reason: "already_voided" });
+      });
+
+      it("action_not_found for a non-UUID and for an id that is not at this organization", async () => {
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: "nope",
+            reason: "x",
+          }),
+        ).toEqual({ kind: "refused", reason: "action_not_found" });
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: "00000000-0000-0000-0000-000000000000",
+            reason: "x",
+          }),
+        ).toEqual({ kind: "refused", reason: "action_not_found" });
+      });
+
+      it("not_on_record_kind: a Session-approved or pending membership action cannot be undone here", async () => {
+        const platform = getPlatformDb();
+        const subject = await mkPerson("Desmond", "Pryce");
+        const [approved] = await platform
+          .insert(rollActions)
+          .values({
+            organizationId: orgA,
+            personId: subject,
+            kind: "baptized_member_enrolled",
+            effectiveDate: "2025-01-01",
+            resultingRoll: "baptized",
+            approvalStatus: "approved",
+            approvedBy: proposerUserId2,
+            proposedBy: proposerUserId2,
+          })
+          .returning({ id: rollActions.id });
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: approved!.id,
+            reason: "Not mine to undo.",
+          }),
+        ).toEqual({ kind: "refused", reason: "not_on_record_kind" });
+      });
+
+      it("forbidden without roll.propose, and for a user claim that is not the acting person's; nothing is written", async () => {
+        const { subject, enrolId } = await enrolled("Ephraim");
+        expect(
+          await voidParticipantAction(outsiderPerson, orgA, approverUserId, {
+            rollActionId: enrolId,
+            reason: "No permission.",
+          }),
+        ).toEqual({ kind: "forbidden" });
+        expect(
+          await voidParticipantAction(proposerPerson, orgA, approverUserId, {
+            rollActionId: enrolId,
+            reason: "Wrong user claim.",
+          }),
+        ).toEqual({ kind: "forbidden" });
+        expect(await snapshot(subject)).toMatchObject({ rollRows: 1, currentRoll: "other_participant" });
+      });
+
+      it("a failed audit insert rolls the void back: no void row, the person still a participant", async () => {
+        const { subject, enrolId } = await enrolled("Fitzgerald");
+        auditControl.fail = true;
+        await expect(
+          voidParticipantAction(proposerPerson, orgA, proposerUserId2, {
+            rollActionId: enrolId,
+            reason: "Will not commit.",
+          }),
+        ).rejects.toThrow(/audit insert failed/);
+        expect(await snapshot(subject)).toMatchObject({ rollRows: 1, currentRoll: "other_participant" });
+      });
     });
   });
 });

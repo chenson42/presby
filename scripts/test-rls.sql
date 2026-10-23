@@ -1412,6 +1412,11 @@ rollback;
 --      cleanup, same latitude invariant 4's own text grants pending rows
 --      for UPDATE); an APPROVED row's DELETE is still rejected, not
 --      silently no-op'ed.
+--      drizzle/0061 (R5) forbids presby_app from INSERTING an approved row
+--      (roll_actions_insert_pending_only, section 61), so the approved row is
+--      now built the way the application builds one: inserted pending, then
+--      approved by UPDATE (the decideRollAction() path, still
+--      application-gated on roll.approve until Increment 2).
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   insert into roll_actions (id, organization_id, person_id, kind, effective_date,
@@ -1426,7 +1431,9 @@ begin;
   insert into roll_actions (id, organization_id, person_id, kind, effective_date,
                             resulting_roll, approval_status)
   values ('bbbbbbbb-0000-0000-0000-0000000000b2', :ALDER, :ELDER, 'other_gain',
-          current_date, 'active', 'approved');
+          current_date, 'active', 'pending');
+  update roll_actions set approval_status = 'approved', approved_on = current_date
+   where id = 'bbbbbbbb-0000-0000-0000-0000000000b2';
   do $$
   begin
     delete from roll_actions where id = 'bbbbbbbb-0000-0000-0000-0000000000b2';
@@ -7873,7 +7880,17 @@ begin;
   select assert_eq(
     (select count(*) from app_role_permissions
       where role_id = '00000000-0000-0000-0000-000000000004'),
-    1, 'DECISION-152: the template carries EXACTLY ONE permission — statistics.publish. No role carries a wildcard, template roles least of all');
+    3, 'DECISION-152 + DECISION-199: the template carries EXACTLY THREE permissions — statistics.publish, and (drizzle/0061) roll.propose and directory.view. No role carries a wildcard, template roles least of all');
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = '00000000-0000-0000-0000-000000000004'
+        and permission_key in ('roll.propose', 'directory.view')),
+    2, 'DECISION-199 (drizzle/0061): keeping and reading the rolls is the clerk''s constitutional duty (DECISION-078) - roll.propose and directory.view');
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = '00000000-0000-0000-0000-000000000004'
+        and permission_key = 'roll.approve'),
+    0, 'DECISION-199: and NEVER roll.approve - the Session decides collectively; no role carries both roll keys');
   select assert_eq(
     (select count(*) from app_role_permissions
       where role_id = '00000000-0000-0000-0000-000000000004'
@@ -8036,7 +8053,7 @@ begin;
    where t.organization_id is null and t.key = 'congregation_stated_clerk';
   select assert_eq(
     (select count(*) from app_role_permissions where role_id = :FA_OFFICE_ROLE),
-    1, '44a: the office half is COPIED from the congregation_stated_clerk template, not re-enumerated (statistics.publish)');
+    3, '44a: the office half is COPIED from the congregation_stated_clerk template, not re-enumerated (statistics.publish, roll.propose, directory.view since drizzle/0061)');
 
   -- Person-arm grants. granted_by is deliberately NULL here: the resolver's
   -- four arms never read it (Phase 2, Two Hierarchies — it is provenance
@@ -8060,15 +8077,22 @@ begin;
       where presby_has_permission(:FA_PERSON, :ALDER, k)),
     8, '44a (i): every key of the administration half resolves (DECISION-155''s enumerated tier-1 set, as amended by F118 — eight keys)');
 
-  -- F118: the founding administrator CAN anchor a staff-kind person (the only
-  -- in-app person-creation path that writes no roll_actions row) and CANNOT
-  -- touch the roll. Both halves in one assertion, because the pair is the
-  -- ruling — either one alone would read as an arbitrary line.
+  -- F118, as amended by DECISION-199 (drizzle/0061): the founding
+  -- administrator CAN anchor a staff-kind person (staff.manage, the
+  -- bundle) and CAN propose a roll action - through the congregation stated
+  -- clerk OFFICE role (the template now carries roll.propose), never through
+  -- the bundle - and still CANNOT approve one: roll.approve is carried by no
+  -- role until Increment 2's Session baseline role. Three keys in one
+  -- assertion, because the split is the ruling.
   select assert_eq(
     (select count(*) from unnest(array[
        'staff.manage', 'roll.propose', 'roll.approve']) as k
       where presby_has_permission(:FA_PERSON, :ALDER, k)),
-    1, '44a (F118): the founding administrator anchors staff-kind people (staff.manage) but neither proposes nor approves a roll action — the roll begins when the Session is seated');
+    2, '44a (F118 / DECISION-199): the founding administrator anchors staff-kind people (staff.manage) and proposes roll actions through the clerk office (roll.propose), but never approves one (roll.approve) - approval is a Session act');
+  select assert_eq(
+    (select count(*) from app_role_permissions
+      where role_id = :FA_ROLE and permission_key in ('roll.propose', 'roll.approve')),
+    0, '44a (DECISION-155 / DECISION-199): the founding-administrator BUNDLE itself carries neither roll key - roll.propose arrives only with the office role, which survives the bundle being dissolved');
 
   select assert_eq(
     (select count(*) where presby_has_permission(:FA_PERSON, :ALDER, 'statistics.publish')),
@@ -8076,8 +8100,10 @@ begin;
 
   -- No wildcard, proven by the permissions the bundle must NOT carry
   -- (Key Invariant: No Role Carries a Wildcard). Tier 3 entire, plus the
-  -- tier-2 keys outside the office and the two roll keys Phase 2 excluded
+  -- tier-2 keys outside the office and roll.approve, which Phase 2 excluded
   -- by name (the roll is the system of record; approval is a Session act).
+  -- roll.propose left this list with drizzle/0061 (DECISION-199): the
+  -- office half now carries it, and the F118 assertion above pins that.
   select assert_eq(
     (select count(*) from unnest(array[
        'demographics.manage', 'disabilities.manage', 'medical.manage',
@@ -8091,7 +8117,7 @@ begin;
   select assert_eq(
     (select count(*) from unnest(array[
        'children.roster', 'ledger.approve', 'per_capita.manage',
-       'statistics.manage', 'roll.propose', 'roll.approve',
+       'statistics.manage', 'roll.approve',
        'branding.manage', 'events.manage', 'directory.view_hidden',
        'credentials.manage']) as k
       where presby_has_permission(:FA_PERSON, :ALDER, k)),
@@ -8586,3 +8612,12 @@ rollback;
 --     script. It needs the test helpers, so it is never run against production.
 -- ===========================================================================
 \ir designation-revoke/test-rls-60.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/founding-admin-directory (integration).
+-- 61. Participant roll on record (drizzle/0061_presby_participant_roll.sql).
+--     Its own file, as 46, 47, 59 and 60 above; \ir resolves relative to this
+--     script. It needs the test helpers and scripts/seed-dev.sql's Alder Creek
+--     fixture (no seed change), so it is never run against production.
+-- ===========================================================================
+\ir participants/test-rls-61.sql

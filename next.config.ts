@@ -169,6 +169,17 @@ const nextConfig: NextConfig = {
         destination: "/home",
         permanent: true,
       },
+      // The admin people section moved from its old "members" path to `/admin/community`
+      // (docs/work-log/2026-10-22-founding-admin-directory.md, Batch M; DECISION-201).
+      // The same permanent, platform-host-scoped shape as `/orgs` above (F151): on a custom
+      // host this falls through to the proxy's neutral 404. `:path*` carries the sub-paths
+      // (`new`, `pending`, `children`, `<id>/edit/...`) and Next preserves the query string.
+      {
+        source: "/o/:slug/admin/members/:path*",
+        has: [{ type: "host", value: PLATFORM_HOST }],
+        destination: "/o/:slug/admin/community/:path*",
+        permanent: true,
+      },
     ];
   },
   async headers() {

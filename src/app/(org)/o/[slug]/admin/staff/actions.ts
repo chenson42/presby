@@ -49,7 +49,7 @@ import type { ActionResult } from "@/types/actions";
  * override were omitted, a `staff.manage`-only-and-`people.manage`-holding
  * caller could smuggle a real `profession_of_faith`/`other_participant_
  * enrolled` roll action through the staff form — a roll mutation with none of
- * `admin/members/new`'s own review/confirm wizard steps. `createPerson()`'s
+ * `admin/community/new`'s own review/confirm wizard steps. `createPerson()`'s
  * own gate (`people.manage` unconditionally, per DECISION-128 ruling 2) is
  * one half of the enforcement; this action ALSO checks `staff.manage` itself
  * (via `hasPermission()`) before ever calling `createPerson()` — per the
@@ -58,7 +58,7 @@ import type { ActionResult } from "@/types/actions";
  * `people.manage`, so a `people.manage`-only holder (no `staff.manage` grant
  * at all) cannot use this staff-specific action to anchor a new person as
  * `engagementStatus: "staff"` — they would have to go through
- * `admin/members/new`'s own wizard instead, which writes a real roll action.
+ * `admin/community/new`'s own wizard instead, which writes a real roll action.
  * QA's Phase 5 loop-back (`docs/work-log/2026-08-27-staff-and-personnel.md`)
  * found this action previously relied ONLY on `createPerson()`'s internal
  * `people.manage` check, silently forgetting `staff.manage` — fixed here.
@@ -277,6 +277,16 @@ export async function createStaffPersonAction(
         ok: false,
         error: "That household no longer exists. Choose another or leave it unset.",
       };
+    case "already_here":
+      return {
+        ok: false,
+        error: "That person is already in this community. Choose them from the list instead.",
+      };
+    case "roll_refused":
+      // Unreachable for this action (rollAction is pinned to { kind: "none" }
+      // above, which never calls the participant function); typed so the
+      // switch stays exhaustive.
+      return { ok: false, error: "That person could not be added." };
     case "ok":
       break;
   }
@@ -285,7 +295,7 @@ export async function createStaffPersonAction(
   // pinned to { kind: "none" } above) and staff_positions itself carries no
   // access-change nexus — see this file's header (DECISION-129, fourth
   // ruling). The underlying `people` row create itself also carries no
-  // AUDIT_ACTIONS entry today (admin/members/new/actions.ts's own precedent
+  // AUDIT_ACTIONS entry today (admin/community/new/actions.ts's own precedent
   // — createPerson() writes no audit event by design).
   revalidatePath(`/o/${slug}/admin/staff`);
 

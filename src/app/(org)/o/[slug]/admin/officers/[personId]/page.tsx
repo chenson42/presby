@@ -20,7 +20,7 @@ import { OfficerHistory } from "../officer-history";
 /**
  * `/o/<slug>/admin/officers/<personId>` — one person's full officer history
  * (Flow 3). Groups-and-officers Phase 3 design, commit 3/3. Mirrors
- * `admin/members/[id]/edit/page.tsx`'s existence as a per-person detail
+ * `admin/community/[id]/edit/page.tsx`'s existence as a per-person detail
  * route one level below the parent list page, and repeats the `(org)` auth
  * pattern in full for the same reason every page under `(org)` does.
  *
@@ -40,7 +40,7 @@ import { OfficerHistory } from "../officer-history";
  * `getOfficerHistory()`'s `{ kind: "invalid_target" }` (the personId has
  * never had a membership at this org) is a real 404, not a load error — same
  * as `getPersonForEdit()`'s `not_found` branch in
- * `admin/members/[id]/edit/page.tsx`.
+ * `admin/community/[id]/edit/page.tsx`.
  */
 export default async function OfficerHistoryPage({
   params,

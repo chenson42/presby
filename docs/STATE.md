@@ -3,38 +3,52 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-22.
+Updated 2026-10-23.
 
 ---
 
-## RESUME HERE — 2026-10-22: v0.38.0 (designation-holder revoke) integrated; Community pipeline in Phase 4
+## RESUME HERE — 2026-10-23: Community Increment 1 integrated at v0.39.0, PR pending; Increments 2, 2b and 3 designed
 
-**2026-10-22.** v0.37.0 (invitations, PR #36) and v0.37.1 (sign-in hint removed, PR #37) are live; `0059` is on production.
-`pipeline/designation-revoke` is integrated for its PR as **v0.38.0**: on `/admin/organizations/<id>` the platform operator sees
-founding-administrator and treasurer holders by display name and ends them with a required reason and an audit row, as lockout
-recovery (migration `0060`, DECISION-194–196, F169–F171, `docs/work-log/2026-10-22-designation-revoke.md`; QA PASS, Phase 6
-SHIP WITH NOTES, every note a `docs/TODO.md` line). **Accepted residual (F170, operator ruling):** revoke, then self-invite,
-then self-accept lets the platform role clear and then hold a slot; audited, not prevented (CLAUDE.md, Two Hierarchies).
-`0060` keeps the count signatures, so it can be applied to production before or after the code deploys.
+**2026-10-23.** v0.38.0 (designation-holder revoke, PR #38, migration `0060`, accepted residual F170) is merged; `0060` keeps the count signatures, so it can be applied to production before or after its code. `pipeline/founding-admin-directory`
+(worktree `presby-fadir`, Neon `pipeline-founding-admin-directory`) is integrated for its PR as **v0.39.0**, **Community
+Increment 1**: the admin Members section is now **Community** at `/o/<slug>/admin/community` (the old URL redirects, platform
+hosts only); a founding administrator or clerk can open it (the page degrades instead of showing "forbidden", F172), add a
+visitor with `people.manage` alone, enrol and remove participants **on record with no approval** (undo covers participant
+entries only), and propose member entries; `createPerson()` writes `resulting_roll` (F173 closed); migration `0061`,
+DECISION-197–201, F172–F178 (`docs/schema-design-2.md` §2u; `docs/work-log/2026-10-22-founding-admin-directory.md`). QA PASS (run 2),
+Phase 6 SHIP WITH NOTES, every note a `docs/TODO.md` line. **Deploy order: code first, then apply `0061`** (the new CHECK refuses
+what the old `createPerson()` writes). The clerk template now carries `roll.propose` and `directory.view`; the F111/F118 ceiling is
+half closed.
 
-**Production clean-up, 2026-10-22 (out-of-band, operator-instructed, snapshots first; no audit rows — open TODO):** the 68
+**What is and is not true of it.** Member entries can be proposed, but **no role carries `roll.approve`**, so nobody can approve or
+withdraw them, and a waiting proposal blocks enrolling or removing that person (F183, accepted; the release note says so).
+Increment 2 closes it. **Open residuals:** P5 (`presby_app` can insert a pending roll row and UPDATE it to approved; only the
+approved-at-insert half is a database property until 0063), F177 (visitors are in `active_membership`; harmless until a visitor
+can sign in), F176 (hard-delete paths remain). "Participants on record" is a decision (DECISION-198): a participant takes effect
+when recorded, because participants are not members.
+
+**Designed, not built (same work-log):** Increment 2 (Session approval, pending queue, withdrawal; migrations 0062 and 0063,
+DECISION-202–206, F179–F185 and F188–F191), Increment 2b (elder and member sign-in invitations; migration 0064, DECISION-207–208,
+F186–F187 and F192–F199, closes F177 by acknowledgement), Increment 3 (visitor follow-ups; scoping note only, starts at F200 and
+DECISION-209). Increment 2 needs the operator to confirm the pastors-as-Session-approvers ruling (DECISION-206) and to read its
+copy. Increment 2 adds one CLAUDE.md sentence (self-recorded, self-approved Session members) for the operator to review in that diff.
+
+**CI:** the `db` and `e2e` workflows got their Neon secrets on 2026-10-23 and their first runs failed; diagnosing them is a
+`docs/TODO.md` line. Until they are green the CI signal is still not whole.
+
+**Production clean-up, 2026-10-22 (out-of-band, operator-instructed, snapshots first; no audit rows; open TODO):** the 68
 `.invalid` test accounts deactivated and stripped; the August synthetic people, roll, households and districts purged (the
-operator's first test congregation now has a clean roster); the congregation's baseline member grant restored after the purge
-removed it. Only the operator's two real accounts are active.
-
-**In flight:** `pipeline/founding-admin-directory` (worktree `presby-fadir`, Neon `pipeline-founding-admin-directory`),
-reclassified to Feature — the admin "Members" section becomes **Community** at `/admin/community` (moved, permanent redirect):
-visitors, participants enrolled/removed on record without approval (with undo), the clerk can propose member entries,
-`createPerson()` roll-cache fix; migration `0061` (DECISION-197–201, F172–F178). Increment 1 is in Phase 4 (Batches M and A
-done, B running). Increment 2 (Session approval, pending queue) and Increment 3 (visitor follow-ups) follow. Deploy order for
-`0061`: code first, then the migration.
+operator's first test congregation has a clean roster); that congregation's baseline member grant was deleted by the purge and
+restored (the cause of F172). Only the operator's two real accounts are active.
 
 **Next, in order (operator, 2026-10-22: all Community work first):**
-1. Community Increments 1 → 2 → 3.
-2. The F166 bug-fix pipeline (recovery codes vanish after first 2FA enrolment), before anyone other than the operator is invited.
-3. The new pre-cutover fpcw parity tracks (careers — Track L, event sign-ups, public events calendar, parish management, account
+1. Merge Increment 1 (`/merge-pr`), deploy the code, then apply `0061` to production (snapshot first). Re-run
+   `scripts/test-rls.sql` as `presby_app` on merged `development`.
+2. Community Increment 2 (Phase 4 starts after Increment 1 merges), then 2b, then 3.
+3. The F166 bug-fix pipeline (recovery codes vanish after first 2FA enrolment), before anyone other than the operator is invited.
+4. The pre-cutover fpcw parity tracks (careers — Track L, event sign-ups, public events calendar, parish management, account
    migration, event import traps; `docs/reviews/2026-10-22-fpcw-parity.md`).
-4. Operator items in `docs/TODO.md` → Deployment: audit backfill question, purge-rehearsal branch deletion, Resend secret
+5. Operator items in `docs/TODO.md` → Deployment: audit backfill question, purge-rehearsal branch deletion, Resend secret
    rotation, the soft-delete fixture exemption, old `blob_assets`; overdue test-coverage and retrospective reviews.
 
 ---

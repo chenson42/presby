@@ -20,6 +20,7 @@
  * `org-features.test.ts`: `@/lib/audit` transitively imports `@/auth`
  * (next-auth), which this test environment cannot resolve.
  */
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, and, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
@@ -27,9 +28,28 @@ import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/lib/audit", () => ({
-  AUDIT_ACTIONS: { PERSON_UPDATED: "tenant.person.updated" },
+  AUDIT_ACTIONS: {
+    PERSON_UPDATED: "tenant.person.updated",
+    ROLL_ACTION_RECORDED: "tenant.roll_action.recorded",
+    ROLL_ACTION_VOIDED: "tenant.roll_action.voided",
+  },
   recordAudit: vi.fn().mockResolvedValue(undefined),
 }));
+
+// A participant enrolment through createPerson() writes its REAL audit row in
+// the same transaction as the person (R8); this wrapper only lets a test force
+// that insert to throw, to prove the whole create rolls back with it.
+const auditControl = vi.hoisted(() => ({ fail: false }));
+vi.mock("@/lib/audit-tx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit-tx")>();
+  return {
+    ...actual,
+    insertAuditRow: async (...args: Parameters<typeof actual.insertAuditRow>) => {
+      if (auditControl.fail) throw new Error("audit insert failed (test-injected)");
+      return actual.insertAuditRow(...args);
+    },
+  };
+});
 
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
@@ -288,6 +308,9 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       })
       .returning({ id: users.id });
     grantingUserId = u!.id;
+    // R3: the participant functions resolve the ACTOR from the users.id the
+    // session supplies, so the user must be linked to the acting person.
+    await platform.update(people).set({ userId: grantingUserId }).where(eq(people.id, managerPerson));
 
     const [hhB] = await platform
       .insert(households)
@@ -330,6 +353,9 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     // disable/enable wrapper below is kept only as defensive belt-and-
     // braces in case a future test in this file approves a row, matching
     // `roll.test.ts`'s own teardown, which genuinely still needs it.
+    await platform.execute(
+      sql`delete from audit_events where metadata->>'organizationId' = ${orgA}`,
+    );
     await platform.execute(sql`alter table roll_actions disable trigger roll_actions_freeze`);
     try {
       await platform.delete(rollActions).where(eq(rollActions.organizationId, orgA));
@@ -375,6 +401,21 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       `StaffOnly${stamp}`,
       `StaffDirectoryLeak${stamp}`,
       `StaffFindPersonLeak${stamp}`,
+      // Community pipeline (2026-10-22) createPerson() arms.
+      `VisitorArm${stamp}`,
+      `ParticipantArm${stamp}`,
+      `ParticipantRolledBack${stamp}`,
+      // Every rolled-back variant, swept defensively: if a regression ever lets
+      // one of them commit, its row must not outlive the run (an unstamped
+      // people row can never be deleted afterwards).
+      `ParticipantRolledBack${stamp}Denied`,
+      `ParticipantRolledBack${stamp}Claim`,
+      `ParticipantRolledBack${stamp}Future`,
+      `ParticipantRolledBack${stamp}Audit`,
+      `VisitorArm${stamp}Denied`,
+      `VisitorArm${stamp}Bad`,
+      `VisitorLeak${stamp}`,
+      `MemberArm${stamp}`,
     ]) {
       await platform
         .update(people)
@@ -442,8 +483,10 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       expect(candidate.displayName).toBe(`P. Vantongeren${stamp}`);
       // Minimal disclosure — no other keys on the candidate.
       expect(Object.keys(candidate).sort()).toEqual(
-        ["confidence", "displayName", "personId"].sort(),
+        ["alreadyHere", "confidence", "displayName", "personId"].sort(),
       );
+      // A person who belongs nowhere here is not "already here".
+      expect(candidate.alreadyHere).toBeNull();
     });
 
     it("a shared name with no distinguishing identifier returns multiple low-confidence candidates", async () => {
@@ -539,6 +582,8 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         kind: "ok",
         personId: expect.any(String),
         rollActionId: expect.any(String),
+        effect: "pending",
+        affectsFiledPeriod: false,
       });
       if (result.kind !== "ok") return;
 
@@ -600,6 +645,14 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         organizationId: orgA,
         personId: result.personId,
         kind: "profession_of_faith",
+        // F173 — regression for createPerson writing a null resulting_roll
+        // (drizzle/0061's CHECK now refuses it; presby_sync_current_roll
+        // would otherwise write current_roll = null on approval).
+        resultingRoll: "active",
+        // F173 — dob 1990-06-15, effective 2026-01-01: 35 (birthday not yet
+        // reached that year). Null here read as "18 and older" for every
+        // profession of faith (coalesce(age_at_action, 99)).
+        ageAtAction: 35,
         approvalStatus: "pending",
         minuteReference: "Session 2026-01-01, item 3",
         proposedBy: grantingUserId,
@@ -662,6 +715,9 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         kind: "ok",
         personId: freeAgentPerson,
         rollActionId: expect.any(String),
+        // A participant enrolment takes effect on record (DECISION-198).
+        effect: "recorded",
+        affectsFiledPeriod: false,
       });
 
       const platform = getPlatformDb();
@@ -796,6 +852,8 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         kind: "ok",
         personId: expect.any(String),
         rollActionId: null,
+        effect: "none",
+        affectsFiledPeriod: false,
       });
       if (result.kind !== "ok") return;
 
@@ -968,6 +1026,402 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
         sql`select has_table_privilege('presby_app', 'people', 'DELETE') as ok`,
       ).then((r) => r.rows as Array<{ ok: boolean }>);
       expect(granted!.ok).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Community pipeline (docs/work-log/2026-10-22-founding-admin-directory.md,
+  // Phase 3 Test Plan 1.7, 1.10, 1.11): the visitor arm, the participant arm
+  // on record, the F173 pin, matchPerson's alreadyHere (F178).
+  // -------------------------------------------------------------------------
+
+  async function membershipOf(personId: string) {
+    const platform = getPlatformDb();
+    const [row] = await platform
+      .select({
+        engagementStatus: memberships.engagementStatus,
+        currentRoll: memberships.currentRoll,
+        currentRollSince: memberships.currentRollSince,
+        firstVisitDate: memberships.firstVisitDate,
+        howHeard: memberships.howHeard,
+        endedOn: memberships.endedOn,
+      })
+      .from(memberships)
+      .where(and(eq(memberships.personId, personId), eq(memberships.organizationId, orgA)));
+    return row;
+  }
+
+  async function auditRows(resourceId: string): Promise<Array<Record<string, unknown>>> {
+    const platform = getPlatformDb();
+    const result = await platform.execute(
+      sql`select * from audit_events where resource_id = ${resourceId} order by created_at`,
+    );
+    return (result as unknown as { rows: Array<Record<string, unknown>> }).rows;
+  }
+
+  async function peopleNamed(lastName: string) {
+    const platform = getPlatformDb();
+    return platform.select({ id: people.id }).from(people).where(eq(people.lastName, lastName));
+  }
+
+  describe("createPerson — the visitor arm (DECISION-200)", () => {
+    it("needs people.manage ONLY (no roll.propose): engagement visitor, no roll row, the pastoral fields stored and trimmed", async () => {
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Isolde", lastName: `VisitorArm${stamp}` },
+        contact: { email: `visitor-${stamp}@example.invalid` },
+        household: { mode: "none" },
+        rollAction: { kind: "visitor", firstVisitDate: "2026-09-13", howHeard: "  a neighbor  " },
+      });
+      expect(result).toEqual({
+        kind: "ok",
+        personId: expect.any(String),
+        rollActionId: null,
+        effect: "none",
+        affectsFiledPeriod: false,
+      });
+      if (result.kind !== "ok") return;
+
+      expect(await membershipOf(result.personId)).toEqual({
+        engagementStatus: "visitor",
+        currentRoll: null,
+        currentRollSince: null,
+        firstVisitDate: "2026-09-13",
+        howHeard: "a neighbor",
+        endedOn: null,
+      });
+      const platform = getPlatformDb();
+      const rollRows = await platform.select().from(rollActions).where(eq(rollActions.personId, result.personId));
+      expect(rollRows).toHaveLength(0);
+    });
+
+    it("blank fields become null; a visitor with no fields at all is valid", async () => {
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Jocasta", lastName: `VisitorArm${stamp}` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "visitor", firstVisitDate: "  ", howHeard: "   " },
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(await membershipOf(result.personId)).toMatchObject({
+        engagementStatus: "visitor",
+        firstVisitDate: null,
+        howHeard: null,
+      });
+    });
+
+    it("forbidden without people.manage, and nothing is created", async () => {
+      const result = await createPerson(directoryViewerPerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Kestrel", lastName: `VisitorArm${stamp}Denied` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "visitor" },
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(await peopleNamed(`VisitorArm${stamp}Denied`)).toHaveLength(0);
+    });
+
+    it("a malformed or future first-visit date and an over-long how-heard THROW before any write", async () => {
+      for (const rollAction of [
+        { kind: "visitor" as const, firstVisitDate: "09/13/2026" },
+        { kind: "visitor" as const, firstVisitDate: "2026-02-30" },
+        { kind: "visitor" as const, firstVisitDate: "2999-01-01" },
+        { kind: "visitor" as const, howHeard: "h".repeat(201) },
+      ]) {
+        await expect(
+          createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+            identity: { mode: "new", firstName: "Lysander", lastName: `VisitorArm${stamp}Bad` },
+            contact: {},
+            household: { mode: "none" },
+            rollAction,
+          }),
+        ).rejects.toThrow();
+      }
+      expect(await peopleNamed(`VisitorArm${stamp}Bad`)).toHaveLength(0);
+    });
+
+    it("REGRESSION for DECISION-200: a visitor appears in neither getDirectory() nor findPersonMatches()", async () => {
+      const { getDirectory } = await import("./directory");
+      const { findPersonMatches } = await import("./org-portal/find-person");
+      const created = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Maren", lastName: `VisitorLeak${stamp}` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "visitor", firstVisitDate: "2026-09-13" },
+      });
+      expect(created.kind).toBe("ok");
+      if (created.kind !== "ok") return;
+
+      const directoryResult = await getDirectory(directoryViewerPerson, orgA);
+      expect(directoryResult.kind).toBe("ok");
+      if (directoryResult.kind !== "ok") return;
+      const ids = directoryResult.entries.map((entry) => entry.personId);
+      expect(ids).not.toContain(created.personId);
+      expect(ids.length).toBeGreaterThan(0); // the harness can see other people
+
+      const searched = await getDirectory(directoryViewerPerson, orgA, { search: `VisitorLeak${stamp}` });
+      expect(searched.kind === "ok" && searched.entries).toEqual([]);
+
+      const match = await findPersonMatches(directoryViewerPerson, orgA, `VisitorLeak${stamp}`);
+      expect(match.kind === "ok" && match.personIds).toEqual([]);
+    });
+  });
+
+  describe("createPerson — a participant takes effect ON RECORD (DECISION-198)", () => {
+    async function counts() {
+      const platform = getPlatformDb();
+      const result = await platform.execute(sql`select * from presby_roll_counts_as_of(${orgA}::uuid)`);
+      return (result as unknown as { rows: Array<{ other_participant: number; total_adherents: number }> }).rows[0]!;
+    }
+
+    it("a new person: approved at insert, resulting_roll and age derived, the cache set, one audit row, counted in the SASR and listed in the Directory", async () => {
+      const before = await counts();
+      const result = await createPerson(
+        managerPerson,
+        orgA,
+        grantingUserId,
+        {
+          identity: { mode: "new", firstName: "Nerissa", lastName: `ParticipantArm${stamp}`, dateOfBirth: "1985-05-05" },
+          contact: {},
+          household: { mode: "none" },
+          rollAction: { kind: "other_participant_enrolled", effectiveDate: "2026-02-01", minuteReference: "  note  " },
+        },
+        { actingUserEmail: "manager@example.invalid" },
+      );
+      expect(result).toEqual({
+        kind: "ok",
+        personId: expect.any(String),
+        rollActionId: expect.any(String),
+        effect: "recorded",
+        affectsFiledPeriod: false,
+      });
+      if (result.kind !== "ok") return;
+
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, result.rollActionId!));
+      expect(row).toMatchObject({
+        kind: "other_participant_enrolled",
+        resultingRoll: "other_participant",
+        ageAtAction: 40,
+        approvalStatus: "approved",
+        approvedBy: grantingUserId,
+        proposedBy: grantingUserId,
+        minuteReference: "note",
+      });
+      expect(await membershipOf(result.personId)).toMatchObject({
+        engagementStatus: "regular",
+        currentRoll: "other_participant",
+        currentRollSince: "2026-02-01",
+      });
+
+      const audits = await auditRows(result.rollActionId!);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: "tenant.roll_action.recorded",
+        actor_user_id: grantingUserId,
+        actor_email: "manager@example.invalid",
+      });
+      expect(audits[0]!.metadata).toEqual({
+        organizationId: orgA,
+        rollActionId: result.rollActionId,
+        kind: "other_participant_enrolled",
+        effectiveDate: "2026-02-01",
+        membershipEnded: false,
+      });
+
+      const after = await counts();
+      expect(after.other_participant).toBe(before.other_participant + 1);
+      expect(after.total_adherents).toBe(before.total_adherents + 1);
+
+      const { getDirectory } = await import("./directory");
+      const listed = await getDirectory(directoryViewerPerson, orgA, { status: "other_participant" });
+      expect(listed.kind === "ok" && listed.entries.map((e) => e.personId)).toContain(result.personId);
+    });
+
+    it("forbidden without roll.propose: nothing is created and nothing is audited (the people.manage-only holder may add a visitor, not a participant)", async () => {
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Octavian", lastName: `ParticipantRolledBack${stamp}Denied` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "other_participant_enrolled", effectiveDate: "2026-02-01" },
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(await peopleNamed(`ParticipantRolledBack${stamp}Denied`)).toHaveLength(0);
+    });
+
+    it("the database's identity refusal (a user that is not the acting person) is forbidden and rolls the person back", async () => {
+      const result = await createPerson(managerPerson, orgA, randomUUID(), {
+        identity: { mode: "new", firstName: "Perdita", lastName: `ParticipantRolledBack${stamp}Claim` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "other_participant_enrolled", effectiveDate: "2026-02-01" },
+      });
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(await peopleNamed(`ParticipantRolledBack${stamp}Claim`)).toHaveLength(0);
+    });
+
+    it("a refusal by the roll function (a date before the birth date) rolls back the person, the membership and the household together", async () => {
+      const result = await createPerson(managerPerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Quillon", lastName: `ParticipantRolledBack${stamp}`, dateOfBirth: "2000-06-15" },
+        contact: { email: `rolledback-${stamp}@example.invalid` },
+        household: { mode: "new", name: `Rolled Back Household ${stamp}` },
+        rollAction: { kind: "other_participant_enrolled", effectiveDate: "1999-01-01" },
+      });
+      expect(result).toEqual({ kind: "roll_refused", reason: "date_out_of_range" });
+      expect(await peopleNamed(`ParticipantRolledBack${stamp}`)).toHaveLength(0);
+      const platform = getPlatformDb();
+      const hh = await platform.select({ id: households.id }).from(households).where(eq(households.name, `Rolled Back Household ${stamp}`));
+      expect(hh).toHaveLength(0);
+    });
+
+    it("a future date is refused by the function and rolls everything back", async () => {
+      const result = await createPerson(managerPerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Rosamund", lastName: `ParticipantRolledBack${stamp}Future` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "other_participant_enrolled", effectiveDate: "2999-01-01" },
+      });
+      expect(result).toEqual({ kind: "roll_refused", reason: "date_out_of_range" });
+      expect(await peopleNamed(`ParticipantRolledBack${stamp}Future`)).toHaveLength(0);
+    });
+
+    it("a failed audit insert rolls back the person, the membership and the roll row — no participant without its audit row", async () => {
+      auditControl.fail = true;
+      try {
+        await expect(
+          createPerson(managerPerson, orgA, grantingUserId, {
+            identity: { mode: "new", firstName: "Sebastian", lastName: `ParticipantRolledBack${stamp}Audit` },
+            contact: {},
+            household: { mode: "none" },
+            rollAction: { kind: "other_participant_enrolled", effectiveDate: "2026-02-01" },
+          }),
+        ).rejects.toThrow(/audit insert failed/);
+      } finally {
+        auditControl.fail = false;
+      }
+      expect(await peopleNamed(`ParticipantRolledBack${stamp}Audit`)).toHaveLength(0);
+    });
+
+    it("FORGERY: profession_of_faith stays a pending proposal whatever else rides in the payload", async () => {
+      const result = await createPerson(managerPerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Thaddeus", lastName: `MemberArm${stamp}`, dateOfBirth: "2008-03-10" },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: {
+          kind: "profession_of_faith",
+          effectiveDate: "2026-03-10",
+          approvalStatus: "approved",
+          approvedBy: grantingUserId,
+        } as never,
+      });
+      expect(result).toMatchObject({ kind: "ok", effect: "pending" });
+      if (result.kind !== "ok") return;
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, result.rollActionId!));
+      expect(row).toMatchObject({
+        approvalStatus: "pending",
+        approvedBy: null,
+        resultingRoll: "active",
+        // F173: an 18th birthday on the effective date is 18, the adult side
+        // of the 17/18 split in presby_roll_changes.
+        ageAtAction: 18,
+      });
+      expect(await membershipOf(result.personId)).toMatchObject({ currentRoll: null });
+      expect(await auditRows(result.rollActionId!)).toHaveLength(0);
+    });
+
+    it("F173: an existing person's birth date (not in this input) is read back for age_at_action", async () => {
+      const platform = getPlatformDb();
+      const [p] = await platform
+        .insert(people)
+        .values({
+          firstName: "Ursula",
+          lastName: `MemberArm${stamp}`,
+          dateOfBirth: "2000-02-29",
+          deletableUntil: fixtureDeletableUntil(),
+        })
+        .returning({ id: people.id });
+      trackedPeopleIds.push(p!.id);
+      const result = await createPerson(managerPerson, orgA, grantingUserId, {
+        identity: { mode: "existing", matchedPersonId: p!.id },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "profession_of_faith", effectiveDate: "2025-02-28" },
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, result.rollActionId!));
+      expect(row?.ageAtAction).toBe(24); // 29 February birthday, one day short of 25
+    });
+  });
+
+  describe("matchPerson — alreadyHere (F178)", () => {
+    it("annotates a candidate who already has a membership here with how they are connected, and sorts them first", async () => {
+      const platform = getPlatformDb();
+      const surname = `Alreadyhere${stamp}`;
+      const mk = async (first: string) => {
+        const [p] = await platform
+          .insert(people)
+          .values({ firstName: first, lastName: surname, deletableUntil: fixtureDeletableUntil() })
+          .returning({ id: people.id });
+        trackedPeopleIds.push(p!.id);
+        return p!.id;
+      };
+      // Same first name for all: one shared-name candidate set (rank 4).
+      const first = `Same${stamp}`;
+      const visitor = await mk(first);
+      const participant = await mk(first);
+      const ended = await mk(first);
+      const former = await mk(first);
+      const staffAnchor = await mk(first);
+      const elsewhere = await mk(first);
+      await platform.insert(memberships).values([
+        { organizationId: orgA, personId: visitor, engagementStatus: "visitor" },
+        { organizationId: orgA, personId: participant, engagementStatus: "regular", currentRoll: "other_participant" },
+        { organizationId: orgA, personId: ended, engagementStatus: "regular", endedOn: "2025-12-01", endedReason: "moved away" },
+        { organizationId: orgA, personId: former, engagementStatus: "regular", endedOn: "2025-11-01", endedReason: "other_participant_removed" },
+        { organizationId: orgA, personId: staffAnchor, engagementStatus: "staff" },
+      ]);
+      await platform.insert(memberships).values({ organizationId: orgB, personId: elsewhere, engagementStatus: "regular" });
+
+      const result = await matchPerson(managerPerson, orgA, { lastName: surname, firstName: first });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+
+      const byId = new Map(result.candidates.map((c) => [c.personId, c]));
+      expect(byId.get(visitor)?.alreadyHere).toEqual({ connection: "visitor", endedOn: null });
+      expect(byId.get(participant)?.alreadyHere).toEqual({ connection: "participant", endedOn: null });
+      expect(byId.get(ended)?.alreadyHere).toEqual({ connection: "ended", endedOn: "2025-12-01" });
+      expect(byId.get(former)?.alreadyHere).toEqual({ connection: "former_participant", endedOn: "2025-11-01" });
+      expect(byId.get(staffAnchor)?.alreadyHere).toEqual({ connection: "staff", endedOn: null });
+      // Belongs only at orgB: this org's RLS cannot see it, so it is NOT "already here".
+      expect(byId.get(elsewhere)?.alreadyHere).toBeNull();
+
+      // Already-here candidates sort ahead of the one who is not.
+      const order = result.candidates.map((c) => c.alreadyHere !== null);
+      expect(order).toEqual([...order].sort((a, b) => Number(b) - Number(a)));
+      expect(order[order.length - 1]).toBe(false);
+    });
+
+    it("confirming a match on someone ALREADY HERE is already_here, not 'belongs to another organization', and writes nothing", async () => {
+      const platform = getPlatformDb();
+      const [p] = await platform
+        .insert(people)
+        .values({ firstName: "Valentina", lastName: `Alreadyhere${stamp}Confirm`, deletableUntil: fixtureDeletableUntil() })
+        .returning({ id: people.id });
+      trackedPeopleIds.push(p!.id);
+      await platform.insert(memberships).values({ organizationId: orgA, personId: p!.id, engagementStatus: "visitor" });
+
+      const result = await createPerson(managerPerson, orgA, grantingUserId, {
+        identity: { mode: "existing", matchedPersonId: p!.id },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "other_participant_enrolled", effectiveDate: "2026-02-01" },
+      });
+      expect(result).toEqual({ kind: "already_here" });
+      const rows = await platform.select().from(rollActions).where(eq(rollActions.personId, p!.id));
+      expect(rows).toHaveLength(0);
+      expect(await membershipOf(p!.id)).toMatchObject({ engagementStatus: "visitor", currentRoll: null });
     });
   });
 });

@@ -46,6 +46,17 @@ inputs:
       error string, or an uploaded trace.
     required: false
     default: "ci_run"
+  compute_cu:
+    description: >
+      Fixed compute size, in compute units, for the ephemeral branch's
+      read-write endpoint (min = max, so it never scales down mid-run). A
+      branch is otherwise created at the project's default size (0.25 CU),
+      which db.yml's serial vitest run cannot finish on inside any sane
+      timeout. The Neon create-branch action has no compute input, so this is
+      a follow-up API call; a refusal (for example a plan limit) is a warning,
+      not a failure.
+    required: false
+    default: "2"
 outputs:
   branch_id:
     description: "Neon branch id, for the matching delete-branch-action call."
@@ -86,6 +97,39 @@ runs:
         # sets its own password below rather than taking a second call or a
         # third operator secret (Phase 2 ruling, DECISION-150).
         username: neondb_owner
+
+    - name: Size the branch's compute
+      shell: bash
+      env:
+        NEON_API_KEY: ${{ inputs.api_key }}
+        NEON_PROJECT_ID: ${{ inputs.project_id }}
+        NEON_BRANCH_ID: ${{ steps.create-branch.outputs.branch_id }}
+        COMPUTE_CU: ${{ inputs.compute_cu }}
+      run: |
+        set -euo pipefail
+        case "$COMPUTE_CU" in
+          ''|*[!0-9.]*) echo "::error::compute_cu must be a number, got '$COMPUTE_CU'"; exit 1 ;;
+        esac
+        API="https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}"
+        EP="$(curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+          "${API}/branches/${NEON_BRANCH_ID}/endpoints" \
+          | jq -r '[.endpoints[] | select(.type == "read_write")][0].id // empty')"
+        if [ -z "$EP" ]; then
+          echo "::warning::no read_write endpoint found for the branch; compute left at the default size"
+          exit 0
+        fi
+        # Only the endpoint's size is printed - never a host, URL or password.
+        CODE="$(curl -sS -o resp.json -w '%{http_code}' -X PATCH \
+          -H "Authorization: Bearer ${NEON_API_KEY}" -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -d "{\"endpoint\":{\"autoscaling_limit_min_cu\":${COMPUTE_CU},\"autoscaling_limit_max_cu\":${COMPUTE_CU}}}" \
+          "${API}/endpoints/${EP}")"
+        if [ "$CODE" = "200" ]; then
+          echo "compute sized: $(jq -r '.endpoint | "\(.autoscaling_limit_min_cu)-\(.autoscaling_limit_max_cu) CU"' resp.json)"
+        else
+          echo "::warning::compute sizing refused (HTTP ${CODE}): $(jq -r '.message // "no message"' resp.json 2>/dev/null)"
+        fi
+        rm -f resp.json
 
     - name: Create the fresh database and set presby_app's password
       id: urls

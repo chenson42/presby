@@ -36,7 +36,7 @@ inputs:
       pins this to `development` in every caller.
     required: true
   branch_name:
-    description: "Unique per-run branch name, e.g. db-tests-${{ github.run_id }}-${{ github.run_attempt }}."
+    description: "Unique per-run branch name, e.g. db-tests-<run_id>-<run_attempt>. (No expression syntax in this text: GitHub evaluates it here, and the github context is not available in action metadata.)"
     required: true
   database_name:
     description: >

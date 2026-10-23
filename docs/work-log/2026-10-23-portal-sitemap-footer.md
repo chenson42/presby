@@ -19,8 +19,8 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-23 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-23 |
-| 3 — Technical design | tech-lead | In progress | — | — |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 3 — Technical design | tech-lead | Complete | Design complete; implementer named | 2026-10-23 |
+| 4 — Implementation | full-stack-developer | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -390,48 +390,173 @@ Files reviewed (all under `/Users/cshenso/git/presby-platform/presby-nav/`):
 
 # Phase 3 — Technical Design (tech-lead)
 
+*Feasibility checked against the live `presby-nav` tree on 2026-10-23: no SQL, no schema, no new FK, no new dependency. The one cycle risk (F135) is handled by the one-way import below.*
+
 ## Summary
 
-[One paragraph: what we're building and why.]
+The portal nav and footer will render one pure menu structure instead of reading the tile registry two ways. `buildPortalMenu()` (new, `src/lib/org-portal/portal-menu.ts`) turns already-resolved tiles into a plain list of entries (Home, one per non-empty domain, Administration), and `getPortalMenu()` (added to `visible-tiles.ts`) does the reads and calls it. The nav renders each entry as a link; the footer renders Home as a link and every other entry as a column with a plain-text heading. The `people` domain label becomes "Community" (key unchanged). Administration follows one rule in both places, and in the footer it carries only an "Administration overview" link (operator Q1). This implements Phase 2 Rulings 1–7 and proposed DECISION-220 as written; nothing here departs from them.
 
 ## Permissions & Flags
 
-- Permission key(s): `area.action`
-- Default role bindings: [list]
-- Feature flag(s): [key, or "not needed"]
+- Permission key(s): none. The menu checks no permission (DECISION-003/162); each destination stays the sole authority. No `hasFeature` call may appear in `portal-menu.ts`, `getPortalMenu`, the nav or the footer.
+- Default role bindings: none.
+- Feature flag(s): not needed. Existing `org_portal.chrome_v2` (nav), `org_portal.chrome_v3` (footer) and `org_portal.admin_hub` (Administration) keep their meanings. No new flag (operator standing rule).
 
 ## API Contract
 
-- `POST /api/...` — purpose, request body, response shape
-- `GET /api/...` — purpose, query params, response shape
-- Or server-action signatures: `async function actionName(input): Promise<Result>`
+No routes or server actions. Two internal contracts.
+
+**Builder** — `src/lib/org-portal/portal-menu.ts`. Pure; no `server-only`, no React, no DB. Imports `DOMAIN_LABELS`/`DOMAIN_ORDER` (runtime) and `type PortalTile`/`PortalDomain` from `./tiles`; imports nothing from `org-features`, `visible-tiles` or any client file. `tiles.ts` must never import it (F135). Exports only `buildPortalMenu`, `PortalMenu`, `PortalMenuEntry`, `PortalMenuChild`.
+
+```ts
+buildPortalMenu(input: {
+  slug: string;
+  operateTiles: readonly PortalTile[];     // already filtered by visiblePortalTiles("operate")
+  administerTiles: readonly PortalTile[];  // [] when the loader skipped the read
+  adminHubEnabled: boolean;
+}): PortalMenu                              // readonly PortalMenuEntry[]
+
+interface PortalMenuChild { key: string; label: string; href: string; comingSoon: boolean }
+interface PortalMenuEntry {
+  key: "home" | PortalDomain;
+  label: string; href: string; exact: boolean;
+  icon: "home" | PortalDomain;              // always equal to key; kept so the nav map is one line
+  children: PortalMenuChild[];
+}
+```
+
+Output is strings and booleans only (no `href(slug)` function, no icon component), because the nav hands it to a `'use client'` leaf (the live-500 precedent in `portal-nav-links.tsx`). Rules, all in this one function:
+
+1. **Home** first, always: label from a `HOME_LABEL = "Home"` constant in this file, `href /o/<slug>`, `exact: true`, `children: []`.
+2. **Domain entries**, in `DOMAIN_ORDER`, for every domain except `administration` that has at least one operate tile (`tile.domain`): label `DOMAIN_LABELS[domain]`, `href /o/<slug>#domain-<domain>`, `exact: true`, `children` = that domain's tiles in input order as `{ key: tile.key, label: tile.label, href: tile.href(slug), comingSoon: tile.comingSoon === true }`. An operate tile whose domain is `administration` is dropped (standing rule, now stated once here).
+3. **Administration** last, present if and only if `adminHubEnabled && administerTiles.length > 0`: key and icon `"administration"`, label `DOMAIN_LABELS.administration`, `href /o/<slug>/admin`, `exact: false`, `children` exactly one item `{ key: "administration-overview", label: ADMIN_OVERVIEW_LABEL, href: /o/<slug>/admin, comingSoon: false }`. `administerTiles` is used only for `.length`; it is never copied into `children` (so Q1 is a property of the data).
+4. The file header states once: no two top-level entries share a label, and the home page's "Community" pill and "Community" card are the accepted residual (Q2).
+
+**Loader** — added to `src/lib/org-portal/visible-tiles.ts` (server-only, already imports `isFlagEnabled`):
+
+```ts
+getPortalMenu(slug: string, organizationType: OrganizationType, viewer: TileViewer): Promise<PortalMenu>
+```
+
+Reads `visiblePortalTiles("operate", …)` and `isFlagEnabled("org_portal.admin_hub")` in parallel, then reads `visiblePortalTiles("administer", …)` **only if the hub flag is on** (Ruling 7 mitigation), then calls `buildPortalMenu`. No new `cache()` (every read under it is already cached; if one is ever added it takes primitive arguments). It never throws: `isFlagEnabled` returns false on error and `visiblePortalTiles` swallows gate failures, so a failed read hides a tile or Administration and never takes the chrome down. The nav and footer each call it independently (each stays self-sufficient, as both headers document).
 
 ## Data Model
 
-[New tables / columns / indexes, or "No schema changes required."]
+No schema changes required. "People & Membership" is stored nowhere in the database (architect-verified); `people` stays the CHECK value, the `#domain-people` anchor and the icon key. No migration, no Neon branch.
 
 ## Component / Page Plan
 
-- Pages to create: [list]
-- Components to create: [list]
-- Files to modify: [list]
+- Pages to create: none.
+- Files to create: `src/lib/org-portal/portal-menu.ts`, `src/lib/org-portal/portal-menu.test.ts`, `e2e/portal-footer-sitemap.spec.ts`.
+- Files to modify:
+  - `src/lib/org-portal/tiles.ts` — `DOMAIN_LABELS.people` to "Community"; update the `PortalDomain` union comment (line 114), the stale "nav hardcodes Administration" paragraph in the `PortalDomain` doc, and the comments at lines ~278 and ~296.
+  - `src/lib/org-portal/visible-tiles.ts` — add `getPortalMenu`.
+  - `src/app/(org)/o/[slug]/portal-nav.tsx` — a Server Component that calls `getPortalMenu` and maps each entry to `PortalNavEntry` (`{ label, href, exact, icon }`). It drops its `isFlagEnabled`, `tiles` and domain computation, and its header comment is rewritten (no more "Home/Administration are hardcoded", no more "gated solely on the flag").
+  - `src/components/org-portal/portal-footer.tsx` — calls `getPortalMenu`; layout below; header comment rewritten (it still says the footer calls `"operate"` only and is a flat recap).
+  - `src/lib/org-features.ts:70` — comment only.
+- Unchanged on purpose: `portal-nav-links.tsx` (its `PortalNavEntry` type already fits), `layout.tsx` and its props (still renders both only inside `resolved.kind === "ok"`; DECISION-040), `domain-tile-sections.tsx` (Ruling 5), `org-feature-categories.ts`.
+
+**Footer layout** (Server Component, no `'use client'`, no `<details>`):
+- Order: contact block (unchanged), `<nav aria-label="Footer">`, copyright (unchanged).
+- Inside the nav: first the Home link (a plain link row, `min-h-11`), then `<div class="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">`. Home is not a column.
+- One `<div class="min-w-0">` per entry that has at least one child, containing `<h2 id="footer-menu-<key>" class="text-sm font-semibold text-foreground">` (plain text, never a link) and `<ul aria-labelledby="footer-menu-<key>">`. An entry with no children renders no column, so there is never a heading without items or an empty `<ul>`.
+- Each link: `flex min-h-11 flex-wrap items-center gap-x-2 py-1 break-words`, plus the existing hover and focus-ring classes (2px offset). A `comingSoon` child adds `<span class="text-sm">Coming soon</span>` inside the link (muted, no badge fill).
+- Semantic tokens only (`text-muted-foreground`, `text-foreground`, `border-border`); no `*-brand` utility and no `bg-primary` fill. Run `npm run check:brand-scope`.
+
+**360px layout.** The container is `px-6`, so about 312px of content, which gives two columns of about 144px with a 24px gap. A seven-entry presbytery view (Community, Worship & Events, Governance & Courts, Reports & Insights, Communications, Administration, plus Giving where in scope) stacks to about four rows of columns. Long labels ("Worship & Service Planning", "Committees & Commissions", "Congregation Oversight", and a heading like "Governance & Courts") wrap inside their column (`min-w-0`, `break-words`) and never truncate. Targets stay 44px high. Acceptance: `document.documentElement.scrollWidth <= clientWidth` at 360x800, and no link under 44px tall. At `sm` (640) three columns, at `lg` (1024) four.
+
+## Copy
+
+Every user-facing string this change adds or changes. All plain text, no punctuation tricks.
+
+| Where | String |
+|---|---|
+| Domain label (nav pill, home section heading, footer column heading, Features page category header) | **Community** (was "People & Membership") |
+| Other domain labels (unchanged, now also footer headings) | Worship & Events · Giving & Finance · Governance & Courts · Reports & Insights · Communications |
+| Home link, nav and footer | Home |
+| Administration, nav pill and footer column heading | Administration |
+| Footer Administration link | Administration overview |
+| Footer link to a tile that is not built yet | the tile's own label, then the words "Coming soon" |
+| Footer landmark label | Footer (unchanged) |
+| Footer contact block, copyright | unchanged |
+
+No new errors, toasts, dialogs or emails. Release-note entry (draft; Phase 6 / `/release-notes`):
+
+> **The portal footer is now a site map, and "People & Membership" is now "Community".** The footer lists each section of the portal as a column with its tools underneath, using the same section names as the menu at the top of the page. The "People & Membership" section is now called "Community" everywhere it appears, including the Features page. The Administration link in the menu and footer now shows only when your congregation has at least one administration tool turned on (before, it showed whenever the administration area was on). Everyone in the congregation sees the Administration link when it is shown; the pages behind it still check what each person is allowed to do. On the home page, the Community menu item and the Community card are separate links that lead to different places, and that is expected.
+
+Read against the accepted residuals: it does not claim Administration is hidden from people who cannot use it (Q1/Note 4), it states the pill/card pair (Q2), and it does not mention the Members-tile toggle mismatch, which is out of scope and unchanged. The what's-new entry (Rule 13) reuses the first two sentences only.
+
+## Existing tests and e2e to update
+
+**Unit (vitest) — these assert the old design and must change:**
+- `src/components/org-portal/portal-footer.test.tsx` — the mock becomes `getPortalMenu`. Rewrite the "nav recap" describe (lines 119–147): drop "calls visiblePortalTiles with the 'operate' category, never 'administer'" and "recaps every visible tile"; keep and adapt "always includes a Home link, even with zero visible tiles"; adapt "forwards organizationType" to forward `slug`/`organizationType`/`viewer` to `getPortalMenu`. Contact (69–118) and copyright (149+) are untouched.
+- `src/app/(org)/o/[slug]/portal-nav.test.tsx` — the whole entry-construction suite moves to `portal-menu.test.ts`. This file shrinks to the mapping: mock `getPortalMenu` (drop the `tiles` and `flags` mocks); assert menu entries map to `label/href/exact/icon` with `children` and `key` not passed on, that slug/organizationType/viewer are forwarded, and that the result renders through `PortalNavLinks`. Remove: "calls visiblePortalTiles with 'operate', never 'administer'" (113), the anchor/order/collapse/exclusion cases (131–219), the admin-hub cases (221–250, 284–307), the icon-key case (251–283) and the presbytery-only block (309+); each is re-asserted in the builder test. The header comment ("gated solely on `org_portal.admin_hub`") is rewritten.
+- `src/lib/org-features.test.ts:470` — a real assertion against the real `DOMAIN_LABELS` (DB-backed suite): `"People & Membership"` becomes `"Community"`. This is the only test that breaks on the rename alone.
+
+**Unit — literal fixtures that still pass but should read "Community" so the fixtures stay honest (cosmetic, same commit):** `portal-nav-links.test.tsx` (218, 232, 252, 269, 281), `page.test.tsx` (74, 301), `admin/page.test.tsx` (66, 296), `domain-tile-sections.test.tsx` (27, 60), `features/features-list.test.tsx:44`, `features/page.test.tsx` (302, 333), `features/feature-categories-list.test.tsx` (42, 119). `tiles.test.ts:327` checks keys only and is unaffected.
+
+**Must stay green untouched:** `layout.test.tsx` (mocks both components; props are unchanged and the DECISION-040 cases for forbidden, ended, not-found and no-session must still pass).
+
+**e2e (Playwright):**
+- `e2e/community-participants.spec.ts:283` — `getByRole("heading", { name: "Community" })` has no level, so with `chrome_v3` on it also matches the footer `<h2>Community</h2>` and fails strict mode. Change to `{ level: 1, name: "Community" }`. Check the sibling headings in that file the same way.
+- **Correction to Phase 1 Note 5:** `e2e/member-calendar.spec.ts:260` needs no change. Under operator Q1 the footer lists no administer tiles, so there is no second "Manage events" link, and lines 243 and 267 stay valid. `e2e/branded-signin.spec.ts:253` (`heading "Directory"`) needs no change either: footer headings are domain labels and none contains "Directory". The implementer re-checks with a repo-wide grep of heading and link locators against the seven domain labels, "Home", "Administration" and "Administration overview" before closing; the grep run today (2026-10-23) finds none other.
+- No e2e currently asserts nav or footer text, and none asserts "Administration", so nothing else breaks on the Note 3 rule change.
+
+## New tests
+
+- `src/lib/org-portal/portal-menu.test.ts` (pure; only `vi.mock("server-only", () => ({}))`, as `tiles.test.ts:41` does), using hand-built `PortalTile` fixtures plus one pass over the real `PORTAL_TILES`:
+  - Administration truth table: hub off or on, crossed with zero or at least one administer tile (present only when both are true);
+  - `administration` never appears as a domain entry, and an operate tile carrying `domain: "administration"` is dropped;
+  - an empty domain is omitted; domain order follows `DOMAIN_ORDER`; Home first, Administration last; Home has no children;
+  - `comingSoon` is carried to children and defaults to `false`;
+  - top-level labels are unique; no administer tile label or key appears in any `children`; Administration's only child is the overview link;
+  - every `href` and every other field is a string or boolean (a serializability check: `JSON.parse(JSON.stringify(menu))` deep-equals `menu`);
+  - label sourcing: the "Community" domain entry's label equals `DOMAIN_LABELS.people`, and `DOMAIN_LABELS.people === "Community"`.
+- `src/lib/org-portal/visible-tiles.test.ts` (extend, or create beside it if none exists): `getPortalMenu` skips the administer read entirely when `org_portal.admin_hub` is off (spy on `visiblePortalTiles`' gate), and returns Home plus operate domains with no Administration when the administer read is empty.
+- Footer unit tests (in the rewritten `portal-footer.test.tsx`): one `<h2>` per entry with children, in menu order; each `<ul>` is labelled by its heading; headings are not links; no heading and no `<ul>` for an entry with no children; Administration column holds exactly one link, "Administration overview", to `/o/<slug>/admin`; a coming-soon child shows "Coming soon"; Home is a link and not a column; the footer has no `*-brand` class.
+- **Render parity test** (new file `src/components/org-portal/portal-menu-parity.test.tsx`, jsdom): feed one mocked `getPortalMenu` result to both `PortalNav` and `PortalFooter` and assert the nav's link labels, in order, equal Home followed by the footer's column headings, in order.
+- **Anchor parity** (same file, Ruling 6 third assertion): for one operate-tile fixture, every domain entry's `#domain-<key>` fragment matches a `<section id>` rendered by `DomainTileSections` for the same tiles.
+- **e2e** `e2e/portal-footer-sitemap.spec.ts`: capture and restore `org_portal.chrome_v3` and `org_portal.admin_hub` with `e2e/support/flags.ts` (pattern of `portal-home-cards.spec.ts`), sign in as the alpha-org member, then at 360x800 assert the footer nav shows the "Community" `<h2>` and a "Directory" link; the footer has no horizontal overflow (`scrollWidth <= clientWidth`); every footer link is at least 44px tall; and with `admin_hub` on and one administer tile visible, the Administration column holds only "Administration overview", while with `admin_hub` off neither the nav nor the footer shows Administration. Repeat the no-overflow assertion at 1024. Phase 5 also verifies by eye in a browser at a phone viewport (Verify-in-a-Browser invariant).
 
 ## Implementation Order
 
-1. Schema (if any) → `npm run db:push` on a Neon branch
-2. `FEATURE_CATALOG` entry + seed binding
-3. Route handlers / server actions
-4. UI
-5. Audit events for security-sensitive paths
-6. Release notes entry
+1. Rename `DOMAIN_LABELS.people` and fix the comments in `tiles.ts` and `org-features.ts`; update `org-features.test.ts:470`.
+2. `portal-menu.ts` and `portal-menu.test.ts` (green in isolation).
+3. `getPortalMenu` in `visible-tiles.ts` and its test.
+4. `portal-nav.tsx` and its shrunken test.
+5. `portal-footer.tsx`, its rewritten test, then the parity tests.
+6. Cosmetic fixture renames; tighten `community-participants.spec.ts:283`; new e2e.
+7. `npm run typecheck`, `npm run lint`, `npm run test`, `npm run check` (in particular `check:brand-scope`), then the e2e run and a 360px browser pass.
+8. At Phase 6, by the orchestrator at integration: release notes (suggest 0.40.0, a Feature) and `package.json`, what's-new entry (Rule 13), `docs/product/functionality-map.md` org-portal bullet (Rule 14), `docs/decisions.md` entries below, and the `docs/TODO.md` lines below. These touch Rule 16 files, so this pipeline does not edit them mid-flight.
+
+No audit events (read-only). No `FEATURE_CATALOG` or seed change.
 
 ## Edge Cases & Risks
 
-- [Thing that could fail or that needs special handling]
+- **Cycle (F135).** Enforced by direction: `visible-tiles.ts` imports `portal-menu.ts`, which imports `tiles.ts`. The new unit test imports `portal-menu.ts` alone and so fails if `tiles.ts` ever imports it back or pulls in `org-features` (the mock list would no longer be enough).
+- **Client boundary.** The menu has only plain data; `portal-nav.tsx` passes the existing four-field entries. The serializability test guards it. A browser pass is required because tsc and the build do not catch this class of defect.
+- **Behavior change on purpose.** With `admin_hub` on and no visible administer tile, the nav's Administration pill disappears (it appeared before). `/o/<slug>/admin` still renders its "Nothing is turned on here yet." state for a direct visit.
+- **Cost.** About six more flag reads per page, plus one per-org toggle read, only when `admin_hub` is on (Ruling 7). Accepted; no TODO unless measured.
+- **Permission-blind column.** Every member sees "Administration overview" when it is shown (Q1). The follow-up for a "can administer" signal and the Members-tile toggle mismatch are TODO lines, not this pipeline.
+- **Duplicate-label residual.** The home page's "Community" pill (to the section) and "Community" card (to `/admin/community`). Accepted (Q2). The footer has none (headings are not links).
+- **Failed gate reads** hide that tile (and its whole column if it was the only one) and never throw; worst case is Home, contact info and copyright.
+- **Public repo.** Fixtures and the e2e use only the existing synthetic alpha org; no real names or addresses.
+
+## Out of Scope (confirm)
+
+Listing individual administer tiles in the footer (Q1 ruled); permission-aware menus; reconciling the Members tile with its toggle; renaming the Community tile or page, or the `people` key; scroll-spy or active state in the footer; a nav dropdown for Administration; the `tel:` link hardening; public-site, `/home` and platform `/admin` footers; caching all flags in one read.
+
+## Decisions
+
+- **DECISION-220** stays the architect's (architectural) entry as proposed in Phase 2; no change.
+- **DECISION-221 (implementation) — draft for the orchestrator to integrate:** "The footer is a site map built from `PortalMenu`: Home is a leading link; every entry with children is a column whose heading is a plain-text `<h2>` (never a link) and whose list is `aria-labelledby` that heading; an entry with no children renders no column. The grid wraps (2, 3, 4 columns at the base, `sm` and `lg` breakpoints) instead of fixing a column count, columns are never collapsible (the iOS `<details>` failure), and `comingSoon` children render the words 'Coming soon' as plain text. Rationale: the headings equal the nav's labels by construction, only one link is named 'Community' in the footer, and the layout cannot hide a link on a phone. Revisit if a presbytery's footer grows past about eight columns."
+- **DECISION-222 (implementation) — draft:** "`getPortalMenu()` skips the administer-tile read when `org_portal.admin_hub` is off, and makes no new `cache()` of its own: the per-tile and per-flag reads under it are already cached on primitive arguments, so the nav, the footer and the page share them. The cost accepted is about six uncached flag reads and one toggle read per request when the hub is on. Revisit with a single cached all-flags read in `flags.ts` if it is ever measured as a problem."
+
+**TODO lines to add at integration (Rule 10):** (1) a "can administer" signal so the footer and nav can hide Administration from viewers who cannot use it (Phase 1 Note 4); (2) the Members tile ignores the `members_create` toggle, so the tile can open an "off" state (Phase 1 Note 5, item 5); (3) the category axis does not affect Directory, Groups, Staff, Officers or Roles.
 
 ## Implementer
 
-[database-admin | api-developer | ux-developer | full-stack-developer]
+**full-stack-developer.** One lib module, one loader, two server components and their tests, about eight files in all; splitting across agents would cost more than it saves. The builder and its tests come first so the rest builds on a green base.
 
 ---
 

@@ -20,6 +20,7 @@ For any non-trivial feature, author a concise design doc — its structure match
 - **Component / Page Plan** — pages to create, components to create, files to modify.
 - **Implementation Order** — schema → `FEATURE_CATALOG` + seed binding → routes/actions → UI → audit events → release notes.
 - **Edge Cases & Risks** and **Out of Scope** (explicit non-goals for the user to confirm). Include the e2e blast radius: which *existing* e2e specs assert behavior this change will alter, not just which new tests are needed (retro 2026-07-11 — the period's one informal loop-back was an unanticipated existing-spec break).
+- **Copy** — every user-facing string the feature adds or changes: page text, buttons, dialogs, errors, toasts, emails, and the release-note lines. Write them in the design, not in Phase 4, for non-engineers. Then read each one against the design's own accepted residuals and the Phase 2 rulings: copy must never deny a residual the technical record admits. The 0.25.2 release note and the v0.38 treasurer copy (F170) both did, and each cost a Phase 6 loop-back. Copy written here gets one review at design time, rather than a rework after QA.
 - **Implementer** — named (see the Phase 4 selection table in CLAUDE.md).
 
 **Feasibility check, against the live tree, before naming the implementer.** A design that fails this on the implementer's first read isn't a Phase 4 deviation — it's a Phase 3 defect, and catching it here is one grep cheaper than a loop-back:

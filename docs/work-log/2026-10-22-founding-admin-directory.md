@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete (design to R1-R14; S1-S6 ruled; route move designed as its own Batch M) | Design complete; implementers named | 2026-10-22 |
 | 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; Batch B (server: lib, actions, audit) complete 2026-10-22; Batches C and D (UI, e2e, 360px pass) complete 2026-10-22 — Phase 4 Complete for Increment 1 | — | — |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 FAIL (stale integration patch only; all code checks green); fixed; re-verification pending | FAIL → pending | 2026-10-23 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 | Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
@@ -1674,46 +1674,185 @@ Next: Phase 5 (qa). Click-through: sign in as a user holding `people.manage`, `r
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+## Run 1 (2026-10-23), recorded verbatim from qa's returned text
+
+**Date:** 2026-10-23
 **Verified by:** qa
+**Code under test:** `origin/main...b899ec2`: 1a40061 (route move), b0acbb9 (0061), 7370280 (server), 12bc703 (UI and e2e). Worktree `presby-fadir`, Neon branch `pipeline-founding-admin-directory`. Not auth-touching (no change under `src/auth.ts`, `src/proxy.ts`, `(auth)/`, `api/auth/` or `lib/auth/`), so the stricter auth gate doesn't apply.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: PASS. `npm run lint` (`--max-warnings=0`): PASS. `npm run check`: PASS, all eight tripwires (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports). `check:audit` passes trivially for the new actions, since they write through the lib (Phase 3 Measurement 14); the audit writes are verified below by reading and by e2e.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+Total: 9761 | Passed: 7603 | Failed: 0 | Skipped: 2158 (72 files, all gated on a DB URL and run below) | Duration: 25.3 s
+
+**DB-backed suite** (`npm run test:db`, serial, pipeline branch): 575 files, 565 passed, 10 failed (14 tests plus 2 unhandled errors), 6193 s.
+- **Timeouts and dropped connections (not defects).** Every failure but the leak canary below was a 20 s test or 30 s hook timeout, or a "Connection terminated unexpectedly". Each failing file was re-run on its own:
+  - passed with the default timeout: `events.test.ts` 53/53, `role-definitions.test.ts` 47/47, `giving/statements.db.test.ts` 24/24, `domains/service.db.test.ts` 101/101;
+  - passed with `--testTimeout=120000`: `org-features.test.ts` 29/29, `giving/two-factor-agreement.test.ts` 3/3, `giving/connection.db.test.ts` 39/39, `calendar.test.ts` 142/142;
+  - `db/domain/invitations.db.test.ts`: 66/66 tests pass; only the 30 s `afterAll` at `:219` timed out, and it left nothing behind.
+- **`src/lib/db/fixture-deletable.test.ts:199` and `:224`: an environmental leak, not a code defect.**
+  - Two stamped `people` rows named "Waiting ForSession" were created at 21:08 UTC on 2026-10-22 by `src/lib/directory.test.ts:1767` during an interrupted Phase 4 run, hours before this verification.
+  - Their deletion window has expired, so they can no longer be deleted on this pipeline branch, and the canary will stay red there until the branch is deleted.
+  - That test's teardown (`:1675`) is sound, and my full run added no stamped rows.
+- **This pipeline's DB files all passed in the full run:** `participant-roll.db.test.ts`, `community.db.test.ts`, `roll-derive-parity.db.test.ts`, `roll.test.ts`, `people.test.ts`, `directory.test.ts`, `designation-parity.db.test.ts`.
+
+**Isolation suite as `presby_app`** (confirmed `rolbypassrls = f`): `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/participants/test-rls-61.sql` exits 0 with 34 passes.
+
+**Integration patch: FAIL.** `git apply --check scripts/participants/test-rls.sql.integration.patch` fails with `patch failed: scripts/test-rls.sql:8578`.
+- The last hunk (patch file line 106, `@@ -8578,3 +8604,12 @@`) expects `\ir invitations/test-rls-59.sql` to be the file's last line.
+- The origin/main merge at 1e97a81, after Batch A wrote the patch, appended the 0060 block. The file now ends at `scripts/test-rls.sql:8588` with `\ir designation-revoke/test-rls-60.sql`.
+- Hunks 1–7 (section 20d, the 44a counts) still apply cleanly (checked with the last hunk removed). Section 60 asserts nothing 0061 changes.
+- **Not completed:** a full patched `test-rls.sql` run on this branch. A network drop killed the first attempt, and I stopped the second myself after misreading elapsed time. Batch A's pre-merge patched run stands (1120 passes, three failures that already existed). The post-merge run on `development` (Rule 16) remains the gate.
+
+**Live-catalog probes, as `presby_app` on the pipeline branch, each rolled back:**
+
+| Probe | What refused it |
+|---|---|
+| P1: insert an approved roll row of valid shape | the restrictive policy `roll_actions_insert_pending_only` (42501, named in the error), as designed |
+| P2: the same row as `pending` | allowed, which confirms P1 was refused by the policy and not a CHECK or trigger |
+| P3: pending `profession_of_faith` with a null `resulting_roll` | the CHECK `roll_actions_resulting_roll_matches_kind` (F173 is now a database rule) |
+| P4: call `presby_participant__actor_may_propose` | no execute grant ("permission denied for function") |
+| P6: record function with an unknown user id | the function's identity check: the one uniform message |
+| P7: void function with no org setting | the same uniform message |
+| **P5: insert pending, then UPDATE to approved** | **nothing: it succeeds** |
+
+P5 is the documented residual. The restrictive policy covers INSERT only, and the approval UPDATE is gated only in the application, on `roll.approve`. Phase 2 R5 and DECISION-198(b) assign closing it to Increment 2. A second note: `presby_platform` holds INSERT/UPDATE/DELETE on `roll_actions` and the restrictive policy doesn't cover it, but it can't log in (`rolcanlogin = f`), so it isn't a live path.
+
+**Fresh install** (throwaway branch with an empty database; no connection details printed):
+- **Migrations:** I copied `drizzle/` to the scratchpad and added the `0061_presby_participant_roll` journal entry that integration will add. `drizzle-kit migrate` then applied all 61 migrations (0000–0061, with 0058 reserved) to the empty database. **No migration failed.**
+- **Parity and seed:** `check:schema-parity` compared 85 tables with 0 failing. `npm run db:seed` succeeded, with all four DB URLs overridden in the command environment only; 39 flags and 3 roles landed on the fresh database.
+- **0061 catalog confirmed:**
+  - `roll.propose` and `roll.approve` (tier 1, module `roll`) are present;
+  - the clerk template holds `{directory.view, roll.propose, statistics.publish}`;
+  - both definer functions are `prosecdef`, with `search_path=public, pg_temp`, owned by `neondb_owner`, and executable only by `presby_app`; the actor helper has no grant;
+  - FORCE RLS is on; the restrictive policy, all three CHECKs (validated) and `roll_actions_one_live_void_idx` exist.
+- **Idempotence:** re-applying 0061 by hand exited 0.
+- **`presby_app` role:** it already existed on that branch's cluster, inherited from the parent branch. Migration 0009 creates it `if not exists` as `nobypassrls` with no LOGIN, so a truly new cluster gets the role from the migrations, but its login and password must be set separately (as the CI composite action does).
+- `ledger.approve` is still missing on a fresh install (known, out of scope).
+- Without the journal entry, `db:migrate` stops at 0060; that entry is already on the integration hand-off list.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+Run from a hardlinked scratchpad copy; Playwright started its own dev server on port 3000 with the test fakes.
+
+**Targeted set: 58 passed, 0 failed, 9.5 min.** (The first attempt was lost to the network outage; every failure in it was a `NeonDbError: fetch failed`.)
+- `e2e/community-participants.spec.ts` 9/9: the participant lifecycle, the visitor and already-here step, the member proposal, and nav plus empty states, each at desktop and at 360 px; plus the degrade at 360 px.
+- `e2e/community-redirect.spec.ts` 3/3: 308 with the query intact, bare and nested paths, and a signed-in bookmark landing on the new page.
+- `e2e/hydration/community-participant-dialogs.spec.ts` 1/1.
+- `e2e/custom-domains/lockdown.spec.ts` 30/30 (`custom-hosts` project), including the old and new paths as the neutral 404.
+- `e2e/member-calendar.spec.ts` 15/15. **`:273` (the event types page) passes on HEAD.** The implementer's persistent failure didn't reproduce on the code under test, so it was environmental; with it green on HEAD, no origin/main run was needed.
+
+**Giving suite, re-run once: 85 passed, 2 failed, 15 did not run (serial dependents).**
+- Failures: `giving-connect.spec.ts:220` (after "take offline" the give page still reads "on", line 273) and `giving-statements.spec.ts:264` (no "Notice emailed", line 272). `giving-connect:220` failed the same way again on a second HEAD run.
+- **Both specs also fail on origin/main** against the same database (`giving-connect:220` at line 247, `giving-statements` at line 184), so this is environmental and was there before this diff.
+- Giving's only dependency on this diff is `@/lib/audit`, which gained two keys and changed nothing else.
+- The implementer's seven connection-drop failures did not recur as such.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+The original bug (a founding administrator without `directory.view` reaching Add person, the degrade state):
+- `should keep the header, Add person and the nav, and name the missing permission` (`it("keeps the header, Add person and the nav, and names the missing permission")`): `src/app/(org)/o/[slug]/admin/community/page.test.tsx:244`.
+- `without directory.view the page keeps Add person and Visitors and names the missing permission`: `e2e/community-participants.spec.ts:280` (real browser, 360 px, passed).
+- **Would they have failed before the fix?** Not observed by running: Batch C recorded no failing-first run for these two. Confirmed by reading instead: origin/main's `admin/members/page.tsx` returns `MembersForbidden` whenever `getDirectory()` is forbidden (no Add person, generic copy), and both tests assert the opposite.
+- **Naming:** neither carries the `— regression for …` suffix (only the describe names F172).
+
+Other regressions, each with a test:
+
+| Finding | Test |
+|---|---|
+| F173 | `src/lib/people.test.ts:648` (pinned with a comment), `:1333`; `participant-roll.db.test.ts:526` |
+| F178 | `src/lib/people.test.ts:1406`; `community/new/actions.test.ts:189` |
+| F174 | `participant-roll.db.test.ts:457` |
+| R5 | `participant-roll.db.test.ts:429`, and test-rls-61 section 61b |
+
+Batch A recorded failing-first proofs for R5, the actor permission check, the org-from-GUC rule, the void `person_id` and the date bounds. Batch B recorded them for the `createPerson()` rollback and the audit-insert rollback.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+| Module | Statements |
+|---|---|
+| `src/lib/permissions.ts` | 100% |
+| `src/lib/flags.ts` | 100% |
+| `src/lib/two-factor.ts` | 91.3% (lines 35–39) |
+| New pure modules (`roll-action-kinds.ts`, `ymd.ts`, `is-uuid.ts`) | 100% |
+| `community-labels.ts` | 100% statements, 96.6% branches |
+
+All targets met.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+No `src/app/api/**/route.ts` was added or changed. These are `(org)` tenant actions, so the gate is a tenant permission (`presby_has_permission` inside the lib's `withOrgContext` transaction), not `hasFeature(FEATURES.*)`. `organizationId` comes from `resolveOrgContext()`, never from the client.
 
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| `createPersonAction` (`community/new/actions.ts:168`) | yes (via `resolveActingIdentity`, `:67`) | n/a (tenant) | `people.manage` always; plus `roll.propose` for participant or member (`people.ts:440-450`); the definer function re-checks |
+| `matchPersonAction` (`new/actions.ts:86`) | yes | n/a | `people.manage` (`people.ts:117`) |
+| `recordRollActionAction` (`[id]/edit/actions.ts:89`) | yes | n/a | `roll.propose` (`roll.ts:764`); a participant enrolment goes through the definer function |
+| `removeParticipantAction` (`[id]/edit/actions.ts:174`) | yes | n/a | `roll.propose` (`roll.ts:466`) and the function's actor check; the kind is fixed in the action |
+| `undoParticipantEntryAction` (`[id]/edit/actions.ts:242`) | yes | n/a | `roll.propose` (`roll.ts:590`) and the function's actor check |
+| `updatePersonAction` (moved, unchanged) | yes | n/a | `people.manage` (`people.ts:783`) |
+| Page `community/page.tsx` | yes | n/a | flag plus toggle (`:116-126`); `people.manage` for Add person and the admin views; `directory.view` through `getDirectory()`; degrade at `:186-192` |
+| Page `community/new/page.tsx` | yes | n/a | flag plus toggle; `canProposeRoll = roll.propose` (`:86`) |
+| Page `community/[id]/edit/page.tsx` | yes | n/a | flag plus toggle; Remove and Undo only with `org_portal.members_roll_action_edit` and `roll.propose` (`:152`) |
+| `community.ts` readers | n/a (lib) | n/a | `people.manage` on every export |
+
+- **Audit:** `tenant.roll_action.recorded` (`roll.ts:510`) and `tenant.roll_action.voided` (`roll.ts:653`) are written with `insertAuditRow()` in the same transaction, never `tenant.roll_action.approved`. The persisted rows are asserted in e2e (`community-participants.spec.ts:116`, `:175`).
+- **Flags:** honored at page level only; none of the actions checks `org_portal.members_create` or `members_roll_action_edit`. That matches origin/main and nearly every other `(org)` actions file (only `filings` differs). A flag never grants access, and every action is permission-gated.
+- **Native dialogs:** none. The two `confirm()` hits are local handler names inside `AlertDialog` components.
+- **`console.log`:** none in production paths.
+- **Deletes:** none in production paths or in 0061 (a source-scan test pins the latter). Removal sets `ended_on`/`ended_reason`, and a void is a new row. The deletes in the diff are all fixture teardown in tests (the fixture exemption).
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** One required check went red. It's a staged integration file, not product behavior:
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+1. **`scripts/participants/test-rls.sql.integration.patch:106`**: the final hunk no longer applies. `scripts/test-rls.sql` now ends at `:8588` with the section-60 `\ir` line merged from origin/main. Regenerate the patch against the current file so the section-61 banner and `\ir participants/test-rls-61.sql` come after section 60, then confirm `git apply --check` is clean. Hunks 1–7 need no change.
+
+To fold into the same pass (not blocking on their own):
+
+2. Add the `— regression for …` suffix to `page.test.tsx:244` and `e2e/community-participants.spec.ts:280`, for example "— regression for founding administrator cannot reach Add person (F172)".
+
+Everything else passed:
+- typecheck, lint, all eight tripwires and the unit suite;
+- the DB suite: every failure was a timeout, a dropped connection, or the leak that predates my session, and each file passed on re-run;
+- test-rls-61 as `presby_app`, the live probes, and the fresh install from empty;
+- the targeted e2e (58/58) at desktop and 360 px;
+- the feature-gate audit, the audit keys, soft deletes, and no dialogs or `console.log`.
+
+The giving failures and `member-calendar.spec.ts:273` are not regressions from this diff.
+
+**Pipeline-branch side effects, for the orchestrator** (the branch is throwaway):
+- The two expired "Waiting ForSession" rows keep `fixture-deletable.test.ts` red there.
+- My first e2e attempt died before its `afterAll`, so the prior flag state was lost. `org_portal.members_create`, `org_portal.members_roll_action_edit` and the e2e-alpha toggle are now on, and the `e2e_community_clerk` grant remains. Spec people were swept to 0.
+- I terminated one `presby_app` session left idle in a transaction by my own interrupted test-rls run; it was a read-only assertion block.
+- The fresh-install branch holds a migrated and seeded database and is left for you to delete.
+
+---
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (Increment 1) | FAIL: the integration patch's last hunk no longer applies after the origin/main merge; all code checks green | 2026-10-23 |
+
+## Handoff
+
+The next agent is **database-admin** (Batch A owner), to regenerate `scripts/participants/test-rls.sql.integration.patch` against the current `scripts/test-rls.sql`. Item 2 goes to whichever implementer owns those two test files (ux-developer). Re-verification is cheap: `git apply --check` on the patch plus a check of the renamed tests; nothing else needs to run again. No escalation to tech-lead: nothing here points to a design flaw.
+
+Files referenced:
+- /Users/cshenso/git/presby-platform/presby-fadir/scripts/participants/test-rls.sql.integration.patch
+- /Users/cshenso/git/presby-platform/presby-fadir/scripts/test-rls.sql
+- /Users/cshenso/git/presby-platform/presby-fadir/src/app/(org)/o/[slug]/admin/community/page.test.tsx
+- /Users/cshenso/git/presby-platform/presby-fadir/e2e/community-participants.spec.ts
+- /Users/cshenso/git/presby-platform/presby-fadir/src/lib/directory.test.ts
+
+## Fix after run 1 (orchestrator, 2026-10-23)
+
+- `scripts/participants/test-rls.sql.integration.patch` regenerated against the current `scripts/test-rls.sql` (hunks 1–7 unchanged; the section-61 banner and `\ir` now follow section 60). `git apply --check` is clean.
+- The `— regression for founding administrator cannot reach Add person (F172)` suffix was added to `page.test.tsx:244` and `e2e/community-participants.spec.ts:280`. `page.test.tsx`: 32/32 pass.
 
 ---
 

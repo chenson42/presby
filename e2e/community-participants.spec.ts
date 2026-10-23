@@ -277,7 +277,7 @@ test.describe("Community", () => {
       await setDirectoryView(sql, true);
     });
 
-    test("without directory.view the page keeps Add person and Visitors and names the missing permission", async ({ page }) => {
+    test("without directory.view the page keeps Add person and Visitors and names the missing permission — regression for founding administrator cannot reach Add person (F172)", async ({ page }) => {
       await setDirectoryView(sql, false);
       await page.goto(BASE);
       await expect(page.getByRole("heading", { name: "Community" })).toBeVisible();

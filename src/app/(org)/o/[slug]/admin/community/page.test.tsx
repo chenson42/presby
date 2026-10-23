@@ -241,7 +241,7 @@ describe("MembersPage — the degrade (DECISION-197, F172): people.manage withou
     );
   }
 
-  it("keeps the header, Add person and the nav, and names the missing permission", async () => {
+  it("keeps the header, Add person and the nav, and names the missing permission — regression for founding administrator cannot reach Add person (F172)", async () => {
     await renderLimited();
     expect(screen.getByRole("heading", { name: /^community$/i })).toBeTruthy();
     expect(screen.getAllByRole("link", { name: /add person/i }).length).toBeGreaterThan(0);

@@ -1,6 +1,8 @@
---- a/scripts/test-rls.sql	2026-10-22 13:17:24
-+++ b/scripts/test-rls.sql	2026-10-22 13:17:24
-@@ -1412,6 +1412,11 @@
+diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
+index 0b0a9e8..58741e7 100644
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
+@@ -1412,6 +1412,11 @@ rollback;
  --      cleanup, same latitude invariant 4's own text grants pending rows
  --      for UPDATE); an APPROVED row's DELETE is still rejected, not
  --      silently no-op'ed.
@@ -12,7 +14,7 @@
  begin;
    select set_config('app.current_org_id', :ALDER, true);
    insert into roll_actions (id, organization_id, person_id, kind, effective_date,
-@@ -1426,7 +1431,9 @@
+@@ -1426,7 +1431,9 @@ begin;
    insert into roll_actions (id, organization_id, person_id, kind, effective_date,
                              resulting_roll, approval_status)
    values ('bbbbbbbb-0000-0000-0000-0000000000b2', :ALDER, :ELDER, 'other_gain',
@@ -23,7 +25,7 @@
    do $$
    begin
      delete from roll_actions where id = 'bbbbbbbb-0000-0000-0000-0000000000b2';
-@@ -7873,10 +7880,20 @@
+@@ -7873,7 +7880,17 @@ begin;
    select assert_eq(
      (select count(*) from app_role_permissions
        where role_id = '00000000-0000-0000-0000-000000000004'),
@@ -34,18 +36,15 @@
 +      where role_id = '00000000-0000-0000-0000-000000000004'
 +        and permission_key in ('roll.propose', 'directory.view')),
 +    2, 'DECISION-199 (drizzle/0061): keeping and reading the rolls is the clerk''s constitutional duty (DECISION-078) - roll.propose and directory.view');
-   select assert_eq(
-     (select count(*) from app_role_permissions
-       where role_id = '00000000-0000-0000-0000-000000000004'
-+        and permission_key = 'roll.approve'),
-+    0, 'DECISION-199: and NEVER roll.approve - the Session decides collectively; no role carries both roll keys');
 +  select assert_eq(
 +    (select count(*) from app_role_permissions
 +      where role_id = '00000000-0000-0000-0000-000000000004'
-         and permission_key = 'statistics.publish'),
-     1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
++        and permission_key = 'roll.approve'),
++    0, 'DECISION-199: and NEVER roll.approve - the Session decides collectively; no role carries both roll keys');
    select assert_eq(
-@@ -8036,7 +8053,7 @@
+     (select count(*) from app_role_permissions
+       where role_id = '00000000-0000-0000-0000-000000000004'
+@@ -8036,7 +8053,7 @@ begin;
     where t.organization_id is null and t.key = 'congregation_stated_clerk';
    select assert_eq(
      (select count(*) from app_role_permissions where role_id = :FA_OFFICE_ROLE),
@@ -54,7 +53,7 @@
  
    -- Person-arm grants. granted_by is deliberately NULL here: the resolver's
    -- four arms never read it (Phase 2, Two Hierarchies — it is provenance
-@@ -8060,15 +8077,22 @@
+@@ -8060,15 +8077,22 @@ begin;
        where presby_has_permission(:FA_PERSON, :ALDER, k)),
      8, '44a (i): every key of the administration half resolves (DECISION-155''s enumerated tier-1 set, as amended by F118 — eight keys)');
  
@@ -82,7 +81,7 @@
  
    select assert_eq(
      (select count(*) where presby_has_permission(:FA_PERSON, :ALDER, 'statistics.publish')),
-@@ -8076,8 +8100,10 @@
+@@ -8076,8 +8100,10 @@ begin;
  
    -- No wildcard, proven by the permissions the bundle must NOT carry
    -- (Key Invariant: No Role Carries a Wildcard). Tier 3 entire, plus the
@@ -94,7 +93,7 @@
    select assert_eq(
      (select count(*) from unnest(array[
         'demographics.manage', 'disabilities.manage', 'medical.manage',
-@@ -8091,7 +8117,7 @@
+@@ -8091,7 +8117,7 @@ begin;
    select assert_eq(
      (select count(*) from unnest(array[
         'children.roster', 'ledger.approve', 'per_capita.manage',
@@ -103,15 +102,15 @@
         'branding.manage', 'events.manage', 'directory.view_hidden',
         'credentials.manage']) as k
        where presby_has_permission(:FA_PERSON, :ALDER, k)),
-@@ -8578,3 +8604,12 @@
- --     (included by scripts/seed-dev.sql), so it is never run against production.
+@@ -8586,3 +8612,12 @@ rollback;
+ --     script. It needs the test helpers, so it is never run against production.
  -- ===========================================================================
- \ir invitations/test-rls-59.sql
+ \ir designation-revoke/test-rls-60.sql
 +
 +-- ===========================================================================
 +-- APPENDED SECTION - pipeline/founding-admin-directory (integration).
 +-- 61. Participant roll on record (drizzle/0061_presby_participant_roll.sql).
-+--     Its own file, as 46, 47 and 59 above; \ir resolves relative to this
++--     Its own file, as 46, 47, 59 and 60 above; \ir resolves relative to this
 +--     script. It needs the test helpers and scripts/seed-dev.sql's Alder Creek
 +--     fixture (no seed change), so it is never run against production.
 +-- ===========================================================================

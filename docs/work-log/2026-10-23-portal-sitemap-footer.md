@@ -21,8 +21,8 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-23 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named | 2026-10-23 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green; see Phase 4 | 2026-10-23 |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete | PASS | 2026-10-23 |
+| 6 — Shipped vs intent | analyst | In progress | — | — |
 
 ---
 
@@ -611,46 +611,171 @@ Not done here (orchestrator, Rule 16): release notes, what's-new, functionality 
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+*Recorded verbatim.*
+
+**Date:** 2026-10-23
+**Verified by:** qa (read-only; no repo file edited. Bash wrote only to the session scratchpad and two scratch copies outside `~/git/presby-platform`, both since deleted.)
+**Commit under test:** `354547c`, worktree `presby-nav`, diffed against `origin/main` = merge base `e51d137`.
+
+**Scope run:**
+- **In full:** typecheck, lint, `npm run check`, the unit suite.
+- **DB-backed:** `src/lib/org-features.test.ts` alone. No other DB suite was run, because the diff touches no migration, `authz.ts`, `src/lib/db/` or shared fixture.
+- **e2e:** `portal-footer-sitemap`, `community-participants`, `member-calendar` and `portal-home-cards`, at desktop and 360px. These run from a hardlinked scratch copy against its own dev server, not the full chromium suite (the diff touches no `proxy.ts`, `auth.ts`, layout, `e2e/support/` or `playwright.config.ts`). Implementer-reported runs of `branded-signin` and `giving-admin` were not repeated.
+- **Database switch mid-run:** the coordinator moved `.env.local` from `pipeline-person-emails` (ep-winter-leaf) to `pipeline-fixes-and-nav` (ep-lively-union). Everything below was re-run on the new branch. Old-branch results are kept as supporting evidence.
+- **Not auth-touching.** No schema change, so no Schema/RLS audit applies.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: PASS (exit 0).
+`npm run lint` (`--max-warnings=0`): PASS.
+`npm run check`: PASS. All eight tripwires passed, including `check:brand-scope`.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+Total: 9787 | Passed: 7629 | Failed: 0 | Skipped: 2158 | Duration: 25.7s
+- Test files: 506 passed, 72 skipped. The 72 are the `hasDb`-guarded DB-backed files, which need `.env.local`. This matches the implementer's counts exactly and is the designed split, not a hidden pass.
+- Key files run alone: `layout.test.tsx`, `portal-menu.test.ts`, `portal-menu-parity.test.tsx`, `portal-footer.test.tsx`, `portal-nav.test.tsx`, `visible-tiles.test.ts`. Result: 6 files, 105 passed, 0 skipped.
+
+**DB-backed `src/lib/org-features.test.ts`.** Not a flake: two cases always run over the 20 s budget. They predate this pipeline and are not a regression.
+
+| Run | Branch | Timeout | Result |
+|---|---|---|---|
+| 1 | old | 20 s | 27 passed, 2 failed |
+| 2 | old | 120 s | 29/29 passed |
+| 3 | new | 20 s | 25 passed, 4 failed |
+| 4 | new | 120 s | 29/29 passed |
+
+- **The two slow cases:** `members_create` and `calendar` "every axis x category x toggle combination", at `src/lib/org-features.test.ts:532`. With the timeout raised they take 25–29 s each, because 18 combinations make remote Neon round trips.
+- **The extra failures are a cascade.** A timed-out loop keeps deleting orgA's toggle rows while the next tests run. That produced the assertion failures at `:549`, at `:566` ("follows the WORSHIP category") and in "an uncatalogued key".
+- **Pre-existing:** against `origin/main`, the only test change is the label literal at `:470`, and `org-features.ts` changes only a comment. Both `it.each` cases have been unchanged since `45ababe` (2026-10-15).
+- The `:470` "Community" assertion passed in every run.
+- Suggested TODO for the orchestrator: give those two cases their own timeout.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+Final results on `pipeline-fixes-and-nav` (desktop and 360 are both covered inside each spec):
+
+| Spec | Result |
+|---|---|
+| `e2e/portal-footer-sitemap.spec.ts` | 7/7 passed: 360 and 1024 × 2, plus 3 Administration cases. The implementer reported 6; there are 7. |
+| `e2e/portal-home-cards.spec.ts` | 11/11 passed |
+| `e2e/member-calendar.spec.ts` | Run 1: 13/15. Run 2 (single-file re-run): 15/15 |
+| `e2e/community-participants.spec.ts` | 8/9 on the final run; one pre-existing failure, see below |
+
+**member-calendar run 1:** the failures at `:134` (a 5 s navigation poll) and `:140` (a 90 s `page.goto`) were cold-compile timeouts on a freshly cleared `.next`. Run 2 was clean, and the spec was also 15/15 on the old branch.
+
+**community-participants:**
+- **Run 1:** 1 passed, 2 failed, 6 did not run. Neon connectivity dropped: `NeonDbError: Error connecting to database: TypeError: fetch failed` from the `support/community-fixture.ts:169` sweep, plus `ERR_ABORTED` at `:203`. This is environmental.
+- **Run 2:** 8/9 passed. One failure, below.
+- **Old branch:** 9/9 passed.
+- **The failure:** `community-participants.spec.ts:280` "without directory.view … — regression for … (F172)", at `:291`. `getByText(/the directory\.view permission/i)` was expected to have count 0 and had 1 after clicking Visitors. It failed again when re-run alone.
+- **Pre-existing, not this diff:** the `origin/main` build (`e51d137`, own dev server on port 3113) fails the same way at `:291`, twice, on the same branch.
+- **Cause:** the trace shows the Visitors RSC request sent headers at 24 ms and then streamed for longer than the assertion's 5 s window. The page's own first load took about 4.7 s on this branch. The failure screenshot shows the Visitors view rendered with the notice gone.
+- **The line this diff changed passes in every run:** the `level: 1` locator at `:283`.
+- The presby-fix QA shares this branch and may hit the same failure.
+
+**By-eye browser check.** Real Chromium against the PR build. Pages: `/o/e2e-alpha` and `/directory` as org-single, and `/admin/community` as congregation-clerk, at 360 and 1280.
+- Overflow was 0 everywhere.
+- Every footer link was at least 44 px.
+- Two columns of 144 px at 360, four of 258 px at 1280.
+- Long labels wrap, "Coming soon" renders as plain text, and there is no `<details>` and no `-brand` class.
+- Screenshots read correctly.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+This is a Feature, not a bug fix, so failing-then-passing does not apply. The new guards are:
+
+- `buildPortalMenu — Administration truth table` (`src/lib/org-portal/portal-menu.test.ts:135`) guards against Administration showing without both `admin_hub` and an administer tile (Note 3).
+- `never copies an administer tile into any children (Q1)` (`portal-menu.test.ts:169`) guards against a footer that lists individual admin tools.
+- `has unique top-level labels over the real registry` (`portal-menu.test.ts:192`) guards against duplicate menu titles.
+- `is plain serializable data` (`portal-menu.test.ts:203`) and `portal-nav.test.tsx:109` guard against the non-plain-prop live 500 at the client boundary.
+- `nav labels, in order, equal Home then the footer's column headings`, plus three menu-shape variants (`src/components/org-portal/portal-menu-parity.test.tsx:107-150`), guard against nav/footer title drift, which was the operator's original complaint.
+- `matches #domain-<key> to a rendered <section id>` (`portal-menu-parity.test.tsx:153`) guards against a nav anchor with no target.
+- `skips the administer read entirely when org_portal.admin_hub is off` (`src/lib/org-portal/visible-tiles.test.ts:519`) guards the Ruling 7 cost mitigation.
+- `makes headings plain text, never links` and `gives Administration exactly one link` (`src/components/org-portal/portal-footer.test.tsx:188,217`) guard against a second "Community" link and Q1.
+- e2e: `portal-footer-sitemap.spec.ts:144,159,174` guard the Administration rule end to end in both nav and footer. `:99` guards 360px overflow and 44 px targets.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100% (target 100)
+- `src/lib/two-factor.ts`: 91.3% (target 90+; lines 35–39 uncovered, untouched by this diff)
+- `src/lib/flags.ts`: 100% (target 100)
+- New code: `src/lib/org-portal/portal-menu.ts` 100%, `src/lib/org-portal/visible-tiles.ts` 100% (statements, branches and functions)
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+No protected routes touched. The diff adds or changes no `route.ts`, no `actions.ts` and no `"use server"` action.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
 |-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| none (no route or server action in the diff) | n/a | n/a | n/a |
+
+The requested invariant checks, verified by reading the source:
+
+- **Parity holds by construction.**
+  - `portal-nav.tsx:53-57` maps every `getPortalMenu()` entry.
+  - `portal-footer.tsx:102-107` renders Home plus every non-home entry that has children.
+  - The builder always gives a domain entry at least one child, and Administration exactly one, so the two lists are the same.
+  - The live DOM matched on all six page/width combinations: Portal nav = Home, Community, Worship & Events, Governance & Courts, Reports & Insights, Communications, Administration, and the footer headings were the same after Home.
+- **Administration rule.**
+  - `portal-menu.ts:118` is `adminHubEnabled && administerTiles.length > 0`.
+  - Its only child is "Administration overview" → `/o/<slug>/admin`.
+  - `administerTiles` is used only for `.length`.
+  - The loader skips the administer read when the hub is off (`visible-tiles.ts:135-141`).
+  - Confirmed at runtime by the e2e hub-off and hub-on-with-no-tile cases.
+- **No permission check added (DECISION-003/162).** No added non-test line contains `hasFeature`, `hasPermission`, `FEATURES.` or a grant lookup.
+- **Footer only in the ok branch.**
+  - `layout.tsx:112-146`: `showFooter`, `orgOrganizationType` and `tileViewer` are set only inside `resolved.kind === "ok"`, and the footer render at `:195` requires all three.
+  - `getPortalMenu` is called only from the nav and the footer.
+  - `layout.test.tsx` is unchanged and green, including the forbidden, ended, not-found and no-session cases.
+- **Brand scope.**
+  - `check:brand-scope` passes.
+  - The footer uses only semantic tokens; the `-brand`, `bg-primary` and `<details>` grep hits in `portal-footer.tsx` are comments only.
+  - No client file imports `portal-menu`.
+  - F135 holds: `tiles.ts` does not import `portal-menu.ts`.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**PASS**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+Every required check is green. The two red items in the targeted runs are pre-existing, each with baseline evidence:
+- the `org-features.test.ts` 20 s budget, identical code on `origin/main`;
+- the F172 test at `community-participants.spec.ts:291`, which fails identically on `origin/main` on `pipeline-fixes-and-nav`.
+
+Neither is caused by this diff.
+
+**For the orchestrator (not blocking):**
+1. **Possible leftover on `pipeline-fixes-and-nav`.** Community run 1's afterAll aborted on the Neon connectivity error before `removeCommunityFixture` restored the toggle.
+   - The e2e-alpha row in `organization_feature_toggles` (`org_portal.members_create`) now reads `enabled=true`, set by that run at 18:09:24Z.
+   - I did not snapshot that table before the run, so its prior value is unknown. Delete the row if it did not exist before.
+   - Verified clean after the runs:
+     - all 39 `feature_flags` match the pre-run snapshot, on both branches;
+     - `roll_actions_freeze` and `group_memberships_reject_derived` are enabled (`O`);
+     - no `E2ECommunity` fixture people remain.
+2. **Phase 6 observation (cosmetic, does not affect behaviour):** the footer's Home link uses `flex` without `w-fit`, so its click target spans the full row (312 px at 360, 1104 px at 1280). The phone link already uses `w-fit`.
+3. **TODO candidates:**
+   - a per-test timeout for the two `org-features.test.ts:532` cases;
+   - the F172 `:291` assertion's 5 s window, which is too short on a slow branch.
+
+---
+
+**Per-Phase Status row:**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete | PASS | 2026-10-23 |
+
+**Handoff:** next agent is **analyst** (Phase 6, shipped vs intent). Carry forward the toggle-row note (item 1) and the Home-link observation (item 2). The Phase 4 notes still stand: release notes, what's-new, functionality map lines 27 and 72, DECISION-220/221/222 and the three TODO lines are outstanding.
+
+Relevant files:
+- /Users/cshenso/git/presby-platform/presby-nav/src/lib/org-portal/portal-menu.ts
+- /Users/cshenso/git/presby-platform/presby-nav/src/lib/org-portal/visible-tiles.ts
+- /Users/cshenso/git/presby-platform/presby-nav/src/components/org-portal/portal-footer.tsx
+- /Users/cshenso/git/presby-platform/presby-nav/src/app/(org)/o/[slug]/portal-nav.tsx
+- /Users/cshenso/git/presby-platform/presby-nav/src/app/(org)/o/[slug]/layout.tsx
+- /Users/cshenso/git/presby-platform/presby-nav/e2e/portal-footer-sitemap.spec.ts
+- /Users/cshenso/git/presby-platform/presby-nav/e2e/community-participants.spec.ts
+- /Users/cshenso/git/presby-platform/presby-nav/src/lib/org-features.test.ts
 
 ---
 

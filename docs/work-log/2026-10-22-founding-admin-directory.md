@@ -25,6 +25,7 @@
 | Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
+| Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23 | — | — |
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
@@ -4644,3 +4645,130 @@ Files read:
 
 - **"Warn and confirm."** Option 3: inviting a visitor needs an audited acknowledgement from the sender that the visitor will be able to see the directory. Narrowing `active_membership` is deferred to Increment 3. Production measurement (orchestrator, read-only, 2026-10-22): 0 case-duplicate email groups in `users`, so `users_email_lower_uq` applies cleanly.
 
+
+---
+
+# Increment 2 — Phase 4
+
+## Batch A (migrations 0062, 0063) — database-admin, 2026-10-23
+
+Worktree `presby-fadir`, branch `pipeline/session-approval`, Neon branch `pipeline-session-approval` (`ep-autumn-mountain-axe0l5il`). Built to Phase 3's Data Model and section order. DECISION-206 was confirmed by the operator, so the pastor artifacts (R10-R12, S1) are in.
+
+### Migration mode
+
+**Hand-written.** Apply: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0062_presby_session_approval.sql` (and the same for `0063_presby_roll_decide_lockdown.sql`, **only after Batch B's code is deployed**, per R16). No `_journal.json` edit (Rule 16). Integration adds `{ idx: 62, tag: "0062_presby_session_approval" }` and `{ idx: 63, tag: "0063_presby_roll_decide_lockdown" }`.
+
+- **0062 is applied on the pipeline branch.**
+  - The whole file was applied twice. Both runs exit 0.
+  - First run: `INSERT 0 13` groups (6 Session plus 7 Board of Deacons, matching Measurement 1), `INSERT 0 8` session_member grants (9 congregations minus Alder's existing role), `UPDATE 1` (Rowan's pastor term re-materialised).
+  - Second run: `INSERT 0 0`, `INSERT 0 0`, and the no-op touch `UPDATE 1`.
+  - Row counts and md5 digests of `roll_actions`, `app_roles`, `app_role_permissions`, `role_grants`, `groups`, `group_memberships`, `officer_terms` and `memberships` are identical after run 1 and run 2.
+  - The `roll_actions` digest moved only because the row text gained three null columns. A digest of the original 15 columns equals the pre-apply digest. No row carries the new columns.
+  - It was re-applied twice more as the restore step of the failing-first proofs. Exit 0 each time.
+- **0063 is NOT applied. The branch is at the 0062 state.**
+  - `neonctl` here is authenticated to a different Neon account, so no child branch could be made. The owner also cannot `SET ROLE presby_app`.
+  - So 0063 was applied for real twice (both exit 0, data snapshot unchanged), the lockdown-state runs and proofs below were done, and then it was reverted with exactly the rollback statements in 0063's header (plus `presby_platform`'s grants).
+  - Verified afterwards: the ACL equals the baseline, the policy text is 0061's, and the terminal-stamps CHECK is absent.
+  - Batch B applies 0063 before its DB gate, as designed.
+- **Fresh install.** A throwaway empty database was created on the pipeline branch and then dropped. The recipe was QA's from Increment 1:
+  - `drizzle/` copied to the scratchpad with the two journal entries added;
+  - `drizzle-kit migrate`: 63 migrations (0000-0063, 0058 reserved), none failed;
+  - every 0062/0063 object present (5 functions, 6 CHECKs, the trigger, both indexes, the narrowed policy, `presby_app` without UPDATE or DELETE);
+  - `db:seed` exit 0 (39 flags, 6 roles);
+  - `check:schema-parity` 0 failing;
+  - 0062 and 0063 hand re-applied twice, exit 0.
+
+### Files
+
+- **Created:**
+  - `drizzle/0062_presby_session_approval.sql`;
+  - `drizzle/0063_presby_roll_decide_lockdown.sql`;
+  - `src/lib/db/domain/session-approval.db.test.ts` (49 tests);
+  - `src/lib/db/domain/roll-decide-lockdown.db.test.ts` (10 tests: 5 catalog tests that run in either state, 5 behavioural tests that run only when 0063 is applied);
+  - `scripts/session-approval/test-rls-62.sql` (53 assertions, as `presby_app`, requires both migrations);
+  - `scripts/session-approval/test-rls.sql.integration.patch` (against the current file with section 61; `git apply --check` clean, +54/-31). It rewrites section 5 and 20d for the lockdown state and appends `\ir session-approval/test-rls-62.sql` with a banner.
+- **Modified:**
+  - `src/lib/db/domain/roll.ts` and `officers.ts` (mirror: three columns, the `decided_by` FK, four CHECKs, both indexes, and NOT-EXPRESSIBLE notes for the policy, revoke, triggers and definers);
+  - `src/lib/db/domain/participant-roll.db.test.ts` and `scripts/participants/test-rls-61.sql`. These are the Increment 1 assertions 0062/0063 change: policy text relaxed to the half that holds in both states, CHECK list scoped to 0061's three, void-index predicate updated, the section 4 replay drops the R7 index inside its rolled-back transaction, parity inserts roll back per savepoint, pending positive controls use a gain kind, and a denied fixture carries its stamps;
+  - `docs/schema-design.md`: new subsection "Session approval and withdrawal", plus `docs:erd` (one new edge, `decided_by`).
+
+### Deviations from Phase 3
+
+1. **The S1 trigger also fires on `ends_on` and refuses re-opening a closed pastor term**, or moving an open one onto a rolled person. Phase 3 said `UPDATE OF person_id, office` only, which left re-opening as a bypass. Ending, shortening or extending an already-open term never fails, which keeps Phase 3's intent. It raises with `constraint = 'officer_terms_pastor_no_roll'`, so Batch B maps it without parsing messages.
+2. **0063 also revokes UPDATE and DELETE from `presby_platform`.** It cannot log in and no path uses them; the grant documents intent. The rollback note says they need not be restored.
+3. **Two extra stop-blocks in 0062:** the `court` group type is missing (section 6), and a pastor-office term sits at an organization with no Session group (section 8c, which would otherwise raise inside the touch). Both measured 0.
+4. **The void-index re-predicate is guarded on its own definition** (drop only if the old predicate is present), so a re-apply does not churn the index.
+5. **On deny, `self_approved` and `self_target` are false.** They are computed on approve only. The deny contract has no such fields.
+6. **The backfilled grant's `starts_on` is `current_date`** (Phase 3 was silent).
+7. **The tests carry SQL-literal lists** (outcomes, approvable kinds, counted kinds, Session, pastor and office lists) because `roll-action-kinds.ts` and `officer-offices.ts` are Batch B's. Batch B replaces them with imports.
+8. **`roll.test.ts` is not touched; it is handed to Batch B** (below). In the 0062 state its `beforeAll` hits R7 (four pending rows for one subject), so its 47 tests skip.
+
+### Gates
+
+- **Full `scripts/test-rls.sql` as `presby_app`** (scratch copy, stop-on-error off):
+
+  | Run | Passes | Failures |
+  |---|---|---|
+  | Baseline, before 0062 | 1138 | 4 pre-existing: presbytery members 3≠2; 2fa definer; DECISION-152 count; `46i` |
+  | After 0062, unpatched | 1137 | The same 4, plus the one Phase 3 predicted: section 5's `denial_reason = 'editable'` on a pending row (line 276) |
+  | Lockdown state, **patched** | 1192 | Only the same 4 pre-existing |
+- **Standalone suites as `presby_app`:**
+  - `test-rls-62.sql`: exit 0, 53 passes (lockdown state);
+  - `test-rls-61.sql`: exit 0, 34 passes, in both the 0062 and lockdown states.
+- **DB Vitest, serial.**
+  - Final run (0062 state), the three Batch A files: 96 passed, 5 skipped (the behavioural half of the lockdown test).
+  - Lockdown state: all three files green, 100 tests, including lockdown 10/10, after the two fixture-stamp fixes.
+  - Blast radius (0062 state): `people`, `officers`, `community.db`, `org-provisioning`, `role-grants`, `role-definitions`, `directory`, `people-update`, `org-portal/home-data`, `org-portal/find-person`, `designation-parity.db`: 324 tests. The first run had 3 × 20 s timeouts in affiliation and org-delete cases. `org-provisioning` re-ran 31/31.
+- **Other checks:**
+  - `check:schema-parity`: 85 tables, 0 failing (7 pre-existing allowlisted);
+  - `typecheck` and `lint` clean;
+  - `npm run check` (all tripwires) passes;
+  - `npm run test`: 504 files passed, 7604 tests.
+
+### Failing-first proofs
+
+Each mechanism was broken on the branch, then tested, then restored by re-applying the migration file, then re-tested green (section 62 exit 0 with 53 passes; Vitest 49/49 and 10/10).
+
+| Mechanism | Broken by | Failure observed |
+|---|---|---|
+| (a) decide actor check (`roll.approve`) | identity clause replaced by `or false` | `session-approval.db.test.ts` "decide: no org context…" and "an elder whose membership has ended…" (`:341` / `:764`, "expected the uniform identity refusal"); `test-rls-62.sql` 62d line 277 errors: the function went on to approve for a user with no person (FK violation on `approved_by`) |
+| (b) decide org predicate (step 1) | `and ra.organization_id = v_org` removed | "not_found…" `:418`: another org's row came back `already_on_roll` instead of `not_found` |
+| (c) withdraw actor check (`roll.propose`) | identity clause replaced by `or false` | "withdraw: … an approve-only elder…" `:341` |
+| (d) denied/withdrawn freeze | the 0062 freeze branch removed | "as the owner, UPDATE and DELETE of an approved, a denied and a withdrawn row…" (statement not rejected) |
+| (e) one pending per person | index dropped | "R7 and R1d…" `:576`; "a second pending row…" (not rejected); 62a line 103; 62b line 211 "FAIL 62b - a second pending roll action for one person was accepted (R7)" |
+| (f) S1 pastor guard | trigger dropped | structure `:592`; both S1 tests (not rejected); 62f line 437 "FAIL 62f - an open pastor term was recorded for a person on the roll (S1)" |
+| (g) pastors in the Session CASE | three CASE arms removed | CASE test `:1259` ("installed_pastor: expected null to be 'session'"); touch `:1280`; inheritance `:1291`; DECISION-206 pastor-approves `:1053`; live-function pin `:1406` |
+| (h) 0063 revoke | `grant update, delete … to presby_app` | 62a line 77 "FAIL 62a (R16, 0063): presby_app holds NEITHER UPDATE NOR DELETE…"; 62c line 227 "FAIL 62c - presby_app approved a roll action by plain UPDATE (F180)"; `roll-decide-lockdown.db.test.ts:299` and the plain-SQL test |
+| (i) 0063 narrowed policy | 0061's pending-only policy restored | 62b line 165 "FAIL 62b - presby_app inserted a pending LOSS row (F191)"; the lockdown F191 test |
+
+Proof (h) exposed a test defect, fixed before commit: the lockdown test's "is 0063 applied?" switch read the very privilege under test, so a re-grant would have skipped the behavioural half silently. It now reads 0063's own CHECK, and a live-catalog privilege assertion was added.
+
+### Handoff to Batch B (api-developer)
+
+- **Call shapes.** Inside the caller's `withOrgContext` transaction, with no org parameter:
+  - `select * from presby_decide_roll_action($id::uuid, 'approve'|'deny', $minute::text, $reason::text, $actingUserId::uuid)` returns exactly one row `{ outcome, roll_action_id, subject_person_id, action_kind, action_effective_date, affects_filed_period, shadowed_by_kind, shadowed_by_date, self_approved, self_target }`;
+  - `select * from presby_withdraw_roll_action($id::uuid, $reason::text, $actingUserId::uuid)` returns `{ outcome, roll_action_id, subject_person_id, action_kind, action_effective_date, self_proposed }`;
+  - the identity refusal is SQLSTATE `42501` with message exactly `roll_actions: this roll decision is not permitted`;
+  - on a non-`ok` outcome nothing was written, but the caller must still throw to roll back its own transaction.
+- **Vocabularies:**
+  - decide: `ok, invalid_decision, reason_required, reason_too_long, minute_reference_too_long, not_found, already_decided, not_approvable_kind, person_deceased, person_merged, membership_ended, holds_pastoral_office, already_on_roll, active_elsewhere, provisioning_incomplete`;
+  - withdraw: `ok, reason_required, reason_too_long, not_found, already_decided`.
+- **Errors to map:**
+  - R7: `23505` with `constraint = 'roll_actions_one_pending_per_person_idx'` becomes `pending_exists`;
+  - S1: `23514` with `constraint = 'officer_terms_pastor_no_roll'` becomes `on_roll`;
+  - a Session or pastor office at a non-congregation: `23503` "organization % has no derived group session" becomes `invalid_office_for_org`.
+- **`src/lib/roll.test.ts` needs rework for R7 and 0063:**
+  - the `beforeAll` `pendingAction` ×4 for one subject (`:334-352`);
+  - the Finding 2 test (`:579`, a further pending row for that subject; after 0063 the DELETE is 42501);
+  - the FORGERY test (`:875`, several pending proposals for one subject through `recordRollAction`, which is now `pending_exists` after the first);
+  - the two B-M3 pending voids for that subject (`:1052`, `:1092`);
+  - plus everything Phase 3 already listed (approve/deny through the definers, the freeze at `:532` becomes 42501, teardown).
+- **Swap the SQL-literal lists** at the top of `session-approval.db.test.ts` and `roll-decide-lockdown.db.test.ts` for the TypeScript constants.
+- **Apply 0063 (twice) before your DB gate.** Then the lockdown test's behavioural half runs (10/10 expected).
+
+### Integration hand-offs (orchestrator, Rule 16)
+
+- `_journal.json`: the two entries above.
+- `git apply scripts/session-approval/test-rls.sql.integration.patch`, then re-run `scripts/test-rls.sql` as `presby_app` on merged `development` **with both 0062 and 0063 applied**. The patched sections 5 and 20d and section 62a assume the lockdown state; the unpatched file fails section 5 on 0062 alone.
+- No `seed-dev.sql` change. F190 is unchanged; section 62 never relies on Tobias lacking `roll.approve`.
+- Re-measure production before deploy (0062 header): congregations without court groups, org-owned `session_member` roles, distinct offices, pending duplicates.

@@ -106,6 +106,12 @@ jobs:
             echo "APP_DATABASE_URL=${{ steps.db.outputs.app_database_url }}"
             echo "PLATFORM_DATABASE_URL=${{ steps.db.outputs.platform_database_url }}"
             echo "MIGRATE_DATABASE_URL=${{ steps.db.outputs.migrate_database_url }}"
+            # The vitest suite expects the same app secrets a developer's
+            # .env.local carries (src/lib/onboarding/issue.db.test.ts: without
+            # AUTH_TOTP_ENCRYPTION_KEY, isTotpConfigured() is false and every
+            # invitation create answers totp_unavailable). Generated per run.
+            echo "AUTH_SECRET=$(openssl rand -base64 32)"
+            echo "AUTH_TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
           } >> .env.local
 
       - run: npm run db:migrate

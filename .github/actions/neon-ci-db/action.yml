@@ -118,6 +118,10 @@ runs:
           echo "::warning::no read_write endpoint found for the branch; compute left at the default size"
           exit 0
         fi
+        # What the branch was born with (the project default), for the log.
+        curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+          "${API}/endpoints/${EP}" \
+          | jq -r '.endpoint | "default compute before resize: \(.autoscaling_limit_min_cu)-\(.autoscaling_limit_max_cu) CU, suspend \(.suspend_timeout_seconds)s"' || true
         # Only the endpoint's size is printed - never a host, URL or password.
         CODE="$(curl -sS -o resp.json -w '%{http_code}' -X PATCH \
           -H "Authorization: Bearer ${NEON_API_KEY}" -H "Content-Type: application/json" \

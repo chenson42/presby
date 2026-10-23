@@ -70,7 +70,7 @@ jobs:
     needs: check-secrets
     if: needs.check-secrets.outputs.has-neon == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -94,7 +94,7 @@ jobs:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           parent: development
           branch_name: e2e-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
-          compute_cu: "1"
+          compute_cu: "2"
 
       # Deliberately does NOT also set the four DB URLs as step-level `env:`
       # on any `npm run` step below - dotenv -e .env.local does not override

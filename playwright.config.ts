@@ -111,6 +111,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
+  // A GitHub runner talking to a remote Neon branch under `next dev` renders a
+  // revalidated page several times slower than a developer machine (the first
+  // CI run took 40 min for what takes ~15 locally; giving-connect's post-action
+  // re-render was still "Rendering..." at 5 s). Only the assertion budget is
+  // widened, and only in CI: a locally-slow assertion should still be loud.
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   reporter: [["list"]],
   // Starts the dev server automatically. Locally, reuseExistingServer means an
   // already-running `npm run dev` is used as-is (no more two-terminal dance);

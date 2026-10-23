@@ -37,7 +37,9 @@ jobs:
         run: npm run check
 
       - name: Dependency audit (production deps, high+)
-        run: npm audit --omit=dev --audit-level=high
+        # Same gate as `npm audit --omit=dev --audit-level=high`, plus a dated
+        # list of operator-accepted advisories that fails once it expires.
+        run: node scripts/ci/audit-prod.mjs
 
       - name: Unit tests
         run: npm test

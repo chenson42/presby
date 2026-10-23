@@ -30,6 +30,7 @@ import { platformSql, type Sql } from "./support/db";
 import {
   CLERK_EMAIL,
   COMMUNITY_ORG,
+  createStaffAnchorViaSql,
   removeCommunityFixture,
   setDirectoryView,
   setupCommunityFixture,
@@ -244,6 +245,24 @@ test.describe("Community", () => {
         await page.goto(`${BASE}?view=members`);
         await expect(page.getByRole("listitem").filter({ hasText: full })).toHaveCount(0);
         await noHorizontalOverflow(page);
+      });
+
+      test("a staff anchor with no position is listed under Staff, never under Everyone — regression for staff-anchor people missing from Community", async ({ page }) => {
+        const last = `Spec${tag}Anchor`;
+        const full = `E2ECommunity ${last}`;
+        await createStaffAnchorViaSql(sql, tag === "D" ? 1 : 2, last);
+
+        await page.goto(`${BASE}?view=staff`);
+        const card = page.getByRole("listitem").filter({ hasText: full });
+        await expect(card).toBeVisible();
+        await expect(card.getByText(/no position yet/i)).toBeVisible();
+        await expect(card.getByRole("link", { name: /^edit/i })).toBeVisible();
+        await noHorizontalOverflow(page);
+
+        // DECISION-129: the member Directory and Everyone still exclude the anchor.
+        await page.goto(BASE);
+        await expect(page.getByRole("heading", { name: "Community", exact: true })).toBeVisible();
+        await expect(page.getByRole("listitem").filter({ hasText: full })).toHaveCount(0);
       });
 
       test("the nav is six real links in one scrollable row, and every empty state reads", async ({ page }) => {

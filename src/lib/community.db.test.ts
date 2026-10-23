@@ -47,6 +47,7 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
   let orgB: string;
   let managerOnly: string; // people.manage ONLY: no directory.view (DECISION-197)
   let directoryOnly: string; // directory.view ONLY: no people.manage
+  let viewerBoth: string; // people.manage AND directory.view: sees every view
   let proposerUserId: string;
 
   // fixture people
@@ -63,6 +64,8 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
   let staffAnchorNoPosition: string; // engagement staff, none
   let staffFutureEnd: string; // position that ends in the future
   let staffEndedOnly: string; // only an ended position
+  let staffAnchorEnded: string; // engagement staff, membership ended
+  let staffAnchorMerged: string; // engagement staff, merged into staffAnchorNoPosition
   let formerA: string; // ended by a participant removal
   let formerB: string;
   let endedOther: string; // ended for another reason
@@ -172,7 +175,11 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
     directoryOnly = await person("Dir");
     await member(managerOnly, orgA, "regular");
     await member(directoryOnly, orgA, "regular");
+    viewerBoth = await person("Both");
+    await member(viewerBoth, orgA, "regular");
     await platform.insert(roleGrants).values([
+      { organizationId: orgA, roleId: manageRole!.id, personId: viewerBoth, startsOn: "2020-01-01" },
+      { organizationId: orgA, roleId: dirRole!.id, personId: viewerBoth, startsOn: "2020-01-01" },
       { organizationId: orgA, roleId: manageRole!.id, personId: managerOnly, startsOn: "2020-01-01" },
       { organizationId: orgA, roleId: dirRole!.id, personId: directoryOnly, startsOn: "2020-01-01" },
     ]);
@@ -195,6 +202,8 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
     staffAnchorNoPosition = await person("Kit");
     staffFutureEnd = await person("Lark");
     staffEndedOnly = await person("Moss");
+    staffAnchorEnded = await person("Nan");
+    staffAnchorMerged = await person("Opal");
     formerA = await person("Nell");
     formerB = await person("Orla");
     endedOther = await person("Pia");
@@ -214,6 +223,9 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
     await member(staffAnchorNoPosition, orgA, "staff");
     await member(staffFutureEnd, orgA, "regular");
     await member(staffEndedOnly, orgA, "regular");
+    await member(staffAnchorEnded, orgA, "staff", { endedOn: "2026-02-01", endedReason: "left" });
+    await member(staffAnchorMerged, orgA, "staff");
+    await platform.update(people).set({ mergedIntoId: staffAnchorNoPosition }).where(eq(people.id, staffAnchorMerged));
     await member(formerA, orgA, "regular", { endedOn: "2026-04-01", endedReason: "other_participant_removed" });
     await member(formerB, orgA, "visitor", { endedOn: "2026-05-01", endedReason: "other_participant_removed" });
     await member(endedOther, orgA, "regular", { endedOn: "2026-03-01", endedReason: "moved away" });
@@ -246,7 +258,7 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
       approvedBy: proposerUserId,
       proposedBy: proposerUserId,
     });
-  });
+  }, 120_000);
 
   afterAll(async () => {
     if (!hasDb || !getPlatformDb) return;
@@ -267,11 +279,12 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
     }
     // Self-referencing merge pointer first, then the rows.
     await platform.update(people).set({ mergedIntoId: null }).where(eq(people.id, visitorMerged));
+    await platform.update(people).set({ mergedIntoId: null }).where(eq(people.id, staffAnchorMerged));
     for (const id of people_) {
       await platform.delete(people).where(eq(people.id, id));
     }
     await platform.delete(users).where(eq(users.id, proposerUserId));
-  });
+  }, 120_000);
 
   const ALL = { page: 1, pageSize: 50 };
   const idsOf = (rows: Array<{ personId: string }>) => rows.map((r) => r.personId).sort();
@@ -351,11 +364,13 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
 
   // ---------------------------------------------------------------------------
   describe("listStaff", () => {
-    it("lists everyone with an OPEN position, whatever the engagement, with their open titles only", async () => {
+    it("lists everyone with an OPEN position or a live staff anchor, whatever the engagement, with their open titles only", async () => {
       const result = await listStaff(managerOnly, orgA, ALL);
       expect(result.kind).toBe("ok");
       if (result.kind !== "ok") return;
-      expect(idsOf(result.rows)).toEqual([staffRegular, staffAnchorWithPosition, staffFutureEnd].sort());
+      expect(idsOf(result.rows)).toEqual(
+        [staffRegular, staffAnchorWithPosition, staffAnchorNoPosition, staffFutureEnd].sort(),
+      );
       expect(result.rows.find((r) => r.personId === staffRegular)?.positions).toEqual(["Organist"]);
       // The ended Bookkeeper position is not listed; the open Sexton is.
       expect(result.rows.find((r) => r.personId === staffAnchorWithPosition)?.positions).toEqual(["Sexton"]);
@@ -363,11 +378,34 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
       expect(result.rows.find((r) => r.personId === staffFutureEnd)?.positions).toEqual(["Choir Director"]);
     });
 
-    it("engagement 'staff' alone does not list (staff is a position), and an ended position does not either", async () => {
+    it("a live engagement-'staff' anchor with NO position lists too, with no positions; an ended position alone still does not", async () => {
+      const result = await listStaff(managerOnly, orgA, ALL);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      const ids = idsOf(result.rows);
+      expect(ids).toContain(staffAnchorNoPosition);
+      expect(result.rows.find((r) => r.personId === staffAnchorNoPosition)?.positions).toEqual([]);
+      expect(ids).not.toContain(staffEndedOnly);
+    });
+
+    it("an ENDED or merged anchor does not list", async () => {
       const result = await listStaff(managerOnly, orgA, ALL);
       const ids = result.kind === "ok" ? idsOf(result.rows) : [];
-      expect(ids).not.toContain(staffAnchorNoPosition);
-      expect(ids).not.toContain(staffEndedOnly);
+      expect(ids).not.toContain(staffAnchorEnded);
+      expect(ids).not.toContain(staffAnchorMerged);
+    });
+
+    it("counts, search and order stay coherent with the anchor in the list", async () => {
+      const result = await listStaff(managerOnly, orgA, ALL);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.pagination.total).toBe(result.rows.length);
+      // One shared surname, so the (last, first) order is the first-name order.
+      const names = result.rows.map((r) => r.displayName);
+      expect(names).toEqual([...names].sort());
+      const searched = await listStaff(managerOnly, orgA, { ...ALL, search: "Kit" });
+      expect(searched.kind === "ok" && idsOf(searched.rows)).toEqual([staffAnchorNoPosition]);
+      const paged = await listStaff(managerOnly, orgA, { page: 1, pageSize: 2 });
+      expect(paged.kind === "ok" && paged.pagination.total).toBe(result.rows.length);
     });
   });
 
@@ -461,6 +499,51 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
       expect(await getCommunityStatus(managerOnly, orgA, "nope")).toEqual({ kind: "not_found" });
       expect(await getCommunityStatus(managerOnly, orgA, "00000000-0000-0000-0000-000000000000")).toEqual({ kind: "not_found" });
       expect(await getCommunityStatus(managerOnly, orgA, elsewhereVisitor)).toEqual({ kind: "not_found" });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe("every live-membership shape is findable in Community", () => {
+    it("each person lands in at least one of the six views, and the ended one in Former — regression for staff-anchor people missing from Community", async () => {
+      const all = { page: 1, pageSize: 200 };
+      const directoryIds = async (extra: Record<string, unknown> = {}) => {
+        const result = await getDirectory(viewerBoth, orgA, { ...all, ...extra });
+        if (result.kind !== "ok") throw new Error("directory not ok");
+        return result.entries.map((e) => e.personId);
+      };
+      const adminIds = async (reader: typeof listVisitors) => {
+        const result = await reader(viewerBoth, orgA, all);
+        if (result.kind !== "ok") throw new Error("list not ok");
+        return result.rows.map((r) => r.personId);
+      };
+
+      const views: Record<string, string[]> = {
+        everyone: await directoryIds(),
+        members: await directoryIds({ rollStatuses: ["active", "baptized", "affiliate"] }),
+        participants: await directoryIds({ status: "other_participant" }),
+        visitors: await adminIds(listVisitors),
+        staff: await adminIds(listStaff),
+        former: await adminIds(listFormerParticipants),
+      };
+      const viewsOf = (id: string) =>
+        Object.entries(views)
+          .filter(([, ids]) => ids.includes(id))
+          .map(([name]) => name);
+
+      const liveShapes: Record<string, string> = {
+        "roll member": memberActive,
+        participant,
+        visitor: visitorA,
+        "staff with a position": staffRegular,
+        "staff anchor without a position": staffAnchorNoPosition,
+      };
+      for (const [shape, id] of Object.entries(liveShapes)) {
+        expect(viewsOf(id), shape).not.toEqual([]);
+      }
+      expect(viewsOf(formerA), "ended membership").toContain("former");
+
+      // DECISION-129 is untouched: the anchor is Staff-only, never in the Directory.
+      expect(viewsOf(staffAnchorNoPosition)).toEqual(["staff"]);
     });
   });
 });

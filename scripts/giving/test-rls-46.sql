@@ -920,13 +920,15 @@ begin;
   -- drizzle/0059 (invitations) adds presby_giving_manage_holder_count, the
   -- treasurer-designation holder count, owner-only by design (DECISION-183, migration 0059):
   -- presby_accept_invitation() calls it as definer; presby_app never does.
+  -- drizzle/0060 (designation revoke) adds presby_giving_manage_holder_grants on the
+  -- same terms (revoked from public, presby_app, presby_platform).
   expected(f) as (values
     ('presby_giving_ingest_health'), ('presby_giving_dead_letters'), ('presby_giving_requeue_event'),
-    ('presby_giving_manage_holder_count'))
+    ('presby_giving_manage_holder_count'), ('presby_giving_manage_holder_grants'))
   select assert_eq(
     (select count(*) from ((select f from owner_only except select f from expected)
                            union all (select f from expected except select f from owner_only)) d),
-    0, '46i: the owner-only callable set is exactly ingest_health, dead_letters, requeue_event, manage_holder_count (P3-6, C2, 0059)');
+    0, '46i: the owner-only callable set is exactly ingest_health, dead_letters, requeue_event, manage_holder_count, manage_holder_grants (P3-6, C2, 0059, 0060)');
 rollback;
 
 -- ===========================================================================

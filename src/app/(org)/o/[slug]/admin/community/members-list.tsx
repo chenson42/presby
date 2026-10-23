@@ -88,6 +88,7 @@ export function MembersList({
               slug={slug}
               view={view as "visitors" | "staff" | "former"}
               rows={rows ?? []}
+              canStaffLink={canStaffLink}
             />
           )}
         </>

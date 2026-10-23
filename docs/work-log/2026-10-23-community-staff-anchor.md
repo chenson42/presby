@@ -1,0 +1,372 @@
+# Community hides people whose only connection is a staff anchor — Work Log
+
+> **Slug:** `2026-10-23-community-staff-anchor`
+> **Surface:** (org) — `/o/<slug>/admin/community`
+> **Permission(s):** existing (`people.manage`), unchanged
+> **Flag(s):** not needed
+> **Estimated complexity:** small
+> **Pipeline mode:** Bug-fix variant
+> **Source:** operator, production, 2026-10-23. The operator accepted the founding-administrator invitation at their first test congregation. Their person record was then findable by search and editable, but appeared in none of Community's six views.
+
+---
+
+## Per-Phase Status
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 1 — Functional refinement | orchestrator | Complete (brief: bug confirmed on production, read-only) | — | 2026-10-23 |
+| 2 — Architectural review | — | Skipped: no schema, permission, route or invariant change; one reader's predicate widens inside the existing `people.manage` gate | — | 2026-10-23 |
+| 3 — Technical design | orchestrator | Complete (brief, below) | — | 2026-10-23 |
+| 4 — Implementation | full-stack-developer | Complete | — | 2026-10-23 |
+| 5 — Verification | qa | Complete (run 1 FAIL on the copy; run 2 PASS) | PASS | 2026-10-23 |
+| 6 — Shipped vs intent | analyst | Complete; follow-ups to TODO | SHIP WITH NOTES | 2026-10-23 |
+
+## Phase 1 — bug confirmed (orchestrator)
+
+Production, read-only, counts and flags only:
+- The congregation's single membership row has `engagement_status = 'staff'`, `current_roll` null, not ended, and the person is linked to an account.
+- It has 0 open staff positions, 0 officer terms, 1 email and 2 open role grants.
+
+This is exactly the anchor `presby_accept_invitation` writes for a designee (DECISION-128 shape, DECISION-183). The six views and why each misses it:
+- **Everyone:** Directory-backed, which excludes staff anchors with no roll (DECISION-129).
+- **Members** and **Participants:** need a roll.
+- **Visitors:** needs engagement `visitor`.
+- **Staff:** built from open staff positions only (Increment 1 ruling).
+- **Former:** needs `ended_on`.
+
+So a founding administrator or treasurer who joins by invitation is invisible in Community. Search finds them because the match reader covers every live membership. Phase 6 of the Community pipeline flagged the "Everyone" semantics (follow-up 4) but not this hole.
+
+## Phase 3 — root cause and fix shape (orchestrator)
+
+**Root cause.** The Staff view was defined as "open staff position" and the Everyone view as "Directory". No view owns the staff anchor: a live membership with engagement `staff`, no roll and no position.
+
+**Fix.**
+1. The Staff view (`src/lib/community.ts` and the page) lists people with an open staff position **or** a live membership with `engagement_status = 'staff'`. Anchors without a position show a "No position yet" note, with a link to the Staff page to add one. Ordering and the empty state stay coherent.
+2. **Invariant regression test.** A DB-backed test builds a person for each live-membership shape (roll member, participant, visitor, staff with a position, staff anchor without a position, and an ended membership) and asserts each appears in at least one Community view. A future shape then cannot fall through.
+3. The Directory exclusion (DECISION-129) is unchanged: the anchor still does not appear in the member Directory or in Everyone.
+
+**Implementer:** full-stack-developer. The change is small and spans the lib reader, the page row, and the tests.
+
+## Phase 4 — implementation (full-stack-developer)
+
+**Files changed**
+- `src/lib/community.ts`: the `staff` list predicate is now `live, not merged, not deceased, and (engagement_status = 'staff' or an open position)`. An anchor row comes back with `positions: []`. Reader, count, search, order and the `people.manage` gate are the same query path. The Directory, Everyone and DECISION-129 are untouched (`directory.ts` not edited).
+- `src/app/(org)/o/[slug]/admin/community/community-rows-list.tsx` and `members-list.tsx`: a Staff row with no position shows "No position yet", plus an "Add a position" link to `/o/<slug>/admin/staff` when `canStaffLink` (flag `org_portal.staff` on and `staff.manage`, the same gate the empty-state link already uses). The page already computed `canStaffLink` for the staff view, so `page.tsx` needed no change.
+- `src/lib/community.db.test.ts`: new viewer holding both `people.manage` and `directory.view`; two new fixtures (ended anchor, merged anchor); the old "engagement 'staff' alone does not list" test rewritten; ended or merged anchors asserted absent; count, search, order and pagination asserted; the invariant regression test (below). The `beforeAll` and `afterAll` hooks got an explicit 120 s timeout because the added setup pushed past the 30 s default on a slow Neon connection.
+- `members-list.test.tsx`: anchor row reads "No position yet", link only with `canStaffLink`, never on a row with a position.
+- `e2e/community-participants.spec.ts` and `e2e/support/community-fixture.ts`: new `createStaffAnchorViaSql` helper (fixture-prefixed id, swept by the existing sweep) and an anchor spec at desktop and 360px (listed under Staff with the note, absent from Everyone). The existing e2e did not pin Staff view content, so nothing else changed.
+
+**Deviations**
+- No `page.tsx` change (see above).
+- The "Add a position" link renders only when the viewer can use the Staff page. A `people.manage` holder without `staff.manage` sees the note without the link rather than a link to a forbidden page.
+- The Staff empty-state headline ("No one holds a staff position yet") is unchanged. It is now reachable only when there is no anchor either; the pinned copy is a little loose but not wrong enough to touch.
+
+**Regression test, red then green**
+`community.db.test.ts` > "every live-membership shape is findable in Community" > "each person lands in at least one of the six views, and the ended one in Former — regression for staff-anchor people missing from Community". One person per shape: roll member, participant, visitor, staff with a position, staff anchor without a position, and an ended membership (Former). It reads the six views as a viewer with both permissions, and asserts the anchor lands in Staff only.
+- Before the fix: 3 failed, 15 passed. The invariant test failed on "staff anchor without a position: expected [] to not deeply equal []", and the two listStaff tests that pin the anchor failed.
+- After the fix: 18 of 18 pass (`--no-file-parallelism --testTimeout=120000`).
+
+**Gates**
+- `npm run typecheck`, `npm run lint`, `npm run check` (all eight tripwires): clean.
+- Unit suite (no DB env): 504 files passed, 72 skipped; 7606 tests passed, 2161 skipped.
+- `community.db.test.ts`: 18 of 18 passed.
+- Community e2e (`e2e/community-participants.spec.ts`, chromium project), from a hardlinked scratch copy: 11 of 11 passed at desktop and 360px, including the new anchor spec. Several earlier runs failed because another pipeline's worktree (`presby-nav-e2e`) was running the same spec against the shared Neon branch at the same time. Both specs sweep `E2ECommunity` people, so they delete each other's fixtures. This is not a code defect, but concurrent runs of this spec on a shared branch are not safe.
+- Real-browser look at `?view=staff` at 360px: the anchor card shows name, "No position yet" and Edit, with no overflow. The e2e clerk lacks `staff.manage`, so the Staff link was not visible in the browser; the unit test covers it.
+
+**Incident, cleaned up.** I once ran `npm test` in a shell that had `.env.local` exported, so the whole DB-backed suite ran in parallel against `pipeline-person-emails` and many suites timed out before their teardown. That left 328 fixture organizations, 413 people and 160 users created in that window. I removed exactly those rows (counts verified before commit: 343 to 15, 1098 to 685, 190 to 30). The purge disabled user triggers inside its transaction, which committed that state; I found 69 triggers left disabled and re-enabled them all (73 of 73 enabled, none were disabled beforehand). Leftover counts for this test's fixtures are now 0.
+
+**Handoff.** Next is qa (Phase 5). Browser check: as a founding administrator at a congregation, `/o/<slug>/admin/community?view=staff` lists them with "No position yet", and with `org_portal.staff` on and `staff.manage`, an "Add a position" link. They stay absent from Everyone. No schema, env var, flag or `FEATURES` change.
+
+---
+
+## Added to this fix: the no-organization page copy (operator, production, 2026-10-23)
+
+The operator signed in with an address that was on their person record but not connected to their account. They landed on `/no-organization`, which said "If your church already uses presby, someone there with administrator access can add you. They will need the email address you signed in with." That is not true: a contact email never connects an account (only accepting an invitation does). The page also said "presby" where DECISION-126 requires PresbyPortal.
+
+- **Fix:** `src/app/no-organization/page.tsx` now says "Signing in doesn't connect you to a congregation by itself. You join by opening an invitation link sent to the email address you signed in with. Ask your church administrator to arrange one for: <email>". Every "presby" on the page is now "PresbyPortal".
+- **Regression tests:** two cases in `src/app/no-organization/page.test.tsx`. Both failed on the old copy (watched) and pass on the new. `e2e/post-login-routing.spec.ts:84`'s locator was updated to "Read about PresbyPortal".
+- **Follow-ups (recorded in TODO at integration):**
+  - Auto-connect a verified sign-in to the person whose on-file address matches. This was operator-requested and folds into Community Increment 2b.
+  - The platform invitation screen should warn when the invited address is already on a person who signs in. This folds into the multiple-emails pipeline.
+
+
+---
+
+# Phase 5 — Verification (qa), run 1
+
+*Recorded verbatim.*
+
+**Date:** 2026-10-23
+**Verified by:** qa
+
+**Scope run.**
+- **In full:** typecheck, lint, `npm run check` (8 tripwires), and the unit suite.
+- **DB-backed:** `src/lib/community.db.test.ts` only. No migration, `src/lib/authz.ts`, `src/lib/db/` or shared fixture is in the diff.
+- **e2e:** `e2e/community-participants.spec.ts` (which contains the new staff-anchor spec, at desktop and 360px) and `e2e/post-login-routing.spec.ts` (desktop, and 360px through a scratch-only config override). The full suite was not run; the diff touches no proxy, auth, layout, `e2e/support/` beyond one added helper, or shared component.
+- **Where it ran:** a `git archive HEAD` scratch copy outside the repo, with APFS-cloned `node_modules`, on a private port (3113).
+- **Database:** all DB and e2e runs used the replacement branch `pipeline-fixes-and-nav` (ep-lively-union). Nothing ran against `pipeline-person-emails`, so nothing needed re-running after the coordinator's switch. Community e2e runs were held until no other Playwright run was active.
+
+## Type Check
+
+`npm run typecheck`: PASS. `npm run lint`: PASS. `npm run check`: PASS (all eight tripwires).
+
+## Unit Tests
+
+Total: 9769 | Passed: 7608 | Failed: 0 | Skipped: 2161 (72 files) | Duration: 29s
+
+- The run had no DB env. The 72 skipped files are DB-guarded (79 files carry `skipIf(!hasDb)`), and the diff adds no `.skip` or `.only`.
+- 7608 is two more than the work-log's 7606. The difference is the two `/no-organization` cases added in the later commit.
+- **DB-backed:** `src/lib/community.db.test.ts` passed 18 of 18 (`--no-file-parallelism`, default 20 s test timeout, 47 s). Its fixtures were torn down: 0 `community-test-%` orgs remain.
+
+## End-to-End Tests
+
+Total: 23 run at desktop+360 (Community 11, post-login 12), plus 12 post-login at 360 | Passed: 31 | Failed: 4 | Duration: 6.0 min + 0.9 min
+
+| Spec | Result |
+|---|---|
+| `community-participants.spec.ts`, all 11 (both viewports, plus the DECISION-197 degrade) | Pass, counting one re-run |
+| New anchor spec `community-participants.spec.ts:250` | Pass at desktop and 360px |
+| Visitor spec `community-participants.spec.ts:183` at 360px | Failed once, passed on re-run |
+| `post-login-routing.spec.ts:73` (test 2), desktop and 360px | **FAIL** |
+| `post-login-routing.spec.ts:209` (test 8), desktop and 360px | **FAIL** |
+| Other 10 `post-login-routing.spec.ts` tests | Pass at both viewports |
+
+- **Visitor spec at 360px.** The first run timed out at `:214`; the screenshot shows the search still showing "Searching…" during a dev-server cold compile. On re-run it passed at both viewports, so it is not a defect.
+- **`post-login-routing.spec.ts:83`, regression.** `getByText(/ask your church administrator/i)` resolved to 2 elements: the `<h2>Ask your church administrator</h2>` and the new `<p>Signing in doesn't connect…</p>`. Run 1 failed at desktop and run 2 at 360px; the failure is deterministic. With origin/main's `page.tsx` and spec, the same test passes.
+- **`post-login-routing.spec.ts:219`, regression.** It asserts `/isn't set up on presby yet/i`, which this diff rewrote to "PresbyPortal". It fails at desktop and 360px and passes with origin/main's page and spec.
+
+## Regression Tests Added
+
+Red/green was checked by swapping origin/main's fix files into the scratch copy, running, then restoring HEAD byte-identically. The worktree was never modified.
+
+- **"each person lands in at least one of the six views…" — `src/lib/community.db.test.ts:507`.** Guards against a live-membership shape that no Community view lists.
+  - On origin/main's `community.ts`: **4 failed, 14 passed**, including this test with "staff anchor without a position: expected [] to not deeply equal []".
+  - The work-log records 3 failed and 15 passed. The fourth failure is "counts, search and order stay coherent", whose search for "Kit" returns `[]` before the fix. That is the right reason to fail.
+  - On HEAD: 18 of 18 pass. Confirmed red then green.
+- **"Staff: an anchor with no position reads 'No position yet'…" — `members-list.test.tsx:155`.** Guards the anchor row's note and the link gate. Fails on origin/main's row components and passes on HEAD. Confirmed.
+- **"says signing in alone does not connect you…" — `src/app/no-organization/page.test.tsx:32`.** Fails on origin/main's page and passes on HEAD. Confirmed.
+- **"names the product PresbyPortal, not presby" — `page.test.tsx:40`.** Fails on origin/main's page and passes on HEAD. Confirmed.
+- **e2e anchor spec — `e2e/community-participants.spec.ts:250`.** Passes on HEAD. I did not run it against the pre-fix reader; the DB invariant test above gives the red/green evidence for this behaviour.
+
+## Coverage on Critical Modules
+
+Not measured. The diff touches none of `permissions.ts`, `two-factor.ts` or `flags.ts`, so this is deferred to the release-slot test-coverage review.
+
+## Feature-Gate Audit
+
+No API route or server action was added or changed. This was checked by reading the files.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|-----------------|-------------------|----------------------------|----------------------------|
+| `listRows("staff")` via `listStaff`, `src/lib/community.ts:152-155` | n/a, tenant reader | n/a: `canManagePeople` (`people.manage`) inside `withOrgContext`, on the RLS `db` connection, unchanged | n/a (tenant axis) |
+| "Add a position" link, `community-rows-list.tsx:78-95` | n/a | Shown only when `canStaffLink` (`page.tsx:199-201`: flag `org_portal.staff` and `staff.manage`) | n/a (tenant axis). Same gate the Staff page enforces on the server (`admin/staff/page.tsx:101`, plus the `staff.manage` reader). The link is a convenience, not the guard |
+
+`listStaff` has one caller, the Community page. The public staff listing goes through `src/lib/staff.ts`, which is not in the diff, so the widened predicate cannot surface anchors publicly.
+
+**Unchanged-behaviour checks.**
+- `src/lib/directory.ts` and the Directory pages are not in the diff.
+- The invariant test asserts the anchor appears in `["staff"]` only, never in Everyone, Members or Participants.
+- The e2e anchor spec asserts it is absent from Everyone at both viewports. DECISION-129 holds.
+
+**Copy truthfulness (asked to check). The new paragraph over-claims.**
+- **True:** "Signing in doesn't connect you". `presby_accept_invitation` is the only writer of `people.user_id`.
+- **True:** "an invitation link sent to the email address you signed in with". Existing-account acceptance returns `email_mismatch` on a different address (`drizzle/0059_presby_account_invitations.sql`, `lower(v_user_email) <> v_inv.email_normalized`).
+- **Not true:** "Ask your church administrator to arrange one". Invitations are issued only by a platform operator from `(admin)` (`src/lib/onboarding/issue.ts`, `getPlatformDb()` only). `account_invitations.purpose` is CHECK-limited to `founding_administrator` or `treasurer`. A church administrator cannot issue or arrange an invitation for an ordinary member, and no other join path exists today. The page tells exactly the person it is for, an ordinary member, to take a step that cannot happen.
+- **Minor:** when `session.user.email` is null the sentence ends "…arrange one for." with no object.
+
+**Schema/RLS audit:** not applicable, no schema change.
+
+**Auth-touching gate:** not triggered. The diff touches no `src/auth.ts`, `(auth)`, `api/auth` or `src/lib/auth/`.
+
+**Hygiene.**
+- 0 of 73 user triggers disabled before and after my runs.
+- My fixtures were swept by spec teardown. One `E2ECommunity SpecDPart` row seen at the end was created at 18:17:23 UTC, five seconds before my check. It belongs to another agent's `community-participants.spec.ts` run that started after mine finished, so I left it alone.
+- The scratch copy is removed and the worktree is clean.
+
+## Verdict
+
+**FAIL.** Return to full-stack-developer (Phase 4).
+
+1. `e2e/post-login-routing.spec.ts:83`: strict-mode violation caused by the new copy. Fix either the locator (for example, the heading role) or the copy.
+2. `e2e/post-login-routing.spec.ts:219`: a stale "presby" locator the rename broke.
+3. `src/app/no-organization/page.tsx:159-161`: the copy directs ordinary members to an invitation route that church administrators cannot provide. The wording should be settled with the operator (it is product copy), then pinned by the unit test. The null-email "…for." ending should be fixed in the same change.
+
+The Community staff-anchor fix passes on its own: unit, DB invariant (red then green confirmed), e2e at both viewports, the link gate, and DECISION-129 unchanged. After the fix, re-verification can be limited to `post-login-routing.spec.ts` (desktop and 360px) and `src/app/no-organization/page.test.tsx`.
+
+---
+
+**Per-Phase Status row**
+
+| 5 — Verification | qa | Complete | FAIL | 2026-10-23 |
+
+**Handoff:** to full-stack-developer (Phase 4), citing `e2e/post-login-routing.spec.ts:83`, `e2e/post-login-routing.spec.ts:219` and `src/app/no-organization/page.tsx:159-161`. The finding about who can issue an invitation needs an operator wording decision before the copy is rewritten. Escalating to tech-lead is not needed; there is no design flaw.
+
+## Fix after run 1 (orchestrator, 2026-10-23)
+
+- The paragraph now states only what is true today: "Signing in doesn't connect you to a congregation by itself. Only an invitation link does, and it works while you are signed in with the address it was sent to. You are signed in as <email>." It contains no instruction to ask anyone to arrange an invitation, and with no email the sentence ends cleanly.
+- `e2e/post-login-routing.spec.ts:219` now expects "PresbyPortal". The paragraph no longer contains "Ask your church administrator", so `:83` resolves to the heading alone.
+- `page.test.tsx` gained a no-email case and asserts that neither "arrange" nor "can add you" appears. 4/4 pass.
+
+
+# Phase 5 — Verification (qa), run 2
+
+*Recorded verbatim.*
+
+**Date:** 2026-10-23
+**Verified by:** qa
+**HEAD:** `4b5a1c1` ("no-organization copy states only what is true; update the stale e2e locator"). It changes `src/app/no-organization/page.tsx`, its unit test, and `e2e/post-login-routing.spec.ts:219`.
+
+**Scope run.**
+- **Re-verified:** the three run-1 items only, plus `src/app/no-organization/page.test.tsx` and `e2e/post-login-routing.spec.ts`.
+- **Where it ran:** a fresh `git archive HEAD` scratch copy on port 3113, on the same branch as run 1 (`pipeline-fixes-and-nav`, ep-lively-union). It ran after another agent's Community e2e run had exited.
+- **Not re-run:** everything else. The new commit changes no Community, DB or gate code, so those rest on run 1, which passed them.
+
+### Unit Tests
+
+`src/app/no-organization/page.test.tsx`: 4 of 4 pass on HEAD.
+
+Red check against run 1's page (`6899783`): 2 failed and 2 passed, so the new assertions catch the old copy.
+- The new `queryByText(/arrange|can add you/i)` check fails on the old copy.
+- The new case "ends the sentence cleanly when the session has no email" (`page.test.tsx:48`) also fails on it.
+
+The scratch file was restored byte-identical to HEAD.
+
+### End-to-End Tests
+
+`e2e/post-login-routing.spec.ts`:
+
+| Viewport | Result |
+|---|---|
+| Desktop | 12 of 12 pass |
+| 360px, first run | 6 passed, 2 failed, 4 did not run |
+| 360px, single re-run | 12 of 12 pass |
+
+**First 360px run, environmental.** Both failures were database connection problems, not copy assertions:
+- Test 7 timed out in `signInAndLand` at `post-login-routing.spec.ts:51`.
+- Test 8 failed with `NeonDbError: … fetch failed` in the fixture-invariant hook (`e2e/support/assert-fixture-invariants.ts:57`).
+
+**Run-1 items:**
+- **`:83`** (test 2) passes at both viewports. The paragraph no longer repeats the heading's text, so the locator matches one element.
+- **`:219`** (test 8) passes at both viewports with the "PresbyPortal" locator.
+
+### Copy Truthfulness
+
+The new paragraph: "Signing in doesn't connect you to a congregation by itself. Only an invitation link does, and it works while you are signed in with the address it was sent to. You are signed in as <email>."
+
+- **"Only an invitation link does": true.** `presby_accept_invitation` is the only writer of `people.user_id` (checked in run 1).
+- **"works while you are signed in with the address it was sent to": true for the signed-in reader.** Existing-account acceptance returns `email_mismatch` when the account address differs (`drizzle/0059_presby_account_invitations.sql`). The link can also create a new account when opened signed out, but the sentence doesn't deny that, so it isn't untrue.
+- **No "ask" or "arrange" promise remains.** With no email, the text ends "…address it was sent to." and the unit test pins that.
+
+**Note for Phase 6 (not blocking).** The section heading "Ask your church administrator" (`page.tsx:152-154`) is older than this pipeline and unchanged. Church administrators still cannot issue invitations; only a platform operator can, and only for founding-administrator or treasurer. The heading now makes no specific promise, but it still points readers at someone who cannot act. `post-login-routing.spec.ts:83` pins it, and it overlaps the auto-connect and invitation follow-ups already recorded.
+
+### Hygiene
+
+The scratch copy is removed, nothing is left on port 3113, and the worktree is clean at `4b5a1c1`. The run made no writes beyond what the spec's own globalSetup and teardown do.
+
+### Verdict
+
+**PASS.** Combined with run 1, every required check is green. Auth-touching gate: not triggered.
+
+---
+
+**Per-Phase Status row**
+
+| 5 — Verification | qa | Complete (run 2) | PASS | 2026-10-23 |
+
+**Handoff:** to analyst (Phase 6). Please carry the heading note above into the shipped-vs-intent review.
+
+
+# Phase 6 — Shipped vs Intent (analyst)
+
+*Recorded verbatim.*
+
+**Date:** 2026-10-23
+**Reviewed:** `git diff origin/main...HEAD` at `497ceee`, with the shipped code at `4b5a1c1`. I read the diff and the work-log. I ran no suites and no browser. For behavior, I rely on QA runs 1 and 2, which I checked against the code.
+
+### Bug 1: a person who joined by invitation is invisible in Community
+
+**Delivered.**
+- **Root cause.** The root cause named in Phase 3 is real. No view owned a live `engagement_status = 'staff'` membership with no roll and no open position. The Staff view was position-only, and Everyone is Directory-backed (DECISION-129).
+- **The fix.** The `staff` list predicate in `src/lib/community.ts` is now "live, not merged, not deceased, and (engagement `staff` or an open position)". The founding administrator or treasurer now appears under Staff.
+- **What the operator sees.**
+  - The row reads "No position yet".
+  - An "Add a position" link shows only for someone who can use the Staff page (the `org_portal.staff` flag on and `staff.manage`). A `people.manage` holder without `staff.manage` sees the note and no link, which is better than a link to a forbidden page.
+- **Gate and visibility.** The `people.manage` gate and the query path are unchanged. The anchor still does not appear in Everyone or the Directory (DECISION-129). The public staff listing goes through `staff.ts`, which is not in the diff, so the anchor cannot surface publicly.
+- **Evidence.**
+  - The DB invariant test covers every live-membership shape (roll member, participant, visitor, staff with a position, staff anchor without a position, ended). It was run red then green by both the implementer and QA.
+  - An e2e anchor spec passes at desktop and 360px. It checks the anchor is listed under Staff and absent from Everyone.
+  - The implementer looked at 360px in a real browser: no overflow.
+- **A durable fix.** The invariant test means the next membership shape that falls through fails a test instead of reaching production.
+
+### Bug 2: `/no-organization` false promise and "presby"
+
+**Delivered.**
+- **Old promise removed.** The old promise ("someone there with administrator access can add you… the email address you signed in with") is gone. The page no longer suggests that a contact email connects an account.
+- **Current copy.** The page now says "If you were invited, open the link in your invitation email". It adds that signing in doesn't connect you, that only an invitation link does, and that it works while you are signed in with the address it was sent to. It then says "You are signed in as <email>" when an email exists.
+- **True against the code.** QA checked each claim: `presby_accept_invitation` is the only writer of `people.user_id`, and a different account address returns `email_mismatch`.
+- **Edge cases.** The null-email case ends the sentence cleanly, and a unit test pins it. A test also asserts that "arrange" and "can add you" do not appear.
+- **Rename.** Every product-name "presby" on the page is now "PresbyPortal". The only remaining matches are "presbytery". The e2e locators were updated, and `:83` and `:219` pass at both viewports.
+- **Gates.** There is no auth-path change and no schema change. QA run 2 is PASS.
+
+### The heading ruling: "Ask your church administrator"
+
+**Ruling: it does not block this release. It becomes a follow-up.**
+
+- **Why it is no longer the operator's bug.** The operator's complaint was a false, specific promise, and that is fixed. The heading is older than this pipeline. It sits above a paragraph that now correctly says "open the invitation link", so the section no longer instructs anyone to do something impossible. A heading that nudges toward the wrong person is still a real inaccuracy, but a smaller one than the one just removed.
+- **Why waiting is better than fixing now.** The right wording depends on a product decision that is open and already tracked: auto-connecting a verified sign-in to the person record with a matching on-file address, in Community 2b. If auto-connect ships, "ask your church administrator" may become correct again, because an admin could then add the email. Rewording now risks churning the heading twice. It also touches the e2e locator at `post-login-routing.spec.ts:83`.
+- **What ships meanwhile.** The paragraph under the heading is true and carries the load.
+- **What would reverse this.** If the heading were the only text on the page, or the paragraph still promised something, I would block.
+
+### What's-new entry (Rule 13)
+
+**Not warranted.**
+- Both changes are bug fixes, which Rule 13 excludes.
+- The Staff-view change is admin-facing and shows only an extra row, not a new capability.
+- The `/no-organization` change corrects copy and adds no behavior.
+
+### Phase 1 gap check
+
+| Gap | Status |
+|---|---|
+| Staff-anchor invisibility | Fixed in code, with a regression test |
+| Other live-membership shapes falling through | Covered by the invariant test |
+| Directory/Everyone exclusion (DECISION-129) | Unchanged and asserted |
+| `/no-organization` false promise | Fixed and pinned by tests |
+| Auto-connect by on-file email | Deferred and tracked (see follow-ups) |
+| Warning when an invited address is already on a person who signs in | Deferred and tracked (see follow-ups) |
+| "Ask your church administrator" heading | Deferred and tracked (see follow-ups) |
+| Staff empty-state headline ("No one holds a staff position yet") | Deliberately unchanged, noted below |
+
+### Verdict: SHIP WITH NOTES
+
+Both bugs no longer show up for the operator. The notes below ship as tracked follow-ups.
+
+### Follow-ups
+
+Each of these goes into `docs/TODO.md` at integration, per Rule 10.
+
+1. **Reword the `/no-organization` heading "Ask your church administrator"**, and update the `post-login-routing.spec.ts:83` locator with it. Settle it together with the auto-connect decision (follow-up 2). Church administrators currently cannot issue invitations. The platform operator issues them, and only for founding-administrator and treasurer purposes.
+2. **Auto-connect a verified sign-in to the person whose on-file address matches.** Operator-requested, and it folds into Community Increment 2b.
+3. **Warn on the platform invitation screen when the invited address is already on a person who signs in.** This folds into the multiple-emails pipeline.
+4. **Staff empty-state copy.** "No one holds a staff position yet" is now reachable only when there is no anchor either. It is not wrong. Revisit it when someone next edits that view.
+5. **Concurrent e2e hazard.** `community-participants.spec.ts` sweeps `E2ECommunity` people, so two worktrees running it on one shared Neon branch delete each other's fixtures. Either scope the sweep per run or document the rule in `docs/testing.md`.
+
+### Housekeeping at integration
+
+- **Rule 12:** the source was operator production testing, not an in-app feedback row, so there is no row to mark `done`.
+- **Rule 14:** update the Community Staff-view line in `docs/product/functionality-map.md`. Staff now means an open position or a live staff anchor.
+- **Rule 15:** no `architecture.md` change.
+- **Rule 10:** move this fix to Done in `docs/TODO.md` and add the follow-ups above.
+- **Release notes:** write them for a non-engineer. They must not claim that invitations can be arranged by a church administrator.
+
+### Per-Phase Status row
+
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-10-23 |
+
+**Handoff:** to the orchestrator for integration: the Rule 10 and 14 housekeeping, the release notes, and the PR via `/merge-pr` after the user's approval to commit and push. No agent needed beyond that. No loop-back is needed, because the open heading question is a product decision gated on follow-up 2.
+
+Files:
+- /Users/cshenso/git/presby-platform/presby-fix/docs/work-log/2026-10-23-community-staff-anchor.md
+- /Users/cshenso/git/presby-platform/presby-fix/src/lib/community.ts
+- /Users/cshenso/git/presby-platform/presby-fix/src/app/no-organization/page.tsx
+- /Users/cshenso/git/presby-platform/presby-fix/e2e/post-login-routing.spec.ts

@@ -28,6 +28,14 @@ on:
   pull_request:
     branches: [main]
 
+# Sharding (2026-10-23): the suite is ~575 DB-backed files run serially
+# (--no-file-parallelism, because the files share one database), which took
+# ~100 minutes on a 1 CU branch and was cancelled by the old 20-minute timeout
+# on a default-size one. It now runs as SHARDS parallel jobs, each with its OWN
+# ephemeral branch (so files in different shards can never see each other's
+# rows) sized by the composite action's compute_cu. scripts/test-rls.sql runs in
+# exactly one separate job, on its own fresh branch, as presby_app.
+
 concurrency:
   group: db-tests-${{ github.ref }}
   cancel-in-progress: true
@@ -52,11 +60,15 @@ jobs:
           fi
 
   db-tests:
-    name: vitest + test-rls.sql on an ephemeral Neon branch
+    name: vitest shard ${{ matrix.shard }}/4
     needs: check-secrets
     if: needs.check-secrets.outputs.has-neon == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
 
@@ -74,16 +86,103 @@ jobs:
           api_key: ${{ secrets.NEON_API_KEY }}
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           parent: development
-          branch_name: db-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          branch_name: db-tests-${{ github.run_id }}-${{ github.run_attempt }}-s${{ matrix.shard }}
+          compute_cu: "2"
 
       # Deliberately does NOT also set the four URLs as step-level `env:` on
-      # any `npm run` step below — dotenv -e .env.local does not override an
+      # any `npm run` step below - dotenv -e .env.local does not override an
       # already-exported variable, and a stray env: here would silently
       # migrate/seed/test against something other than what was just written
       # while the job stayed green (Batch A finding, docs/work-log/
-      # 2026-09-26-ci-db-tests.md). The three `psql` steps below are the
-      # legitimate exception: psql reads a URL passed via `env:`/argument, it
-      # has no dotenv integration at all.
+      # 2026-09-26-ci-db-tests.md). The `psql` steps below are the legitimate
+      # exception: psql reads a URL passed via `env:`/argument, it has no
+      # dotenv integration at all.
+      - name: Write .env.local
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "DATABASE_URL=${{ steps.db.outputs.database_url }}"
+            echo "APP_DATABASE_URL=${{ steps.db.outputs.app_database_url }}"
+            echo "PLATFORM_DATABASE_URL=${{ steps.db.outputs.platform_database_url }}"
+            echo "MIGRATE_DATABASE_URL=${{ steps.db.outputs.migrate_database_url }}"
+            # The vitest suite expects the same app secrets a developer's
+            # .env.local carries (src/lib/onboarding/issue.db.test.ts: without
+            # AUTH_TOTP_ENCRYPTION_KEY, isTotpConfigured() is false and every
+            # invitation create answers totp_unavailable). Generated per run.
+            echo "AUTH_SECRET=$(openssl rand -base64 32)"
+            echo "AUTH_TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+          } >> .env.local
+
+      - run: npm run db:migrate
+      - run: npm run check:schema-parity
+      - run: npm run db:seed
+
+      - name: Apply the synthetic fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/seed-dev.sql
+        env:
+          MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
+
+      # State the vitest suite assumes but a from-empty database lacks (an
+      # active platform admin). See the file's own header. Shards only.
+      - name: Apply the DB-suite baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/db-baseline.sql
+        env:
+          MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
+
+      - name: Install test-only SQL helpers (assert_eq)
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/install-test-helpers.sql
+        env:
+          MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
+
+      - name: Run this shard of the DB-backed suite
+        run: npm run test:db -- --shard=${{ matrix.shard }}/4
+
+      - name: Delete ephemeral Neon branch
+        if: always()
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch: db-tests-${{ github.run_id }}-${{ github.run_attempt }}-s${{ matrix.shard }}
+
+  # scripts/test-rls.sql lives in exactly this job, on a fresh branch of its
+  # own, so its exact-count assertions see only migrate + seed + fixture.
+  rls:
+    name: test-rls.sql (presby_app)
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-neon == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Provision ephemeral database
+        id: db
+        uses: ./.github/actions/neon-ci-db
+        with:
+          api_key: ${{ secrets.NEON_API_KEY }}
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          parent: development
+          branch_name: db-rls-${{ github.run_id }}-${{ github.run_attempt }}
+          compute_cu: "1"
+
       - name: Write .env.local
         shell: bash
         run: |
@@ -107,11 +206,9 @@ jobs:
         env:
           MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
 
-      # scripts/test-rls.sql has always called assert_eq(), installed on every
-      # live branch by hand and tracked in no migration until Batch A added
-      # this file (docs/work-log/2026-09-26-ci-db-tests.md, Phase 4 Finding
-      # 5). Without this step the isolation suite dies at its first assertion
-      # on a from-scratch database. Owner connection, before the suite.
+      # scripts/test-rls.sql has always called assert_eq(), tracked in no
+      # migration; without this step the suite dies at its first assertion on
+      # a from-scratch database (Phase 4 Finding 5). Owner connection.
       - name: Install test-only SQL helpers (assert_eq)
         shell: bash
         run: |
@@ -119,8 +216,6 @@ jobs:
           psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/install-test-helpers.sql
         env:
           MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
-
-      - run: npm run test:db
 
       - name: Assert presby_app before the isolation suite
         shell: bash
@@ -147,4 +242,4 @@ jobs:
         with:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}
-          branch: db-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          branch: db-rls-${{ github.run_id }}-${{ github.run_attempt }}

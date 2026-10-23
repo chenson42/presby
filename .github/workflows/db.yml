@@ -120,6 +120,16 @@ jobs:
         env:
           MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
 
+      # State the vitest suite assumes but a from-empty database lacks (an
+      # active platform admin). See the file's own header. Shards only.
+      - name: Apply the DB-suite baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/db-baseline.sql
+        env:
+          MIGRATE_DATABASE_URL: ${{ steps.db.outputs.migrate_database_url }}
+
       - name: Install test-only SQL helpers (assert_eq)
         shell: bash
         run: |

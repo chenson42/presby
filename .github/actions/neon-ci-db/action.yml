@@ -126,6 +126,25 @@ runs:
           "${API}/endpoints/${EP}")"
         if [ "$CODE" = "200" ]; then
           echo "compute sized: $(jq -r '.endpoint | "\(.autoscaling_limit_min_cu)-\(.autoscaling_limit_max_cu) CU"' resp.json)"
+          # A resize reconfigures (and may restart) the compute. The first
+          # sharded run lost one shard to "Connection terminated unexpectedly"
+          # on its first connection after the resize, so wait for the
+          # operations the PATCH started to finish, then for the endpoint to
+          # settle, before anything connects.
+          for OP in $(jq -r '.operations[]?.id' resp.json); do
+            for _ in $(seq 1 60); do
+              ST="$(curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+                "${API}/operations/${OP}" | jq -r '.operation.status')"
+              case "$ST" in finished|skipped|cancelled) break ;; failed) echo "::warning::resize operation failed"; break ;; esac
+              sleep 2
+            done
+          done
+          for _ in $(seq 1 60); do
+            PENDING="$(curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+              "${API}/endpoints/${EP}" | jq -r '.endpoint.pending_state // "none"')"
+            [ "$PENDING" = "none" ] && break
+            sleep 2
+          done
         else
           echo "::warning::compute sizing refused (HTTP ${CODE}): $(jq -r '.message // "no message"' resp.json 2>/dev/null)"
         fi
@@ -144,7 +163,22 @@ runs:
         # ci_run is cloned from template1 — its entire schema arrives only by
         # `npm run db:migrate` later in the caller. This is the
         # reproducibility proof DECISION-150 is about, not a convenience.
-        psql "$OWNER_NEONDB_URL" -v ON_ERROR_STOP=1 -c "create database \"${DB_NAME}\""
+        # A freshly created or resized compute can drop or refuse a connection
+        # (first sharded run: "terminating connection due to administrator
+        # command" after the resize). Every statement here is idempotent, so
+        # retry each one.
+        retry() {
+          local n
+          for n in 1 2 3 4 5 6; do
+            "$@" && return 0
+            echo "attempt ${n} failed; retrying" >&2
+            sleep 5
+          done
+          return 1
+        }
+        retry psql "$OWNER_NEONDB_URL" -v ON_ERROR_STOP=1 -Atqc \
+          "select 1 from pg_database where datname = '${DB_NAME}'" | grep -q 1 || \
+          retry psql "$OWNER_NEONDB_URL" -v ON_ERROR_STOP=1 -c "create database \"${DB_NAME}\""
 
         OWNER_DB_URL="postgresql://neondb_owner:${OWNER_PW}@${HOST}/${DB_NAME}?sslmode=require"
 
@@ -156,7 +190,7 @@ runs:
         # migration 0009 is `if not exists`-guarded, so setting the password
         # here (before any migration has run against the fresh database) is
         # safe: the role itself already exists on the parent's lineage.
-        psql "$OWNER_DB_URL" -v ON_ERROR_STOP=1 -c \
+        retry psql "$OWNER_DB_URL" -v ON_ERROR_STOP=1 -c \
           "alter role presby_app with login password '${APP_PW}'"
 
         APP_DB_URL="postgresql://presby_app:${APP_PW}@${HOST}/${DB_NAME}?sslmode=require"

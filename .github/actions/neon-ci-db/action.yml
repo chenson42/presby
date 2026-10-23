@@ -36,7 +36,7 @@ inputs:
       pins this to `development` in every caller.
     required: true
   branch_name:
-    description: "Unique per-run branch name, e.g. db-tests-${{ github.run_id }}-${{ github.run_attempt }}."
+    description: "Unique per-run branch name, e.g. db-tests-<run_id>-<run_attempt>. (No expression syntax in this text: GitHub evaluates it here, and the github context is not available in action metadata.)"
     required: true
   database_name:
     description: >
@@ -46,6 +46,17 @@ inputs:
       error string, or an uploaded trace.
     required: false
     default: "ci_run"
+  compute_cu:
+    description: >
+      Fixed compute size, in compute units, for the ephemeral branch's
+      read-write endpoint (min = max, so it never scales down mid-run). A
+      branch is otherwise created at the project's default size (0.25 CU),
+      which db.yml's serial vitest run cannot finish on inside any sane
+      timeout. The Neon create-branch action has no compute input, so this is
+      a follow-up API call; a refusal (for example a plan limit) is a warning,
+      not a failure.
+    required: false
+    default: "2"
 outputs:
   branch_id:
     description: "Neon branch id, for the matching delete-branch-action call."
@@ -87,6 +98,62 @@ runs:
         # third operator secret (Phase 2 ruling, DECISION-150).
         username: neondb_owner
 
+    - name: Size the branch's compute
+      shell: bash
+      env:
+        NEON_API_KEY: ${{ inputs.api_key }}
+        NEON_PROJECT_ID: ${{ inputs.project_id }}
+        NEON_BRANCH_ID: ${{ steps.create-branch.outputs.branch_id }}
+        COMPUTE_CU: ${{ inputs.compute_cu }}
+      run: |
+        set -euo pipefail
+        case "$COMPUTE_CU" in
+          ''|*[!0-9.]*) echo "::error::compute_cu must be a number, got '$COMPUTE_CU'"; exit 1 ;;
+        esac
+        API="https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}"
+        EP="$(curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+          "${API}/branches/${NEON_BRANCH_ID}/endpoints" \
+          | jq -r '[.endpoints[] | select(.type == "read_write")][0].id // empty')"
+        if [ -z "$EP" ]; then
+          echo "::warning::no read_write endpoint found for the branch; compute left at the default size"
+          exit 0
+        fi
+        # What the branch was born with (the project default), for the log.
+        curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+          "${API}/endpoints/${EP}" \
+          | jq -r '.endpoint | "default compute before resize: \(.autoscaling_limit_min_cu)-\(.autoscaling_limit_max_cu) CU, suspend \(.suspend_timeout_seconds)s"' || true
+        # Only the endpoint's size is printed - never a host, URL or password.
+        CODE="$(curl -sS -o resp.json -w '%{http_code}' -X PATCH \
+          -H "Authorization: Bearer ${NEON_API_KEY}" -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -d "{\"endpoint\":{\"autoscaling_limit_min_cu\":${COMPUTE_CU},\"autoscaling_limit_max_cu\":${COMPUTE_CU}}}" \
+          "${API}/endpoints/${EP}")"
+        if [ "$CODE" = "200" ]; then
+          echo "compute sized: $(jq -r '.endpoint | "\(.autoscaling_limit_min_cu)-\(.autoscaling_limit_max_cu) CU"' resp.json)"
+          # A resize reconfigures (and may restart) the compute. The first
+          # sharded run lost one shard to "Connection terminated unexpectedly"
+          # on its first connection after the resize, so wait for the
+          # operations the PATCH started to finish, then for the endpoint to
+          # settle, before anything connects.
+          for OP in $(jq -r '.operations[]?.id' resp.json); do
+            for _ in $(seq 1 60); do
+              ST="$(curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+                "${API}/operations/${OP}" | jq -r '.operation.status')"
+              case "$ST" in finished|skipped|cancelled) break ;; failed) echo "::warning::resize operation failed"; break ;; esac
+              sleep 2
+            done
+          done
+          for _ in $(seq 1 60); do
+            PENDING="$(curl -fsS -H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json" \
+              "${API}/endpoints/${EP}" | jq -r '.endpoint.pending_state // "none"')"
+            [ "$PENDING" = "none" ] && break
+            sleep 2
+          done
+        else
+          echo "::warning::compute sizing refused (HTTP ${CODE}): $(jq -r '.message // "no message"' resp.json 2>/dev/null)"
+        fi
+        rm -f resp.json
+
     - name: Create the fresh database and set presby_app's password
       id: urls
       shell: bash
@@ -100,7 +167,22 @@ runs:
         # ci_run is cloned from template1 — its entire schema arrives only by
         # `npm run db:migrate` later in the caller. This is the
         # reproducibility proof DECISION-150 is about, not a convenience.
-        psql "$OWNER_NEONDB_URL" -v ON_ERROR_STOP=1 -c "create database \"${DB_NAME}\""
+        # A freshly created or resized compute can drop or refuse a connection
+        # (first sharded run: "terminating connection due to administrator
+        # command" after the resize). Every statement here is idempotent, so
+        # retry each one.
+        retry() {
+          local n
+          for n in 1 2 3 4 5 6; do
+            "$@" && return 0
+            echo "attempt ${n} failed; retrying" >&2
+            sleep 5
+          done
+          return 1
+        }
+        retry psql "$OWNER_NEONDB_URL" -v ON_ERROR_STOP=1 -Atqc \
+          "select 1 from pg_database where datname = '${DB_NAME}'" | grep -q 1 || \
+          retry psql "$OWNER_NEONDB_URL" -v ON_ERROR_STOP=1 -c "create database \"${DB_NAME}\""
 
         OWNER_DB_URL="postgresql://neondb_owner:${OWNER_PW}@${HOST}/${DB_NAME}?sslmode=require"
 
@@ -112,7 +194,7 @@ runs:
         # migration 0009 is `if not exists`-guarded, so setting the password
         # here (before any migration has run against the fresh database) is
         # safe: the role itself already exists on the parent's lineage.
-        psql "$OWNER_DB_URL" -v ON_ERROR_STOP=1 -c \
+        retry psql "$OWNER_DB_URL" -v ON_ERROR_STOP=1 -c \
           "alter role presby_app with login password '${APP_PW}'"
 
         APP_DB_URL="postgresql://presby_app:${APP_PW}@${HOST}/${DB_NAME}?sslmode=require"

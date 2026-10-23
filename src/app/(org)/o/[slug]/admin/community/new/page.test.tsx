@@ -16,6 +16,7 @@ vi.mock("@/lib/auth/cached-auth", () => ({
 
 const resolveOrgContext = vi.fn();
 const assertOrgAccess = vi.fn();
+const hasPermission = vi.fn();
 vi.mock("@/lib/authz", () => {
   class MockOrgAccessError extends Error {
     constructor() {
@@ -27,6 +28,7 @@ vi.mock("@/lib/authz", () => {
     OrgAccessError: MockOrgAccessError,
     resolveOrgContext: (...args: unknown[]) => resolveOrgContext(...args),
     assertOrgAccess: (...args: unknown[]) => assertOrgAccess(...args),
+    hasPermission: (...args: unknown[]) => hasPermission(...args),
   };
 });
 
@@ -50,7 +52,9 @@ vi.mock("./actions", () => ({
   createPersonAction: vi.fn(),
 }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+}));
 
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
@@ -72,6 +76,7 @@ afterEach(() => {
   cachedAuth.mockReset();
   resolveOrgContext.mockReset();
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
+  hasPermission.mockReset().mockResolvedValue(true);
   isFlagEnabled.mockReset();
   isOrgFeatureEnabled.mockReset();
   getHouseholds.mockReset();
@@ -132,6 +137,36 @@ describe("NewMemberPage — gate composition (DECISION-097)", () => {
     const el = await NewMemberPage({ params: makeParams() });
     render(el);
 
+    expect(screen.getByRole("heading", { name: /add a person/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^search$/i })).toBeTruthy();
+  });
+});
+
+describe("NewMemberPage — the roll-bearing choices follow roll.propose (DECISION-197)", () => {
+  async function renderWith(canPropose: boolean) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    hasPermission.mockImplementation(
+      async (_p: string, _o: string, key: string) =>
+        key === "roll.propose" ? canPropose : true,
+    );
+    render(await NewMemberPage({ params: makeParams() }));
+    // Walk the wizard far enough to see the Connection select would need the
+    // full flow; the page's own contract is the permission it computed.
+    return hasPermission.mock.calls.map((c) => c[2]);
+  }
+
+  it("asks for roll.propose, and nothing wider, for the wizard", async () => {
+    const asked = await renderWith(true);
+    expect(asked).toContain("roll.propose");
+    expect(asked).not.toContain("roll.approve");
+  });
+
+  it("still renders the wizard for a people.manage holder without roll.propose", async () => {
+    await renderWith(false);
     expect(screen.getByRole("heading", { name: /add a person/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^search$/i })).toBeTruthy();
   });

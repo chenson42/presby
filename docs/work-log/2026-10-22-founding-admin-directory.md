@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete (revised; reclassified to Feature) | READY WITH NOTES | 2026-10-22 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-10-22 |
 | 3 — Technical design | tech-lead | Complete (design to R1-R14; S1-S6 ruled; route move designed as its own Batch M) | Design complete; implementers named | 2026-10-22 |
-| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; Batch B (server: lib, actions, audit) complete 2026-10-22; C, D pending | — | — |
+| 4 — Implementation | M full-stack-developer, A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch M (route move) complete 2026-10-22; Batch A (0061) complete 2026-10-22; Batch B (server: lib, actions, audit) complete 2026-10-22; Batches C and D (UI, e2e, 360px pass) complete 2026-10-22 — Phase 4 Complete for Increment 1 | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1580,6 +1580,65 @@ Every non-`ok` outcome rolls the caller's whole transaction back (the `CreatePer
 Next: **Batch C** (`ux-developer`): the Community page (wire `parseCommunityView`, `getDirectory({ rollStatuses })`, the three lists, `getCommunityBadges`, the limited state on `forbidden` plus `people.manage`), the wizard Connection step and the already-here step (`MatchCandidate.alreadyHere`, `alreadyHereSentence`), the edit page's Connection card (`getCommunityStatus`), the Remove and Undo dialogs, the labels, and the toasts from `participant-copy.ts`. Then Batch D (e2e). The orchestrator records this section and the status row; nothing in a Rule 16 file changed.
 
 ---
+
+## Phase 4 — Batches C and D (UI, e2e, 360px pass) — ux-developer, 2026-10-22
+
+The Community page, its six views, the DECISION-197 degrade, the wizard's Connection step and already-here step, the edit page's Connection card with the Remove and Undo dialogs, empty states, labels, the e2e specs and a real-browser pass at 360px and 1280px. Built to Phase 3's Component / Page Plan and copy table, consuming Batch B's contract unchanged. No schema, no new audit key, no flag, no `FEATURES` entry. Committed as `feat(community): ...`.
+
+### Files created (all under `src/app/(org)/o/[slug]/admin/community/` unless noted)
+
+- `community-nav.tsx` (+ test) — six real links in a `ButtonGroup` (`aria-label="Community view"`), Visitors / Staff / Former only for `people.manage`, search carried across views; exports `communityHref`.
+- `community-search.tsx` — the GET search form, with the view as a hidden field. `community-empty-state.tsx` — one empty state per view, search-miss told apart. `community-rows-list.tsx` — cards for Visitors, Staff, Former. `community-badge.tsx` — the six badge labels on the `ui/Badge` primitive.
+- `[id]/edit/connection-card.tsx` (server), `participant-controls.tsx` (owns both dialogs so the removal toast's Undo opens the undo dialog on the new removal id), `remove-participant-dialog.tsx`, `undo-entry-dialog.tsx` (both `AlertDialog`, controlled state, trigger disabled until `useHydrated()`), `participant-controls.test.tsx`.
+- `new/connection-step.tsx` (`git mv` from `roll-action-step.tsx`).
+- e2e: `e2e/support/community-fixture.ts`, `e2e/community-participants.spec.ts`, `e2e/community-redirect.spec.ts`, `e2e/hydration/community-participant-dialogs.spec.ts`.
+
+### Files modified
+
+- `page.tsx` (six views, degrade, badges, Staff link), `members-list.tsx`, `members-states.tsx` (adds `MembersLimited`; `MembersForbidden` body untouched), `new/page.tsx` (computes `canProposeRoll`), `new/member-wizard.tsx`, `new/member-wizard-schema.ts` (a `relationship` enum plus `visit` group; the roll kind is no longer a field), `new/review-step.tsx`, `new/confirm-step.tsx`, `[id]/edit/page.tsx`, `[id]/edit/record-roll-action-form.tsx` (toasts by effect, shadowed and filed warnings, new description).
+- `src/lib/org-portal/tiles.ts` (label "Community", new description), `src/lib/org-features.ts` (the toggle's display name and description; key unchanged).
+- `src/lib/route-move-community.test.ts` (allowlist gains the two e2e files that must name the old path), `e2e/custom-domains/lockdown.spec.ts` (three paths added to the neutral-404 matrix).
+- Tests rewritten or extended: `members-list.test.tsx`, `page.test.tsx`, `new/page.test.tsx`, `new/member-wizard.test.tsx`, `new/member-wizard-schema.test.ts`, `[id]/edit/page.test.tsx`, `[id]/edit/record-roll-action-form.test.tsx`.
+
+### Behaviour notes
+
+- **Degrade:** `people.manage` without `directory.view` keeps the header, Add person, the nav and the three admin views, and `MembersLimited` names `directory.view`. No `people.manage` gets `MembersForbidden`, body byte-identical (pinned by an exact-string test), also for the three admin views.
+- **Add person** gates on `people.manage` only. The wizard offers only Visitor without `roll.propose`, with the Clerk-of-Session line; the server still re-checks.
+- **Wizard landing:** after submit it routes to the list that now holds the person (`?view=participants`, `?view=visitors`, or Everyone for a member proposal). Not in the design; a small kindness, easy to drop.
+- **Already here:** `ConfirmStep` hides "Yes, this is ..." and offers "Open their record" (a link) plus "No, this is someone new".
+- **Edit page:** Remove shows for a current participant, Undo when the latest effective entry is an on-record kind (so also for a former participant, to undo the removal); both need the roll-action edit flag and `roll.propose`. The Connection card shows without the flag.
+- **No native dialogs.** The remove date input defaults to browser-local today with `max` the same; the server bounds by the database date regardless.
+- The `members-` file names and component names are kept (Batch M's rule). The page component is now `CommunityPage`.
+
+### Deviations from Phase 3
+
+1. The status `<select>` is gone from the search form (as designed), so a `?status=` URL is ignored; no link to it remains.
+2. Empty-state "Former" and "Staff" use the design's strings verbatim; the Staff page link renders only for `org_portal.staff` on and `staff.manage`.
+3. `CommunityBadge` uses the `ui/Badge` primitive (variants `secondary`/`outline`, amber for "waiting") because `check:brand-scope` rejects a hand-built pill outside `components/ui`.
+4. The Connection card sits below the Profile card (above Record a roll action), not above Profile; the design did not fix the order.
+5. The `useForm`-free dialogs mean `check:hydration-gate` does not cover them; the new hydration spec is their guard.
+
+### Browser verification (real Chromium against `next dev`, Neon branch `pipeline-founding-admin-directory`)
+
+Screenshots kept in the scratchpad, never committed. A scratch script seeded one participant and one visitor on the owner connection and removed them afterward.
+- **360 x 740 and 1280 x 800, signed in as the clerk fixture:** Community in all six views, the edit page, both dialogs, the wizard, and the limited state (360 only). `scrollWidth - clientWidth` was 0 on every page at both widths; zero page errors and zero console errors.
+- **What I saw at 360:** the nav is one row inside a rounded tray and scrolls horizontally (the third segment is clipped at the edge, "Parti..."; that is the `ButtonGroup`'s documented behaviour, but there is no scroll affordance, so a first-time phone user may not guess the other three views exist). Search stacks, cards wrap long names, Edit is a 44px target, the badge sits under the email. The remove dialog fits the viewport with every control reachable and the date picker showing today. The limited state reads correctly. The wizard's already-here screen shows full-width "Open their record" and "No, this is someone new" buttons.
+- **At 1280:** the six-segment tray sits on one row; the Visitors card shows "First visit 5/3/2026" and Edit.
+- Pre-hydration: Remove and Undo are disabled before hydration (hydration spec, below).
+
+### Gates
+
+- `npm run typecheck`, `npm run lint`, all eight `npm run check` tripwires: pass. `npm run test`: 502 files, 7603 tests passed, 0 failed after the allowlist fix. `npm run build`: pass (built in the worktree; no font flake this time).
+- e2e against a real dev server (port 3111, the `playwright.config.ts` fakes in its environment): `community-participants.spec.ts` 5/5 (participant lifecycle and visitor/already-here at both widths, and the degrade), `community-redirect.spec.ts` 3/3, `hydration/community-participant-dialogs.spec.ts` green. Also green: `custom-hosts` lockdown 30/30 (with the three new neutral-404 paths), and the new hydration spec in the production-build lane (`test:e2e:prod` from a hardlinked scratch copy, 1/1).
+- **Full `--project=chromium` run (dev server): 280 passed, 14 failed, 83 did not run.** None touches Community. The seven `giving-*` failures are a database-connection drop in that window (`no user row for ...` at `giving-fixture.ts:96`, a Neon `execute` error), and the 83 not-run are their serial dependents; I did not re-run the giving suite (the memory notes a Stripe test account is still missing on this branch). `header-controls.spec.ts` (six org-switcher tests, 30 s timeouts in the full run) passed 36/36 when re-run with `member-calendar.spec.ts`. **One failure persisted: `member-calendar.spec.ts:273`** (event types page: "Event type added." toast shows but the new `E2E Choir` row never appears in the list within 5 s). It is the event-types page, which this batch does not touch; I did not bisect it against main, so QA should confirm whether it fails on `origin/main` too.
+
+### New copy strings for a fork's branding pass
+
+"Community" (tile, heading, nav); filter names Everyone, Members, Participants, Visitors, Staff, Former; badge labels; the wizard's Connection step, option text and descriptions; the limited-state sentence; every empty state; the remove and undo dialog copy; the edit-page Connection card text. All are the Phase 3 table verbatim except the card's "Latest entry ..." and "Participant since ..." lines, which are new.
+
+### Handoff
+
+Next: Phase 5 (qa). Click-through: sign in as a user holding `people.manage`, `roll.propose` and `directory.view` at a congregation with `org_portal.members_create` on; open Community; add a visitor, a participant and a member; remove and undo the participant from its edit page; search for an existing name in the wizard; then remove `directory.view` and reload. Orchestrator integration unchanged: do not commit `AGENTS.md` (the dev server regenerates it).
 
 ## Remaining Phase 4 template (Batches A to D fill this in)
 

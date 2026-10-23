@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import {
   assertOrgAccess,
+  hasPermission,
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
@@ -82,6 +83,12 @@ export default async function NewMemberPage({
     return <MembersFlagOff name={resolved.org.name} />;
   }
 
+  const canProposeRoll = await hasPermission(
+    resolved.org.personId,
+    resolved.org.organizationId,
+    "roll.propose",
+  );
+
   let households: { householdId: string; name: string }[] = [];
   try {
     const householdsResult = await getHouseholds(
@@ -111,7 +118,11 @@ export default async function NewMemberPage({
           {resolved.org.name}
         </p>
       </div>
-      <MemberWizard slug={slug} households={households} />
+      <MemberWizard
+        slug={slug}
+        households={households}
+        canProposeRoll={canProposeRoll}
+      />
     </section>
   );
 }

@@ -3,9 +3,17 @@
 import type { UseFormReturn } from "react-hook-form";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import {
-  ROLL_ACTION_KIND_LABELS,
+  RELATIONSHIP_LABELS,
   type MemberWizardValues,
 } from "./member-wizard-schema";
+
+const RELATIONSHIP_NOTES = {
+  visitor: "Visitors aren't listed in the Directory.",
+  participant:
+    "This takes effect immediately and is counted in the statistical report from the effective date.",
+  member:
+    "This person's roll action will wait for the Session to approve before they appear as a member.",
+} as const;
 
 /** A read-only summary of everything the wizard collected — the last thing
  * a volunteer admin sees before the single transactional submit. Nulls/
@@ -69,24 +77,44 @@ export function ReviewStep({
       )}
       <ReviewRow label="Household" value={householdLine || "None yet"} />
       <ReviewRow
-        label="Roll action"
-        value={ROLL_ACTION_KIND_LABELS[values.rollAction.kind]}
+        label="Connection"
+        value={RELATIONSHIP_LABELS[values.relationship]}
       />
-      <ReviewRow
-        label="Effective date"
-        value={
-          <FormattedDate value={values.rollAction.effectiveDate} mode="date" />
-        }
-      />
-      {values.rollAction.minuteReference && (
-        <ReviewRow
-          label="Minute reference"
-          value={values.rollAction.minuteReference}
-        />
+      {values.relationship === "visitor" ? (
+        <>
+          {values.visit.firstVisitDate && (
+            <ReviewRow
+              label="First visit"
+              value={
+                <FormattedDate value={values.visit.firstVisitDate} mode="date" />
+              }
+            />
+          )}
+          {values.visit.howHeard && (
+            <ReviewRow label="How they heard" value={values.visit.howHeard} />
+          )}
+        </>
+      ) : (
+        <>
+          <ReviewRow
+            label="Effective date"
+            value={
+              <FormattedDate
+                value={values.rollAction.effectiveDate ?? ""}
+                mode="date"
+              />
+            }
+          />
+          {values.rollAction.minuteReference && (
+            <ReviewRow
+              label="Minute reference"
+              value={values.rollAction.minuteReference}
+            />
+          )}
+        </>
       )}
       <p className="pt-2 text-sm text-muted-foreground">
-        This person&apos;s roll action will need to be approved before they
-        appear as a full member.
+        {RELATIONSHIP_NOTES[values.relationship]}
       </p>
     </dl>
   );

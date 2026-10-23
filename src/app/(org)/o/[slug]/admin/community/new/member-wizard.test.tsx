@@ -31,12 +31,12 @@ vi.mock("./actions", () => ({
 
 const toastSuccess = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
+const toastWarning = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccess, error: toastError },
+  toast: { success: toastSuccess, error: toastError, warning: toastWarning },
 }));
 
 import { MemberWizard } from "./member-wizard";
-import { WIZARD_ROLL_ACTION_KINDS } from "@/lib/roll-action-kinds";
 
 afterEach(() => {
   cleanup();
@@ -45,6 +45,7 @@ afterEach(() => {
   mockCreatePersonAction.mockReset();
   toastSuccess.mockClear();
   toastError.mockClear();
+  toastWarning.mockClear();
 });
 
 function fillSearch(firstName = "Nora", lastName = "Ashgrove") {
@@ -58,7 +59,7 @@ function fillSearch(firstName = "Nora", lastName = "Ashgrove") {
 
 describe("MemberWizard — initial render", () => {
   it("starts on the search step, with an adaptive step count (no match/confirm yet)", () => {
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
     expect(screen.getByText(/step 1 of 6/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /^search$/i })).toBeTruthy();
     // No Back button on the very first step.
@@ -69,7 +70,7 @@ describe("MemberWizard — initial render", () => {
 describe("MemberWizard — search with no match", () => {
   it("skips straight to the Identity step and prefills the searched name", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -96,7 +97,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
         ],
       },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -120,7 +121,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
         ],
       },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -144,7 +145,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
         ],
       },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -165,7 +166,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
 describe("MemberWizard — validation blocks Next", () => {
   it("Identity step: blank first/last name blocks advancing to Contact & Address", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     // Search with valid values so we reach Identity, then clear them.
     fillSearch("Nora", "Ashgrove");
@@ -188,7 +189,7 @@ describe("MemberWizard — validation blocks Next", () => {
   });
 
   it("Search step: blank first/last name blocks calling matchPersonAction at all", async () => {
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
     await waitFor(() => {
       expect(screen.getByText(/first name is required/i)).toBeTruthy();
@@ -200,7 +201,7 @@ describe("MemberWizard — validation blocks Next", () => {
 describe("MemberWizard — Back is lossless (req 6)", () => {
   it("Back from Contact & Address to Identity preserves the identity fields already typed", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -240,7 +241,7 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
 
   it("REGRESSION (docs/TODO.md): dateOfBirth survives Next→Back when the native input's change event lands one frame after the visible value, not synchronously with it — reproducing real device timing, not jsdom's synchronous fireEvent", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -273,40 +274,91 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
   });
 });
 
-describe("MemberWizard — roll action kind options — regression for wizard-select-full-kind-map (docs/work-log/2026-08-26-member-roll-on-edit.md)", () => {
-  it("the Roll action <select> renders exactly WIZARD_ROLL_ACTION_KINDS, never death/void/any other kind from the shared 17-kind label map", async () => {
-    mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+async function walkToConnection(canProposeRoll = true) {
+  mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
+  render(
+    <MemberWizard
+      slug="alder-creek"
+      households={[]}
+      canProposeRoll={canProposeRoll}
+    />,
+  );
+  fillSearch("Nora", "Ashgrove");
+  fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+  await waitFor(() => screen.getByText(/name & birth date/i));
+  fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+  await waitFor(() => screen.getByText(/contact & address/i));
+  fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+  await waitFor(() => screen.getByText(/^household$/i));
+  fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+  await waitFor(() => screen.getByText(/step \d+ of \d+: connection/i));
+}
 
-    fillSearch("Nora", "Ashgrove");
-    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
-    await waitFor(() => screen.getByText(/name & birth date/i));
+describe("MemberWizard — Connection step options — regression for wizard-select-full-kind-map (docs/work-log/2026-08-26-member-roll-on-edit.md)", () => {
+  it("offers Visitor, Participant and Member to a roll.propose holder, never a roll kind such as death or void", async () => {
+    await walkToConnection(true);
+    const select = screen.getByLabelText(/how is this person connected/i) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      "visitor",
+      "participant",
+      "member",
+    ]);
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      "Visitor",
+      "Participant (takes effect now)",
+      "Member: profession of faith (needs Session approval)",
+    ]);
+  });
+
+  it("offers only Visitor, with the Clerk-of-Session line, without roll.propose", async () => {
+    await walkToConnection(false);
+    const select = screen.getByLabelText(/how is this person connected/i) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["visitor"]);
+    expect(
+      screen.getByText(
+        /participants and members are recorded by someone who can propose roll actions, such as the clerk of session/i,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("shows the fields and the one-sentence description each choice needs", async () => {
+    await walkToConnection(true);
+    // Visitor (default)
+    expect(screen.getByLabelText(/first visit \(optional\)/i)).toBeTruthy();
+    expect(screen.getByLabelText(/how did they hear about us\? \(optional\)/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/^effective date/i)).toBeNull();
+    expect(
+      screen.getByText(/someone who has visited\. not on any roll, and not listed in the directory/i),
+    ).toBeTruthy();
+
+    const select = screen.getByLabelText(/how is this person connected/i);
+    fireEvent.change(select, { target: { value: "participant" } });
+    expect(screen.getByLabelText(/^effective date/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/first visit/i)).toBeNull();
+    expect(screen.getByText(/no approval is needed/i)).toBeTruthy();
+
+    fireEvent.change(select, { target: { value: "member" } });
+    expect(
+      screen.getByText(/the session must approve before they count as a member/i),
+    ).toBeTruthy();
+  });
+
+  it("blocks Next on a participant with no effective date", async () => {
+    await walkToConnection(true);
+    fireEvent.change(screen.getByLabelText(/how is this person connected/i), {
+      target: { value: "participant" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-
-    await waitFor(() => screen.getByText(/contact & address/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-
-    await waitFor(() => screen.getByText(/^household$/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-
-    await waitFor(() => screen.getByText(/step \d+ of \d+: roll action/i));
-
-    const select = screen.getByLabelText(/^roll action/i) as HTMLSelectElement;
-    const optionValues = Array.from(select.options).map((option) => option.value);
-
-    // Exact match, not just "doesn't contain death" — proves the <select>
-    // consumes WIZARD_ROLL_ACTION_KINDS itself, not some other subset that
-    // happens to exclude death too.
-    expect(optionValues).toEqual([...WIZARD_ROLL_ACTION_KINDS]);
-    expect(optionValues).not.toContain("death");
-    expect(optionValues).not.toContain("void");
-    expect(optionValues).not.toContain("certificate_dismissed");
+    await waitFor(() =>
+      expect(screen.getByText(/effective date is required/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(/step \d+ of \d+: connection/i)).toBeTruthy();
   });
 });
 
 describe("MemberWizard — required-field markers (L3)", () => {
   it("marks First name and Last name as required on the Search step", () => {
-    render(<MemberWizard slug="alder-creek" households={[]} />);
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
 
     const firstName = screen.getByLabelText(/^first name/i);
     const lastName = screen.getByLabelText(/^last name/i);
@@ -318,68 +370,58 @@ describe("MemberWizard — required-field markers (L3)", () => {
     expect(email.getAttribute("aria-required")).toBeNull();
   });
 
-  it("marks the Roll action select and Effective date as required", async () => {
-    mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
-
-    fillSearch("Nora", "Ashgrove");
-    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
-    await waitFor(() => screen.getByText(/name & birth date/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => screen.getByText(/contact & address/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => screen.getByText(/^household$/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => screen.getByText(/step \d+ of \d+: roll action/i));
-
+  it("marks the Connection select, and Effective date once a roll choice is made, as required", async () => {
+    await walkToConnection(true);
     expect(
-      screen.getByLabelText(/^roll action/i).getAttribute("aria-required"),
+      screen.getByLabelText(/how is this person connected/i).getAttribute("aria-required"),
     ).toBe("true");
+    fireEvent.change(screen.getByLabelText(/how is this person connected/i), {
+      target: { value: "participant" },
+    });
     expect(
       screen.getByLabelText(/effective date/i).getAttribute("aria-required"),
     ).toBe("true");
   });
 });
 
-describe("MemberWizard — full happy path submit", () => {
-  it("walks Search → Identity → Contact → Household → Roll action → Review → submit, calling createPersonAction with the assembled input", async () => {
-    mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    mockCreatePersonAction.mockResolvedValue({
-      ok: true,
-      data: { personId: "p-1", rollActionId: "ra-1" },
+async function submitFrom(relationship: "visitor" | "participant" | "member") {
+  await walkToConnection(true);
+  fireEvent.change(screen.getByLabelText(/how is this person connected/i), {
+    target: { value: relationship },
+  });
+  if (relationship === "visitor") {
+    fireEvent.change(screen.getByLabelText(/first visit/i), {
+      target: { value: "2026-05-03" },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
-
-    fillSearch("Nora", "Ashgrove");
-    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
-    await waitFor(() => screen.getByText(/name & birth date/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-
-    await waitFor(() => screen.getByText(/contact & address/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-
-    await waitFor(() => screen.getByText(/^household$/i));
-    // Default household.mode is "none" — no extra fields required.
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-
-    await waitFor(() => screen.getByText(/step \d+ of \d+: roll action/i));
+    fireEvent.change(screen.getByLabelText(/how did they hear/i), {
+      target: { value: "A neighbor" },
+    });
+  } else {
     fireEvent.change(screen.getByLabelText(/effective date/i), {
       target: { value: "2026-06-01" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+  }
+  fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+  await waitFor(() => screen.getByText(/review & submit/i));
+}
 
-    await waitFor(() => screen.getByText(/review & submit/i));
+describe("MemberWizard — full happy path submit", () => {
+  it("Member: assembles a profession_of_faith proposal and says it waits for the Session", async () => {
+    mockCreatePersonAction.mockResolvedValue({
+      ok: true,
+      data: { personId: "p-1", rollActionId: "ra-1", effect: "pending", affectsFiledPeriod: false },
+    });
+    await submitFrom("member");
+    expect(
+      screen.getByText(/will wait for the session to approve before they appear as a member/i),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /add person/i }));
 
     await waitFor(() => {
       expect(mockCreatePersonAction).toHaveBeenCalledWith(
         "alder-creek",
         expect.objectContaining({
-          identity: expect.objectContaining({
-            mode: "new",
-            firstName: "Nora",
-            lastName: "Ashgrove",
-          }),
+          identity: expect.objectContaining({ mode: "new", firstName: "Nora", lastName: "Ashgrove" }),
           household: { mode: "none" },
           rollAction: expect.objectContaining({
             kind: "profession_of_faith",
@@ -388,32 +430,74 @@ describe("MemberWizard — full happy path submit", () => {
         }),
       );
     });
-    expect(toastSuccess).toHaveBeenCalled();
+    expect(toastSuccess).toHaveBeenCalledWith(
+      "Person added. They'll appear as a member once the Session approves.",
+    );
     expect(mockPush).toHaveBeenCalledWith("/o/alder-creek/admin/community");
   });
 
+  it("Participant: assembles an other_participant_enrolled entry that takes effect now", async () => {
+    mockCreatePersonAction.mockResolvedValue({
+      ok: true,
+      data: { personId: "p-1", rollActionId: "ra-1", effect: "recorded", affectsFiledPeriod: true },
+    });
+    await submitFrom("participant");
+    expect(screen.getByText(/takes effect immediately and is counted in the statistical report/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /add person/i }));
+
+    await waitFor(() => {
+      expect(mockCreatePersonAction).toHaveBeenCalledWith(
+        "alder-creek",
+        expect.objectContaining({
+          rollAction: expect.objectContaining({
+            kind: "other_participant_enrolled",
+            effectiveDate: "2026-06-01",
+          }),
+        }),
+      );
+    });
+    expect(toastSuccess).toHaveBeenCalledWith(
+      "Participant added. They're counted from the date you chose.",
+    );
+    // A second, warning toast when the entry lands in a filed year.
+    expect(toastWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/year that has already been filed/i),
+    );
+    expect(mockPush).toHaveBeenCalledWith("/o/alder-creek/admin/community?view=participants");
+  });
+
+  it("Visitor: sends the visitor arm with first visit and how-heard, no roll fields", async () => {
+    mockCreatePersonAction.mockResolvedValue({
+      ok: true,
+      data: { personId: "p-1", rollActionId: null, effect: "none", affectsFiledPeriod: false },
+    });
+    await submitFrom("visitor");
+    expect(screen.getByText(/visitors aren't listed in the directory/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /add person/i }));
+
+    await waitFor(() => {
+      expect(mockCreatePersonAction).toHaveBeenCalledWith(
+        "alder-creek",
+        expect.objectContaining({
+          rollAction: {
+            kind: "visitor",
+            firstVisitDate: "2026-05-03",
+            howHeard: "A neighbor",
+          },
+        }),
+      );
+    });
+    expect(toastSuccess).toHaveBeenCalledWith("Visitor added.");
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith("/o/alder-creek/admin/community?view=visitors");
+  });
+
   it("a denied submit does NOT reset the form or navigate away (no data loss)", async () => {
-    mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
     mockCreatePersonAction.mockResolvedValue({
       ok: false,
       error: "That household no longer exists. Choose another or create a new one.",
     });
-    render(<MemberWizard slug="alder-creek" households={[]} />);
-
-    fillSearch("Nora", "Ashgrove");
-    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
-    await waitFor(() => screen.getByText(/name & birth date/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => screen.getByText(/contact & address/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => screen.getByText(/^household$/i));
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => screen.getByText(/step \d+ of \d+: roll action/i));
-    fireEvent.change(screen.getByLabelText(/effective date/i), {
-      target: { value: "2026-06-01" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => screen.getByText(/review & submit/i));
+    await submitFrom("member");
     fireEvent.click(screen.getByRole("button", { name: /add person/i }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
@@ -424,9 +508,42 @@ describe("MemberWizard — full happy path submit", () => {
   });
 });
 
+describe("MemberWizard — already here (F178, DECISION-200)", () => {
+  it("links to the person's record and does not offer the failing confirm", async () => {
+    mockMatchPersonAction.mockResolvedValue({
+      ok: true,
+      data: {
+        candidates: [
+          {
+            personId: "p-7",
+            displayName: "N. Ashgrove",
+            confidence: "exact",
+            alreadyHere: { connection: "visitor", endedOn: null },
+          },
+        ],
+      },
+    });
+    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    fillSearch("Nora", "Ashgrove");
+    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+
+    await waitFor(() =>
+      screen.getByText(/n\. ashgrove is already in this community/i),
+    );
+    expect(screen.getByText("They're a visitor.")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /open their record/i }).getAttribute("href"),
+    ).toBe("/o/alder-creek/admin/community/p-7/edit");
+    expect(screen.queryByRole("button", { name: /^yes, this is/i })).toBeNull();
+    // "No" still routes to a new person.
+    fireEvent.click(screen.getByRole("button", { name: /no, this is someone new/i }));
+    expect(screen.getByText(/name & birth date/i)).toBeTruthy();
+  });
+});
+
 describe("MemberWizard — HydrationGate wiring (DECISION-159, F116)", () => {
   it("the server render of the root (which has no <form> tag) is a disabled, busy fieldset", () => {
-    const html = renderToString(<MemberWizard slug="alder-creek" households={[]} />);
+    const html = renderToString(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
     expect(html).toContain('<fieldset disabled=""');
     expect(html).toContain('aria-busy="true"');
   });

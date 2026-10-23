@@ -76,3 +76,28 @@ export function MembersLoadError({
     </section>
   );
 }
+
+/**
+ * DECISION-197: a `people.manage` holder who lacks `directory.view`. They can
+ * add and edit people and see Visitors, Staff and Former (those need
+ * `people.manage`), but the Directory-backed views (Everyone, Members,
+ * Participants) are closed to them, and the page says which permission is
+ * missing instead of the generic forbidden copy. Rendered INSIDE the page
+ * chrome (below the nav), not as a whole-page replacement; `MembersForbidden`
+ * is for a caller with no `people.manage`, and its body stays byte-identical.
+ */
+export function MembersLimited({ name }: { name: string }) {
+  return (
+    <div
+      role="status"
+      className="rounded-lg border border-dashed border-border px-4 py-10 text-center"
+    >
+      <p className="text-sm text-muted-foreground">
+        You can add and edit people at {name}, but browsing the full list needs
+        directory access (the directory.view permission). Ask your stated clerk
+        or another administrator to add it. Visitors and Staff above still
+        work.
+      </p>
+    </div>
+  );
+}

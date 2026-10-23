@@ -222,8 +222,9 @@ export type PortalTile = PortalTileBase & PortalTileGate;
 export const PORTAL_TILES: readonly PortalTile[] = [
   {
     key: "members",
-    label: "Members",
-    description: "Add a person and record roll actions.",
+    label: "Community",
+    description:
+      "Add people, record participants and roll actions, and see visitors and staff.",
     href: (slug) => `/o/${slug}/admin/community`,
     flagKey: "org_portal.members_create",
     category: "operate",

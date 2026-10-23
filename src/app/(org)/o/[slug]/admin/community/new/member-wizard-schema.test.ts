@@ -14,8 +14,9 @@ const VALID_NEW_IDENTITY = {
     dateOfBirth: "",
   },
   household: { mode: "none" as const, name: "", householdId: "" },
+  relationship: "member" as const,
+  visit: { firstVisitDate: "", howHeard: "" },
   rollAction: {
-    kind: "profession_of_faith" as const,
     effectiveDate: "2026-06-01",
     minuteReference: "",
   },
@@ -111,15 +112,60 @@ describe("memberWizardSchema — cross-field rules", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects a rollAction.kind outside WIZARD_ROLL_ACTION_KINDS, e.g. 'death' — regression for wizard-select-full-kind-map (docs/work-log/2026-08-26-member-roll-on-edit.md)", () => {
+  it("rejects a relationship outside visitor / participant / member — regression for wizard-select-full-kind-map (docs/work-log/2026-08-26-member-roll-on-edit.md)", () => {
     const result = memberWizardSchema.safeParse({
       ...VALID_NEW_IDENTITY,
-      rollAction: { ...VALID_NEW_IDENTITY.rollAction, kind: "death" },
+      relationship: "death",
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       const paths = result.error.issues.map((i) => i.path.join("."));
-      expect(paths).toContain("rollAction.kind");
+      expect(paths).toContain("relationship");
     }
+  });
+
+  it("accepts a participant with an effective date", () => {
+    expect(
+      memberWizardSchema.safeParse({
+        ...VALID_NEW_IDENTITY,
+        relationship: "participant",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("a visitor needs no effective date and no first-visit date", () => {
+    const result = memberWizardSchema.safeParse({
+      ...VALID_NEW_IDENTITY,
+      relationship: "visitor",
+      rollAction: { effectiveDate: "", minuteReference: "" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("a visitor's first-visit date, when present, must be a real shape", () => {
+    const result = memberWizardSchema.safeParse({
+      ...VALID_NEW_IDENTITY,
+      relationship: "visitor",
+      visit: { firstVisitDate: "last sunday", howHeard: "" },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.path.join("."))).toContain(
+        "visit.firstVisitDate",
+      );
+    }
+  });
+
+  it("caps how-heard at 200 characters", () => {
+    const result = memberWizardSchema.safeParse({
+      ...VALID_NEW_IDENTITY,
+      relationship: "visitor",
+      visit: { firstVisitDate: "", howHeard: "x".repeat(201) },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("defaults to Visitor, the one choice that needs no roll permission", () => {
+    expect(WIZARD_DEFAULT_VALUES.relationship).toBe("visitor");
   });
 });

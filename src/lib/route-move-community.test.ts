@@ -52,7 +52,13 @@ describe("the retired route string", () => {
   const OLD = "admin/members";
   // Files allowed to name the old path: this test, and the redirect-list assertion beside the
   // /orgs one. (next.config.ts is root-level, outside SCAN_DIRS, and has its own check below.)
-  const ALLOWED = new Set(["src/lib/route-move-community.test.ts", "src/lib/giving/csp.test.ts"]);
+  const ALLOWED = new Set([
+    "src/lib/route-move-community.test.ts",
+    "src/lib/giving/csp.test.ts",
+    // The e2e that exercises the redirect and the custom-host 404 must name the old path.
+    "e2e/community-redirect.spec.ts",
+    "e2e/custom-domains/lockdown.spec.ts",
+  ]);
 
   function* walk(dir: string): Generator<string> {
     for (const name of readdirSync(dir)) {

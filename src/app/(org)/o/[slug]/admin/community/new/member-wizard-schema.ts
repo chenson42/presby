@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { WIZARD_ROLL_ACTION_KINDS } from "@/lib/roll-action-kinds";
 
 /**
  * ONE combined zod schema for the whole wizard (Phase 3's explicit choice
@@ -14,6 +13,18 @@ import { WIZARD_ROLL_ACTION_KINDS } from "@/lib/roll-action-kinds";
  */
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The three connections the wizard offers, in select order. */
+export const RELATIONSHIPS = ["visitor", "participant", "member"] as const;
+export type Relationship = (typeof RELATIONSHIPS)[number];
+
+/** The review step's names for each choice (the select's option text is
+ * longer: it carries the approval hint). */
+export const RELATIONSHIP_LABELS: Record<Relationship, string> = {
+  visitor: "Visitor",
+  participant: "Participant",
+  member: "Member (profession of faith)",
+};
 
 export const memberWizardSchema = z
   .object({
@@ -53,14 +64,23 @@ export const memberWizardSchema = z
       name: z.string().optional(),
       householdId: z.string().optional(),
     }),
+    /** How the person is connected (the wizard's "Connection" step). The
+     * ROLL KIND is not a field: Participant is always an on-record enrolment
+     * and Member is always a profession-of-faith proposal. The server decides
+     * what takes effect from the kind alone (DECISION-198). */
+    relationship: z.enum(RELATIONSHIPS),
+    /** Visitor only. */
+    visit: z.object({
+      firstVisitDate: z.string().optional(),
+      howHeard: z.string().max(200, "Keep this under 200 characters").optional(),
+    }),
+    /** Participant and Member only. */
     rollAction: z.object({
-      // Same 2 values as before this extraction — WIZARD_ROLL_ACTION_KINDS
-      // is the shared module's own copy of this exact literal list, not a
-      // behavior change (docs/work-log/2026-08-26-member-roll-on-edit.md
-      // Phase 3 step 6).
-      kind: z.enum(WIZARD_ROLL_ACTION_KINDS),
-      effectiveDate: z.string().min(1, "Effective date is required"),
-      minuteReference: z.string().optional(),
+      effectiveDate: z.string().optional(),
+      minuteReference: z
+        .string()
+        .max(200, "Keep this under 200 characters")
+        .optional(),
     }),
   })
   .superRefine((data, ctx) => {
@@ -106,12 +126,29 @@ export const memberWizardSchema = z
       });
     }
 
-    if (!DATE_RE.test(data.rollAction.effectiveDate)) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Enter a valid date",
-        path: ["rollAction", "effectiveDate"],
-      });
+    if (data.relationship === "visitor") {
+      if (data.visit.firstVisitDate && !DATE_RE.test(data.visit.firstVisitDate)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Enter a valid date",
+          path: ["visit", "firstVisitDate"],
+        });
+      }
+    } else {
+      const date = data.rollAction.effectiveDate ?? "";
+      if (!date) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Effective date is required",
+          path: ["rollAction", "effectiveDate"],
+        });
+      } else if (!DATE_RE.test(date)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Enter a valid date",
+          path: ["rollAction", "effectiveDate"],
+        });
+      }
     }
   });
 
@@ -133,18 +170,7 @@ export const WIZARD_DEFAULT_VALUES: MemberWizardValues = {
   contact: { email: "", phone: "" },
   address: { line1: "", city: "", region: "", postalCode: "" },
   household: { mode: "none", name: "", householdId: "" },
-  rollAction: {
-    kind: "profession_of_faith",
-    effectiveDate: "",
-    minuteReference: "",
-  },
+  relationship: "visitor",
+  visit: { firstVisitDate: "", howHeard: "" },
+  rollAction: { effectiveDate: "", minuteReference: "" },
 };
-
-// Source of truth extraction only, no behavior change (docs/work-log/
-// 2026-08-26-member-roll-on-edit.md Phase 3 step 6): the full 17-kind label
-// map now lives in the shared, plain `src/lib/roll-action-kinds.ts` (needed
-// by both this wizard and the edit screen's own `RecordRollActionForm`).
-// `rollAction.kind`'s zod enum above stays the same 2 values — re-exported
-// here so every existing importer (`roll-action-step.tsx`, `review-step.tsx`)
-// keeps working unchanged.
-export { ROLL_ACTION_KIND_LABELS } from "@/lib/roll-action-kinds";

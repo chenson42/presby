@@ -21,6 +21,7 @@ import {
 } from "./record-roll-action-schema";
 import { recordRollActionAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
+import { SUCCESS_COPY } from "../../participant-copy";
 
 // Same standard treatment as the household select in `edit-person-form.tsx`
 // on the same page (H2, docs/reviews/2026-08-26-portal-ux.md) — without
@@ -77,7 +78,17 @@ export function RecordRollActionForm({
     setSubmitting(false);
 
     if (result.ok) {
-      toast.success("Roll action recorded.");
+      const data = result.data;
+      toast.success(
+        data?.effect === "recorded"
+          ? SUCCESS_COPY.rollRecorded
+          : data?.shadowed
+            ? SUCCESS_COPY.shadowedProposal
+            : SUCCESS_COPY.rollProposed,
+      );
+      if (data?.affectsFiledPeriod) {
+        toast.warning(SUCCESS_COPY.filedPeriodWarning);
+      }
       form.reset(RECORD_ROLL_ACTION_DEFAULT_VALUES);
       router.refresh();
     } else {
@@ -95,9 +106,8 @@ export function RecordRollActionForm({
       <div>
         <h2 className="text-lg font-medium">Record a roll action</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Proposes a new roll action for this person. A holder of
-          roll.approve must still approve it on the pending worklist before
-          it takes effect.
+          Enrolling someone as a participant takes effect now. Every other
+          action is proposed and waits for the Session to approve it.
         </p>
       </div>
 

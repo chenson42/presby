@@ -4,7 +4,7 @@
  * same gate-composition contract as `admin/community/new/page.test.tsx`, plus
  * the person-lookup three-way split (`ok` / `forbidden` / `not_found`).
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 const cachedAuth = vi.fn();
@@ -68,12 +68,23 @@ vi.mock("@/lib/person-sensitive", () => ({
     getSensitiveInfoGrants(...args),
 }));
 
+// `@/lib/community` is `server-only`: mocked so the real module never loads
+// under jsdom. Its own correctness is `community.db.test.ts`'s job.
+const getCommunityStatus = vi.fn();
+vi.mock("@/lib/community", () => ({
+  getCommunityStatus: (...args: unknown[]) => getCommunityStatus(...args),
+}));
+
 vi.mock("./actions", () => ({
   updatePersonAction: vi.fn(),
   recordRollActionAction: vi.fn(),
+  removeParticipantAction: vi.fn(),
+  undoParticipantEntryAction: vi.fn(),
 }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+}));
 
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
@@ -89,6 +100,28 @@ vi.mock("next/navigation", () => ({
 
 import EditMemberPage from "./page";
 import { OrgAccessError } from "@/lib/authz";
+
+/** A listed person with no roll: the quietest connection. */
+function status(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: "ok" as const,
+    status: {
+      personId: "p-1",
+      connection: "listed",
+      currentRoll: null,
+      currentRollSince: null,
+      endedOn: null,
+      hasOpenStaffPosition: false,
+      pendingCount: 0,
+      latestAction: null,
+      ...overrides,
+    },
+  };
+}
+
+beforeEach(() => {
+  getCommunityStatus.mockReset().mockResolvedValue(status());
+});
 
 afterEach(() => {
   cleanup();
@@ -504,7 +537,7 @@ describe("EditMemberPage — guardians link (docs/work-log/2026-08-26-childrens-
 });
 
 describe("EditMemberPage — card-separated visual structure (M2, docs/reviews/2026-08-26-portal-ux.md)", () => {
-  it("wraps Profile, the roll-action form, and the sensitive-info link in their own bg-card panels", async () => {
+  it("wraps Profile, Connection, the roll-action form, and the sensitive-info link in their own bg-card panels", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     mockFlags({ membersCreate: true, rollActionEdit: true, sensitiveInfo: true });
@@ -523,9 +556,9 @@ describe("EditMemberPage — card-separated visual structure (M2, docs/reviews/2
     const { container } = render(el);
 
     const cards = container.querySelectorAll(".bg-card");
-    // Profile, Record a roll action, and the sensitive-info link each get
-    // their own panel — three, not one undifferentiated scroll.
-    expect(cards.length).toBe(3);
+    // Profile, Connection, Record a roll action, and the sensitive-info link
+    // each get their own panel — four, not one undifferentiated scroll.
+    expect(cards.length).toBe(4);
 
     const profileHeading = screen.getByRole("heading", { name: /^profile$/i });
     expect(profileHeading.closest(".bg-card")).not.toBeNull();
@@ -537,5 +570,156 @@ describe("EditMemberPage — card-separated visual structure (M2, docs/reviews/2
 
     const sensitiveLink = screen.getByText(/pastoral notes, demographics/i);
     expect(sensitiveLink.closest(".bg-card")).not.toBeNull();
+  });
+});
+
+describe("EditMemberPage — the Connection card and participant controls (DECISION-198, DECISION-200)", () => {
+  async function renderWith({
+    connection = "listed",
+    latestAction = null,
+    currentRollSince = null,
+    endedOn = null,
+    rollActionEdit = true,
+    canPropose = true,
+    pending = [],
+  }: {
+    connection?: string;
+    latestAction?: { id: string; kind: string; effectiveDate: string; onRecordKind: boolean } | null;
+    currentRollSince?: string | null;
+    endedOn?: string | null;
+    rollActionEdit?: boolean;
+    canPropose?: boolean;
+    pending?: Array<{ id: string; kind: string; effectiveDate: string }>;
+  }) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true, rollActionEdit });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getPendingRollActionsForPerson.mockResolvedValue({ kind: "ok", actions: pending });
+    getCommunityStatus.mockResolvedValue(
+      status({ connection, latestAction, currentRollSince, endedOn }),
+    );
+    hasPermission.mockImplementation(
+      async (_p: string, _o: string, key: string) =>
+        key === "roll.propose" ? canPropose : false,
+    );
+    render(await EditMemberPage({ params: makeParams() }));
+  }
+
+  const ENROLMENT = {
+    id: "ra-1",
+    kind: "other_participant_enrolled",
+    effectiveDate: "2026-03-01",
+    onRecordKind: true,
+  };
+
+  it.each([
+    ["visitor", "Visitor"],
+    ["participant", "Participant"],
+    ["member", "Member"],
+    ["staff", "Staff"],
+    ["listed", "Listed"],
+    ["former_participant", "Former participant"],
+    ["ended", "Connection ended"],
+  ])("states a %s connection in words", async (connection, label) => {
+    await renderWith({ connection });
+    const card = screen.getByTestId("connection-card");
+    expect(card.textContent).toContain(label);
+    expect(screen.getByRole("heading", { name: "Connection" })).toBeTruthy();
+  });
+
+  it("a participant gets Remove, Undo and the become-a-member note", async () => {
+    await renderWith({
+      connection: "participant",
+      latestAction: ENROLMENT,
+      currentRollSince: "2026-03-01",
+    });
+    expect(screen.getByRole("button", { name: /remove as participant/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /undo last entry/i })).toBeTruthy();
+    expect(
+      screen.getByText(
+        /to receive this person as a member, record a profession of faith or another gain below\. no removal is needed\./i,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/latest entry: enrolled as a participant/i)).toBeTruthy();
+  });
+
+  it("a visitor has no Remove, and no Undo without an on-record entry", async () => {
+    await renderWith({ connection: "visitor" });
+    expect(screen.queryByRole("button", { name: /remove as participant/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /undo last entry/i })).toBeNull();
+    expect(screen.queryByText(/no removal is needed/i)).toBeNull();
+  });
+
+  it("an enrolled visitor (roll is participant) can be undone back to a visitor", async () => {
+    await renderWith({ connection: "participant", latestAction: ENROLMENT });
+    expect(screen.getByRole("button", { name: /undo last entry/i })).toBeTruthy();
+  });
+
+  it("a former participant can Undo the removal but not Remove again", async () => {
+    await renderWith({
+      connection: "former_participant",
+      endedOn: "2026-04-02",
+      latestAction: {
+        id: "ra-2",
+        kind: "other_participant_removed",
+        effectiveDate: "2026-04-02",
+        onRecordKind: true,
+      },
+    });
+    expect(screen.queryByRole("button", { name: /remove as participant/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /undo last entry/i })).toBeTruthy();
+  });
+
+  it("a member whose latest entry is a Session-approved kind gets neither control", async () => {
+    await renderWith({
+      connection: "member",
+      latestAction: {
+        id: "ra-3",
+        kind: "profession_of_faith",
+        effectiveDate: "2026-01-01",
+        onRecordKind: false,
+      },
+    });
+    expect(screen.queryByRole("button", { name: /remove as participant/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /undo last entry/i })).toBeNull();
+  });
+
+  it("without roll.propose the card shows but no control does", async () => {
+    await renderWith({
+      connection: "participant",
+      latestAction: ENROLMENT,
+      canPropose: false,
+    });
+    expect(screen.getByTestId("connection-card")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /remove as participant/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /undo last entry/i })).toBeNull();
+  });
+
+  it("with the roll-action edit flag off the controls are absent (the card is not)", async () => {
+    await renderWith({
+      connection: "participant",
+      latestAction: ENROLMENT,
+      rollActionEdit: false,
+    });
+    expect(screen.getByTestId("connection-card")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /remove as participant/i })).toBeNull();
+    expect(hasPermission).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "roll.propose",
+    );
+  });
+
+  it("names a pending action as waiting for the Session", async () => {
+    await renderWith({
+      connection: "listed",
+      pending: [{ id: "ra-9", kind: "profession_of_faith", effectiveDate: "2026-06-01" }],
+    });
+    expect(
+      screen.getByText(/waiting for the session to approve: profession of faith/i),
+    ).toBeTruthy();
   });
 });

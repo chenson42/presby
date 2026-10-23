@@ -107,6 +107,11 @@ const PLATFORM_PATHS = [
   "/developer",
   "/o/e2e-alpha",
   "/o/e2e-alpha/admin",
+  // The Community route move (DECISION-201): the old path is redirected ONLY on a platform host (F151),
+  // so here it is the neutral 404 with no `location`, and the new path is the same neutral 404.
+  "/o/e2e-alpha/admin/members",
+  "/o/e2e-alpha/admin/members/new?x=1",
+  "/o/e2e-alpha/admin/community",
 ] as const;
 
 // Looping over dozens of paths against a DEV server compiles each route on first touch; allow for it.

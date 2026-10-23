@@ -7,11 +7,15 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
+import { getDirectory, type DirectoryResult } from "@/lib/directory";
 import {
-  DIRECTORY_STATUSES,
-  getDirectory,
-  type DirectoryStatus,
-} from "@/lib/directory";
+  getCommunityBadges,
+  listFormerParticipants,
+  listStaff,
+  listVisitors,
+  type CommunityListResult,
+} from "@/lib/community";
+import { parseCommunityView } from "@/lib/community-labels";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
 import { Button } from "@/components/ui/button";
@@ -19,59 +23,60 @@ import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import {
   MembersFlagOff,
   MembersForbidden,
+  MembersLimited,
   MembersLoadError,
 } from "./members-states";
 import { MembersList } from "./members-list";
+import { CommunityNav } from "./community-nav";
 
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
 const CHILDREN_MINISTRY_FLAG = "org_portal.children_ministry";
+const STAFF_FLAG = "org_portal.staff";
 
 /**
- * `/o/<slug>/admin/community` — the list + "Add Person" entry point
- * (Deliverable B, Increment 1). Gated on BOTH `org_portal.members_create`
- * (the global flag) AND the matching `organization_feature_toggles` row
- * (DECISION-097's third axis) — the flag answers "does this exist
- * anywhere", the toggle answers "does this exist for THIS congregation".
+ * `/o/<slug>/admin/community` — the Community page: the list, its six views and
+ * the "Add person" entry point. Gated on BOTH `org_portal.members_create` (the
+ * global flag) AND the matching `organization_feature_toggles` row
+ * (DECISION-097's third axis).
  *
- * REUSES `getDirectory()` FOR ROW DATA (Phase 3's explicit choice) rather
- * than inventing an `admin/community`-specific reader — same privacy-filtered
- * read the public Directory already ships. The "Add Person" CTA is
- * ADDITIONALLY gated on `people.manage`, checked directly here (not inside
- * `getDirectory()`, which knows nothing about that permission) — a KNOWN,
- * NAMED Increment-1 coupling (Phase 3): a `people.manage` holder who lacks
- * `directory.view` sees `getDirectory()`'s own forbidden state on the list
- * even though they could still reach `/new` directly. Not fixed here.
+ * VIEWS (DECISION-201), server-rendered links in `CommunityNav`: Everyone,
+ * Members (active, baptized, affiliate), Participants read the privacy-filtered
+ * Directory (`getDirectory()`, `directory.view`); Visitors, Staff and Former
+ * read `src/lib/community.ts` (`people.manage`, admin-only, never in the
+ * Directory).
+ *
+ * DEGRADE (DECISION-197, F172): a `people.manage` holder without
+ * `directory.view` keeps the header, Add person and the three admin views, and
+ * sees `MembersLimited` in place of a Directory-backed list. A caller without
+ * `people.manage` gets `MembersForbidden`, unchanged. "Add person" is gated on
+ * `people.manage` alone (a Visitor needs nothing more); the roll-bearing
+ * choices are gated on `roll.propose` inside the wizard and re-checked on the
+ * server.
  */
-/** Increment 5. Same default `directory/page.tsx` uses — one number, not
- * two independently-tuned constants for the same underlying list shape. */
 const MEMBERS_PAGE_SIZE = 25;
 
-function parseStatus(raw: string | undefined): DirectoryStatus | undefined {
-  return (DIRECTORY_STATUSES as readonly string[]).includes(raw ?? "")
-    ? (raw as DirectoryStatus)
-    : undefined;
-}
+const HEADING = "Community";
 
 function parsePage(raw: string | undefined): number {
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : 1;
 }
 
-export default async function MembersPage({
+export default async function CommunityPage({
   params,
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ search?: string; status?: string; page?: string }>;
+  searchParams: Promise<{ search?: string; view?: string; page?: string }>;
 }) {
   const { slug } = await params;
   const {
     search: rawSearch,
-    status: rawStatus,
+    view: rawView,
     page: rawPage,
   } = await searchParams;
   const search = rawSearch?.trim() ?? "";
-  const status = parseStatus(rawStatus);
+  const view = parseCommunityView(rawView);
   const page = parsePage(rawPage);
 
   const session = await cachedAuth();
@@ -117,17 +122,55 @@ export default async function MembersPage({
       )
     : false;
   if (!flagOn || !toggleOn) {
-    return <MembersFlagOff name={resolved.org.name} heading="Members" />;
+    return <MembersFlagOff name={resolved.org.name} heading={HEADING} />;
   }
 
-  let result;
+  // Independent awaited calls, not merged into one Promise.all — same
+  // discipline edit/page.tsx's own conditional cards follow.
+  const canManage = await hasPermission(
+    resolved.org.personId,
+    resolved.org.organizationId,
+    "people.manage",
+  );
+  const adminView = view === "visitors" || view === "staff" || view === "former";
+  if (adminView && !canManage) {
+    return <MembersForbidden name={resolved.org.name} heading={HEADING} />;
+  }
+
+  const personId = resolved.org.personId;
+  const organizationId = resolved.org.organizationId;
+
+  let directoryResult: DirectoryResult | null = null;
+  let listResult: CommunityListResult | null = null;
+  let badges: Awaited<ReturnType<typeof getCommunityBadges>> = {};
   try {
-    result = await getDirectory(resolved.org.personId, resolved.org.organizationId, {
-      search,
-      status,
-      page,
-      pageSize: MEMBERS_PAGE_SIZE,
-    });
+    if (adminView) {
+      const opts = { search, page, pageSize: MEMBERS_PAGE_SIZE };
+      listResult =
+        view === "visitors"
+          ? await listVisitors(personId, organizationId, opts)
+          : view === "staff"
+            ? await listStaff(personId, organizationId, opts)
+            : await listFormerParticipants(personId, organizationId, opts);
+    } else {
+      directoryResult = await getDirectory(personId, organizationId, {
+        search,
+        ...(view === "members"
+          ? { rollStatuses: ["active", "baptized", "affiliate"] as const }
+          : view === "participants"
+            ? { status: "other_participant" as const }
+            : {}),
+        page,
+        pageSize: MEMBERS_PAGE_SIZE,
+      });
+      if (canManage && directoryResult.kind === "ok") {
+        badges = await getCommunityBadges(
+          personId,
+          organizationId,
+          directoryResult.entries.map((e) => e.personId),
+        );
+      }
+    }
   } catch (err) {
     if (err instanceof OrgAccessError) {
       throw err;
@@ -135,37 +178,34 @@ export default async function MembersPage({
     return (
       <MembersLoadError
         backHref={`/o/${slug}/admin/community`}
-        heading="Members"
+        heading={HEADING}
       />
     );
   }
 
-  if (result.kind === "forbidden") {
-    return <MembersForbidden name={resolved.org.name} heading="Members" />;
+  const directoryForbidden = directoryResult?.kind === "forbidden";
+  if (directoryForbidden && !canManage) {
+    return <MembersForbidden name={resolved.org.name} heading={HEADING} />;
+  }
+  if (listResult?.kind === "forbidden") {
+    return <MembersForbidden name={resolved.org.name} heading={HEADING} />;
   }
 
-  // Independent awaited calls, not merged into one Promise.all — same
-  // discipline edit/page.tsx's own two conditional cards follow, so a
-  // future ordering bug in one check can't cross-contaminate the other.
-  const canCreate = await hasPermission(
-    resolved.org.personId,
-    resolved.org.organizationId,
-    "people.manage",
-  );
   const childrenMinistryFlagOn = await isFlagEnabled(CHILDREN_MINISTRY_FLAG);
   const canViewChildrenRoster = childrenMinistryFlagOn
-    ? await hasPermission(
-        resolved.org.personId,
-        resolved.org.organizationId,
-        "children.roster",
-      )
+    ? await hasPermission(personId, organizationId, "children.roster")
     : false;
+  // The Staff empty state links to the Staff page only when it is reachable.
+  const canStaffLink =
+    view === "staff" && (await isFlagEnabled(STAFF_FLAG))
+      ? await hasPermission(personId, organizationId, "staff.manage")
+      : false;
 
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Members</h1>
+          <h1 className="text-2xl font-semibold">{HEADING}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {resolved.org.name}
           </p>
@@ -178,7 +218,7 @@ export default async function MembersPage({
               </Link>
             </Button>
           )}
-          {canCreate && (
+          {canManage && (
             <Button asChild className="min-h-11">
               <Link href={`/o/${slug}/admin/community/new`}>Add person</Link>
             </Button>
@@ -186,15 +226,33 @@ export default async function MembersPage({
         </div>
       </div>
 
-      <MembersList
-        slug={slug}
-        entries={result.entries}
-        canCreate={canCreate}
-        canEdit={canCreate}
-        search={search}
-        status={status ?? ""}
-        pagination={result.pagination}
-      />
+      <CommunityNav slug={slug} view={view} search={search} canManage={canManage} />
+
+      {directoryForbidden ? (
+        <MembersLimited name={resolved.org.name} />
+      ) : directoryResult?.kind === "ok" ? (
+        <MembersList
+          slug={slug}
+          view={view}
+          entries={directoryResult.entries}
+          badges={badges}
+          canManage={canManage}
+          canStaffLink={canStaffLink}
+          search={search}
+          pagination={directoryResult.pagination}
+        />
+      ) : listResult?.kind === "ok" ? (
+        <MembersList
+          slug={slug}
+          view={view}
+          rows={listResult.rows}
+          badges={badges}
+          canManage={canManage}
+          canStaffLink={canStaffLink}
+          search={search}
+          pagination={listResult.pagination}
+        />
+      ) : null}
     </section>
   );
 }

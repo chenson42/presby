@@ -20,8 +20,9 @@ vi.mock("./actions", () => ({
 
 const toastSuccess = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
+const toastWarning = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccess, error: toastError },
+  toast: { success: toastSuccess, error: toastError, warning: toastWarning },
 }));
 
 import { RecordRollActionForm } from "./record-roll-action-form";
@@ -32,6 +33,7 @@ afterEach(() => {
   mockRecordRollActionAction.mockReset();
   toastSuccess.mockClear();
   toastError.mockClear();
+  toastWarning.mockClear();
 });
 
 describe("RecordRollActionForm — pending notice", () => {
@@ -159,5 +161,59 @@ describe("RecordRollActionForm — submit", () => {
       (screen.getByLabelText(/effective date/i) as HTMLInputElement).value,
     ).toBe("2026-06-01");
     expect(mockRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("RecordRollActionForm — what the success says depends on what happened", () => {
+  async function submitWith(data: Record<string, unknown>) {
+    mockRecordRollActionAction.mockResolvedValueOnce({ ok: true, data });
+    render(
+      <RecordRollActionForm slug="alder-creek" personId="p-1" pendingActions={[]} />,
+    );
+    fireEvent.change(screen.getByLabelText(/effective date/i), {
+      target: { value: "2026-06-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /record roll action/i }));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+  }
+
+  it("a participant enrolment is recorded, with no approval", async () => {
+    await submitWith({ effect: "recorded", affectsFiledPeriod: false, shadowed: null });
+    expect(toastSuccess).toHaveBeenCalledWith("Participant recorded. No approval is needed.");
+  });
+
+  it("a proposal says it is waiting for the Session", async () => {
+    await submitWith({ effect: "pending", affectsFiledPeriod: false, shadowed: null });
+    expect(toastSuccess).toHaveBeenCalledWith(
+      "Roll action proposed. It's waiting for the Session to approve.",
+    );
+    expect(toastWarning).not.toHaveBeenCalled();
+  });
+
+  it("a shadowed proposal carries the S1 note", async () => {
+    await submitWith({
+      effect: "pending",
+      affectsFiledPeriod: false,
+      shadowed: { kind: "other_participant_enrolled", effectiveDate: "2026-07-01" },
+    });
+    expect(toastSuccess).toHaveBeenCalledWith(
+      expect.stringMatching(/dated before this person's latest roll entry/i),
+    );
+  });
+
+  it("an entry in a filed year adds the filed-period warning as a second toast", async () => {
+    await submitWith({ effect: "recorded", affectsFiledPeriod: true, shadowed: null });
+    expect(toastWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/year that has already been filed.*file a correcting return/i),
+    );
+  });
+
+  it("explains the new behaviour in its own description", () => {
+    render(
+      <RecordRollActionForm slug="alder-creek" personId="p-1" pendingActions={[]} />,
+    );
+    expect(
+      screen.getByText(/enrolling someone as a participant takes effect now/i),
+    ).toBeTruthy();
   });
 });

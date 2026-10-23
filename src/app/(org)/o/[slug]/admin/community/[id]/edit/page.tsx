@@ -12,6 +12,7 @@ import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
 import { getHouseholds } from "@/lib/directory";
 import { getPersonForEdit } from "@/lib/people";
+import { getCommunityStatus, type CommunityStatus } from "@/lib/community";
 import { getSensitiveInfoGrants } from "@/lib/person-sensitive";
 import {
   getPendingRollActionsForPerson,
@@ -25,6 +26,8 @@ import {
 } from "../../members-states";
 import { EditPersonForm } from "./edit-person-form";
 import { RecordRollActionForm } from "./record-roll-action-form";
+import { ConnectionCard } from "./connection-card";
+import { ParticipantControls } from "./participant-controls";
 
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
 const ROLL_ACTION_EDIT_FLAG = "org_portal.members_roll_action_edit";
@@ -139,6 +142,8 @@ export default async function EditMemberPage({
   let pendingRollActions: PendingRollActionForPerson[] = [];
   let showSensitiveInfoLink = false;
   let showGuardiansLink = false;
+  let communityStatus: CommunityStatus | null = null;
+  let canPropose = false;
   try {
     personResult = await getPersonForEdit(
       resolved.org.personId,
@@ -155,7 +160,20 @@ export default async function EditMemberPage({
         name: h.name,
       }));
     }
+    const statusResult = await getCommunityStatus(
+      resolved.org.personId,
+      resolved.org.organizationId,
+      id,
+    );
+    if (statusResult.kind === "ok") {
+      communityStatus = statusResult.status;
+    }
     if (rollActionEditFlagOn) {
+      canPropose = await hasPermission(
+        resolved.org.personId,
+        resolved.org.organizationId,
+        "roll.propose",
+      );
       const pendingResult = await getPendingRollActionsForPerson(
         resolved.org.personId,
         resolved.org.organizationId,
@@ -223,6 +241,36 @@ export default async function EditMemberPage({
           households={households}
         />
       </div>
+
+      {communityStatus && (
+        <div className="space-y-4 rounded-xl border bg-card p-6 shadow-sm">
+          <ConnectionCard
+            status={communityStatus}
+            pendingActions={pendingRollActions}
+          />
+          {rollActionEditFlagOn && canPropose && (
+            <ParticipantControls
+              slug={slug}
+              personId={id}
+              personName={`${personResult.person.firstName} ${personResult.person.lastName}`}
+              orgName={resolved.org.name}
+              canRemove={communityStatus.connection === "participant"}
+              undo={
+                communityStatus.latestAction?.onRecordKind
+                  ? {
+                      rollActionId: communityStatus.latestAction.id,
+                      entryLabel:
+                        communityStatus.latestAction.kind ===
+                        "other_participant_removed"
+                          ? "removal"
+                          : "enrolment",
+                    }
+                  : null
+              }
+            />
+          )}
+        </div>
+      )}
 
       {rollActionEditFlagOn && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">

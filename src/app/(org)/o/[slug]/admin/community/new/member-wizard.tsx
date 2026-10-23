@@ -18,9 +18,10 @@ import { ConfirmStep } from "./confirm-step";
 import { IdentityStep } from "./identity-step";
 import { ContactAddressStep } from "./contact-address-step";
 import { HouseholdStep } from "./household-step";
-import { RollActionStep } from "./roll-action-step";
+import { ConnectionStep } from "./connection-step";
 import { ReviewStep } from "./review-step";
 import { createPersonAction, matchPersonAction } from "./actions";
+import { SUCCESS_COPY } from "../participant-copy";
 import { HydrationGate } from "@/components/shared/hydration-gate";
 
 type StepId =
@@ -29,7 +30,7 @@ type StepId =
   | "identity"
   | "contact"
   | "household"
-  | "rollAction"
+  | "connection"
   | "review";
 
 const STEP_LABELS: Record<StepId, string> = {
@@ -38,7 +39,7 @@ const STEP_LABELS: Record<StepId, string> = {
   identity: "Name & birth date",
   contact: "Contact & address",
   household: "Household",
-  rollAction: "Roll action",
+  connection: "Connection",
   review: "Review & submit",
 };
 
@@ -60,8 +61,10 @@ const HOUSEHOLD_FIELDS = [
   "household.name",
   "household.householdId",
 ] as const;
-const ROLL_ACTION_FIELDS = [
-  "rollAction.kind",
+const CONNECTION_FIELDS = [
+  "relationship",
+  "visit.firstVisitDate",
+  "visit.howHeard",
   "rollAction.effectiveDate",
   "rollAction.minuteReference",
 ] as const;
@@ -87,9 +90,12 @@ const ROLL_ACTION_FIELDS = [
 export function MemberWizard({
   slug,
   households,
+  canProposeRoll,
 }: {
   slug: string;
   households: { householdId: string; name: string }[];
+  /** `roll.propose`. Without it only Visitor is offered; the server re-checks. */
+  canProposeRoll: boolean;
 }) {
   const router = useRouter();
   const form = useForm<MemberWizardValues>({
@@ -118,7 +124,7 @@ export function MemberWizard({
     const s: StepId[] = ["search"];
     if (searched && matchCandidate) s.push("confirm");
     if (identityMode === "new") s.push("identity");
-    s.push("contact", "household", "rollAction", "review");
+    s.push("contact", "household", "connection", "review");
     return s;
   }, [searched, matchCandidate, identityMode]);
 
@@ -202,11 +208,11 @@ export function MemberWizard({
 
   async function handleHouseholdNext() {
     const valid = await form.trigger(HOUSEHOLD_FIELDS);
-    if (valid) setCurrentStepId("rollAction");
+    if (valid) setCurrentStepId("connection");
   }
 
-  async function handleRollActionNext() {
-    const valid = await form.trigger(ROLL_ACTION_FIELDS);
+  async function handleConnectionNext() {
+    const valid = await form.trigger(CONNECTION_FIELDS);
     if (valid) setCurrentStepId("review");
   }
 
@@ -250,11 +256,23 @@ export function MemberWizard({
           : values.household.mode === "existing"
             ? { mode: "existing", householdId: values.household.householdId! }
             : { mode: "none" },
-      rollAction: {
-        kind: values.rollAction.kind,
-        effectiveDate: values.rollAction.effectiveDate,
-        minuteReference: values.rollAction.minuteReference || undefined,
-      },
+      // The roll KIND is fixed by the choice; what takes effect on record is
+      // decided by the server from the kind alone (DECISION-198).
+      rollAction:
+        values.relationship === "visitor"
+          ? {
+              kind: "visitor",
+              firstVisitDate: values.visit.firstVisitDate || undefined,
+              howHeard: values.visit.howHeard || undefined,
+            }
+          : {
+              kind:
+                values.relationship === "participant"
+                  ? "other_participant_enrolled"
+                  : "profession_of_faith",
+              effectiveDate: values.rollAction.effectiveDate ?? "",
+              minuteReference: values.rollAction.minuteReference || undefined,
+            },
     };
 
     setSubmitting(true);
@@ -262,9 +280,26 @@ export function MemberWizard({
     setSubmitting(false);
 
     if (result.ok) {
-      toast.success("Person added. Their roll action is pending approval.");
+      const effect = result.data?.effect;
+      toast.success(
+        effect === "recorded"
+          ? SUCCESS_COPY.participantAdded
+          : effect === "pending"
+            ? SUCCESS_COPY.memberProposed
+            : SUCCESS_COPY.visitorAdded,
+      );
+      if (result.data?.affectsFiledPeriod) {
+        toast.warning(SUCCESS_COPY.filedPeriodWarning);
+      }
       form.reset(WIZARD_DEFAULT_VALUES);
-      router.push(`/o/${slug}/admin/community`);
+      // Land on the list that now holds the person.
+      const landing =
+        effect === "recorded"
+          ? "?view=participants"
+          : effect === "none"
+            ? "?view=visitors"
+            : "";
+      router.push(`/o/${slug}/admin/community${landing}`);
     } else {
       // NO reset here — see this component's own header (req 9).
       toast.error(result.error);
@@ -293,6 +328,8 @@ export function MemberWizard({
               displayName={matchCandidate.displayName}
               onConfirm={handleConfirmMatch}
               onReject={handleRejectMatch}
+              alreadyHere={matchCandidate.alreadyHere}
+              recordHref={`/o/${slug}/admin/community/${matchCandidate.personId}/edit`}
             />
             {/* Confirm's own two full-width buttons ARE the forward action —
              * only Back is offered here, in case the search itself needs
@@ -313,7 +350,9 @@ export function MemberWizard({
         {currentStepId === "household" && (
           <HouseholdStep form={form} households={households} mode={householdMode} />
         )}
-        {currentStepId === "rollAction" && <RollActionStep form={form} />}
+        {currentStepId === "connection" && (
+          <ConnectionStep form={form} canProposeRoll={canProposeRoll} />
+        )}
         {currentStepId === "review" && (
           <ReviewStep form={form} householdName={selectedHousehold?.name} />
         )}
@@ -364,10 +403,10 @@ export function MemberWizard({
                 Next
               </Button>
             )}
-            {currentStepId === "rollAction" && (
+            {currentStepId === "connection" && (
               <Button
                 type="button"
-                onClick={handleRollActionNext}
+                onClick={handleConnectionNext}
                 className="min-h-[44px] min-w-[44px]"
               >
                 Next

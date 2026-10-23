@@ -2,11 +2,22 @@ import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
 import type { db } from "@/lib/db";
-import { isExclusionViolation } from "@/lib/db/errors";
+import { isExclusionViolation, isPgError, pgErrorMessages } from "@/lib/db/errors";
 import { officerTerms } from "@/lib/db/domain/officers";
+import { groups } from "@/lib/db/domain/groups";
 import { orgUnits } from "@/lib/db/domain/org";
 import { memberships, people } from "@/lib/db/domain/people";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
+import { insertAuditRow } from "@/lib/audit-tx";
+import { isUuid } from "@/lib/is-uuid";
+import {
+  OFFICER_OFFICES,
+  OFFICE_LABELS,
+  isPastorOffice,
+  isSessionOffice,
+  type OfficerOffice,
+} from "@/lib/officer-offices";
+import { todayUtcYmd } from "@/lib/ymd";
 
 /**
  * Officer-term administration — P?? gap 1 (`docs/work-log/
@@ -67,14 +78,19 @@ import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
  *      one on a deacon office) — the "iff" is an application-level rule,
  *      enforced here and again client-side (commit 3).
  *
- * `setOfficerTermPublicListed()` (docs/work-log/
- * 2026-08-27-public-staff-directory.md, Phase 3) IS AN EXCEPTION to this
- * module's usual "audit lives in `admin/officers/actions.ts`" split
- * (`startOfficerTerm`/`endOfficerTerm`'s own `AUDIT_ACTIONS.OFFICER_TERM_
- * STARTED`/`ENDED` calls are in that actions.ts file, not here) —
- * `recordAudit()` is called from INSIDE this function per that work-log's
- * explicit Phase 3 instruction. See the function's own doc comment for the
- * `check:audit` tripwire-coverage finding this produced.
+ * AUDIT (Increment 2, DECISION-205, R13): `startOfficerTerm()` and
+ * `endOfficerTerm()` write `tenant.officer_term.started`/`ended` HERE with
+ * `insertAuditRow()` in the SAME transaction as the term (they used to be
+ * written by `admin/officers/actions.ts` after commit through `recordAudit()`,
+ * which swallows failures). A Session-bearing term is equivalent to a grant of
+ * whatever the congregation's Session role carries, and grants are audited in
+ * the transaction, so a term can no longer commit with no audit row. The
+ * metadata is built from the term's own row, not client input, and carries
+ * `selfRecorded` (the person's `user_id` is the actor): the first link of the
+ * `paper` chain DECISION-205 names. `setOfficerTermPublicListed()`
+ * (docs/work-log/2026-08-27-public-staff-directory.md) still calls
+ * `recordAudit()` from inside the function, after commit; see its own doc
+ * comment for the `check:audit` tripwire-coverage finding.
  */
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -82,25 +98,10 @@ type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const OFFICERS_MANAGE = "officers.manage";
 
-export const OFFICER_OFFICES = [
-  "ruling_elder",
-  "deacon",
-  "clerk_of_session",
-  "moderator",
-  "treasurer",
-  "trustee",
-] as const;
-
-export type OfficerOffice = (typeof OFFICER_OFFICES)[number];
-
-export const OFFICE_LABELS: Record<OfficerOffice, string> = {
-  ruling_elder: "Ruling Elder",
-  deacon: "Deacon",
-  clerk_of_session: "Clerk of Session",
-  moderator: "Moderator",
-  treasurer: "Treasurer",
-  trustee: "Trustee",
-};
+// The office vocabulary lives in the pure `officer-offices.ts` (DECISION-206):
+// one list, re-exported here so existing importers keep their path.
+export { OFFICER_OFFICES, OFFICE_LABELS };
+export type { OfficerOffice };
 
 function isOfficerOffice(value: string): value is OfficerOffice {
   return (OFFICER_OFFICES as readonly string[]).includes(value);
@@ -153,6 +154,10 @@ export interface OfficerRosterEntry {
    * 2026-08-28-public-directory-primitives.md) — additive field, same
    * query. `null` = no curation set, alphabetical-by-name ordering. */
   publicDisplayOrder: number | null;
+  /** Session-bearing offices only: the term was recorded by the person it
+   * seats (`recorded_by` equals the person's `user_id`), shown as
+   * "Self-recorded" (S2, DECISION-205). Always false for other offices. */
+  selfRecorded: boolean;
 }
 
 export interface OfficerHistoryEntry {
@@ -175,7 +180,16 @@ export type OfficersResult<T> =
   | { kind: "forbidden" }
   | { kind: "invalid_target" }
   | { kind: "invalid_input"; message: string }
-  | { kind: "overlap"; personName: string; officeLabel: string };
+  | { kind: "overlap"; personName: string; officeLabel: string }
+  /** A pastor office for a person who is on this congregation's roll (S1): a
+   * pastor's membership is held by the presbytery, so the link carries no roll
+   * fact. Pre-checked here and backstopped by the `officer_terms_pastor_no_roll`
+   * trigger. */
+  | { kind: "on_roll"; personName: string }
+  /** A Session, pastor or diaconate office at an organization with no matching
+   * derived group (only congregations have them). Used to be a raw foreign-key
+   * error (F189). */
+  | { kind: "invalid_office_for_org"; officeLabel: string };
 
 // ---------------------------------------------------------------------------
 // listOfficerRoster
@@ -195,6 +209,7 @@ interface RosterRow {
   org_unit_name: string | null;
   public_listed: boolean;
   public_display_order: number | null;
+  self_recorded: boolean;
 }
 
 /**
@@ -218,7 +233,8 @@ export async function listOfficerRoster(
 
     const result = await tx.execute(sql`
       with all_offices(office) as (
-        values ('ruling_elder'), ('deacon'), ('clerk_of_session'),
+        values ('ruling_elder'), ('installed_pastor'), ('co_pastor'),
+               ('associate_pastor'), ('deacon'), ('clerk_of_session'),
                ('moderator'), ('treasurer'), ('trustee')
       ),
       roster as (
@@ -243,7 +259,8 @@ export async function listOfficerRoster(
         ot.org_unit_id          as org_unit_id,
         ou.name                 as org_unit_name,
         ot.public_listed        as public_listed,
-        ot.public_display_order as public_display_order
+        ot.public_display_order as public_display_order,
+        (ot.recorded_by is not null and ot.recorded_by = p.user_id) as self_recorded
         from roster
         join people p on p.id = roster.person_id
         join officer_terms ot on ot.id = roster.term_id
@@ -264,6 +281,7 @@ export async function listOfficerRoster(
       orgUnitName: row.org_unit_name,
       publicListed: row.public_listed,
       publicDisplayOrder: row.public_display_order,
+      selfRecorded: isSessionOffice(row.office) && row.self_recorded === true,
     }));
 
     return { kind: "ok", data };
@@ -420,6 +438,37 @@ export interface StartOfficerTermInput {
   orgUnitId?: string;
 }
 
+export interface OfficerActingOptions {
+  /** Stamped on the audit row only. Never an authority claim. */
+  actingUserEmail?: string | null;
+}
+
+/**
+ * The derived group an office needs at its organization: the Session offices
+ * (elders and pastors) need `session`, a deacon needs `diaconate`, everything
+ * else needs none. Only congregations have either group, so this is how a
+ * Session, pastor or diaconate office at a presbytery becomes the typed
+ * `invalid_office_for_org` instead of the trigger's raw foreign-key error.
+ */
+function requiredDerivedGroup(office: OfficerOffice): "session" | "diaconate" | null {
+  if (office === "deacon") return "diaconate";
+  if (isSessionOffice(office)) return "session";
+  return null;
+}
+
+async function hasDerivedGroup(
+  tx: OrgTx,
+  organizationId: string,
+  derivedFrom: "session" | "diaconate",
+): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: groups.id })
+    .from(groups)
+    .where(and(eq(groups.organizationId, organizationId), eq(groups.derivedFrom, derivedFrom)))
+    .limit(1);
+  return row !== undefined;
+}
+
 /**
  * Records a new term of service. NEVER an upsert, NEVER a delete — a plain
  * INSERT every time, so two non-consecutive terms for the same person/office
@@ -434,23 +483,35 @@ export interface StartOfficerTermInput {
  *   2. The deacon/org_unit "iff" rule — application-level (the CHECK
  *      constraint only forbids the non-deacon direction), checked BEFORE any
  *      query runs, returned as `invalid_input` naming which rule failed.
+ *   2b. A Session, pastor or diaconate office needs the matching derived group
+ *      at this organization (only congregations have them) —
+ *      `invalid_office_for_org`.
  *   3. Validate `personId` is a CURRENT member of this org (F21 shape) —
  *      `invalid_target`.
  *   4. Validate `orgUnitId`, when supplied, belongs to THIS org —
  *      `invalid_target`. Closes the composite-tenant-key gap (F2/F21): an
  *      `org_unit` id from another organization can never be attached to a
  *      term here.
- *   5. Resolve the person's display name BEFORE the insert, so the
- *      `overlap` result never needs a second query after the failure (Phase
- *      3's own API-contract note).
+ *   5. Resolve the person's display name and `user_id` BEFORE the insert, so
+ *      the `overlap` and `on_roll` results never need a second query after the
+ *      failure (Phase 3's own API-contract note), and so the audit row can
+ *      stamp `selfRecorded`.
+ *   5b. A pastor office for a person on this congregation's roll is refused
+ *      (`on_roll`, S1/DECISION-206): the roll as of the later of today and the
+ *      start date, or `memberships.current_roll`, is non-null. The database
+ *      trigger is the backstop for the race.
  *   6. Insert, wrapped in try/catch for `officer_terms_no_overlap`
- *      (`isExclusionViolation()`) — mapped to `overlap`, never surfaced raw.
+ *      (`isExclusionViolation()`) — mapped to `overlap`, never surfaced raw —
+ *      and for the two trigger refusals above.
+ *   7. The audit row, in the SAME transaction (R13): `selfRecorded` is true
+ *      when the person's `user_id` is the actor.
  */
 export async function startOfficerTerm(
   viewerPersonId: string,
   organizationId: string,
   actingUserId: string,
   input: StartOfficerTermInput,
+  opts?: OfficerActingOptions,
 ): Promise<OfficersResult<{ termId: string }>> {
   if (!DATE_RE.test(input.startsOn)) {
     throw new Error(
@@ -496,10 +557,23 @@ export async function startOfficerTerm(
       };
     }
 
+    // Step 2b — the derived group the trigger will write to must exist here.
+    const neededGroup = requiredDerivedGroup(input.office);
+    if (neededGroup && !(await hasDerivedGroup(tx, organizationId, neededGroup))) {
+      return {
+        kind: "invalid_office_for_org",
+        officeLabel: OFFICE_LABELS[input.office],
+      };
+    }
+
     // Step 3 — F21 shape: a CURRENT membership at this org, not a bare
-    // people lookup.
+    // people lookup. A malformed id is `invalid_target`, never a raw cast
+    // error.
+    if (!isUuid(input.personId)) {
+      return { kind: "invalid_target" };
+    }
     const [membership] = await tx
-      .select({ id: memberships.id })
+      .select({ id: memberships.id, currentRoll: memberships.currentRoll })
       .from(memberships)
       .where(
         and(
@@ -516,6 +590,9 @@ export async function startOfficerTerm(
     // Step 4 — org_unit, when supplied, must belong to THIS org.
     let orgUnitId: string | null = null;
     if (input.orgUnitId) {
+      if (!isUuid(input.orgUnitId)) {
+        return { kind: "invalid_target" };
+      }
       const [orgUnit] = await tx
         .select({ id: orgUnits.id })
         .from(orgUnits)
@@ -539,6 +616,7 @@ export async function startOfficerTerm(
         firstName: people.firstName,
         lastName: people.lastName,
         preferredName: people.preferredName,
+        userId: people.userId,
       })
       .from(people)
       .where(eq(people.id, input.personId))
@@ -546,7 +624,31 @@ export async function startOfficerTerm(
     const personName = personRow
       ? `${personRow.preferredName ?? personRow.firstName} ${personRow.lastName}`
       : "That person";
+    const selfRecorded =
+      personRow?.userId !== null &&
+      personRow?.userId !== undefined &&
+      personRow.userId === actingUserId;
 
+    // Step 5b — S1: a pastor's membership is held by the presbytery, so a
+    // pastor term cannot seat a person who is on this congregation's roll.
+    if (isPastorOffice(input.office)) {
+      const asOf = input.startsOn > todayUtcYmd() ? input.startsOn : todayUtcYmd();
+      const replay = await tx.execute(sql`
+        select presby_roll_as_of(
+                 ${input.personId}::uuid,
+                 ${organizationId}::uuid,
+                 ${asOf}::date
+               ) as roll
+      `);
+      const rollAsOf =
+        (replay as unknown as { rows?: Array<{ roll?: string | null }> }).rows?.[0]?.roll ??
+        null;
+      if (membership.currentRoll !== null || rollAsOf !== null) {
+        return { kind: "on_roll", personName };
+      }
+    }
+
+    let termId: string;
     try {
       const [inserted] = await tx
         .insert(officerTerms)
@@ -563,8 +665,7 @@ export async function startOfficerTerm(
           recordedBy: actingUserId,
         })
         .returning({ id: officerTerms.id });
-
-      return { kind: "ok", data: { termId: inserted!.id } };
+      termId = inserted!.id;
     } catch (err) {
       if (isExclusionViolation(err)) {
         return {
@@ -573,8 +674,40 @@ export async function startOfficerTerm(
           officeLabel: OFFICE_LABELS[input.office],
         };
       }
+      // The races the pre-checks above cannot close: the roll changed between
+      // the check and the insert (the trigger's own constraint name, so no
+      // message is parsed), or the derived group vanished.
+      if (isPgError(err, "23514", "officer_terms_pastor_no_roll")) {
+        return { kind: "on_roll", personName };
+      }
+      if (
+        isPgError(err, "23503") &&
+        /has no derived group/.test(pgErrorMessages(err))
+      ) {
+        return {
+          kind: "invalid_office_for_org",
+          officeLabel: OFFICE_LABELS[input.office],
+        };
+      }
       throw err;
     }
+
+    await insertAuditRow(tx, {
+      action: AUDIT_ACTIONS.OFFICER_TERM_STARTED,
+      actor: { userId: actingUserId, email: opts?.actingUserEmail ?? null },
+      resourceType: "officer_term",
+      resourceId: termId,
+      metadata: {
+        organizationId,
+        personId: input.personId,
+        office: input.office,
+        startsOn: input.startsOn,
+        orgUnitId,
+        selfRecorded,
+      },
+    });
+
+    return { kind: "ok", data: { termId } };
   });
 }
 
@@ -594,11 +727,18 @@ export interface EndOfficerTermInput {
  * delete. `officer_terms_sync_derived` propagates `ends_on` into the
  * person's `group_memberships` row on its own; Session/Diaconate access
  * drops the day the term does, with no further write from this module.
+ *
+ * Writes `tenant.officer_term.ended` in the SAME transaction (R13). The
+ * person and office in the metadata are read from the term's own row, never
+ * from client input (the action used to forward them from the form), and
+ * `selfRecorded` is stamped on the end as on the start.
  */
 export async function endOfficerTerm(
   viewerPersonId: string,
   organizationId: string,
+  actingUserId: string,
   input: EndOfficerTermInput,
+  opts?: OfficerActingOptions,
 ): Promise<OfficersResult<{ termId: string }>> {
   if (!DATE_RE.test(input.endsOn)) {
     throw new Error(
@@ -611,8 +751,16 @@ export async function endOfficerTerm(
       return { kind: "forbidden" };
     }
 
+    if (!isUuid(input.termId)) {
+      return { kind: "invalid_target" };
+    }
     const [term] = await tx
-      .select({ id: officerTerms.id, startsOn: officerTerms.startsOn })
+      .select({
+        id: officerTerms.id,
+        startsOn: officerTerms.startsOn,
+        personId: officerTerms.personId,
+        office: officerTerms.office,
+      })
       .from(officerTerms)
       .where(
         and(
@@ -633,10 +781,35 @@ export async function endOfficerTerm(
       };
     }
 
+    const [person] = await tx
+      .select({ userId: people.userId })
+      .from(people)
+      .where(eq(people.id, term.personId))
+      .limit(1);
+    const selfRecorded =
+      person?.userId !== null &&
+      person?.userId !== undefined &&
+      person.userId === actingUserId;
+
     await tx
       .update(officerTerms)
       .set({ endsOn: input.endsOn, endReason: input.endReason })
       .where(eq(officerTerms.id, input.termId));
+
+    await insertAuditRow(tx, {
+      action: AUDIT_ACTIONS.OFFICER_TERM_ENDED,
+      actor: { userId: actingUserId, email: opts?.actingUserEmail ?? null },
+      resourceType: "officer_term",
+      resourceId: input.termId,
+      metadata: {
+        organizationId,
+        personId: term.personId,
+        office: term.office,
+        endsOn: input.endsOn,
+        endReason: input.endReason,
+        selfRecorded,
+      },
+    });
 
     return { kind: "ok", data: { termId: input.termId } };
   });

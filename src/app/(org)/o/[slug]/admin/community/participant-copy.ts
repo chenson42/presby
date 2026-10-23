@@ -1,6 +1,7 @@
 import type {
   ParticipantRecordRefusal,
   ParticipantVoidRefusal,
+  ProposalRefusal,
 } from "@/lib/roll-action-kinds";
 
 /**
@@ -104,3 +105,15 @@ export const CREATE_COPY = {
   invalidHousehold:
     "That household no longer exists. Choose another or create a new one.",
 } as const;
+
+/**
+ * Why a membership PROPOSAL was refused (Increment 2, R7 and R15). A
+ * `Record<ProposalRefusal, string>`, so a new refusal without copy is a type
+ * error. Used by the wizard's create action and the edit page's roll action.
+ */
+export const PROPOSAL_COPY: Record<ProposalRefusal, string> = {
+  no_session:
+    "This organization has no Session to approve member roll actions, so a member can't be proposed here.",
+  pending_exists:
+    "This person already has a roll action waiting for the Session. Withdraw it first if it was a mistake, then propose the new one.",
+};

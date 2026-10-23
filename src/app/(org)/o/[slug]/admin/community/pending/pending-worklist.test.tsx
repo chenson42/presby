@@ -32,10 +32,15 @@ import type { PendingRollAction } from "@/lib/roll";
 
 const ACTION: PendingRollAction = {
   id: "ra-1",
+  personId: "person-9",
   personDisplayName: "Nora Ashgrove",
   kind: "profession_of_faith",
   effectiveDate: "2026-06-01",
+  minuteReference: null,
+  proposedOn: "2026-05-20",
   proposedByIsViewer: false,
+  membershipEnded: false,
+  personDeceased: false,
 };
 
 afterEach(() => {

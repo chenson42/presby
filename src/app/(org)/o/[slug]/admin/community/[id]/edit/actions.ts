@@ -13,7 +13,11 @@ import {
 import { isUuid } from "@/lib/is-uuid";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
 import type { ActionResult } from "@/types/actions";
-import { PARTICIPANT_COPY, VALIDATION_COPY } from "../../participant-copy";
+import {
+  PARTICIPANT_COPY,
+  PROPOSAL_COPY,
+  VALIDATION_COPY,
+} from "../../participant-copy";
 
 /**
  * Server Action for `/o/<slug>/admin/community/[id]/edit`. Same plumbing shape
@@ -144,6 +148,8 @@ export async function recordRollActionAction(
       return { ok: false, error: PARTICIPANT_COPY.invalid_kind };
     case "refused":
       return { ok: false, error: PARTICIPANT_COPY[result.reason] };
+    case "proposal_refused":
+      return { ok: false, error: PROPOSAL_COPY[result.reason] };
     case "ok":
       break;
   }

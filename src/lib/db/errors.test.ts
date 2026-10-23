@@ -15,7 +15,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { isExclusionViolation, isUniqueViolation } from "./errors";
+import {
+  isExclusionViolation,
+  isPgError,
+  isUniqueViolation,
+  pgErrorField,
+  pgErrorMessages,
+} from "./errors";
 
 describe("isUniqueViolation()", () => {
   // ── True cases ────────────────────────────────────────────────────────────
@@ -186,5 +192,90 @@ describe("isExclusionViolation()", () => {
 
   it("returns false for an empty object", () => {
     expect(isExclusionViolation({})).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pgErrorField / pgErrorMessages / isPgError (Increment 2): the roll and
+// officer libraries map a SPECIFIC constraint to a typed outcome and must never
+// parse a message to tell two unique violations apart.
+// ---------------------------------------------------------------------------
+
+describe("pgErrorField()", () => {
+  it("reads the driver's code and constraint from the top level", () => {
+    const err = { code: "23505", constraint: "roll_actions_one_pending_per_person_idx" };
+    expect(pgErrorField(err, "code")).toBe("23505");
+    expect(pgErrorField(err, "constraint")).toBe("roll_actions_one_pending_per_person_idx");
+  });
+
+  it("finds them below Drizzle's own wrapper, which carries neither field", () => {
+    const err = {
+      message: "Failed query: insert into roll_actions ...",
+      cause: { code: "23514", constraint: "officer_terms_pastor_no_roll" },
+    };
+    expect(pgErrorField(err, "code")).toBe("23514");
+    expect(pgErrorField(err, "constraint")).toBe("officer_terms_pastor_no_roll");
+  });
+
+  it("finds them two levels down, and stops at six", () => {
+    const deep = { code: "23503", cause: undefined };
+    let wrapped: unknown = deep;
+    for (let i = 0; i < 4; i += 1) wrapped = { message: "wrapper", cause: wrapped };
+    expect(pgErrorField(wrapped, "code")).toBe("23503");
+    let tooDeep: unknown = deep;
+    for (let i = 0; i < 8; i += 1) tooDeep = { message: "wrapper", cause: tooDeep };
+    expect(pgErrorField(tooDeep, "code")).toBeUndefined();
+  });
+
+  it("returns undefined for null, undefined, strings, numbers and an object with neither field", () => {
+    for (const value of [null, undefined, "23505", 23505, {}, { message: "x" }]) {
+      expect(pgErrorField(value, "code")).toBeUndefined();
+      expect(pgErrorField(value, "constraint")).toBeUndefined();
+    }
+  });
+
+  it("does not loop on a cyclic cause chain", () => {
+    const a: { cause?: unknown } = {};
+    a.cause = a;
+    expect(pgErrorField(a, "code")).toBeUndefined();
+  });
+});
+
+describe("pgErrorMessages()", () => {
+  it("joins every message in the chain, the driver's text sitting below Drizzle's", () => {
+    const err = {
+      message: "Failed query: insert into officer_terms",
+      cause: { message: "organization abc has no derived group session; seed derived groups" },
+    };
+    expect(pgErrorMessages(err)).toBe(
+      "Failed query: insert into officer_terms :: organization abc has no derived group session; seed derived groups",
+    );
+  });
+
+  it("is empty for a non-object", () => {
+    expect(pgErrorMessages(null)).toBe("");
+    expect(pgErrorMessages("x")).toBe("");
+  });
+});
+
+describe("isPgError()", () => {
+  const wrapped = {
+    message: "Failed query",
+    cause: { code: "23505", constraint: "roll_actions_one_pending_per_person_idx" },
+  };
+
+  it("matches on code alone, and on code plus constraint", () => {
+    expect(isPgError(wrapped, "23505")).toBe(true);
+    expect(isPgError(wrapped, "23505", "roll_actions_one_pending_per_person_idx")).toBe(true);
+  });
+
+  it("tells two unique violations apart by constraint name, never by message", () => {
+    expect(isPgError(wrapped, "23505", "memberships_one_active_roll_idx")).toBe(false);
+    expect(isPgError(wrapped, "23514")).toBe(false);
+    expect(isPgError(wrapped, "23514", "roll_actions_one_pending_per_person_idx")).toBe(false);
+  });
+
+  it("is false when the error has no code at all", () => {
+    expect(isPgError(new Error("duplicate key value violates unique constraint"), "23505")).toBe(false);
   });
 });

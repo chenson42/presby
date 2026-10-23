@@ -14,11 +14,15 @@ import { rollActions } from "@/lib/db/domain/roll";
 import {
   deriveRollFields,
   type ParticipantRecordRefusal,
+  type ProposalRefusal,
 } from "@/lib/roll-action-kinds";
 import {
+  PENDING_PER_PERSON_INDEX,
+  organizationHasSession,
   recordParticipantActionInTx,
   type ActingOptions,
 } from "@/lib/roll";
+import { isPgError } from "@/lib/db/errors";
 import { deriveConnection, type Connection } from "@/lib/community-labels";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
@@ -273,7 +277,12 @@ export type CreatePersonResult =
   | { kind: "invalid_household" }
   /** The participant enrolment was refused by the database function (a date
    * before the birth date, for instance); the whole transaction rolled back. */
-  | { kind: "roll_refused"; reason: ParticipantRecordRefusal };
+  | { kind: "roll_refused"; reason: ParticipantRecordRefusal }
+  /** A membership PROPOSAL was refused (R7, R15): the organization has no
+   * Session to approve it (`no_session`), or the person already has a roll
+   * action waiting (`pending_exists`, the race backstop: a person who is new
+   * here has none). The whole transaction rolled back. */
+  | { kind: "proposal_refused"; reason: ProposalRefusal };
 
 /**
  * Internal control-flow signal, NOT exported. Thrown from inside the
@@ -447,6 +456,20 @@ export async function createPerson(
       ]);
       if (!canManagePeople || !canProposeRoll) {
         throw new CreatePersonAbort({ kind: "forbidden" });
+      }
+
+      // R15 (F185): a membership PROPOSAL needs a Session to approve it. Only
+      // congregations have a derived Session group; anywhere else the proposal
+      // would wait forever. Refused before any write, so no person row is left
+      // behind (the abort also rolls the transaction back).
+      if (
+        input.rollAction.kind === "profession_of_faith" &&
+        !(await organizationHasSession(tx, organizationId))
+      ) {
+        throw new CreatePersonAbort({
+          kind: "proposal_refused",
+          reason: "no_session",
+        });
       }
 
       let personId: string;
@@ -688,20 +711,34 @@ export async function createPerson(
       );
       const proposalMinute = input.rollAction.minuteReference?.trim() || null;
 
-      const [rollAction] = await tx
-        .insert(rollActions)
-        .values({
-          organizationId,
-          personId,
-          kind: input.rollAction.kind,
-          effectiveDate: input.rollAction.effectiveDate,
-          resultingRoll,
-          ageAtAction,
-          approvalStatus: "pending",
-          minuteReference: proposalMinute,
-          proposedBy: actingUserId,
-        })
-        .returning({ id: rollActions.id });
+      let rollAction: { id: string } | undefined;
+      try {
+        [rollAction] = await tx
+          .insert(rollActions)
+          .values({
+            organizationId,
+            personId,
+            kind: input.rollAction.kind,
+            effectiveDate: input.rollAction.effectiveDate,
+            resultingRoll,
+            ageAtAction,
+            approvalStatus: "pending",
+            minuteReference: proposalMinute,
+            proposedBy: actingUserId,
+          })
+          .returning({ id: rollActions.id });
+      } catch (err) {
+        // R7's backstop. Unreachable in practice (a person who is new here has
+        // no pending row, and an existing member is `already_here` above), so a
+        // hit means a concurrent proposal; the abort rolls everything back.
+        if (isPgError(err, "23505", PENDING_PER_PERSON_INDEX)) {
+          throw new CreatePersonAbort({
+            kind: "proposal_refused",
+            reason: "pending_exists",
+          });
+        }
+        throw err;
+      }
 
       return {
         kind: "ok",

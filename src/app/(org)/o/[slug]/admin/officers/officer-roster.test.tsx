@@ -49,6 +49,7 @@ const ELDER_ENTRY: OfficerRosterEntry = {
   orgUnitName: null,
   publicListed: false,
   publicDisplayOrder: null,
+  selfRecorded: false,
 };
 
 const DEACON_ENTRY: OfficerRosterEntry = {
@@ -63,6 +64,7 @@ const DEACON_ENTRY: OfficerRosterEntry = {
   orgUnitName: "North District",
   publicListed: false,
   publicDisplayOrder: null,
+  selfRecorded: false,
 };
 
 const PUBLIC_ENTRY: OfficerRosterEntry = {
@@ -77,6 +79,7 @@ const PUBLIC_ENTRY: OfficerRosterEntry = {
   orgUnitName: null,
   publicListed: true,
   publicDisplayOrder: null,
+  selfRecorded: false,
 };
 
 describe("OfficerRoster — empty state", () => {

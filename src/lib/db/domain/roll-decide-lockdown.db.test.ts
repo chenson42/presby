@@ -27,6 +27,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sql, type SQL } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 import { rowsOf, type Row } from "@/lib/testing/invitation-fixture";
+import { APPROVABLE_ROLL_ACTION_KINDS } from "@/lib/roll-action-kinds";
 
 vi.mock("server-only", () => ({}));
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 180_000 });
@@ -34,14 +35,14 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 180_000 });
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL);
 
 const M63 = path.join(process.cwd(), "drizzle", "0063_presby_roll_decide_lockdown.sql");
-const APPROVABLE_KINDS = [
-  "profession_of_faith", "reaffirmation", "restoration", "certificate_received",
-  "other_gain", "baptized_member_enrolled", "affiliate_received",
-];
+// The seven approvable kinds, imported from the module the application uses
+// (src/lib/roll-action-kinds.ts) rather than retyped: the live policy text is
+// proven equal to the code's own list.
+const APPROVABLE_KINDS: readonly string[] = APPROVABLE_ROLL_ACTION_KINDS;
 const EXPECTED_WITH_CHECK =
-  "((approval_status = 'pending'::text) AND (kind = ANY (ARRAY['profession_of_faith'::roll_action_kind, " +
-  "'reaffirmation'::roll_action_kind, 'restoration'::roll_action_kind, 'certificate_received'::roll_action_kind, " +
-  "'other_gain'::roll_action_kind, 'baptized_member_enrolled'::roll_action_kind, 'affiliate_received'::roll_action_kind])))";
+  "((approval_status = 'pending'::text) AND (kind = ANY (ARRAY[" +
+  APPROVABLE_KINDS.map((k) => `'${k}'::roll_action_kind`).join(", ") +
+  "])))";
 
 type Db = ReturnType<typeof import("@/lib/db").getPlatformDb>;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];

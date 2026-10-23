@@ -25,7 +25,7 @@
 | Inc 2 · 1 — Functional refinement | analyst | Complete; operator rulings Q1–Q3, Q6 recorded | READY WITH NOTES | 2026-10-22 |
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
-| Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23 | — | — |
+| Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23; Batch B (server: library, actions, in-transaction audit; 0063 applied to the pipeline branch, twice, so the branch is in the lockdown state) complete 2026-10-23 | — | — |
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
@@ -4772,3 +4772,114 @@ Proof (h) exposed a test defect, fixed before commit: the lockdown test's "is 00
 - `git apply scripts/session-approval/test-rls.sql.integration.patch`, then re-run `scripts/test-rls.sql` as `presby_app` on merged `development` **with both 0062 and 0063 applied**. The patched sections 5 and 20d and section 62a assume the lockdown state; the unpatched file fails section 5 on 0062 alone.
 - No `seed-dev.sql` change. F190 is unchanged; section 62 never relies on Tobias lacking `roll.approve`.
 - Re-measure production before deploy (0062 header): congregations without court groups, org-owned `session_member` roles, distinct offices, pending duplicates.
+
+## Batch B (server: library, actions, audit) — api-developer, 2026-10-23
+
+Worktree `presby-fadir`, branch `pipeline/session-approval`, Neon branch `pipeline-session-approval`. Built to Phase 3's API Contract and Batch A's hand-offs. No route handlers: every entry point is a server action or a library function.
+
+### 0063 applied
+
+0063 was applied to the pipeline branch **twice** before any DB gate (both runs exit clean, `roll_actions` rows and digest unchanged: 29 rows, `c89d89f0…`). The branch is now in the **lockdown state**: `presby_app` holds neither `UPDATE` nor `DELETE` on `roll_actions`, `roll_actions_terminal_decision_stamps` exists, and the insert policy admits only the seven approvable gain kinds. Every DB-backed result below ran in that state. Do not revert it: `roll.test.ts` and the three Batch A suites now assume it.
+
+### Files
+
+- **Created:**
+  - `src/lib/officer-offices.ts`: the one home of `OFFICER_OFFICES`, `OFFICE_LABELS`, `SESSION_OFFICES`, `PASTOR_OFFICES`, `isSessionOffice()`, `isPastorOffice()` (pure).
+  - `src/lib/session-approval-state.ts`: the five Flow 7 state kinds and the pure `deriveSessionApprovalKind()`.
+  - `src/app/(org)/o/[slug]/admin/community/pending/decision-copy.ts`: `DECISION_COPY`, `WITHDRAW_COPY`, `BULK_COPY` (`Record<code, string>` over the closed vocabularies).
+  - Tests: `src/lib/decide-boundaries.test.ts` (21, source scans), `src/lib/officer-offices.test.ts` (10), `src/lib/session-approval-state.test.ts` (7).
+- **Rewritten or extended:**
+  - `src/lib/roll.ts`: `approveRollAction`, `denyRollAction` (now takes `actingUserId`), new `withdrawRollAction`, `approveRollActions` (bulk), `listPendingRollActions` (decide and read modes, pagination), `listRecentlyDecidedRollActions`, `countPendingRollActions`, `getSessionApprovalState`, `organizationHasSession`; `recordRollAction` gains `proposal_refused`. No longer imports `recordAudit`.
+  - `src/lib/roll-action-kinds.ts`: `APPROVABLE_ROLL_ACTION_KINDS`, `COUNTED_GAIN_KINDS`, `ROLL_DECISION_REFUSALS`, `ROLL_WITHDRAW_REFUSALS`, `PROPOSAL_REFUSALS`, `BULK_APPROVE_MAX`, `isApprovableKind()`.
+  - `src/lib/officers.ts`: pastor offices, `invalid_office_for_org`, `on_roll`, in-transaction audit with `selfRecorded`, `listOfficerRoster` returns `selfRecorded`; `endOfficerTerm` gains `actingUserId`.
+  - `src/lib/people.ts`: `createPerson` returns `proposal_refused` (`no_session`, `pending_exists`).
+  - `src/lib/org-provisioning.ts`: type-varying `baselineRoleSeedPlan` (`session_member` for a congregation, `boundToDerivedFrom` widened).
+  - `src/lib/audit.ts`: `ROLL_ACTION_WITHDRAWN: "tenant.roll_action.withdrawn"`.
+  - `src/lib/db/errors.ts`: `pgErrorField`, `pgErrorMessages`, `isPgError` (map a specific constraint to a typed outcome, never parse a message).
+  - Actions: `community/pending/actions.ts` (four actions), `officers/actions.ts` (audit removed, new results), `community/new/actions.ts` and `community/[id]/edit/actions.ts` (`proposal_refused`), `staff/actions.ts` (exhaustiveness), `community/participant-copy.ts` (`PROPOSAL_COPY`).
+  - UI files touched only to keep the build green (Batch C owns their behaviour): `officers/office-labels.ts` (now a re-export), `officers/end-term-dialog.tsx` (no longer sends `personId`/`office`; the prop is kept, unused), and fixtures in `pending-worklist.test.tsx`, `officer-roster.test.tsx`, `end-term-dialog.test.tsx`.
+  - Tests rewritten or extended: `roll.test.ts` (95), `officers.test.ts` (45), `people.test.ts` (36), `org-provisioning.test.ts`, `roll-action-kinds.test.ts` (36), `audit.test.ts`, `db/errors.test.ts` (36), `pending/actions.test.ts` (23), `officers/actions.test.ts`; `session-approval.db.test.ts` and `roll-decide-lockdown.db.test.ts` now import the TypeScript constants in place of Batch A's SQL-literal lists.
+
+### Contract (what Batch C consumes)
+
+All server actions: `auth()` in the body, `resolveOrgContext()` re-run, organization and acting person from the session, never the client; result is `ActionResult<T>`.
+
+| Action (file `community/pending/actions.ts`) | Gate | Input | Data on `ok: true` |
+|---|---|---|---|
+| `approveRollActionAction(slug, { rollActionId, minuteReference? })` | `roll.approve` (lib pre-check, then the definer by `users.id`) | UUID-checked id; minute at most 200 | `{ rollActionId, effectiveDate, futureDated, affectsFiledPeriod, shadowed: {kind, effectiveDate} \| null, selfApproved }` |
+| `approveRollActionsAction(slug, { rollActionIds, minuteReference? })` | `roll.approve` | 1 to 50 unique ids | `{ approved, failed: [{rollActionId, error}], affectsFiledPeriod, shadowedCount }`; `ok: true` even when `failed` is non-empty; `ok: false` only for empty, over 50, or forbidden |
+| `denyRollActionAction(slug, { rollActionId, reason })` | `roll.approve` | reason 1 to 500 after trimming | `{ rollActionId }` |
+| `withdrawRollActionAction(slug, { rollActionId, reason })` | `roll.propose` | reason 1 to 500 | `{ rollActionId }` |
+
+Every refusal maps through `DECISION_COPY` / `WITHDRAW_COPY` / `BULK_COPY` (`decision-copy.ts`); `PROPOSAL_COPY` (`participant-copy.ts`) covers `no_session` and `pending_exists` for `createPersonAction` and `recordRollActionAction` (both gain a `proposal_refused` arm). `endOfficerTermAction(slug, { termId, endsOn, endReason })` no longer accepts `personId`/`office`. `startOfficerTermAction` returns copy for `on_roll` and `invalid_office_for_org`.
+
+Library reads for the pages (all gated on `roll.approve` OR `roll.propose`, forbidden otherwise):
+
+- `listPendingRollActions(viewer, org, { page?, pageSize? })` returns `{ kind: "ok", mode: "decide" | "read", actions, pagination: { page, pageSize, total, totalPages }, viewer: { canApprove, canPropose, canManagePeople } }`. **Page size is 50** (the bulk cap), so the existing page now shows only the first 50 until Batch C adds `?page=`. Each action adds `personId`, `minuteReference`, `proposedOn`, `membershipEnded`, `personDeceased`.
+- `listRecentlyDecidedRollActions(viewer, org, { limit? })`, `countPendingRollActions(viewer, org)`, `getSessionApprovalState(viewer, org)` as in Phase 3 (counts only, no names).
+- **The current `pending/page.tsx` does not switch on `mode` yet**, so a propose-only holder now loads the page and sees Approve and Deny buttons that return the forbidden copy. Batch C must render read mode.
+- Officers: `listOfficerRoster` entries carry `selfRecorded`; `OfficersResult` gains `on_roll` and `invalid_office_for_org`; the vocabulary now has the three pastor offices.
+
+### Deviations from Phase 3
+
+1. **`deriveSessionApprovalKind` and the state type live in a new pure `session-approval-state.ts`**, re-exported from `roll.ts`, so the derivation is unit-tested without a database and client components can import it.
+2. **`BULK_APPROVE_MAX` lives in `roll-action-kinds.ts`** (re-exported from `roll.ts`): a `"use server"` file cannot export a constant, and the dialog and `decision-copy.ts` need it.
+3. **`decision-copy.ts` was created here, not in Batch C**, because the actions cannot map refusals without it. Success and warning toast strings are left to Batch C.
+4. **Bulk with a mid-run `forbidden`** (a key revoked during the loop) marks the remaining rows `forbidden` rather than dropping them; a `forbidden` on the first row is the whole result.
+5. **UUID shape is checked in `startOfficerTerm`, `endOfficerTerm` and the four actions** (a malformed id is `invalid_target` / `not_found`, never a cast error); `startOfficerTermAction` turns an unknown office into a message instead of the lib's throw. Not in Phase 3, in its spirit.
+6. **Both layers carry the S1, F189 and R7 backstops**: a TypeScript pre-check and a mapping of the database's own refusal (`officer_terms_pastor_no_roll`, `has no derived group`, `roll_actions_one_pending_per_person_idx`), so a race returns the typed result. The two pre-checks are individually redundant with their backstops by design (the failing-first run removes both together).
+7. **`createPerson`'s `pending_exists` is a backstop only**: a person new to the organization has no pending row and an existing member is `already_here`, so no test can reach it without a race; it is exercised only through `isPgError`'s unit tests and the identical path in `recordRollAction` (R7 race test).
+8. **`listRecentlyDecidedRollActions`' `decidedOn` falls back to `recorded_at`** when a row has neither `decided_at` nor `approved_on` (a seed row), so it is always a date.
+9. **A membership cannot end while an officer term is open** (`memberships_guard_end`), so "a Session seat held by someone whose membership ended" cannot exist; the state test covers an ended term instead.
+
+### Gates
+
+- `npm run typecheck`, `npm run lint` (max-warnings 0): clean. `npm run check` (all eight tripwires): pass. `check:audit` passes vacuously (the actions call no `db.*`), so audit coverage is proven by `roll.test.ts`, `officers.test.ts` and `decide-boundaries.test.ts`.
+- `npm run test`: **507 files passed, 74 skipped; 7685 tests passed, 2283 skipped** (Batch A: 504 and 7604).
+- DB-backed, serial, 0063 applied:
+
+  | File | Result |
+  |---|---|
+  | `roll.test.ts` | 95 / 95 (the first full run had one `Connection terminated unexpectedly` on one test; the full re-run is clean) |
+  | `officers.test.ts` | 45 / 45 |
+  | `people.test.ts` | 36 / 36 |
+  | `org-provisioning.test.ts` | 34 / 34 |
+  | `session-approval.db.test.ts`, `roll-decide-lockdown.db.test.ts` (10 / 10, behavioural half included), `participant-roll.db.test.ts`, `roll-derive-parity.db.test.ts` | 102 / 102 |
+  | Blast radius, 20 files (community.db, groups, staff, role-grants, role-definitions, home-data, find-person, people-update, founding-administrator, designation-parity, accept.db, designation-holders, treasurer-designation, presbytery, imports, lifecycle, sasr-fields, statistics-grants, filings, directory) | passed; the first batch run had 5 timeouts and WebSocket closes in `directory.test.ts` and `designation-parity.db.test.ts`; both re-ran green (directory 99 / 99 with `--testTimeout=180000 --hookTimeout=300000`, designation-parity 12 / 12). Remote-database latency, not a change in either file |
+
+- `scripts/session-approval/test-rls-62.sql` as `presby_app`: exit 0, **53 passes, 0 failures**. `scripts/participants/test-rls-61.sql`: exit 0, **34 passes, 0 failures**.
+- The roll.test.ts first full run had one `Connection terminated unexpectedly` on a single test; it passed on re-run.
+
+### Failing-first evidence
+
+Each mechanism was broken in the source, the focused tests were run, and the file was restored (verified: no mutation text remains). Harness: a script in the session scratchpad applying one edit, running the named test filter, restoring.
+
+| # | Mechanism broken | Tests that failed |
+|---|---|---|
+| 1 | Audit failures swallowed for every in-transaction audit in `roll.ts` (the old `recordAudit` semantics, F180) | `roll.test.ts`: approve, deny, withdraw, bulk and participant "a failed audit insert rolls ... back" (6 tests) |
+| 2 | Database identity refusal no longer mapped to `forbidden` | "FORGERY: a users.id that is not the acting person's is refused by the database" |
+| 3 | Withdraw pre-checks `roll.approve` instead of `roll.propose` | `decide-boundaries.test.ts` "each decision pre-checks the right key" (the database still refuses by `users.id`, so only the scan can see this) |
+| 4a | `recordRollAction` no longer refuses with no Session | "R15: an organization with no Session refuses a membership proposal" |
+| 4b | `createPerson` no longer refuses with no Session | "an organization with no Session refuses a member proposal ... rolled back" |
+| 5 | One pending per person: pre-check and unique-violation mapping both removed | three tests: sequential `pending_exists`, the race (one ok and one `pending_exists`), "releases the person" |
+| 6 | `selfRecorded` hard-coded false | start-and-end stamp test, roster `selfRecorded` test |
+| 7 | Pastor-on-roll: pre-check and trigger mapping both removed | both S1 tests (cache and replay cases) |
+| 8 | `invalid_office_for_org`: pre-check and foreign-key mapping both removed | the typed-refusal test (raw FK error instead) |
+| 9 | An application `UPDATE` of `roll_actions` added | `decide-boundaries.test.ts` "no non-test file under src/ matches update(rollActions)" (the 0063 safety proof) |
+| 10 | Bulk cap removed | "deduplicates ids ... caps the request at 50" |
+| 11 | Action stops validating the id shape | "a malformed id is not_found copy and the lib is never called" |
+| 12 | Queue read gate narrowed back to `roll.approve` | "a roll.propose-only holder gets READ mode" |
+| 13 | Decided-history gate removed | "forbidden without either roll key" |
+| 14 | Propose-only viewer shown decide mode | "a roll.propose-only holder gets READ mode" |
+| 15 | Bulk `forbidden` on the first row no longer ends the run | "forbidden on the first row is the whole result" |
+| 16 | `no_permission` dropped from the derivation | `session-approval-state.test.ts` |
+| 17 | End-term audit reads person and office from caller input | "the term's own people-and-office are the audit source" |
+| 18 | `recordAudit` imported back into `roll.ts` | `decide-boundaries.test.ts` "no longer imports recordAudit" |
+
+### Handoff to Batch C (ux-developer)
+
+- Next: **ux-developer, Batch C** (pending page, worklist, bulk and withdraw dialogs, banner, history, Community header link, edit-page and wizard changes, Officers page). Read the Contract above; `decision-copy.ts` and `participant-copy.ts` hold the refusal strings, the Phase 3 Copy section holds the rest.
+- The wizard and the edit page decide whether to offer Member with `getSessionApprovalState` (called only when `canProposeRoll`); `kind === "no_session"` hides it. The server refuses regardless.
+- `EndTermDialog` still takes a `personId` prop it no longer uses; drop it when convenient.
+- `e2e/community-participants.spec.ts:228` and the e2e fixtures still need a Session group at `alpha` (Batch D); `createOrganization` now also creates a `session_member` role for every congregation, which any e2e role-count assertion would see.
+- Rule 16, unchanged by this batch: the journal entries, the `test-rls.sql` integration patch and the other shared files stay with the orchestrator (Batch A's hand-offs stand). `docs/TODO.md` follow-ups from Phase 3 are still the orchestrator's.

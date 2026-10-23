@@ -18,11 +18,11 @@
  * it never relies on presby_app's UPDATE or DELETE. 0063 itself is proven in
  * roll-decide-lockdown.db.test.ts.
  *
- * The SQL-literal lists below (outcomes, approvable kinds, counted kinds,
- * Session offices, the office vocabulary) are the ground truth Batch B pins
- * its TypeScript constants to (src/lib/roll-action-kinds.ts,
- * src/lib/officer-offices.ts). When those modules exist, Batch B imports them
- * here in place of the literals.
+ * The outcome, kind and office lists below are the TypeScript constants the
+ * application uses (src/lib/roll-action-kinds.ts, src/lib/officer-offices.ts),
+ * imported rather than retyped, so the SQL is proven against the same lists
+ * the code is. (Batch A carried SQL-literal copies until those modules
+ * existed.)
  *
  * Fixtures: synthetic names, `example.invalid` addresses (No Real Data);
  * organizations and people are stamped `deletable_until` at insert. Teardown
@@ -41,6 +41,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sql, type SQL } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 import { rowsOf, type Row } from "@/lib/testing/invitation-fixture";
+import {
+  APPROVABLE_ROLL_ACTION_KINDS,
+  COUNTED_GAIN_KINDS,
+  ROLL_DECISION_REFUSALS,
+  ROLL_WITHDRAW_REFUSALS,
+} from "@/lib/roll-action-kinds";
+import { OFFICER_OFFICES, PASTOR_OFFICES, SESSION_OFFICES } from "@/lib/officer-offices";
 
 vi.mock("server-only", () => ({}));
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 240_000 });
@@ -51,29 +58,13 @@ const M62 = path.join(process.cwd(), "drizzle", "0062_presby_session_approval.sq
 const M63 = path.join(process.cwd(), "drizzle", "0063_presby_roll_decide_lockdown.sql");
 const DENY_LITERAL = "roll_actions: this roll decision is not permitted";
 
-const DECIDE_OUTCOMES = [
-  "ok", "invalid_decision", "reason_required", "reason_too_long",
-  "minute_reference_too_long", "not_found", "already_decided",
-  "not_approvable_kind", "person_deceased", "person_merged", "membership_ended",
-  "holds_pastoral_office", "already_on_roll", "active_elsewhere",
-  "provisioning_incomplete",
-] as const;
-const WITHDRAW_OUTCOMES = [
-  "ok", "reason_required", "reason_too_long", "not_found", "already_decided",
-] as const;
-const APPROVABLE_KINDS = [
-  "profession_of_faith", "reaffirmation", "restoration", "certificate_received",
-  "other_gain", "baptized_member_enrolled", "affiliate_received",
-] as const;
-const COUNTED_GAIN_KINDS = [
-  "profession_of_faith", "reaffirmation", "restoration", "certificate_received", "other_gain",
-] as const;
-const SESSION_OFFICES = ["ruling_elder", "installed_pastor", "co_pastor", "associate_pastor"] as const;
-const PASTOR_OFFICES = ["installed_pastor", "co_pastor", "associate_pastor"] as const;
-const OFFICER_OFFICES = [
-  "ruling_elder", "installed_pastor", "co_pastor", "associate_pastor", "deacon",
-  "clerk_of_session", "moderator", "treasurer", "trustee",
-] as const;
+// The ground truth Batch A pinned its SQL to was a set of literal lists; Batch B
+// replaced them with the TypeScript constants the application actually uses
+// (src/lib/roll-action-kinds.ts, src/lib/officer-offices.ts), so this file now
+// proves the SQL against the SAME lists the code does.
+const DECIDE_OUTCOMES = ["ok", ...ROLL_DECISION_REFUSALS] as const;
+const WITHDRAW_OUTCOMES = ["ok", ...ROLL_WITHDRAW_REFUSALS] as const;
+const APPROVABLE_KINDS = APPROVABLE_ROLL_ACTION_KINDS;
 
 type Db = ReturnType<typeof import("@/lib/db").getPlatformDb>;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];

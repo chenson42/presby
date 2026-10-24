@@ -20,7 +20,7 @@
 | 3 — Technical design | tech-lead (folded into the implementer, accelerated) | Complete | Design note recorded | 2026-10-24 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green (DB-backed tests and e2e not run) | 2026-10-24 |
 | 5 — Verification | qa | Run 1 FAIL (360px overflow ×2; treasurer resend DB test) → fix 14671d0; Run 2 PASS: overflow fixed on both paths at 360px and desktop, DB test with mutation control | PASS (run 2) | 2026-10-24 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete; two low-priority follow-ups tracked; 0.42.1 | SHIP WITH NOTES | 2026-10-24 |
 
 ---
 
@@ -531,32 +531,116 @@ No protected routes touched in this fix pass. It changes three client components
 
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+SHIP WITH NOTES
+
+The feature is complete and matches intent. The notes are two low-priority follow-ups (below). Neither blocks shipping, and Rule 10 requires both to land in `docs/TODO.md`.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> After a platform admin sends or resends a founding-administrator or treasurer invitation, the notice now says the designation "takes effect when {name} accepts it from the email". The standing "open" and "expired" lines name the same person, and all the wording lives in one plain module that the tests import.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The operator's requirement is met word for word.** `acceptanceSentence` in `src/lib/onboarding/invitation-copy.ts` produces "The founding administrator designation takes effect when {name} accepts it from the email. Until then nobody holds this role." The treasurer variant ends "…nobody holds this access."
+- **Name fallbacks hold, with no dead end.** The order is name, then "the person at {address}", then "the invitee". Phase 1 flagged that the no-name case is rare, and it is covered anyway.
+- **The notice and the standing line now agree.** Both read the same server-derived `inviteeDisplayName`. It is carried on the create result, the resend result and `InvitationListRow`, so a first send, a resend and a page reload all name the same person.
+- **First send now names the address.** Both sections keep the submitted address in state, because the field clears on success. The first-send notice therefore matches the resend notice. This fixes the Phase 1 inconsistency.
+- **Expired rows no longer say "open".** The expired line, with or without a name, never says "open". The Phase 4 regression tests pin that.
+- **The copy claims no delivery.** Every string says "from the email" and nothing more, and `invitation-copy.test.ts:43` asserts it. The lead line "sent" or "queued" is unchanged.
+- **The privacy ruling is honoured.** The treasurer name is first name only, derived on the platform connection. A DB test pins `Odalys` and rejects `Pennick`. The QA mutation control showed the test fails if the last name leaks, and QA saw no last name in the browser.
+- **The copy lives in one shared module.** It has no imports, so the server action, the client notice, both sections and the tests share one text. `INVITATION_WARNING_COPY` moved out of `actions.ts`, and a grep finds the literal only in the module. This closes the person-emails Phase 6 residual about a copied literal in `invitation-sent-notice.test.tsx:9`.
+- **Bidi controls are stripped, not accepted.** `normalizePersonName` removes U+202A–202E and U+2066–2069. It runs only on founding-administrator create and on new-account accept. Names are never compared, and matching goes by token hash, address and `person_id`. No existing invitation can stop matching.
+- **QA's first-run overflow defects were fixed and proven.** The e2e test fails on the pre-fix components with 13 offenders and passes at HEAD. The treasurer path was checked at 360px and 1280px, and the desktop layout with an ordinary name is unchanged.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: the notice names who must accept, "takes effect when {name} accepts it from the email". Shipped: exactly that, with the Phase 1 fallback table. Verdict: matches.
+- Phase 1 said: pass the submitted address on first send. Shipped: done in both sections. Verdict: matches.
+- Phase 1 said: name the person in the open line, and correct the expired line. Shipped: done, and a later fix pass made an expired row with no name still say "expired". Verdict: matches, and slightly stronger than Phase 1.
+- Phase 1 said: treasurer name is first name only. Shipped: first name only, pinned in the DB test and checked in the browser. Verdict: matches.
+- Phase 1 said: the name must wrap (Gap 5). The first run shipped with two overflows. After the fix pass, no element passes the viewport at 360px or 1280px. Verdict: matches after the fix.
+- Phase 1 said: strip bidi controls or accept the residual explicitly. Shipped: stripped for the embedding, override and isolate ranges, with the residuals below. Verdict: acceptable drift, because the high-risk characters are handled.
+- Phase 1 said: the copy module sits in `src/lib/onboarding/` and is plain. Shipped: `invitation-copy.ts` has no imports, and the boundaries test lists it. Verdict: matches.
+- Phase 3 deviation: the notice and list take `purpose` instead of `role`. The word is now derived, so the two cannot disagree. Verdict: acceptable drift, an improvement.
+- The e2e check that the screen looks the same whether or not the address has an account now masks the typed address and name. Nothing in the notice depends on whether an account exists, so the enumeration property it guards is unchanged. Verdict: acceptable.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: not applicable. These surfaces only render after a send or when an open row exists, and the no-name fallbacks cover missing data.
+- Failure microcopy: pass. Error results still render the action's own string, which never mentions account existence. This diff did not change that.
+- Permission gate: pass. All three actions check `auth()` and `hasFeature(…, FEATURES.ADMIN_ORGANIZATIONS)`. QA read the bodies, and there is no new route or action.
+- Audit event: pass. `invitation.created` and `invitation.resent` are unchanged and still fire, and no new security-sensitive mutation was added.
+- Mobile (360px): pass after the fix pass.
+  - The 360px e2e test passes.
+  - The treasurer path was checked by a scratch spec.
+  - The cosmetic toast overlay is existing behaviour (see below).
+- Self-addressed send: pass. The dialog sentence and audit flag are untouched, and "takes effect when {name} accepts" stays true.
+- Enumeration and redirects: pass. No new redirect or user-controlled URL was added. The treasurer name is first name only, which the email greeting already used.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Classification of QA's Non-Blocking Notes
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+| Note | Class | Reasoning |
+|---|---|---|
+| LRM, RLM and ALM (U+200E, U+200F, U+061C) not stripped; the 100-character limit is checked before the strip | **Follow-up (low)** | These marks cannot reorder a sentence the way the override and isolate controls can, but RLM can shift punctuation. The limit order means a 100-character name plus one stray control is refused rather than cleaned. The result is safe but unhelpful, and only a platform admin sees it. One line covers both. |
+| "Takes effect when … accepts" is conditional in practice | **None** | This is the operator's own requirement text, and Phase 1 approved it. The blockers (`has_holders`, `membership_ended`, `person_merged`) are exceptional, and the invitee sees a refusal page. The existing "Note." covers the self-addressed case. Qualifying every notice would add noise to the common path. |
+| Treasurer e2e regex `.+` does not pin first name only | **None** | The DB test pins it with a mutation control, and the scratch browser check confirmed it. A tighter e2e would duplicate that. |
+| Regression-suffix style | **None** | Style only. The regression tests exist, and QA confirmed they fail before the fix and pass after. |
+| Treasurer list rows show the live roster first name on ended and redacted rows | **Follow-up (low)** | Redaction only nulls the email, and founding-administrator rows keep their typed names after redaction. So terminal treasurer rows showing a first name is consistent with the existing 0059 residual. The difference is that the treasurer name is read live. If the person is later renamed or merged, a terminal row shows today's name, not the person invited. It is first name only, and only platform admins see it. It needs an operator ruling: accept, or snapshot at send. |
+| Toast overlays the top of the section at 360px after a send | **None** | Existing toast behaviour, nothing overflows, and the diff did not change it. |
 
-## Red Flags (if NEEDS REWORK)
+## Follow-Ups
 
-- [Specific. What has to change before this ships.]
+TODO-ready lines for `docs/TODO.md`:
+
+- [ ] **Invite names: strip LRM/RLM/ALM and check the 100-character limit after the strip.** `normalizePersonName` (`src/lib/onboarding/input.ts`) removes the embedding, override and isolate controls but not the benign marks U+200E, U+200F and U+061C. The zod `inviteeNameSchema` checks `.max(100)` before the strip, so a 100-character name plus one stray control is refused rather than cleaned. The protection is application-level only (the SQL `[[:cntrl:]]` check does not cover format characters). Low priority: only a platform admin sees the name. — `docs/work-log/2026-10-24-invite-accept-copy.md` Phase 5 and Phase 6
+- [ ] **Ruling: treasurer invitation rows show the live roster first name, including ended and redacted rows.** The name is read from `people` at list time, not stored on the invitation, so a later rename or merge changes what an old terminal row shows. Fits the 0059 "names retained after redaction" residual for founding-administrator rows. Decide whether to accept this or snapshot the first name at send (a schema change). — `docs/work-log/2026-10-24-invite-accept-copy.md` Phase 5 and Phase 6
+
+Housekeeping:
+
+- **Rule 10.** Move the existing line at `docs/TODO.md:149` ("Platform invite success copy…") to Done with the date, in the same commit as the release notes. Add the two lines above.
+- **Landing order.** The operator required this to land before Community Increment 2b, which reuses the notice. It is ready.
+
+## Release-Note Entry
+
+A PATCH bump to 0.42.1 is right: no new capability, no schema change, no flag, and only internal admin copy and display change. Add it to `docs/release-notes/v0.42.md` (table row plus entry).
+
+> ### 0.42.1 — date of merge
+>
+> **Polish: the invitation screens now say who has to accept.**
+>
+> **Value:** When a platform administrator invites someone to be a congregation's founding administrator or treasurer, the confirmation now says whose acceptance makes it official. That removes the guesswork about whether the role is already in place.
+>
+> #### What's Changed
+>
+> - **The confirmation names the person.** After you send or resend an invitation, the message now reads "The founding administrator designation takes effect when {name} accepts it from the email. Until then nobody holds this role." For a treasurer it names the person's first name only and ends "…nobody holds this access."
+> - **If a name is not available,** it says "the person at {address}", or "the invitee".
+> - **The invitation line on the organization page names the person too.** An open invitation says who it is waiting on, and an expired one says it has expired instead of calling itself open.
+> - **First send now shows the address.** The first confirmation says "Invitation sent to {address}", the same as a resend already did.
+> - **The treasurer's name now appears in the invitation list.** It shows the person's first name, as the founding administrator's name already did.
+> - **Very long names wrap on a phone screen** instead of running off the edge.
+> - **Names no longer carry hidden text-direction characters** that could scramble a sentence. This applies when an administrator types a founding administrator's name, and also to the name a new invitee enters when accepting. A few harmless direction marks are still left in place.
+>
+> The wording says what happens when the person accepts. It does not say the email arrived or was opened, because we cannot know that.
+
+## Rule 13 and Functionality Map
+
+- **Rule 13 (what's-new):** not needed. This is internal platform-admin tooling, and no member sees it.
+- **Rule 12 (feedback row):** not applicable. The source is an operator requirement, not an in-app feedback row.
+- **Rule 15 (`docs/architecture.md`):** not needed. Nothing architectural changed.
+- **Rule 14 (functionality map):** yes, a short edit to the "Organizations" bullet at `docs/product/functionality-map.md:130`. After "the notice is identical whether or not the address has an account", add a clause such as: "the success notice, and the open or expired line, name who must accept (founding administrator: the typed name; treasurer: the roster first name only), with the copy in `src/lib/onboarding/invitation-copy.ts`". The Index needs no change.
+
+## Per-Phase Status row
+
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (two low-priority follow-ups tracked; TODO line 149 to Done; release note 0.42.1; functionality-map clause) | 2026-10-24 |
+
+## Handoff
+
+This verdict closes the entry once the orchestrator records it. The orchestrator then does the housekeeping in one cluster, with user approval before any commit:
+
+1. Write this section and the status row into the work-log.
+2. Add the 0.42.1 entry to `docs/release-notes/v0.42.md`.
+3. Move TODO line 149 to Done and add the two follow-up lines.
+4. Add the functionality-map clause.
+5. Run `/pre-push`, then `/merge-pr` after the user approves. Community Increment 2b can start after the merge.
+
+No next phase is pending, so no agent is named.

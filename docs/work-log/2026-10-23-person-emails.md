@@ -23,7 +23,7 @@
 | 2 — Architectural review | architect | Complete. ER1–ER24; migration 0064 (2b moves to 0065); new module `src/lib/contact-methods/`; DECISION-215–218; F210–F214 | Approved with suggestions | 2026-10-23 |
 | 3 — Technical design | tech-lead | Complete. Designed to ER1–ER3b and ER11–ER23b (the text has no ER4–ER10 or ER24); S1–S4 ruled; Note 1 measured (0 CHECK violations; `seed-dev.sql` writes no contact rows; `invitations.db.test.ts:644` and `seed-dev-invitations.sql` need changes); D1–D15 additions, none needing a Phase 2 loop-back; F215–F217; DECISION-219 drafted; giving left unwired (D7, operator to be told) | Design complete; implementers named | 2026-10-23 |
 | 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | In progress: Batch A (0064, Drizzle mirror, DB tests, staged section 64 and seed patches) complete 2026-10-23; Batch 2 (server: `contact-methods/` module, `updatePerson`/`createPerson` rewired, readers, audit keys, actions, scans, signed-in-address warning) complete 2026-10-23; Batch 3 (UI: editor, three hosts, directory Work line, invitation notice, e2e and hydration specs) complete 2026-10-23 | — | 2026-10-23 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 FAIL: `check:secrets` flags `email-addresses-form.test.ts:67`; `person-emails.spec.ts` audit rows survive the crash sweep. Back to ux-developer (Batch 3 fix pass), then scoped re-run | FAIL (run 1) | 2026-10-23 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1234,50 +1234,252 @@ Added to `docs/deployment.md` at integration in the style of the 0059 runbook.
 
 **Next:** qa (Phase 5).
 
+### Batch 3 — QA fix pass
+
+Fixes for Phase 5 Run 1 (FAIL).
+
+1. **`check:secrets`.** `src/components/org-portal/email-addresses-form.test.ts:67` samples now use `.invalid` domains (same valid/invalid shapes). The two work-log lines that quoted the old literal (QA's own record) were redacted, since the guard scans docs too. No `leak-ok`.
+2. **Self-poisoning e2e.** `e2e/support/person-emails-fixture.ts`: new `dbNow()`; `emailAudit(sql, personId, since?)` bounds on `created_at > since`. `e2e/person-emails.spec.ts` captures `since = await dbNow(sql)` before creating the person (database clock, so no skew) and passes it at the audit assertion; the exact-set assertion no longer depends on any earlier run. No audit deletion was needed for that.
+   - Found while demonstrating independence: with the afterAll skipped, the next run died in `beforeAll` because leftover `staff_positions` block the community sweep's `delete from memberships` (`staff_positions_person_fk`). Same class of defect, different cause. Added `sweepEmailExtras()` (fixture file), called in `beforeAll` before `sweepCommunityPeople`; it clears staff positions (required) and the address audit rows (tidiness only; the assertion does not rely on it). `FIXTURE_FIRST_NAME` is now exported from `e2e/support/community-fixture.ts` for it.
+3. **`invitation-sent-notice.test.tsx:9`** (under `src/app/(admin)/admin/organizations/[id]/`) now pins the shipped text ("...was sent, but it will be refused..."). The constant is not exported (a `"use server"` file may export only async functions), so the exact text is matched.
+
+**Results** (own dev server on :3320, pipeline Neon branch): `typecheck` clean; `lint` clean; `npm run check` all eight pass; the two touched unit files 22/22. `person-emails.spec.ts`: 10/10 twice in a row. Independence: afterAll skipped (scratch only, reverted) then run normally, 10/10; repeated skip then normal: 10/10, 10/10, 10/10. One run immediately after the first failed skip-demo (recovering from a half-swept state) failed at the directory test (:270) with 3 passed; not reproduced in four later runs. A dev server rewrote `AGENTS.md` (heading level); reverted, not part of this change.
+
 ---
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+## Run 1 — FAIL
+
+**Date:** 2026-10-23
+**Verified by:** qa (read-only; I wrote no tests and edited no repo file)
+
+**What I ran.** I tested the worktree `/Users/cshenso/git/presby-platform/presby-emails` at `683b01f` on Neon branch `pipeline-person-emails` (endpoint `ep-winter-leaf`). Nothing touched production or `development`.
+- **In full:** typecheck, lint, `npm run check`, the unit suite, and every DB-backed Vitest file, run serially.
+- **SQL suite:** the staged `test-rls-64.sql`, as `presby_app`.
+- **Patches:** `git apply --check` for the three staged patches.
+- **Live catalog:** probes as `presby_app` and as the owner.
+- **Fresh install:** a throwaway database created inside the pipeline branch, then dropped.
+- **E2E:** from a scratch copy outside `~/git/presby-platform` with a hardlinked `node_modules`; the production-build lane once.
+
+**What I did not run.** The full `scripts/test-rls.sql`: you asked for section 64 only. Batch A's full run stands, with five failures that were already there. I also did not re-run the e2e specs outside the requested list.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS**
+
+The other static gates:
+- `npm run lint`: **PASS**.
+- `npm run check`: **FAIL**. `check:secrets` stopped the chain with one soft finding:
+  - `src/components/org-portal/email-addresses-form.test.ts:67`, `a-at-b-dot-co` is outside the safe-domain allowlist: `for (const value of [(shape samples, since replaced by .invalid forms)]) {`
+  - The file is committed in `683b01f`, so Batch 3's "all eight pass" is not true at HEAD.
+  - The other seven checks pass. I ran the three that the halt skipped one by one (hydration-gate, giving-boundaries, proxy-imports).
+- `git apply --check`: **PASS** for `test-rls.sql`, `seed-dev.sql` and `seed-dev-invitations.sql`. None of the three target files has changed on `origin/main` since the merge base.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Unit suite.** 588 files: 513 passed, 75 skipped. Tests: 7822 passed, 0 failed, 2313 skipped. 26.2 s. The 75 skipped files are the DB-backed ones, run below.
+
+**DB-backed set.** I ran all 83 files serially (`--no-file-parallelism`, hook and test timeouts raised to 120 s): the 75 fully skipped files plus 8 that were partly skipped.
+
+| Run | Result |
+|---|---|
+| Run 1 (6464 s) | 2351 tests: 2344 passed, 6 failed, 1 skipped |
+| Run 2: the 4 failing files alone | `filings`, `giving/attention.db` and `giving/ingest/apply.db` passed. `directory.test.ts` died in `beforeAll` ("Connection terminated unexpectedly") |
+| Run 3: `directory.test.ts` alone | 100/100 |
+
+- All six run-1 failures were dropped Neon connections: `Connection terminated unexpectedly`, `ECONNRESET`, and one 120 s timeout. None of them are assertion failures. They were in `directory.test.ts` (2), `filings.test.ts` (2), `giving/attention.db.test.ts` (1) and `giving/ingest/apply.db.test.ts` (1).
+- **Net result: every DB-backed test passes.**
+- The one skip is `render-pdf.test.ts`'s sample writer (`it.skipIf(!process.env.STATEMENT_SAMPLE_DIR)`). It writes PDFs for a person to read and asserts no behaviour, so it is not a gap.
+
+This pipeline's DB files all passed in run 1:
+
+| File | Passed |
+|---|---|
+| `contact-methods.db` | 45/45 |
+| `store.db` | 32/32 |
+| `matrix.db` | 22/22 |
+| `readers.db` | 24/24 |
+| `people-update` | 22/22 |
+| `people` | 39/39 |
+| `issue.db` | 62/62 |
+| `accept.db` | 30/30 |
+| `invitations.db` | 66/66 |
+| `designation-parity.db` | 12/12 |
+| `designation-holders.db` | 16/16 |
+| `designation-revoke.db` | 21/21 |
+| `community.db` | 15/15 |
+| `find-person` | 9/9 |
+
+**`scripts/person-emails/test-rls-64.sql` as `presby_app`** (I confirmed `rolbypassrls = f`): exit 0, 47 passes.
+
+## Schema/RLS Audit (live catalog, pipeline branch)
+
+**Catalog read.** I used `pg_class`, `aclexplode(relacl)`, `pg_policies`, `pg_trigger`, `pg_constraint` and `pg_proc`.
+- `contact_methods` has RLS enabled and forced, and is owned by `neondb_owner`.
+- Grants:
+  - `presby_app`: INSERT, SELECT, UPDATE.
+  - `presby_platform`: INSERT, SELECT, UPDATE.
+  - The owner holds every privilege.
+- The four person-level policies are unchanged.
+- All four CHECKs are validated.
+- The three partial indexes are present, and `contact_methods_value_idx` is gone.
+- Triggers:
+  - The guard is a BEFORE INSERT/UPDATE row trigger (tgtype 23). It runs as invoker with a pinned `search_path`.
+  - The at-least-one-main check is a constraint trigger, `DEFERRABLE INITIALLY DEFERRED`. Its function is `SECURITY DEFINER` with a pinned `search_path`.
+  - Only the owner can execute either function.
+- `presby_person_email` is a stable invoker function. EXECUTE is held by the owner and `presby_app` only.
+
+**Probes.** Every probe was rolled back. A row was confirmed visible to `presby_app` first, so a refusal is not RLS hiding the row.
+
+| Probe | Connection | Result and refusing layer |
+|---|---|---|
+| DELETE a visible row | `presby_app` | 42501 `permission denied for table` (**grant**) |
+| DELETE | `presby_platform` | No DELETE in `aclexplode`. `has_table_privilege` is false. It belongs to no role it could inherit DELETE from. It cannot log in, and the owner cannot `SET ROLE` to it, so this is **grant**, verified by catalog only |
+| Change `value`, `kind` or `person_id` | `presby_app` and owner | 42501 "...are immutable..." (**guard trigger**; it binds the owner too) |
+| Relabel an ended row; set `is_primary` on an ended row | `presby_app` and owner | 42501 "...is ended and cannot change" (**guard trigger** fires before the CHECK) |
+| `verified_at` on UPDATE or on INSERT | `presby_app` | 42501 "verified_at is set only by presby_accept_invitation()" (**guard trigger**) |
+| `verified_at` | owner | Allowed, as designed: the acceptance definer runs as the owner |
+| Second active main (insert, or promote while a main is active) | `presby_app` | 23505 `contact_methods_one_primary_uq` (**partial unique index**) |
+| End the main without clearing `is_primary` | `presby_app` and owner | 23514 `contact_methods_ended_not_primary` (**CHECK**) |
+| Demote the main with no successor, forced with `set constraints immediate` | `presby_app` | 23514 "no main address" (**deferred definer trigger**) |
+| The same on a real `COMMIT` (fresh DB) | owner | Refused at COMMIT. 0 rows persisted. "End and promote" and "end the only address" both commit |
+| DELETE and UPDATE under another organization's context | `presby_app` | DELETE refused (grant); UPDATE touches 0 rows (RLS) |
+| DELETE | owner (`getPlatformDb()` connects as `neondb_owner`) | Allowed. This is the `paper` residual (ER1b), mitigated by the single-writer scan |
+
+**The four ended-address sites.**
+- **Text:** I diffed the 0059 and 0064 bodies of `presby_preview_invitation` and `presby_accept_invitation`. Exactly four lines differ, each adding `ended_at is null`.
+- **Live:** the catalog has 1 site in the preview function and 3 in accept. Both are still pinned definers.
+- **Catalog query:** the only function whose body names `contact_methods` without naming `ended_at` is `presby_guard_people_delete`, which is allow-listed.
+- **Behaviour:** `contact-methods.db.test.ts` covers sites 1, 2+3 and 4, and passed.
+
+**Parity golden.** The diff of `designation-parity.golden.json` is empty (0 lines), and `designation-parity.db.test.ts` passed 12/12.
+
+**Fresh install.** I created `presby_fresh_0064` inside the pipeline branch and dropped it afterwards with `with (force)`, because Neon's internal pgbouncer held an idle session.
+- Migrations: I added the 0064 entry from Phase 3 integration step 3 to a scratch copy of the journal. `drizzle-kit migrate` then applied 62 migrations (0000–0061, then 0064) from empty with no errors.
+- `npm run db:seed` exit 0: 11 features, 39 flags, 3 roles.
+- On the fresh database, `contact_methods` matches the pipeline branch: FORCE RLS, the same grants, 4 validated CHECKs, both triggers, and the same catalog query result.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+**Environment.** The specs ran from a scratch copy outside the repo, with a real dev server started by Playwright, against the pipeline branch, with `RATE_LIMIT_DISABLED=true`.
+
+- **Desktop:** the `chromium` project.
+- **360px:** a scratch-only config adding a `chromium-360` project, which is `chromium` at 360x740. `person-emails.spec.ts` already loops over desktop and 360px itself, so it ran under `chromium` only.
+
+**Two discarded runs.**
+1. **The first run on port 3000 was aborted.** Another pipeline's Playwright run (`/private/tmp/presby-fadir-e2e`, `community-approval.spec.ts`) attached to my dev server on :3000 through `reuseExistingServer`. I stopped my run. Their results from that window are invalid, and anything they wrote through my server landed on `pipeline-person-emails`.
+2. **The first run on :3310 is void.** The machine lost its link to Neon partway through: "fetch failed" in the fixtures, then the server refused connections.
+
+**Valid runs:**
+
+| Run | Total | Passed | Failed | Did not run |
+|---|---|---|---|---|
+| Desktop, :3310 (9.6 min) | 63 | 53 | 5 | 5 |
+| Re-run: `person-emails` + `community-participants` + `admin-organizations:883` | 20 | 19 | 1 | 0 |
+| Re-run: `person-emails` alone | 10 | 10 | 0 | 0 |
+| 360px project (5.5 min) | 44 | 42 | 2 | 0 |
+| Re-run: `invitation-new-account` at 360px | 1 | 1 | 0 | 0 |
+| `npm run test:e2e:prod`, run 1 | 75 | 45 | 1 (`custom-domains/lockdown` `beforeAll` timed out on a DB update) | 29 skipped behind it |
+| Re-run: `lockdown.spec.ts` in the prod lane | 30 | 30 | 0 | 0 |
+
+**Final state by spec:**
+- `person-emails.spec.ts`: **10/10** at desktop and 360px. It failed once at `:171` (finding 2 below).
+- `hydration/person-emails-editor.spec.ts`: passes on the dev server at desktop and 360px, and in the prod lane.
+- `community-participants.spec.ts`: **9/9**, plus the degrade test.
+- `invitation-new-account` and `invitation-existing-account`: all pass at desktop and 360px. One 360px timeout at `:116` passed on re-run.
+- `designation-revoke.spec.ts`: all pass at desktop and 360px.
+- `admin-organizations.spec.ts` and `admin-organizations-create.spec.ts`: all pass except `:433`. That test is blocked by fixture residue: two `organization_service_times` rows on `e2e-alpha` (`e2e00000-…0002`, "Traditional" and "Front office"), almost certainly left by the aborted first run. The diff does not touch service times. I made no write to clean them.
+- Production-build lane: **all 75 pass** across the two runs.
+
+**Failures:**
+1. `e2e/person-emails.spec.ts:171` (in the test at `:89`, desktop). It expected 4 `tenant.person_email.*` audit rows and got 8. This is finding 2.
+2. The other first-run failures were Neon `fetch failed` / `waitForURL` timeouts, or fixture teardown lost to the same drops. Each passed on re-run, apart from `:433` above.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+- `invalid_household writes NOTHING … — regression for F216`: `src/lib/people-update.test.ts:449`. It guards against a refused save committing partial writes.
+  - Batch 2 reports watching it fail with the F216 shape restored.
+  - I could not re-observe the fail-before step, because I can't modify code.
+- The F211, F212 and F214 guards are tests of mechanisms rather than tests named after a fixed bug:
+  - `contact-methods.db.test.ts` covers the four ended-address sites, the guard and DELETE.
+  - `readers.db.test.ts` covers search matching only what is shown, plus the reversed raw-value test in `directory.test.ts`.
+  - `store.db` covers the stale form, the person lock and the shared-note predicate.
+  - Batches A and 2 report a break-the-mechanism, watch-it-fail pass for each. I re-verified each mechanism against the live catalog (table above), not against the tests.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+| Module | Statements | Branches |
+|---|---|---|
+| `src/lib/permissions.ts` | 100% | 100% |
+| `src/lib/two-factor.ts` | 91.3% | 100% |
+| `src/lib/flags.ts` | 100% | 100% |
+
+The new pure modules:
+- 100% statements: `normalize`, `email-plan` (98% branches), `email-routing` (75.6% branches), `email-audience`, `email-rows-schema`, `copy`, `email-addresses-form` and `person-save-notes`.
+- `store.ts`, `sql.ts` and `reader.ts` show 0% in the unit run. They are DB-backed and exercised by `store.db`, `matrix.db` and `readers.db`.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+I read the action bodies directly. No `route.ts`, no `proxy.ts` and no auth file is in the diff, so the stricter gate for auth-touching work does not apply. The `(org)` actions use the tenant axis: the permission check lives in the library inside `withOrgContext`, before any write.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| `updatePersonAction` (community/[id]/edit/actions.ts) | yes, plus `resolveOrgContext` | n/a: tenant `people.manage` in `updatePerson` (`people.ts:867`) before any write | n/a. The actor comes from the session and the input is rebuilt from known fields |
+| `createPersonAction` (community/new/actions.ts) | yes, plus `resolveOrgContext` | n/a: `people.manage`, and `roll.propose` when a roll row is written, in `createPerson` (`people.ts:466–473`) | n/a |
+| `createStaffPersonAction` (staff/actions.ts) | yes, plus `resolveOrgContext` | n/a: `staff.manage` in the action, `people.manage` in `createPerson` | n/a |
+| `inviteFoundingAdministratorAction`, `inviteTreasurerAction` (admin/organizations/[id]/actions.ts) | yes | yes (unchanged; the diff only adds `warnings`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `getPersonForEdit` (edit page data) | page `auth()` | n/a: `people.manage` (`people.ts:1077`) | n/a |
+
+**No address values in audit metadata: confirmed.**
+- The `store.ts:192–220` metadata holds only ids, `subtype`, booleans and `fields`.
+- `tenant.person.updated` metadata (`people.ts:977–983`) is `{organizationId, emailChanged, phoneChanged}`.
+- The invitation warning writes no audit row.
+- This is backed by `scan.test.ts` item 5, `store.db`'s "no `@`" check and the e2e check at `person-emails.spec.ts:181`.
+
+**Auth paths never read contact emails: confirmed by my own scan.**
+- `src/auth.ts`, `src/lib/auth/`, `(auth)`, `(password-reset)`, `(email-verify)`, `api/auth` and `src/proxy.ts` contain zero mentions of `contact_methods`, `contactMethods`, `contact-methods`, `presby_person_email` or `getPersonEmail`.
+- In non-test `src/`, only these name the table:
+  - `contact-methods/{store,sql,normalize,email-audience}`;
+  - `onboarding/issue.ts`;
+  - the schema file;
+  - the three files annotated with `contact-methods-scan-ok` (`children.ts`, `staff-directory.tsx`, `dev-docs.ts`).
+
+**Copy truthfulness.**
+- **The UI strings are accurate.** I confirmed the Batch 2 correction against the code: Visitors, Staff and Former use `listCommunity` with `anyActiveEmailLikeSql`, so they match every active address. Members, Everyone and Participants go through `getDirectory`, which matches only displayed addresses and honours `hide_email`.
+- **The Phase 3 draft release-note line is false.** It says "Community search, for people managers, matches every address on file for a person", but only those three lists do. `/release-notes` must correct it before ship.
+- Minor: `invitation-sent-notice.test.tsx:9` uses copy that differs from the real string ("…was sent, **so** it will be refused…" against "…**but**…" in `actions.ts:738`). The test passes whichever string it is given, so it does not pin the shipped copy.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** Back to **ux-developer** (Batch 3). Both items are in Batch 3 files.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+1. **`npm run check` is red.** `check:secrets` flags `src/components/org-portal/email-addresses-form.test.ts:67` (`a-at-b-dot-co`). Change it to a safe `.invalid` fixture domain, as Batch 3 already did for the Batch 2 files. Do not annotate it as `leak-ok`.
+2. **`e2e/person-emails.spec.ts` poisons itself after any interrupted run.** This is test independence, and I observed it today.
+   - **Cause:** the test at `:89` asserts the exact set of `tenant.person_email.*` rows at `:171`. It finds them through `emailAudit()` (`e2e/support/person-emails-fixture.ts:57`), keyed on a fixed person id (`createParticipantViaSql`, `e2ce1000-0000-4000-8000-0000000001{40,50}`).
+   - **Why it sticks:** the crash-recovery sweep in `beforeAll` (`sweepCommunityPeople`, `person-emails.spec.ts:73`) removes the people but not their audit rows. Those rows are removed only in `afterAll` (`removeEmailExtras`).
+   - **Effect:** when a run's `afterAll` is lost to a Neon drop, the next run fails with 8 rows instead of 4. Pre-existing rows of that kind made the run fail once here; the next run passed after `afterAll` cleaned up.
+   - **Fix:** in `beforeAll`, clear audit rows for the fixture ids, or limit the query to rows written after the test started.
+
+**Not blocking. Each needs an owner:**
+- **For the fadir pipeline:** its Playwright run used this pipeline's dev server for a few minutes, so its results from that window are invalid. Parallel pipelines should each use their own e2e port. I used `PORT` together with `E2E_BASE_URL`.
+- **Fixture residue:** two `organization_service_times` rows on `e2e-alpha` block `admin-organizations.spec.ts:433`. The orchestrator should remove them and re-run that one test.
+- **Integration:**
+  - The branch base is behind `origin/main` (now 0.40.0).
+  - `src/lib/community.ts` changed on both sides (fix/community-staff-anchor), so expect a rebase conflict.
+  - The `_journal.json` entry is required: without it, a fresh install stops at 0061.
+- **Signed-in-address warning:** `addressOnSignedInPerson` (`issue.ts`) does not filter ended memberships. It may warn about a former member, and the warning is still true at acceptance. Noted only.
+- **The Neon link was unstable all session.** Every failure blamed on the environment above was re-run and passed. Both runs are reported.
+
+**Re-run scope after the fix:** `npm run check`, plus `e2e/person-emails.spec.ts` twice in a row. Better still, the second run should follow a run with `afterAll` deliberately skipped. Everything else stands on this run.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Schema and RLS confirmed live (DELETE refused by the grant; identity, ended-row and `verified_at` writes refused by the guard trigger; second main refused by the unique index; ended main refused by the CHECK; no-main refused by the deferred definer trigger at commit); four ended-address sites and parity golden confirmed; fresh install from empty plus seed clean; DB-backed 83 files all green after re-runs of connection drops; e2e all green apart from 1 residue-blocked test outside the diff. FAIL on `check:secrets` (`email-addresses-form.test.ts:67`) and on `person-emails.spec.ts` (audit rows survive the crash sweep). | FAIL | 2026-10-23 |
+
+**Handoff:** next agent is **ux-developer** (Phase 4, Batch 3) for the two items above, then qa for the scoped re-run. On a PASS after that, the next agent is analyst (Phase 6).
 
 ---
 

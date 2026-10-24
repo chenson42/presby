@@ -64,7 +64,7 @@ describe("contactEmailsSchema", () => {
   });
 
   it("agrees with the shared shape rule on a sample (what the form lets through, the server's shape check accepts)", () => {
-    for (const value of ["a@b.co", "a.b+c@d.e.f", "a@b", "a b@c.d", "a@@b.c", ""]) {
+    for (const value of ["a@b.invalid", "a.b+c@d.e.invalid", "a@b", "a b@c.invalid", "a@@b.invalid", ""]) {
       const clientOk = issues([row(value)]).length === 0 || value.trim() === "";
       if (clientOk && value !== "") expect(isValidEmailShape(value.trim().toLowerCase())).toBe(true);
     }

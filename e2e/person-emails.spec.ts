@@ -33,7 +33,9 @@ import {
 import {
   addContactEmail,
   addOpenStaffPosition,
+  dbNow,
   emailAudit,
+  sweepEmailExtras,
   emailRows,
   removeEmailExtras,
 } from "./support/person-emails-fixture";
@@ -70,6 +72,7 @@ test.describe("Person emails", () => {
 
   test.beforeAll(async () => {
     sql = platformSql("person-emails.spec");
+    await sweepEmailExtras(sql); // a crashed prior run's staff positions block the sweep below
     await sweepCommunityPeople(sql); // a crashed prior run
     state = await setupCommunityFixture(sql);
   });
@@ -87,6 +90,7 @@ test.describe("Person emails", () => {
       });
 
       test("add a Work address, make it Main, remove the Main and see the promotion; nothing persisted leaks an address into audit", async ({ page }) => {
+        const since = await dbNow(sql);
         const person = await createParticipantViaSql(sql, vp.n, `SpecEmails${vp.n}`);
         personIds.push(person.personId);
         const personal = `e2e-${vp.n}-home@example.invalid`;
@@ -166,7 +170,7 @@ test.describe("Person emails", () => {
         ]);
 
         // The audit trail: ids and labels, never an address; the promotion was automatic.
-        const audit = await emailAudit(sql, person.personId);
+        const audit = await emailAudit(sql, person.personId, since);
         // (Rows written in one transaction share a timestamp, so compare as a set.)
         expect(audit.map((a) => a.action).sort()).toEqual([
           "tenant.person_email.added",

@@ -6,7 +6,7 @@ import { InvitationSentNotice } from "./invitation-sent-notice";
 afterEach(cleanup);
 
 const WARNING =
-  "That address is already on file for a person here who signs in. The invitation was sent, so it will be refused unless the invitee accepts while signed in to that person's own account.";
+  "That address is already on file for a person here who signs in. The invitation was sent, but it will be refused unless the invitee accepts while signed in to that person's own account.";
 
 describe("InvitationSentNotice - warnings", () => {
   it("renders each warning as a Note inside the status region (the invitation WAS sent, so it is not an alert)", () => {

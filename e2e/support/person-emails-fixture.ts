@@ -10,7 +10,7 @@
  */
 
 import type { Sql } from "./db";
-import { COMMUNITY_ORG } from "./community-fixture";
+import { COMMUNITY_ORG, FIXTURE_FIRST_NAME } from "./community-fixture";
 
 export interface FixtureEmail {
   value: string;
@@ -53,14 +53,25 @@ export async function emailRows(sql: Sql, personId: string): Promise<EmailRow[]>
      order by created_at, id`) as EmailRow[];
 }
 
-/** The audit rows this person's address changes wrote, by action, oldest first. */
+/** The database's clock, as text (keeps microseconds), to bound `emailAudit` to rows written after this moment. */
+export async function dbNow(sql: Sql): Promise<string> {
+  return ((await sql`select clock_timestamp()::text as t`) as { t: string }[])[0].t;
+}
+
+/**
+ * The audit rows this person's address changes wrote, by action, oldest first.
+ * `since` (from `dbNow`) excludes rows left by an interrupted earlier run on the
+ * same fixed person id, so an assertion on the exact set never depends on cleanup.
+ */
 export async function emailAudit(
   sql: Sql,
   personId: string,
+  since?: string,
 ): Promise<{ action: string; metadata: Record<string, unknown> }[]> {
   return (await sql`
     select action, metadata from audit_events
      where resource_id = ${personId} and action like 'tenant.person_email.%'
+       and (${since ?? null}::timestamptz is null or created_at > ${since ?? null}::timestamptz)
      order by created_at, id`) as { action: string; metadata: Record<string, unknown> }[];
 }
 
@@ -70,4 +81,20 @@ export async function removeEmailExtras(sql: Sql, personIds: string[]): Promise<
   await sql`delete from staff_positions where person_id = any(${personIds}::uuid[])`;
   await sql`delete from audit_events
              where resource_id = any(${personIds}) and (action like 'tenant.person_email.%' or action = 'tenant.person.updated')`;
+}
+
+/**
+ * Crash sweep: run BEFORE `sweepCommunityPeople`. A run that died before its
+ * afterAll leaves `staff_positions` rows, and the community sweep's
+ * `delete from memberships` then fails on `staff_positions_person_fk`, which
+ * poisons every later run. Clears the staff positions (required) and the address
+ * audit rows (tidiness only: the audit assertion is bounded by `dbNow`, not by this).
+ */
+export async function sweepEmailExtras(sql: Sql): Promise<void> {
+  const rows = (await sql`
+    select id from people
+     where first_name = ${FIXTURE_FIRST_NAME}
+       and exists (select 1 from memberships m where m.person_id = people.id and m.organization_id = ${COMMUNITY_ORG.id}::uuid)
+  `) as { id: string }[];
+  await removeEmailExtras(sql, rows.map((r) => r.id));
 }

@@ -114,10 +114,11 @@ export async function createInvitationFixture(label: string) {
     if (id && !userIds.includes(id)) userIds.push(id);
   }
 
+  /** One main address, stored NORMALIZED (lower, trimmed): the contact CHECK refuses anything else (0064). */
   async function addEmail(personId: string, address: string): Promise<void> {
     await q(sql`
       insert into contact_methods (person_id, kind, value, is_primary)
-      values (${personId}, 'email', ${address}, true)`);
+      values (${personId}, 'email', ${address.trim().toLowerCase()}, true)`);
   }
 
   async function linkUser(personId: string, userId: string): Promise<void> {

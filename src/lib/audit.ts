@@ -128,6 +128,13 @@ export const AUDIT_ACTIONS = {
   // access does not.
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+  // A proposer withdrew a pending roll action (docs/work-log/2026-10-22-
+  // founding-admin-directory.md, Increment 2, DECISION-203). Its own key, not
+  // ROLL_ACTION_DENIED: "the Session said no" and "the clerk fixed a typo" are
+  // different facts. Written by src/lib/roll.ts with insertAuditRow() in the
+  // SAME transaction as the status change, like approve and deny. Metadata is
+  // ids and the reason only, plus `selfProposed`.
+  ROLL_ACTION_WITHDRAWN: "tenant.roll_action.withdrawn",
   // Participant enrolment/removal and its undo take effect ON RECORD, with no
   // Session approval (docs/work-log/2026-10-22-founding-admin-directory.md,
   // DECISION-198, R8) — written by src/lib/roll.ts with insertAuditRow() in
@@ -146,6 +153,17 @@ export const AUDIT_ACTIONS = {
   // same tier as ORG_FEATURE_TOGGLED, not elevated to the roll actions'
   // constitutional weight.
   PERSON_UPDATED: "tenant.person.updated",
+  // Multiple email addresses per person (docs/work-log/2026-10-23-person-
+  // emails.md, DECISION-215/216, ER20) — written from src/lib/contact-methods/
+  // store.ts with insertAuditRow() in the SAME transaction as the change. An
+  // address decides where a credential link goes, so each change is its own
+  // record. resourceId is the person id; metadata carries the contact row id
+  // and the label, NEVER the address, a fragment of it, or its domain (the
+  // ended row keeps the value). `.updated` is a label or do-not-contact change.
+  TENANT_PERSON_EMAIL_ADDED: "tenant.person_email.added",
+  TENANT_PERSON_EMAIL_ENDED: "tenant.person_email.ended",
+  TENANT_PERSON_EMAIL_PRIMARY_CHANGED: "tenant.person_email.primary_changed",
+  TENANT_PERSON_EMAIL_UPDATED: "tenant.person_email.updated",
   // Officer-terms administration (docs/work-log/
   // 2026-08-26-groups-and-officers.md, Phase 3/4 commit 2) — written from
   // src/app/(org)/o/[slug]/admin/officers/actions.ts. Starting or ending a

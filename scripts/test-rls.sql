@@ -250,6 +250,11 @@ rollback;
 
 -- ---------------------------------------------------------------------------
 -- 5. Invariant 4. An approved roll action is immutable.
+--    drizzle/0063 revokes UPDATE and DELETE on roll_actions from presby_app,
+--    so on the tenant connection the refusal is now the privilege (42501),
+--    before the freeze trigger is reached. The trigger layer (approved,
+--    denied and withdrawn rows frozen, on the OWNER path too) is proven as
+--    the owner in src/lib/db/domain/session-approval.db.test.ts.
 -- ---------------------------------------------------------------------------
 begin;
   select set_config('app.current_org_id', :ALDER, true);
@@ -257,25 +262,31 @@ begin;
   begin
     update roll_actions set effective_date = '1999-01-01' where approval_status = 'approved';
     raise exception 'FAIL invariant 4 — an approved roll action was mutated';
-  exception when check_violation then
-    raise notice 'pass  invariant 4: approved roll action frozen';
+  exception when insufficient_privilege then
+    raise notice 'pass  invariant 4: approved roll action cannot be mutated by presby_app (no UPDATE privilege, drizzle/0063)';
   end $$;
 rollback;
 
--- Pending rows are working state and must stay editable. Creates its own row:
--- a test that depends on seed state breaks the moment anyone works with the
--- fixture by hand.
+-- Pending rows are NOT editable by presby_app any more (drizzle/0063, F180):
+-- leaving pending is function-mediated (presby_decide_roll_action,
+-- presby_withdraw_roll_action), and a mistaken proposal is withdrawn, not
+-- edited. Creates its own row: a test that depends on seed state breaks the
+-- moment anyone works with the fixture by hand. (The old block set
+-- denial_reason on a pending row, which drizzle/0062's
+-- roll_actions_denial_reason_only_when_denied CHECK also refuses.)
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   insert into roll_actions (organization_id, person_id, kind, effective_date,
                             resulting_roll, approval_status)
   values (:ALDER, :ELDER, 'other_gain', current_date, 'active', 'pending');
-  -- Targets only the row this test created; the seed carries its own pending
-  -- action and the assertion must not depend on how many exist.
-  update roll_actions set denial_reason = 'editable'
-   where approval_status = 'pending' and kind = 'other_gain';
-  select assert_eq((select count(*) from roll_actions where denial_reason = 'editable'), 1,
-                   'pending roll action still editable');
+  do $$
+  begin
+    update roll_actions set minute_reference = 'edited'
+     where approval_status = 'pending' and kind = 'other_gain';
+    raise exception 'FAIL invariant 4 — presby_app edited a pending roll action by plain UPDATE';
+  exception when insufficient_privilege then
+    raise notice 'pass  invariant 4: a pending roll action is not editable by presby_app (decisions go through the definers, drizzle/0062-0063)';
+  end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
@@ -1408,38 +1419,38 @@ begin;
   end $$;
 rollback;
 
--- 20d. Finding 2: a PENDING roll_actions row can be DELETEd (working-state
---      cleanup, same latitude invariant 4's own text grants pending rows
---      for UPDATE); an APPROVED row's DELETE is still rejected, not
---      silently no-op'ed.
---      drizzle/0061 (R5) forbids presby_app from INSERTING an approved row
---      (roll_actions_insert_pending_only, section 61), so the approved row is
---      now built the way the application builds one: inserted pending, then
---      approved by UPDATE (the decideRollAction() path, still
---      application-gated on roll.approve until Increment 2).
+-- 20d. Finding 2: roll_actions_freeze's DELETE path (TG_OP uppercase) lets a
+--      PENDING row be deleted and refuses an APPROVED one. drizzle/0063
+--      revokes DELETE on roll_actions from presby_app (all deletes are soft;
+--      withdrawal replaces deletion; the roll_actions part of F176), so on
+--      the tenant connection both are now refused by the privilege. The
+--      trigger's own DELETE branches (pending allowed, approved/denied/
+--      withdrawn refused) are proven on the OWNER path, where the trigger is
+--      the only backstop, in src/lib/db/domain/session-approval.db.test.ts.
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   insert into roll_actions (id, organization_id, person_id, kind, effective_date,
                             resulting_roll, approval_status)
   values ('aaaaaaaa-0000-0000-0000-0000000000a2', :ALDER, :ELDER, 'other_gain',
           current_date, 'active', 'pending');
-  delete from roll_actions where id = 'aaaaaaaa-0000-0000-0000-0000000000a2';
-  select assert_eq(
-    (select count(*) from roll_actions where id = 'aaaaaaaa-0000-0000-0000-0000000000a2'),
-    0, 'finding 2: a pending roll_actions row can now be deleted (was silently no-op''d before the fix)');
-
-  insert into roll_actions (id, organization_id, person_id, kind, effective_date,
-                            resulting_roll, approval_status)
-  values ('bbbbbbbb-0000-0000-0000-0000000000b2', :ALDER, :ELDER, 'other_gain',
-          current_date, 'active', 'pending');
-  update roll_actions set approval_status = 'approved', approved_on = current_date
-   where id = 'bbbbbbbb-0000-0000-0000-0000000000b2';
   do $$
   begin
-    delete from roll_actions where id = 'bbbbbbbb-0000-0000-0000-0000000000b2';
+    delete from roll_actions where id = 'aaaaaaaa-0000-0000-0000-0000000000a2';
+    raise exception 'FAIL finding 2 — presby_app deleted a pending roll_actions row';
+  exception when insufficient_privilege then
+    raise notice 'pass  finding 2: presby_app cannot delete a pending roll_actions row (no DELETE privilege, drizzle/0063)';
+  end $$;
+  select assert_eq(
+    (select count(*) from roll_actions where id = 'aaaaaaaa-0000-0000-0000-0000000000a2'),
+    1, 'finding 2: the pending row is still there');
+
+  do $$
+  begin
+    delete from roll_actions
+     where organization_id = '22222222-2222-2222-2222-222222222222' and approval_status = 'approved';
     raise exception 'FAIL finding 2 — an approved roll_actions row was deleted';
-  exception when check_violation then
-    raise notice 'pass  finding 2: an approved roll_actions row DELETE is still rejected, not silently no-op''d';
+  exception when insufficient_privilege then
+    raise notice 'pass  finding 2: presby_app cannot delete an approved roll_actions row either';
   end $$;
 rollback;
 
@@ -8621,3 +8632,24 @@ rollback;
 --     fixture (no seed change), so it is never run against production.
 -- ===========================================================================
 \ir participants/test-rls-61.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/session-approval (integration).
+-- 62. Session approval, withdrawal and pastors as members of the Session
+--     (drizzle/0062_presby_session_approval.sql and
+--     drizzle/0063_presby_roll_decide_lockdown.sql). Its own file, as 46, 47,
+--     59, 60 and 61 above; \ir resolves relative to this script. It needs
+--     the test helpers, scripts/seed-dev.sql's Alder Creek fixture (no seed
+--     change) and BOTH migrations applied, so it is never run against
+--     production.
+-- ===========================================================================
+\ir session-approval/test-rls-62.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/person-emails (integration).
+-- 64. Person emails (drizzle/0064_presby_person_emails.sql).
+--     Its own file, as 46, 47, 59, 60, 61 and 62 above; \ir resolves relative
+--     to this script. It needs the test helpers and the seed's person-emails
+--     fixture, so it is never run against production.
+-- ===========================================================================
+\ir person-emails/test-rls-64.sql

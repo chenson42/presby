@@ -891,17 +891,26 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       expect(result.entries).toHaveLength(0);
     });
 
-    it("a match on a hidden field's raw stored value still nulls that field in the returned row", async () => {
-      // fieldEmail's own fixture email is `${fieldEmail}@example.invalid` —
-      // searching the person's own id therefore matches only via the RAW
-      // (hidden) email column, never via name. The row still comes back
-      // with `email: null` — the CASE WHEN in the SELECT list runs
-      // regardless of how the row was found by the WHERE clause.
+    it("a hidden field's raw stored value matches NOTHING — the oracle is closed (F212, ER23a)", async () => {
+      // fieldEmail's own fixture email is `${fieldEmail}@example.invalid`, so
+      // searching the person's own id could only ever match via the RAW
+      // (hidden) email. Before F212 that returned the row (with `email: null`),
+      // which confirmed by trial that the hidden address existed. The search now
+      // matches only what the card shows, so a hidden email finds no one.
       const result = await getDirectory(control, orgA, { search: fieldEmail });
       if (result.kind !== "ok") throw new Error("expected ok");
-      const matched = result.entries.find((e) => e.personId === fieldEmail);
-      expect(matched).toBeDefined();
-      expect(matched?.email).toBeNull();
+      expect(result.entries.find((e) => e.personId === fieldEmail)).toBeUndefined();
+      expect(result.entries).toHaveLength(0);
+    });
+
+    it("a hidden phone matches nothing either, while the same number on a person who shows it still matches", async () => {
+      // Every field-privacy fixture person carries phone 555-0100; only fieldPhone hides it.
+      const result = await getDirectory(control, orgA, { search: "555-0100" });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const ids = result.entries.map((e) => e.personId);
+      expect(ids).not.toContain(fieldPhone);
+      expect(ids).toContain(fieldEmail);
+      expect(ids).toContain(fieldAddress);
     });
 
     it("someone with no directory.view grant still gets forbidden, search or not", async () => {

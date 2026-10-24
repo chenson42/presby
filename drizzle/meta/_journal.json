@@ -428,6 +428,27 @@
       "when": 1787187173186,
       "tag": "0061_presby_participant_roll",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787273573186,
+      "tag": "0062_presby_session_approval",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787359973186,
+      "tag": "0063_presby_roll_decide_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1787446373186,
+      "tag": "0064_presby_person_emails",
+      "breakpoints": true
     }
   ]
 }

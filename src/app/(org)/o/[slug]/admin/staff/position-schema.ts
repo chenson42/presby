@@ -1,3 +1,4 @@
+import { contactEmailsSchema } from "@/components/org-portal/email-addresses-form";
 import { z } from "zod";
 
 /**
@@ -51,7 +52,10 @@ export const newStaffPersonSchema = z.object({
     .trim()
     .min(1, "Last name is required")
     .max(200, "String must contain at most 200 character(s)"),
-  email: z.string().trim().max(320).optional(),
   phone: z.string().trim().max(40).optional(),
+  // The shared address list editor's field (the person's own edit page is where
+  // the rest of a record is kept). Its path is `contact.emails` because the
+  // editor is generic over any form that has that shape.
+  contact: z.object({ emails: contactEmailsSchema }),
 });
 export type NewStaffPersonFormValues = z.infer<typeof newStaffPersonSchema>;

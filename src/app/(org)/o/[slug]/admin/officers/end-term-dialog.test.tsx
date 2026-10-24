@@ -10,8 +10,9 @@
  *   - the confirmation copy names BOTH the person and the office — never a
  *     generic "Are you sure?" (mirrors `revoke-dialog.tsx`'s own precedent);
  *   - Cancel calls `endOfficerTermAction` zero times;
- *   - Confirm calls `endOfficerTermAction` with the exact termId/personId/
- *     office/endsOn/endReason;
+ *   - Confirm calls `endOfficerTermAction` with the exact termId/endsOn/
+ *     endReason and nothing else (the person and office are read from the term
+ *     row by the lib, so the client no longer forwards them);
  *   - every mapped `ActionResult` denial (Phase 3's API-contract table —
  *     `overlap`'s composed copy, `invalid_input`, `invalid_target`,
  *     `forbidden`) surfaces via `toast.error` with the server's own message,
@@ -84,7 +85,7 @@ describe("EndTermDialog — cancel", () => {
 });
 
 describe("EndTermDialog — confirm", () => {
-  it("calls endOfficerTermAction with termId/personId/office and the entered endsOn/endReason, toasts success on ok", async () => {
+  it("calls endOfficerTermAction with ONLY termId and the entered endsOn/endReason (the lib reads person and office from the term row), toasts success on ok", async () => {
     mockEndOfficerTermAction.mockResolvedValueOnce({
       ok: true,
       data: { termId: "term-1" },
@@ -109,8 +110,6 @@ describe("EndTermDialog — confirm", () => {
       termId: "term-1",
       endsOn: "2026-06-30",
       endReason: "resigned",
-      personId: "person-1",
-      office: "ruling_elder",
     });
     expect(toastSuccess).toHaveBeenCalledWith(
       "Ruling Elder term ended for Tobias Renwick.",

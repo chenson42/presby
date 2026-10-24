@@ -46,7 +46,11 @@ describe("participant copy table", () => {
   });
 
   it("uses the Phase 3 wording for the refusals an administrator will actually meet", () => {
-    expect(PARTICIPANT_COPY.pending_action).toMatch(/waiting for the Session/);
+    expect(PARTICIPANT_COPY.pending_action).toBe(
+      "This person has a roll action waiting for the Session, so this can't be recorded yet. Try again once the Session has decided it or it has been withdrawn. Withdrawing is done from Pending approvals, by someone who can propose roll actions.",
+    );
+    expect(PARTICIPANT_COPY.pending_action).toMatch(/withdrawn/);
+    expect(PARTICIPANT_COPY.pending_action).not.toMatch(/Wait for the Session/);
     expect(PARTICIPANT_COPY.holds_position).toMatch(/office, a role or a staff position/);
     expect(PARTICIPANT_COPY.self_target).toMatch(/remove yourself/);
     expect(PARTICIPANT_COPY.forbidden).toBe("You don't have permission to record roll actions here.");

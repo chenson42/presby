@@ -15,6 +15,7 @@ import {
 } from "./officers-states";
 import { OfficerRoster } from "./officer-roster";
 import { AddOfficerTermForm } from "./add-officer-term-form";
+import { SessionNote } from "./session-note";
 
 /**
  * `/o/<slug>/admin/officers` — the roster/recording surface for who holds
@@ -152,17 +153,22 @@ export default async function OfficersPage({
 
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">Current roster</h2>
+        <SessionNote />
         <OfficerRoster entries={rosterResult.data} slug={slug} />
       </div>
 
       <div className="max-w-md space-y-4">
         <h2 className="text-xl font-semibold">Add an officer term</h2>
         <p className="text-sm text-muted-foreground">
-          This records who holds the office. Granting software access
-          (Administration → Roles) is done separately — recording someone
-          here does not, by itself, change what they can do in the app.
+          This records who holds the office. Apart from seating the Session
+          (see above), recording someone here does not change what they can
+          do in the app. Other access is granted under Administration → Roles.
         </p>
-        <AddOfficerTermForm slug={slug} options={optionsResult.data} />
+        <AddOfficerTermForm
+          slug={slug}
+          options={optionsResult.data}
+          viewerPersonId={resolved.org.personId}
+        />
       </div>
     </section>
   );

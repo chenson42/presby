@@ -54,7 +54,7 @@ function DirectoryCard({ entry }: { entry: DirectoryEntry }) {
     <Card className="py-4">
       <CardContent className="space-y-2">
         <h3 className="text-lg font-medium">{displayName}</h3>
-        {(entry.email || entry.phone) && (
+        {(entry.email || entry.workEmail || entry.phone) && (
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             {entry.email && (
               <a
@@ -62,6 +62,14 @@ function DirectoryCard({ entry }: { entry: DirectoryEntry }) {
                 className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 {entry.email}
+              </a>
+            )}
+            {entry.workEmail && (
+              <a
+                href={`mailto:${entry.workEmail}`}
+                className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                {`Work: ${entry.workEmail}`}
               </a>
             )}
             {entry.phone && (

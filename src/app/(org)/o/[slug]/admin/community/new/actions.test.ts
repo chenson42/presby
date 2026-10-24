@@ -238,6 +238,62 @@ describe("createPersonAction", () => {
     );
   });
 
+  describe("email rows (person-emails)", () => {
+    const ROW = { value: "nora@example.invalid", subtype: "work" as const, isPrimary: true, doNotContact: false };
+    const withEmails = (emails: unknown) =>
+      ({ ...CREATE_INPUT, contact: { emails } }) as unknown as typeof CREATE_INPUT;
+
+    it("rebuilds the rows from the known fields and passes them, with the phone, to createPerson", async () => {
+      mockCreatePerson.mockResolvedValueOnce(OK_PENDING);
+      await createPersonAction("alder-creek", {
+        ...CREATE_INPUT,
+        contact: { emails: [ROW], phone: "555-0100" },
+      } as unknown as typeof CREATE_INPUT);
+      expect(mockCreatePerson.mock.calls[0]![3].contact).toEqual({ emails: [ROW], phone: "555-0100" });
+    });
+
+    it("a forged id, a stray property or a malformed list is refused before createPerson with a Copy string", async () => {
+      for (const bad of [
+        [{ ...ROW, id: "11111111-1111-4111-8111-111111111111" }],
+        [{ ...ROW, verifiedAt: "2020-01-01" }],
+        [{ ...ROW, subtype: "home" }],
+        "nope",
+      ]) {
+        const result = await createPersonAction("alder-creek", withEmails(bad));
+        expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
+      }
+      const tooMany = await createPersonAction("alder-creek", withEmails(Array.from({ length: 21 }, () => ROW)));
+      expect(tooMany).toEqual({ ok: false, error: "A person can have up to 10 email addresses." });
+      expect(mockCreatePerson).not.toHaveBeenCalled();
+    });
+
+    it("omitting emails sends none (a person may have no address)", async () => {
+      mockCreatePerson.mockResolvedValueOnce(OK_PENDING);
+      await createPersonAction("alder-creek", CREATE_INPUT);
+      expect(mockCreatePerson.mock.calls[0]![3].contact).not.toHaveProperty("emails");
+    });
+
+    it("email_refused maps to its Copy string and does not revalidate", async () => {
+      mockCreatePerson.mockResolvedValueOnce({ kind: "email_refused", refusal: { reason: "duplicate", index: 1 } });
+      const result = await createPersonAction("alder-creek", withEmails([ROW]));
+      expect(result).toEqual({ ok: false, error: "This address is already in the list." });
+      expect(mockRevalidatePath).not.toHaveBeenCalled();
+    });
+
+    it("the shared-address notes are passed back to the wizard", async () => {
+      const notes = { shared: [{ address: "nora@example.invalid", names: ["Hollis Sharer"], more: 0 }] };
+      mockCreatePerson.mockResolvedValueOnce({ ...OK_PENDING, notes });
+      const result = await createPersonAction("alder-creek", withEmails([ROW]));
+      expect(result).toMatchObject({ ok: true, data: { personId: "p-1", notes } });
+    });
+
+    it("a result with no notes carries no notes key (the existing shape is unchanged)", async () => {
+      mockCreatePerson.mockResolvedValueOnce(OK_PENDING);
+      const result = await createPersonAction("alder-creek", CREATE_INPUT);
+      expect(result).not.toHaveProperty("data.notes");
+    });
+  });
+
   describe("what the client may and may not ask for (forgery)", () => {
     it('rejects kind "none" (the Staff anchor) before createPerson', async () => {
       const result = await createPersonAction("alder-creek", {

@@ -80,6 +80,24 @@ describe("DirectoryList — null fields are omitted, not shown empty", () => {
     );
   });
 
+  it("renders the Work line under the main address, and by itself when only the work address is shown", () => {
+    render(
+      <DirectoryList
+        entries={[
+          entry({ email: "m.ashcombe@example.invalid", workEmail: "m.ashcombe.work@example.invalid" }),
+          entry({ personId: "c0000000-0000-0000-0000-000000000002", workEmail: "only.work@example.invalid" }),
+        ]}
+      />,
+    );
+    const hrefs = screen.getAllByRole("link").map((l) => l.getAttribute("href"));
+    expect(hrefs).toEqual([
+      "mailto:m.ashcombe@example.invalid",
+      "mailto:m.ashcombe.work@example.invalid",
+      "mailto:only.work@example.invalid",
+    ]);
+    expect(screen.getByRole("link", { name: "Work: only.work@example.invalid" })).toBeTruthy();
+  });
+
   it("renders only the phone link when email and address are null", () => {
     render(<DirectoryList entries={[entry({ phone: "555-0100" })]} />);
     const links = screen.getAllByRole("link");

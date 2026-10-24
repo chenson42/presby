@@ -51,9 +51,11 @@ vi.mock("@/lib/people", () => ({
 }));
 
 const getPendingRollActionsForPerson = vi.fn();
+const getSessionApprovalState = vi.fn();
 vi.mock("@/lib/roll", () => ({
   getPendingRollActionsForPerson: (...args: unknown[]) =>
     getPendingRollActionsForPerson(...args),
+  getSessionApprovalState: (...args: unknown[]) => getSessionApprovalState(...args),
 }));
 
 // `page.tsx` also imports `getSensitiveInfoGrants` from `@/lib/person-
@@ -73,6 +75,10 @@ vi.mock("@/lib/person-sensitive", () => ({
 const getCommunityStatus = vi.fn();
 vi.mock("@/lib/community", () => ({
   getCommunityStatus: (...args: unknown[]) => getCommunityStatus(...args),
+}));
+
+vi.mock("../../pending/actions", () => ({
+  withdrawRollActionAction: vi.fn(),
 }));
 
 vi.mock("./actions", () => ({
@@ -133,6 +139,9 @@ afterEach(() => {
   getHouseholds.mockReset();
   getPersonForEdit.mockReset();
   getPendingRollActionsForPerson.mockReset();
+  getSessionApprovalState
+    .mockReset()
+    .mockResolvedValue({ kind: "ok", state: { kind: "ready" } });
   getSensitiveInfoGrants.mockReset();
   hasPermission.mockReset();
   redirectMock.mockClear();
@@ -212,7 +221,16 @@ const PERSON = {
   middleName: null,
   preferredName: null,
   suffix: null,
-  email: "nora@example.invalid",
+  emails: [
+    {
+      id: "c-1",
+      value: "nora@example.invalid",
+      subtype: null,
+      isPrimary: true,
+      doNotContact: false,
+      createdAt: "2026-01-01T00:00:00.000000Z",
+    },
+  ],
   phone: null,
   address: null,
   householdId: null,
@@ -721,5 +739,40 @@ describe("EditMemberPage — the Connection card and participant controls (DECIS
     expect(
       screen.getByText(/waiting for the session to approve: profession of faith/i),
     ).toBeTruthy();
+  });
+
+  const PENDING = [{ id: "ra-9", kind: "profession_of_faith", effectiveDate: "2026-06-01" }];
+
+  it("a roll.propose holder gets Withdraw proposal on the pending notice", async () => {
+    await renderWith({ connection: "listed", pending: PENDING });
+    expect(screen.getByRole("button", { name: /withdraw proposal for/i })).toBeTruthy();
+    expect(screen.queryByText(/no one can approve yet/i)).toBeNull();
+  });
+
+  it("without roll.propose there is no Withdraw (and the pending notice is not read at all)", async () => {
+    await renderWith({ connection: "listed", pending: PENDING, canPropose: false });
+    expect(screen.queryByRole("button", { name: /withdraw proposal for/i })).toBeNull();
+    expect(getSessionApprovalState).not.toHaveBeenCalled();
+  });
+
+  it("when the Session cannot act the notice says so and links to the queue", async () => {
+    getSessionApprovalState.mockResolvedValue({ kind: "ok", state: { kind: "no_sign_in" } });
+    await renderWith({ connection: "listed", pending: PENDING });
+    const link = screen.getByRole("link", { name: /see why on the pending approvals page/i });
+    expect(link.getAttribute("href")).toBe("/o/alder-creek/admin/community/pending");
+  });
+
+  it("terms_not_started also shows the can't-approve notice (only ready is skipped)", async () => {
+    getSessionApprovalState.mockResolvedValue({ kind: "ok", state: { kind: "terms_not_started" } });
+    await renderWith({ connection: "listed", pending: PENDING });
+    expect(screen.getByText(/no one can approve yet/i)).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /see why on the pending approvals page/i }),
+    ).toBeTruthy();
+  });
+
+  it("does not read the Session state when nothing is pending", async () => {
+    await renderWith({ connection: "listed", pending: [] });
+    expect(getSessionApprovalState).not.toHaveBeenCalled();
   });
 });

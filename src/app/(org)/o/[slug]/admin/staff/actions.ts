@@ -14,6 +14,8 @@ import {
   type StartStaffPositionInput,
 } from "@/lib/staff";
 import { createPerson, type CreatePersonInput } from "@/lib/people";
+import { emailRefusalMessage } from "@/lib/contact-methods/copy";
+import { parseNewPersonEmails } from "@/lib/contact-methods/email-rows-schema";
 import type { ActionResult } from "@/types/actions";
 
 /**
@@ -85,7 +87,13 @@ import type { ActionResult } from "@/types/actions";
  */
 
 async function resolveActingIdentity(slug: string): Promise<
-  | { ok: true; userId: string; personId: string; organizationId: string }
+  | {
+      ok: true;
+      userId: string;
+      email: string | null;
+      personId: string;
+      organizationId: string;
+    }
   | { ok: false; error: string }
 > {
   const session = await auth();
@@ -104,6 +112,7 @@ async function resolveActingIdentity(slug: string): Promise<
   return {
     ok: true,
     userId: session.user.id,
+    email: session.user.email ?? null,
     personId: resolved.org.personId,
     organizationId: resolved.org.organizationId,
   };
@@ -247,16 +256,28 @@ export async function createStaffPersonAction(
     };
   }
 
+  // D14: the staff form sends one unlabelled main address. The posted rows
+  // are parsed and rebuilt like every other action that takes email rows.
+  const contact: CreatePersonInput["contact"] = {};
+  if (typeof input.contact?.phone === "string") contact.phone = input.contact.phone;
+  if (input.contact?.emails !== undefined) {
+    const emails = parseNewPersonEmails(input.contact.emails);
+    if (!emails.ok) return { ok: false, error: emails.error };
+    contact.emails = emails.value;
+  }
+
   const result = await createPerson(
     identity.personId,
     identity.organizationId,
     identity.userId,
     {
       ...input,
+      contact,
       // NEVER trust a client-supplied rollAction here — see this file's
       // header comment for why.
       rollAction: { kind: "none" },
     },
+    { actingUserEmail: identity.email },
   );
 
   switch (result.kind) {
@@ -282,10 +303,16 @@ export async function createStaffPersonAction(
         ok: false,
         error: "That person is already in this community. Choose them from the list instead.",
       };
+    case "email_refused":
+      return { ok: false, error: emailRefusalMessage(result.refusal) };
     case "roll_refused":
       // Unreachable for this action (rollAction is pinned to { kind: "none" }
       // above, which never calls the participant function); typed so the
       // switch stays exhaustive.
+      return { ok: false, error: "That person could not be added." };
+    case "proposal_refused":
+      // Unreachable for the same reason: only a membership proposal can be
+      // refused, and `{ kind: "none" }` proposes nothing.
       return { ok: false, error: "That person could not be added." };
     case "ok":
       break;

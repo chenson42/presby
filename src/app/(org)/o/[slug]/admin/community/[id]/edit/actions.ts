@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { resolveOrgContext } from "@/lib/authz";
 import { updatePerson, type UpdatePersonInput } from "@/lib/people";
+import { EMAIL_COPY, emailRefusalMessage } from "@/lib/contact-methods/copy";
+import { parseUpdateEmails } from "@/lib/contact-methods/email-rows-schema";
+import type { PersonSaveNotes } from "@/lib/contact-methods/types";
 import {
   recordParticipantAction,
   recordRollAction,
@@ -13,7 +16,11 @@ import {
 import { isUuid } from "@/lib/is-uuid";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
 import type { ActionResult } from "@/types/actions";
-import { PARTICIPANT_COPY, VALIDATION_COPY } from "../../participant-copy";
+import {
+  PARTICIPANT_COPY,
+  PROPOSAL_COPY,
+  VALIDATION_COPY,
+} from "../../participant-copy";
 
 /**
  * Server Action for `/o/<slug>/admin/community/[id]/edit`. Same plumbing shape
@@ -21,11 +28,19 @@ import { PARTICIPANT_COPY, VALIDATION_COPY } from "../../participant-copy";
  * `organizationId` never trusted from the client, `resolveOrgContext()`
  * re-run inside the action body — the permission check itself lives in
  * `updatePerson()`, not duplicated here.
+ *
+ * The audit actor comes from the SESSION, never from `input`. A posted list of
+ * email rows is parsed and REBUILT by `parseUpdateEmails()` (a Server Action's
+ * parameter type is not a runtime boundary), and a thrown database error is
+ * logged by class only (a message can carry an address) and shown as the one
+ * fixed "couldn't save" string, never a raw database message. The audit rows
+ * (`tenant.person.updated`, `tenant.person_email.*`) are written by the
+ * library in the save's own transaction, not here.
  */
 export async function updatePersonAction(
   slug: string,
   input: UpdatePersonInput,
-): Promise<ActionResult<{ personId: string }>> {
+): Promise<ActionResult<{ personId: string; notes?: PersonSaveNotes }>> {
   const session = await auth();
   if (!session?.user) {
     return { ok: false, error: "You must be signed in to do that." };
@@ -36,11 +51,32 @@ export async function updatePersonAction(
     return { ok: false, error: "You don't have access to that organization." };
   }
 
-  const result = await updatePerson(
-    resolved.org.personId,
-    resolved.org.organizationId,
-    input,
-  );
+  let contact: UpdatePersonInput["contact"] = {};
+  if (typeof input.contact?.phone === "string") contact.phone = input.contact.phone;
+  if (input.contact?.emails !== undefined) {
+    const emails = parseUpdateEmails(input.contact.emails);
+    if (!emails.ok) return { ok: false, error: emails.error };
+    contact = { ...contact, emails: emails.value };
+  }
+
+  let result: Awaited<ReturnType<typeof updatePerson>>;
+  try {
+    result = await updatePerson(
+      resolved.org.personId,
+      resolved.org.organizationId,
+      {
+        personId: input.personId,
+        identity: input.identity,
+        contact,
+        address: input.address,
+        household: input.household,
+      },
+      { userId: session.user.id, email: session.user.email ?? null },
+    );
+  } catch (err) {
+    console.error("[updatePersonAction] save failed:", errorClass(err));
+    return { ok: false, error: EMAIL_COPY.saveFailed };
+  }
 
   switch (result.kind) {
     case "forbidden":
@@ -58,14 +94,33 @@ export async function updatePersonAction(
         ok: false,
         error: "That household no longer exists. Choose another or create a new one.",
       };
+    case "email_refused":
+      return { ok: false, error: emailRefusalMessage(result.refusal) };
     case "ok":
       break;
   }
 
   revalidatePath(`/o/${slug}/admin/community`);
+  revalidatePath(`/o/${slug}/directory`);
   revalidatePath(`/o/${slug}/directory/${input.personId}`);
 
-  return { ok: true, data: { personId: input.personId } };
+  return {
+    ok: true,
+    data: {
+      personId: input.personId,
+      ...(result.notes ? { notes: result.notes } : {}),
+    },
+  };
+}
+
+/** Error CLASS only, for logs: never the message (it can carry values). */
+function errorClass(err: unknown): string {
+  const name = err instanceof Error ? err.name : typeof err;
+  const code =
+    typeof err === "object" && err !== null && "code" in err
+      ? String((err as { code?: unknown }).code)
+      : undefined;
+  return code ? `${name}/${code}` : name;
 }
 
 const MAX_MINUTE_REFERENCE = 200;
@@ -144,6 +199,8 @@ export async function recordRollActionAction(
       return { ok: false, error: PARTICIPANT_COPY.invalid_kind };
     case "refused":
       return { ok: false, error: PARTICIPANT_COPY[result.reason] };
+    case "proposal_refused":
+      return { ok: false, error: PROPOSAL_COPY[result.reason] };
     case "ok":
       break;
   }

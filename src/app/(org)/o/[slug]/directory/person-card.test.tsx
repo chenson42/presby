@@ -59,3 +59,22 @@ describe("PersonCard — chevron affordance (L1)", () => {
     expect(card?.className).toContain("hover:shadow-md");
   });
 });
+
+describe("PersonCard — the staff Work address", () => {
+  it("shows a Work line under the main address as its own mailto link, only when workEmail is set", () => {
+    render(
+      <PersonCard entry={{ ...ENTRY, workEmail: "ada.work@example.invalid" }} photoSrc={null} slug="alder-creek" />,
+    );
+    const work = screen.getByRole("link", { name: "Work: ada.work@example.invalid" });
+    expect(work.getAttribute("href")).toBe("mailto:ada.work@example.invalid");
+    // The main address keeps its own, unprefixed link.
+    expect(screen.getByRole("link", { name: "ada@example.invalid" }).getAttribute("href")).toBe(
+      "mailto:ada@example.invalid",
+    );
+  });
+
+  it("renders no Work line when workEmail is null or absent", () => {
+    render(<PersonCard entry={{ ...ENTRY, workEmail: null }} photoSrc={null} slug="alder-creek" />);
+    expect(screen.queryByText(/^Work:/)).toBeNull();
+  });
+});

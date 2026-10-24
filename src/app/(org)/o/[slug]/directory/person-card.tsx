@@ -101,6 +101,15 @@ export function PersonCard({
               {entry.email}
             </a>
           )}
+          {entry.workEmail && (
+            <a
+              href={`mailto:${entry.workEmail}`}
+              className="flex min-h-11 max-w-full items-center gap-1.5 truncate text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <Mail className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+              {`Work: ${entry.workEmail}`}
+            </a>
+          )}
           {entry.phone && (
             <a
               href={`tel:${entry.phone}`}

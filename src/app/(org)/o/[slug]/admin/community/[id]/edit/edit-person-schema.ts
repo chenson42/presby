@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { contactEmailsSchema } from "@/components/org-portal/email-addresses-form";
 
 /**
  * Single-screen edit form (docs/work-log/2026-08-26-member-management-
@@ -19,7 +20,7 @@ export const editPersonSchema = z.object({
     suffix: z.string().optional(),
   }),
   contact: z.object({
-    email: z.string().optional(),
+    emails: contactEmailsSchema,
     phone: z.string().optional(),
   }),
   address: z.object({

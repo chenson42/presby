@@ -393,6 +393,169 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
   });
 
   // -------------------------------------------------------------------------
+  // docs/work-log/2026-10-23-person-emails.md: ER3a (the TypeScript readers learn
+  // `ended_at`) and the operator-ruled signed-in-address warning.
+  describe("createInvitation: contact rows (person-emails)", () => {
+    /** End an address the way the store does: clear the main flag and stamp ended_at in one statement. */
+    async function endAddresses(personId: string) {
+      await q(sql`update contact_methods set is_primary = false, ended_at = now() where person_id = ${personId} and kind = 'email'`);
+    }
+    /** Owner-side insert of an ENDED row for an address (the guard lets the owner set ended_at at insert). */
+    async function insertEndedAddress(personId: string, address: string, doNotContact = false) {
+      await q(sql`
+        insert into contact_methods (person_id, kind, value, is_primary, do_not_contact, ended_at)
+        values (${personId}, 'email', ${address}, false, ${doNotContact}, now())`);
+    }
+
+    it("an ENDED address does not resolve a treasurer: the person has no address on file (no_matching_person)", async () => {
+      const orgId = await org();
+      const address = fx.email("tr-ended-addr");
+      const person = await member(orgId, address);
+      await endAddresses(person);
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r).toEqual({ kind: "no_matching_person" });
+      expect(await invitationsOf(orgId)).toHaveLength(0);
+    });
+
+    it("another person's ENDED copy of the address does not make it ambiguous: the active holder resolves", async () => {
+      const orgId = await org();
+      const address = fx.email("tr-ended-copy");
+      const active = await member(orgId, address, "Odalys");
+      const formerHolder = await fx.makePerson("Odell", "Pennick");
+      await fx.addMember(orgId, formerHolder);
+      await insertEndedAddress(formerHolder, address);
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r.kind).toBe("ok");
+      const [inv] = await invitationsOf(orgId);
+      expect(inv!.person_id).toBe(active);
+    });
+
+    it("an ended do-not-contact copy of an address does NOT trigger the warning for its active replacement", async () => {
+      const orgId = await org();
+      const address = fx.email("tr-dnc-ended");
+      const person = await member(orgId, address);
+      await insertEndedAddress(person, address, true);
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r.kind).toBe("ok");
+    });
+
+    it("an ACTIVE do-not-contact address still needs the acknowledgement (the ended predicate did not weaken it)", async () => {
+      const orgId = await org();
+      const address = fx.email("tr-dnc-active");
+      const person = await member(orgId, address);
+      await q(sql`update contact_methods set do_not_contact = true where person_id = ${person} and ended_at is null`);
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r).toEqual({ kind: "needs_acknowledgement", reason: "do_not_contact" });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe("createInvitation: the signed-in-address warning (operator ruling 2026-10-23)", () => {
+    /** An active roster member with the address on file, linked to an account (people.user_id set). */
+    async function signedInMember(orgId: string, address: string) {
+      const person = await member(orgId, address);
+      const userId = await fx.makeUser(fx.email("linked"));
+      await fx.linkUser(person, userId);
+      return person;
+    }
+
+    it("a treasurer invitation to an address on a person who already signs in is CREATED, with the warning (non-blocking)", async () => {
+      const orgId = await org();
+      const address = fx.email("warn-tr");
+      const person = await signedInMember(orgId, address);
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r.kind).toBe("ok");
+      if (r.kind !== "ok") return;
+      expect(r.warnings).toEqual(["address_on_signed_in_person"]);
+      // non-blocking: the invitation, its queue row and the audit row all exist
+      const [inv] = await invitationsOf(orgId);
+      expect(inv).toMatchObject({ id: r.invitationId, person_id: person, purpose: "treasurer" });
+      expect(await auditRows("invitation.created", orgId)).toHaveLength(1);
+      expect(await queueRowsTo(address)).toHaveLength(1);
+    });
+
+    it("the same for a founding administrator whose address matches a signed-in roster person", async () => {
+      const orgId = await org();
+      const address = fx.email("warn-fa");
+      await signedInMember(orgId, address);
+      const r = await issue.createInvitation({
+        organizationId: orgId, purpose: "founding_administrator", email: address, firstName: "A", lastName: "B", inviter: actor(),
+      });
+      expect(r.kind).toBe("ok");
+      if (r.kind !== "ok") return;
+      expect(r.warnings).toEqual(["address_on_signed_in_person"]);
+    });
+
+    it("no warning (and no `warnings` key at all) when the person does not sign in", async () => {
+      const orgId = await org();
+      const address = fx.email("nowarn-unlinked");
+      await member(orgId, address);
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r.kind).toBe("ok");
+      expect(r).not.toHaveProperty("warnings");
+    });
+
+    it("no warning for an address nobody has on file (a founding administrator's typed address)", async () => {
+      const orgId = await org();
+      const r = await issue.createInvitation({
+        organizationId: orgId, purpose: "founding_administrator", email: fx.email("nowarn-new"), firstName: "A", lastName: "B", inviter: actor(),
+      });
+      expect(r.kind).toBe("ok");
+      expect(r).not.toHaveProperty("warnings");
+    });
+
+    it("no warning when the signed-in person's copy of the address has ENDED", async () => {
+      const orgId = await org();
+      const address = fx.email("nowarn-ended");
+      const holder = await signedInMember(orgId, address);
+      // an ended copy on the signed-in person, and an active copy on someone who does not sign in
+      await q(sql`update contact_methods set is_primary = false, ended_at = now() where person_id = ${holder}`);
+      await member(orgId, address, "Odalys");
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r.kind).toBe("ok");
+      expect(r).not.toHaveProperty("warnings");
+    });
+
+    it("is scoped to THIS organization's roster: a signed-in person elsewhere with the address does not warn", async () => {
+      const orgId = await org();
+      const elsewhere = await org();
+      const address = fx.email("nowarn-elsewhere");
+      await signedInMember(elsewhere, address);
+      const r = await issue.createInvitation({
+        organizationId: orgId, purpose: "founding_administrator", email: address, firstName: "A", lastName: "B", inviter: actor(),
+      });
+      expect(r.kind).toBe("ok");
+      expect(r).not.toHaveProperty("warnings");
+    });
+
+    it("a merged person's link does not warn", async () => {
+      const orgId = await org();
+      const address = fx.email("nowarn-merged");
+      const merged = await signedInMember(orgId, address);
+      const survivor = await fx.makePerson("Surv", "Ivor");
+      await q(sql`update people set merged_into_id = ${survivor} where id = ${merged}`);
+      const r = await issue.createInvitation({
+        organizationId: orgId, purpose: "founding_administrator", email: address, firstName: "A", lastName: "B", inviter: actor(),
+      });
+      expect(r.kind).toBe("ok");
+      expect(r).not.toHaveProperty("warnings");
+      await q(sql`update people set merged_into_id = null where id = ${merged}`);
+    });
+
+    it("a warning changes nothing else: the audit row and the invitation row are those of an unwarned send", async () => {
+      const orgId = await org();
+      const address = fx.email("warn-same");
+      await signedInMember(orgId, address);
+      const r = await issue.createInvitation({ organizationId: orgId, purpose: "treasurer", email: address, inviter: actor() });
+      expect(r.kind).toBe("ok");
+      const [audit] = await auditRows("invitation.created", orgId);
+      expect(Object.keys(audit!.metadata as object).sort()).toEqual(
+        ["acknowledgedDoNotContact", "expiresAt", "invitationId", "organizationId", "personId", "purpose", "selfAddressed"].sort(),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe("createInvitation: refusals leave nothing behind", () => {
     async function expectNothing(orgId: string, address: string) {
       expect(await invitationsOf(orgId)).toHaveLength(0);

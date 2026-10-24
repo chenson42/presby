@@ -159,6 +159,7 @@ erDiagram
 erDiagram
   organizations ||--o{ roll_actions : "organization_id"
   users |o--o{ roll_actions : "approved_by"
+  users |o--o{ roll_actions : "decided_by"
   users |o--o{ roll_actions : "proposed_by"
   memberships ||--o{ roll_actions : "person_id"
   organizations ||--o{ transfer_certificates : "issuing_org_id"
@@ -797,7 +798,8 @@ lockdown migration revokes it (
   (`resulting_roll` equals `ROLL_ACTION_KIND_TO_ROLL`, `opening_balance` exempt),
   `roll_actions_void_shape`, `roll_actions_approval_status_allowed`, and the partial unique index
   `roll_actions_one_live_void_idx`. The `withdrawn` status sketched in the DDL above was never
-  used and is not in the vocabulary.
+  used and is not in 0061's vocabulary (0062 adds it: see "Session approval and
+  withdrawal" below).
 - **Catalog and binding:** `roll.propose` and `roll.approve` enter `permissions` by migration (F174);
   the `congregation_stated_clerk` template carries `statistics.publish`, `roll.propose` and
   `directory.view`; org-owned copies are topped up only where a `founding_administrator` role marks
@@ -805,6 +807,72 @@ lockdown migration revokes it (
 
 Proven by `src/lib/db/domain/participant-roll.db.test.ts` (owner connection, every outcome) and
 `scripts/participants/test-rls-61.sql` (as `presby_app`, section 61 at integration).
+
+### Session approval and withdrawal (added 2026-10-23, `drizzle/0062_presby_session_approval.sql`, `drizzle/0063_presby_roll_decide_lockdown.sql`)
+
+D3 says a member-roll action waits for the Session. Until 0062/0063 the waiting was real but the
+deciding was paper: `presby_app` held `UPDATE` and `DELETE` on `roll_actions`, the only check on
+"who may approve" was `decideRollAction()` in TypeScript, a denied row recorded no actor, and its
+audit row was written after commit. 0062 adds the decision functions and the Session's authority;
+0063, applied only after the code that calls them is deployed, removes the tenant connection's
+direct write paths (Community Increment 2; `docs/work-log/2026-10-22-founding-admin-directory.md`;
+DECISION-202, DECISION-203, DECISION-205, DECISION-206; F180, F181, F184, F188, F189, F191).
+
+- **Two decision functions, function-mediated.** `presby_decide_roll_action(roll_action_id,
+  decision, minute_reference, reason, decided_by)` approves or denies; `presby_withdraw_roll_action(
+  roll_action_id, reason, withdrawn_by)` withdraws. Same shape as 0061's: `SECURITY DEFINER`,
+  `search_path = public, pg_temp`, executable by `presby_app` only, the organization from
+  `presby_current_org()`, the actor a bounded `users.id` whose live, unmerged person is an active
+  member holding `roll.approve` (decide) or `roll.propose` (withdraw), checked in the caller's own
+  transaction by the owner-only `presby_roll__actor_holds`. One identity literal
+  (`roll_actions: this roll decision is not permitted`, distinct from 0061's); every state refusal
+  is a closed outcome, one row per call. Lock order is membership, then roll action, as in 0061.
+- **What approval refuses:** a kind outside the seven approvable gain kinds (participant enrolment
+  is on record; losses, voids and opening balances are never proposals); a deceased or merged
+  person; an ended membership; an open installed / co- / associate pastor term (a pastor's
+  membership is held by the presbytery); and a gain the person already has, checked in both
+  directions (the replay as of the effective date already equals the row's roll, or the next
+  effective row is a counted gain to the same roll), because `presby_roll_changes` counts every
+  effective gain row. A later-dated effective row is a warning (`shadowed_by_*`), never a refusal.
+  The global active-roll collision becomes `active_elsewhere` without naming the other
+  organization. Deny and withdraw check no person state, so junk can always be cleaned up softly.
+- **Status and stamps.** `withdrawn` joins the vocabulary (a proposer taking back a mistake is not
+  the Session refusing it). `decided_by` / `decided_at` are one actor pair for every terminal
+  transition; rows decided before 0062 are not backfilled (approved rows are frozen) and readers
+  coalesce with `approved_by` / `approved_on`. Each reason exists only in its own state (two
+  CHECKs, 0062); denied and withdrawn rows carry both stamps (`roll_actions_terminal_decision_stamps`,
+  0063, because the pre-Increment-2 deny set neither).
+- **Terminal rows.** `roll_actions_freeze` now refuses `UPDATE` and `DELETE` of denied and
+  withdrawn rows as well as approved ones. It is a trigger, so it binds the owner connection
+  (`getPlatformDb()`), where no grant applies (F44).
+- **One pending proposal per person** per organization (`roll_actions_one_pending_per_person_idx`).
+  The one-live-void index is re-predicated to `approval_status in ('pending','approved')` so a
+  withdrawn void is not live.
+- **Lockdown (0063).** `presby_app` (and the login-less `presby_platform`) lose `UPDATE` and
+  `DELETE` on `roll_actions`; the restrictive insert policy narrows to pending rows of the seven
+  approvable kinds (F191). After it, the only way any tenant caller moves a row out of pending is a
+  definer that checked the key in the same transaction, and nothing on the tenant connection can
+  delete a roll row. RI checks from `person_milestones` still work: they run as the table owner.
+- **The Session's authority (DECISION-202).** Every congregation has `session` and `diaconate`
+  derived groups (0062 seeds the missing ones, F189) and a constitutional, protected
+  `session_member` role carrying `roll.approve` only, bound to the Session group by a group-arm
+  grant. A tenant's own `session_member` is never modified. No role carries both roll keys.
+- **Pastors are members of the Session (DECISION-206).** `presby_sync_derived_group` maps
+  `ruling_elder`, `installed_pastor`, `co_pastor` and `associate_pastor` to `session`
+  (G-3.0201); `moderator` stays unmapped. `officer_terms_office_allowed` closes the office
+  vocabulary (F188). `officer_terms_pastor_no_roll` (`presby_guard_pastor_no_roll`, definer)
+  refuses an open pastor term for a person on the organization's roll, and refuses re-opening one;
+  ending or shortening a term never fails. `appointments` (presbytery-owned) is deliberately not
+  the source: a presbytery row writing a congregation's roster would be authority flowing down.
+- **Residuals, paper:** a direct SQL caller of the decision functions skips the audit row
+  (`src/lib/roll.ts` writes it in the same transaction; a source scan pins it as the only caller);
+  a founding administrator who records themselves as a ruling elder or installed pastor becomes a
+  Session approver, permitted and stamped `selfRecorded` / `selfApproved` (DECISION-205);
+  participant enrolment of a pastor-office holder is not refused.
+
+Proven by `src/lib/db/domain/session-approval.db.test.ts` (owner connection, every outcome, the
+freeze, the backfill, the pastor guard), `src/lib/db/domain/roll-decide-lockdown.db.test.ts`
+(0063), and `scripts/session-approval/test-rls-62.sql` (as `presby_app`, section 62 at integration).
 
 ### Two-sided transfers (F9)
 

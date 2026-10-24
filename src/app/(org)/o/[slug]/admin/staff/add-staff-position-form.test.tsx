@@ -200,7 +200,7 @@ describe("AddStaffPositionForm — the inline 'add a new person' flow", () => {
 
     expect(mockCreateStaffPersonAction).toHaveBeenCalledWith("alder-creek", {
       identity: { mode: "new", firstName: "Marisol", lastName: "Windham" },
-      contact: { email: undefined, phone: undefined },
+      contact: { emails: undefined, phone: undefined },
       household: { mode: "none" },
       rollAction: { kind: "none" },
     });
@@ -214,6 +214,47 @@ describe("AddStaffPositionForm — the inline 'add a new person' flow", () => {
     const select = screen.getByLabelText(/^person/i) as HTMLSelectElement;
     expect(select.value).toBe("person-3");
     expect(screen.getByText("Marisol Windham")).toBeTruthy();
+  });
+
+  it("sends the address list from the shared editor: labels, the main address, and no blank rows", async () => {
+    mockCreateStaffPersonAction.mockResolvedValueOnce({ ok: true, data: { personId: "person-3" } });
+    render(<AddStaffPositionForm slug="alder-creek" options={OPTIONS} canCreatePeople={true} />);
+    fireEvent.click(screen.getByText(/can.t find them\? add a new person/i));
+    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: "Marisol" } });
+    fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: "Windham" } });
+    fireEvent.change(screen.getByLabelText(/^email address$/i), { target: { value: "marisol@example.invalid" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add another email address$/i }));
+    fireEvent.change(screen.getAllByLabelText(/^email address$/i)[1]!, {
+      target: { value: "m.windham@example.invalid" },
+    });
+    fireEvent.change((screen.getAllByLabelText(/^label$/i) as HTMLSelectElement[])[1]!, {
+      target: { value: "work" },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^add person$/i }));
+    });
+
+    expect(mockCreateStaffPersonAction.mock.calls[0]![1].contact).toEqual({
+      emails: [
+        { value: "marisol@example.invalid", subtype: null, isPrimary: true, doNotContact: false },
+        { value: "m.windham@example.invalid", subtype: "work", isPrimary: false, doNotContact: false },
+      ],
+      phone: undefined,
+    });
+  });
+
+  it("a malformed address blocks the sub-form with the field error and calls nothing", async () => {
+    render(<AddStaffPositionForm slug="alder-creek" options={OPTIONS} canCreatePeople={true} />);
+    fireEvent.click(screen.getByText(/can.t find them\? add a new person/i));
+    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: "Marisol" } });
+    fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: "Windham" } });
+    fireEvent.change(screen.getByLabelText(/^email address$/i), { target: { value: "nope" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^add person$/i }));
+    });
+    expect(screen.getByText("Enter a valid email address.")).toBeTruthy();
+    expect(mockCreateStaffPersonAction).not.toHaveBeenCalled();
   });
 
   it("surfaces a createStaffPersonAction denial via toast.error, verbatim, and keeps the sub-form open", async () => {

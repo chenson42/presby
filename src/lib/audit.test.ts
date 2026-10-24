@@ -132,6 +132,7 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // src/app/(org)/o/[slug]/admin/community/pending/actions.ts
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+  ROLL_ACTION_WITHDRAWN: "tenant.roll_action.withdrawn",
   // Participant enrolment/removal/undo on record (2026-10-22, DECISION-198)
   // — written from src/lib/roll.ts, in the same transaction as the roll row
   ROLL_ACTION_RECORDED: "tenant.roll_action.recorded",
@@ -139,6 +140,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Member management, Increment 2 (2026-08-26) — written from
   // src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts
   PERSON_UPDATED: "tenant.person.updated",
+  TENANT_PERSON_EMAIL_ADDED: "tenant.person_email.added",
+  TENANT_PERSON_EMAIL_ENDED: "tenant.person_email.ended",
+  TENANT_PERSON_EMAIL_PRIMARY_CHANGED: "tenant.person_email.primary_changed",
+  TENANT_PERSON_EMAIL_UPDATED: "tenant.person_email.updated",
   // Officer-terms administration (2026-08-26, groups-and-officers) —
   // written from src/app/(org)/o/[slug]/admin/officers/actions.ts
   OFFICER_TERM_STARTED: "tenant.officer_term.started",

@@ -13,8 +13,15 @@ import { describe, expect, it } from "vitest";
 // and avoids it entirely.
 import { rollActionKind } from "@/lib/db/domain";
 import {
+  APPROVABLE_ROLL_ACTION_KINDS,
+  BULK_APPROVE_MAX,
+  COUNTED_GAIN_KINDS,
   EDIT_TIME_ROLL_ACTION_KINDS,
   ON_RECORD_ROLL_ACTION_KINDS,
+  PROPOSAL_REFUSALS,
+  ROLL_DECISION_REFUSALS,
+  ROLL_WITHDRAW_REFUSALS,
+  isApprovableKind,
   PARTICIPANT_RECORD_REFUSALS,
   PARTICIPANT_REMOVAL_ENDED_REASON,
   PARTICIPANT_VOID_REFUSALS,
@@ -197,5 +204,167 @@ describe("deriveRollFields (F173)", () => {
   it("throws on a malformed date rather than computing NaN", () => {
     expect(() => deriveRollFields("profession_of_faith", null, "03/01/2026")).toThrow(/effectiveDate/);
     expect(() => deriveRollFields("profession_of_faith", "June 2000", "2026-01-01")).toThrow(/dateOfBirth/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Approval, denial and withdrawal: constants pinned to drizzle/0062 and 0063
+// (docs/work-log/2026-10-22-founding-admin-directory.md, Increment 2 Phase 3
+// Test Plan 1.10; DECISION-203)
+// ---------------------------------------------------------------------------
+
+const MIGRATION_0062 = readFileSync(
+  path.resolve(__dirname, "../../drizzle/0062_presby_session_approval.sql"),
+  "utf8",
+);
+const MIGRATION_0063 = readFileSync(
+  path.resolve(__dirname, "../../drizzle/0063_presby_roll_decide_lockdown.sql"),
+  "utf8",
+);
+const MIGRATION_0012 = readFileSync(
+  path.resolve(__dirname, "../../drizzle/0012_presby_roll_read.sql"),
+  "utf8",
+);
+
+function body0062(name: string): string {
+  const start = MIGRATION_0062.indexOf(`create or replace function ${name}(`);
+  expect(start, `${name} not found in 0062`).toBeGreaterThanOrEqual(0);
+  const next = MIGRATION_0062.indexOf("create or replace function ", start + 10);
+  return MIGRATION_0062.slice(start, next === -1 ? undefined : next);
+}
+
+/** Every quoted word in a parenthesised SQL list, sorted. */
+function quoted(list: string): string[] {
+  return [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!).sort();
+}
+
+describe("APPROVABLE_ROLL_ACTION_KINDS is pinned to both SQL lists", () => {
+  it("is the edit-time kinds minus the on-record kinds, the seven gain kinds", () => {
+    expect([...APPROVABLE_ROLL_ACTION_KINDS]).toEqual(
+      EDIT_TIME_ROLL_ACTION_KINDS.filter((k) => !isOnRecordKind(k)),
+    );
+    expect([...APPROVABLE_ROLL_ACTION_KINDS].sort()).toEqual(
+      [
+        "affiliate_received",
+        "baptized_member_enrolled",
+        "certificate_received",
+        "other_gain",
+        "profession_of_faith",
+        "reaffirmation",
+        "restoration",
+      ].sort(),
+    );
+  });
+
+  it("equals the `v_t.kind not in (...)` list inside presby_decide_roll_action (0062)", () => {
+    const match = /v_t\.kind not in \(([^)]*)\)/.exec(body0062("presby_decide_roll_action"));
+    expect(match, "v_t.kind not in (...) not found").not.toBeNull();
+    expect([...APPROVABLE_ROLL_ACTION_KINDS].sort()).toEqual(quoted(match![1]!));
+  });
+
+  it("equals the kind list in 0063's narrowed insert policy", () => {
+    // The leading newline skips the rollback recipe in the file's header comment.
+    const start = MIGRATION_0063.indexOf("\ncreate policy roll_actions_insert_pending_only");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const policy = MIGRATION_0063.slice(start, MIGRATION_0063.indexOf(";", start));
+    const match = /kind in \(([^)]*)\)/.exec(policy);
+    expect(match, "kind in (...) not found in the policy").not.toBeNull();
+    expect([...APPROVABLE_ROLL_ACTION_KINDS].sort()).toEqual(quoted(match![1]!));
+  });
+
+  it("every approvable kind maps to a non-null roll and none is an on-record kind", () => {
+    for (const kind of APPROVABLE_ROLL_ACTION_KINDS) {
+      expect(ROLL_ACTION_KIND_TO_ROLL[kind]).not.toBeNull();
+      expect(isOnRecordKind(kind)).toBe(false);
+      expect(isApprovableKind(kind)).toBe(true);
+    }
+  });
+
+  it("no loss kind, void, opening_balance or participant kind is approvable (F191)", () => {
+    for (const kind of [
+      "certificate_dismissed",
+      "death",
+      "removed_by_session",
+      "renunciation_of_jurisdiction",
+      "other_loss",
+      "affiliate_ended",
+      "other_participant_enrolled",
+      "other_participant_removed",
+      "void",
+      "opening_balance",
+    ]) {
+      expect(isApprovableKind(kind)).toBe(false);
+    }
+    expect(isApprovableKind(undefined)).toBe(false);
+    expect(isApprovableKind({ toString: () => "profession_of_faith" })).toBe(false);
+  });
+});
+
+describe("COUNTED_GAIN_KINDS is pinned to the decide function and to presby_roll_changes", () => {
+  it("equals the next-effective-row list inside presby_decide_roll_action (0062)", () => {
+    const match = /v_next\.kind in \(([^)]*)\)/.exec(body0062("presby_decide_roll_action"));
+    expect(match, "v_next.kind in (...) not found").not.toBeNull();
+    expect([...COUNTED_GAIN_KINDS].sort()).toEqual(quoted(match![1]!));
+  });
+
+  it("equals the gain kinds presby_roll_changes counts (0012)", () => {
+    const start = MIGRATION_0012.indexOf("create or replace function presby_roll_changes(");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const fn = MIGRATION_0012.slice(start, MIGRATION_0012.indexOf("$$;", start));
+    // The four gain lines: the two profession lines (a kind list) and
+    // certificate / other (a single kind each). Loss lines are excluded.
+    const gains = new Set<string>();
+    for (const m of fn.matchAll(/where kind in \(([^)]*)\)/g)) {
+      for (const k of quoted(m[1]!)) gains.add(k);
+    }
+    for (const m of fn.matchAll(/where kind = '([a-z_]+)'/g)) gains.add(m[1]!);
+    const lossOrNot = new Set([
+      "certificate_dismissed",
+      "death",
+      "other_loss",
+      "removed_by_session",
+      "renunciation_of_jurisdiction",
+    ]);
+    const counted = [...gains].filter((k) => !lossOrNot.has(k)).sort();
+    expect([...COUNTED_GAIN_KINDS].sort()).toEqual(counted);
+  });
+
+  it("is a subset of the approvable kinds and excludes the uncounted gains", () => {
+    for (const kind of COUNTED_GAIN_KINDS) expect(isApprovableKind(kind)).toBe(true);
+    expect(COUNTED_GAIN_KINDS).not.toContain("baptized_member_enrolled");
+    expect(COUNTED_GAIN_KINDS).not.toContain("affiliate_received");
+  });
+});
+
+describe("the decide and withdraw outcome vocabularies are pinned to drizzle/0062", () => {
+  it("ROLL_DECISION_REFUSALS equals presby_decide_roll_action's outcome literals, minus ok", () => {
+    expect([...ROLL_DECISION_REFUSALS].sort()).toEqual(
+      outcomesIn(body0062("presby_decide_roll_action")),
+    );
+  });
+
+  it("ROLL_WITHDRAW_REFUSALS equals presby_withdraw_roll_action's outcome literals, minus ok", () => {
+    expect([...ROLL_WITHDRAW_REFUSALS].sort()).toEqual(
+      outcomesIn(body0062("presby_withdraw_roll_action")),
+    );
+  });
+
+  it("the withdraw vocabulary is a subset of the decide vocabulary (shared copy cannot drift)", () => {
+    for (const code of ROLL_WITHDRAW_REFUSALS) {
+      expect(ROLL_DECISION_REFUSALS).toContain(code);
+    }
+  });
+
+  it("PROPOSAL_REFUSALS is the two proposal refusals and no database outcome", () => {
+    expect([...PROPOSAL_REFUSALS]).toEqual(["no_session", "pending_exists"]);
+    for (const code of PROPOSAL_REFUSALS) {
+      expect(ROLL_DECISION_REFUSALS as readonly string[]).not.toContain(code);
+    }
+  });
+});
+
+describe("BULK_APPROVE_MAX", () => {
+  it("is 50 (R18)", () => {
+    expect(BULK_APPROVE_MAX).toBe(50);
   });
 });

@@ -1,0 +1,41 @@
+diff --git a/scripts/invitations/seed-dev-invitations.sql b/scripts/invitations/seed-dev-invitations.sql
+index f501956..dff35ad 100644
+--- a/scripts/invitations/seed-dev-invitations.sql
++++ b/scripts/invitations/seed-dev-invitations.sql
+@@ -22,7 +22,9 @@
+ --   1. F159: an on-file email (contact_methods) for three seeded people who
+ --      have a login but no email row, so the roster-resolved treasurer flow
+ --      (C6) has someone to find in dev. The value is their own login's
+---      address.
++--      address, normalized (lower, trimmed) and written as the person's main
++--      address: drizzle/0064's contact_methods_value_shape refuses anything
++--      else, and "no email row" means no ACTIVE email row (ended_at is null).
+ --   2. Six invitations, each with a KNOWN raw token (dev only):
+ --        Quillhaven  founding_administrator  OPEN (live)        token qh-fa
+ --        Quillhaven  treasurer (Odalys)      OPEN (live)        token qh-tr
+@@ -50,14 +52,15 @@
+ 
+ -- 1. F159: on-file emails for three seeded people with a login.
+ insert into contact_methods (person_id, kind, value, is_primary)
+-select p.id, 'email', u.email, true
++select p.id, 'email', lower(btrim(u.email)), true
+   from people p
+   join users u on u.id = p.user_id
+  where p.id in ('c1000000-0000-0000-0000-000000000001',   -- Odalys Winterbourne, Quillhaven
+                 'c1000000-0000-0000-0000-000000000002',   -- Ptolemy Gaddis, Marrowbone
+                 'c1000000-0000-0000-0000-000000000006')   -- Susanna Peel, Fernwood
+    and u.email like '%@example.invalid'
+-   and not exists (select 1 from contact_methods c where c.person_id = p.id and c.kind = 'email');
++   and not exists (select 1 from contact_methods c where c.person_id = p.id and c.kind = 'email'
++                      and c.ended_at is null);
+ 
+ -- 2. Invitations. created_by_user_id is the elder fixture (provenance only).
+ 
+@@ -79,6 +82,7 @@ select '44444444-4444-4444-4444-444444444444', 'treasurer', lower(c.value), c.pe
+        'e0000000-0000-0000-0000-0000000000f2', '2099-01-01T00:00:00Z', '2099-01-30T00:00:00Z'
+   from contact_methods c
+  where c.person_id = 'c1000000-0000-0000-0000-000000000001' and c.kind = 'email'
++   and c.is_primary and c.ended_at is null
+    and not exists (select 1 from account_invitations
+                     where token_hash = encode(sha256(convert_to('seed-dev-invitation-qh-tr-00000000000000000', 'UTF8')), 'hex'))
+  limit 1;

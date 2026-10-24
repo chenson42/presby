@@ -1,0 +1,17 @@
+diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
+index 58741e7..8c13ade 100644
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
+@@ -8621,3 +8621,12 @@ rollback;
+ --     fixture (no seed change), so it is never run against production.
+ -- ===========================================================================
+ \ir participants/test-rls-61.sql
++
++-- ===========================================================================
++-- APPENDED SECTION - pipeline/person-emails (integration).
++-- 64. Person emails (drizzle/0064_presby_person_emails.sql).
++--     Its own file, as 46, 47, 59, 60 and 61 above; \ir resolves relative to
++--     this script. It needs the test helpers and the seed's person-emails
++--     fixture, so it is never run against production.
++-- ===========================================================================
++\ir person-emails/test-rls-64.sql

@@ -121,6 +121,12 @@ src/lib/domains/       — custom domains (Track F): hostname rules, the state
                          and DNS adapters behind interfaces with fakes, and the
                          three pure files the proxy may import. See A Custom
                          Host Is a Key, Not an Identity
+src/lib/contact-methods/ — which address a person's mail uses (DECISION-216): pure
+                         normalize, routing, plan and audience-registry files;
+                         the RLS-side SQL fragments; store.ts, the ONLY writer
+                         of contact_methods (end-dated, never deleted);
+                         reader.ts, the TypeScript door to presby_person_email,
+                         the credential authority
 src/lib/site-urls.ts   — SiteUrls: the only place a same-host public URL is
                          built (a source-scan test bans hand-built /site/${…}
                          elsewhere); pure, safe for the proxy and next.config.ts
@@ -511,6 +517,9 @@ designation lets the platform role clear a slot and then hold it. That chain is
 detected by audit (`org.*.revoked`, then `invitation.created` with
 `selfAddressed`) and is not prevented (operator ruling 2026-10-22). This is
 `paper`.
+A founding administrator who records themselves as a ruling elder, installed
+pastor, co-pastor or associate pastor becomes a Session approver (DECISION-205).
+This is permitted, stamped `selfRecorded` and `selfApproved`, and `paper`.
 
 ### The Roll Is the System of Record
 
@@ -555,7 +564,9 @@ permission never stages a rollout. A gated feature asks both questions.
 A credential (hashed, single-use, expiring; DECISION-147, DECISION-183) is a
 third mechanism: it authorizes only the act its own row names, inside SECURITY
 DEFINER functions that derive org and purpose from that row, and is never mapped
-into `FEATURES.*`, a session claim or the resolver.
+into `FEATURES.*`, a session claim or the resolver. A contact email
+authenticates nothing; only a definer reading it through `presby_person_email`
+may address a credential to it (DECISION-216).
 
 `isFlagEnabled()` returns `false` on a missing row or a DB error — right for a
 toggle, wrong for a flag that gates an auth path, where `false` means "deny

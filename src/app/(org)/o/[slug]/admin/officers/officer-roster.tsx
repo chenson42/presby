@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/table";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import type { OfficerRosterEntry } from "@/lib/officers";
-import { OFFICE_LABELS } from "./office-labels";
+import { Badge } from "@/components/ui/badge";
+import { OFFICE_LABELS, OFFICER_OFFICES } from "./office-labels";
 import { EndTermDialog } from "./end-term-dialog";
 import { PublicListingToggle } from "./public-listing-toggle";
 import { DisplayOrderInput } from "./display-order-input";
@@ -82,6 +83,12 @@ export function OfficerRoster({
   }
 
   const hasDistrict = entries.some((entry) => entry.orgUnitName !== null);
+  // Group by office in the vocabulary's own order (the three pastor offices sit
+  // beside ruling elder); `Array.prototype.sort` is stable, so the query's
+  // name order holds within an office.
+  const ordered = [...entries].sort(
+    (a, b) => OFFICER_OFFICES.indexOf(a.office) - OFFICER_OFFICES.indexOf(b.office),
+  );
 
   return (
     <Table>
@@ -101,10 +108,15 @@ export function OfficerRoster({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {entries.map((entry) => (
+        {ordered.map((entry) => (
           <TableRow key={entry.termId}>
             <TableCell className="max-w-[6rem] whitespace-normal font-medium sm:max-w-none sm:whitespace-nowrap">
               {OFFICE_LABELS[entry.office]}
+              {entry.selfRecorded && (
+                <Badge variant="outline" className="ml-2 font-normal">
+                  Self-recorded
+                </Badge>
+              )}
             </TableCell>
             <TableCell className="max-w-[6rem] whitespace-normal sm:max-w-none sm:whitespace-nowrap">
               <Link

@@ -39,6 +39,16 @@ import {
  * senders). Every refusal describes the organization or the roster, never
  * account existence.
  *
+ * ONE OPERATOR-RULED ADDITION (2026-10-23, person-emails pipeline): a created
+ * invitation carries a NON-BLOCKING warning when the address is on file for a
+ * person on THIS organization's roster who already signs in
+ * (`people.user_id` set), because acceptance would then be refused as
+ * `person_linked_elsewhere` unless the invitee is that person's own account.
+ * It reads the person's link column on the roster, scoped to this
+ * organization, and still never reads `users`; it blocks nothing and writes
+ * nothing. Production hit it: adding a second address to the operator's own
+ * record silently re-targeted a treasurer invitation at them.
+ *
  * LOCK ORDER, every writer here and in `presby_accept_invitation`:
  * organization row -> invitation row -> users row -> person. Each mutation
  * below opens by locking the organization row `for update`, so every
@@ -103,6 +113,9 @@ export interface InvitationActor {
   email: string | null;
 }
 
+/** A non-blocking note on a created invitation. */
+export type InvitationWarning = "address_on_signed_in_person";
+
 export interface CreateInvitationInput {
   organizationId: string;
   purpose: AccountInvitationPurpose;
@@ -121,6 +134,8 @@ export type CreateInvitationResult =
       expiresAt: Date;
       delivery: "sent" | "queued";
       selfAddressed: boolean;
+      /** Present only when non-empty. The invitation WAS created and sent. */
+      warnings?: InvitationWarning[];
     }
   | { kind: "has_holders" }
   | { kind: "already_pending"; invitationId: string | null; expired: boolean }
@@ -298,6 +313,7 @@ async function resolveTreasurerPerson(
       join people p on p.id = cm.person_id and p.merged_into_id is null
       join memberships m on m.person_id = p.id and m.organization_id = ${organizationId}::uuid
      where cm.kind = 'email'
+       and cm.ended_at is null
        and lower(btrim(cm.value)) = ${email}
      order by p.id
   `);
@@ -320,8 +336,35 @@ async function hasDoNotContact(
       from contact_methods cm
       join memberships m on m.person_id = cm.person_id and m.organization_id = ${organizationId}::uuid
      where cm.kind = 'email'
+       and cm.ended_at is null
        and lower(btrim(cm.value)) = ${email}
        and cm.do_not_contact
+     limit 1
+  `);
+  return rowsOf(result).length > 0;
+}
+
+/**
+ * The operator-ruled warning (see the header): an ACTIVE address on a live
+ * person on this organization's roster whose `people.user_id` is set. Same
+ * match predicate acceptance uses for a founding administrator (active address,
+ * live person, a membership here), so a warning means acceptance would be
+ * refused for any account but that person's own. Reads `people.user_id` only;
+ * never `users`.
+ */
+async function addressOnSignedInPerson(
+  tx: PlatformTx,
+  organizationId: string,
+  email: string,
+): Promise<boolean> {
+  const result = await tx.execute(sql`
+    select 1 as ok
+      from contact_methods cm
+      join people p on p.id = cm.person_id and p.merged_into_id is null and p.user_id is not null
+      join memberships m on m.person_id = p.id and m.organization_id = ${organizationId}::uuid
+     where cm.kind = 'email'
+       and cm.ended_at is null
+       and lower(btrim(cm.value)) = ${email}
      limit 1
   `);
   return rowsOf(result).length > 0;
@@ -399,7 +442,14 @@ async function sendAfterCommit(queueId: string): Promise<"sent" | "queued"> {
 
 type CreateTxOutcome =
   | { kind: "org_missing" }
-  | { kind: "created"; invitationId: string; queueId: string; expiresAt: Date; selfAddressed: boolean }
+  | {
+      kind: "created";
+      invitationId: string;
+      queueId: string;
+      expiresAt: Date;
+      selfAddressed: boolean;
+      warnings: InvitationWarning[];
+    }
   | Exclude<CreateInvitationResult, { kind: "ok" } | { kind: "db_error" } | { kind: "invalid_input" } | { kind: "link_origin_unavailable" }>;
 
 export async function createInvitation(
@@ -464,6 +514,12 @@ export async function createInvitation(
       if (!input.acknowledgeDoNotContact && (await hasDoNotContact(tx, org.id, email))) {
         return { kind: "needs_acknowledgement", reason: "do_not_contact" };
       }
+
+      // Non-blocking (operator ruling, see the header): never changes the
+      // outcome, only rides on the ok result.
+      const warnings: InvitationWarning[] = (await addressOnSignedInPerson(tx, org.id, email))
+        ? ["address_on_signed_in_person"]
+        : [];
 
       // One open designation per (org, purpose). The partial unique indexes
       // are the database form; this read is the friendly path.
@@ -546,6 +602,7 @@ export async function createInvitation(
         queueId: queued.id,
         expiresAt,
         selfAddressed,
+        warnings,
       };
     });
 
@@ -559,6 +616,7 @@ export async function createInvitation(
       expiresAt: outcome.expiresAt,
       delivery,
       selfAddressed: outcome.selfAddressed,
+      ...(outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
     };
   } catch (err) {
     if (isOpenDesignationViolation(err)) {

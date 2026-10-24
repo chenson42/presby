@@ -8,20 +8,38 @@ import {
   memberships,
   households,
   addresses,
-  contactMethods,
 } from "@/lib/db/domain/people";
 import { rollActions } from "@/lib/db/domain/roll";
 import {
   deriveRollFields,
   type ParticipantRecordRefusal,
+  type ProposalRefusal,
 } from "@/lib/roll-action-kinds";
 import {
+  PENDING_PER_PERSON_INDEX,
+  organizationHasSession,
   recordParticipantActionInTx,
   type ActingOptions,
 } from "@/lib/roll";
+import { isPgError } from "@/lib/db/errors";
 import { deriveConnection, type Connection } from "@/lib/community-labels";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
-import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
+import { AUDIT_ACTIONS, insertAuditRow } from "@/lib/audit-tx";
+import {
+  createContactsForNewPerson,
+  findSharedAddressNotes,
+  getPrimaryPhone,
+  listActiveEmails,
+  saveEmails,
+  savePrimaryPhone,
+  type StoreContext,
+} from "@/lib/contact-methods/store";
+import type {
+  ActiveEmailRow,
+  EmailRefusal,
+  EmailRowInput,
+  PersonSaveNotes,
+} from "@/lib/contact-methods/types";
 
 /**
  * Member management, Increment 1 (docs/work-log/2026-08-25-member-
@@ -193,7 +211,13 @@ export type PersonIdentityInput =
 
 export interface CreatePersonInput {
   identity: PersonIdentityInput;
-  contact: { email?: string; phone?: string };
+  /**
+   * Addresses go through `contact-methods/store.ts` (the only writer): the
+   * first one becomes the main address unless one is flagged. A row's `id` is
+   * ignored here (nothing exists yet to refer to). Ignored entirely for
+   * `identity.mode === "existing"` (F215, pre-existing).
+   */
+  contact: { emails?: EmailRowInput[]; phone?: string };
   address?: {
     line1?: string;
     city?: string;
@@ -264,8 +288,12 @@ export type CreatePersonResult =
        * `pending` = a proposal waiting for the Session; `none` = no roll row. */
       effect: "none" | "pending" | "recorded";
       affectsFiledPeriod: boolean;
+      /** Present only when there is something to say (a shared address). */
+      notes?: PersonSaveNotes;
     }
   | { kind: "forbidden" }
+  /** An email row was refused (shape, duplicate, too many ...); nothing was written. */
+  | { kind: "email_refused"; refusal: EmailRefusal }
   | { kind: "existing_member_elsewhere" }
   /** The matched person already has a membership at THIS organization (F178):
    * confirming a "same person?" match on someone already here. */
@@ -273,7 +301,12 @@ export type CreatePersonResult =
   | { kind: "invalid_household" }
   /** The participant enrolment was refused by the database function (a date
    * before the birth date, for instance); the whole transaction rolled back. */
-  | { kind: "roll_refused"; reason: ParticipantRecordRefusal };
+  | { kind: "roll_refused"; reason: ParticipantRecordRefusal }
+  /** A membership PROPOSAL was refused (R7, R15): the organization has no
+   * Session to approve it (`no_session`), or the person already has a roll
+   * action waiting (`pending_exists`, the race backstop: a person who is new
+   * here has none). The whole transaction rolled back. */
+  | { kind: "proposal_refused"; reason: ProposalRefusal };
 
 /**
  * Internal control-flow signal, NOT exported. Thrown from inside the
@@ -338,8 +371,8 @@ function errorMessageChain(err: unknown, depth = 0): string {
  *
  * ORDER OF OPERATIONS (Phase 3's design, each step named because a reorder
  * would reopen a finding):
- *   1. `identity.mode === "new"` inserts `people` (+ `addresses` +
- *      `contact_methods`). `identity.mode === "existing"` checks the
+ *   1. `identity.mode === "new"` inserts `people` (+ `addresses` + the
+ *      contact rows, through `contact-methods/store.ts`). `identity.mode === "existing"` checks the
  *      matched person holds NO membership anywhere — nonzero means the
  *      "same person?" confirm was answered "yes" on someone who already
  *      belongs to another org, which this increment cannot silently
@@ -449,6 +482,25 @@ export async function createPerson(
         throw new CreatePersonAbort({ kind: "forbidden" });
       }
 
+      // R15 (F185): a membership PROPOSAL needs a Session to approve it. Only
+      // congregations have a derived Session group; anywhere else the proposal
+      // would wait forever. Refused before any write, so no person row is left
+      // behind (the abort also rolls the transaction back).
+      if (
+        input.rollAction.kind === "profession_of_faith" &&
+        !(await organizationHasSession(tx, organizationId))
+      ) {
+        throw new CreatePersonAbort({
+          kind: "proposal_refused",
+          reason: "no_session",
+        });
+      }
+
+      const storeContext: StoreContext = {
+        organizationId,
+        actor: { userId: actingUserId, email: opts?.actingUserEmail ?? null },
+      };
+      let insertedAddresses: string[] = [];
       let personId: string;
 
       if (input.identity.mode === "new") {
@@ -474,22 +526,23 @@ export async function createPerson(
           dateOfBirth: input.identity.dateOfBirth ?? null,
         });
 
-        if (input.contact.email) {
-          await tx.insert(contactMethods).values({
-            personId,
-            kind: "email",
-            value: input.contact.email,
-            isPrimary: true,
+        // Contact rows go through the store (the only writer of the
+        // contact table). Still BEFORE the membership exists, so the store
+        // takes no lock and returns nothing from its inserts (D11). A refused
+        // email row aborts the whole create, so no orphan person remains.
+        const contacts = await createContactsForNewPerson(
+          tx,
+          storeContext,
+          personId,
+          input.contact,
+        );
+        if (contacts.kind === "refused") {
+          throw new CreatePersonAbort({
+            kind: "email_refused",
+            refusal: contacts.refusal,
           });
         }
-        if (input.contact.phone) {
-          await tx.insert(contactMethods).values({
-            personId,
-            kind: "phone",
-            value: input.contact.phone,
-            isPrimary: true,
-          });
-        }
+        insertedAddresses = contacts.insertedAddresses;
         const addr = input.address;
         if (addr && (addr.line1 || addr.city || addr.region || addr.postalCode)) {
           await tx.insert(addresses).values({
@@ -618,6 +671,12 @@ export async function createPerson(
         throw err;
       }
 
+      // "Also on file for {Name}" (ER23b): computed now that the membership
+      // exists and the person is visible, on this RLS connection only.
+      const shared = await findSharedAddressNotes(tx, personId, insertedAddresses);
+      const notes: PersonSaveNotes | undefined =
+        shared.length > 0 ? { shared } : undefined;
+
       // DECISION-128 / DECISION-200: `none` and `visitor` skip step 4 entirely
       // — no roll_actions row, ever, for those kinds. Checked as a plain `if`
       // (not folded into the try/catch above) so TypeScript narrows
@@ -629,6 +688,7 @@ export async function createPerson(
           rollActionId: null,
           effect: "none",
           affectsFiledPeriod: false,
+          ...(notes ? { notes } : {}),
         };
       }
 
@@ -668,6 +728,7 @@ export async function createPerson(
           rollActionId: recorded.rollActionId,
           effect: "recorded",
           affectsFiledPeriod: recorded.affectsFiledPeriod,
+          ...(notes ? { notes } : {}),
         };
       }
 
@@ -688,20 +749,34 @@ export async function createPerson(
       );
       const proposalMinute = input.rollAction.minuteReference?.trim() || null;
 
-      const [rollAction] = await tx
-        .insert(rollActions)
-        .values({
-          organizationId,
-          personId,
-          kind: input.rollAction.kind,
-          effectiveDate: input.rollAction.effectiveDate,
-          resultingRoll,
-          ageAtAction,
-          approvalStatus: "pending",
-          minuteReference: proposalMinute,
-          proposedBy: actingUserId,
-        })
-        .returning({ id: rollActions.id });
+      let rollAction: { id: string } | undefined;
+      try {
+        [rollAction] = await tx
+          .insert(rollActions)
+          .values({
+            organizationId,
+            personId,
+            kind: input.rollAction.kind,
+            effectiveDate: input.rollAction.effectiveDate,
+            resultingRoll,
+            ageAtAction,
+            approvalStatus: "pending",
+            minuteReference: proposalMinute,
+            proposedBy: actingUserId,
+          })
+          .returning({ id: rollActions.id });
+      } catch (err) {
+        // R7's backstop. Unreachable in practice (a person who is new here has
+        // no pending row, and an existing member is `already_here` above), so a
+        // hit means a concurrent proposal; the abort rolls everything back.
+        if (isPgError(err, "23505", PENDING_PER_PERSON_INDEX)) {
+          throw new CreatePersonAbort({
+            kind: "proposal_refused",
+            reason: "pending_exists",
+          });
+        }
+        throw err;
+      }
 
       return {
         kind: "ok",
@@ -709,6 +784,7 @@ export async function createPerson(
         rollActionId: rollAction!.id,
         effect: "pending",
         affectsFiledPeriod: false,
+        ...(notes ? { notes } : {}),
       };
     });
   } catch (err) {
@@ -733,7 +809,17 @@ export interface UpdatePersonInput {
     preferredName?: string;
     suffix?: string;
   };
-  contact: { email?: string; phone?: string };
+  /**
+   * `emails` is the person's FULL set of active addresses (declarative), plus
+   * the ids the form loaded (`knownIds`, the stale-form guard, D4). OMITTING
+   * `emails` leaves every address untouched, so a caller that does not manage
+   * addresses can never wipe them. `phone` keeps its old meaning: blank or
+   * absent clears the primary phone (the edit form always sends it).
+   */
+  contact: {
+    emails?: { rows: EmailRowInput[]; knownIds: string[] };
+    phone?: string;
+  };
   address?: {
     line1?: string;
     city?: string;
@@ -747,10 +833,32 @@ export interface UpdatePersonInput {
 }
 
 export type UpdatePersonResult =
-  | { kind: "ok" }
+  | {
+      kind: "ok";
+      /** Present only when there is something to say (a promotion, a shared address). */
+      notes?: PersonSaveNotes;
+    }
   | { kind: "forbidden" }
   | { kind: "not_found" }
-  | { kind: "invalid_household" };
+  | { kind: "invalid_household" }
+  /** An email row was refused or the form was stale; the WHOLE save rolled back. */
+  | { kind: "email_refused"; refusal: EmailRefusal };
+
+/**
+ * Internal control-flow signal, NOT exported (the `CreatePersonAbort`
+ * precedent). An ordinary early `return` from inside `db.transaction()`'s
+ * callback COMMITS whatever was written so far; only a thrown rejection rolls
+ * back. Every refusal in `updatePerson` therefore throws this, and the outer
+ * function turns it back into the typed result. That is F216: before this,
+ * `invalid_household` returned from AFTER the name, contact and address writes,
+ * so a refused save persisted part of the edit while telling the user it failed.
+ */
+class UpdatePersonAbort extends Error {
+  constructor(readonly result: Exclude<UpdatePersonResult, { kind: "ok" }>) {
+    super(`updatePerson aborted: ${result.kind}`);
+    this.name = "UpdatePersonAbort";
+  }
+}
 
 /**
  * Edits an already-visible person's name variants, contact methods, address,
@@ -767,156 +875,162 @@ export type UpdatePersonResult =
  * discipline, meant to be: a `people.manage` holder must not learn a person
  * exists in some OTHER org from this form's error message.
  *
- * Contact methods and the address are each a single PRIMARY row, mirroring
- * `createPerson()`'s own "one primary email/phone/address" shape (Increment
- * 1 never created a second of any of them, so Increment 2 doesn't need to
- * manage multiples either). A blank value clears (deletes) the primary row
- * if one exists; a non-blank value updates it if present, else inserts a
- * new primary row.
+ * ORDER (D8, D9): permission, visibility, household validation, THEN writes
+ * (people row, email set, phone, address, household), the shared-address note,
+ * and the `tenant.person.updated` audit row, all in ONE transaction. Every
+ * refusal throws `UpdatePersonAbort`, so a refused save writes nothing (F216)
+ * and the person's audit row can never exist without the change it records
+ * (F199, pulled forward from Increment 2b; `emailChanged` is kept so 2b's R21
+ * detection text stays true).
+ *
+ * Email addresses are a LIST managed by `contact-methods/store.ts` (the only
+ * writer of the contact table); the address is a single primary row, mirrored
+ * from `createPerson()`. A blank address clears (deletes) the primary row if
+ * one exists; a non-blank value updates it if present, else inserts a new
+ * primary row.
  */
 export async function updatePerson(
   actingPersonId: string,
   organizationId: string,
   input: UpdatePersonInput,
+  actor: { userId: string; email: string | null },
 ): Promise<UpdatePersonResult> {
-  const result = await withOrgContext<UpdatePersonResult>(actingPersonId, organizationId, async (tx) => {
-    if (!(await hasPermission(tx, actingPersonId, organizationId, PEOPLE_MANAGE))) {
-      return { kind: "forbidden" };
+  const storeContext: StoreContext = { organizationId, actor };
+  try {
+    return await withOrgContext<UpdatePersonResult>(
+      actingPersonId,
+      organizationId,
+      async (tx) => {
+        if (!(await hasPermission(tx, actingPersonId, organizationId, PEOPLE_MANAGE))) {
+          throw new UpdatePersonAbort({ kind: "forbidden" });
+        }
+
+        // RLS-scoped by construction: `people`'s SELECT policy only shows rows
+        // with a `memberships` row in THIS org (drizzle/0028_presby_people_
+        // write_rls_fix.sql's `USING` clause, untouched by that migration) — a
+        // zero-row result here is already the correct "not visible to me"
+        // answer, no separate cross-org check needed the way createPerson's
+        // existing-member-elsewhere path required.
+        const [existing] = await tx
+          .select({ id: people.id })
+          .from(people)
+          .innerJoin(
+            memberships,
+            and(
+              eq(memberships.personId, people.id),
+              eq(memberships.organizationId, organizationId),
+            ),
+          )
+          .where(eq(people.id, input.personId))
+          .limit(1);
+        if (!existing) {
+          throw new UpdatePersonAbort({ kind: "not_found" });
+        }
+
+        // F216: validate the household BEFORE any write.
+        let existingHouseholdId: string | null = null;
+        if (input.household.mode === "existing") {
+          const [household] = await tx
+            .select({ id: households.id })
+            .from(households)
+            .where(
+              and(
+                eq(households.id, input.household.householdId),
+                eq(households.organizationId, organizationId),
+              ),
+            )
+            .limit(1);
+          if (!household) {
+            throw new UpdatePersonAbort({ kind: "invalid_household" });
+          }
+          existingHouseholdId = household.id;
+        }
+
+        await tx
+          .update(people)
+          .set({
+            firstName: input.identity.firstName,
+            lastName: input.identity.lastName,
+            middleName: input.identity.middleName ?? null,
+            preferredName: input.identity.preferredName ?? null,
+            suffix: input.identity.suffix ?? null,
+          })
+          .where(eq(people.id, input.personId));
+
+        let emailChanged = false;
+        let promoted: { address: string } | undefined;
+        let insertedAddresses: string[] = [];
+        if (input.contact.emails) {
+          const saved = await saveEmails(tx, storeContext, input.personId, input.contact.emails);
+          if (saved.kind === "refused") {
+            throw new UpdatePersonAbort({ kind: "email_refused", refusal: saved.refusal });
+          }
+          emailChanged = saved.changed;
+          promoted = saved.promoted;
+          insertedAddresses = saved.insertedAddresses;
+        }
+        const phone = await savePrimaryPhone(tx, input.personId, input.contact.phone);
+        await upsertPrimaryAddress(tx, input.personId, input.address);
+
+        if (input.household.mode === "new") {
+          const [household] = await tx
+            .insert(households)
+            .values({ organizationId, name: input.household.name })
+            .returning({ id: households.id });
+          await tx
+            .update(memberships)
+            .set({ householdId: household!.id })
+            .where(
+              and(
+                eq(memberships.personId, input.personId),
+                eq(memberships.organizationId, organizationId),
+              ),
+            );
+        } else if (existingHouseholdId !== null) {
+          await tx
+            .update(memberships)
+            .set({ householdId: existingHouseholdId })
+            .where(
+              and(
+                eq(memberships.personId, input.personId),
+                eq(memberships.organizationId, organizationId),
+              ),
+            );
+        } else {
+          await tx
+            .update(memberships)
+            .set({ householdId: null })
+            .where(
+              and(
+                eq(memberships.personId, input.personId),
+                eq(memberships.organizationId, organizationId),
+              ),
+            );
+        }
+
+        // "Also on file for {Name}" (ER23b): only for addresses this save added.
+        const shared = await findSharedAddressNotes(tx, input.personId, insertedAddresses);
+
+        await insertAuditRow(tx, {
+          action: AUDIT_ACTIONS.PERSON_UPDATED,
+          actor,
+          resourceType: "person",
+          resourceId: input.personId,
+          metadata: { organizationId, emailChanged, phoneChanged: phone.changed },
+        });
+
+        const notes: PersonSaveNotes = {
+          ...(promoted ? { promoted } : {}),
+          ...(shared.length > 0 ? { shared } : {}),
+        };
+        return Object.keys(notes).length > 0 ? { kind: "ok", notes } : { kind: "ok" };
+      },
+    );
+  } catch (err) {
+    if (err instanceof UpdatePersonAbort) {
+      return err.result;
     }
-
-    // RLS-scoped by construction: `people`'s SELECT policy only shows rows
-    // with a `memberships` row in THIS org (drizzle/0028_presby_people_
-    // write_rls_fix.sql's `USING` clause, untouched by that migration) — a
-    // zero-row result here is already the correct "not visible to me"
-    // answer, no separate cross-org check needed the way createPerson's
-    // existing-member-elsewhere path required.
-    const [existing] = await tx
-      .select({ id: people.id })
-      .from(people)
-      .innerJoin(
-        memberships,
-        and(
-          eq(memberships.personId, people.id),
-          eq(memberships.organizationId, organizationId),
-        ),
-      )
-      .where(eq(people.id, input.personId))
-      .limit(1);
-    if (!existing) {
-      return { kind: "not_found" };
-    }
-
-    await tx
-      .update(people)
-      .set({
-        firstName: input.identity.firstName,
-        lastName: input.identity.lastName,
-        middleName: input.identity.middleName ?? null,
-        preferredName: input.identity.preferredName ?? null,
-        suffix: input.identity.suffix ?? null,
-      })
-      .where(eq(people.id, input.personId));
-
-    await upsertPrimaryContactMethod(tx, input.personId, "email", input.contact.email);
-    await upsertPrimaryContactMethod(tx, input.personId, "phone", input.contact.phone);
-    await upsertPrimaryAddress(tx, input.personId, input.address);
-
-    if (input.household.mode === "new") {
-      const [household] = await tx
-        .insert(households)
-        .values({ organizationId, name: input.household.name })
-        .returning({ id: households.id });
-      await tx
-        .update(memberships)
-        .set({ householdId: household!.id })
-        .where(
-          and(
-            eq(memberships.personId, input.personId),
-            eq(memberships.organizationId, organizationId),
-          ),
-        );
-    } else if (input.household.mode === "existing") {
-      const [household] = await tx
-        .select({ id: households.id })
-        .from(households)
-        .where(
-          and(
-            eq(households.id, input.household.householdId),
-            eq(households.organizationId, organizationId),
-          ),
-        )
-        .limit(1);
-      if (!household) {
-        return { kind: "invalid_household" };
-      }
-      await tx
-        .update(memberships)
-        .set({ householdId: household.id })
-        .where(
-          and(
-            eq(memberships.personId, input.personId),
-            eq(memberships.organizationId, organizationId),
-          ),
-        );
-    } else {
-      await tx
-        .update(memberships)
-        .set({ householdId: null })
-        .where(
-          and(
-            eq(memberships.personId, input.personId),
-            eq(memberships.organizationId, organizationId),
-          ),
-        );
-    }
-
-    return { kind: "ok" };
-  });
-
-  if (result.kind === "ok") {
-    await recordAudit({
-      action: AUDIT_ACTIONS.PERSON_UPDATED,
-      resourceType: "person",
-      resourceId: input.personId,
-      metadata: { organizationId },
-    });
-  }
-
-  return result;
-}
-
-async function upsertPrimaryContactMethod(
-  tx: OrgTx,
-  personId: string,
-  kind: "email" | "phone",
-  value: string | undefined,
-): Promise<void> {
-  const [primary] = await tx
-    .select({ id: contactMethods.id })
-    .from(contactMethods)
-    .where(
-      and(
-        eq(contactMethods.personId, personId),
-        eq(contactMethods.kind, kind),
-        eq(contactMethods.isPrimary, true),
-      ),
-    )
-    .limit(1);
-
-  if (!value) {
-    if (primary) {
-      await tx.delete(contactMethods).where(eq(contactMethods.id, primary.id));
-    }
-    return;
-  }
-
-  if (primary) {
-    await tx
-      .update(contactMethods)
-      .set({ value })
-      .where(eq(contactMethods.id, primary.id));
-  } else {
-    await tx.insert(contactMethods).values({ personId, kind, value, isPrimary: true });
+    throw err;
   }
 }
 
@@ -973,7 +1087,8 @@ export interface PersonForEdit {
   middleName: string | null;
   preferredName: string | null;
   suffix: string | null;
-  email: string | null;
+  /** The person's active addresses in the canonical order (main first, then oldest). */
+  emails: ActiveEmailRow[];
   phone: string | null;
   address: {
     line1: string | null;
@@ -1024,28 +1139,8 @@ export async function getPersonForEdit(
       return { kind: "not_found" };
     }
 
-    const [email] = await tx
-      .select({ value: contactMethods.value })
-      .from(contactMethods)
-      .where(
-        and(
-          eq(contactMethods.personId, personId),
-          eq(contactMethods.kind, "email"),
-          eq(contactMethods.isPrimary, true),
-        ),
-      )
-      .limit(1);
-    const [phone] = await tx
-      .select({ value: contactMethods.value })
-      .from(contactMethods)
-      .where(
-        and(
-          eq(contactMethods.personId, personId),
-          eq(contactMethods.kind, "phone"),
-          eq(contactMethods.isPrimary, true),
-        ),
-      )
-      .limit(1);
+    const emails = await listActiveEmails(tx, personId);
+    const phone = await getPrimaryPhone(tx, personId);
     const [address] = await tx
       .select({
         line1: addresses.line1,
@@ -1066,8 +1161,8 @@ export async function getPersonForEdit(
         middleName: row.middleName,
         preferredName: row.preferredName,
         suffix: row.suffix,
-        email: email?.value ?? null,
-        phone: phone?.value ?? null,
+        emails,
+        phone,
         address: address ?? null,
         householdId: row.householdId,
       },

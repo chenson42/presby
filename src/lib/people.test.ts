@@ -30,6 +30,10 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/audit", () => ({
   AUDIT_ACTIONS: {
     PERSON_UPDATED: "tenant.person.updated",
+    TENANT_PERSON_EMAIL_ADDED: "tenant.person_email.added",
+    TENANT_PERSON_EMAIL_ENDED: "tenant.person_email.ended",
+    TENANT_PERSON_EMAIL_PRIMARY_CHANGED: "tenant.person_email.primary_changed",
+    TENANT_PERSON_EMAIL_UPDATED: "tenant.person_email.updated",
     ROLL_ACTION_RECORDED: "tenant.roll_action.recorded",
     ROLL_ACTION_VOIDED: "tenant.roll_action.voided",
   },
@@ -79,6 +83,11 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
 
   let orgA: string;
   let orgB: string;
+  // Increment 2 (R15, F185): a presbytery with NO derived Session group, so a
+  // membership proposal has nobody to approve it.
+  let orgNoSession: string;
+  let noSessionManager: string; // orgNoSession — people.manage AND roll.propose
+  let noSessionUserId: string; // the users.id linked to noSessionManager (R3: the actor claim)
 
   let managerPerson: string; // orgA — holds BOTH people.manage and roll.propose
   let onlyPeopleManagePerson: string; // orgA — people.manage ONLY, no roll.propose
@@ -143,6 +152,20 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     }
     orgA = await makeOrg("A");
     orgB = await makeOrg("B");
+    {
+      const [row] = await platform
+        .insert(organizations)
+        .values({
+          deletableUntil: fixtureDeletableUntil(),
+          organizationType: "presbytery",
+          name: "Fixture Presbytery for people.test.ts",
+          slug: `people-test-nosession-${stamp}`,
+          path: `people_test_nosession_${stamp}`,
+          platformStatus: "unmanaged",
+        })
+        .returning({ id: organizations.id });
+      orgNoSession = row!.id;
+    }
 
     const [gt] = await platform
       .insert(groupTypes)
@@ -175,6 +198,34 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     }
     await activeMembershipGroup(orgA);
     await activeMembershipGroup(orgB);
+    await activeMembershipGroup(orgNoSession);
+
+    // R15: a member proposal needs a Session to approve it, so the fixture
+    // congregation carries the derived Session group a real one is seeded with.
+    {
+      const [court] = await platform
+        .insert(groupTypes)
+        .values({ key: "court", name: "Court" })
+        .onConflictDoNothing()
+        .returning({ id: groupTypes.id });
+      let courtTypeId = court?.id;
+      if (!courtTypeId) {
+        const [existingCourt] = await platform
+          .select({ id: groupTypes.id })
+          .from(groupTypes)
+          .where(eq(groupTypes.key, "court"))
+          .limit(1);
+        courtTypeId = existingCourt!.id;
+      }
+      await platform.insert(groups).values({
+        organizationId: orgA,
+        groupTypeId: courtTypeId,
+        name: "Session",
+        membershipSource: "derived",
+        derivedFrom: "session",
+        isProtected: true,
+      });
+    }
 
     await platform
       .insert(permissions)
@@ -279,6 +330,32 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       { organizationId: orgB, personId: elsewherePerson, engagementStatus: "regular" },
     ]);
 
+    noSessionManager = await person("Nerys", `Presbyter${stamp}`);
+    await platform
+      .insert(memberships)
+      .values({ organizationId: orgNoSession, personId: noSessionManager, engagementStatus: "regular" });
+    {
+      const [noSessionRole] = await platform
+        .insert(appRoles)
+        .values({
+          organizationId: orgNoSession,
+          key: "member_manager",
+          name: "Member Manager",
+          roleKind: "custom",
+        })
+        .returning({ id: appRoles.id });
+      await platform.insert(appRolePermissions).values([
+        { roleId: noSessionRole!.id, permissionKey: "people.manage" },
+        { roleId: noSessionRole!.id, permissionKey: "roll.propose" },
+      ]);
+      await platform.insert(roleGrants).values({
+        organizationId: orgNoSession,
+        roleId: noSessionRole!.id,
+        personId: noSessionManager,
+        startsOn: "2020-01-01",
+      });
+    }
+
     await platform.insert(roleGrants).values([
       {
         organizationId: orgA,
@@ -311,6 +388,17 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     // R3: the participant functions resolve the ACTOR from the users.id the
     // session supplies, so the user must be linked to the acting person.
     await platform.update(people).set({ userId: grantingUserId }).where(eq(people.id, managerPerson));
+    {
+      const [nu] = await platform
+        .insert(users)
+        .values({
+          email: `people-test-nosession-${stamp}@example.invalid`,
+          name: "Fixture Presbytery Proposer",
+        })
+        .returning({ id: users.id });
+      noSessionUserId = nu!.id;
+      await platform.update(people).set({ userId: noSessionUserId }).where(eq(people.id, noSessionManager));
+    }
 
     const [hhB] = await platform
       .insert(households)
@@ -354,12 +442,13 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     // braces in case a future test in this file approves a row, matching
     // `roll.test.ts`'s own teardown, which genuinely still needs it.
     await platform.execute(
-      sql`delete from audit_events where metadata->>'organizationId' = ${orgA}`,
+      sql`delete from audit_events where metadata->>'organizationId' in (${orgA}, ${orgNoSession})`,
     );
     await platform.execute(sql`alter table roll_actions disable trigger roll_actions_freeze`);
     try {
       await platform.delete(rollActions).where(eq(rollActions.organizationId, orgA));
       await platform.delete(rollActions).where(eq(rollActions.organizationId, orgB));
+      await platform.delete(rollActions).where(eq(rollActions.organizationId, orgNoSession));
     } finally {
       await platform.execute(sql`alter table roll_actions enable trigger roll_actions_freeze`);
     }
@@ -374,6 +463,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     try {
       await platform.delete(organizations).where(eq(organizations.id, orgA));
       await platform.delete(organizations).where(eq(organizations.id, orgB));
+      await platform.delete(organizations).where(eq(organizations.id, orgNoSession));
     } finally {
       await platform.execute(
         sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
@@ -416,6 +506,9 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       `VisitorArm${stamp}Bad`,
       `VisitorLeak${stamp}`,
       `MemberArm${stamp}`,
+      // Increment 2 (R15): proposals refused or accepted at an organization
+      // with no Session; swept defensively like the rollback variants above.
+      `NoSessionArm${stamp}`,
     ]) {
       await platform
         .update(people)
@@ -424,6 +517,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       await platform.delete(people).where(eq(people.lastName, surname));
     }
     await platform.delete(users).where(eq(users.id, grantingUserId));
+    await platform.delete(users).where(eq(users.id, noSessionUserId));
   });
 
   // ---------------------------------------------------------------------
@@ -569,7 +663,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
           lastName: `NewPerson${stamp}`,
           dateOfBirth: "1990-06-15",
         },
-        contact: { email: `fresh-${stamp}@example.invalid`, phone: "555-0142" },
+        contact: { emails: [{ value: `fresh-${stamp}@example.invalid`, subtype: null, isPrimary: true, doNotContact: false }], phone: "555-0142" },
         address: { line1: "1 Fixture Way", city: "Fixtureville", region: "OH", postalCode: "00000" },
         household: { mode: "new", name: `The Fresh Household ${stamp}` },
         rollAction: {
@@ -844,7 +938,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
           firstName: "Marisol",
           lastName: `StaffOnly${stamp}`,
         },
-        contact: { email: `staffonly-${stamp}@example.invalid` },
+        contact: { emails: [{ value: `staffonly-${stamp}@example.invalid`, subtype: null, isPrimary: true, doNotContact: false }] },
         household: { mode: "none" },
         rollAction: { kind: "none" },
       });
@@ -1068,7 +1162,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     it("needs people.manage ONLY (no roll.propose): engagement visitor, no roll row, the pastoral fields stored and trimmed", async () => {
       const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
         identity: { mode: "new", firstName: "Isolde", lastName: `VisitorArm${stamp}` },
-        contact: { email: `visitor-${stamp}@example.invalid` },
+        contact: { emails: [{ value: `visitor-${stamp}@example.invalid`, subtype: null, isPrimary: true, doNotContact: false }] },
         household: { mode: "none" },
         rollAction: { kind: "visitor", firstVisitDate: "2026-09-13", howHeard: "  a neighbor  " },
       });
@@ -1263,7 +1357,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     it("a refusal by the roll function (a date before the birth date) rolls back the person, the membership and the household together", async () => {
       const result = await createPerson(managerPerson, orgA, grantingUserId, {
         identity: { mode: "new", firstName: "Quillon", lastName: `ParticipantRolledBack${stamp}`, dateOfBirth: "2000-06-15" },
-        contact: { email: `rolledback-${stamp}@example.invalid` },
+        contact: { emails: [{ value: `rolledback-${stamp}@example.invalid`, subtype: null, isPrimary: true, doNotContact: false }] },
         household: { mode: "new", name: `Rolled Back Household ${stamp}` },
         rollAction: { kind: "other_participant_enrolled", effectiveDate: "1999-01-01" },
       });
@@ -1355,6 +1449,59 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     });
   });
 
+  describe("createPerson — membership proposals need a Session (R15, F185; R7)", () => {
+    async function peopleSurnamed(surname: string): Promise<string[]> {
+      const platform = getPlatformDb();
+      const rows = await platform.select({ id: people.id }).from(people).where(eq(people.lastName, surname));
+      return rows.map((r) => r.id);
+    }
+
+    it("an organization with no Session refuses a member proposal as proposal_refused no_session, and the person, membership and roll rows are all rolled back", async () => {
+      const result = await createPerson(noSessionManager, orgNoSession, noSessionUserId, {
+        identity: { mode: "new", firstName: "Noor", lastName: `NoSessionArm${stamp}`, dateOfBirth: "1990-01-01" },
+        contact: { emails: [{ value: "noor@example.invalid", subtype: null, isPrimary: true, doNotContact: false }] },
+        household: { mode: "new", name: "Noor household" },
+        rollAction: { kind: "profession_of_faith", effectiveDate: "2026-03-10" },
+      });
+      expect(result).toEqual({ kind: "proposal_refused", reason: "no_session" });
+      expect(await peopleSurnamed(`NoSessionArm${stamp}`)).toHaveLength(0);
+      const platform = getPlatformDb();
+      const rows = await platform.select().from(rollActions).where(eq(rollActions.organizationId, orgNoSession));
+      expect(rows).toHaveLength(0);
+      const households = await platform.execute(
+        sql`select count(*)::int as n from households where organization_id = ${orgNoSession}::uuid`,
+      );
+      expect((households as unknown as { rows: Array<{ n: number }> }).rows[0]!.n).toBe(0);
+    });
+
+    it("the same organization still takes a participant on record and a visitor (only a MEMBER needs a Session)", async () => {
+      const participant = await createPerson(noSessionManager, orgNoSession, noSessionUserId, {
+        identity: { mode: "new", firstName: "Pax", lastName: `NoSessionArm${stamp}` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "other_participant_enrolled", effectiveDate: "2026-02-01" },
+      });
+      expect(participant).toMatchObject({ kind: "ok", effect: "recorded" });
+      const visitor = await createPerson(noSessionManager, orgNoSession, noSessionUserId, {
+        identity: { mode: "new", firstName: "Vic", lastName: `NoSessionArm${stamp}` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "visitor" },
+      });
+      expect(visitor).toMatchObject({ kind: "ok", effect: "none" });
+    });
+
+    it("an organization WITH a Session still proposes (the Session group is the whole difference)", async () => {
+      const result = await createPerson(managerPerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Sess", lastName: `MemberArm${stamp}` },
+        contact: {},
+        household: { mode: "none" },
+        rollAction: { kind: "profession_of_faith", effectiveDate: "2026-03-10" },
+      });
+      expect(result).toMatchObject({ kind: "ok", effect: "pending" });
+    });
+  });
+
   describe("matchPerson — alreadyHere (F178)", () => {
     it("annotates a candidate who already has a membership here with how they are connected, and sorts them first", async () => {
       const platform = getPlatformDb();
@@ -1422,6 +1569,139 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
       const rows = await platform.select().from(rollActions).where(eq(rollActions.personId, p!.id));
       expect(rows).toHaveLength(0);
       expect(await membershipOf(p!.id)).toMatchObject({ engagementStatus: "visitor", currentRoll: null });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Multiple email addresses (docs/work-log/2026-10-23-person-emails.md, ER19a,
+  // ER23b, D11): the contact rows go through contact-methods/store.ts BEFORE the
+  // membership exists.
+  describe("createPerson — email addresses through the store (person-emails)", () => {
+    const emailRow = (value: string, over: Record<string, unknown> = {}) => ({
+      value,
+      subtype: null,
+      isPrimary: false,
+      doNotContact: false,
+      ...over,
+    });
+    const visitor = { kind: "visitor" } as const;
+
+    async function emailsOf(personId: string) {
+      const platform = getPlatformDb();
+      return platform
+        .select({
+          value: contactMethods.value,
+          subtype: contactMethods.subtype,
+          isPrimary: contactMethods.isPrimary,
+          doNotContact: contactMethods.doNotContact,
+          verifiedAt: contactMethods.verifiedAt,
+          endedAt: contactMethods.endedAt,
+        })
+        .from(contactMethods)
+        .where(and(eq(contactMethods.personId, personId), eq(contactMethods.kind, "email")));
+    }
+
+    it("several addresses: the first becomes the main address, the labels and flags are kept, and every row is born unverified and active", async () => {
+      const a = `multi-a-${stamp}@example.invalid`;
+      const b = `multi-b-${stamp}@example.invalid`;
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Maren", lastName: `MultiEmail${stamp}` },
+        contact: { emails: [emailRow(` ${a.toUpperCase()} `), emailRow(b, { subtype: "work", doNotContact: true })] },
+        household: { mode: "none" },
+        rollAction: visitor,
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      const rows = await emailsOf(result.personId);
+      expect(rows.find((r) => r.value === a)).toMatchObject({ isPrimary: true, subtype: null, verifiedAt: null, endedAt: null });
+      expect(rows.find((r) => r.value === b)).toMatchObject({ isPrimary: false, subtype: "work", doNotContact: true, verifiedAt: null });
+      expect(rows).toHaveLength(2);
+      expect(result).not.toHaveProperty("notes");
+
+      const platform = getPlatformDb();
+      const audit = (
+        await platform.execute(
+          sql`select action, metadata from audit_events where resource_id = ${result.personId} and action like 'tenant.person_email.%'`,
+        )
+      ).rows as Array<{ action: string; metadata: Record<string, unknown> }>;
+      expect(audit.map((r) => r.action)).toEqual(["tenant.person_email.added", "tenant.person_email.added"]);
+      expect(audit.map((r) => r.metadata.isPrimary).sort()).toEqual([false, true]);
+      expect(JSON.stringify(audit)).not.toContain("@");
+    });
+
+    it("an invalid list is refused as email_refused and the WHOLE create rolls back: no orphan person, household or membership", async () => {
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Nolan", lastName: `BadEmail${stamp}` },
+        contact: { emails: [emailRow(`ok-${stamp}@example.invalid`), emailRow("not-an-address")] },
+        household: { mode: "new", name: `Refused Household ${stamp}` },
+        rollAction: visitor,
+      });
+      expect(result).toEqual({ kind: "email_refused", refusal: { reason: "invalid_shape", index: 1 } });
+      expect(await peopleNamed(`BadEmail${stamp}`)).toHaveLength(0);
+      const platform = getPlatformDb();
+      expect(await platform.select({ id: households.id }).from(households).where(eq(households.name, `Refused Household ${stamp}`))).toHaveLength(0);
+    });
+
+    it("a duplicate address in one submission is refused before it reaches the unique index", async () => {
+      const a = `dup-${stamp}@example.invalid`;
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Dara", lastName: `DupEmail${stamp}` },
+        contact: { emails: [emailRow(a), emailRow(a.toUpperCase())] },
+        household: { mode: "none" },
+        rollAction: visitor,
+      });
+      expect(result).toEqual({ kind: "email_refused", refusal: { reason: "duplicate", index: 1 } });
+      expect(await peopleNamed(`DupEmail${stamp}`)).toHaveLength(0);
+    });
+
+    it("an address already on file for another LIVE member of this congregation is saved, with the shared-address note", async () => {
+      const shared = `shared-${stamp}@example.invalid`;
+      const first = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Hollis", lastName: `Sharer${stamp}` },
+        contact: { emails: [emailRow(shared, { isPrimary: true })] },
+        household: { mode: "none" },
+        rollAction: visitor,
+      });
+      expect(first.kind).toBe("ok");
+      const second = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Ines", lastName: `Sharee${stamp}` },
+        contact: { emails: [emailRow(shared)] },
+        household: { mode: "none" },
+        rollAction: visitor,
+      });
+      expect(second).toMatchObject({
+        kind: "ok",
+        notes: { shared: [{ address: shared, names: [`Hollis Sharer${stamp}`], more: 0 }] },
+      });
+      if (second.kind === "ok") expect(await emailsOf(second.personId)).toHaveLength(1);
+    });
+
+    it("an unlabelled single address becomes the main one (the staff form and the wizard's interim field)", async () => {
+      const a = `single-${stamp}@example.invalid`;
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Sol", lastName: `SingleEmail${stamp}` },
+        contact: { emails: [emailRow(a)] },
+        household: { mode: "none" },
+        rollAction: { kind: "none" },
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(await emailsOf(result.personId)).toEqual([
+        { value: a, subtype: null, isPrimary: true, doNotContact: false, verifiedAt: null, endedAt: null },
+      ]);
+    });
+
+    it("a row carrying an id is ignored as an id (nothing exists yet to refer to): it is inserted as a new row", async () => {
+      const a = `withid-${stamp}@example.invalid`;
+      const result = await createPerson(onlyPeopleManagePerson, orgA, grantingUserId, {
+        identity: { mode: "new", firstName: "Ide", lastName: `WithId${stamp}` },
+        contact: { emails: [{ ...emailRow(a), id: "11111111-1111-4111-8111-111111111111" }] },
+        household: { mode: "none" },
+        rollAction: visitor,
+      });
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect((await emailsOf(result.personId)).map((r) => r.value)).toEqual([a]);
     });
   });
 });

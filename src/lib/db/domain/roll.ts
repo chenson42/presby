@@ -78,14 +78,29 @@ export const rollActions = pgTable(
     // retroactively once a year is reported.
     ageAtAction: integer("age_at_action"),
 
-    // Approval (D3). Rows in `pending` are mutable working state; a trigger
-    // freezes the row on approval. Invariant 4 covers approved rows only.
+    // Approval (D3). pending | approved | denied | withdrawn (drizzle/0062).
+    // A trigger freezes approved rows (Invariant 4) and, since drizzle/0062
+    // (R8), denied and withdrawn rows too. Pending rows are mutable only on
+    // the owner connection: presby_app holds no UPDATE or DELETE after
+    // drizzle/0063, and every decision goes through a definer.
     approvalStatus: text("approval_status").notNull().default("pending"),
     // Free text until the meetings module lands, then an FK to docket_items.
     minuteReference: text("minute_reference"),
     approvedOn: date("approved_on"),
     approvedBy: uuid("approved_by").references(() => users.id),
     denialReason: text("denial_reason"),
+    // drizzle/0062 section 2 (R5): one generic actor pair for every terminal
+    // transition (approved, denied, withdrawn), set by
+    // presby_decide_roll_action / presby_withdraw_roll_action. Null on rows
+    // decided before 0062 (approved rows are frozen, so never backfilled);
+    // readers use coalesce(decided_by, approved_by) and
+    // coalesce(decided_at, approved_on::timestamptz).
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    // drizzle/0062: required (1-500 characters) when the proposer withdraws.
+    // Free text about a person; returned only to roll.propose / roll.approve
+    // holders (DECISION-204).
+    withdrawalReason: text("withdrawal_reason"),
 
     // Self-referential AND composite (B-M3, drizzle/0048 section 7). THE
     // ROLL IS THE SYSTEM OF RECORD, so this is the highest-value of the five
@@ -155,27 +170,61 @@ export const rollActions = pgTable(
       "roll_actions_void_shape",
       sql`(kind = 'void') = (voids_action_id is not null)`,
     ),
-    // drizzle/0061 section 5 (S2).
+    // drizzle/0061 section 5 (S2), widened by drizzle/0062 section 3.
     check(
       "roll_actions_approval_status_allowed",
-      sql`approval_status in ('pending', 'approved', 'denied')`,
+      sql`approval_status in ('pending', 'approved', 'denied', 'withdrawn')`,
     ),
-    // drizzle/0061 section 5 (S3): one live (pending or approved) void per
-    // action; a denied void does not block a later one.
+    // drizzle/0062 section 3 (R5): each reason exists only in its own state.
+    check(
+      "roll_actions_denial_reason_only_when_denied",
+      sql`denial_reason is null or approval_status = 'denied'`,
+    ),
+    check(
+      "roll_actions_withdrawal_reason_only_when_withdrawn",
+      sql`withdrawal_reason is null or approval_status = 'withdrawn'`,
+    ),
+    // drizzle/0063 section 2 (R5): denied and withdrawn rows carry both
+    // stamps. Lands in 0063, after the code deploy, because the
+    // pre-Increment-2 deny UPDATE sets neither (Phase 3 refinement 2).
+    check(
+      "roll_actions_terminal_decision_stamps",
+      sql`approval_status not in ('denied', 'withdrawn')
+        or (decided_by is not null and decided_at is not null)`,
+    ),
+    // drizzle/0061 section 5 (S3), re-predicated by drizzle/0062 section 3:
+    // one live (pending or approved) void per action; a denied or withdrawn
+    // void does not block a later one.
     uniqueIndex("roll_actions_one_live_void_idx")
       .on(t.voidsActionId)
-      .where(sql`kind = 'void' and approval_status <> 'denied'`),
+      .where(sql`kind = 'void' and approval_status in ('pending', 'approved')`),
+    // drizzle/0062 section 4 (R7): one pending proposal per person per
+    // organization.
+    uniqueIndex("roll_actions_one_pending_per_person_idx")
+      .on(t.organizationId, t.personId)
+      .where(sql`approval_status = 'pending'`),
 
-    // NOT EXPRESSIBLE HERE (SQL-only, drizzle/0061):
-    //   * section 6, policy roll_actions_insert_pending_only: RESTRICTIVE,
-    //     FOR INSERT, TO presby_app, WITH CHECK (approval_status = 'pending').
-    //     presby_app can insert only pending rows; an approved-at-insert row
-    //     comes only from the definer functions below or the owner (R5).
-    //   * section 7, presby_record_participant_action() and
+    // NOT EXPRESSIBLE HERE (SQL-only):
+    //   * policy roll_actions_insert_pending_only (drizzle/0061 section 6,
+    //     narrowed by drizzle/0063 section 4): RESTRICTIVE, FOR INSERT, TO
+    //     presby_app, WITH CHECK (approval_status = 'pending' AND kind is
+    //     one of the seven approvable gain kinds). An approved-at-insert row
+    //     comes only from the participant definers or the owner (R5, F191).
+    //   * drizzle/0063 section 3: presby_app (and presby_platform) hold no
+    //     UPDATE or DELETE on this table; SELECT and INSERT only.
+    //   * trigger roll_actions_freeze, presby_freeze_approved_roll_action()
+    //     (drizzle/0062 section 5): approved, denied and withdrawn rows are
+    //     immutable, on the owner path too.
+    //   * drizzle/0061 section 7, presby_record_participant_action() and
     //     presby_void_participant_action(): SECURITY DEFINER, org from
     //     presby_current_org(), the only tenant path to an on-record
     //     (approved-at-insert) participant enrolment, removal or void
     //     (DECISION-198). Called only from src/lib/roll.ts.
+    //   * drizzle/0062 section 9, presby_decide_roll_action() and
+    //     presby_withdraw_roll_action(): SECURITY DEFINER, org from
+    //     presby_current_org(), the only tenant path out of pending
+    //     (approve, deny, withdraw; DECISION-203). Called only from
+    //     src/lib/roll.ts.
   ],
 );
 

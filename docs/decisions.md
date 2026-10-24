@@ -4,6 +4,116 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-219 — Person emails: the implementation shape.**
+
+**Status:** Resolved (operator acknowledged the giving deferral, "keep giving on the donor record for now, go", 2026-10-23) · **Date:** 2026-10-23 · **Feature:** `2026-10-23-person-emails` (Phase 3 D1–D15; implementation, tech-lead)
+
+- **Reader and clock.** `presby_person_email` is `language plpgsql stable`, security invoker, because it must raise an explicit errcode for an unknown purpose (D1). `created_at` defaults to `clock_timestamp()` and the guard forces it for non-owner inserts, so two addresses added in one save are ordered and no one can backdate a row (D2).
+- **One pure planner.** `email-plan.ts` turns "the list the administrator submitted" into a minimal set of writes (end, relabel, insert, demote, promote, and whether the promotion is automatic); `store.ts` only executes a plan (D3).
+- **Stale-form guard.** The edit form submits `knownIds`; under the person lock, a live active set that differs refuses with `emails_changed` and writes nothing (D4). The replacement row takes exactly what the form submitted for that row, label and `do_not_contact` carried by default and visible, and never `verified_at` (D5).
+- **Two store entry points.** `createContactsForNewPerson` (before the membership exists: no lock, client-generated ids, no `RETURNING`) and `saveEmails` (an existing, visible person). Contact rows are inserted before the membership, and the SELECT policies need one (D11). Results carry an optional `notes` only when there is something to say (D10).
+- **F199 pulled forward for `updatePerson`.** `tenant.person.updated` is written inside the transaction with a required actor, metadata `{organizationId, emailChanged, phoneChanged}` (D8). **F216 closed:** the household is validated before any write and refusals abort by sentinel throw (D9).
+- **Narrowings.** The wizard's duplicate match passes the search-step address only, because `presby_match_person()` reads `person_identifiers`, which this feature does not write (D6, ER22). A staff position counts as open from `starts_on`, so a future-dated position's Work address shows once it starts (D12). The staff quick-add keeps one unlabelled Main address (D14). A confirmed existing person's typed contact details are still dropped: F215, pre-existing (D15).
+- **Giving is not wired (D7).** `giving.statement.notice` is classified `donor` in the registry and the statement notice stays addressed to the donor record only. A personal-address fallback for a linked donor with no donor email is a new recipient for a tier-2 financial notice and needs the analyst's functional spec and copy first; it is a `docs/TODO.md` line. The operator asked for every send path to be wired; this satisfies that for every path except giving, and the operator accepted the exception after Phase 6.
+
+---
+
+**DECISION-218 — Person emails: accepted residuals (global contact table, and `person_identifiers` kept separate).**
+
+**Status:** Resolved · **Date:** 2026-10-23 · **Feature:** `2026-10-23-person-emails` (ER21, ER22)
+
+- `contact_methods` stays global with person-level policies. Another congregation's `people.manage` can see, end, relabel or re-main an address a different congregation entered for a person who belongs to both, and with auto-promotion (DECISION-215) ending the Main address also changes the other congregation's routing. **Accepted residual, `paper`.** Bounded for credentials: the sign-in invitation rule refuses anyone with any membership elsewhere, live or ended. Detected by audit: every change writes `tenant.person_email.*` carrying the acting `organizationId`. No copy denies it. Scoping contact data per organization is a D-level redesign, tracked in `docs/TODO.md`.
+- `person_identifiers` stays separate. The form never writes it (a congregation typing an address is not proof of control), and ending a contact address does not touch an identifier. Two follow-ups are tracked: unverify or flag a verified identifier whose address is ended everywhere, and giving link proposals do not see contact addresses.
+- The owner connection keeps `DELETE` on `contact_methods` (fixtures and the cascade run there); a source scan bans non-test deletes. Also a `paper` residual.
+
+---
+
+**DECISION-217 — The member directory shows the Main address and an open staff member's Work address, and search matches only what is shown.**
+
+**Status:** Resolved (operator ruling Q1, 2026-10-23) · **Date:** 2026-10-23 · **Feature:** `2026-10-23-person-emails` (ER23, ER23a, ER23b; F212)
+
+- The directory shows the active Main address, plus the active Work address when the person holds an open staff position at the current organization. `hide_email` hides both. The public staff directory is unchanged (0041 requires its own pipeline to widen it). **Known limit, told to the operator at Phase 6 and accepted:** staff anchors are not in the member directory (DECISION-129), so a person who is only staff shows no Work address to members; tracked in `docs/TODO.md`.
+- Directory search and Find a person match names, plus displayed emails when `hide_email` is false, plus the primary phone when `hide_phone` is false; ended rows never match. This reverses the earlier raw-value match (F212). Community search for `people.manage` holders matches every active address on the three admin readers that use the admin fragment (Visitors, Staff, Former); Members, Everyone and Participants go through the directory reader and match only displayed addresses.
+- The "Also on file for {Name}" note is same-organization only, using the live-membership predicate that Increment 2b's `address_shared` will use; a test pins them equal.
+
+---
+
+**DECISION-216 — One place decides which address a person's mail uses; a contact email authenticates nothing.**
+
+**Status:** Resolved · **Date:** 2026-10-23 · **Feature:** `2026-10-23-person-emails` (ER11–ER14)
+
+- `src/lib/contact-methods/` is the module: pure normalize, routing, plan and audience-registry files; the SQL fragments for the RLS side; `store.ts`, the only writer of `contact_methods` (a source scan fails on any other); `reader.ts`, the TypeScript door to `presby_person_email`.
+- `presby_person_email(person, purpose)` is the credential authority: SQL, security invoker, adds no authority and does no scoping. Three purposes: `credential` (the active primary, `do_not_contact` returned for the caller to acknowledge), `role` (active, not `do_not_contact`, Work first) and `personal` (active, not `do_not_contact`, never Work). SQL is authoritative for any credential; TypeScript mirrors it for previews and a matrix test pins the two. **A contact email authenticates nothing; only a definer reading it through the reader may address a credential to it.**
+- `email-audience.ts` is a closed registry that classifies every `templateKey` in `src/` as `account` (`users.email`, never `contact_methods`), `typed`, `donor` or `person:<purpose>`. A source scan fails CI on an unclassified key, so "which address does this send use?" is asked mechanically for every future sender. Auth paths are scan-proven never to read contact emails.
+
+---
+
+**DECISION-215 — Contact methods are end-dated, never deleted, and their identity is immutable.**
+
+**Status:** Resolved (operator ruling Q3: removing the Main address promotes the oldest remaining one) · **Date:** 2026-10-23 · **Feature:** `2026-10-23-person-emails` (ER1–ER1e, ER2c, ER15–ER19a)
+
+- `contact_methods` gains `created_at` and `ended_at` (null is active); no `ended_by` (the in-transaction audit row is the authoritative "who"). `DELETE` is revoked from `presby_app` and `presby_platform`. A guard trigger refuses any change to `value`, `kind`, `person_id` or `created_at`, freezes an ended row, and lets only the owner set `verified_at`. An edit is therefore end-and-replace, and a replacement starts unverified. This closes the `contact_methods` arm of F176; F176 stays open for the other tables.
+- Database properties: at most one active primary per person and kind (partial unique index); at least one for email (deferred definer constraint trigger); validated CHECKs on kind, subtype per kind, value shape and ended-not-primary; one active row per (person, address). Values are normalized on write; `home` email labels become `personal`.
+- **Auto-promotion is application code, not a trigger,** so the promoted row and a typed audit row (`automatic: true`) come back to the action for the toast; the deferred check is the backstop. The oldest active row by `(created_at, id)` wins whatever its label, which can make a Work address the Main one (operator-ruled). A typo fix is a new row, so a corrected address counts from the day it was corrected.
+- **One migration, applied before the code deploy (ER2c).** Old code against the new schema fails closed three ways and corrupts nothing; the runbook is in `docs/deployment.md`.
+
+---
+
+**DECISION-206 — Installed pastors, co-pastors and associate pastors are members of the Session, through `officer_terms` at the congregation.**
+
+**Status:** Resolved (operator confirmed, "Yes, include them") · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (R10-R12, S1)
+
+- The PC(USA) Book of Order composes the session of the ruling elders in active service together with all installed pastors and associate pastors (G-3.0201) and has the session keep the register of installed pastors (G-3.0204). Temporary relationships (stated supply, interim, temporary supply), parish associates and a designated moderator are not in that composition and are not mapped; `moderator` stays unmapped.
+- The carrier is `officer_terms` at the congregation, and the roster stays materialised from it by trigger (The Court Is Not a Group). `appointments` is deliberately not the source: it is presbytery-owned, and a presbytery row writing a congregation's Session roster would be authority flowing down by inheritance. `staff_positions` grants nothing by design, and the `installed_pastor` role is a permission set, not court composition.
+- No congregation membership is invented: the `memberships` row is the link, the roll is `current_roll` and `roll_actions`, and the pastor's link carries none, so no SASR count and no Directory listing. A database guard (`officer_terms_pastor_no_roll`) refuses an open pastor-office term for a person on the roll. The guard also fires on `ends_on`, so it blocks re-opening a closed pastor term or moving an open one onto a rolled person; ending, shortening or extending an already-open term never fails (Batch A deviation 1). Approval refuses a member-roll gain for a pastor-office holder (`holds_pastoral_office`).
+- Any role a tenant has bound to its Session group now reaches installed pastors too, which is correct polity. Pastor offices are congregation-only and recorded with `officers.manage`. A pastor already on the platform at the presbytery cannot yet be linked (the claim function does not exist; a known limit).
+- One pure `officer-offices.ts` is now the single home of the office vocabulary (nine values, `officer_terms_office_allowed`).
+
+---
+
+**DECISION-205 — The Session roster is constituted by `officers.manage`; self-recording and self-approval are permitted and stamped; the Session's inability to act is told in six states.**
+
+**Status:** Resolved · **Date:** 2026-10-22 (six-state amendment 2026-10-23, after QA run 1) · **Feature:** `2026-10-22-founding-admin-directory` (F182, operator ruling Q1)
+
+- The authority comes from the congregation's own officer record entered by a tenant permission; no platform predicate takes part in any check. A block would deadlock a one-person start, so the founding administrator may record themselves as a ruling elder or pastor and then approve their own proposals. Officer-term start and end are audited in the same transaction with `selfRecorded`; approval with `selfApproved` and `selfTarget`; the queue and roster show "Self-approved" and "Self-recorded".
+- **Accepted residual, `paper`:** the chain platform designation, then `officers.manage`, then a self-recorded Session seat, then `roll.approve` is the one DECISION-155 refused to bundle. It is detected by audit and not prevented. The CLAUDE.md Two Hierarchies section states it.
+- Approval does not require two-step sign-in unless `require_two_factor` is on (default false). Not changed here.
+- **Six states** (checked in this order): `no_session`; `empty` (no seat recorded and none starting later); `terms_not_started` (seats are recorded, none is in effect yet; shows the earliest start date and says nothing about accounts); `no_sign_in`; `no_permission`; `ready`. **`no_sign_in` means exactly: at least one seat is in effect today and none of the people in effect today has an account.** QA run 1 found that the first design reached `no_sign_in` for a roster whose seats all start later, claiming "none has an account" about people whose accounts the query never looked at; `terms_not_started` is the fix. Member is offered only where a Session exists (F185). Elders without an account cannot approve until Increment 2b; the copy says so.
+
+---
+
+**DECISION-204 — The pending queue is visible to roll proposers and approvers; decided history shows reasons to the same holders; bulk approve is capped and per-row.**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (F179, R17, R18)
+
+- `roll.approve` or `roll.propose` reads the queue (decide mode for approvers, read mode for proposers) and a "Recently decided" history of approvals, denials and withdrawals. Denial and withdrawal reasons are free text about a person, so the library returns them only to holders of those two keys. Names of `directory_hidden` people appear to these holders by design: approvers need identity to decide and proposers typed the person in.
+- Entry points are the Community header link and the person's edit page; no admin-hub tile (the hub is permission-blind). The queue rides `org_portal.members_create`, so turning the Community toggle off also hides it.
+- Bulk approve is at most 50 per submit, one transaction per row, each its own definer call and audit row; the result is "N approved, M need attention" and no cross-row atomicity is claimed.
+
+---
+
+**DECISION-203 — Approve, deny and withdraw go through two `SECURITY DEFINER` functions; decided rows are terminal; `presby_app` loses `UPDATE` and `DELETE` on `roll_actions`; audit is written in the same transaction.**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (R1-R8, R13, R16, F180, F181, F184, F191)
+
+- `presby_decide_roll_action` and `presby_withdraw_roll_action`: org from `presby_current_org()`, a bounded `users.id` actor claim checked for `roll.approve` or `roll.propose` in the caller's own transaction, uniform identity literal, typed outcomes, exactly one row. Lock order membership then roll action.
+- Approval refuses a non-approvable kind (the seven gain kinds; participant enrolment is on-record only), a deceased or merged person, an ended membership, a pastor-office holder, a gain that would put someone on a roll they are already on (checked in both directions so `presby_roll_changes` cannot double-count), and maps the global active-roll collision to `active_elsewhere` without naming the other organization. A later-dated effective row is a warning, never a refusal. One pending proposal per person (R7). Input bounds are enforced in the database too.
+- A `withdrawn` status, distinct from `denied`, with `decided_by` and `decided_at` on every new decision. Denied, withdrawn and approved rows are terminal for the owner as well as the application. Approved rows predating this are not backfilled (the append-only trigger is not disabled by a migration); readers coalesce.
+- 0062 is additive; 0063 revokes `UPDATE` and `DELETE` from `presby_app` and from `presby_platform` (which cannot log in; the revoke documents intent and binds the day a real login exists) and narrows the insert policy to the approvable kinds; the order is 0062, code, 0063. The audit rows (`approved`, `denied`, new `withdrawn`) use `insertAuditRow` in the same transaction, replacing the after-commit `recordAudit` that swallowed failures. A filed return is never altered; `affects_filed_period` warns.
+- **Accepted residuals.** (1) On the owner connection (`neondb_owner`, `getPlatformDb()`) the freeze is **trigger-only**: ownership keeps every privilege, and `roll_actions_freeze` (which fires on the owner path too, F44) is the sole backstop. Platform maintenance that works directly in the database is stopped by that rule, not by a removed permission. (2) A direct SQL caller of the functions would skip the audit row (`paper`, pinned by a source scan that only `roll.ts` names them).
+
+---
+
+**DECISION-202 — Every congregation gets a baseline `session_member` role carrying `roll.approve` only, bound to its derived Session group.**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (R9; revisits DECISION-100)
+
+- DECISION-100's comment anticipated this: the plan "is ready to branch the day a genuinely type-varying baseline role is proposed". `baselineRoleSeedPlan("congregation")` now also returns `session_member` (constitutional, protected), and `boundToDerivedFrom` widens to `session`. Other organization types are unchanged.
+- 0062 backfills congregations that have a Session group and no org-owned `session_member` (the role key is the discriminator, never a reason text), never modifies an existing one, and first seeds the missing Session and Board of Deacons groups (an empty derived group grants nothing). The fixture's extra `directory.view` is not copied; the baseline `member` grant already covers it.
+- No role carries both roll keys, as a bundle or a template. The roster is constituted by `officers.manage` (DECISION-205), not by the roll.
+
+---
+
 **DECISION-222 — `getPortalMenu()` skips the administer-tile read when `org_portal.admin_hub` is off, and adds no `cache()` of its own.**
 
 **Status:** Resolved · **Date:** 2026-10-23 · **Feature:** `2026-10-23-portal-sitemap-footer` (Phase 3; integrated 2026-10-23)

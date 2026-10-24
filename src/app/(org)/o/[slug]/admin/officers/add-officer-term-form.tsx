@@ -16,7 +16,12 @@ import type {
   OfficerFormOptions,
   StartOfficerTermInput,
 } from "@/lib/officers";
-import { OFFICE_LABELS, OFFICER_OFFICES } from "./office-labels";
+import {
+  OFFICE_LABELS,
+  OFFICER_OFFICES,
+  isPastorOffice,
+  isSessionOffice,
+} from "./office-labels";
 import {
   officerTermSchema,
   type OfficerTermFormValues,
@@ -70,9 +75,13 @@ function defaultValues(options: OfficerFormOptions): OfficerTermFormValues {
 export function AddOfficerTermForm({
   slug,
   options,
+  viewerPersonId,
 }: {
   slug: string;
   options: OfficerFormOptions;
+  /** The signed-in person's own `people.id`, so recording themselves for a
+   * Session office can be named in plain words (DECISION-205). */
+  viewerPersonId?: string;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -88,6 +97,11 @@ export function AddOfficerTermForm({
   } = form;
   const office = useWatch({ control: form.control, name: "office" });
   const isDeacon = office === "deacon";
+  const selectedPersonId = useWatch({ control: form.control, name: "personId" });
+  const recordingSelf =
+    viewerPersonId !== undefined &&
+    selectedPersonId === viewerPersonId &&
+    isSessionOffice(office);
 
   // H3 (docs/reviews/2026-08-26-portal-ux.md) — this form has no in-form
   // Back/Cancel link of its own; the guard's document-level click
@@ -194,6 +208,27 @@ export function AddOfficerTermForm({
             />
           </div>
         </div>
+
+        {isPastorOffice(office) && (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="pastor-helper"
+          >
+            A pastor&apos;s membership is held by the presbytery, so a pastor is
+            recorded here without a roll membership. If they aren&apos;t in the
+            list, add them from the Staff page first.
+          </p>
+        )}
+
+        {recordingSelf && (
+          <p
+            className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+            data-testid="self-note"
+          >
+            You&apos;re recording yourself as a member of the Session. That&apos;s
+            allowed, and the record will show it as self-recorded.
+          </p>
+        )}
 
         {isDeacon &&
           (districtListEmpty ? (

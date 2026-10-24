@@ -6,6 +6,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
+import { EmailAddressesEditor } from "@/components/org-portal/email-addresses-editor";
+import {
+  blankEmailRow,
+  toNewPersonEmailInputs,
+} from "@/components/org-portal/email-addresses-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,12 +43,14 @@ function defaultValues(
   };
 }
 
-const EMPTY_NEW_PERSON: NewStaffPersonFormValues = {
-  firstName: "",
-  lastName: "",
-  email: "",
-  phone: "",
-};
+function emptyNewPerson(): NewStaffPersonFormValues {
+  return {
+    firstName: "",
+    lastName: "",
+    phone: "",
+    contact: { emails: [blankEmailRow(true)] },
+  };
+}
 
 /**
  * Records a new staff position — Phase 3's Flow 1/2 combined into one form:
@@ -118,7 +125,7 @@ export function AddStaffPositionForm({
 
   const personForm = useForm<NewStaffPersonFormValues>({
     resolver: zodResolver(newStaffPersonSchema),
-    defaultValues: EMPTY_NEW_PERSON,
+    defaultValues: emptyNewPerson(),
   });
 
   // H3 (docs/reviews/2026-08-26-portal-ux.md) — same guard shape every other
@@ -155,7 +162,7 @@ export function AddStaffPositionForm({
         lastName: values.lastName,
       },
       contact: {
-        email: values.email || undefined,
+        emails: toNewPersonEmailInputs(values.contact.emails),
         phone: values.phone || undefined,
       },
       household: { mode: "none" },
@@ -182,7 +189,7 @@ export function AddStaffPositionForm({
     );
     setValue("personId", result.data!.personId, { shouldDirty: true });
     setShowNewPersonForm(false);
-    personForm.reset(EMPTY_NEW_PERSON);
+    personForm.reset(emptyNewPerson());
     toast.success(`${displayName} added — now record their position below.`);
   }
 
@@ -324,15 +331,7 @@ export function AddStaffPositionForm({
               )}
             </div>
 
-            <div>
-              <Label htmlFor="staff-new-person-email">Email (optional)</Label>
-              <Input
-                id="staff-new-person-email"
-                type="email"
-                className="mt-1"
-                {...personForm.register("email")}
-              />
-            </div>
+            <EmailAddressesEditor form={personForm} idPrefix="staff-new-person" />
 
             <div>
               <Label htmlFor="staff-new-person-phone">Phone (optional)</Label>
@@ -360,7 +359,7 @@ export function AddStaffPositionForm({
                   className="min-h-11"
                   onClick={() => {
                     setShowNewPersonForm(false);
-                    personForm.reset(EMPTY_NEW_PERSON);
+                    personForm.reset(emptyNewPerson());
                   }}
                 >
                   Choose an existing person instead

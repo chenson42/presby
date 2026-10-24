@@ -139,7 +139,7 @@ export async function addRosterPerson(
     returning id`) as { id: string }[];
   await sql`
     insert into contact_methods (person_id, kind, value, is_primary)
-    values (${person.id}::uuid, 'email', ${input.email}, true)`;
+    values (${person.id}::uuid, 'email', ${input.email.trim().toLowerCase()}, true)`;
   await sql`
     insert into memberships (organization_id, person_id, engagement_status, current_roll)
     values (${org.orgId}::uuid, ${person.id}::uuid, 'regular', 'active')`;

@@ -5,7 +5,9 @@ import type { InvitationActionResult } from "./actions";
  * The inline result of a send, resend or revoke. Errors are `role="alert"`
  * (announced, persistent); success is `role="status"`. Never toast-only. The
  * action's own `error` string is rendered verbatim (it never mentions account
- * existence). Colour is never the only signal: the leading words carry it.
+ * existence). Colour is never the only signal: the leading words carry it. A non-blocking
+ * warning (person-emails Batch 3) is a "Note." paragraph inside the same status
+ * region: the invitation WAS sent, so it is not an alert.
  */
 export function InvitationSentNotice({
   result,
@@ -42,6 +44,12 @@ export function InvitationSentNotice({
       )}
       It expires on <FormattedDate value={result.expiresAt} mode="date" />. Nobody holds this {role} until
       it is accepted.
+      {result.warnings?.map((warning) => (
+        <p key={warning.code} data-testid="invitation-warning" className="mt-2">
+          <span className="font-semibold">Note. </span>
+          {warning.message}
+        </p>
+      ))}
     </div>
   );
 }

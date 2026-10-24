@@ -677,7 +677,8 @@ reserved and unbuilt, so the gap in the numbering is expected. Confirm first:
 
 Added at integration (v0.41.0). Migrations `0062` and `0063`. Design:
 `docs/work-log/2026-10-22-founding-admin-directory.md` (Increment 2);
-DECISION-202–206. Production is at `0061`; `0064` is reserved for Increment 2b.
+DECISION-202–206. Production is at `0061`; `0064` went to person emails (below) and Increment 2b
+moves to `0065`.
 Confirm first: `select to_regclass('roll_actions')` is non-null and
 `select count(*) from information_schema.columns where table_name = 'roll_actions'
 and column_name = 'decided_by'` is 0.
@@ -743,6 +744,73 @@ and column_name = 'decided_by'` is 0.
    approvals flips to decide mode, they approve their own proposal, and the audit
    row carries `selfRecorded` and `selfApproved`; then repeat the read-mode view
    with a propose-only clerk (work-log ship condition 10).
+
+---
+
+## Person emails (several addresses per person)
+
+Added at integration (v0.42.0). Migration `0064`. Design:
+`docs/work-log/2026-10-23-person-emails.md`; DECISION-215–219. Production is at
+`0063` (v0.41.0 live). Confirm first: `select to_regclass('contact_methods')` is
+non-null, and `select count(*) from information_schema.columns where
+table_name = 'contact_methods' and column_name in ('created_at', 'ended_at')`
+is 0.
+
+### Pre-deploy runbook: 0064, then the code
+
+1. **Order: `0064` first, then deploy the code (ER2c).** The new code reads
+   `created_at` and `ended_at`, so code before the schema breaks every Community
+   and directory page. In the window between the two, the OLD code against the
+   NEW schema fails closed: a mixed-case insert fails the value-shape CHECK, an
+   in-place value update is refused by the guard trigger, and a blank-field
+   delete fails the revoke. No row is corrupted, and production has no
+   `contact_methods` rows at the time of writing. Saving a person's contact
+   details can fail for a few minutes in that window.
+2. **Snapshot `production` first** (Neon).
+3. **Pre-flight, read-only, on production.** Re-count; `0064`'s own stop-block
+   re-counts and refuses to run on any violation, and never prints a value.
+   Expect 0 for each: bad kind, bad email or phone shape, untrimmed or
+   mixed-case emails, unknown subtype, several primaries for one person and
+   kind, duplicate address within a person, a person with active email rows and
+   no primary. Also record `select count(*) from contact_methods`.
+4. **ER2a, on `development` only, BEFORE `0064` runs there.** `0064` re-creates
+   `presby_preview_invitation` and `presby_accept_invitation` from the live
+   definitions. Diff `pg_get_functiondef` of both on `development` against the
+   merged branch's pre-0064 definitions (the `0059` text, as re-created by
+   nothing since). They must be identical, or the re-creation would silently
+   revert someone else's change. Record the result in the work-log.
+5. **Apply `0064` WITH `-1`:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0064_presby_person_emails.sql`.
+   It has no top-level `begin;`/`commit;` (its `begin` lines are `DO` and
+   function bodies) and is idempotent. Then **deploy the code.**
+6. **Verify.**
+   - `contact_methods` has `created_at` (default `clock_timestamp()`) and
+     `ended_at`; the four CHECKs (`contact_methods_kind_check`,
+     `contact_methods_subtype_check`, `contact_methods_value_shape`,
+     `contact_methods_ended_not_primary`) exist and are validated.
+   - Three partial indexes: `contact_methods_one_primary_uq`,
+     `contact_methods_person_email_uq`, `contact_methods_email_norm_idx`; the old
+     `contact_methods_value_idx` is gone.
+   - Both triggers are enabled: `contact_methods_guard_write` and
+     `contact_methods_primary_required` (the latter `deferrable initially
+     deferred`).
+   - `has_table_privilege('presby_app', 'contact_methods', 'DELETE')` and the
+     same for `presby_platform` are false.
+   - `presby_app` holds EXECUTE on `presby_person_email(uuid, text)` and PUBLIC
+     does not; the function is security invoker.
+   - `presby_preview_invitation` and `presby_accept_invitation` are still
+     `SECURITY DEFINER` with `search_path = public, pg_temp` and their ACLs
+     intact (EXECUTE for `presby_app`, none for PUBLIC).
+   - Row counts unchanged from step 3.
+7. **On `development`** (after step 4): apply `0064`, then
+   `scripts/person-emails/seed-dev-person-emails.sql` (also reached through
+   `scripts/seed-dev.sql`), then run `scripts/test-rls.sql` as `presby_app`.
+   Section 64 is `scripts/person-emails/test-rls-64.sql`. **Do not run the seed
+   or the suite on production** (test helpers and fixture people).
+8. **Down-path.** There is no rollback file: the migration only adds structure
+   and tightens constraints, and the code does not need the old schema. If the
+   code must be rolled back, the old code fails closed as in step 1 until it is
+   redeployed; do not drop the columns or the guards.
 
 ---
 

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  blankEmailRow,
+  contactEmailsSchema,
+} from "@/components/org-portal/email-addresses-form";
 
 /**
  * ONE combined zod schema for the whole wizard (Phase 3's explicit choice
@@ -50,7 +54,7 @@ export const memberWizardSchema = z
       dateOfBirth: z.string().optional(),
     }),
     contact: z.object({
-      email: z.string().optional(),
+      emails: contactEmailsSchema,
       phone: z.string().optional(),
     }),
     address: z.object({
@@ -167,7 +171,9 @@ export const WIZARD_DEFAULT_VALUES: MemberWizardValues = {
     suffix: "",
     dateOfBirth: "",
   },
-  contact: { email: "", phone: "" },
+  // One blank, valid row so the step can be walked with no input (the editor's
+  // own empty state is for a person who has none).
+  contact: { emails: [blankEmailRow(true)], phone: "" },
   address: { line1: "", city: "", region: "", postalCode: "" },
   household: { mode: "none", name: "", householdId: "" },
   relationship: "visitor",

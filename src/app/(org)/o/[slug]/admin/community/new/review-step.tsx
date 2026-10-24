@@ -1,6 +1,7 @@
 "use client";
 
 import type { UseFormReturn } from "react-hook-form";
+import { reviewEmailLines } from "@/components/org-portal/email-addresses-form";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import {
   RELATIONSHIP_LABELS,
@@ -33,6 +34,7 @@ export function ReviewStep({
   householdName?: string;
 }) {
   const values = form.getValues();
+  const emailLines = reviewEmailLines(values.contact.emails);
 
   const displayName =
     values.identityMode === "existing"
@@ -59,8 +61,17 @@ export function ReviewStep({
           }
         />
       )}
-      {values.contact.email && (
-        <ReviewRow label="Email" value={values.contact.email} />
+      {emailLines.length > 0 && (
+        <ReviewRow
+          label="Email addresses"
+          value={
+            <ul className="space-y-1">
+              {emailLines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          }
+        />
       )}
       {values.contact.phone && (
         <ReviewRow label="Phone" value={values.contact.phone} />

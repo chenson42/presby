@@ -153,6 +153,17 @@ export const AUDIT_ACTIONS = {
   // same tier as ORG_FEATURE_TOGGLED, not elevated to the roll actions'
   // constitutional weight.
   PERSON_UPDATED: "tenant.person.updated",
+  // Multiple email addresses per person (docs/work-log/2026-10-23-person-
+  // emails.md, DECISION-215/216, ER20) — written from src/lib/contact-methods/
+  // store.ts with insertAuditRow() in the SAME transaction as the change. An
+  // address decides where a credential link goes, so each change is its own
+  // record. resourceId is the person id; metadata carries the contact row id
+  // and the label, NEVER the address, a fragment of it, or its domain (the
+  // ended row keeps the value). `.updated` is a label or do-not-contact change.
+  TENANT_PERSON_EMAIL_ADDED: "tenant.person_email.added",
+  TENANT_PERSON_EMAIL_ENDED: "tenant.person_email.ended",
+  TENANT_PERSON_EMAIL_PRIMARY_CHANGED: "tenant.person_email.primary_changed",
+  TENANT_PERSON_EMAIL_UPDATED: "tenant.person_email.updated",
   // Officer-terms administration (docs/work-log/
   // 2026-08-26-groups-and-officers.md, Phase 3/4 commit 2) — written from
   // src/app/(org)/o/[slug]/admin/officers/actions.ts. Starting or ending a

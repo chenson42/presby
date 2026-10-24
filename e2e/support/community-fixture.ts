@@ -52,7 +52,7 @@ export const COMMUNITY_ORG = E2E_ORGS.alpha;
 export const MEMBERS_CREATE = "org_portal.members_create";
 export const ROLL_ACTION_EDIT = "org_portal.members_roll_action_edit";
 
-const FIXTURE_FIRST_NAME = "E2ECommunity";
+export const FIXTURE_FIRST_NAME = "E2ECommunity";
 const ROLE_ID = "e2ce1000-0000-4000-8000-000000000001";
 const ROLE_KEY = "e2e_community_clerk";
 const APPROVER_ROLE_ID = "e2ce1000-0000-4000-8000-000000000002";

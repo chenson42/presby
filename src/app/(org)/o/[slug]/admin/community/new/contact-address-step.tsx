@@ -1,6 +1,7 @@
 "use client";
 
 import type { UseFormReturn } from "react-hook-form";
+import { EmailAddressesEditor } from "@/components/org-portal/email-addresses-editor";
 import { WizardField } from "./wizard-field";
 import type { MemberWizardValues } from "./member-wizard-schema";
 
@@ -22,14 +23,7 @@ export function ContactAddressStep({
 
   return (
     <div className="space-y-4">
-      <WizardField
-        name="contact.email"
-        label="Email (optional)"
-        type="email"
-        register={register}
-        errors={errors}
-        autoComplete="off"
-      />
+      <EmailAddressesEditor form={form} idPrefix="member-wizard" />
       <WizardField
         name="contact.phone"
         label="Phone (optional)"

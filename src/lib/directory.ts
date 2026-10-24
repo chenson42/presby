@@ -2,6 +2,11 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
 import type { db } from "@/lib/db";
+import {
+  ACTIVE_MAIN_EMAIL_LATERAL,
+  ACTIVE_PRIMARY_PHONE_LATERAL,
+  staffWorkEmailLateral,
+} from "@/lib/contact-methods/sql";
 
 /**
  * The congregation directory — the first read of real tenant CONTENT, not
@@ -89,8 +94,15 @@ export interface DirectoryEntry {
   firstName: string;
   lastName: string;
   preferredName: string | null;
-  /** Nulled per `person_privacy.hide_email` (default false). */
+  /** The person's active MAIN address. Nulled per `person_privacy.hide_email` (default false). */
   email: string | null;
+  /**
+   * ER23: the active Work address of a person with an OPEN staff position at
+   * this organization, shown in addition to the main address. Null when there
+   * is none, when the Main address IS the Work address (it is shown once, as
+   * `email`), and when `hide_email` is set (that hides both).
+   */
+  workEmail?: string | null;
   /** Nulled per `person_privacy.hide_phone` (default false). */
   phone: string | null;
   /** Nulled per `person_privacy.hide_address` (default false). */
@@ -143,22 +155,20 @@ export type DirectoryResult =
 export interface GetDirectoryOptions {
   /**
    * A free-text fragment matched (case-insensitive, substring) against
-   * first name, last name, preferred name, primary email, and primary
-   * phone — the SAME columns the SELECT list already projects, so a match
-   * always corresponds to something the viewer could otherwise see on the
-   * card. Trimmed; empty/whitespace-only behaves exactly as omitted.
+   * first name, last name, preferred name, and the email and phone the card
+   * SHOWS: the active main address (and a staff member's Work address) unless
+   * `hide_email` is set, and the primary phone unless `hide_phone` is set.
+   * Trimmed; empty/whitespace-only behaves exactly as omitted.
    *
    * Applied AFTER, never instead of, the existing privacy predicate — the
    * `directory_hidden` exclusion in the WHERE clause runs first and is
-   * untouched by `search`. Matches against the RAW `contact_methods.value`
-   * (the same lateral join the SELECT list nulls via
-   * `hide_email`/`hide_phone`), not the nulled value — a hidden field's
-   * VALUE is still eligible to produce a match even though it is never
-   * returned in the result row. This mirrors the Phase 3 design's literal
-   * SQL text; flagged in the work-log as a narrow, pre-existing-shape
-   * observation (a match on a hidden phone number confirms its presence by
-   * trial search, without ever revealing the value itself) rather than a
-   * change made here.
+   * untouched by `search`. A search matches ONLY what the card would display
+   * (F212, ER23a): a hidden email or phone, a non-main address and an ended
+   * address never produce a match. Before F212 this matched the raw value even
+   * when `hide_*` nulled it in the result, so typing a number confirmed a
+   * hidden one by trial; that oracle is closed. The admin Community lists
+   * (`community.ts`, `people.manage`) match every active address instead,
+   * because the administrator's own surface shows them all.
    */
   search?: string;
   /**
@@ -225,6 +235,7 @@ interface DirectoryRow {
   suffix: string | null;
   preferred_name: string | null;
   email: string | null;
+  work_email: string | null;
   phone: string | null;
   address_line1: string | null;
   address_city: string | null;
@@ -323,6 +334,25 @@ interface QueryDirectoryRowsOptions {
 }
 
 /**
+ * THE one search predicate (F212, ER23a), shared by the directory read and
+ * Find a person so they can never disagree. Names, plus ONLY what the card
+ * displays: the main and staff-Work addresses unless `hide_email`, the primary
+ * phone unless `hide_phone`. Needs the `p`, `pp`, `cm_email`, `cm_work` and
+ * `cm_phone` aliases in scope.
+ */
+function directorySearchSql(term: string) {
+  const like = `%${term}%`;
+  return sql`(
+               p.first_name ilike ${like}
+               or p.last_name ilike ${like}
+               or p.preferred_name ilike ${like}
+               or (not coalesce(pp.hide_email, false)
+                   and (cm_email.value ilike ${like} or cm_work.value ilike ${like}))
+               or (not coalesce(pp.hide_phone, false) and cm_phone.value ilike ${like})
+             )`;
+}
+
+/**
  * THE shared FROM/JOIN/WHERE fragment `queryDirectoryRows()` and
  * `countDirectoryRows()` both build on — written once so a paginated count
  * can never drift out of sync with the rows it's counting (Increment 5's
@@ -340,18 +370,9 @@ function directoryFromWhereSql(
       left join person_privacy pp
              on pp.person_id = m.person_id
             and pp.organization_id = m.organization_id
-      left join lateral (
-        select value from contact_methods
-         where person_id = p.id and kind = 'email'
-         order by is_primary desc, id
-         limit 1
-      ) cm_email on true
-      left join lateral (
-        select value from contact_methods
-         where person_id = p.id and kind = 'phone'
-         order by is_primary desc, id
-         limit 1
-      ) cm_phone on true
+      ${ACTIVE_MAIN_EMAIL_LATERAL}
+      ${staffWorkEmailLateral(organizationId)}
+      ${ACTIVE_PRIMARY_PHONE_LATERAL}
       left join lateral (
         select line1, city, region, postal_code from addresses
          where person_id = p.id
@@ -360,17 +381,7 @@ function directoryFromWhereSql(
       ) addr on true
      where m.organization_id = ${organizationId}::uuid
        and ${directoryEligibilityWhereSql(Boolean(opts.includeHidden), opts.status, opts.rollStatuses)}
-       ${
-         trimmedSearch
-           ? sql`and (
-               p.first_name ilike ${`%${trimmedSearch}%`}
-               or p.last_name ilike ${`%${trimmedSearch}%`}
-               or p.preferred_name ilike ${`%${trimmedSearch}%`}
-               or cm_email.value ilike ${`%${trimmedSearch}%`}
-               or cm_phone.value ilike ${`%${trimmedSearch}%`}
-             )`
-           : sql``
-       }
+       ${trimmedSearch ? sql`and ${directorySearchSql(trimmedSearch)}` : sql``}
        ${
          opts.householdId
            ? sql`and m.household_id = ${opts.householdId}::uuid`
@@ -384,16 +395,17 @@ function directoryFromWhereSql(
 
 /**
  * Find-a-person's search (portal home): at most `limit` distinct person ids in
- * `organizationId` whose name, preferred name, or ANY email/phone contact value
+ * `organizationId` whose name, preferred name, or DISPLAYED email or phone
  * matches `query`. The caller has already verified `directory.view` inside
  * this same transaction.
  *
  * Exported as a finder rather than exporting the predicate: eligibility is
  * `directoryEligibilityWhereSql(false)` — the one shared predicate, never a
  * hand copy — so find-person can only ever match someone the directory itself
- * would list (F136). Contact matching deliberately covers every contact row,
- * not just the primary one the directory's own search uses; that difference
- * predates this function and is unchanged.
+ * would list (F136). Contact matching uses `directorySearchSql()`, the same
+ * predicate the directory's own search uses (F212): only what the card shows,
+ * honouring `hide_email` and `hide_phone`, active addresses only. Before F212
+ * this matched EVERY contact row, including a hidden person's address.
  */
 export async function findDirectoryPersonIds(
   tx: OrgTx,
@@ -401,7 +413,6 @@ export async function findDirectoryPersonIds(
   query: string,
   limit: number,
 ): Promise<string[]> {
-  const like = `%${query}%`;
   const result = await tx.execute(sql`
     select distinct m.person_id as person_id
       from memberships m
@@ -409,16 +420,12 @@ export async function findDirectoryPersonIds(
       left join person_privacy pp
              on pp.person_id = m.person_id
             and pp.organization_id = m.organization_id
-      left join contact_methods cm
-             on cm.person_id = p.id and cm.kind in ('email', 'phone')
+      ${ACTIVE_MAIN_EMAIL_LATERAL}
+      ${staffWorkEmailLateral(organizationId)}
+      ${ACTIVE_PRIMARY_PHONE_LATERAL}
      where m.organization_id = ${organizationId}::uuid
        and ${directoryEligibilityWhereSql(false)}
-       and (
-         p.first_name ilike ${like}
-         or p.last_name ilike ${like}
-         or p.preferred_name ilike ${like}
-         or cm.value ilike ${like}
-       )
+       and ${directorySearchSql(query)}
      limit ${limit}
   `);
   return (
@@ -455,6 +462,9 @@ async function queryDirectoryRows(
       p.preferred_name                                      as preferred_name,
       case when coalesce(pp.hide_email, false) then null
            else cm_email.value end                           as email,
+      case when coalesce(pp.hide_email, false) then null
+           when cm_work.value is not distinct from cm_email.value then null
+           else cm_work.value end                            as work_email,
       case when coalesce(pp.hide_phone, false) then null
            else cm_phone.value end                           as phone,
       case when coalesce(pp.hide_address, false) then null
@@ -546,6 +556,7 @@ function mapRow(row: DirectoryRow): DirectoryEntry {
     lastName: row.last_name,
     preferredName: row.preferred_name,
     email: row.email,
+    workEmail: row.work_email,
     phone: row.phone,
     address: hasAddress
       ? {

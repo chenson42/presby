@@ -225,6 +225,30 @@ describe("PersonDetailPage — the ok path", () => {
     expect(phoneLink.getAttribute("href")).toBe("tel:555-0100");
   });
 
+  it("renders the Work address as its own mailto link under the main one", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsOn();
+    getPersonDetail.mockResolvedValue({
+      kind: "ok",
+      entry: baseEntry({ workEmail: "m.ashcombe.work@example.invalid" }),
+    });
+
+    render(await PersonDetailPage({ params: makeParams() }));
+
+    const work = screen.getByRole("link", { name: "Work: m.ashcombe.work@example.invalid" });
+    expect(work.getAttribute("href")).toBe("mailto:m.ashcombe.work@example.invalid");
+  });
+
+  it("renders no Work line without a workEmail", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsOn();
+    getPersonDetail.mockResolvedValue({ kind: "ok", entry: baseEntry({ workEmail: null }) });
+    render(await PersonDetailPage({ params: makeParams() }));
+    expect(screen.queryByText(/^Work:/)).toBeNull();
+  });
+
   it("prefers preferredName over firstName in the heading", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);

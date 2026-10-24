@@ -100,7 +100,118 @@ describe("updatePersonAction", () => {
         "person-1",
         "org-1",
         UPDATE_INPUT,
+        // The audit actor is the SESSION's user, never anything in the input.
+        { userId: "user-1", email: "clerk@example.invalid" },
       );
+    });
+
+    it("takes the audit actor from the session even when the input names another", async () => {
+      mockUpdatePerson.mockResolvedValueOnce({ kind: "ok" });
+      await updatePersonAction("alder-creek", {
+        ...UPDATE_INPUT,
+        actor: { userId: "someone-else", email: "forged@example.invalid" },
+      } as typeof UPDATE_INPUT);
+      expect(mockUpdatePerson.mock.calls[0]![3]).toEqual({
+        userId: "user-1",
+        email: "clerk@example.invalid",
+      });
+      expect(JSON.stringify(mockUpdatePerson.mock.calls[0]![2])).not.toContain("forged");
+    });
+
+    describe("email rows", () => {
+      const ROW = {
+        value: "nora.work@example.invalid",
+        subtype: "work" as const,
+        isPrimary: true,
+        doNotContact: false,
+      };
+      const EMAILS = {
+        rows: [ROW],
+        knownIds: ["11111111-1111-4111-8111-111111111111"],
+      };
+      const withEmails = (emails: unknown) =>
+        ({ ...UPDATE_INPUT, contact: { emails } }) as unknown as typeof UPDATE_INPUT;
+
+      it("rebuilds the rows from the known fields and passes them to updatePerson", async () => {
+        mockUpdatePerson.mockResolvedValueOnce({ kind: "ok" });
+        await updatePersonAction(
+          "alder-creek",
+          withEmails({ ...EMAILS, rows: [{ ...ROW, evil: "<script>" }] }),
+        );
+        // `.strict()` rejects the stray property, so this must NOT have been called.
+        expect(mockUpdatePerson).not.toHaveBeenCalled();
+
+        await updatePersonAction("alder-creek", withEmails(EMAILS));
+        expect(mockUpdatePerson.mock.calls[0]![2].contact).toEqual({ emails: EMAILS });
+      });
+
+      it("leaves emails out entirely when the caller omitted them (addresses are never wiped)", async () => {
+        mockUpdatePerson.mockResolvedValueOnce({ kind: "ok" });
+        await updatePersonAction("alder-creek", UPDATE_INPUT);
+        expect(mockUpdatePerson.mock.calls[0]![2].contact).not.toHaveProperty("emails");
+      });
+
+      it("a malformed post is refused before updatePerson with a Copy string", async () => {
+        const bad = await updatePersonAction("alder-creek", withEmails({ rows: "nope", knownIds: [] }));
+        expect(bad).toEqual({ ok: false, error: "Enter a valid email address." });
+        const tooMany = await updatePersonAction(
+          "alder-creek",
+          withEmails({ rows: Array.from({ length: 21 }, () => ROW), knownIds: [] }),
+        );
+        expect(tooMany).toEqual({ ok: false, error: "A person can have up to 10 email addresses." });
+        const badId = await updatePersonAction(
+          "alder-creek",
+          withEmails({ rows: [{ ...ROW, id: "not-a-uuid" }], knownIds: [] }),
+        );
+        expect(badId.ok).toBe(false);
+        expect(mockUpdatePerson).not.toHaveBeenCalled();
+      });
+
+      it("email_refused maps each reason to its Copy string", async () => {
+        const cases: Array<[string, string]> = [
+          ["invalid_shape", "Enter a valid email address."],
+          ["too_long", "That email address is too long. Use 254 characters or fewer."],
+          ["duplicate", "This address is already in the list."],
+          ["too_many", "A person can have up to 10 email addresses."],
+          ["multiple_primary", "Choose one main address."],
+          [
+            "emails_changed",
+            "This person's email addresses changed while you were editing. Reload the page to see the current list. Nothing was saved.",
+          ],
+        ];
+        for (const [reason, copy] of cases) {
+          mockUpdatePerson.mockResolvedValueOnce({ kind: "email_refused", refusal: { reason } });
+          const result = await updatePersonAction("alder-creek", withEmails(EMAILS));
+          expect(result, reason).toEqual({ ok: false, error: copy });
+        }
+        expect(mockRevalidatePath).not.toHaveBeenCalled();
+      });
+
+      it("a thrown database error is the one fixed message, logged by class only", async () => {
+        const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const err = Object.assign(
+          new Error('duplicate key value violates unique constraint "x" (nora.work@example.invalid)'),
+          { code: "23505" },
+        );
+        mockUpdatePerson.mockRejectedValueOnce(err);
+        const result = await updatePersonAction("alder-creek", withEmails(EMAILS));
+        expect(result).toEqual({
+          ok: false,
+          error: "We couldn't save. Nothing was changed. Try again.",
+        });
+        const logged = JSON.stringify(spy.mock.calls);
+        expect(logged).toContain("Error/23505");
+        expect(logged).not.toContain("nora.work@example.invalid");
+        expect(logged).not.toContain("violates");
+        spy.mockRestore();
+      });
+
+      it("ok carries the library's notes back to the form", async () => {
+        const notes = { promoted: { address: "next@example.invalid" } };
+        mockUpdatePerson.mockResolvedValueOnce({ kind: "ok", notes });
+        const result = await updatePersonAction("alder-creek", withEmails(EMAILS));
+        expect(result).toEqual({ ok: true, data: { personId: "p-1", notes } });
+      });
     });
 
     it("forbidden → ok:false, no revalidate", async () => {
@@ -136,6 +247,7 @@ describe("updatePersonAction", () => {
       expect(mockRevalidatePath).toHaveBeenCalledWith(
         "/o/alder-creek/admin/community",
       );
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/o/alder-creek/directory");
       expect(mockRevalidatePath).toHaveBeenCalledWith(
         "/o/alder-creek/directory/p-1",
       );

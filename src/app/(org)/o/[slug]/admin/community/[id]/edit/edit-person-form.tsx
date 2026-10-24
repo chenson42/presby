@@ -13,6 +13,13 @@ import { RequiredMark } from "@/components/shared/required-mark";
 import { UnsavedChangesDialog } from "@/components/shared/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/components/shared/use-unsaved-changes-guard";
 import type { PersonForEdit, UpdatePersonInput } from "@/lib/people";
+import { EmailAddressesEditor } from "@/components/org-portal/email-addresses-editor";
+import {
+  emailRowsFromSaved,
+  knownEmailIds,
+  toEmailRowInputs,
+} from "@/components/org-portal/email-addresses-form";
+import { notifySaved } from "@/components/org-portal/person-save-notes";
 import { editPersonSchema, type EditPersonValues } from "./edit-person-schema";
 import { updatePersonAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
@@ -56,7 +63,7 @@ export function EditPersonForm({
         suffix: person.suffix ?? "",
       },
       contact: {
-        email: person.email ?? "",
+        emails: emailRowsFromSaved(person.emails),
         phone: person.phone ?? "",
       },
       address: {
@@ -99,7 +106,10 @@ export function EditPersonForm({
         suffix: values.identity.suffix || undefined,
       },
       contact: {
-        email: values.contact.email || undefined,
+        emails: {
+          rows: toEmailRowInputs(values.contact.emails),
+          knownIds: knownEmailIds(person.emails),
+        },
         phone: values.contact.phone || undefined,
       },
       address:
@@ -127,7 +137,7 @@ export function EditPersonForm({
     setSubmitting(false);
 
     if (result.ok) {
-      toast.success("Person updated.");
+      notifySaved("Person updated.", result.data?.notes);
       router.push(`/o/${slug}/admin/community`);
     } else {
       // NO reset here — see this component's own header (req 9).
@@ -149,7 +159,12 @@ export function EditPersonForm({
 
         <div className="space-y-4">
           <h2 className="text-lg font-medium">Contact & address</h2>
-          <TextField id="email" label="Email (optional)" type="email" register={register} name="contact.email" />
+          <EmailAddressesEditor
+            form={form}
+            idPrefix="edit-person"
+            personName={`${person.firstName} ${person.lastName}`}
+            savedRows={person.emails}
+          />
           <TextField id="phone" label="Phone (optional)" type="tel" register={register} name="contact.phone" />
           <TextField id="line1" label="Address (optional)" register={register} name="address.line1" />
           <TextField id="city" label="City" register={register} name="address.city" />

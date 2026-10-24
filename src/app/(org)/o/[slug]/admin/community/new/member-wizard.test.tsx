@@ -32,8 +32,13 @@ vi.mock("./actions", () => ({
 const toastSuccess = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
 const toastWarning = vi.hoisted(() => vi.fn());
+const toastNote = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccess, error: toastError, warning: toastWarning },
+  toast: Object.assign((...args: unknown[]) => toastNote(...args), {
+    success: toastSuccess,
+    error: toastError,
+    warning: toastWarning,
+  }),
 }));
 
 import { MemberWizard } from "./member-wizard";
@@ -46,6 +51,7 @@ afterEach(() => {
   toastSuccess.mockClear();
   toastError.mockClear();
   toastWarning.mockClear();
+  toastNote.mockClear();
 });
 
 function fillSearch(firstName = "Nora", lastName = "Ashgrove") {
@@ -217,7 +223,7 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
 
     await waitFor(() => screen.getByText(/contact & address/i));
-    fireEvent.change(screen.getByLabelText(/^email/i), {
+    fireEvent.change(screen.getByLabelText(/^email address$/i), {
       target: { value: "nora@example.invalid" },
     });
 
@@ -235,7 +241,7 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
     await waitFor(() => screen.getByText(/contact & address/i));
     expect(
-      (screen.getByLabelText(/^email/i) as HTMLInputElement).value,
+      (screen.getByLabelText(/^email address$/i) as HTMLInputElement).value,
     ).toBe("nora@example.invalid");
   });
 
@@ -546,5 +552,137 @@ describe("MemberWizard — HydrationGate wiring (DECISION-159, F116)", () => {
     const html = renderToString(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
     expect(html).toContain('<fieldset disabled=""');
     expect(html).toContain('aria-busy="true"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The address list editor on the contact step (DECISION-216, Batch 3).
+// ---------------------------------------------------------------------------
+
+async function walkToContact(searchEmail = "") {
+  mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
+  render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+  fillSearch("Nora", "Ashgrove");
+  if (searchEmail) {
+    fireEvent.change(screen.getByLabelText(/^email/i), { target: { value: searchEmail } });
+  }
+  fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+  await waitFor(() => screen.getByText(/name & birth date/i));
+  fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+  await waitFor(() => screen.getByText(/contact & address/i));
+}
+
+const next = () => fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+describe("MemberWizard — the contact step's address list", () => {
+  it("shows one blank, valid row that is the main address, and Next works untouched", async () => {
+    await walkToContact();
+    const inputs = screen.getAllByLabelText(/^email address$/i) as HTMLInputElement[];
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.value).toBe("");
+    expect((screen.getByRole("radio", { name: /^main address$/i }) as HTMLInputElement).checked).toBe(true);
+    next();
+    await waitFor(() => screen.getByText(/^household$/i));
+  });
+
+  it("pre-fills the first row from the address typed on the search step", async () => {
+    await walkToContact("nora@example.invalid");
+    expect((screen.getByLabelText(/^email address$/i) as HTMLInputElement).value).toBe("nora@example.invalid");
+  });
+
+  it("never overwrites an address typed on the contact step when the search is re-run", async () => {
+    await walkToContact("nora@example.invalid");
+    fireEvent.change(screen.getByLabelText(/^email address$/i), { target: { value: "typed@example.invalid" } });
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }));
+    await waitFor(() => screen.getByText(/name & birth date/i));
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }));
+    await waitFor(() => screen.getByRole("button", { name: /^search$/i }));
+    fireEvent.change(screen.getByLabelText(/^email/i), { target: { value: "other@example.invalid" } });
+    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+    await waitFor(() => screen.getByText(/name & birth date/i));
+    next();
+    await waitFor(() => screen.getByText(/contact & address/i));
+    expect((screen.getByLabelText(/^email address$/i) as HTMLInputElement).value).toBe("typed@example.invalid");
+  });
+
+  it("blocks Next on a malformed address with the field error, and keeps the step", async () => {
+    await walkToContact();
+    fireEvent.change(screen.getByLabelText(/^email address$/i), { target: { value: "nora@" } });
+    next();
+    await waitFor(() => expect(screen.getByText("Enter a valid email address.")).toBeTruthy());
+    expect(screen.getByText(/contact & address/i)).toBeTruthy();
+  });
+
+  it("a row typed in this session is removed with no confirmation; a list can be emptied", async () => {
+    await walkToContact();
+    fireEvent.click(screen.getByRole("button", { name: /^add another email address$/i }));
+    expect(screen.getAllByLabelText(/^email address$/i)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Remove email address 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove email address 1" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByText("No email address on file.")).toBeTruthy();
+  });
+
+  it("the review step lists every address with its tags, and the submit sends them with no ids and no blank rows", async () => {
+    mockCreatePersonAction.mockResolvedValue({
+      ok: true,
+      data: { personId: "p-1", rollActionId: "ra-1", effect: "none", affectsFiledPeriod: false },
+    });
+    await walkToContact();
+    fireEvent.change(screen.getByLabelText(/^email address$/i), { target: { value: "Nora@Example.Invalid" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add another email address$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add another email address$/i })); // stays blank
+    const inputs = screen.getAllByLabelText(/^email address$/i);
+    fireEvent.change(inputs[1]!, { target: { value: "nora.work@example.invalid" } });
+    fireEvent.change((screen.getAllByLabelText(/^label$/i) as HTMLSelectElement[])[1]!, { target: { value: "work" } });
+    fireEvent.click(
+      (screen.getAllByRole("checkbox", { name: /don.t send mail to this address/i }) as HTMLInputElement[])[1]!,
+    );
+    next();
+    await waitFor(() => screen.getByText(/^household$/i));
+    next();
+    await waitFor(() => screen.getByText(/step \d+ of \d+: connection/i));
+    next();
+    await waitFor(() => screen.getByText(/review & submit/i));
+
+    expect(screen.getByText("Email addresses")).toBeTruthy();
+    expect(screen.getByText("nora@example.invalid (Main)")).toBeTruthy();
+    expect(screen.getByText("nora.work@example.invalid (Work, Don't send)")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /add person/i }));
+    await waitFor(() => expect(mockCreatePersonAction).toHaveBeenCalled());
+    expect(mockCreatePersonAction.mock.calls[0]![1].contact.emails).toEqual([
+      { value: "Nora@Example.Invalid", subtype: null, isPrimary: true, doNotContact: false },
+      { value: "nora.work@example.invalid", subtype: "work", isPrimary: false, doNotContact: true },
+    ]);
+  });
+
+  it("a person with no address sends no emails at all", async () => {
+    mockCreatePersonAction.mockResolvedValue({
+      ok: true,
+      data: { personId: "p-1", rollActionId: "ra-1", effect: "none", affectsFiledPeriod: false },
+    });
+    await submitFrom("visitor");
+    fireEvent.click(screen.getByRole("button", { name: /add person/i }));
+    await waitFor(() => expect(mockCreatePersonAction).toHaveBeenCalled());
+    expect(mockCreatePersonAction.mock.calls[0]![1].contact.emails).toBeUndefined();
+  });
+
+  it("raises an 'Also on file for' toast for a shared address after the person is added", async () => {
+    mockCreatePersonAction.mockResolvedValue({
+      ok: true,
+      data: {
+        personId: "p-1",
+        rollActionId: "ra-1",
+        effect: "none",
+        affectsFiledPeriod: false,
+        notes: { shared: [{ address: "nora@example.invalid", names: ["Tobias Renwick"], more: 0 }] },
+      },
+    });
+    await submitFrom("visitor");
+    fireEvent.click(screen.getByRole("button", { name: /add person/i }));
+    await waitFor(() => expect(toastNote).toHaveBeenCalled());
+    expect(toastNote.mock.calls[0]![0]).toBe("Also on file for Tobias Renwick");
+    expect(toastSuccess).toHaveBeenCalled();
   });
 });

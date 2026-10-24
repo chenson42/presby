@@ -1,3 +1,4 @@
+// contact-methods-scan-ok: a comment only; this module never queries the table (children.ts reads person_relationships)
 import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import type { db } from "@/lib/db";

@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { toNewPersonEmailInputs } from "@/components/org-portal/email-addresses-form";
+import { notifySaved } from "@/components/org-portal/person-save-notes";
 import { Button } from "@/components/ui/button";
 import type { CreatePersonInput, MatchCandidate } from "@/lib/people";
 import {
@@ -49,7 +51,7 @@ const IDENTITY_FIELDS = [
   "identity.dateOfBirth",
 ] as const;
 const CONTACT_FIELDS = [
-  "contact.email",
+  "contact.emails",
   "contact.phone",
   "address.line1",
   "address.city",
@@ -115,6 +117,9 @@ export function MemberWizard({
     null,
   );
   const [searching, setSearching] = useState(false);
+  // The address last copied from the search step into the contact list, so a
+  // re-search can replace it without ever overwriting something typed since.
+  const prefilledEmail = useRef("");
   const [submitting, setSubmitting] = useState(false);
 
   // `useWatch` (a proper subscribing hook), not `form.watch()` (an
@@ -141,6 +146,20 @@ export function MemberWizard({
     if (prev) setCurrentStepId(prev);
   }
 
+  /**
+   * D6: the match step still takes ONE address; the contact step's first row
+   * starts from it. Only a blank first row, or one still holding the previous
+   * copy, is replaced, so nothing the administrator typed is overwritten.
+   */
+  function prefillFirstEmail(searchEmail: string | undefined) {
+    const typed = (searchEmail ?? "").trim();
+    const first = form.getValues("contact.emails.0");
+    if (!first || first.id) return;
+    if (first.value !== "" && first.value !== prefilledEmail.current) return;
+    form.setValue("contact.emails.0.value", typed);
+    prefilledEmail.current = typed;
+  }
+
   async function handleSearch() {
     setSearching(true);
     const { firstName, lastName, dateOfBirth, email } =
@@ -159,6 +178,7 @@ export function MemberWizard({
     }
 
     setSearched(true);
+    prefillFirstEmail(email);
     const top = result.data?.candidates[0];
     if (top) {
       setMatchCandidate(top);
@@ -241,7 +261,7 @@ export function MemberWizard({
               dateOfBirth: values.identity.dateOfBirth || undefined,
             },
       contact: {
-        email: values.contact.email || undefined,
+        emails: toNewPersonEmailInputs(values.contact.emails),
         phone: values.contact.phone || undefined,
       },
       address:
@@ -287,12 +307,13 @@ export function MemberWizard({
 
     if (result.ok) {
       const effect = result.data?.effect;
-      toast.success(
+      notifySaved(
         effect === "recorded"
           ? SUCCESS_COPY.participantAdded
           : effect === "pending"
             ? SUCCESS_COPY.memberProposed
             : SUCCESS_COPY.visitorAdded,
+        result.data?.notes,
       );
       if (result.data?.affectsFiledPeriod) {
         toast.warning(SUCCESS_COPY.filedPeriodWarning);

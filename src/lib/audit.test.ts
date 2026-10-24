@@ -140,6 +140,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   // Member management, Increment 2 (2026-08-26) — written from
   // src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts
   PERSON_UPDATED: "tenant.person.updated",
+  TENANT_PERSON_EMAIL_ADDED: "tenant.person_email.added",
+  TENANT_PERSON_EMAIL_ENDED: "tenant.person_email.ended",
+  TENANT_PERSON_EMAIL_PRIMARY_CHANGED: "tenant.person_email.primary_changed",
+  TENANT_PERSON_EMAIL_UPDATED: "tenant.person_email.updated",
   // Officer-terms administration (2026-08-26, groups-and-officers) —
   // written from src/app/(org)/o/[slug]/admin/officers/actions.ts
   OFFICER_TERM_STARTED: "tenant.officer_term.started",

@@ -22,6 +22,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { storageStatePath } from "./support/users";
 import { platformSql, type Sql } from "./support/db";
+import { captureFlags, setFlag, type FlagCapture } from "./support/flags";
 import {
   COMMUNITY_ORG,
   createParticipantViaSql,
@@ -42,6 +43,9 @@ import {
 
 const BASE = `/o/${COMMUNITY_ORG.slug}/admin/community`;
 const DIRECTORY = `/o/${COMMUNITY_ORG.slug}/directory`;
+// The directory test needs both directory flags. A fresh database (CI) has
+// them off, so the spec turns them on and restores what it found.
+const DIRECTORY_FLAGS = ["org_portal.directory", "org_portal.directory_v2"];
 const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 800, n: 40 },
   { name: "360px", width: 360, height: 740, n: 50 },
@@ -68,10 +72,13 @@ test.describe("Person emails", () => {
 
   let sql: Sql;
   let state: CommunityFixtureState;
+  let flags: FlagCapture;
   const personIds: string[] = [];
 
   test.beforeAll(async () => {
     sql = platformSql("person-emails.spec");
+    flags = await captureFlags(sql, DIRECTORY_FLAGS);
+    for (const key of DIRECTORY_FLAGS) await setFlag(sql, key, true);
     await sweepEmailExtras(sql); // a crashed prior run's staff positions block the sweep below
     await sweepCommunityPeople(sql); // a crashed prior run
     state = await setupCommunityFixture(sql);
@@ -80,6 +87,7 @@ test.describe("Person emails", () => {
   test.afterAll(async () => {
     await removeEmailExtras(sql, personIds);
     await removeCommunityFixture(sql, state);
+    await flags.restore();
   });
 
   for (const vp of VIEWPORTS) {

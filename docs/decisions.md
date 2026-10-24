@@ -4,6 +4,25 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-224 — zod 4 conversion rules: parity at the first message, ids through `z.guid`, tests that pin only what a user can see.**
+
+**Status:** Resolved · **Date:** 2026-10-24 · **Feature:** `2026-10-23-zod-4` (Phase 3 with the Phase 3a amendment; implementation, tech-lead)
+
+- **Rules.** (1) Id inputs are `z.guid(message?)`, the top-level form, keeping any message. (2) A bounded whole-number field is `z.number({ error })` plus `.refine(Number.isInteger)`, not `.int()`, because v4's `.int()` also rejects integers beyond ±2^53 and changes the first message; the `error` function maps `undefined` to the "is required" copy and every other type failure to the "whole number" copy. This applies where the first message reaches a user. A field reached only by tampering, or one that returns fixed copy, may keep `.int()` (the `year` field at `statements/actions.ts:31`). (3) A trimmed, lower-cased email is `z.string().trim().toLowerCase().pipe(z.email().max(320))`. (4) `code: "custom"` replaces `z.ZodIssueCode.custom`. (5) A check a user can reach through a form carries an explicit message pinned to today's string, and a tamper-only default may change wording. (6) The characterization tests assert exact text only for the former and path-and-failure for the latter, and stay in the tree as permanent regression coverage. (7) A schema private to a `"use server"` file that a test must reach moves to the existing pure module that already shares its sibling schema (`revokeHolderFieldsSchema` to `designation-holder-copy.ts`).
+- **Why.** v4 changes defaults without a compile error; the first message is the one every route shows; tests that pinned tamper-only wording would force edits in the same commit as the bump and stop proving "unchanged".
+- **The tamper-only list is closed.** It is: an unmessaged id, enum and missing-key type defaults, `year` on statements, and the discriminated-union discriminator. Phase 5 and Phase 6 added two members, both reachable only by a hand-built request: the `subtype` enum in `src/components/org-portal/email-addresses-form.ts:51` (`z.enum(["", ...EMAIL_SUBTYPES])`, a `<select>` limited to the vocabulary) and `isPrimary` at `:52` (a non-boolean value; the form sets it only through `setValue(..., i === index)` and a registered checkbox). `doNotContact` (`:53`) is the same kind of field. Their golden assertions stay path-and-failure, and a wording change on those paths is a zod default, not copy. Any further addition needs a decision entry.
+- **Revisit if** v4 changes `.int()`, or a form starts rendering one of the unpinned fields.
+
+---
+
+**DECISION-223 — zod 3 → 4 is a direct upgrade, with ids through `z.guid()` and no `zod/v3` subpath.**
+
+**Status:** Resolved · **Date:** 2026-10-24 · **Feature:** `2026-10-23-zod-4` (Phase 2 Note 1; architectural, architect)
+
+zod 3 → 4 is a direct upgrade to `zod@^4.6.7` on the classic API. The `zod/v3` compatibility subpath is rejected because it ships the unfixed v3 `ZodArray` that `npm audit` cannot see (F226). Id inputs use `z.guid()`, not `z.uuid()`, because fixed ids in shipped migrations are not RFC 9562 (F225). Size checks come first on every collection schema. No global zod error map: messages users can reach are explicit at the call site. Closes high advisory GHSA-mrhx-c7xc-m3w5 and removes its CI exception.
+
+---
+
 **DECISION-219 — Person emails: the implementation shape.**
 
 **Status:** Resolved (operator acknowledged the giving deferral, "keep giving on the donor record for now, go", 2026-10-23) · **Date:** 2026-10-23 · **Feature:** `2026-10-23-person-emails` (Phase 3 D1–D15; implementation, tech-lead)

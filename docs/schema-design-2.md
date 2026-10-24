@@ -1894,6 +1894,20 @@ Pipeline `2026-10-23-person-emails` (v0.42.0, migration 0064; DECISION-215–219
 
 **Accepted residuals (`paper`, DECISION-218).** `contact_methods` is a global person child: another congregation's `people.manage` can see, end, relabel or re-main an address for a person who belongs to both, and that can change routing. Bounded for credentials by the sign-in invitation rule that refuses anyone with a membership elsewhere; detected by `tenant.person_email.*` audit rows carrying the acting organization. Scoping contact data per organization is a D-level redesign (TODO). `person_identifiers` stays separate and is never written by the form (a typed address is not proof of control). The owner connection keeps `DELETE` on `contact_methods`; its mitigation is a source scan, not a trigger.
 
+## 2x. zod 4 upgrade — findings (F225–F229)
+
+Pipeline `2026-10-23-zod-4` (v0.42.2; no migration; DECISION-223–224). Not a schema round: recorded here because this file is where the F-series lives. F225, F227 and F229 are closed by the upgrade's own code and tests, F226 is avoided by the choice of import, and F228 was found and is closed.
+
+**F225 — the built-in role ids in shipped migrations (`drizzle/0032`, `0037`, `0039`, `0052`, `0055`) and 218 fixture ids are not RFC 9562.** Under zod 4, `z.string().uuid()` enforces the version and variant digits and would refuse them, only at runtime and only for those ids. **Closed:** every `.uuid()` became `z.guid()` (17 calls); the golden tests accept `00000000-…-0005` and `d9100000-…-0010`; `src/lib/zod-usage-guard.test.ts` fails on any reintroduced `.uuid()` (DECISION-223).
+
+**F226 — zod 4.x's `zod/v3` subpath carries the v3 array behaviour the advisory describes, while `npm audit` reports the package as fixed.** Importing it would have closed the scanner finding and left the exposure. **Avoided:** direct upgrade on the classic API; the guard test bans `zod/v3`, `zod/v4` and `zod/mini` imports; `revoke-holder-fields.advisory.test.ts` is a negative control (fails with 100,001 issues on zod 3.25.76, passes with one `too_big` on 4.6.7).
+
+**F227 — no test pinned a single validation message.** Before the characterization tests the exit criterion "no user-visible change" could not be proven. **Closed:** 16 golden files committed on zod 3 before the bump, then run unedited on zod 4 (DECISION-224 rules 5 and 6).
+
+**F228 — `scripts/ci/audit-prod.mjs` existed only on `chore/workflow-efficiency`,** so the exit criterion depended on that branch merging first. **Found and closed:** PR #45 merged; the script now carries `ACCEPTED = []` with the expiry mechanism kept.
+
+**F229 — zod 4's `.int()` rejects integers beyond ±2^53 as an `invalid_type`.** A bounded number field given `1e20` (for example the fee-rate field) would report "must be a whole number." where v3 reported "must be between 0 and N." A plain port of `connection-input.ts` changes user-visible copy. Found in Phase 3 by running the schema on both versions. **Closed:** `.refine(Number.isInteger)` in `.int()`'s place; resolved by DECISION-224 (2).
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

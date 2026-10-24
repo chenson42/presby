@@ -511,6 +511,9 @@ designation lets the platform role clear a slot and then hold it. That chain is
 detected by audit (`org.*.revoked`, then `invitation.created` with
 `selfAddressed`) and is not prevented (operator ruling 2026-10-22). This is
 `paper`.
+A founding administrator who records themselves as a ruling elder, installed
+pastor, co-pastor or associate pastor becomes a Session approver (DECISION-205).
+This is permitted, stamped `selfRecorded` and `selfApproved`, and `paper`.
 
 ### The Roll Is the System of Record
 

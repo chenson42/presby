@@ -15,6 +15,7 @@ import type { ActionResult } from "@/types/actions";
 import {
   CREATE_COPY,
   PARTICIPANT_COPY,
+  PROPOSAL_COPY,
   VALIDATION_COPY,
 } from "../participant-copy";
 
@@ -213,6 +214,8 @@ export async function createPersonAction(
       return { ok: false, error: CREATE_COPY.invalidHousehold };
     case "roll_refused":
       return { ok: false, error: PARTICIPANT_COPY[result.reason] };
+    case "proposal_refused":
+      return { ok: false, error: PROPOSAL_COPY[result.reason] };
     case "ok":
       break;
   }

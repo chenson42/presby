@@ -15,6 +15,17 @@
  * The limited-state spec temporarily removes `directory.view` from THIS role
  * only, and restores it.
  *
+ * THE SESSION (Increment 2, Batch D). A congregation with no `session` derived
+ * group refuses member proposals (R15), and the e2e organization `alpha` is
+ * created with only an `active_membership` group. So setup ensures alpha has a
+ * Session group (created here only if absent; removed at teardown only if THIS
+ * fixture created it), and adds a second spec-owned role, `e2e_session_approver`
+ * (`roll.approve` only), granted to the clerk by the person arm.
+ * `setRollApprove(sql, false)` takes the key away for the read-only-queue spec.
+ * The Session roster stays EMPTY, so the queue's Session state at alpha is
+ * `empty` (the "Ask an administrator" variant, since the role lacks
+ * officers.manage).
+ *
  * WHAT IT CAPTURES AND RESTORES. The `org_portal.members_create` and
  * `org_portal.members_roll_action_edit` platform flags, and alpha's
  * `org_portal.members_create` toggle row (all three are what a real congregation
@@ -44,6 +55,8 @@ export const ROLL_ACTION_EDIT = "org_portal.members_roll_action_edit";
 const FIXTURE_FIRST_NAME = "E2ECommunity";
 const ROLE_ID = "e2ce1000-0000-4000-8000-000000000001";
 const ROLE_KEY = "e2e_community_clerk";
+const APPROVER_ROLE_ID = "e2ce1000-0000-4000-8000-000000000002";
+const APPROVER_ROLE_KEY = "e2e_session_approver";
 const SQL_PERSON_PREFIX = "e2ce1000-0000-4000-8000-";
 
 /** The clerk fixture person (Ottoline Fairweather) and her platform user. */
@@ -53,6 +66,8 @@ export const CLERK_EMAIL = E2E_USERS["congregation-clerk"].email;
 export interface CommunityFixtureState {
   priorFlags: Record<string, boolean>;
   priorToggle: boolean | null;
+  /** The Session group this fixture created at alpha, or null when it already existed. */
+  createdSessionGroupId: string | null;
 }
 
 async function adminUserId(sql: Sql): Promise<string> {
@@ -111,7 +126,54 @@ export async function setupCommunityFixture(sql: Sql): Promise<CommunityFixtureS
      )
   `;
 
-  return { priorFlags, priorToggle };
+  // The Session group (R15) and the approver role. The group is created only
+  // if absent, and only that case is undone at teardown.
+  const existingSession = (await sql`
+    select id from groups where organization_id = ${COMMUNITY_ORG.id}::uuid and derived_from = 'session'
+  `) as { id: string }[];
+  let createdSessionGroupId: string | null = null;
+  if (!existingSession[0]) {
+    const created = (await sql`
+      insert into groups (organization_id, group_type_id, name, membership_source, derived_from, is_protected)
+      select ${COMMUNITY_ORG.id}::uuid, gt.id, 'Session', 'derived', 'session', true
+        from group_types gt where gt.key = 'court'
+      returning id
+    `) as { id: string }[];
+    if (!created[0]) throw new Error("[community-fixture] could not create alpha's Session group");
+    createdSessionGroupId = created[0].id;
+  }
+
+  await sql`
+    insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
+    values (${APPROVER_ROLE_ID}::uuid, ${COMMUNITY_ORG.id}::uuid, ${APPROVER_ROLE_KEY}, 'E2E Session Approver', 'custom', false)
+    on conflict (id) do nothing
+  `;
+  await sql`
+    insert into role_grants (organization_id, role_id, person_id, starts_on, granted_by)
+    select ${COMMUNITY_ORG.id}::uuid, ${APPROVER_ROLE_ID}::uuid, ${CLERK_PERSON_ID}::uuid, date '2020-01-01', ${admin}::uuid
+     where not exists (
+       select 1 from role_grants
+        where person_id = ${CLERK_PERSON_ID}::uuid
+          and organization_id = ${COMMUNITY_ORG.id}::uuid
+          and role_id = ${APPROVER_ROLE_ID}::uuid
+     )
+  `;
+  await setRollApprove(sql, true);
+
+  return { priorFlags, priorToggle, createdSessionGroupId };
+}
+
+/** Grants or removes `roll.approve` on the spec-owned approver role (the clerk keeps `roll.propose`). */
+export async function setRollApprove(sql: Sql, granted: boolean): Promise<void> {
+  if (granted) {
+    await sql`
+      insert into app_role_permissions (role_id, permission_key)
+      values (${APPROVER_ROLE_ID}::uuid, 'roll.approve')
+      on conflict do nothing
+    `;
+  } else {
+    await sql`delete from app_role_permissions where role_id = ${APPROVER_ROLE_ID}::uuid and permission_key = 'roll.approve'`;
+  }
 }
 
 /** Removes or restores the one permission the limited-state spec toggles. */
@@ -133,12 +195,20 @@ export interface SqlParticipant {
   lastName: string;
 }
 
+/** Enforces the disjoint person-id ranges documented below: n is 0..99. */
+function assertFixtureIndex(n: number): void {
+  if (!Number.isInteger(n) || n < 0 || n >= 100) {
+    throw new Error(`fixture index n must be an integer in 0..99, got ${n}`);
+  }
+}
+
 /**
  * A current participant written on the owner connection (an approved
  * enrolment, with the cache the sync trigger writes), for specs that need one
  * without walking the wizard. The id carries the fixture prefix.
  */
 export async function createParticipantViaSql(sql: Sql, n: number, lastName: string): Promise<SqlParticipant> {
+  assertFixtureIndex(n);
   const personId = `${SQL_PERSON_PREFIX}${String(100 + n).padStart(12, "0")}`;
   assertSqlPersonId(personId);
   const firstName = FIXTURE_FIRST_NAME;
@@ -165,12 +235,21 @@ export async function createParticipantViaSql(sql: Sql, n: number, lastName: str
 }
 
 /**
+ * Fixture person id ranges (SQL_PERSON_PREFIX + n), kept disjoint so one helper
+ * can never silently reuse another's row through `on conflict do nothing`:
+ *   100 + n  createParticipantViaSql
+ *   200 + n  createStaffAnchorViaSql (PR #43)
+ *   300 + n  createProposalViaSql    (this pipeline; n stays under 100)
+ */
+
+/**
  * A staff anchor written on the owner connection: a live membership with
  * engagement 'staff', no roll and no staff position, the exact shape
  * `presby_accept_invitation` writes for an invited administrator or treasurer.
  * The id carries the fixture prefix, so the sweep removes it.
  */
 export async function createStaffAnchorViaSql(sql: Sql, n: number, lastName: string): Promise<SqlParticipant> {
+  assertFixtureIndex(n);
   const personId = `${SQL_PERSON_PREFIX}${String(200 + n).padStart(12, "0")}`;
   assertSqlPersonId(personId);
   const firstName = FIXTURE_FIRST_NAME;
@@ -189,6 +268,45 @@ export async function createStaffAnchorViaSql(sql: Sql, n: number, lastName: str
   return { personId, firstName, lastName };
 }
 
+/**
+ * A member proposal waiting for the Session, written on the owner connection
+ * (a pending profession of faith for a new person with a regular membership
+ * and no roll), for specs that need queue rows without walking the wizard. The
+ * id carries the fixture prefix; the proposer is the clerk's own user.
+ */
+export async function createProposalViaSql(
+  sql: Sql,
+  n: number,
+  lastName: string,
+  effectiveDate = "2026-06-01",
+): Promise<SqlParticipant & { rollActionId: string }> {
+  assertFixtureIndex(n);
+  const personId = `${SQL_PERSON_PREFIX}${String(300 + n).padStart(12, "0")}`;
+  assertSqlPersonId(personId);
+  const firstName = FIXTURE_FIRST_NAME;
+  await sql`
+    insert into people (id, first_name, last_name, deletable_until)
+    values (${personId}::uuid, ${firstName}, ${lastName}, now() + interval '2 hours')
+    on conflict (id) do nothing
+  `;
+  await sql`
+    insert into memberships (person_id, organization_id, engagement_status)
+    select ${personId}::uuid, ${COMMUNITY_ORG.id}::uuid, 'regular'
+     where not exists (
+       select 1 from memberships where person_id = ${personId}::uuid and organization_id = ${COMMUNITY_ORG.id}::uuid
+     )
+  `;
+  await sql`
+    insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll,
+                              approval_status, proposed_by)
+    select ${COMMUNITY_ORG.id}::uuid, ${personId}::uuid, 'profession_of_faith', ${effectiveDate}::date,
+           'active', 'pending', (select id from users where email = ${CLERK_EMAIL})
+     where not exists (select 1 from roll_actions where person_id = ${personId}::uuid)
+  `;
+  const row = (await sql`select id from roll_actions where person_id = ${personId}::uuid limit 1`) as { id: string }[];
+  return { personId, firstName, lastName, rollActionId: row[0]!.id };
+}
+
 /** Deletes every person this fixture's specs created, by the guarded first name. */
 export async function sweepCommunityPeople(sql: Sql): Promise<number> {
   const rows = (await sql`
@@ -202,7 +320,8 @@ export async function sweepCommunityPeople(sql: Sql): Promise<number> {
   try {
     await sql`alter table roll_actions disable trigger roll_actions_freeze`;
     await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
-    await sql`delete from audit_events where action in ('tenant.roll_action.recorded', 'tenant.roll_action.voided')
+    await sql`delete from audit_events where action in ('tenant.roll_action.recorded', 'tenant.roll_action.voided',
+                   'tenant.roll_action.approved', 'tenant.roll_action.denied', 'tenant.roll_action.withdrawn')
                  and resource_id in (select id::text from roll_actions where person_id = any(${ids}::uuid[]))`;
     // A void references its target: voids first.
     await sql`delete from roll_actions where person_id = any(${ids}::uuid[]) and kind = 'void'`;
@@ -224,6 +343,8 @@ export async function sweepCommunityPeople(sql: Sql): Promise<number> {
 export async function removeCommunityFixture(sql: Sql, state: CommunityFixtureState | undefined): Promise<void> {
   await sweepCommunityPeople(sql);
   await setDirectoryView(sql, true);
+  await removeApproverRole(sql);
+  if (state?.createdSessionGroupId) await removeSessionGroup(sql, state.createdSessionGroupId);
   if (!state) return;
   for (const [key, enabled] of Object.entries(state.priorFlags)) {
     await sql`update feature_flags set enabled = ${enabled} where key = ${key}`;
@@ -240,5 +361,26 @@ export async function removeCommunityFixture(sql: Sql, state: CommunityFixtureSt
       update organization_feature_toggles set enabled = ${state.priorToggle}
        where organization_id = ${COMMUNITY_ORG.id}::uuid and feature_key = ${MEMBERS_CREATE}
     `;
+  }
+}
+
+/** Removes the spec-owned approver role (grant, permission, role). Fixture plumbing only. */
+async function removeApproverRole(sql: Sql): Promise<void> {
+  await sql`delete from role_grants where role_id = ${APPROVER_ROLE_ID}::uuid`;
+  await sql`delete from app_role_permissions where role_id = ${APPROVER_ROLE_ID}::uuid`;
+  await sql`delete from app_roles where id = ${APPROVER_ROLE_ID}::uuid`;
+}
+
+/** Removes the Session group this fixture created (never one that already existed). */
+async function removeSessionGroup(sql: Sql, groupId: string): Promise<void> {
+  try {
+    await sql`alter table groups disable trigger groups_reject_derived_edit`;
+    await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
+    await sql`delete from role_grants where group_id = ${groupId}::uuid`;
+    await sql`delete from group_memberships where group_id = ${groupId}::uuid`;
+    await sql`delete from groups where id = ${groupId}::uuid and organization_id = ${COMMUNITY_ORG.id}::uuid`;
+  } finally {
+    await sql`alter table groups enable trigger groups_reject_derived_edit`;
+    await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
   }
 }

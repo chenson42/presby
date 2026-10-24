@@ -1,44 +1,21 @@
-import type { OfficerOffice } from "@/lib/officers";
-
 /**
- * A UI-safe duplicate of `src/lib/officers.ts`'s `OFFICER_OFFICES`/
- * `OFFICE_LABELS`.
+ * A UI-safe re-export of the office vocabulary.
  *
- * `officers.ts` begins with `import "server-only"` (it reads through
- * `withOrgContext()`/the Neon pool). Importing a RUNTIME value from it — as
- * opposed to a `type`, which is erased at compile time — from a Client
- * Component (`add-officer-term-form.tsx`, `end-term-dialog.tsx`) would pull
- * that whole module, and its `server-only` guard, into the client bundle,
- * where the guard throws unconditionally. The same failure mode reproduces
- * in a plain Vitest/jsdom run of ANY component in this tree, server or
- * client, because Vitest resolves `server-only`'s package export without
- * Next's `react-server` condition either. This is exactly why
- * `roles-list.tsx`/`grant-role-form.tsx` (P9's equivalent surface) only ever
- * `import type` from `@/lib/role-grants.ts` and never a runtime export.
- *
- * This file is the one small, effectively-frozen exception every officers
- * UI file (client AND server component) should import display labels from,
- * instead of `@/lib/officers`'s own copy — a `Record<OfficerOffice, string>`
- * with nothing library-only about it. `src/lib/officers.ts` remains the
- * source of truth for `OfficerOffice` itself (imported here as a `type`
- * only) and for the values this array must match; a future new office added
- * to one and not the other is a TypeScript error, not a silent drift,
- * because `satisfies` below checks this array against that type.
+ * `src/lib/officers.ts` begins with `import "server-only"`, so a Client
+ * Component cannot import a RUNTIME value from it (the guard throws in the
+ * client bundle, and in a plain Vitest/jsdom run of any component in this
+ * tree). The vocabulary itself now lives in the pure
+ * `src/lib/officer-offices.ts` (Increment 2, DECISION-206), which has no
+ * server-only guard, so this file is a one-line re-export kept so the officers
+ * UI files keep their existing import path. There is no second copy of the
+ * list to drift.
  */
-export const OFFICER_OFFICES = [
-  "ruling_elder",
-  "deacon",
-  "clerk_of_session",
-  "moderator",
-  "treasurer",
-  "trustee",
-] as const satisfies readonly OfficerOffice[];
-
-export const OFFICE_LABELS: Record<OfficerOffice, string> = {
-  ruling_elder: "Ruling Elder",
-  deacon: "Deacon",
-  clerk_of_session: "Clerk of Session",
-  moderator: "Moderator",
-  treasurer: "Treasurer",
-  trustee: "Trustee",
-};
+export {
+  OFFICER_OFFICES,
+  OFFICE_LABELS,
+  PASTOR_OFFICES,
+  SESSION_OFFICES,
+  isPastorOffice,
+  isSessionOffice,
+} from "@/lib/officer-offices";
+export type { OfficerOffice } from "@/lib/officer-offices";

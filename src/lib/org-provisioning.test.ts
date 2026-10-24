@@ -202,7 +202,7 @@ describe.skipIf(!hasDb)(
     });
 
     describe("baselineRoleSeedPlan / eventTypeSeedPlan (pure plans)", () => {
-      it("gives the member role a LIST of permissions: directory.view and events.view", () => {
+      it("gives the member role a LIST of permissions: directory.view and events.view, for EVERY organization type", () => {
         for (const type of [
           "congregation",
           "presbytery",
@@ -211,10 +211,62 @@ describe.skipIf(!hasDb)(
           "new_worshiping_community",
         ] as const) {
           const plan = baselineRoleSeedPlan(type);
-          expect(plan).toHaveLength(1);
-          expect(plan[0].key).toBe("member");
-          expect(plan[0].permissionKeys).toEqual(["directory.view", "events.view"]);
+          const member = plan.find((r) => r.key === "member");
+          expect(member, type).toBeDefined();
+          expect(member!.permissionKeys).toEqual(["directory.view", "events.view"]);
+          expect(member!.boundToDerivedFrom).toBe("active_membership");
         }
+      });
+
+      // DECISION-202 (Increment 2): the plan is now type-varying. DECISION-100's
+      // comment anticipated this ("ready to branch the day a genuinely
+      // type-varying baseline role is proposed"); only a congregation has a
+      // Session, so only a congregation gets the Session role.
+      it("a CONGREGATION also gets session_member: roll.approve ONLY, bound to the derived Session group", () => {
+        const plan = baselineRoleSeedPlan("congregation");
+        expect(plan.map((r) => r.key)).toEqual(["member", "session_member"]);
+        const session = plan.find((r) => r.key === "session_member")!;
+        expect(session).toEqual({
+          key: "session_member",
+          name: "Session member",
+          permissionKeys: ["roll.approve"],
+          boundToDerivedFrom: "session",
+        });
+      });
+
+      it("every other organization type is unchanged: one member role, no Session role (F185: nobody could approve)", () => {
+        for (const type of [
+          "presbytery",
+          "synod",
+          "general_assembly",
+          "new_worshiping_community",
+        ] as const) {
+          const plan = baselineRoleSeedPlan(type);
+          expect(plan.map((r) => r.key), type).toEqual(["member"]);
+        }
+      });
+
+      it("no baseline role holds both roll keys, or any wildcard: a clerk who is also an elder holds them through two roles", () => {
+        for (const type of [
+          "congregation",
+          "presbytery",
+          "synod",
+          "general_assembly",
+          "new_worshiping_community",
+        ] as const) {
+          for (const role of baselineRoleSeedPlan(type)) {
+            const keys = role.permissionKeys;
+            expect(
+              keys.includes("roll.propose") && keys.includes("roll.approve"),
+              `${type}/${role.key}`,
+            ).toBe(false);
+            expect(keys.some((k) => k === "*" || k.endsWith(".*")), `${type}/${role.key}`).toBe(false);
+          }
+        }
+        // roll.propose is in NO baseline role: the clerk template carries it.
+        expect(
+          baselineRoleSeedPlan("congregation").some((r) => r.permissionKeys.includes("roll.propose")),
+        ).toBe(false);
       });
 
       it("re-exports the pure event-type seed plan (congregation: the standard nine; presbytery: the fallback only)", () => {
@@ -387,11 +439,15 @@ describe.skipIf(!hasDb)(
           expect(g.isProtected).toBe(true);
         }
 
-        // Baseline role seed (DECISION-100): a constitutional, protected
-        // `member` role bound to `directory.view`, granted through the
-        // GROUP arm to this org's own `active_membership` group.
-        const [roleRow] = await platform
+        // Baseline role seed (DECISION-100, extended by DECISION-202): a
+        // constitutional, protected `member` role (directory.view and
+        // events.view) granted through the GROUP arm to this org's own
+        // `active_membership` group, and a constitutional, protected
+        // `session_member` role (roll.approve only) granted through the GROUP
+        // arm to its derived `session` group.
+        const roleRows = await platform
           .select({
+            id: appRoles.id,
             key: appRoles.key,
             name: appRoles.name,
             roleKind: appRoles.roleKind,
@@ -399,39 +455,59 @@ describe.skipIf(!hasDb)(
           })
           .from(appRoles)
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(roleRow?.key).toBe("member");
-        expect(roleRow?.name).toBe("Member");
-        expect(roleRow?.roleKind).toBe("constitutional");
-        expect(roleRow?.isProtected).toBe(true);
+        expect(roleRows.map((r) => r.key).sort()).toEqual(["member", "session_member"]);
+        const memberRole = roleRows.find((r) => r.key === "member")!;
+        const sessionRole = roleRows.find((r) => r.key === "session_member")!;
+        expect(memberRole.name).toBe("Member");
+        expect(sessionRole.name).toBe("Session member");
+        for (const role of roleRows) {
+          expect(role.roleKind).toBe("constitutional");
+          expect(role.isProtected).toBe(true);
+        }
 
         const permissionRows = await platform
-          .select({ permissionKey: appRolePermissions.permissionKey })
+          .select({
+            roleId: appRolePermissions.roleId,
+            permissionKey: appRolePermissions.permissionKey,
+          })
           .from(appRolePermissions)
           .innerJoin(appRoles, eq(appRolePermissions.roleId, appRoles.id))
           .where(eq(appRoles.organizationId, result.organizationId));
         // DECISION-160 R9: the member role also carries events.view, the
         // member calendar's read grant.
-        expect(permissionRows.map((r) => r.permissionKey).sort()).toEqual([
-          "directory.view",
-          "events.view",
-        ]);
+        expect(
+          permissionRows
+            .filter((r) => r.roleId === memberRole.id)
+            .map((r) => r.permissionKey)
+            .sort(),
+        ).toEqual(["directory.view", "events.view"]);
+        // DECISION-202: roll.approve ONLY, never roll.propose, never both.
+        expect(
+          permissionRows.filter((r) => r.roleId === sessionRole.id).map((r) => r.permissionKey),
+        ).toEqual(["roll.approve"]);
 
         const activeMembershipGroupId = groupRows.find(
           (g) => g.derivedFrom === "active_membership",
         )?.id;
+        const sessionGroupId = groupRows.find((g) => g.derivedFrom === "session")?.id;
         expect(activeMembershipGroupId).toBeDefined();
+        expect(sessionGroupId).toBeDefined();
 
         const grantRows = await platform
           .select({
+            roleId: roleGrants.roleId,
             personId: roleGrants.personId,
             groupId: roleGrants.groupId,
           })
           .from(roleGrants)
           .innerJoin(appRoles, eq(roleGrants.roleId, appRoles.id))
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(grantRows).toHaveLength(1);
-        expect(grantRows[0].personId).toBeNull();
-        expect(grantRows[0].groupId).toBe(activeMembershipGroupId);
+        expect(grantRows).toHaveLength(2);
+        for (const grant of grantRows) expect(grant.personId).toBeNull();
+        expect(grantRows.find((g) => g.roleId === memberRole.id)?.groupId).toBe(
+          activeMembershipGroupId,
+        );
+        expect(grantRows.find((g) => g.roleId === sessionRole.id)?.groupId).toBe(sessionGroupId);
       });
 
       it("creates a presbytery with only Active Membership (no Session, no Board of Deacons)", async () => {
@@ -517,9 +593,11 @@ describe.skipIf(!hasDb)(
           .select({ id: appRoles.id, organizationId: appRoles.organizationId })
           .from(appRoles)
           .where(eq(appRoles.organizationId, resultB.organizationId));
-        expect(rolesA).toHaveLength(1);
-        expect(rolesB).toHaveLength(1);
-        expect(rolesA[0].id).not.toBe(rolesB[0].id);
+        // A congregation's plan is two roles (member, session_member).
+        expect(rolesA).toHaveLength(2);
+        expect(rolesB).toHaveLength(2);
+        const idsA = new Set(rolesA.map((r) => r.id));
+        for (const r of rolesB) expect(idsA.has(r.id)).toBe(false);
         // Each org's own query returns exactly its own row — no cross-org id
         // shows up under the other org's filter.
         expect(
@@ -537,14 +615,16 @@ describe.skipIf(!hasDb)(
           .select({ groupId: roleGrants.groupId, roleId: roleGrants.roleId })
           .from(roleGrants)
           .where(eq(roleGrants.organizationId, resultB.organizationId));
-        expect(grantsA).toHaveLength(1);
-        expect(grantsB).toHaveLength(1);
-        // The two orgs' grants point at two different roles and two
-        // different (org-scoped) active_membership groups — never the same
-        // id, which would indicate a copy-paste of the wrong org's id.
-        expect(grantsA[0].roleId).toBe(rolesA[0].id);
-        expect(grantsB[0].roleId).toBe(rolesB[0].id);
-        expect(grantsA[0].groupId).not.toBe(grantsB[0].groupId);
+        expect(grantsA).toHaveLength(2);
+        expect(grantsB).toHaveLength(2);
+        // The two orgs' grants point at their OWN roles and their OWN
+        // (org-scoped) groups — never the other org's id, which would
+        // indicate a copy-paste of the wrong org's id.
+        const idsB = new Set(rolesB.map((r) => r.id));
+        for (const g of grantsA) expect(idsA.has(g.roleId)).toBe(true);
+        for (const g of grantsB) expect(idsB.has(g.roleId)).toBe(true);
+        const groupsA = new Set(grantsA.map((g) => g.groupId));
+        for (const g of grantsB) expect(groupsA.has(g.groupId)).toBe(false);
       });
 
       it("rejects a slug that is already taken", async () => {

@@ -5,7 +5,13 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
-import { listPendingRollActions } from "@/lib/roll";
+import {
+  getSessionApprovalState,
+  listPendingRollActions,
+  listRecentlyDecidedRollActions,
+} from "@/lib/roll";
+import { todayUtcYmd } from "@/lib/ymd";
+import { Pagination } from "@/components/shared/pagination";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
 import { OrgAccessDenied, OrgAccessEnded } from "../../../org-states";
@@ -15,8 +21,15 @@ import {
   MembersLoadError,
 } from "../members-states";
 import { PendingWorklist } from "./pending-worklist";
+import { RecentlyDecided } from "./recently-decided";
+import { SessionStateBanner } from "./session-state-banner";
 
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
+
+function parsePage(raw: string | undefined): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 1;
+}
 
 /**
  * `/o/<slug>/admin/community/pending` — the approve/deny worklist
@@ -25,15 +38,23 @@ const MEMBERS_CREATE_FLAG = "org_portal.members_create";
  * other `admin/community*` page: `org_portal.members_create` (flag) AND its
  * matching `organization_feature_toggles` row.
  *
- * `listPendingRollActions()` is gated on `roll.approve` internally, checked
- * inside its own `withOrgContext()` transaction — not re-checked here.
+ * The three reads are gated on `roll.approve` OR `roll.propose` internally,
+ * checked inside their own `withOrgContext()` transactions — not re-checked
+ * here. The page switches on the returned `mode` (DECISION-204): an approver
+ * gets the decide queue (checkboxes, Approve, Deny, bulk), a propose-only
+ * holder a read-only queue with the Flow 7 banner and Withdraw. `?page=`
+ * pages the queue 50 at a time (the bulk cap).
  */
 export default async function PendingMembersPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
   const { slug } = await params;
+  const { page: rawPage } = await searchParams;
+  const page = parsePage(rawPage);
 
   const session = await cachedAuth();
   if (!session?.user) {
@@ -84,11 +105,24 @@ export default async function PendingMembersPage({
   }
 
   let result;
+  let decided;
+  let sessionState;
   try {
     result = await listPendingRollActions(
       resolved.org.personId,
       resolved.org.organizationId,
+      { page },
     );
+    if (result.kind === "ok") {
+      decided = await listRecentlyDecidedRollActions(
+        resolved.org.personId,
+        resolved.org.organizationId,
+      );
+      sessionState = await getSessionApprovalState(
+        resolved.org.personId,
+        resolved.org.organizationId,
+      );
+    }
   } catch (err) {
     if (err instanceof OrgAccessError) {
       throw err;
@@ -107,6 +141,13 @@ export default async function PendingMembersPage({
     );
   }
 
+  const { mode, actions, pagination, viewer } = result;
+  // Decide mode shows a banner only when there is no Session at all; read mode
+  // shows every state (the proposer needs to know why nothing is moving).
+  const state = sessionState?.kind === "ok" ? sessionState.state : null;
+  const showBanner =
+    state !== null && (mode === "read" || state.kind === "no_session");
+
   return (
     <section className="space-y-6">
       <div>
@@ -114,9 +155,41 @@ export default async function PendingMembersPage({
         <p className="mt-1 text-sm text-muted-foreground">
           {resolved.org.name}
         </p>
+        {mode === "read" && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            You can see what&apos;s waiting for the Session. Only members of the
+            Session can approve.
+          </p>
+        )}
       </div>
 
-      <PendingWorklist slug={slug} actions={result.actions} />
+      {showBanner && state && <SessionStateBanner slug={slug} state={state} />}
+
+      <section aria-labelledby="waiting-heading" className="space-y-3">
+        <h2 id="waiting-heading" className="text-lg font-semibold">
+          Waiting for the Session
+        </h2>
+        <PendingWorklist
+          slug={slug}
+          actions={actions}
+          mode={mode}
+          viewer={viewer}
+          today={todayUtcYmd()}
+        />
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          buildHref={(target) =>
+            target <= 1
+              ? `/o/${slug}/admin/community/pending`
+              : `/o/${slug}/admin/community/pending?page=${target}`
+          }
+        />
+      </section>
+
+      {decided && decided.kind === "ok" && (
+        <RecentlyDecided actions={decided.actions} />
+      )}
     </section>
   );
 }

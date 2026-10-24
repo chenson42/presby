@@ -23,7 +23,10 @@ const RELATIONSHIP_NOTES = {
 export function ReviewStep({
   form,
   householdName,
+  sessionWaits = false,
 }: {
+  /** The Session cannot approve yet (Flow 7), so a member proposal will wait. */
+  sessionWaits?: boolean;
   form: UseFormReturn<MemberWizardValues>;
   /** Resolved display name for `household.householdId`, when in "existing"
    * mode — the raw id is not useful to show a human. */
@@ -114,7 +117,9 @@ export function ReviewStep({
         </>
       )}
       <p className="pt-2 text-sm text-muted-foreground">
-        {RELATIONSHIP_NOTES[values.relationship]}
+        {values.relationship === "member" && sessionWaits
+          ? "This person's roll action will wait. No one on your Session can approve yet."
+          : RELATIONSHIP_NOTES[values.relationship]}
       </p>
     </dl>
   );

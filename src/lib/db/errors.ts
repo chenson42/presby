@@ -81,3 +81,58 @@ export function isExclusionViolation(err: unknown): boolean {
     /conflicting key value violates exclusion constraint/i.test(err.message)
   );
 }
+
+/**
+ * One field of the Postgres error (`code` or `constraint`), found ANYWHERE in
+ * the error's cause chain.
+ *
+ * Drizzle wraps the driver error in its own `Failed query: ...` error and puts
+ * the original on `.cause`, so SQLSTATE and the constraint name are one or more
+ * levels down. The roll and officer libraries map a SPECIFIC constraint to a
+ * typed outcome (`roll_actions_one_pending_per_person_idx` to `pending_exists`,
+ * `officer_terms_pastor_no_roll` to `on_roll`) and must not parse a message to
+ * tell two unique violations apart. Depth-bounded (6) like the other walkers.
+ */
+export function pgErrorField(
+  err: unknown,
+  field: "code" | "constraint",
+): string | undefined {
+  let current: unknown = err;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (typeof current === "object" && current !== null) {
+      const value = (current as Record<string, unknown>)[field];
+      // The Drizzle wrapper carries neither field, so the first string found
+      // is the driver's own.
+      if (typeof value === "string" && value !== "") return value;
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Every `.message` in the cause chain, joined: the driver's text sits below
+ * Drizzle's own "Failed query" wrapper. */
+export function pgErrorMessages(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (typeof current !== "object" || current === null) break;
+    const message = (current as { message?: unknown }).message;
+    if (typeof message === "string") parts.push(message);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return parts.join(" :: ");
+}
+
+/** True when `err` is a Postgres error with this SQLSTATE and, when given,
+ * this constraint name (anywhere in the cause chain). */
+export function isPgError(
+  err: unknown,
+  code: string,
+  constraint?: string,
+): boolean {
+  if (pgErrorField(err, "code") !== code) return false;
+  return constraint === undefined || pgErrorField(err, "constraint") === constraint;
+}

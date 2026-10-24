@@ -673,6 +673,79 @@ reserved and unbuilt, so the gap in the numbering is expected. Confirm first:
 
 ---
 
+## Session approval (Community Increment 2)
+
+Added at integration (v0.41.0). Migrations `0062` and `0063`. Design:
+`docs/work-log/2026-10-22-founding-admin-directory.md` (Increment 2);
+DECISION-202–206. Production is at `0061`; `0064` is reserved for Increment 2b.
+Confirm first: `select to_regclass('roll_actions')` is non-null and
+`select count(*) from information_schema.columns where table_name = 'roll_actions'
+and column_name = 'decided_by'` is 0.
+
+### Pre-deploy runbook: 0062, the code, then 0063
+
+1. **Order is the reverse of 0061: `0062`, deploy the code, then `0063`.**
+   - Code before `0062` calls functions that do not exist yet.
+   - `0063` before the code makes the old approve and deny fail on the removed
+     privilege.
+   - A code rollback alone does not undo `0063`; use the rollback statements in
+     its header (`grant update, delete on roll_actions to presby_app;` and the
+     re-created 0061 policy).
+2. **Snapshot `production` first** (Neon).
+3. **Re-measure before applying.** The design's 2026-10-22 counts predate real
+   use, and Increment 1 has been live since 2026-10-23 with the operator testing
+   in production. Count, and stop if any of the first two is non-zero:
+   - people with more than one pending proposal (`0062` stop-block);
+   - `officer_terms` offices outside the nine-value vocabulary (`0062`
+     stop-block);
+   - congregations without a `session` or `diaconate` group (`0062` seeds them);
+   - org-owned `session_member` roles (`0062` leaves an existing one alone);
+   - denied or withdrawn `roll_actions` rows lacking `decided_by` or `decided_at`
+     (`0063` stop-block).
+4. **A duplicate pending proposal has no in-app remedy before this release.** The
+   stop-block says "withdraw or deny the extras", but neither exists in
+   production before this release and no one holds `roll.approve`. If the
+   pre-flight finds one, stop. Resolve it on the owner connection as a minuted
+   act, and expect to stamp `decided_by` and `decided_at` by hand before `0063`,
+   because no audit row will exist to backfill from.
+5. **Apply `0062` WITH `-1`:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0062_presby_session_approval.sql`.
+   It has no top-level `begin;`/`commit;` (its `begin` lines are `DO` blocks) and
+   is idempotent. Then **deploy the code.**
+6. **Apply `0063` after the deploy, WITH `-1`:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0063_presby_roll_decide_lockdown.sql`.
+7. **Verify.**
+   - After `0062`: `presby_decide_roll_action` and `presby_withdraw_roll_action`
+     are `SECURITY DEFINER` with `search_path = public, pg_temp`, `presby_app`
+     holds EXECUTE and PUBLIC does not; the triggers `roll_actions_freeze`,
+     `officer_terms_pastor_no_roll` and `group_memberships_reject_derived` are
+     enabled; every congregation has a `session` and a `diaconate` group and one
+     org-owned `session_member` role.
+   - After `0063`: `has_table_privilege('presby_app', 'roll_actions', 'UPDATE')`
+     and `'DELETE'` are false, `'SELECT'` and `'INSERT'` true; the insert policy
+     `roll_actions_insert_pending_only` allows only pending rows of the seven
+     approvable kinds.
+   - Existing row counts are unchanged.
+   - **Do not run `scripts/session-approval/test-rls-62.sql` on production**
+     (test helpers); run `scripts/test-rls.sql` as `presby_app` on merged
+     `development` with both migrations applied. Expect only the four
+     pre-existing failures noted in the work-log (presbytery members 3 not 2,
+     the 2FA definer, the DECISION-152 count, and `46i`); section 62 reports 53
+     passes and section 61 reports 34.
+8. **After `0062`, the first congregation has the role and an empty Session.**
+   Nobody can approve until its administrator records themselves (or a ruling
+   elder or pastor) under Officers. Existing waiting proposals then become
+   approvable. An elder needs a PresbyPortal account to approve until Increment
+   2b ships. Test on a congregation made for testing: decided rows cannot be
+   changed or deleted afterward.
+9. **Before release, one manual walk on `development` at 360px:** an
+   administrator records themselves as a ruling elder starting today, Pending
+   approvals flips to decide mode, they approve their own proposal, and the audit
+   row carries `selfRecorded` and `selfApproved`; then repeat the read-mode view
+   with a propose-only clerk (work-log ship condition 10).
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

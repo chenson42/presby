@@ -168,6 +168,108 @@ export const PARTICIPANT_VOID_REFUSALS = [
 export type ParticipantVoidRefusal = (typeof PARTICIPANT_VOID_REFUSALS)[number];
 
 // ---------------------------------------------------------------------------
+// Approval, denial and withdrawal (docs/work-log/2026-10-22-founding-admin-
+// directory.md, Increment 2 Phase 3 "Pure shared modules"; DECISION-203)
+// ---------------------------------------------------------------------------
+
+/**
+ * The kinds a Session can APPROVE: the edit-time gain kinds minus the on-record
+ * participant enrolment (Phase 3 refinement 3). Participant enrolment takes
+ * effect on record and never waits for the Session, so a pending participant
+ * row is not approvable (it can still be denied or withdrawn: junk is cleaned
+ * up softly).
+ *
+ * DERIVED, not retyped, and PINNED EQUAL by source-scan tests
+ * (`roll-action-kinds.test.ts`) to BOTH SQL lists: the `v_t.kind not in (...)`
+ * list inside `presby_decide_roll_action()` (`drizzle/0062`) and the
+ * `kind in (...)` list in 0063's narrowed `roll_actions_insert_pending_only`
+ * policy. The three must move together: a kind the policy admits but the
+ * function refuses is a row that blocks its person forever (F191).
+ */
+export const APPROVABLE_ROLL_ACTION_KINDS = EDIT_TIME_ROLL_ACTION_KINDS.filter(
+  (kind): kind is Exclude<EditTimeRollActionKind, OnRecordRollActionKind> =>
+    !isOnRecordKind(kind),
+);
+
+export type ApprovableRollActionKind = (typeof APPROVABLE_ROLL_ACTION_KINDS)[number];
+
+export function isApprovableKind(kind: unknown): kind is ApprovableRollActionKind {
+  return (
+    typeof kind === "string" &&
+    (APPROVABLE_ROLL_ACTION_KINDS as readonly string[]).includes(kind)
+  );
+}
+
+/**
+ * The five gain kinds `presby_roll_changes()` COUNTS (the two profession lines,
+ * `certificate_received`, `other_gain`). R6's "next effective row" guard uses
+ * this list so approval can never leave two consecutive counted gains on the
+ * same roll. Pinned equal to the list in `presby_decide_roll_action()` AND to
+ * the kinds `presby_roll_changes()`'s live definition names, by a test.
+ * `baptized_member_enrolled`, `affiliate_received` and the participant kinds
+ * are not counted.
+ */
+export const COUNTED_GAIN_KINDS = [
+  "profession_of_faith",
+  "reaffirmation",
+  "restoration",
+  "certificate_received",
+  "other_gain",
+] as const satisfies readonly RollActionKind[];
+
+/**
+ * The most roll actions one bulk approve may carry (R18). Here, not in
+ * `roll.ts` (`server-only`), so the bulk dialog and the pending list's page
+ * size, both of which must agree with it, can import it.
+ */
+export const BULK_APPROVE_MAX = 50;
+
+/**
+ * The closed outcome vocabularies of `presby_decide_roll_action()` and
+ * `presby_withdraw_roll_action()`, minus `ok`. Pinned equal to the
+ * `outcome := '...'` literals in `drizzle/0062` by a source-scan test, so a
+ * code the database can return that TypeScript has no copy for is a failing
+ * test and (via `decision-copy.ts`'s `Record<..., string>`) a type error.
+ */
+export const ROLL_DECISION_REFUSALS = [
+  "invalid_decision",
+  "reason_required",
+  "reason_too_long",
+  "minute_reference_too_long",
+  "not_found",
+  "already_decided",
+  "not_approvable_kind",
+  "person_deceased",
+  "person_merged",
+  "membership_ended",
+  "holds_pastoral_office",
+  "already_on_roll",
+  "active_elsewhere",
+  "provisioning_incomplete",
+] as const;
+
+export type RollDecisionRefusal = (typeof ROLL_DECISION_REFUSALS)[number];
+
+export const ROLL_WITHDRAW_REFUSALS = [
+  "reason_required",
+  "reason_too_long",
+  "not_found",
+  "already_decided",
+] as const;
+
+export type RollWithdrawRefusal = (typeof ROLL_WITHDRAW_REFUSALS)[number];
+
+/**
+ * Why a PROPOSAL (a pending membership row) was refused before or at insert:
+ * `no_session` (R15, F185: the organization has no derived Session group, so
+ * nobody could ever approve it) and `pending_exists` (R7: one pending proposal
+ * per person, `roll_actions_one_pending_per_person_idx`).
+ */
+export const PROPOSAL_REFUSALS = ["no_session", "pending_exists"] as const;
+
+export type ProposalRefusal = (typeof PROPOSAL_REFUSALS)[number];
+
+// ---------------------------------------------------------------------------
 // deriveRollFields (F173)
 // ---------------------------------------------------------------------------
 

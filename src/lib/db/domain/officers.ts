@@ -104,7 +104,9 @@ export const officerTerms = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     personId: uuid("person_id").notNull(),
-    // ruling_elder | deacon | clerk_of_session | moderator | treasurer | trustee
+    // ruling_elder | installed_pastor | co_pastor | associate_pastor | deacon
+    // | clerk_of_session | moderator | treasurer | trustee. Enforced by the
+    // officer_terms_office_allowed CHECK below (drizzle/0062 section 8, F188).
     office: text("office").notNull(),
     // Display label only, e.g. "class of 2028". Boards are divided into three
     // classes with one elected each year, and nominating committees plan by
@@ -190,6 +192,22 @@ export const officerTerms = pgTable(
       "officer_terms_org_unit_deacon_check",
       sql`${t.orgUnitId} is null or ${t.office} = 'deacon'`,
     ),
+    // drizzle/0062 section 8 (F188, DECISION-206): the office vocabulary.
+    check(
+      "officer_terms_office_allowed",
+      sql`${t.office} in ('ruling_elder', 'installed_pastor', 'co_pastor',
+        'associate_pastor', 'deacon', 'clerk_of_session', 'moderator',
+        'treasurer', 'trustee')`,
+    ),
+    // NOT EXPRESSIBLE HERE (SQL-only):
+    //   * trigger officer_terms_sync_derived, presby_sync_derived_group()
+    //     (drizzle/0062 section 8a): ruling_elder, installed_pastor,
+    //     co_pastor and associate_pastor materialise into the derived
+    //     `session` group, deacon into `diaconate` (The Court Is Not a Group;
+    //     G-3.0201). moderator stays unmapped.
+    //   * trigger officer_terms_pastor_no_roll, presby_guard_pastor_no_roll()
+    //     (drizzle/0062 section 8d, S1): an open pastor-office term cannot be
+    //     recorded for a person on this organization's roll.
   ],
 );
 

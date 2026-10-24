@@ -39,9 +39,13 @@ const DESCRIPTIONS: Record<Relationship, string> = {
 export function ConnectionStep({
   form,
   canProposeRoll,
+  memberAvailable = true,
 }: {
   form: UseFormReturn<MemberWizardValues>;
   canProposeRoll: boolean;
+  /** The organization has a Session, so a member can be proposed (R15, F185).
+   * The server refuses `no_session` regardless of what was posted. */
+  memberAvailable?: boolean;
 }) {
   const {
     register,
@@ -49,7 +53,9 @@ export function ConnectionStep({
   } = form;
   const relationship = useWatch({ control: form.control, name: "relationship" });
   const options: Relationship[] = canProposeRoll
-    ? ["visitor", "participant", "member"]
+    ? memberAvailable
+      ? ["visitor", "participant", "member"]
+      : ["visitor", "participant"]
     : ["visitor"];
 
   return (
@@ -88,6 +94,15 @@ export function ConnectionStep({
           <p className="mt-2 text-sm text-muted-foreground">
             Participants and members are recorded by someone who can propose
             roll actions, such as the Clerk of Session.
+          </p>
+        )}
+        {canProposeRoll && !memberAvailable && (
+          <p
+            className="mt-2 text-sm text-muted-foreground"
+            data-testid="no-session-note"
+          >
+            This organization has no Session, so members can&apos;t be proposed
+            here. Participants and visitors can still be added.
           </p>
         )}
       </div>

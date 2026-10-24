@@ -128,6 +128,13 @@ export const AUDIT_ACTIONS = {
   // access does not.
   ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
   ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+  // A proposer withdrew a pending roll action (docs/work-log/2026-10-22-
+  // founding-admin-directory.md, Increment 2, DECISION-203). Its own key, not
+  // ROLL_ACTION_DENIED: "the Session said no" and "the clerk fixed a typo" are
+  // different facts. Written by src/lib/roll.ts with insertAuditRow() in the
+  // SAME transaction as the status change, like approve and deny. Metadata is
+  // ids and the reason only, plus `selfProposed`.
+  ROLL_ACTION_WITHDRAWN: "tenant.roll_action.withdrawn",
   // Participant enrolment/removal and its undo take effect ON RECORD, with no
   // Session approval (docs/work-log/2026-10-22-founding-admin-directory.md,
   // DECISION-198, R8) — written by src/lib/roll.ts with insertAuditRow() in

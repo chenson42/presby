@@ -226,15 +226,28 @@ export { eventTypeSeedPlan };
 
 /**
  * The baseline `app_roles` to seed for a freshly-created org — sibling to
- * `groupSeedPlan()`, same inline-conditional shape. Per DECISION-100 /
- * Phase 2's ruling, this returns the SAME one-item plan for every
- * `organizationType` today (congregation, presbytery, synod,
- * general_assembly, new_worshiping_community all get exactly `member` /
- * `directory.view` / `active_membership`). `organizationType` is accepted —
- * and unused in the body — purely so this helper stays call-compatible with
- * `groupSeedPlan()`'s shape and is ready to branch the day a genuinely
- * type-varying baseline role is proposed, without a signature change at that
- * point. Do not add a conditional branch pre-emptively.
+ * `groupSeedPlan()`, same inline-conditional shape.
+ *
+ * Every organization type gets `member` (`directory.view` + `events.view`,
+ * bound to `active_membership`). A CONGREGATION also gets `session_member`
+ * (DECISION-202, Increment 2): `roll.approve` ONLY, bound to the derived
+ * `session` group, so the people the congregation's own officer records seat on
+ * its Session can decide the roll actions the clerk proposes. This is the
+ * extension DECISION-100's comment anticipated ("ready to branch the day a
+ * genuinely type-varying baseline role is proposed"), not a reversal: the
+ * function was kept call-compatible with `groupSeedPlan()` so branching it
+ * needed no signature change. Other organization types are unchanged: only
+ * congregations have a Session group (F185).
+ *
+ * `session_member` carries `roll.approve` and nothing else. No baseline or
+ * template role holds both roll keys (`roll.propose` and `roll.approve` stay in
+ * separate roles; a clerk who is also an elder holds both through two roles),
+ * and the dev fixture's extra `directory.view` is not copied because the
+ * `member` role already grants it to every live membership. The role is
+ * constitutional and protected, and the roster that reaches it is constituted
+ * by `officers.manage` (DECISION-205), not by the roll. `drizzle/0062`
+ * backfills the same role (key `session_member`, the only discriminator) for
+ * congregations created before this plan existed.
  *
  * The member role holds TWO permissions, `directory.view` and `events.view`
  * (DECISION-160 R9, the member calendar's read grant) — `permissionKeys` is a
@@ -248,21 +261,29 @@ export { eventTypeSeedPlan };
  * columns — confirmed out of scope (DECISION-100).
  */
 export function baselineRoleSeedPlan(
-  // Unused today — kept for call-compatibility with groupSeedPlan(); see the
-  // doc comment above.
   organizationType: OrganizationType,
 ): Array<{
   key: string;
   name: string;
   permissionKeys: readonly string[];
-  boundToDerivedFrom: "active_membership";
+  boundToDerivedFrom: "active_membership" | "session";
 }> {
+  const member = {
+    key: "member",
+    name: "Member",
+    permissionKeys: ["directory.view", "events.view"],
+    boundToDerivedFrom: "active_membership" as const,
+  };
+  if (organizationType !== "congregation") {
+    return [member];
+  }
   return [
+    member,
     {
-      key: "member",
-      name: "Member",
-      permissionKeys: ["directory.view", "events.view"],
-      boundToDerivedFrom: "active_membership",
+      key: "session_member",
+      name: "Session member",
+      permissionKeys: ["roll.approve"],
+      boundToDerivedFrom: "session" as const,
     },
   ];
 }
@@ -423,11 +444,11 @@ export async function createOrganization(
         );
         if (!boundGroup) {
           // groupSeedPlan() always includes the active_membership entry for
-          // every organizationType (see its own doc comment) — this is
-          // unreachable in practice, but throwing here (rather than
-          // silently skipping the role seed) fails the whole transaction
-          // loudly instead of shipping an org with no working directory
-          // access.
+          // every organizationType, and the session entry for a congregation
+          // (see its own doc comment) — this is unreachable in practice, but
+          // throwing here (rather than silently skipping the role seed) fails
+          // the whole transaction loudly instead of shipping an org with no
+          // working directory access or no Session role.
           throw new Error(
             `org-provisioning: no "${r.boundToDerivedFrom}" group was seeded; cannot bind the "${r.key}" baseline role`,
           );

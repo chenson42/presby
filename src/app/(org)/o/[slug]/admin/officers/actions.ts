@@ -3,18 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { resolveOrgContext } from "@/lib/authz";
-import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import {
   endOfficerTerm,
   setOfficerTermPublicDisplayOrder,
   setOfficerTermPublicListed,
   startOfficerTerm,
   type EndOfficerTermInput,
-  type OfficerOffice,
+  type OfficersResult,
   type SetOfficerTermPublicDisplayOrderInput,
   type SetOfficerTermPublicListedInput,
   type StartOfficerTermInput,
 } from "@/lib/officers";
+import { OFFICE_LABELS } from "@/lib/officer-offices";
 import type { ActionResult } from "@/types/actions";
 
 /**
@@ -24,11 +24,14 @@ import type { ActionResult } from "@/types/actions";
  * membership/org_unit scoping, the exclusion-constraint mapping, the no-
  * upsert/no-delete write path) lives in and is proven by `src/lib/officers.ts`
  * / `officers.test.ts` — this file's only job is the auth-in-the-action-body
- * plumbing, the error→copy mapping named in Phase 3's API contract, and the
- * audit write. Read paths (`listOfficerRoster`/`getOfficerHistory`/
- * `getOfficerFormOptions`) are called directly from the page (a Server
- * Component), not through this file — same shape as `admin/roles/page.tsx`
- * calling `listGrants`/`getGrantFormOptions` directly.
+ * plumbing and the error→copy mapping named in Phase 3's API contract. The
+ * audit rows for starting and ending a term are written by `startOfficerTerm()`
+ * and `endOfficerTerm()` themselves, in the same transaction as the term
+ * (Increment 2, R13); this file calls no `recordAudit()` at all. Read paths
+ * (`listOfficerRoster`/`getOfficerHistory`/`getOfficerFormOptions`) are called
+ * directly from the page (a Server Component), not through this file — same
+ * shape as `admin/roles/page.tsx` calling `listGrants`/`getGrantFormOptions`
+ * directly.
  *
  * `organizationId` NEVER comes from client-supplied form data. Both actions
  * take the URL `slug` and re-resolve it through `resolveOrgContext()` —
@@ -68,6 +71,10 @@ import type { ActionResult } from "@/types/actions";
  *     disambiguate on, so one message covers both).
  *   - `forbidden`        → "You don't have permission to manage officer
  *     terms here."
+ *   - `on_roll`          → a pastor can't also be on this congregation's roll
+ *     (S1, DECISION-206).
+ *   - `invalid_office_for_org` → Session and Board of Deacons offices belong
+ *     to congregations (F189: this used to be a raw foreign-key error).
  *
  * `setOfficerTermPublicListedAction` (docs/work-log/
  * 2026-08-27-public-staff-directory.md) IS A DELIBERATE DIVERGENCE from this
@@ -80,7 +87,13 @@ import type { ActionResult } from "@/types/actions";
  */
 
 async function resolveActingIdentity(slug: string): Promise<
-  | { ok: true; userId: string; personId: string; organizationId: string }
+  | {
+      ok: true;
+      userId: string;
+      email: string | null;
+      personId: string;
+      organizationId: string;
+    }
   | { ok: false; error: string }
 > {
   const session = await auth();
@@ -99,10 +112,40 @@ async function resolveActingIdentity(slug: string): Promise<
   return {
     ok: true,
     userId: session.user.id,
+    email: session.user.email ?? null,
     personId: resolved.org.personId,
     organizationId: resolved.org.organizationId,
   };
 }
+
+const FORBIDDEN_COPY = "You don't have permission to manage officer terms here.";
+
+/** The one copy for every non-ok `OfficersResult`, so the actions cannot
+ * drift (a type error if a new kind is added without copy). `invalidTarget`
+ * differs by action ("that person or district" vs "that officer term"). */
+function describeOfficersFailure(
+  result: Exclude<OfficersResult<unknown>, { kind: "ok" }>,
+  invalidTarget: string,
+): string {
+  switch (result.kind) {
+    case "forbidden":
+      return FORBIDDEN_COPY;
+    case "invalid_target":
+      return invalidTarget;
+    case "invalid_input":
+      return result.message;
+    case "overlap":
+      return `${result.personName} already has an open term as ${result.officeLabel} — end it first.`;
+    case "on_roll":
+      return `${result.personName} is on this congregation's roll. A pastor's membership is held by the presbytery, so a pastor can't also be recorded on the roll here.`;
+    case "invalid_office_for_org":
+      return `${result.officeLabel} isn't available for this kind of organization. Session and Board of Deacons offices belong to congregations.`;
+  }
+}
+
+const PERSON_OR_DISTRICT_COPY =
+  "That person or district doesn't belong to this organization.";
+const TERM_GONE_COPY = "That officer term no longer exists.";
 
 // ---------------------------------------------------------------------------
 // startOfficerTermAction
@@ -115,49 +158,30 @@ export async function startOfficerTermAction(
   const identity = await resolveActingIdentity(slug);
   if (!identity.ok) return { ok: false, error: identity.error };
 
+  // An unknown office would make the lib throw (bad input is a caller bug);
+  // a user must see a message, not a 500, so the action checks it first. The
+  // list is the pure vocabulary, not a client-supplied one.
+  if (!input || typeof input.office !== "string" || !(input.office in OFFICE_LABELS)) {
+    return { ok: false, error: "That office isn't available." };
+  }
+
   const result = await startOfficerTerm(
     identity.personId,
     identity.organizationId,
     identity.userId,
     input,
+    { actingUserEmail: identity.email },
   );
 
-  switch (result.kind) {
-    case "forbidden":
-      return {
-        ok: false,
-        error: "You don't have permission to manage officer terms here.",
-      };
-    case "invalid_target":
-      return {
-        ok: false,
-        error:
-          "That person or district doesn't belong to this organization.",
-      };
-    case "invalid_input":
-      return { ok: false, error: result.message };
-    case "overlap":
-      return {
-        ok: false,
-        error: `${result.personName} already has an open term as ${result.officeLabel} — end it first.`,
-      };
-    case "ok":
-      break;
+  if (result.kind !== "ok") {
+    return {
+      ok: false,
+      error: describeOfficersFailure(result, PERSON_OR_DISTRICT_COPY),
+    };
   }
 
-  await recordAudit({
-    action: AUDIT_ACTIONS.OFFICER_TERM_STARTED,
-    resourceType: "officer_term",
-    resourceId: result.data.termId,
-    metadata: {
-      organizationId: identity.organizationId,
-      personId: input.personId,
-      office: input.office,
-      startsOn: input.startsOn,
-      orgUnitId: input.orgUnitId ?? null,
-    },
-  });
-
+  // The audit row (`tenant.officer_term.started`, with `selfRecorded`) was
+  // written by startOfficerTerm() in the same transaction as the term.
   revalidatePath(`/o/${slug}/admin/officers`);
 
   return { ok: true, data: { termId: result.data.termId } };
@@ -168,18 +192,14 @@ export async function startOfficerTermAction(
 // ---------------------------------------------------------------------------
 
 /**
- * `officers.ts`'s `endOfficerTerm()` returns only a result kind, not the
- * term's person/office details — the caller (the roster page, which already
- * fetched `listOfficerRoster()` to render the row being ended) supplies them
- * so this can write a complete audit-metadata record without a second read
- * inside the action. Mirrors `revokeRoleAction`'s identical shape.
+ * The input is the term id, the end date and the reason ONLY. It used to also
+ * carry the person and office so this action could write an audit row; the lib
+ * now reads both from the term's own row, so the audit metadata is no longer
+ * client-supplied (Increment 2, R13).
  */
 export async function endOfficerTermAction(
   slug: string,
-  input: EndOfficerTermInput & {
-    personId: string;
-    office: OfficerOffice;
-  },
+  input: EndOfficerTermInput,
 ): Promise<ActionResult<{ termId: string }>> {
   const identity = await resolveActingIdentity(slug);
   if (!identity.ok) return { ok: false, error: identity.error };
@@ -187,44 +207,18 @@ export async function endOfficerTermAction(
   const result = await endOfficerTerm(
     identity.personId,
     identity.organizationId,
+    identity.userId,
     {
       termId: input.termId,
       endsOn: input.endsOn,
       endReason: input.endReason,
     },
+    { actingUserEmail: identity.email },
   );
 
-  switch (result.kind) {
-    case "forbidden":
-      return {
-        ok: false,
-        error: "You don't have permission to manage officer terms here.",
-      };
-    case "invalid_target":
-      return { ok: false, error: "That officer term no longer exists." };
-    case "invalid_input":
-      return { ok: false, error: result.message };
-    case "overlap":
-      // Unreachable from endOfficerTerm in practice — no insert happens on
-      // this path, so no exclusion constraint can fire. Handled for
-      // exhaustiveness, not because officers.ts ever returns it here.
-      return { ok: false, error: "Couldn't save that — try again." };
-    case "ok":
-      break;
+  if (result.kind !== "ok") {
+    return { ok: false, error: describeOfficersFailure(result, TERM_GONE_COPY) };
   }
-
-  await recordAudit({
-    action: AUDIT_ACTIONS.OFFICER_TERM_ENDED,
-    resourceType: "officer_term",
-    resourceId: input.termId,
-    metadata: {
-      organizationId: identity.organizationId,
-      personId: input.personId,
-      office: input.office,
-      endsOn: input.endsOn,
-      endReason: input.endReason,
-    },
-  });
 
   revalidatePath(`/o/${slug}/admin/officers`);
 
@@ -258,23 +252,8 @@ export async function setOfficerTermPublicListedAction(
     input,
   );
 
-  switch (result.kind) {
-    case "forbidden":
-      return {
-        ok: false,
-        error: "You don't have permission to manage officer terms here.",
-      };
-    case "invalid_target":
-      return { ok: false, error: "That officer term no longer exists." };
-    case "invalid_input":
-      return { ok: false, error: result.message };
-    case "overlap":
-      // Unreachable from setOfficerTermPublicListed in practice — no insert
-      // happens on this path, so no exclusion constraint can fire. Handled
-      // for exhaustiveness, matching endOfficerTermAction's own precedent.
-      return { ok: false, error: "Couldn't save that — try again." };
-    case "ok":
-      break;
+  if (result.kind !== "ok") {
+    return { ok: false, error: describeOfficersFailure(result, TERM_GONE_COPY) };
   }
 
   revalidatePath(`/o/${slug}/admin/officers`);
@@ -310,23 +289,8 @@ export async function setOfficerTermPublicDisplayOrderAction(
     input,
   );
 
-  switch (result.kind) {
-    case "forbidden":
-      return {
-        ok: false,
-        error: "You don't have permission to manage officer terms here.",
-      };
-    case "invalid_target":
-      return { ok: false, error: "That officer term no longer exists." };
-    case "invalid_input":
-      return { ok: false, error: result.message };
-    case "overlap":
-      // Unreachable from setOfficerTermPublicDisplayOrder in practice — no
-      // insert happens on this path, so no exclusion constraint can fire.
-      // Handled for exhaustiveness, matching this file's other actions.
-      return { ok: false, error: "Couldn't save that — try again." };
-    case "ok":
-      break;
+  if (result.kind !== "ok") {
+    return { ok: false, error: describeOfficersFailure(result, TERM_GONE_COPY) };
   }
 
   revalidatePath(`/o/${slug}/admin/officers`);

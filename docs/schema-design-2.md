@@ -1828,7 +1828,7 @@ Pipeline `2026-10-22-designation-revoke` (v0.38.0, migration 0060; DECISION-194�
 
 ## 2u. Community, Increment 1 — findings (F172–F178)
 
-Pipeline `2026-10-22-founding-admin-directory`, Increment 1 (v0.39.0, migration 0061; DECISION-197–201). Findings F179 onward belong to Increments 2 and 2b, which are designed in the same work-log and not built.
+Pipeline `2026-10-22-founding-admin-directory`, Increment 1 (v0.39.0, migration 0061; DECISION-197–201). Increment 2's findings (F179–F185, F188–F191) are section 2v. F186, F187 and F192 onward belong to Increments 2b and 3, which are designed in the same work-log and not built.
 
 **F172 — a founding administrator could not open Members.** The page rendered the generic forbidden state for a `people.manage` holder without `directory.view`, and the "Add person" button never drew. The immediate production cause was a purge deleting the baseline `member` grant (restored). **Closed:** the page degrades to a limited state that still offers Add person (DECISION-197), and the clerk template now carries `directory.view` (DECISION-199). Pinned by a regression test at `page.test.tsx` and a 360px e2e.
 
@@ -1836,7 +1836,7 @@ Pipeline `2026-10-22-founding-admin-directory`, Increment 1 (v0.39.0, migration 
 
 **F174 — `roll.propose` and `roll.approve` were seeded by no migration.** The two keys existed only in `scripts/seed-dev.sql`, so a fresh install (migrations plus `db:seed`) lacked them and nothing could bind them. **Closed** by 0061's catalog insert (QA ran a from-empty install). `ledger.approve` has the same gap and is out of scope.
 
-**F175 — no correction path for an approved roll row.** An approved row is frozen and the edit-time picker excludes `void`, so a mistaken participant entry would have been permanent in the app. **Closed for participant entries only** by `presby_void_participant_action()` (DECISION-198). An approved member action still has no correction path in the app, and a proposal cannot be withdrawn until Increment 2.
+**F175 — no correction path for an approved roll row.** An approved row is frozen and the edit-time picker excludes `void`, so a mistaken participant entry would have been permanent in the app. **Closed for participant entries only** by `presby_void_participant_action()` (DECISION-198). An approved member action still has no correction path in the app, and a proposal could not be withdrawn until Increment 2, which added withdrawal (F183, section 2v).
 
 **F176 — hard-delete paths in the people and membership area.** `updatePerson()` deletes the primary `contact_methods` and `addresses` rows when a field is blanked (`src/lib/people.ts`); `presby_app` holds `DELETE` on `memberships`, `roll_actions`, `households`, `addresses`, `contact_methods`, `follow_ups`, `person_notes` and `staff_positions` while only `people` carries a delete guard; pending `roll_actions` rows are deletable by design (0028, `test-rls.sql` section 20d), though under the soft-delete rule a mistaken proposal should be denied or withdrawn; the 2026-10-22 purge deleted a `role_grants` row that `ends_on` would have ended recoverably; test fixtures delete through the owner (a fixture exemption). **Open.** Filed, not fixed here. Increment 2's lockdown (0063) revokes `UPDATE` and `DELETE` on `roll_actions` only; the rest remain.
 
@@ -1844,7 +1844,33 @@ Pipeline `2026-10-22-founding-admin-directory`, Increment 1 (v0.39.0, migration 
 
 **F178 — the wizard's match step named the wrong organization.** Confirming a "same person?" match on someone already at this organization reached `memberships_guard_insert` and showed "That person already belongs to another organization." **Closed:** `matchPerson()` annotates `alreadyHere`, `createPerson()` returns `already_here`, and the wizard offers a link to the person's record (DECISION-200).
 
-**P5 — `presby_app` can insert a pending roll row and `UPDATE` it to approved (accepted residual, open until Increment 2).** 0061's restrictive policy `roll_actions_insert_pending_only` closes only the approved-at-insert half. The approval `UPDATE` remains application-gated on `roll.approve` in `decideRollAction()`, so "who may approve" is a `paper` property, not a database one, until 0063 (DECISION-203) moves approval into a definer function and revokes `UPDATE`. Exposure is low: no role holds `roll.approve`, and exploiting it needs an application bug. Recorded in DECISION-198(b), the 0061 header and the policy comment; `docs/schema-design.md` "Participants on record" states the same.
+**P5 — `presby_app` can insert a pending roll row and `UPDATE` it to approved (accepted residual; closed by Increment 2, 0063, 2026-10-23: see section 2v).** 0061's restrictive policy `roll_actions_insert_pending_only` closes only the approved-at-insert half. The approval `UPDATE` remains application-gated on `roll.approve` in `decideRollAction()`, so "who may approve" is a `paper` property, not a database one, until 0063 (DECISION-203) moves approval into a definer function and revokes `UPDATE`. Exposure is low: no role holds `roll.approve`, and exploiting it needs an application bug. Recorded in DECISION-198(b), the 0061 header and the policy comment; `docs/schema-design.md` "Participants on record" states the same.
+
+## 2v. Community, Increment 2 — findings (F179–F185, F188–F191)
+
+Pipeline `2026-10-22-founding-admin-directory`, Increment 2 (v0.41.0, migrations 0062 and 0063; DECISION-202–206). F186 and F187 (Increment 2b) and F192–F199 stay reserved. This round closes P5 and the `roll_actions` part of F176; F176 stays open for the other tables.
+
+**F179 — nothing linked to `/admin/community/pending`, and a proposer never learned that a proposal was denied or why.** **Closed:** the Community header link, the widened read gate with a read-only mode, and the decided history (DECISION-204).
+
+**F180 — `decideRollAction()` issued a plain `UPDATE` as `presby_app`, its audit rows were written after commit through `recordAudit()`, and a denied row recorded no actor.** **Closed:** definer functions, `UPDATE` and `DELETE` revoked from `presby_app` and `presby_platform` (0063), terminal rows frozen, in-transaction audit (DECISION-203). **Accepted residual:** on the owner connection the freeze is trigger-only (`roll_actions_freeze`), and a direct SQL caller of the definers would skip the audit row (`paper`, source-scan pinned).
+
+**F181 — approval did not refuse an ended membership or a deceased person, could count a duplicate gain twice in `presby_roll_changes`, raised a raw unique violation for a cross-organization active-roll collision, and gave no warning for a back-dated filed year.** **Closed:** typed refusals, the two-direction `already_on_roll` guard, one pending proposal per person, `active_elsewhere`, `affects_filed_period` (DECISION-203).
+
+**F182 — the founding administrator can record themselves as an elder and approve their own proposals, and an elder recorded with no account cannot approve.** **Open residual (`paper`):** permitted, stamped `selfRecorded` and `selfApproved`, detected by audit and not prevented (DECISION-205; the chain is now stated in CLAUDE.md, Two Hierarchies). Nothing reads the audit trail for it yet (docs/TODO.md). The no-account half is told honestly in six states until Increment 2b closes it.
+
+**F183 — only `roll.approve` could deny, nobody held it at a new congregation, and Increment 1's `pending_action` refusal then blocked every on-record participant act for that person.** **Closed** by withdrawal and the `session_member` role (DECISION-203, DECISION-202).
+
+**F184 — no required reason, no length caps, and the roll action id was not validated as a UUID.** **Closed:** bounds in the database and the actions (reason 1 to 500, minute reference at most 200, UUID shape).
+
+**F185 — only congregations have a Session group, yet the wizard offered Member by `roll.propose` alone.** **Closed:** `no_session` server-side and the Member option shown only where a Session exists (DECISION-205).
+
+**F188 — G-3.0201's installed pastors and associate pastors were not mapped, `installed_pastor` was an office in the seed but missing from `OFFICER_OFFICES`, and `officer_terms.office` had no vocabulary CHECK.** **Closed** by DECISION-206 (operator confirmed): the CASE, the nine-value CHECK, the no-roll guard (which also fires on `ends_on`).
+
+**F189 — 6 of 9 non-fixture congregations on the branch lacked a `session` group (7 lacked `diaconate`), so recording a ruling elder there raised a raw foreign-key error.** **Closed:** 0062 seeds the missing groups and `startOfficerTerm` returns a typed result. Production measured 0 at design time.
+
+**F190 — the dev `stated_clerk` holds both `roll.propose` and `roll.approve`, and the dev `session_member` also holds `directory.view`; neither is a template or a baseline.** **Recorded, not fixed** (fixture drift in `scripts/seed-dev.sql`; the tests that need a propose-only actor build one). Tracked in docs/TODO.md.
+
+**F191 — the 0061 insert policy let `presby_app` insert a pending void, loss or opening-balance row that no definer will ever approve, and with one pending row per person it would block every proposal for that person.** **Closed** by 0063's narrowed policy (the seven approvable kinds).
 
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 

@@ -1814,3 +1814,10 @@ The two things closest to one, if the operator or orchestrator skips them:
 | 6 — Shipped vs intent | analyst | Complete. Every Phase 1 send path is registered and either wired, classified, or tracked (giving: D7, bounce handling and 2b: TODO). All 14 Phase 1 gaps addressed in code, as a recorded accepted residual, or as a tracked follow-up. Three Phase 3 release-note lines corrected (search, removal, staff display). The owed platform invite copy classified as a separate polish commit before 2b. QA's three non-blocking notes classified as follow-ups. 14 TODO-ready lines supplied. Ship conditions listed for the orchestrator (the operator told about D7 and the staff-anchor limit; journal, patches, ER2a diff, decisions, docs, map and TODO in the ship commit; what's-new advisory). | SHIP WITH NOTES | 2026-10-23 |
 
 **Next agent:** none. This verdict closes the entry once the orchestrator lands the ship conditions and TODO lines. The orchestrator also tells the operator about D7 and the staff-anchor limit. The next pipeline work is the owed invite-copy polish, then Increment 2b.
+
+---
+
+## Operator ruling after Phase 6 (2026-10-23)
+
+- **D7 acknowledged:** "keep giving on the donor record for now, go". Giving statement notices stay addressed to the donor record only; the personal-address fallback remains a tracked follow-up, not a defect.
+- **Staff-anchor Work-address limit:** told to the operator at Phase 6; no change requested. Stays a tracked follow-up.

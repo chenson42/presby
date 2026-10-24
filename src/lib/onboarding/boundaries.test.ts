@@ -265,6 +265,7 @@ describe("S4: designation-holders.ts is imported only from (admin) code (DECISIO
       "designation-holder-types.ts",
       "designation-holder-copy.ts",
       "designation-holder-rows.ts",
+      "invitation-copy.ts",
     ]) {
       const code = read(path.join(SRC, "lib/onboarding", name));
       expect(code, name).not.toMatch(/@\/lib\/db/);

@@ -773,7 +773,10 @@ test.describe("Admin — treasurer invitation (online giving)", () => {
 
     const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
     await expect(notice).toBeVisible({ timeout: 20_000 });
-    await expect(notice).toContainText(/Nobody holds this access until it is accepted/);
+    await expect(notice).toContainText(`Invitation sent to ${treasurerEmail}.`);
+    await expect(notice).toContainText(/The treasurer designation takes effect when .+ accepts it from the email\. Until then nobody holds this access\./);
+    // The open line replaces "nobody holds ... until it is accepted" with the named person.
+    await expect(section).toContainText(/An invitation is open for .+\. Nobody holds this access until .+ accepts it\./);
     // The pending row replaces the form: the control is gone, the row shows the address and its state.
     await expect(section.getByLabel(/treasurer.s email address/i)).toHaveCount(0);
     const row = section.getByTestId("invitation-row");
@@ -974,7 +977,13 @@ test.describe("Admin — founding administrator invitation", () => {
     const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
     await expect(notice).toBeVisible({ timeout: 20_000 });
     noticeForNewAddress = ((await notice.textContent()) ?? "").replace(/\s+/g, " ").trim();
-    expect(noticeForNewAddress).toMatch(/Nobody holds this role until it is accepted/);
+    expect(noticeForNewAddress).toContain(
+      `The founding administrator designation takes effect when ${INVITE_NAMES.first} ${INVITE_NAMES.last} accepts it from the email. Until then nobody holds this role.`,
+    );
+    expect(noticeForNewAddress).toContain(`Invitation sent to ${address}.`);
+    // The notice names the typed address and name; mask them so the second send's screen can be
+    // compared on everything else (the account-existence property must not change it).
+    noticeForNewAddress = noticeForNewAddress.split(address).join("<address>").split(`${INVITE_NAMES.first} ${INVITE_NAMES.last}`).join("<name>");
     const row = section.getByTestId("invitation-row");
     await expect(row).toContainText(address);
     await expect(row).toContainText(`${INVITE_NAMES.first} ${INVITE_NAMES.last}`);
@@ -1039,7 +1048,13 @@ test.describe("Admin — founding administrator invitation", () => {
 
     const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
     await expect(notice).toBeVisible({ timeout: 20_000 });
-    const noticeForExisting = ((await notice.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    const noticeForExisting = ((await notice.textContent()) ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(E2E_USERS.member.email)
+      .join("<address>")
+      .split("Operator Selfaddress")
+      .join("<name>");
     expect(noticeForExisting, "the sender's screen is the same whether or not the address has an account").toBe(noticeForNewAddress);
     await expect(section.getByTestId("invitation-row")).toContainText("Pending");
 
@@ -1048,5 +1063,77 @@ test.describe("Admin — founding administrator invitation", () => {
       select (select count(*)::int from memberships where organization_id = ${orgB.orgId}::uuid) as memberships,
              (select count(*)::int from role_grants where organization_id = ${orgB.orgId}::uuid) as grants`) as { memberships: number; grants: number }[];
     expect(written[0]).toEqual({ memberships: 0, grants: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 9 — a long UNBROKEN invitee name at a 360 px phone viewport
+// (docs/work-log/2026-10-24-invite-accept-copy.md, QA run 1, regression for the
+// open line and the list "For" row overflowing). The name validates at 100
+// characters per part, and a string with no spaces gives the browser nowhere to
+// wrap, so every surface that prints it needs an explicit wrap rule. After the
+// send, nothing in the section may extend past the viewport and the document may
+// not scroll sideways.
+// ---------------------------------------------------------------------------
+
+test.describe("Admin — founding administrator invitation, long unbroken name at 360 px", () => {
+  test.use({ storageState: storageStatePath("admin"), viewport: { width: 360, height: 740 } });
+  test.setTimeout(90_000);
+
+  let org: InviteOrg;
+
+  test.beforeAll(async () => {
+    org = await setupInviteOrg(platformSql());
+  });
+
+  test.afterAll(async () => {
+    await removeInviteOrg(platformSql(), org);
+  });
+
+  test("the notice, the open line and the For row wrap; no element passes the viewport and the page does not scroll sideways — regression for long-name overflow", async ({
+    page,
+  }) => {
+    const first = "W".repeat(100);
+    const last = "M".repeat(100);
+    const address = inviteAddress(org, "long-name");
+
+    await page.goto(`/admin/organizations/${org.orgId}`);
+    const section = page.getByTestId("founding-administrator-section");
+    const email = section.getByLabel("Email address");
+    await expect(email).toBeEnabled({ timeout: 15_000 });
+    await email.fill(address);
+    await section.getByLabel("First name").fill(first);
+    await section.getByLabel("Last name").fill(last);
+    await section.getByRole("button", { name: "Send invitation" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Yes, send invitation" }).click();
+
+    // The notice, the standing open line and the pending row all name the person.
+    const fullName = `${first} ${last}`;
+    const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
+    await expect(notice).toBeVisible({ timeout: 20_000 });
+    await expect(notice).toContainText(fullName);
+    await expect(section).toContainText(`An invitation is open for ${fullName}.`, { timeout: 20_000 });
+    const row = section.getByTestId("invitation-row");
+    await expect(row).toContainText(fullName);
+
+    const offenders = await page.evaluate(() => {
+      const viewport = document.documentElement.clientWidth;
+      const section = document.querySelector('[data-testid="founding-administrator-section"]');
+      const found: string[] = [];
+      for (const el of section ? [section, ...Array.from(section.querySelectorAll("*"))] : []) {
+        const label = `${el.tagName.toLowerCase()}${el.getAttribute("data-testid") ? `[${el.getAttribute("data-testid")}]` : ""}`;
+        const right = el.getBoundingClientRect().right;
+        if (right > viewport + 1) found.push(`${label} right edge ${Math.round(right)}px`);
+        // Text that overflows its own box does not move the box's edge, so also compare
+        // the content width with the box (inline elements report clientWidth 0).
+        if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1) {
+          found.push(`${label} content ${el.scrollWidth}px in a ${el.clientWidth}px box`);
+        }
+      }
+      return { viewport, found, docWidth: document.documentElement.scrollWidth };
+    });
+    expect(offenders.viewport).toBeLessThanOrEqual(360);
+    expect(offenders.found, "no element in the section extends past the viewport").toEqual([]);
+    expect(offenders.docWidth, "the document has no horizontal scroll").toBeLessThanOrEqual(offenders.viewport);
   });
 });

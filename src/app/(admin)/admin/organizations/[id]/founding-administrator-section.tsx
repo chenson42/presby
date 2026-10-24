@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { HydrationGate } from "@/components/shared/hydration-gate";
 import type { OrganizationType } from "@/lib/authz";
 import { sectionLead } from "@/lib/onboarding/designation-holder-copy";
+import { expiredInvitationLine, openInvitationLine } from "@/lib/onboarding/invitation-copy";
 import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
 import { inviteFoundingAdministratorAction } from "./actions";
@@ -120,6 +121,9 @@ export function FoundingAdministratorSection({
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  // The address of the last send, kept after the form clears so the notice can
+  // name it (the form fields are emptied on success).
+  const [sentAddress, setSentAddress] = useState<string | undefined>(undefined);
 
   const trimmedEmail = email.trim();
   const formValid =
@@ -148,19 +152,25 @@ export function FoundingAdministratorSection({
     },
     successToast: `Invitation to ${trimmedEmail} sent.`,
     onSent: () => {
+      setSentAddress(trimmedEmail);
       setEmail("");
       setFirstName("");
       setLastName("");
     },
   });
 
-  const hasOpen = invitations.some((i) => i.status === "pending" || i.status === "expired");
+  const openInvitation = invitations.find((i) => i.status === "pending" || i.status === "expired");
+  const hasOpen = openInvitation !== undefined;
   const list = (
-    <InvitationList organizationId={organizationId} invitations={invitations} role="role" />
+    <InvitationList
+      organizationId={organizationId}
+      invitations={invitations}
+      purpose="founding_administrator"
+    />
   );
   // The result of the last send, kept after the form gives way to the open row.
   const sentNotice = flow.result ? (
-    <InvitationSentNotice result={flow.result} address={undefined} role="role" />
+    <InvitationSentNotice result={flow.result} address={sentAddress} purpose="founding_administrator" />
   ) : null;
   const revokeStatus = revokeNotice ? (
     <p role="status" className="mt-3 rounded-md border border-border bg-muted p-3 text-sm">
@@ -202,9 +212,10 @@ export function FoundingAdministratorSection({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Founding administrator
         </h2>
-        <p className="mt-1 text-sm text-foreground">
-          An invitation is open. Nobody holds this role until it is accepted. Resend it if the email went
-          astray, or revoke it to invite someone else.
+        <p className="mt-1 text-sm text-foreground [overflow-wrap:anywhere]">
+          {openInvitation?.status === "expired"
+            ? expiredInvitationLine("founding_administrator", openInvitation.inviteeDisplayName)
+            : openInvitationLine("founding_administrator", openInvitation?.inviteeDisplayName)}
         </p>
         {revokeStatus}
         {sentNotice}

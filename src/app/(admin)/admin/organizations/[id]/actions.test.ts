@@ -149,6 +149,7 @@ import {
   revokeDesignationHolderAction,
 } from "./actions";
 import { AUDIT_ACTIONS } from "@/lib/audit";
+import { INVITATION_WARNING_COPY } from "@/lib/onboarding/invitation-copy";
 import { FEATURES } from "@/lib/permissions";
 import {
   organizationBrands,
@@ -1120,7 +1121,14 @@ const EXPIRES = new Date("2026-10-28T12:00:00Z");
 
 const FA_FIELDS = { organizationId: VALID_ORG, email: VALID_EMAIL, firstName: "Marisol", lastName: "Quenby" };
 const TR_FIELDS = { organizationId: VALID_ORG, email: VALID_EMAIL };
-const INVITE_OK = { kind: "ok", invitationId: VALID_INVITATION, expiresAt: EXPIRES, delivery: "sent", selfAddressed: false };
+const INVITE_OK = {
+  kind: "ok",
+  invitationId: VALID_INVITATION,
+  expiresAt: EXPIRES,
+  delivery: "sent",
+  selfAddressed: false,
+  inviteeDisplayName: "Marisol Quenby",
+};
 
 const ALL_ACTIONS: Array<[string, (fd: FormData) => Promise<unknown>, Record<string, string>, ReturnType<typeof vi.fn>]> = [
   ["inviteFoundingAdministratorAction", inviteFoundingAdministratorAction, FA_FIELDS, mockCreateInvitation],
@@ -1191,6 +1199,7 @@ describe("inviteFoundingAdministratorAction", () => {
       expiresAt: EXPIRES.toISOString(),
       delivery: "queued",
       selfAddressed: true,
+      inviteeDisplayName: "Marisol Quenby",
     });
     expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
@@ -1280,8 +1289,8 @@ describe("inviteTreasurerAction", () => {
   // Operator ruling 2026-10-23 (person-emails): a SENT invitation to an address on a person who
   // already signs in carries a non-blocking warning. The action only maps it to a sentence.
   describe("the signed-in-address warning is a non-blocking note on a SENT invitation", () => {
-    const WARNING_COPY =
-      "That address is already on file for a person here who signs in. The invitation was sent, but it will be refused unless the invitee accepts while signed in to that person's own account.";
+    // Imported from the shared copy module, not copied: the action maps the code to this string.
+    const WARNING_COPY = INVITATION_WARNING_COPY.address_on_signed_in_person;
 
     it.each([
       ["inviteTreasurerAction", inviteTreasurerAction, TR_FIELDS],
@@ -1295,6 +1304,7 @@ describe("inviteTreasurerAction", () => {
         expiresAt: EXPIRES.toISOString(),
         delivery: "sent",
         selfAddressed: false,
+        inviteeDisplayName: "Marisol Quenby",
         warnings: [{ code: "address_on_signed_in_person", message: WARNING_COPY }],
       });
       expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
@@ -1332,14 +1342,29 @@ describe("resendInvitationAction / revokeInvitationAction / revokeAllInvitations
   });
 
   it("resend passes the organization AND the invitation (the invitation must belong to the organization) and the session actor", async () => {
-    mockResendInvitation.mockResolvedValue({ kind: "ok", invitationId: "new-id", expiresAt: EXPIRES, delivery: "sent" });
+    mockResendInvitation.mockResolvedValue({
+      kind: "ok", invitationId: "new-id", expiresAt: EXPIRES, delivery: "sent", inviteeDisplayName: "Perpetua",
+    });
     const out = await resendInvitationAction(formData(FIELDS));
-    expect(out).toEqual({ ok: true, invitationId: "new-id", expiresAt: EXPIRES.toISOString(), delivery: "sent" });
+    expect(out).toEqual({
+      ok: true, invitationId: "new-id", expiresAt: EXPIRES.toISOString(), delivery: "sent", inviteeDisplayName: "Perpetua",
+    });
     expect(mockResendInvitation).toHaveBeenCalledWith({
       organizationId: VALID_ORG, invitationId: VALID_INVITATION,
       actor: { userId: "operator-1", email: "operator@example.invalid" },
     });
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
+  });
+
+  it("the invitee name is passed through as given and omitted (no key) when the server derived none", async () => {
+    mockCreateInvitation.mockResolvedValue({ ...INVITE_OK, inviteeDisplayName: "Perpetua" });
+    expect(await inviteTreasurerAction(formData(TR_FIELDS))).toMatchObject({ ok: true, inviteeDisplayName: "Perpetua" });
+    mockCreateInvitation.mockResolvedValue({ ...INVITE_OK, inviteeDisplayName: null });
+    expect(await inviteTreasurerAction(formData(TR_FIELDS))).not.toHaveProperty("inviteeDisplayName");
+    mockResendInvitation.mockResolvedValue({
+      kind: "ok", invitationId: "new-id", expiresAt: EXPIRES, delivery: "sent", inviteeDisplayName: null,
+    });
+    expect(await resendInvitationAction(formData(FIELDS))).not.toHaveProperty("inviteeDisplayName");
   });
 
   it.each([

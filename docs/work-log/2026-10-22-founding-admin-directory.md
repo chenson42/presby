@@ -6277,3 +6277,12 @@ Then the **tech-lead** folds the addendum and the reconciliation table into a si
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | Inc 2b · 1 — Phase 1 addendum 2 (auto-connect, accept in place, reconciliation with v0.41–v0.42.2) | analyst | Complete. Gaps G10–G22 raised; no local self-registration exists and `email_verified` is unreliable; connection is not authority-neutral (restricted to authority-free, non-visitor, single-match persons); the contact-email invariant and the credential model need an architect addendum; a stale-design reconciliation table supplied; four operator questions with defaults; `/no-organization` copy for each state. | READY WITH NOTES | 2026-10-24 |
+
+---
+
+## Increment 2b — operator rulings on the Phase 1 addendum 2 questions (2026-10-24)
+
+- **Q1, who auto-connects: "Also elders, not visitors"** (the operator chose against the analyst's default). Auto-connect also binds people who hold a role or a Session/diaconate seat. Visitors still need an invitation; shared addresses, two-congregation people, ended or merged records and already-linked records still decline. Accepted residual: a `people.manage` holder who types an address onto an authority-bearing record can bind that authority to whoever controls the address, with no sender ceiling, rate limit or confirm step; detected by audit (`tenant.person_email.*` then `tenant.person.sign_in_connected`), not prevented. `paper`. The architect addendum must address it (e.g. require 2FA before connecting an authority-bearing record, and stamp the audit row with what the record carried).
+- **Q2, accept-in-place for founding administrator and treasurer: yes**, once address proof (G10) lands in the same increment, with two-step sign-in enforced and the acceptance audited as accepted on site.
+- **Q3 (reject an unverified Google address) and Q4 (disconnect stays out of 2b, first follow-up):** not asked separately; the analyst's defaults stand.
+- **Premise check 4** (the treasurer case) is still to be confirmed with the operator.

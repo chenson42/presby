@@ -27,6 +27,7 @@
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
 | Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23; Batch B (server: library, actions, in-transaction audit; 0063 applied to the pipeline branch, twice, so the branch is in the lockdown state) complete 2026-10-23; Batches C and D (UI, e2e, hydration, 360px pass) complete 2026-10-23 — Phase 4 Complete for Increment 2 | — | — |
 | Inc 2 · 5 — Verification | qa | Run 1 FAIL (2 copy defects) → ruling + fix 0e88167; Run 2 FAIL (bulk panel sentence) → fix 3dab58c; Run 3 (scoped) green: check 8/8, unit 7779/0, new pinning test fails on old dialog, community-approval 13/13 both widths after one Neon-drop re-run | PASS (run 3) | 2026-10-23 |
+| Inc 2 · 6 — Shipped vs intent | analyst | Complete for Increment 2 (entry stays open for 2b and 3). Every Phase 1 verb works for the right person; two ruled drifts; can't-act states truthful with two copy nits; 11 follow-ups; 13 integration conditions incl. a manual bootstrap walk | SHIP WITH NOTES | 2026-10-23 |
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
@@ -5466,7 +5467,7 @@ Not re-measured. The change doesn't touch `permissions.ts`, `two-factor.ts` or `
 ### Increment 2 — Batch C bulk-panel fix
 
 Fixes the Phase 5 run 2 FAIL (ux-developer, Phase 4).
-- `bulk-approve-dialog.tsx`: deleted the "Open each one to approve, deny or withdraw it." sentence from the partial-result panel; no replacement wording. The result view now sets `aria-describedby` undefined so Radix does not warn about a missing description.
+- `bulk-approve-dialog.tsx`: deleted the "Open each one to approve, deny or withdraw it." sentence from the partial-result panel; no replacement wording. The result view now sets `aria-describedby` undefined so Radix does not warn [orchestrator correction after QA run 3: Radix 1.1.23 does not warn; the line is a no-op, kept to avoid a re-test] about a missing description.
 - `pending-worklist.test.tsx`: new test pins the panel (title, per-row name and reason; no "withdraw", no "Open each one").
 - `e2e/support/community-fixture.ts`: `createParticipantViaSql`, `createStaffAnchorViaSql` and `createProposalViaSql` now throw unless `n` is an integer in 0..99, enforcing the disjoint ranges.
 - Next agent: qa (scoped re-check).
@@ -5617,3 +5618,257 @@ Not re-measured. The change doesn't touch `permissions.ts`, `two-factor.ts` or `
    - Run 2 reported 0 such rows. Run 2 ran at about 02:00 UTC 10/24, after these rows already existed, so its count was probably taken on a connection that RLS filters.
    - Worth one sweep before integration.
 6. **Local Node:** still v20.20.2 against `.nvmrc` 22. Unchanged from run 2.
+
+---
+
+# Increment 2 — Phase 6: Shipped vs Intent (analyst)
+
+*Returned as text. The analyst is read-only, so the orchestrator records this verbatim. I wrote nothing.*
+
+I read the Increment 2 Phase 1, the Phase 2 rulings, the Phase 3 design and its copy ruling, the Phase 4 batches, and QA runs 1–3. I also read the shipped code at HEAD `02905aa` in `/Users/cshenso/git/presby-platform/presby-fadir`:
+- `src/lib/roll.ts` (decide, deny, withdraw, bulk, queue reads, Session state)
+- `src/lib/session-approval-state.ts`
+- `src/lib/officers.ts` (pastor and Session path)
+- `community/pending/*` and `community/page.tsx`
+- `drizzle/0062` and `0063` (header, 0063 in full)
+
+I did not run the app, a browser or the database. Where I say a flow works, I mean the code, the tests and QA's recorded evidence agree.
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+This closes Increment 2 only. The work-log entry stays open for Increment 2b and Increment 3. No Phase 1 verb is missing and nothing regressed. Every note below is a follow-up or an integration condition. One of the conditions is a manual walk of the first-congregation bootstrap, because no single test covers it end to end.
+
+## ONE-LINE TAKE
+
+> A congregation's Session can now approve, deny and bulk-approve what the clerk proposes, and the clerk can see the queue and withdraw a mistake. The database enforces who may decide, each outcome writes its audit row in the same transaction, and every "can't act yet" state says only what the system actually knows. Elders other than the founding administrator still cannot approve until 2b gives them a way to sign in, and the product says so.
+
+## What's Working
+
+- **The F183 trap is gone.** A mistaken member proposal can be withdrawn from the queue row or the person's edit page. The person is released from Increment 1's `pending_action` block, and the row stays in the record as `withdrawn`.
+- **A new congregation can bootstrap.**
+  - The `session_member` role (`roll.approve` only) is seeded at provisioning and backfilled by 0062.
+  - The founding administrator can record themselves under Officers. The page says this is allowed and shows a "Self-recorded" marker. The approval is stamped `selfApproved`.
+  - This is the operator's Q1 ruling, and it is stamped rather than blocked.
+- **Each verb is gated on the right key, at both layers.**
+  - The queue read needs `roll.approve` or `roll.propose`. Decide mode needs `roll.approve`. Withdraw needs `roll.propose`.
+  - The library pre-checks, and the definer re-checks by the session's `users.id`.
+  - QA's live probes saw `presby_app` refused at the grant, the restrictive policy, the unique index and the definer identity check. The owner path is refused only by the freeze trigger.
+- **The Session state is honest, because QA run 1 forced a sixth state.**
+  - `terms_not_started` (`session-approval-state.ts:46-51`) now sits before `no_sign_in`.
+  - `no_sign_in` is reached only when `recorded > 0`, that is, when a seat is in effect.
+  - The banner for the new state says nothing about accounts and offers no action.
+- **Approval refuses what would corrupt the roll.** It refuses an ended connection, a deceased or merged person, a pastor-office holder, and a gain that would count someone twice (checked in both directions). A collision with another congregation's active roll becomes `active_elsewhere`, with copy that names no other organization. A back-dated approval warns about the filed year and never touches the filed return.
+- **The audit trail is in the transaction.** Approve, deny, withdraw, and officer-term start and end all use `insertAuditRow` in the same transaction. A denied row now records who and when.
+- **The copy re-scan ended clean.** Both QA copy defects were fixed. The bulk panel is now the title plus each name and reason, with no instruction sentence.
+
+## Intent-vs-Shipped Diff
+
+**Phase 1 verbs**
+
+| Phase 1 verb | Shipped | Verdict |
+|---|---|---|
+| Clerk sees every pending proposal, read-only | Read mode for a propose-only holder. No checkboxes, Approve or Deny. Banner in every state. | matches |
+| Clerk sees what happened and why | "Recently decided" shows approved, denied and withdrawn, with reasons, gated on the two roll keys. | matches |
+| Clerk withdraws a mistaken proposal | Withdraw is on queue rows and the edit page, gated `roll.propose`, with a required 1–500 character reason. | matches |
+| Session member opens the queue "from Community or the admin hub" | Community header link "Pending approvals" with a count, plus the edit-page notice. The hub tile was declined (Phase 3 refinement 8: the hub is permission-blind). | acceptable drift |
+| Approve one or several with one minute reference | Single approve and bulk (max 50, one transaction per row, "N approved, M need attention"). | matches |
+| Deny with a reason | Reason required and capped server-side. | matches |
+| Founding administrator records elders and sees whether the Session can act | Officers page with the Session note, pastor offices and self-recorded marker. The "can't act yet" state is on the queue banner, which shows to a viewer who cannot approve. | matches |
+| `people.manage` sees "waiting for the Session" | Unchanged from Increment 1, plus the edit-page notice. | matches |
+| Provisioning seeds the role, a migration backfills | Done in 0062, and `baselineRoleSeedPlan` is type-varying. | matches |
+| Operator Q2: "add invites into Community" so a real Session can approve | Split to 2b by the architect. Not delivered in this increment. | acceptable drift, owed |
+
+**Operator rulings**
+
+| Ruling | Shipped | Verdict |
+|---|---|---|
+| Q3: own `withdrawn` status | Shipped with a distinct audit key and `decided_by` / `decided_at`. | matches |
+| Q6: installed pastors count | In by DECISION-206 (the Batch A note records the operator's confirmation). Seated through `officer_terms`, with no invented roll membership. The S1 trigger refuses a pastor term for a rolled person. Approval refuses `holds_pastoral_office`. | matches |
+
+**Can't-act states (truthfulness)**
+
+| Viewer and state | What they see | Truthful? |
+|---|---|---|
+| Read mode (propose-only) | No Approve, Deny or checkboxes. Subtitle: "Only members of the Session can approve." The banner says why nothing is moving. | Yes. The subtitle simplifies, because a custom role could carry `roll.approve`; a holder of such a role gets decide mode. |
+| No Session (non-congregation) | "No Session to approve". The Member option is hidden in the wizard, and the server refuses with `no_session`. | Yes |
+| Empty roster | A link to Officers if the viewer holds `officers.manage`, otherwise "Ask an administrator". | Yes |
+| Terms not started | "{n} members of the Session are recorded, but their terms haven't begun. The first term begins {date}…", with no account claim and no action. | Yes. QA saw it render at 360, 320 and desktop. |
+| No sign-in | "none has a PresbyPortal account yet", plus the support-ticket line. | Yes, true by construction. The support-ticket line is a placeholder for 2b. |
+| No permission | "Members of the Session are recorded and have accounts, but none of them has permission…" | **Mostly.** In a mixed roster (QA's own fixture: 2 seated, 1 with an account) "have accounts" is overbroad. The "Check Roles" pointer can send a viewer to a page they may be forbidden from. Rare, because it needs a tenant-edited role. Follow-up 2. |
+| Withdraw refused as `already_decided` | "The Session already decided this one…" | **Slightly false** when another clerk withdrew it first. Follow-up 2. |
+| Terms not started, or queue empty | The queue's own empty-state copy differs by mode, and the Session-state banner is separate. | Yes |
+| Community toggle off | "Member management isn't turned on for {name} yet." | Yes, but an elder gets no hint the queue exists. Named coupling (DECISION-204). |
+| Approver's membership ended | Whole-page "ended" state. | Yes |
+| Self-target approval | The audit row is stamped `selfTarget`. The UI shows "You proposed this" only for proposals. | Acceptable. The Phase 1 default was audit-stamped and detected. Follow-up 8. |
+
+## Edge Cases
+
+- Empty state: **pass.** The queue, Recently decided and the banners all differ by viewer and state.
+- Failure microcopy: **pass**, with the two nits above. The typed refusals are human, and `active_elsewhere` and `provisioning_incomplete` leak nothing.
+- Permission gate: **pass.** Verified at the library and definer layers, on read, decide and withdraw.
+- Audit event: **pass.**
+  - In-transaction and stamped (`selfApproved`, `selfTarget`, `selfProposed`, `selfRecorded`).
+  - Tests prove a failed audit insert rolls the decision back.
+  - Residual, `paper`: a direct SQL caller of the definers would skip the audit row. A source scan pins that only `roll.ts` names them.
+- Mobile (360px): **pass** on QA's evidence. `community-approval` ran 13/13 at both widths, including the sticky-bar geometry and 44px targets, and the `terms_not_started` banner was screenshotted at 360 and 320.
+
+**One gap I could not close by reading.** Phase 3 called the zero-approvers bootstrap "the single most important sentence". The shipped tests cover its links separately:
+- provisioning creates the role and group;
+- `startOfficerTerm` writes a Session seat;
+- a seated person inherits `roll.approve`;
+- `test-rls-62` runs the seated-elder approval.
+
+The e2e approver, however, is a fixture role granted by the person arm, not the Session group path. Nothing walks the real chain in one pass. That chain is: a founding administrator records themselves, the page flips to decide mode, and they approve their own proposal. Ship condition 10 covers it.
+
+## QA's non-blocking notes, classified
+
+| Note | Class | Disposition |
+|---|---|---|
+| UTC `proposed_on` shows tomorrow on a US evening (`roll.ts:781`) | Follow-up, not blocker | Phase 3 edge case 18 accepted UTC, consistent with Increment 1. The same cast feeds `decidedOn` (`roll.ts:893-894`), and `todayUtcYmd()` feeds the "Takes effect" badge. In a minute-keeping context a wrong date erodes trust. It goes in the release note as a known limit and into the TODO. |
+| Redundant `aria-describedby` at `bulk-approve-dialog.tsx:108`, and a wrong work-log reason | Cosmetic | Leave the code unchanged after QA's PASS. The orchestrator adds a one-line correction beside the work-log reason ("Radix 1.1.23 does not warn; the line is a no-op"). Delete the line the next time the file is touched. |
+| Test-tightening at `pending-worklist.test.tsx:264` | Follow-up, low | A neutral replacement description would pass. The real control is the design-time copy review. Tighten to a whole-text assertion when the file is next touched. |
+| `no_permission` banner points at Roles, which a proposer may lack | Follow-up | Same family as the bulk-panel defect, softened by the support-ticket alternative. It is rare: production has no tenant-held `session_member`, and the state needs a tenant-edited role. Fix with the 2b banner pass (follow-up 2). |
+| DECISION-205 six-state amendment not in `decisions.md` | **Ship condition** | The record would otherwise say "five states", and so would the TODO line. See condition 3. |
+| The 2b handoffs | Follow-up | See follow-up 4. They are binding constraints on 2b. |
+
+## Follow-Ups (SHIP WITH NOTES), TODO-ready
+
+1. `- [ ] **System-stamped dates use UTC (Community Increment 2).** "Proposed {date}" and a decision's date are cast to UTC (roll.ts:781, :893-894), and "Takes effect" and Session seat-in-effect use UTC today, so a US-evening proposal shows tomorrow's date. Pass timestamps and render in the viewer's zone through FormattedDate, or give organizations a time zone. Stated as a known limit in the 0.41.0 note. — docs/work-log/2026-10-22-founding-admin-directory.md Increment 2 Phase 6`
+2. `- [ ] **Session-state and withdraw copy pass (do with 2b).** (a) no_permission: "have accounts" is false for a mixed roster (some live seats without accounts), and "Check Roles" can point a viewer at a page they cannot open; suggest "Ask an administrator to check the Session member role, or send us a support ticket", counting accounts truthfully. (b) WITHDRAW_COPY.already_decided says "The Session already decided" when another clerk withdrew it first; suggest "This one was already decided or withdrawn." — Increment 2 Phase 6`
+3. `- [ ] **Tidy after QA run 3.** Delete the redundant aria-describedby spread at bulk-approve-dialog.tsx:108 on the next touch of that file; tighten pending-worklist.test.tsx:264 to assert the dialog's whole text. — Increment 2 Phase 5 run 3`
+4. `- [ ] **2b binding constraints from Increment 2.** (a) Replace only NO_SIGN_IN_INVITE_LINE in session-state-banner.tsx. (b) The Session hand-off appears only in no_sign_in, never in terms_not_started; 2b's e2e must seed a seat in effect. (c) Add the admin-only "Can't sign in yet" marker (R26) to the Session roster rows next to "Self-recorded". (d) Fold in the auto-connect line (TODO:137) and the /no-organization wording. (e) Check that the remedy shown to a read-mode viewer (a link to the invite card) is one the viewer can use; the invite needs people.manage. — Increment 2 Phase 6`
+5. `- [ ] **Pastor and Session follow-ups (DECISION-206, S3, S5).** (a) A pastor already on the platform through the presbytery cannot be linked to a congregation (presby_claim_person() does not exist), so the congregation sees "belongs to another organization". (b) A "Clergy" anchor connection in the wizard (S3) instead of the staff-anchor path. (c) Reconcile a congregation's pastor term against a published presbytery appointment once DECISION-112's publication exists (S5). (d) Participant enrolment of a pastor-office holder is not refused (Phase 3 refinement 7). — Increment 2 Phase 6`
+6. `- [ ] **Queue entry point for Session members.** An elder with only roll.approve reaches the queue through Admin hub, Community, Pending approvals (the hub shows no permission-based tile, Phase 3 refinement 8). Watch the first real elders; revisit with the next hub revision or add a permission-aware tile. — Increment 2 Phase 6`
+7. `- [ ] **Detect the self-recorded Session chain.** DECISION-205's residual (a founding administrator records themselves on the Session, then approves) is "detected by audit", but nothing reads it. Add an audit filter or saved query for officer_term.started with selfRecorded:true on a Session office followed by roll_action.approved with selfApproved:true, and the DECISION-194 revoke-then-self-designate chain. — Increment 2 Phase 6`
+8. `- [ ] **Self-target cue.** An approver approving their own membership (selfTarget) gets no on-screen cue, only the audit stamp. Consider a "This is you" badge in decide mode. — Increment 2 Phase 6`
+9. `- [ ] **Notify proposers and approvers.** A proposer learns of a denial only by opening Pending approvals, and a Session learns of waiting proposals only by looking. Out of Phase 1 scope; a digest or email is the follow-up. — Increment 2 Phase 6`
+10. `- [ ] **F190 fixture drift.** The dev stated_clerk holds both roll keys and the dev session_member also holds directory.view; neither is a template. Recorded, not fixed. — Increment 2 Phase 3`
+11. `- [ ] **End-to-end bootstrap test.** Add one e2e that walks a new congregation: the founding administrator records themselves as a ruling elder under Officers, Pending approvals flips to decide mode, they approve their own proposal, and the audit row carries selfRecorded and selfApproved. Natural home: 2b's e2e 10. — Increment 2 Phase 6`
+
+**Red Flags:** none.
+
+## Release-note lines (non-engineer; suggested version 0.41.0)
+
+**Feature: your Session can approve new members, and a mistaken entry can be withdrawn**
+
+**Value:** The last release let you propose a member, but nobody could approve one. Now your Session can, a clerk can see what is waiting and what happened to it, and a mistaken entry can be withdrawn instead of getting stuck.
+
+- **Who can approve.** Every congregation now has a "Session member" role. It goes to the people your congregation records on its Session under Officers: ruling elders, installed pastors, co-pastors and associate pastors. Existing congregations get the role, plus empty Session and Board of Deacons lists if they had none. Nobody gains anything until your congregation records its own people.
+- **Session members need a PresbyPortal account to approve.** Recording someone under Officers does not create one. Inviting elders to sign in is coming in a following release. Until then, the Pending approvals page says plainly when no one can approve yet and why.
+- **Starting out with one administrator.** A congregation's first administrator can record themselves as a ruling elder or pastor and then approve member entries. We allow this on purpose, because a brand-new congregation would otherwise be stuck. It is recorded, not blocked: the officer record reads "self-recorded" and the approval reads "self-approved", so your Session can look back and confirm it. Approving a member does not ask for two-step sign-in unless your organization has turned that on.
+- **Pending approvals.** Open it from Community. People who can propose roll actions see everything waiting, read-only, and what became of each entry afterward: approved, denied with the reason, or withdrawn. Session members can approve, deny with a reason, or approve up to 50 at once with one minute reference.
+- **Approving several at once is not all-or-nothing.** Each is approved and recorded separately. If one can't be approved, the others still are, and the list says which and why.
+- **Withdraw a mistaken entry.** Someone who can propose roll actions can withdraw a waiting entry, with a reason, from Pending approvals or the person's page. It stays in the record, marked withdrawn, and is never deleted. This replaces the 0.39.0 limit: a waiting entry no longer blocks enrolling or removing that person once it is decided or withdrawn. If no one on your Session can approve yet, a waiting entry still waits, and withdrawing is the way out.
+- **What approval will refuse.**
+  - A person whose connection has ended, or who is recorded as deceased or merged.
+  - A pastor of the congregation, because a pastor's membership is held by the presbytery.
+  - Someone already on that roll as of the date, because they would be counted twice.
+  - A second waiting entry for the same person.
+  - A person who is active at another congregation. This shows only as "can't be approved right now, send us a ticket", and never names that congregation.
+  - Denying is always possible.
+- **Filed years are never changed.** If an approval is dated in a year you have already filed, you are warned and the filed return stays as it was.
+- **The Member choice appears only where there is a Session.** Presbyteries and other organizations can still record participants.
+- **Everything is recorded.** Each approval, denial, withdrawal, and each officer term started or ended is written to the audit log in the same step as the change, so a decision made through PresbyPortal cannot be saved without its record. Approved, denied and withdrawn entries can no longer be changed or deleted by the application, and the database refuses it.
+
+**Known limits.**
+- Dates the system stamps itself ("Proposed", decision dates) follow UTC, so on a US evening they can show the next day. Dates you type are not changed.
+- People hidden from the Directory still appear by name in Pending approvals to those who can propose or approve roll actions, because they need to know whom they are deciding on.
+- A pastor who is already in PresbyPortal through their presbytery cannot yet be linked to a congregation to sit on its Session.
+- Turning off the Community switch also hides Pending approvals.
+- PresbyPortal staff gain no access to a congregation's roll from working for the platform. A staff member could be invited as a congregation's administrator and then record themselves on its Session, as anyone could. Every step is recorded in the audit log, and the platform does not block it.
+- Platform maintenance that works directly in the database is stopped by a database rule, not by a removed permission.
+
+**Technical:** migrations `0062_presby_session_approval` and `0063_presby_roll_decide_lockdown`. `presby_decide_roll_action()` and `presby_withdraw_roll_action()` are the only decide path. `presby_app` loses UPDATE and DELETE on `roll_actions`, which closes P5 and the `roll_actions` part of F176. Decided rows are frozen by `roll_actions_freeze`, which binds the owner connection by trigger only. DECISION-202–206 and findings F179–F185 and F188–F191 are recorded. F183 and F185 are closed. F182 stays open as a named `paper` residual.
+
+**Do not write** (each contradicts the record):
+- "Only the Session can approve", or "no one can approve their own entries".
+- "No one can ever change a decided entry."
+- "Nothing is ever deleted." F176 stays open for other tables, so limit the claim to roll entries and the application.
+- "Elders can now approve" without the account caveat.
+- "The Session will decide it." The Finding 2 ruling forbids promising it.
+- "Visitors are walled off." F177 stays open.
+- "Approval needs two-step sign-in."
+- "Bulk approval is all-or-nothing."
+
+**Operator runbook note (not for the member-facing note).**
+- **Order:** snapshot production, apply `0062`, deploy the code, apply `0063`.
+  - Code before 0062 calls a missing function.
+  - 0063 before the code makes the old deny and approve fail on the privilege.
+  - A code rollback alone does not undo 0063. Use the rollback statements in its header.
+- **Pre-flight, because the 2026-10-22 counts predate real use.** Increment 1 has been live since 2026-10-23 and the operator is testing in production. Re-measure:
+  - more than one pending proposal per person (0062 stop-block);
+  - officer offices outside the nine-value vocabulary (0062 stop-block);
+  - congregations without court groups;
+  - org-owned `session_member` roles;
+  - denied or withdrawn rows lacking `decided_by` or `decided_at` (0063 stop-block).
+- **A duplicate-pending case has no in-app remedy.** The stop-block message says "withdraw or deny the extras", but neither exists in production before this release, and no one holds `roll.approve`. If the pre-flight finds a duplicate, stop. Resolve it on the owner connection as a minuted act, and expect to stamp `decided_by` and `decided_at` by hand before 0063, because no audit row will exist to backfill from.
+- **After 0062, the first congregation has the role and an empty Session.** Nobody can approve until its administrator records themselves under Officers. Existing waiting proposals then become approvable.
+
+## Ship conditions the orchestrator owes at integration
+
+All are Rule 16 shared files, so they are yours and not the branch's.
+
+1. **`drizzle/meta/_journal.json`:** add idx 62 `0062_presby_session_approval` and idx 63 `0063_presby_roll_decide_lockdown`. Each `when` must exceed idx 61's `1787187173186`. Leave 58 reserved and 64 reserved for 2b.
+2. **`scripts/test-rls.sql`:**
+   - Re-check at integration that `git apply scripts/session-approval/test-rls.sql.integration.patch` is still clean. It was clean against `main` at `4cdd5ab`, and parallel pipelines may have moved the file.
+   - Then run the full file as `presby_app` on merged `development`, with both 0062 and 0063 applied.
+   - Expect only the four pre-existing failures: presbytery members 3≠2, the 2fa definer, the DECISION-152 count, and `46i`. Confirm they are tracked.
+   - Section 62 should show 53 passes and section 61 should show 34.
+3. **`docs/decisions.md`:** insert DECISION-202–206 newest-first, above DECISION-222.
+   - **Amend DECISION-205 to six states.** Change the heading from "told in five states". Add `terms_not_started`, and define `no_sign_in` as "a seat in effect and none of the people in effect has an account".
+   - **Change DECISION-206's status** from "Proposed (operator confirmation pending)" to Resolved, per the Batch A record.
+   - **Correct DECISION-206's S1 sentence.** The guard also fires on `ends_on` to block re-opening a closed pastor term (Batch A deviation 1).
+   - **State the owner-path residual in DECISION-203:** the freeze is trigger-only on the owner connection. Also record that 0063 revokes from `presby_platform` as well.
+4. **`docs/schema-design-2.md`:** add F179–F185 and F188–F191 as a lettered subsection.
+   - F182 stays open as a `paper` residual. F190 is recorded, not fixed.
+   - Verify these numbers are free at merge. F186, F187 and F192–F199 stay reserved for 2b.
+5. **`CLAUDE.md` Two Hierarchies sentence**, for the operator to read in the diff.
+   - It is not in the worktree yet.
+   - Use the shipped wording: ruling elder, installed pastor, co-pastor or associate pastor; stamped `selfRecorded` and `selfApproved`; `paper`.
+   - Batch D noted `AGENTS.md` was not regenerated. Regenerate it if `CLAUDE.md` changes.
+6. **`docs/product/functionality-map.md` (Rule 14).** Rewrite the Community bullet (line 70) and the sentence at line 18.
+   - Remove "which nobody can yet approve (Increment 2)", "the approval `UPDATE` stays application-gated until Increment 2", and "no role can give yet (F183…)".
+   - Add: the queue, bulk approve, withdrawal, the `session_member` role, pastors as Session members, the pastor offices on Officers, the six states, and the account requirement until 2b.
+   - Update the Index line too.
+7. **`docs/TODO.md` (Rule 10).**
+   - Move the Increment 2 line (263) to Done with the ship date, leaving 2b and 3 open.
+   - Change "five states" to six.
+   - Close F183 (264) and P5 (265).
+   - Amend line 220: "no new congregation can approve a member" becomes false once a Session is seated.
+   - Keep F177 open, and keep F176 open for the other tables.
+   - Add follow-ups 1–11 above.
+8. **Release notes and version.** Use `docs/release-notes/v0.41.md` and bump to 0.41.0 through `/release-notes`. Use the lines above, which already carry the "Do not write" guardrails. Link `v0.40.md` forward.
+9. **`docs/architecture.md` (Rule 15):** no change. Nothing here is architectural. I agree with Phase 3.
+10. **Manual walk before release.** On `development`, at 360px:
+    - an administrator at a congregation with a Session group records themselves as a ruling elder starting today;
+    - Pending approvals flips to decide mode;
+    - they approve their own proposal;
+    - the audit row carries `selfRecorded` and `selfApproved`.
+
+    Then repeat the read-mode view with a propose-only clerk. Record the result in the work-log. Nothing tests this whole chain end to end (follow-up 11 adds the e2e).
+11. **Work-log housekeeping.**
+    - Add the correction beside the `aria-describedby` reason.
+    - Record the per-phase row below, keeping the pipeline open for 2b and 3.
+    - Pipeline-branch cleanup: rotate the `pipeline-session-approval` role passwords, since QA's run 1 printed dev-only connection strings into a transcript. Confirm or reset the two global flags (`org_portal.members_create`, `org_portal.members_roll_action_edit`) on that branch if it is kept, and sweep the 25 expired fixture rows. All three are moot if the branch is deleted at cleanup under the standing authorization.
+12. **Rule 12:** not applicable. The source was the operator, with no feedback row.
+13. **Rule 13 (what's-new advisory):** hold any what's-new entry until 2b ships.
+    - An entry saying Session members can now approve would be false for any elder without an account.
+    - If one is published sooner, it must carry the account caveat.
+    - This is admin tooling for clerks and Sessions, so the entry is not required.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2 · 6 — Shipped vs intent | analyst | Complete for Increment 2 (the work-log stays open for 2b and 3). Every Phase 1 verb works for the right person. Two drifts, both ruled: no admin-hub tile, and invites deferred to 2b. All can't-act states tell the truth, with two small copy nits. Eleven follow-ups for TODO, thirteen integration conditions (the manual bootstrap walk is the one that needs a person), release lines drafted against the accepted residuals. | **SHIP WITH NOTES** | 2026-10-23 |
+
+## Handoff
+
+Next agent: **orchestrator.** Record this section, then run integration conditions 1–11 through `/merge-pr`. Condition 10, the manual bootstrap walk, needs you or the operator in a browser. Nothing commits or pushes without the operator's say-so.
+
+After that:
+- **deployment-engineer** carries the runbook note.
+- **Increment 2b** starts from follow-up 4's constraints.
+- The operator reads the `CLAUDE.md` sentence and the release note in the diff.

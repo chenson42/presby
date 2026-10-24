@@ -164,6 +164,31 @@ export async function createParticipantViaSql(sql: Sql, n: number, lastName: str
   return { personId, firstName, lastName };
 }
 
+/**
+ * A staff anchor written on the owner connection: a live membership with
+ * engagement 'staff', no roll and no staff position, the exact shape
+ * `presby_accept_invitation` writes for an invited administrator or treasurer.
+ * The id carries the fixture prefix, so the sweep removes it.
+ */
+export async function createStaffAnchorViaSql(sql: Sql, n: number, lastName: string): Promise<SqlParticipant> {
+  const personId = `${SQL_PERSON_PREFIX}${String(200 + n).padStart(12, "0")}`;
+  assertSqlPersonId(personId);
+  const firstName = FIXTURE_FIRST_NAME;
+  await sql`
+    insert into people (id, first_name, last_name, deletable_until)
+    values (${personId}::uuid, ${firstName}, ${lastName}, now() + interval '2 hours')
+    on conflict (id) do nothing
+  `;
+  await sql`
+    insert into memberships (person_id, organization_id, engagement_status)
+    select ${personId}::uuid, ${COMMUNITY_ORG.id}::uuid, 'staff'
+     where not exists (
+       select 1 from memberships where person_id = ${personId}::uuid and organization_id = ${COMMUNITY_ORG.id}::uuid
+     )
+  `;
+  return { personId, firstName, lastName };
+}
+
 /** Deletes every person this fixture's specs created, by the guarded first name. */
 export async function sweepCommunityPeople(sql: Sql): Promise<number> {
   const rows = (await sql`

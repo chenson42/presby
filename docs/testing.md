@@ -372,6 +372,22 @@ Both workflows carry a `check-secrets` gate job that reports `::notice::` and
 skips cleanly (not a green no-op) when `NEON_API_KEY`/`NEON_PROJECT_ID` are
 absent — see `docs/deployment.md` for what adding them turns on.
 
+**Shape of the runs (2026-10-23).** `db.yml` runs `npm run test:db` as four
+`--shard=i/4` jobs, each on its own ephemeral branch (so no two shards share a
+database), plus one `rls` job that runs `scripts/test-rls.sql` as `presby_app`
+on a fresh branch of its own. `e2e.yml` runs a `dev` lane (Playwright against
+`next dev`) and a `prod` lane (the hydration specs against `next build &&
+next start`) as parallel jobs, again one branch each. The composite action's
+`compute_cu` input fixes the branch's compute size after creation (the Neon
+create-branch action has no such input); a branch is born at the project
+default, 0.25-8 CU autoscaling. Measured wall times: db shards 5-15 min, rls
+4 min, e2e dev lane 23 min, prod lane 5 min. Two files hold state a from-empty
+database lacks and the suites assume: `scripts/ci/e2e-baseline-flags.sql`
+(global flags the e2e specs expect ON, applied by e2e.yml only) and
+`scripts/ci/db-baseline.sql` (one active platform admin, applied by the db
+shards only, never the rls job). A spec that asserts against a flag it does not
+set belongs in the first file.
+
 `db-tests` deliberately does **not** set `RATE_LIMIT_DISABLED` — it is the
 one place in this repo's test suites where the sign-in limiter is exercised
 live, for real, under the standard config. `e2e` keeps `RATE_LIMIT_DISABLED=

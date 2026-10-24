@@ -7,7 +7,25 @@ Updated 2026-10-23.
 
 ---
 
-## RESUME HERE — 2026-10-23: Community Increment 1 integrated at v0.39.0, PR pending; Increments 2, 2b and 3 designed
+## RESUME HERE — 2026-10-23 (late): the portal site-map footer is integrated at v0.40.0, PR pending
+
+`pipeline/portal-sitemap-footer` (worktree `presby-nav`, no schema change, no migration) is merged up to `main` at v0.39.2 and
+integrated as **v0.40.0**. The portal nav and the footer now render one pure structure (`buildPortalMenu()` in
+`src/lib/org-portal/portal-menu.ts`, loaded by `getPortalMenu()`); the footer is a wrapping site-map grid with plain-text column
+headings; "People & Membership" is "Community" everywhere (the `people` key is unchanged); and Administration appears in both
+places only when `org_portal.admin_hub` is on **and** at least one administer tile is visible, as a heading plus one
+"Administration overview" link in the footer. DECISION-220–222. QA PASS, Phase 6 SHIP WITH NOTES; every note is a `docs/TODO.md`
+line (a "can administer" signal, the Members tile versus its toggle, the category axis, and two test-robustness items). The
+what's-new entry is drafted in the work-log for publishing at `/admin/whats-new`. The footer itself still sits behind
+`org_portal.chrome_v3`; the rename and the Administration rule show wherever the nav, home page and Features page already render. The Community block below predates the
+v0.39.x merges: Increment 1 and the two patch releases are on `main`; its "PR pending" and next-step list otherwise still stand.
+
+**Next:** merge this PR through `/merge-pr`, then resume the list below (Community Increment 2, the F166 bug-fix pipeline, the
+fpcw parity tracks).
+
+---
+
+## Previous handoff — 2026-10-23: Community Increment 1 integrated at v0.39.0; Increments 2, 2b and 3 designed
 
 **2026-10-23.** v0.38.0 (designation-holder revoke, PR #38, migration `0060`, accepted residual F170) is merged; `0060` keeps the count signatures, so it can be applied to production before or after its code. `pipeline/founding-admin-directory`
 (worktree `presby-fadir`, Neon `pipeline-founding-admin-directory`) is integrated for its PR as **v0.39.0**, **Community

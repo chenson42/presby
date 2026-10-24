@@ -3,6 +3,7 @@ import { cache } from "react";
 import type { OrganizationType } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { ORG_FEATURE_CATALOG, isOrgFeatureEnabled } from "@/lib/org-features";
+import { buildPortalMenu, type PortalMenu } from "@/lib/org-portal/portal-menu";
 import {
   PORTAL_TILES,
   type PortalTile,
@@ -106,4 +107,43 @@ export async function visiblePortalTiles(
     })),
   );
   return checks.filter((c) => c.enabled).map((c) => c.tile);
+}
+
+/**
+ * The loader half of the portal menu (DECISION-220/222): reads what
+ * `buildPortalMenu()` needs and hands it over. The nav and the footer each
+ * call this independently, so neither takes the other down and neither repeats
+ * the Administration rule — that rule lives in `buildPortalMenu()` alone.
+ *
+ * The administer tiles are read ONLY when `org_portal.admin_hub` is on: the
+ * menu would not show Administration without the hub, so the read (about six
+ * uncached flag reads plus one per-org toggle read) is skipped entirely
+ * otherwise. No new `cache()` here — every read underneath is already cached
+ * on primitive arguments, so the nav, the footer and the page share them. If
+ * one is ever added it must take primitives (an object argument defeats
+ * `cache()`).
+ *
+ * NEVER THROWS: `isFlagEnabled` returns false on error and
+ * `visiblePortalTiles` swallows a failed gate read, so a failed read hides a
+ * tile or the Administration entry and never takes the chrome down. NEVER a
+ * permission check (DECISION-003/162).
+ */
+export async function getPortalMenu(
+  slug: string,
+  organizationType: OrganizationType,
+  viewer: TileViewer,
+): Promise<PortalMenu> {
+  const [operateTiles, adminHubEnabled] = await Promise.all([
+    visiblePortalTiles("operate", organizationType, viewer),
+    isFlagEnabled("org_portal.admin_hub"),
+  ]);
+  const administerTiles = adminHubEnabled
+    ? await visiblePortalTiles("administer", organizationType, viewer)
+    : [];
+  return buildPortalMenu({
+    slug,
+    operateTiles,
+    administerTiles,
+    adminHubEnabled,
+  });
 }

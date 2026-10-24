@@ -31,7 +31,7 @@ vi.mock("@/lib/org-features", () => ({
 }));
 
 import { PORTAL_TILES } from "./tiles";
-import { visiblePortalTiles } from "./visible-tiles";
+import { getPortalMenu, visiblePortalTiles } from "./visible-tiles";
 
 const VIEWER = { personId: "person-1", organizationId: "org-1" };
 
@@ -508,5 +508,51 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
           (!t.orgTypeScope || t.orgTypeScope.includes("congregation")),
       ).map((t) => t.key),
     );
+  });
+});
+
+describe("getPortalMenu(slug, organizationType, viewer) — the loader behind the nav and the footer (DECISION-220/222)", () => {
+  const ADMIN_TILE_FLAGS = PORTAL_TILES.filter(
+    (t) => t.category === "administer" && t.flagKey,
+  ).map((t) => t.flagKey as string);
+
+  it("skips the administer read entirely when org_portal.admin_hub is off", async () => {
+    isFlagEnabled.mockImplementation(
+      async (key: string) => key !== "org_portal.admin_hub",
+    );
+    const menu = await getPortalMenu("alpha", "congregation", VIEWER);
+    const asked = isFlagEnabled.mock.calls.map((c) => c[0] as string);
+    // No administer tile's flag was ever read.
+    for (const flag of ADMIN_TILE_FLAGS) {
+      const isAlsoOperate = PORTAL_TILES.some(
+        (t) => t.category === "operate" && t.flagKey === flag,
+      );
+      if (!isAlsoOperate) expect(asked).not.toContain(flag);
+    }
+    expect(menu.some((e) => e.key === "administration")).toBe(false);
+    expect(menu[0].key).toBe("home");
+  });
+
+  it("returns Home plus operate domains and no Administration when the hub is on but no administer tile is visible", async () => {
+    isFlagEnabled.mockImplementation(async (key: string) =>
+      PORTAL_TILES.some((t) => t.category === "operate" && t.flagKey === key) ||
+      key === "org_portal.admin_hub",
+    );
+    const menu = await getPortalMenu("alpha", "congregation", VIEWER);
+    expect(menu.some((e) => e.key === "administration")).toBe(false);
+    expect(menu.some((e) => e.key === "people")).toBe(true);
+  });
+
+  it("appends Administration when the hub is on and an administer tile is visible", async () => {
+    isFlagEnabled.mockResolvedValue(true);
+    const menu = await getPortalMenu("alpha", "congregation", VIEWER);
+    expect(menu[menu.length - 1].key).toBe("administration");
+    expect(menu[menu.length - 1].children).toHaveLength(1);
+  });
+
+  it("never throws when the hub flag read resolves false after a failed gate (chrome stays up)", async () => {
+    isFlagEnabled.mockResolvedValue(false);
+    const menu = await getPortalMenu("alpha", "congregation", VIEWER);
+    expect(menu.map((e) => e.key)).toEqual(["home"]);
   });
 });

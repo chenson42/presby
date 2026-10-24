@@ -112,6 +112,16 @@ test.describe("org switcher — a user with two organizations", () => {
   }) => {
     await page.goto(`/o/${E2E_ORGS.alpha.slug}`);
 
+    // Wait for React to attach to the trigger before pressing a key. A keydown
+    // that lands before hydration is queued and replayed afterwards, by which
+    // time Radix's document-level "last input was the keyboard" listener is not
+    // registered yet, so the menu opens but its first item is never focused.
+    // That is a race the test creates, not product behaviour; on a slow CI
+    // runner under `next dev` it lost every time (first run, 2026-10-23).
+    await page.waitForFunction((id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      return !!el && Object.keys(el).some((k) => k.startsWith("__reactProps$"));
+    }, SWITCHER);
     await page.getByTestId(SWITCHER).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("menu")).toBeVisible();

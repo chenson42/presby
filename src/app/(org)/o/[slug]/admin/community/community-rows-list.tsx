@@ -9,16 +9,21 @@ import type { CommunityView } from "@/lib/community-labels";
  * Cards for the three admin-only lists (Visitors, Staff, Former). Each links to
  * the person's edit page, because a visitor or staff anchor has no Directory
  * page (DECISION-129/200). The detail line is "First visit {date}", the open
- * position titles, or "Removed {date}".
+ * position titles, or "Removed {date}". A Staff row with no open position is a
+ * staff anchor (an invited administrator or treasurer): it reads "No position
+ * yet", with a link to the Staff page when the viewer can use it.
  */
 export function CommunityRowsList({
   slug,
   view,
   rows,
+  canStaffLink = false,
 }: {
   slug: string;
   view: Extract<CommunityView, "visitors" | "staff" | "former">;
   rows: CommunityRow[];
+  /** `org_portal.staff` is on and the viewer holds `staff.manage`. */
+  canStaffLink?: boolean;
 }) {
   return (
     <ul className="space-y-3">
@@ -32,7 +37,7 @@ export function CommunityRowsList({
                   <p className="break-all text-sm text-muted-foreground">{row.email}</p>
                 )}
                 <p className="text-sm text-muted-foreground">
-                  <Detail view={view} row={row} />
+                  <Detail view={view} row={row} slug={slug} canStaffLink={canStaffLink} />
                 </p>
               </div>
               <Button asChild variant="outline" className="min-h-11 shrink-0">
@@ -52,9 +57,13 @@ export function CommunityRowsList({
 function Detail({
   view,
   row,
+  slug,
+  canStaffLink,
 }: {
   view: "visitors" | "staff" | "former";
   row: CommunityRow;
+  slug: string;
+  canStaffLink: boolean;
 }) {
   if (view === "visitors") {
     return row.firstVisitDate ? (
@@ -66,7 +75,25 @@ function Detail({
     );
   }
   if (view === "staff") {
-    return <>{row.positions.join(", ")}</>;
+    if (row.positions.length > 0) return <>{row.positions.join(", ")}</>;
+    return (
+      <>
+        No position yet
+        {canStaffLink && (
+          <>
+            {" "}
+            &middot;{" "}
+            <Link
+              href={`/o/${slug}/admin/staff`}
+              className="inline-flex min-h-11 items-center underline underline-offset-2"
+            >
+              Add a position
+              <span className="sr-only"> for {row.displayName}</span>
+            </Link>
+          </>
+        )}
+      </>
+    );
   }
   return row.endedOn ? (
     <>

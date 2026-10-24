@@ -58,6 +58,21 @@ By default, Neon's compute suspends after a few minutes of inactivity and resume
 
 Storage stays active while compute is suspended, so data is never paged out.
 
+### Size pipeline branches for the test suites
+
+A new branch's compute defaults to 0.25 CU minimum. At that size the
+DB-backed Vitest suites and Playwright regularly hit the 20 s test timeout
+after a cold start, and each timeout costs a re-run. Create every pipeline
+branch (`pipeline-<slug>`) and throwaway check branch with a **1 CU minimum and
+a 4 CU maximum**:
+
+- Neon MCP: `create_branch` with `compute: { min_cu: 1, max_cu: 4 }`.
+- Existing branch: `update_postgres_endpoint` with
+  `autoscaling_limit_min_cu: 1`, `autoscaling_limit_max_cu: 4`.
+
+Scale-to-zero still applies, so an idle branch costs nothing. Never resize
+`production` or `development` this way without the operator.
+
 ## Useful Patterns
 
 ### Working with the Drizzle client

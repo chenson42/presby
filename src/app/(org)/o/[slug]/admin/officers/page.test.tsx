@@ -260,8 +260,16 @@ describe("OfficersPage — result branches", () => {
       screen.getByRole("button", { name: /add officer term/i }),
     ).toBeTruthy();
     expect(
-      screen.getByText(/granting software access.*is done separately/i),
+      screen.getByText(
+        "This records who holds the office. Apart from seating the Session (see above), recording someone here does not change what they can do in the app. Other access is granted under Administration → Roles.",
+      ),
     ).toBeTruthy();
+    // Regression: the old hint said recording never changes access, which
+    // contradicted the Session note (found in the Increment 2 bootstrap walk).
+    expect(screen.queryByText(/does not, by itself, change/i)).toBeNull();
+    expect(screen.getByTestId("session-note").textContent).toBe(
+      "Members of the Session decide who is received onto the roll. Recording a ruling elder, installed pastor, co-pastor or associate pastor here seats them on the Session. They can approve only once they have a PresbyPortal account.",
+    );
   });
 
   it("renders the empty-roster state when listOfficerRoster() returns ok with zero entries", async () => {

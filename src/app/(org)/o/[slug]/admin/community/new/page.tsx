@@ -9,6 +9,7 @@ import {
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
 import { getHouseholds } from "@/lib/directory";
+import { getSessionApprovalState } from "@/lib/roll";
 import { OrgAccessDenied, OrgAccessEnded } from "../../../org-states";
 import { MembersFlagOff, MembersLoadError } from "../members-states";
 import { MemberWizard } from "./member-wizard";
@@ -89,6 +90,31 @@ export default async function NewMemberPage({
     "roll.propose",
   );
 
+  // The Member choice shows only where a Session exists (F185), and the review
+  // note says when the Session cannot approve yet (Flow 7). Read only for a
+  // `roll.propose` holder; a failed read leaves the choice on, because the
+  // server refuses `no_session` regardless.
+  let memberAvailable = true;
+  let sessionWaits = false;
+  if (canProposeRoll) {
+    try {
+      const stateResult = await getSessionApprovalState(
+        resolved.org.personId,
+        resolved.org.organizationId,
+      );
+      if (stateResult.kind === "ok") {
+        memberAvailable = stateResult.state.kind !== "no_session";
+        sessionWaits = ["empty", "terms_not_started", "no_sign_in", "no_permission"].includes(
+          stateResult.state.kind,
+        );
+      }
+    } catch (err) {
+      if (err instanceof OrgAccessError) {
+        throw err;
+      }
+    }
+  }
+
   let households: { householdId: string; name: string }[] = [];
   try {
     const householdsResult = await getHouseholds(
@@ -122,6 +148,8 @@ export default async function NewMemberPage({
         slug={slug}
         households={households}
         canProposeRoll={canProposeRoll}
+        memberAvailable={memberAvailable}
+        sessionWaits={sessionWaits}
       />
     </section>
   );

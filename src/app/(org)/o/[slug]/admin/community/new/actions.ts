@@ -18,6 +18,7 @@ import type { ActionResult } from "@/types/actions";
 import {
   CREATE_COPY,
   PARTICIPANT_COPY,
+  PROPOSAL_COPY,
   VALIDATION_COPY,
 } from "../participant-copy";
 
@@ -229,6 +230,8 @@ export async function createPersonAction(
       return { ok: false, error: PARTICIPANT_COPY[result.reason] };
     case "email_refused":
       return { ok: false, error: emailRefusalMessage(result.refusal) };
+    case "proposal_refused":
+      return { ok: false, error: PROPOSAL_COPY[result.reason] };
     case "ok":
       break;
   }

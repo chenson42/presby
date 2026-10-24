@@ -16,6 +16,7 @@ import { getCommunityStatus, type CommunityStatus } from "@/lib/community";
 import { getSensitiveInfoGrants } from "@/lib/person-sensitive";
 import {
   getPendingRollActionsForPerson,
+  getSessionApprovalState,
   type PendingRollActionForPerson,
 } from "@/lib/roll";
 import { OrgAccessDenied, OrgAccessEnded } from "../../../../org-states";
@@ -144,6 +145,7 @@ export default async function EditMemberPage({
   let showGuardiansLink = false;
   let communityStatus: CommunityStatus | null = null;
   let canPropose = false;
+  let sessionCannotAct = false;
   try {
     personResult = await getPersonForEdit(
       resolved.org.personId,
@@ -181,6 +183,16 @@ export default async function EditMemberPage({
       );
       if (pendingResult.kind === "ok") {
         pendingRollActions = pendingResult.actions;
+      }
+      if (canPropose && pendingRollActions.length > 0) {
+        // Flow 7: only read when a proposal is actually waiting, so the common
+        // page load pays nothing for it.
+        const stateResult = await getSessionApprovalState(
+          resolved.org.personId,
+          resolved.org.organizationId,
+        );
+        sessionCannotAct =
+          stateResult.kind === "ok" && stateResult.state.kind !== "ready";
       }
     }
     if (sensitiveInfoFlagOn && sensitiveInfoToggleOn) {
@@ -247,6 +259,10 @@ export default async function EditMemberPage({
           <ConnectionCard
             status={communityStatus}
             pendingActions={pendingRollActions}
+            slug={slug}
+            personName={`${personResult.person.firstName} ${personResult.person.lastName}`}
+            canWithdraw={rollActionEditFlagOn && canPropose}
+            sessionCannotAct={sessionCannotAct}
           />
           {rollActionEditFlagOn && canPropose && (
             <ParticipantControls

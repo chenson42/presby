@@ -34,22 +34,41 @@ import { eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 
 // `recordAudit()` is mocked at the module boundary — same posture and same
 // reason `children.test.ts`/`person-sensitive.test.ts` document: `@/lib/audit`
 // transitively imports `@/auth` (next-auth), which this test environment
-// cannot resolve. Only exercised by the `setOfficerTermPublicListed` describe
-// block below; every other describe block in this file never touches an
-// audited code path (OFFICER_TERM_STARTED/ENDED are audited from `admin/
-// officers/actions.ts`, a different file, not from `officers.ts` itself).
+// cannot resolve. `recordAudit()` is exercised only by the
+// `setOfficerTermPublicListed` describe block below (it still audits after
+// commit); start and end audit in the term's own transaction, through the real
+// `insertAuditRow()`, and `recordAudit()` must never be called for them.
 const mockRecordAudit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/lib/audit", () => ({
   AUDIT_ACTIONS: {
+    OFFICER_TERM_STARTED: "tenant.officer_term.started",
+    OFFICER_TERM_ENDED: "tenant.officer_term.ended",
     OFFICER_TERM_LISTED_PUBLICLY: "officer_term.listed_publicly",
     OFFICER_TERM_UNLISTED_PUBLICLY: "officer_term.unlisted_publicly",
   },
   recordAudit: (...args: unknown[]) => mockRecordAudit(...args),
 }));
+
+// `startOfficerTerm()`/`endOfficerTerm()` write their audit row with the REAL
+// `insertAuditRow()` in the SAME transaction as the term (Increment 2, R13);
+// this wrapper only lets a test force that insert to throw, to prove the term
+// rolls back with it.
+const auditControl = vi.hoisted(() => ({ fail: false }));
+vi.mock("@/lib/audit-tx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit-tx")>();
+  return {
+    ...actual,
+    insertAuditRow: async (...args: Parameters<typeof actual.insertAuditRow>) => {
+      if (auditControl.fail) throw new Error("audit insert failed (test-injected)");
+      return actual.insertAuditRow(...args);
+    },
+  };
+});
 
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
@@ -98,6 +117,9 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
   let noMembershipPerson: string; // no membership ANYWHERE — cross-org throw
 
   let grantingUserId: string; // a users.id row for recorded_by / grantedBy
+  // People created by the Increment 2 describe; swept by the outer afterAll,
+  // after the organizations (and so their memberships and terms) are gone.
+  const extraPeopleForSweep: string[] = [];
 
   beforeAll(async () => {
     ({
@@ -328,15 +350,19 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
     await platform.execute(
       sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
     );
+    // The Increment 2 describe seeds one approved roll row (the S1 replay
+    // case), which roll_actions_freeze would refuse to cascade away.
+    await platform.execute(sql`alter table roll_actions disable trigger roll_actions_freeze`);
     try {
       await platform.delete(organizations).where(eq(organizations.id, orgA));
       await platform.delete(organizations).where(eq(organizations.id, orgB));
     } finally {
+      await platform.execute(sql`alter table roll_actions enable trigger roll_actions_freeze`);
       await platform.execute(
         sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
       );
     }
-    for (const id of allPeople) {
+    for (const id of [...allPeople, ...extraPeopleForSweep]) {
       await platform.delete(people).where(eq(people.id, id));
     }
     await platform.delete(users).where(eq(users.id, grantingUserId));
@@ -381,7 +407,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
     });
 
     it("endOfficerTerm: forbidden for a person holding no officers.manage", async () => {
-      const result = await endOfficerTerm(narrowPerson, orgA, {
+      const result = await endOfficerTerm(narrowPerson, orgA, grantingUserId, {
         termId: randomUUID(),
         endsOn: "2026-01-01",
         endReason: "resigned",
@@ -428,7 +454,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       if (result.kind !== "ok") return;
 
       // Clean up so later tests see a stable fixture.
-      await endOfficerTerm(clerkPerson, orgA, {
+      await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: result.data.termId,
         endsOn: "2026-01-02",
         endReason: "resigned",
@@ -456,7 +482,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       expect(result.kind).toBe("ok");
       if (result.kind !== "ok") return;
 
-      await endOfficerTerm(clerkPerson, orgA, {
+      await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: result.data.termId,
         endsOn: "2027-01-02",
         endReason: "resigned",
@@ -567,7 +593,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       expect(matching[0]!.termId).toBe(first.data.termId);
 
       // Clean up.
-      await endOfficerTerm(clerkPerson, orgA, {
+      await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: first.data.termId,
         endsOn: "2026-04-01",
         endReason: "resigned",
@@ -581,7 +607,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
 
   describe("endOfficerTerm", () => {
     it("invalid_target for a term id that doesn't exist", async () => {
-      const result = await endOfficerTerm(clerkPerson, orgA, {
+      const result = await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: randomUUID(),
         endsOn: "2026-01-01",
         endReason: "resigned",
@@ -597,7 +623,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       });
       if (started.kind !== "ok") throw new Error("expected ok");
 
-      const result = await endOfficerTerm(clerkPerson, orgA, {
+      const result = await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: started.data.termId,
         endsOn: "2026-04-01",
         endReason: "resigned",
@@ -608,7 +634,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       });
 
       // Clean up with a valid end.
-      await endOfficerTerm(clerkPerson, orgA, {
+      await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: started.data.termId,
         endsOn: "2026-06-01",
         endReason: "resigned",
@@ -623,7 +649,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       });
       if (started.kind !== "ok") throw new Error("expected ok");
 
-      const ended = await endOfficerTerm(clerkPerson, orgA, {
+      const ended = await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: started.data.termId,
         endsOn: "2026-08-01",
         endReason: "resigned",
@@ -659,7 +685,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       if (term1.kind !== "ok") return;
 
       // End term 1.
-      const endedTerm1 = await endOfficerTerm(clerkPerson, orgA, {
+      const endedTerm1 = await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: term1.data.termId,
         endsOn: "2021-01-01",
         endReason: "completed",
@@ -770,7 +796,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
 
     it("endOfficerTerm: a malformed endsOn throws synchronously", async () => {
       await expect(
-        endOfficerTerm(clerkPerson, orgA, {
+        endOfficerTerm(clerkPerson, orgA, grantingUserId, {
           termId: randomUUID(),
           endsOn: "not-a-date",
           endReason: "resigned",
@@ -972,7 +998,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
         .where(eq(officerTerms.id, started.data.termId));
       expect(row?.publicDisplayOrder).toBeNull();
 
-      await endOfficerTerm(clerkPerson, orgA, {
+      await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: started.data.termId,
         endsOn: "2030-01-02",
         endReason: "resigned",
@@ -1053,7 +1079,7 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
         .where(eq(officerTerms.id, started.data.termId));
       expect(clearedRow?.publicDisplayOrder).toBeNull();
 
-      await endOfficerTerm(clerkPerson, orgA, {
+      await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
         termId: started.data.termId,
         endsOn: "2030-02-02",
         endReason: "resigned",
@@ -1061,5 +1087,443 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       },
       20000,
     );
+  });
+
+  // ---------------------------------------------------------------------
+  // Increment 2 (docs/work-log/2026-10-22-founding-admin-directory.md):
+  // in-transaction audit with selfRecorded (R13, DECISION-205), the pastor
+  // offices (DECISION-206, S1) and the typed refusals that replaced raw
+  // foreign-key errors (F189).
+  // ---------------------------------------------------------------------
+
+  describe("Increment 2: in-transaction audit, selfRecorded, pastor offices", () => {
+    const extra: string[] = [];
+    const extraOrgUsers: string[] = [];
+    let selfPerson: string; // orgA; people.user_id = grantingUserId
+    let pastorPerson: string; // orgA; no roll (a pastor's membership is the presbytery's)
+    let bClerk: string; // orgB; holds officers.manage there
+
+    async function mkPersonAt(
+      organizationId: string,
+      first: string,
+      opts: { roll?: string | null; userId?: string | null } = {},
+    ): Promise<string> {
+      const platform = getPlatformDb();
+      const [p] = await platform
+        .insert(people)
+        .values({
+          firstName: first,
+          lastName: `Inc2-${Date.now()}`,
+          userId: opts.userId ?? null,
+          deletableUntil: fixtureDeletableUntil(),
+        })
+        .returning({ id: people.id });
+      extra.push(p!.id);
+      await platform.insert(memberships).values({
+        organizationId,
+        personId: p!.id,
+        engagementStatus: "regular",
+        currentRoll: opts.roll === undefined ? null : opts.roll,
+      });
+      return p!.id;
+    }
+
+    async function auditRows(termId: string): Promise<Array<Record<string, unknown>>> {
+      const platform = getPlatformDb();
+      const result = await platform.execute(
+        sql`select * from audit_events where resource_id = ${termId} order by created_at`,
+      );
+      return (result as unknown as { rows: Array<Record<string, unknown>> }).rows;
+    }
+
+    async function termRowsFor(personId: string, office: string) {
+      const platform = getPlatformDb();
+      return platform
+        .select()
+        .from(officerTerms)
+        .where(sql`${officerTerms.personId} = ${personId}::uuid and ${officerTerms.office} = ${office}`);
+    }
+
+    async function sessionRowsFor(personId: string) {
+      const platform = getPlatformDb();
+      const result = await platform.execute(sql`
+        select gm.id from group_memberships gm
+          join groups g on g.id = gm.group_id
+         where gm.person_id = ${personId}::uuid and g.derived_from = 'session'
+      `);
+      return (result as unknown as { rows: unknown[] }).rows;
+    }
+
+    beforeAll(async () => {
+      const platform = getPlatformDb();
+      // A user whose person is selfPerson: the actor of the self-recording tests.
+      selfPerson = await mkPersonAt(orgA, "Selfa", { userId: grantingUserId });
+      pastorPerson = await mkPersonAt(orgA, "Pastora");
+      bClerk = await mkPersonAt(orgB, "Bclerka");
+      const [roleB] = await platform
+        .insert(appRoles)
+        .values({
+          organizationId: orgB,
+          key: "clerk",
+          name: "Clerk B (test)",
+          roleKind: "constitutional",
+          isProtected: true,
+        })
+        .returning({ id: appRoles.id });
+      await platform
+        .insert(appRolePermissions)
+        .values({ roleId: roleB!.id, permissionKey: "officers.manage" });
+      await platform.insert(roleGrants).values({
+        organizationId: orgB,
+        roleId: roleB!.id,
+        personId: bClerk,
+        startsOn: "2020-01-01",
+        grantedBy: grantingUserId,
+      });
+    });
+
+    afterAll(async () => {
+      const platform = getPlatformDb();
+      auditControl.fail = false;
+      await platform.execute(
+        sql`delete from audit_events where metadata->>'organizationId' in (${orgA}, ${orgB})`,
+      );
+      // The orgs are deleted by the outer afterAll (cascading the memberships
+      // and terms); the people are removed here, after it has run is not
+      // possible, so register them for the outer sweep instead.
+      extraPeopleForSweep.push(...extra);
+      for (const id of extraOrgUsers) {
+        await platform.delete(users).where(eq(users.id, id));
+      }
+    });
+
+    it("start writes tenant.officer_term.started in the SAME transaction, from the term's own values, with selfRecorded false for someone else's record", async () => {
+      const someoneElse = await mkPersonAt(orgA, "Someone");
+      const result = await startOfficerTerm(
+        clerkPerson,
+        orgA,
+        grantingUserId,
+        { personId: someoneElse, office: "treasurer", startsOn: "2025-01-01" },
+        { actingUserEmail: "clerk@example.invalid" },
+      );
+      if (result.kind !== "ok") throw new Error(`expected ok, got ${result.kind}`);
+      const audits = await auditRows(result.data.termId);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: "tenant.officer_term.started",
+        actor_user_id: grantingUserId,
+        actor_email: "clerk@example.invalid",
+        resource_type: "officer_term",
+      });
+      expect(audits[0]!.metadata).toEqual({
+        organizationId: orgA,
+        personId: someoneElse,
+        office: "treasurer",
+        startsOn: "2025-01-01",
+        orgUnitId: null,
+        selfRecorded: false,
+      });
+      // The audit never goes through the swallow-on-failure after-commit path.
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("selfRecorded is true when the person recorded is the actor (the founding administrator recording themselves as an elder), on start AND end", async () => {
+      const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: selfPerson,
+        office: "ruling_elder",
+        startsOn: "2025-02-01",
+      });
+      if (started.kind !== "ok") throw new Error("expected ok");
+      const [startAudit] = await auditRows(started.data.termId);
+      expect(startAudit!.metadata).toMatchObject({ office: "ruling_elder", selfRecorded: true });
+
+      const ended = await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        termId: started.data.termId,
+        endsOn: "2025-12-31",
+        endReason: "completed",
+      });
+      expect(ended.kind).toBe("ok");
+      const audits = await auditRows(started.data.termId);
+      expect(audits.map((a) => a.action)).toEqual([
+        "tenant.officer_term.started",
+        "tenant.officer_term.ended",
+      ]);
+      // The end audit's person and office come from the TERM'S OWN ROW.
+      expect(audits[1]!.metadata).toEqual({
+        organizationId: orgA,
+        personId: selfPerson,
+        office: "ruling_elder",
+        endsOn: "2025-12-31",
+        endReason: "completed",
+        selfRecorded: true,
+      });
+    });
+
+    it("a failed audit insert rolls back the term and its derived Session row — a Session seat never commits without its audit row", async () => {
+      const person = await mkPersonAt(orgA, "Doomed");
+      auditControl.fail = true;
+      try {
+        await expect(
+          startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+            personId: person,
+            office: "ruling_elder",
+            startsOn: "2025-03-01",
+          }),
+        ).rejects.toThrow(/audit insert failed/);
+      } finally {
+        auditControl.fail = false;
+      }
+      expect(await termRowsFor(person, "ruling_elder")).toHaveLength(0);
+      expect(await sessionRowsFor(person)).toHaveLength(0);
+    });
+
+    it("a failed audit insert on END leaves the term open", async () => {
+      const person = await mkPersonAt(orgA, "Enduring");
+      const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: person,
+        office: "trustee",
+        startsOn: "2025-04-01",
+      });
+      if (started.kind !== "ok") throw new Error("expected ok");
+      auditControl.fail = true;
+      try {
+        await expect(
+          endOfficerTerm(clerkPerson, orgA, grantingUserId, {
+            termId: started.data.termId,
+            endsOn: "2025-12-01",
+            endReason: "resigned",
+          }),
+        ).rejects.toThrow(/audit insert failed/);
+      } finally {
+        auditControl.fail = false;
+      }
+      const [row] = await getPlatformDb()
+        .select({ endsOn: officerTerms.endsOn, endReason: officerTerms.endReason })
+        .from(officerTerms)
+        .where(eq(officerTerms.id, started.data.termId));
+      expect(row).toEqual({ endsOn: null, endReason: null });
+      expect((await auditRows(started.data.termId)).map((a) => a.action)).toEqual([
+        "tenant.officer_term.started",
+      ]);
+    });
+
+    it("a refused start (forbidden, invalid_target, overlap) writes no audit row", async () => {
+      const platform = getPlatformDb();
+      const countBefore = await platform.execute(
+        sql`select count(*)::int as n from audit_events where metadata->>'organizationId' = ${orgA}`,
+      );
+      await startOfficerTerm(narrowPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        office: "trustee",
+        startsOn: "2025-06-01",
+      });
+      await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: noMembershipPerson,
+        office: "trustee",
+        startsOn: "2025-06-01",
+      });
+      await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: "not-a-uuid",
+        office: "trustee",
+        startsOn: "2025-06-01",
+      });
+      const countAfter = await platform.execute(
+        sql`select count(*)::int as n from audit_events where metadata->>'organizationId' = ${orgA}`,
+      );
+      expect((countAfter as unknown as { rows: Array<{ n: number }> }).rows[0]!.n).toBe(
+        (countBefore as unknown as { rows: Array<{ n: number }> }).rows[0]!.n,
+      );
+    });
+
+    it("a malformed personId or termId is invalid_target, never a raw cast error", async () => {
+      expect(
+        await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+          personId: "nope",
+          office: "trustee",
+          startsOn: "2025-06-01",
+        }),
+      ).toEqual({ kind: "invalid_target" });
+      expect(
+        await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
+          termId: "nope",
+          endsOn: "2025-06-01",
+          endReason: "resigned",
+        }),
+      ).toEqual({ kind: "invalid_target" });
+    });
+
+    it("an installed pastor, a co-pastor and an associate pastor are recorded and seated on the derived Session group (G-3.0201), and recorded with the person's own selfRecorded stamp", async () => {
+      for (const office of ["installed_pastor", "co_pastor", "associate_pastor"] as const) {
+        const person = await mkPersonAt(orgA, `Pastor-${office}`);
+        const result = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+          personId: person,
+          office,
+          startsOn: "2024-01-01",
+        });
+        expect(result.kind, office).toBe("ok");
+        expect(await sessionRowsFor(person), office).toHaveLength(1);
+        if (result.kind !== "ok") continue;
+        const [audit] = await auditRows(result.data.termId);
+        expect(audit!.metadata, office).toMatchObject({ office, selfRecorded: false });
+      }
+      // A deacon seats on the diaconate, a moderator on neither.
+      const moderator = await mkPersonAt(orgA, "Moderata");
+      expect(
+        (
+          await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+            personId: moderator,
+            office: "moderator",
+            startsOn: "2024-01-01",
+          })
+        ).kind,
+      ).toBe("ok");
+      expect(await sessionRowsFor(moderator)).toHaveLength(0);
+    });
+
+    it("S1: a pastor office for a person on this congregation's roll is on_roll, naming them, and nothing is written", async () => {
+      // A member whose membership carries current_roll = 'active'.
+      const member = await mkPersonAt(orgA, "Rolled", { roll: "active" });
+      for (const office of ["installed_pastor", "co_pastor", "associate_pastor"] as const) {
+        const result = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+          personId: member,
+          office,
+          startsOn: "2025-05-01",
+        });
+        expect(result, office).toMatchObject({ kind: "on_roll", personName: expect.stringMatching(/^Rolled /) });
+        expect(await termRowsFor(member, office), office).toHaveLength(0);
+        expect(await sessionRowsFor(member), office).toHaveLength(0);
+      }
+      // A ruling elder on the roll is, of course, fine (elders are members).
+      const elder = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: member,
+        office: "ruling_elder",
+        startsOn: "2030-01-01",
+      });
+      expect(elder.kind).toBe("ok");
+    });
+
+    it("S1 also counts a roll known only by replay (a future start date as of the term's start): on_roll when replay says so", async () => {
+      const platform = getPlatformDb();
+      const person = await mkPersonAt(orgA, "Replayed");
+      // An approved baptized-member row dated today: the cache and the replay agree.
+      await platform.insert((await import("@/lib/db/domain/roll")).rollActions).values({
+        organizationId: orgA,
+        personId: person,
+        kind: "baptized_member_enrolled",
+        effectiveDate: "2020-01-01",
+        resultingRoll: "baptized",
+        approvalStatus: "approved",
+        approvedBy: grantingUserId,
+        proposedBy: grantingUserId,
+      });
+      expect(
+        await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+          personId: person,
+          office: "installed_pastor",
+          startsOn: "2024-01-01",
+        }),
+      ).toMatchObject({ kind: "on_roll" });
+    });
+
+    it("invalid_office_for_org: a Session, pastor or diaconate office at an organization with no matching group is typed, not a raw foreign-key error — a clerk office there is fine", async () => {
+      const bTarget = outsidePerson; // orgB member
+      for (const [office, label] of [
+        ["ruling_elder", "Ruling Elder"],
+        ["installed_pastor", "Installed Pastor"],
+        ["co_pastor", "Co-Pastor"],
+        ["associate_pastor", "Associate Pastor"],
+      ] as const) {
+        expect(
+          await startOfficerTerm(bClerk, orgB, grantingUserId, {
+            personId: bTarget,
+            office,
+            startsOn: "2024-01-01",
+          }),
+          office,
+        ).toEqual({ kind: "invalid_office_for_org", officeLabel: label });
+      }
+      expect(
+        await startOfficerTerm(bClerk, orgB, grantingUserId, {
+          personId: bTarget,
+          office: "deacon",
+          startsOn: "2024-01-01",
+          orgUnitId: outsideOrgUnit,
+        }),
+      ).toEqual({ kind: "invalid_office_for_org", officeLabel: "Deacon" });
+      expect(
+        (
+          await startOfficerTerm(bClerk, orgB, grantingUserId, {
+            personId: bTarget,
+            office: "clerk_of_session",
+            startsOn: "2024-01-01",
+          })
+        ).kind,
+      ).toBe("ok");
+      expect(await termRowsFor(bTarget, "ruling_elder")).toHaveLength(0);
+    });
+
+    it("listOfficerRoster returns the pastor offices, and selfRecorded only for a Session-bearing office recorded by the person themselves", async () => {
+      const selfElder = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: selfPerson,
+        office: "ruling_elder",
+        startsOn: "2026-01-01",
+      });
+      if (selfElder.kind !== "ok") throw new Error("expected ok");
+      const selfTreasurer = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: selfPerson,
+        office: "treasurer",
+        startsOn: "2026-01-01",
+      });
+      if (selfTreasurer.kind !== "ok") throw new Error("expected ok");
+      const pastor = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: pastorPerson,
+        office: "installed_pastor",
+        startsOn: "2026-01-01",
+      });
+      if (pastor.kind !== "ok") throw new Error("expected ok");
+
+      const roster = await listOfficerRoster(clerkPerson, orgA);
+      if (roster.kind !== "ok") throw new Error("expected ok");
+      const byTerm = new Map(roster.data.map((e) => [e.termId, e]));
+      expect(byTerm.get(selfElder.data.termId)).toMatchObject({
+        office: "ruling_elder",
+        selfRecorded: true,
+      });
+      // recorded_by equals the person's user_id, but a treasurer is not a Session seat.
+      expect(byTerm.get(selfTreasurer.data.termId)).toMatchObject({
+        office: "treasurer",
+        selfRecorded: false,
+      });
+      expect(byTerm.get(pastor.data.termId)).toMatchObject({
+        office: "installed_pastor",
+        selfRecorded: false,
+      });
+      // And the filter by a pastor office works.
+      const onlyPastors = await listOfficerRoster(clerkPerson, orgA, "installed_pastor");
+      if (onlyPastors.kind !== "ok") throw new Error("expected ok");
+      expect(onlyPastors.data.every((e) => e.office === "installed_pastor")).toBe(true);
+      expect(onlyPastors.data.some((e) => e.termId === pastor.data.termId)).toBe(true);
+    });
+
+    it("the term's own people-and-office are the audit source: ending someone else's term cannot be mislabelled by the caller", async () => {
+      const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: pastorPerson,
+        office: "co_pastor",
+        startsOn: "2026-02-01",
+      });
+      if (started.kind !== "ok") throw new Error("expected ok");
+      // The input type no longer has a personId or office; a forged one is ignored.
+      await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        termId: started.data.termId,
+        endsOn: "2026-06-01",
+        endReason: "completed",
+        ...({ personId: targetPerson, office: "trustee" } as object),
+      } as never);
+      const audits = await auditRows(started.data.termId);
+      expect(audits[1]!.metadata).toMatchObject({
+        personId: pastorPerson,
+        office: "co_pastor",
+      });
+    });
   });
 });

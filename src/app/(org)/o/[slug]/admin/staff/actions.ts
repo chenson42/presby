@@ -310,6 +310,10 @@ export async function createStaffPersonAction(
       // above, which never calls the participant function); typed so the
       // switch stays exhaustive.
       return { ok: false, error: "That person could not be added." };
+    case "proposal_refused":
+      // Unreachable for the same reason: only a membership proposal can be
+      // refused, and `{ kind: "none" }` proposes nothing.
+      return { ok: false, error: "That person could not be added." };
     case "ok":
       break;
   }

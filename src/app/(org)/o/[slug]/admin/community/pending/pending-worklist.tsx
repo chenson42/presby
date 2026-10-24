@@ -1,235 +1,142 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { FormattedDate } from "@/components/shared/formatted-date";
-import type { PendingRollAction } from "@/lib/roll";
-import { approveRollActionAction, denyRollActionAction } from "./actions";
+import { isApprovableKind } from "@/lib/roll-action-kinds";
+import type { PendingQueueViewer, PendingRollAction } from "@/lib/roll";
+import { useHydrated } from "@/components/shared/use-hydrated";
+import { BulkApproveDialog } from "./bulk-approve-dialog";
+import { PendingRow } from "./pending-row";
 
-const ROLL_ACTION_LABELS: Record<string, string> = {
-  profession_of_faith: "Profession of faith",
-  other_participant_enrolled: "Enrolled as a participant",
-};
-
-function rollActionLabel(kind: string): string {
-  return ROLL_ACTION_LABELS[kind] ?? kind;
+function canSelect(action: PendingRollAction): boolean {
+  return (
+    isApprovableKind(action.kind) &&
+    !action.membershipEnded &&
+    !action.personDeceased
+  );
 }
 
 /**
- * The clerk's session-agenda worklist. Rows where `proposedByIsViewer` is
- * true carry a "You proposed this" badge — Phase 2's resolution to the
- * self-approval question: permitted by design, surfaced (not blocked), per
- * `src/lib/roll.ts`'s own header.
+ * The queue. In decide mode rows are selectable (only rows approval would not
+ * refuse outright), "Select all on this page" picks every selectable row on the
+ * page (page size equals the bulk cap, so it can never exceed what one submit
+ * accepts), and a sticky "Approve N selected" bar appears with bottom padding on
+ * the list so it never covers the last row. Read mode (a propose-only holder)
+ * renders no checkbox, Approve or Deny.
  */
 export function PendingWorklist({
   slug,
   actions,
+  mode,
+  viewer,
+  today,
 }: {
   slug: string;
   actions: PendingRollAction[];
+  mode: "decide" | "read";
+  viewer: PendingQueueViewer;
+  /** 'YYYY-MM-DD' (UTC), computed on the server so SSR and the client agree. */
+  today: string;
 }) {
+  const hydrated = useHydrated();
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+
+  const selectableIds = useMemo(
+    () => actions.filter(canSelect).map((a) => a.id),
+    [actions],
+  );
+  // Rows that left the page (approved elsewhere or by this run) fall out of the
+  // selection without an effect.
+  const selected = useMemo(
+    () => actions.filter((a) => picked.has(a.id) && canSelect(a)),
+    [actions, picked],
+  );
+
   if (actions.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed border-border py-16 text-center">
+    return mode === "decide" ? (
+      <div className="rounded-lg border border-dashed border-border px-4 py-16 text-center">
         <p className="text-sm font-medium">Nothing waiting for your approval</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Roll actions proposed by admins will show up here.
+          Roll actions proposed by the clerk or other administrators will show up
+          here.
+        </p>
+      </div>
+    ) : (
+      <div className="rounded-lg border border-dashed border-border px-4 py-16 text-center">
+        <p className="text-sm font-medium">Nothing is waiting</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Member proposals you make appear here until the Session decides them.
         </p>
       </div>
     );
   }
 
-  return (
-    <ul className="space-y-3">
-      {actions.map((action) => (
-        <li key={action.id}>
-          <PendingRow slug={slug} action={action} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function PendingRow({
-  slug,
-  action,
-}: {
-  slug: string;
-  action: PendingRollAction;
-}) {
-  const router = useRouter();
-  const [approveOpen, setApproveOpen] = useState(false);
-  const [denyOpen, setDenyOpen] = useState(false);
-  const [minuteReference, setMinuteReference] = useState("");
-  const [denyReason, setDenyReason] = useState("");
-  const [pending, setPending] = useState(false);
-
-  async function handleApprove() {
-    setPending(true);
-    const result = await approveRollActionAction(slug, {
-      rollActionId: action.id,
-      minuteReference: minuteReference.trim() || undefined,
+  function toggle(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
-    setPending(false);
-    if (result.ok) {
-      toast.success(`${action.personDisplayName}'s roll action approved.`);
-      setApproveOpen(false);
-      router.refresh();
-    } else {
-      toast.error(result.error);
-    }
   }
 
-  async function handleDeny() {
-    if (!denyReason.trim()) {
-      toast.error("A reason is required to deny a roll action.");
-      return;
-    }
-    setPending(true);
-    const result = await denyRollActionAction(slug, {
-      rollActionId: action.id,
-      reason: denyReason.trim(),
-    });
-    setPending(false);
-    if (result.ok) {
-      toast.success(`${action.personDisplayName}'s roll action denied.`);
-      setDenyOpen(false);
-      router.refresh();
-    } else {
-      toast.error(result.error);
-    }
-  }
+  const allSelected =
+    selectableIds.length > 0 && selected.length === selectableIds.length;
 
   return (
-    <Card className="py-4">
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-lg font-medium">{action.personDisplayName}</h3>
-          {action.proposedByIsViewer && (
-            <Badge variant="outline" className="font-normal">
-              You proposed this
-            </Badge>
-          )}
+    <div>
+      {mode === "decide" && selectableIds.length > 0 && (
+        <div className="mb-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            disabled={!hydrated}
+            onClick={() =>
+              setPicked(allSelected ? new Set() : new Set(selectableIds))
+            }
+          >
+            {allSelected ? "Clear selection" : "Select all on this page"}
+          </Button>
         </div>
-        <p className="text-sm text-muted-foreground">
-          {rollActionLabel(action.kind)} — effective{" "}
-          <FormattedDate value={action.effectiveDate} mode="date" />
-        </p>
+      )}
 
-        <div className="flex flex-wrap gap-3">
-          <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
-            <DialogTrigger asChild>
-              <Button type="button" className="min-h-11">
-                Approve
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>
-                  Approve {action.personDisplayName}&apos;s roll action?
-                </DialogTitle>
-                <DialogDescription>
-                  This records {rollActionLabel(action.kind).toLowerCase()} on
-                  the roll, effective{" "}
-                  <FormattedDate value={action.effectiveDate} mode="date" />.
-                </DialogDescription>
-              </DialogHeader>
-              <div>
-                <Label htmlFor={`minute-ref-${action.id}`}>
-                  Minute reference (optional)
-                </Label>
-                <Input
-                  id={`minute-ref-${action.id}`}
-                  value={minuteReference}
-                  onChange={(e) => setMinuteReference(e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setApproveOpen(false)}
-                  className="min-h-11"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleApprove}
-                  disabled={pending}
-                  className="min-h-11"
-                >
-                  {pending ? "Approving…" : "Approve"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+      <ul className={mode === "decide" ? "space-y-3 pb-4" : "space-y-3"}>
+        {actions.map((action) => (
+          // `scroll-mb-28`: a row focused or scrolled into view stops above the
+          // sticky bar instead of under it.
+          <li key={action.id} className="scroll-mb-28">
+            <PendingRow
+              slug={slug}
+              action={action}
+              mode={mode}
+              viewer={viewer}
+              today={today}
+              selectable={canSelect(action)}
+              selected={picked.has(action.id) && canSelect(action)}
+              onToggle={toggle}
+            />
+          </li>
+        ))}
+      </ul>
 
-          <Dialog open={denyOpen} onOpenChange={setDenyOpen}>
-            <DialogTrigger asChild>
-              <Button type="button" variant="outline" className="min-h-11">
-                Deny
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>
-                  Deny {action.personDisplayName}&apos;s roll action?
-                </DialogTitle>
-                <DialogDescription>
-                  This roll action will not be recorded. A reason is required.
-                </DialogDescription>
-              </DialogHeader>
-              <div>
-                <Label htmlFor={`deny-reason-${action.id}`}>Reason</Label>
-                <Textarea
-                  id={`deny-reason-${action.id}`}
-                  value={denyReason}
-                  onChange={(e) => setDenyReason(e.target.value)}
-                  required
-                  className="mt-1"
-                />
-              </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setDenyOpen(false)}
-                  className="min-h-11"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={handleDeny}
-                  disabled={pending}
-                  className="min-h-11"
-                >
-                  {pending ? "Denying…" : "Deny"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+      {mode === "decide" && selected.length > 0 && (
+        <div
+          data-testid="bulk-bar"
+          className="sticky bottom-0 z-10 -mx-4 border-t border-border bg-background px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:mx-0 sm:rounded-lg sm:border"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {selected.length} selected
+            </p>
+            <BulkApproveDialog
+              slug={slug}
+              selected={selected}
+              onDone={() => setPicked(new Set())}
+            />
+          </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 }

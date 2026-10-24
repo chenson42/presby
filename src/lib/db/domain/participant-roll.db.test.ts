@@ -426,23 +426,30 @@ describe.skipIf(!hasDb)("drizzle/0061 participant roll (Postgres-backed)", () =>
       expect(by.presby_deny_participant_action).toMatchObject({ prosecdef: false, app_exec: true, public_exec: false });
     });
 
-    it("R5: one RESTRICTIVE insert policy for presby_app with check approval_status = 'pending', beside tenant_isolation", async () => {
+    it("R5: one RESTRICTIVE insert policy for presby_app requiring approval_status = 'pending', beside tenant_isolation", async () => {
       const rows = await q(sql`
         select policyname, permissive, cmd, roles::text as roles, with_check
           from pg_policies where tablename = 'roll_actions' order by policyname`);
       expect(rows.map((r) => r.policyname)).toEqual(["roll_actions_insert_pending_only", "tenant_isolation"]);
-      expect(rows[0]).toMatchObject({
-        permissive: "RESTRICTIVE", cmd: "INSERT", roles: "{presby_app}",
-        with_check: "(approval_status = 'pending'::text)",
-      });
+      expect(rows[0]).toMatchObject({ permissive: "RESTRICTIVE", cmd: "INSERT", roles: "{presby_app}" });
+      // drizzle/0063 narrows the same policy to pending AND an approvable kind
+      // (F191); the exact text is pinned in roll-decide-lockdown.db.test.ts.
+      // Here only 0061's half, which holds in both states.
+      expect(String(rows[0]!.with_check)).toContain("(approval_status = 'pending'::text)");
       const [force] = await q(sql`select relforcerowsecurity from pg_class where relname = 'roll_actions'`);
       expect(force!.relforcerowsecurity).toBe(true);
     });
 
     it("S2/S3: the three CHECKs are VALIDATED and the one-live-void index is partial and unique", async () => {
+      // drizzle/0062 and 0063 add further CHECKs on roll_actions (proven in
+      // session-approval.db.test.ts and roll-decide-lockdown.db.test.ts), so
+      // this asserts 0061's three, not the whole set.
       const rows = await q(sql`
         select conname, convalidated from pg_constraint
-         where conrelid = 'roll_actions'::regclass and contype = 'c' order by conname`);
+         where conrelid = 'roll_actions'::regclass and contype = 'c'
+           and conname in ('roll_actions_approval_status_allowed', 'roll_actions_resulting_roll_matches_kind',
+                           'roll_actions_void_shape')
+         order by conname`);
       expect(rows).toEqual([
         { conname: "roll_actions_approval_status_allowed", convalidated: true },
         { conname: "roll_actions_resulting_roll_matches_kind", convalidated: true },
@@ -451,7 +458,9 @@ describe.skipIf(!hasDb)("drizzle/0061 participant roll (Postgres-backed)", () =>
       const [idx] = await q(sql`select indexdef from pg_indexes where indexname = 'roll_actions_one_live_void_idx'`);
       expect(idx!.indexdef).toContain("CREATE UNIQUE INDEX");
       expect(idx!.indexdef).toContain("(voids_action_id)");
-      expect(idx!.indexdef).toContain("WHERE ((kind = 'void'::roll_action_kind) AND (approval_status <> 'denied'::text))");
+      // Re-predicated by drizzle/0062 (a withdrawn void is not live either).
+      expect(idx!.indexdef).toContain(
+        "WHERE ((kind = 'void'::roll_action_kind) AND (approval_status = ANY (ARRAY['pending'::text, 'approved'::text])))");
     });
 
     it("F174 + DECISION-199: both roll keys are in the catalog (tier 1, module roll) and the clerk TEMPLATE carries exactly statistics.publish, roll.propose, directory.view", async () => {
@@ -530,6 +539,10 @@ describe.skipIf(!hasDb)("drizzle/0061 participant roll (Postgres-backed)", () =>
       const stop = section4.slice(splitAt);
       await inRolledBackOwnerTx(async (tx) => {
         await tx.execute(sql`alter table roll_actions drop constraint roll_actions_resulting_roll_matches_kind`);
+        // The repair replays against the pre-0061 shape, which also predates
+        // drizzle/0062's one-pending-per-person index (R7): three pending rows
+        // for one person were possible then.
+        await tx.execute(sql`drop index if exists roll_actions_one_pending_per_person_idx`);
         const p = rowsOf(await tx.execute(sql`
           insert into people (first_name, last_name, date_of_birth, deletable_until)
           values ('Repair', ${`Subject${stamp}`}, '2000-06-15', ${fixtureDeletableUntil()}) returning id`))[0]!.id as string;
@@ -572,13 +585,24 @@ describe.skipIf(!hasDb)("drizzle/0061 participant roll (Postgres-backed)", () =>
         const insert = (kind: string, roll: string | null) => sql`
           insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, approval_status)
           values (${orgMain}, ${p}, ${kind}::roll_action_kind, '2026-01-01', ${roll}, 'pending')`;
+        // Each accepted insert is rolled back to its savepoint: drizzle/0062's
+        // one-pending-per-person index (R7) would otherwise refuse the second.
+        const accepted = async (query: SQL) => {
+          let ran = false;
+          try {
+            await tx.transaction(async (sp) => { await sp.execute(query); ran = true; throw new Rollback(); });
+          } catch (err) {
+            if (!(err instanceof Rollback)) throw err;
+          }
+          expect(ran).toBe(true);
+        };
         const kinds = Object.keys(ROLL_ACTION_KIND_TO_ROLL).filter((k) => k !== "void");
         expect(kinds.length).toBe(16);
         for (const kind of kinds) {
           const mapped = ROLL_ACTION_KIND_TO_ROLL[kind as keyof typeof ROLL_ACTION_KIND_TO_ROLL];
-          await tx.transaction(async (sp) => { await sp.execute(insert(kind, mapped)); });
+          await accepted(insert(kind, mapped));
           if (kind === "opening_balance") {
-            await tx.transaction(async (sp) => { await sp.execute(insert(kind, "affiliate")); });
+            await accepted(insert(kind, "affiliate"));
             continue;
           }
           const wrong = mapped === null ? "active" : mapped === "active" ? "baptized" : "active";
@@ -602,9 +626,12 @@ describe.skipIf(!hasDb)("drizzle/0061 participant roll (Postgres-backed)", () =>
         const target = String(rowsOf(await tx.execute(sql`
           insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, approval_status)
           values (${orgMain}, ${p}, 'other_participant_enrolled', '2025-01-01', 'other_participant', 'approved') returning id`))[0]!.id);
+        // decided_by/decided_at: drizzle/0063's roll_actions_terminal_decision_stamps
+        // requires them on a denied row; harmless on the others.
         const voidRow = (status: string, voids: string | null) => sql`
-          insert into roll_actions (organization_id, person_id, kind, effective_date, approval_status, voids_action_id)
-          values (${orgMain}, ${p}, 'void', '2026-01-01', ${status}, ${voids}::uuid)`;
+          insert into roll_actions (organization_id, person_id, kind, effective_date, approval_status, voids_action_id,
+                                    decided_by, decided_at)
+          values (${orgMain}, ${p}, 'void', '2026-01-01', ${status}, ${voids}::uuid, ${actorUser}, now())`;
 
         expect((await rejected(tx, voidRow("approved", null))).text).toContain("roll_actions_void_shape");
         expect((await rejected(tx, sql`
@@ -643,13 +670,14 @@ describe.skipIf(!hasDb)("drizzle/0061 participant roll (Postgres-backed)", () =>
         expect(pgCode(caught), status).toBe("42501");
         expect(pgMessages(caught), status).toMatch(/row-level security policy/);
       }
-      // Positive control, rolled back: pending is allowed.
+      // Positive control, rolled back: pending is allowed. A gain kind,
+      // because drizzle/0063 narrows the policy to the approvable kinds (F191).
       let pendingWritten = false;
       try {
         await asApp(orgMain, async (tx) => {
           await tx.execute(sql`
             insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, approval_status)
-            values (${orgMain}, ${p}, 'other_participant_enrolled', '2025-01-01', 'other_participant', 'pending')`);
+            values (${orgMain}, ${p}, 'profession_of_faith', '2025-01-01', 'active', 'pending')`);
           pendingWritten = true;
           throw new Rollback();
         });

@@ -93,11 +93,17 @@ export function MemberWizard({
   slug,
   households,
   canProposeRoll,
+  memberAvailable = true,
+  sessionWaits = false,
 }: {
   slug: string;
   households: { householdId: string; name: string }[];
   /** `roll.propose`. Without it only Visitor is offered; the server re-checks. */
   canProposeRoll: boolean;
+  /** The organization has a Session (R15); false hides the Member choice. */
+  memberAvailable?: boolean;
+  /** The Session exists but cannot approve yet (Flow 7): the review note says so. */
+  sessionWaits?: boolean;
 }) {
   const router = useRouter();
   const form = useForm<MemberWizardValues>({
@@ -372,10 +378,18 @@ export function MemberWizard({
           <HouseholdStep form={form} households={households} mode={householdMode} />
         )}
         {currentStepId === "connection" && (
-          <ConnectionStep form={form} canProposeRoll={canProposeRoll} />
+          <ConnectionStep
+            form={form}
+            canProposeRoll={canProposeRoll}
+            memberAvailable={memberAvailable}
+          />
         )}
         {currentStepId === "review" && (
-          <ReviewStep form={form} householdName={selectedHousehold?.name} />
+          <ReviewStep
+            form={form}
+            householdName={selectedHousehold?.name}
+            sessionWaits={sessionWaits}
+          />
         )}
 
         {currentStepId !== "confirm" && currentStepId !== "search" && (

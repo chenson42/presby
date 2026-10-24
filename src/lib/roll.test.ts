@@ -5,9 +5,20 @@
  * is SKIPPED there, not failed. Run for real with:
  *   dotenv -e .env.local -- vitest run src/lib/roll.test.ts
  *
- * `recordAudit()` is mocked at the module boundary, same posture and same
- * reason as `org-features.test.ts` — `@/lib/audit` transitively imports
- * `@/auth` (next-auth), which this test environment cannot resolve.
+ * `@/lib/audit` is mocked at the module boundary, same posture and same
+ * reason as `org-features.test.ts` — it transitively imports `@/auth`
+ * (next-auth), which this test environment cannot resolve. Only
+ * `AUDIT_ACTIONS` is used for real: approve, deny, withdraw and the
+ * on-record paths write their audit rows with the REAL `insertAuditRow()` in
+ * the same transaction (Increment 2, R13), and `recordAudit` must never be
+ * called by `roll.ts` at all (a test asserts it).
+ *
+ * RUNS AGAINST THE 0063 LOCKDOWN STATE (docs/work-log/2026-10-22-founding-
+ * admin-directory.md, Increment 2 Batch B): `presby_app` holds no UPDATE or
+ * DELETE on `roll_actions`, so every decision in this file goes through the
+ * `presby_decide_roll_action` / `presby_withdraw_roll_action` definers and the
+ * tests that used to prove a plain `presby_app` UPDATE or DELETE now prove it
+ * is refused (SQLSTATE 42501).
  *
  * SCHEMA DEFECT (FIXED): `roll_actions_freeze`'s `BEFORE DELETE` path used
  * to return `new`, which is always NULL on a DELETE — Postgres treats that
@@ -27,17 +38,24 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { eq, and, ne, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 import {
+  APPROVABLE_ROLL_ACTION_KINDS,
+  BULK_APPROVE_MAX,
   EDIT_TIME_ROLL_ACTION_KINDS,
   ROLL_ACTION_KIND_TO_ROLL,
+  ROLL_DECISION_REFUSALS,
+  type RollActionKind,
 } from "@/lib/roll-action-kinds";
 
 vi.mock("server-only", () => ({}));
+// Every test below makes many sequential round trips to a remote database.
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 240_000 });
 
 const mockRecordAudit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/lib/audit", () => ({
   AUDIT_ACTIONS: {
     ROLL_ACTION_APPROVED: "tenant.roll_action.approved",
     ROLL_ACTION_DENIED: "tenant.roll_action.denied",
+    ROLL_ACTION_WITHDRAWN: "tenant.roll_action.withdrawn",
     ROLL_ACTION_RECORDED: "tenant.roll_action.recorded",
     ROLL_ACTION_VOIDED: "tenant.roll_action.voided",
   },
@@ -65,8 +83,13 @@ const hasDb = Boolean(
 
 describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   let approveRollAction: typeof import("./roll").approveRollAction;
+  let approveRollActions: typeof import("./roll").approveRollActions;
   let denyRollAction: typeof import("./roll").denyRollAction;
+  let withdrawRollAction: typeof import("./roll").withdrawRollAction;
   let listPendingRollActions: typeof import("./roll").listPendingRollActions;
+  let listRecentlyDecidedRollActions: typeof import("./roll").listRecentlyDecidedRollActions;
+  let countPendingRollActions: typeof import("./roll").countPendingRollActions;
+  let getSessionApprovalState: typeof import("./roll").getSessionApprovalState;
   let recordRollAction: typeof import("./roll").recordRollAction;
   let getPendingRollActionsForPerson: typeof import("./roll").getPendingRollActionsForPerson;
   let AUDIT_ACTIONS: typeof import("@/lib/audit").AUDIT_ACTIONS;
@@ -92,21 +115,29 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   let outsiderPerson: string; // no grant at all
   let rollSubject: string; // the person the pending roll_actions are about
 
-  let approveTargetId: string; // pending
-  let denyTargetId: string; // pending
-  let raceTargetId: string; // pending, used for the already_decided race test
-  let ownProposalTargetId: string; // pending, proposed_by = approverUserId
+  // A SECOND organization with NO Session group (a presbytery): the
+  // `no_session` refusal (R15), the `no_session` state, and the cross-org
+  // `not_found` for a decision aimed at another organization's row.
+  let orgB: string;
+  let bProposer: string; // holds roll.propose at orgB
+  let bProposerUserId: string;
+  let bSubject: string; // membership at orgB, no roll rows
+  let bPendingId: string; // a pending row at orgB (cross-org probe)
 
   // recordRollAction / getPendingRollActionsForPerson fixture
   let proposerPerson: string; // holds roll.propose ONLY (not roll.approve)
   let proposerUserId2: string; // a users.id for recordRollAction's actingUserId
+  let otherProposerUserId: string; // a users.id that proposed fixture rows (nobody acts as it)
   let editSubjectWithBirthdate: string; // membership at orgA, dateOfBirth set
   let editSubjectNoBirthdate: string; // membership at orgA, dateOfBirth null
   let editSubjectAlreadyPending: string; // membership at orgA, one pre-existing pending row
   let personWithNoMembership: string; // exists, but no membership row at orgA
   let preexistingPendingId: string;
-  // People created by the on-record describes below; swept in afterAll.
+  // People, users and organizations created by the describes below; swept in
+  // afterAll (organizations first, so their memberships cascade).
   const extraPeople: string[] = [];
+  const extraUsers: string[] = [];
+  const extraOrgs: string[] = [];
 
   /** A person with a live membership at orgA (and optionally a birth date). */
   async function mkPerson(
@@ -133,6 +164,199 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     return p!.id;
   }
 
+
+  /** A group_types row by key (the platform catalog), created if absent. */
+  async function groupTypeIdFor(key: "roster" | "court"): Promise<string> {
+    const platform = getPlatformDb();
+    await platform
+      .insert(groupTypes)
+      .values({ key, name: key === "court" ? "Court" : "Roster" })
+      .onConflictDoNothing();
+    const [row] = await platform
+      .select({ id: groupTypes.id })
+      .from(groupTypes)
+      .where(eq(groupTypes.key, key))
+      .limit(1);
+    return row!.id;
+  }
+
+  function courtGroupTypeId(): Promise<string> {
+    return groupTypeIdFor("court");
+  }
+
+  let orgCounter = 0;
+
+  /** An extra fixture organization with its Active Membership group and,
+   * optionally, the derived Session group a congregation is seeded with. */
+  async function mkOrg(
+    label: string,
+    opts: { type?: "congregation" | "presbytery"; session?: boolean } = {},
+  ): Promise<string> {
+    const platform = getPlatformDb();
+    orgCounter += 1;
+    const [org] = await platform
+      .insert(organizations)
+      .values({
+        deletableUntil: fixtureDeletableUntil(),
+        organizationType: opts.type ?? "congregation",
+        name: `Fixture ${label} for roll.test.ts`,
+        slug: `roll-test-${label}-${stamp}-${orgCounter}`,
+        path: `roll_test_${label}_${stamp}_${orgCounter}`,
+        platformStatus: "unmanaged",
+      })
+      .returning({ id: organizations.id });
+    extraOrgs.push(org!.id);
+    await platform.insert(groups).values({
+      organizationId: org!.id,
+      groupTypeId: await groupTypeIdFor("roster"),
+      name: "Active Membership",
+      membershipSource: "derived",
+      derivedFrom: "active_membership",
+      isProtected: true,
+    });
+    if (opts.session) {
+      await platform.insert(groups).values({
+        organizationId: org!.id,
+        groupTypeId: await courtGroupTypeId(),
+        name: "Session",
+        membershipSource: "derived",
+        derivedFrom: "session",
+        isProtected: true,
+      });
+    }
+    return org!.id;
+  }
+
+  /** A person with a live membership at `orgId`, and optionally a linked user. */
+  async function mkMemberAt(
+    orgId: string,
+    first: string,
+    last: string,
+    opts: { dob?: string; engagement?: string; withUser?: boolean } = {},
+  ): Promise<{ personId: string; userId: string | null }> {
+    const platform = getPlatformDb();
+    let userId: string | null = null;
+    if (opts.withUser) {
+      const [u] = await platform
+        .insert(users)
+        .values({
+          email: `roll-test-${first.toLowerCase()}-${stamp}-${extraUsers.length}@example.invalid`,
+          name: `${first} ${last}`,
+        })
+        .returning({ id: users.id });
+      userId = u!.id;
+      extraUsers.push(userId);
+    }
+    const [p] = await platform
+      .insert(people)
+      .values({
+        firstName: first,
+        lastName: `${last}${stamp}`,
+        dateOfBirth: opts.dob ?? null,
+        userId,
+        deletableUntil: fixtureDeletableUntil(),
+      })
+      .returning({ id: people.id });
+    extraPeople.push(p!.id);
+    await platform.insert(memberships).values({
+      organizationId: orgId,
+      personId: p!.id,
+      engagementStatus: opts.engagement ?? "regular",
+    });
+    return { personId: p!.id, userId };
+  }
+
+  /** An org-owned role holding `permissionKeys`, granted to a person or to a
+   * group (the Session role is bound to the derived Session group). */
+  async function mkRoleGrant(
+    orgId: string,
+    key: string,
+    permissionKeys: string[],
+    to: { personId: string } | { groupId: string },
+  ): Promise<void> {
+    const platform = getPlatformDb();
+    const [role] = await platform
+      .insert(appRoles)
+      .values({ organizationId: orgId, key, name: key, roleKind: "custom" })
+      .returning({ id: appRoles.id });
+    await platform
+      .insert(appRolePermissions)
+      .values(permissionKeys.map((permissionKey) => ({ roleId: role!.id, permissionKey })));
+    await platform.insert(roleGrants).values({
+      organizationId: orgId,
+      roleId: role!.id,
+      startsOn: "2020-01-01",
+      ...("personId" in to ? { personId: to.personId } : { groupId: to.groupId }),
+    });
+  }
+
+  /** The derived Session group's id at an organization. */
+  async function sessionGroupId(orgId: string): Promise<string> {
+    const platform = getPlatformDb();
+    const [g] = await platform
+      .select({ id: groups.id })
+      .from(groups)
+      .where(and(eq(groups.organizationId, orgId), eq(groups.derivedFrom, "session")))
+      .limit(1);
+    return g!.id;
+  }
+
+  /** A pending roll action inserted by the owner (fixtures only: presby_app
+   * proposes through recordRollAction / createPerson). One pending row per
+   * person (R7), so each call makes its own subject unless one is given. */
+  async function mkPending(
+    opts: {
+      orgId?: string;
+      personId?: string;
+      kind?: RollActionKind;
+      effectiveDate?: string;
+      proposedBy?: string | null;
+      minuteReference?: string | null;
+      dob?: string;
+    } = {},
+  ): Promise<{ id: string; personId: string }> {
+    const platform = getPlatformDb();
+    const orgId = opts.orgId ?? orgA;
+    const kind = opts.kind ?? "profession_of_faith";
+    const personId =
+      opts.personId ??
+      (orgId === orgA
+        ? await mkPerson("Pending", "Subject", { dob: opts.dob })
+        : (await mkMemberAt(orgId, "Pending", "Subject", { dob: opts.dob })).personId);
+    const [row] = await platform
+      .insert(rollActions)
+      .values({
+        organizationId: orgId,
+        personId,
+        kind,
+        effectiveDate: opts.effectiveDate ?? "2026-01-01",
+        resultingRoll: ROLL_ACTION_KIND_TO_ROLL[kind],
+        approvalStatus: "pending",
+        proposedBy: opts.proposedBy === undefined ? otherProposerUserId : opts.proposedBy,
+        minuteReference: opts.minuteReference ?? null,
+      })
+      .returning({ id: rollActions.id });
+    return { id: row!.id, personId };
+  }
+
+  /** The roll row, the membership cache and the audit rows for one subject:
+   * the "nothing was written" snapshot. */
+  async function stateOf(rollActionId: string, personId: string) {
+    const platform = getPlatformDb();
+    const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, rollActionId));
+    const [m] = await platform
+      .select({ currentRoll: memberships.currentRoll, endedOn: memberships.endedOn })
+      .from(memberships)
+      .where(and(eq(memberships.personId, personId), eq(memberships.organizationId, orgA)));
+    const audits = await auditRowsFor(rollActionId);
+    return {
+      status: row?.approvalStatus,
+      decidedBy: row?.decidedBy ?? null,
+      currentRoll: m?.currentRoll ?? null,
+      audits: audits.length,
+    };
+  }
+
   /** audit_events rows (owner read) for one roll action id. */
   async function auditRowsFor(rollActionId: string): Promise<Array<Record<string, unknown>>> {
     const platform = getPlatformDb();
@@ -145,8 +369,13 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   beforeAll(async () => {
     ({
       approveRollAction,
+      approveRollActions,
       denyRollAction,
+      withdrawRollAction,
       listPendingRollActions,
+      listRecentlyDecidedRollActions,
+      countPendingRollActions,
+      getSessionApprovalState,
       recordRollAction,
       getPendingRollActionsForPerson,
     } = await import("./roll"));
@@ -197,6 +426,16 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       name: "Active Membership",
       membershipSource: "derived",
       derivedFrom: "active_membership",
+      isProtected: true,
+    });
+    // R15: a member proposal needs a Session to approve it, so the fixture
+    // congregation carries the derived Session group a real one is seeded with.
+    await platform.insert(groups).values({
+      organizationId: orgA,
+      groupTypeId: await courtGroupTypeId(),
+      name: "Session",
+      membershipSource: "derived",
+      derivedFrom: "session",
       isProtected: true,
     });
 
@@ -316,7 +555,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       .insert(users)
       .values({ email: `roll-test-proposer-${stamp}@example.invalid`, name: "Fixture Proposer" })
       .returning({ id: users.id });
-    const proposerUserId = u2!.id;
+    otherProposerUserId = u2!.id;
 
     const [u3] = await platform
       .insert(users)
@@ -331,26 +570,6 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       .set({ userId: proposerUserId2 })
       .where(eq(people.id, proposerPerson));
 
-    async function pendingAction(proposedBy: string) {
-      const [row] = await platform
-        .insert(rollActions)
-        .values({
-          organizationId: orgA,
-          personId: rollSubject,
-          kind: "other_participant_enrolled",
-          effectiveDate: "2026-01-01",
-          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
-          approvalStatus: "pending",
-          proposedBy,
-        })
-        .returning({ id: rollActions.id });
-      return row!.id;
-    }
-    approveTargetId = await pendingAction(proposerUserId);
-    denyTargetId = await pendingAction(proposerUserId);
-    raceTargetId = await pendingAction(proposerUserId);
-    ownProposalTargetId = await pendingAction(approverUserId);
-
     const [preexisting] = await platform
       .insert(rollActions)
       .values({
@@ -364,6 +583,16 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       })
       .returning({ id: rollActions.id });
     preexistingPendingId = preexisting!.id;
+
+    // orgB: a presbytery with no Session group, one propose-only user, one
+    // member with no roll rows, and one pending row (the cross-org probe).
+    orgB = await mkOrg("b", { type: "presbytery", session: false });
+    const bProposerMember = await mkMemberAt(orgB, "Bryony", "Proposer", { withUser: true });
+    bProposer = bProposerMember.personId;
+    bProposerUserId = bProposerMember.userId!;
+    await mkRoleGrant(orgB, "roll_proposer", ["roll.propose"], { personId: bProposer });
+    bSubject = (await mkMemberAt(orgB, "Bertram", "Subject")).personId;
+    bPendingId = (await mkPending({ orgId: orgB })).id;
   });
 
   afterEach(() => {
@@ -405,6 +634,23 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
       );
     }
+    // The extra organizations (their memberships, groups, terms, roles and
+    // roll rows cascade). Same trigger handling as orgA above.
+    await platform.execute(sql`alter table roll_actions disable trigger roll_actions_freeze`);
+    await platform.execute(
+      sql`alter table group_memberships disable trigger group_memberships_reject_derived`,
+    );
+    try {
+      for (const id of extraOrgs) {
+        await platform.delete(rollActions).where(eq(rollActions.organizationId, id));
+        await platform.delete(organizations).where(eq(organizations.id, id));
+      }
+    } finally {
+      await platform.execute(
+        sql`alter table group_memberships enable trigger group_memberships_reject_derived`,
+      );
+      await platform.execute(sql`alter table roll_actions enable trigger roll_actions_freeze`);
+    }
     await platform.delete(people).where(eq(people.id, approverPerson));
     await platform.delete(people).where(eq(people.id, outsiderPerson));
     await platform.delete(people).where(eq(people.id, rollSubject));
@@ -422,6 +668,14 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     await platform.execute(
       sql`delete from audit_events where metadata->>'organizationId' = ${orgA}`,
     );
+    for (const id of extraOrgs) {
+      await platform.execute(
+        sql`delete from audit_events where metadata->>'organizationId' = ${id}`,
+      );
+    }
+    for (const id of extraUsers) {
+      await platform.delete(users).where(eq(users.id, id));
+    }
     await platform.delete(users).where(eq(users.id, approverUserId));
     await platform.delete(users).where(eq(users.id, proposerUserId2));
     // proposerUserId was never tracked in a `let` — sweep by email instead.
@@ -431,216 +685,380 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   });
 
   // ---------------------------------------------------------------------
-  // approveRollAction
+  // approveRollAction (through presby_decide_roll_action, DECISION-203)
   // ---------------------------------------------------------------------
 
-  describe("approveRollAction", () => {
-    it("forbidden without roll.approve", async () => {
-      const result = await approveRollAction(
-        outsiderPerson,
-        orgA,
-        approverUserId,
-        approveTargetId,
-        {},
-      );
-      expect(result).toEqual({ kind: "forbidden" });
-      expect(mockRecordAudit).not.toHaveBeenCalled();
-    });
-
-    it("not_found for a nonexistent id", async () => {
-      const result = await approveRollAction(
-        approverPerson,
-        orgA,
-        approverUserId,
-        "00000000-0000-0000-0000-000000000000",
-        {},
-      );
-      expect(result).toEqual({ kind: "not_found" });
-    });
-
-    it("approves a pending action, projects memberships.current_roll, and audits", async () => {
-      const result = await approveRollAction(
-        approverPerson,
-        orgA,
-        approverUserId,
-        approveTargetId,
-        { minuteReference: "Session 2026-01-01, item 5" },
-      );
-      expect(result).toEqual({ kind: "ok" });
-      expect(mockRecordAudit).toHaveBeenCalledTimes(1);
-      expect(mockRecordAudit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: AUDIT_ACTIONS.ROLL_ACTION_APPROVED,
-          resourceId: approveTargetId,
-        }),
-      );
-
-      const platform = getPlatformDb();
-      const [row] = await platform
-        .select()
-        .from(rollActions)
-        .where(eq(rollActions.id, approveTargetId));
-      expect(row?.approvalStatus).toBe("approved");
-      expect(row?.approvedBy).toBe(approverUserId);
-      expect(row?.minuteReference).toBe("Session 2026-01-01, item 5");
-
-      const [membershipRow] = await platform
-        .select()
-        .from(memberships)
-        .where(
-          and(
-            eq(memberships.personId, rollSubject),
-            eq(memberships.organizationId, orgA),
-          ),
-        );
-      // The sync trigger projects current_roll from the newly-approved
-      // action's own resulting_roll/kind — this pins that the trigger
-      // fired at all (untouched code, inherited behavior).
-      expect(membershipRow?.currentRoll).toBeDefined();
-    });
-
-    it("already_decided on a second approval of the same row (the race pre-check)", async () => {
-      const first = await approveRollAction(
-        approverPerson,
-        orgA,
-        approverUserId,
-        raceTargetId,
-        {},
-      );
-      expect(first).toEqual({ kind: "ok" });
-      mockRecordAudit.mockClear();
-
-      const second = await approveRollAction(
-        approverPerson,
-        orgA,
-        approverUserId,
-        raceTargetId,
-        {},
-      );
-      expect(second).toEqual({ kind: "already_decided" });
-      expect(mockRecordAudit).not.toHaveBeenCalled();
-    });
-
-    /**
-     * REGRESSION PIN ON INVARIANT 4 ITSELF, not this module's own pre-check
-     * — a DIRECT `UPDATE` against an already-approved row, run as
-     * `presby_app` (the tenant connection this whole app writes through),
-     * must still be rejected by `presby_freeze_approved_roll_action`. This
-     * proves the trigger is the enforcement floor and `decideRollAction()`'s
-     * pending-status pre-check is a nicety layered on top, not a substitute.
-     */
-    it("presby_freeze_approved_roll_action still rejects a direct UPDATE against an approved row (presby_app)", async () => {
-      const { withOrgContext } = await import("@/lib/authz");
-
-      // NOT `.rejects.toThrow(regex)` — see people.test.ts's own "BLOCKED"
-      // test comment: Drizzle's `DrizzleQueryError.message` is "Failed
-      // query: update ...", and the actual Postgres exception ("approved
-      // actions are immutable...") is one level down, on `.cause`.
-      let caught: unknown;
-      try {
-        await withOrgContext(approverPerson, orgA, async (tx) => {
-          await tx.execute(sql`
-            update roll_actions set denial_reason = 'attempted-edit'
-             where id = ${raceTargetId}::uuid
-          `);
-        });
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeDefined();
-      const chain =
-        caught instanceof Error
-          ? [caught.message, (caught.cause as Error | undefined)?.message]
-              .filter(Boolean)
-              .join(" :: ")
-          : String(caught);
-      expect(chain).toMatch(/immutable/i);
-    });
-
-    /**
-     * REGRESSION PIN — Finding 2 (docs/work-log/2026-08-25-member-
-     * management.md, "Two schema-layer findings, verified live"), fixed by
-     * drizzle/0028_presby_people_write_rls_fix.sql.
-     * `presby_freeze_approved_roll_action`'s BEFORE DELETE path used to
-     * unconditionally `return new` — always NULL on a DELETE — so DELETE
-     * silently no-op'd regardless of `approval_status`, INCLUDING a
-     * `pending` row. Both halves proven through the SAME RLS-enforced
-     * `presby_app` connection this app writes through (`withOrgContext()`,
-     * not `getPlatformDb()`, which would prove nothing about the live
-     * policy — table owner/BYPASSRLS connections are still subject to
-     * ordinary triggers, but a test using only that connection wouldn't
-     * exercise the path the application actually writes through):
-     *   - a PENDING row's DELETE now genuinely succeeds (roll.ts itself
-     *     never deletes anything — this is a schema-floor guarantee, not
-     *     a path this module exercises today).
-     *   - an APPROVED row's DELETE is still rejected, not silently
-     *     no-op'd — the exact defect this migration fixed.
-     */
-    it("Finding 2: a pending row's DELETE now succeeds; an approved row's DELETE is still rejected, not silently no-op'd (presby_app)", async () => {
-      const { withOrgContext } = await import("@/lib/authz");
-      const platform = getPlatformDb();
-
-      const [pendingRow] = await platform
-        .insert(rollActions)
-        .values({
-          organizationId: orgA,
-          personId: rollSubject,
-          kind: "other_participant_enrolled",
-          effectiveDate: "2026-01-01",
-          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
-          approvalStatus: "pending",
-          proposedBy: approverUserId,
-        })
-        .returning({ id: rollActions.id });
-
+  /** The exact UPDATE/DELETE refusal a `presby_app` caller gets after 0063. */
+  async function plainSqlOutcome(statement: ReturnType<typeof sql>): Promise<string> {
+    const { withOrgContext } = await import("@/lib/authz");
+    try {
       await withOrgContext(approverPerson, orgA, async (tx) => {
-        await tx.execute(sql`delete from roll_actions where id = ${pendingRow!.id}::uuid`);
+        await tx.execute(statement);
       });
-      const [stillPending] = await platform
-        .select({ id: rollActions.id })
-        .from(rollActions)
-        .where(eq(rollActions.id, pendingRow!.id));
-      expect(stillPending).toBeUndefined();
-
-      // A SEPARATE, self-created approved row — not a shared fixture id —
-      // so this assertion never depends on another test's execution order.
-      const [approvedRow] = await platform
-        .insert(rollActions)
-        .values({
-          organizationId: orgA,
-          personId: rollSubject,
-          kind: "other_participant_enrolled",
-          effectiveDate: "2026-01-01",
-          resultingRoll: "other_participant", // drizzle/0061 roll_actions_resulting_roll_matches_kind
-          approvalStatus: "approved",
-          proposedBy: approverUserId,
-          approvedBy: approverUserId,
-          approvedOn: "2026-01-02",
-        })
-        .returning({ id: rollActions.id });
-
-      let caught: unknown;
-      try {
-        await withOrgContext(approverPerson, orgA, async (tx) => {
-          await tx.execute(sql`delete from roll_actions where id = ${approvedRow!.id}::uuid`);
-        });
-      } catch (err) {
-        caught = err;
+      return "NO ERROR";
+    } catch (err) {
+      const parts: string[] = [];
+      for (let cur = err as { message?: string; code?: string; cause?: unknown } | undefined; cur; ) {
+        parts.push(`${cur.code ?? ""} ${cur.message ?? ""}`);
+        cur = cur.cause as typeof cur;
       }
-      expect(caught).toBeDefined();
-      const chain =
-        caught instanceof Error
-          ? [caught.message, (caught.cause as Error | undefined)?.message]
-              .filter(Boolean)
-              .join(" :: ")
-          : String(caught);
-      expect(chain).toMatch(/immutable/i);
+      return parts.join(" :: ");
+    }
+  }
 
-      const [stillApproved] = await platform
-        .select({ id: rollActions.id, approvalStatus: rollActions.approvalStatus })
+  describe("approveRollAction", () => {
+    afterEach(() => {
+      auditControl.fail = false;
+    });
+
+    it("forbidden without roll.approve; the row stays pending and nothing is audited", async () => {
+      const target = await mkPending();
+      const result = await approveRollAction(outsiderPerson, orgA, approverUserId, target.id, {});
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(await stateOf(target.id, target.personId)).toEqual({
+        status: "pending",
+        decidedBy: null,
+        currentRoll: null,
+        audits: 0,
+      });
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("a roll.propose-only holder cannot approve, even for the row they proposed (propose and approve stay separate keys)", async () => {
+      const target = await mkPending({ proposedBy: proposerUserId2 });
+      const result = await approveRollAction(proposerPerson, orgA, proposerUserId2, target.id, {});
+      expect(result).toEqual({ kind: "forbidden" });
+      expect((await stateOf(target.id, target.personId)).status).toBe("pending");
+    });
+
+    it("FORGERY: a users.id that is not the acting person's is refused by the database, not trusted — typed forbidden, nothing written", async () => {
+      // approverPerson holds roll.approve (the TypeScript pre-check passes),
+      // but proposerUserId2 belongs to a person who does not: the function's
+      // own actor check raises its one literal (SQLSTATE 42501).
+      const target = await mkPending();
+      const result = await approveRollAction(approverPerson, orgA, proposerUserId2, target.id, {});
+      expect(result).toEqual({ kind: "forbidden" });
+      expect(await stateOf(target.id, target.personId)).toEqual({
+        status: "pending",
+        decidedBy: null,
+        currentRoll: null,
+        audits: 0,
+      });
+    });
+
+    it("not_found for a nonexistent id, a malformed id, and ANOTHER organization's roll action (indistinguishable)", async () => {
+      for (const id of [
+        "00000000-0000-0000-0000-000000000000",
+        "not-a-uuid",
+        "'; drop table roll_actions; --",
+        bPendingId,
+      ]) {
+        expect(
+          await approveRollAction(approverPerson, orgA, approverUserId, id, {}),
+          id,
+        ).toEqual({ kind: "refused", reason: "not_found" });
+      }
+      // The other organization's row was not touched.
+      const platform = getPlatformDb();
+      const [other] = await platform.select().from(rollActions).where(eq(rollActions.id, bPendingId));
+      expect(other?.approvalStatus).toBe("pending");
+    });
+
+    it("approves a pending action: projects current_roll, stamps the decision, overwrites the minute reference, and audits in the same transaction with exactly the documented metadata", async () => {
+      const target = await mkPending({ minuteReference: "Proposer's note" });
+      const result = await approveRollAction(
+        approverPerson,
+        orgA,
+        approverUserId,
+        target.id,
+        { minuteReference: "  Session 2026-01-01, item 5  " },
+        { actingUserEmail: "approver@example.invalid" },
+      );
+      expect(result).toEqual({
+        kind: "ok",
+        rollActionId: target.id,
+        personId: target.personId,
+        rollKind: "profession_of_faith",
+        effectiveDate: "2026-01-01",
+        affectsFiledPeriod: false,
+        shadowedBy: null,
+        selfApproved: false,
+        selfTarget: false,
+      });
+
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, target.id));
+      expect(row).toMatchObject({
+        approvalStatus: "approved",
+        approvedBy: approverUserId,
+        decidedBy: approverUserId,
+        minuteReference: "Session 2026-01-01, item 5",
+      });
+      expect(row?.decidedAt).toBeInstanceOf(Date);
+      const [m] = await platform
+        .select({ currentRoll: memberships.currentRoll, since: memberships.currentRollSince })
+        .from(memberships)
+        .where(and(eq(memberships.personId, target.personId), eq(memberships.organizationId, orgA)));
+      expect(m).toMatchObject({ currentRoll: "active", since: "2026-01-01" });
+
+      const audits = await auditRowsFor(target.id);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: AUDIT_ACTIONS.ROLL_ACTION_APPROVED,
+        actor_user_id: approverUserId,
+        actor_email: "approver@example.invalid",
+        resource_type: "roll_action",
+        resource_id: target.id,
+      });
+      expect(audits[0]!.metadata).toEqual({
+        organizationId: orgA,
+        rollActionId: target.id,
+        personId: target.personId,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-01-01",
+        minuteReference: "Session 2026-01-01, item 5",
+        selfApproved: false,
+        selfTarget: false,
+        affectsFiledPeriod: false,
+        shadowedBy: null,
+      });
+      // roll.ts never calls the swallow-on-failure after-commit recordAudit().
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("an omitted minute reference leaves the proposer's value untouched, and the audit says null", async () => {
+      const target = await mkPending({ minuteReference: "Proposer's note" });
+      const result = await approveRollAction(approverPerson, orgA, approverUserId, target.id, {});
+      expect(result.kind).toBe("ok");
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, target.id));
+      expect(row?.minuteReference).toBe("Proposer's note");
+      const [audit] = await auditRowsFor(target.id);
+      expect((audit!.metadata as Record<string, unknown>).minuteReference).toBeNull();
+    });
+
+    it("stamps selfApproved (the proposer approves their own row) and selfTarget (the approver is the subject) — permitted, never blocked", async () => {
+      const own = await mkPending({ proposedBy: approverUserId });
+      const ownResult = await approveRollAction(approverPerson, orgA, approverUserId, own.id, {});
+      expect(ownResult).toMatchObject({ kind: "ok", selfApproved: true, selfTarget: false });
+      const [ownAudit] = await auditRowsFor(own.id);
+      expect(ownAudit!.metadata).toMatchObject({ selfApproved: true, selfTarget: false });
+
+      // The approver is the SUBJECT of a proposal someone else made.
+      const about = await mkPending({ personId: approverPerson, effectiveDate: "2025-06-01" });
+      const aboutResult = await approveRollAction(approverPerson, orgA, approverUserId, about.id, {});
+      expect(aboutResult).toMatchObject({ kind: "ok", selfApproved: false, selfTarget: true });
+      const [aboutAudit] = await auditRowsFor(about.id);
+      expect(aboutAudit!.metadata).toMatchObject({ selfApproved: false, selfTarget: true });
+    });
+
+    it("returns shadowedBy (a warning, never a refusal) when a later effective action exists, and puts it in the audit metadata", async () => {
+      const subject = await mkPerson("Shadow", "Subject");
+      const platform = getPlatformDb();
+      await platform.insert(rollActions).values({
+        organizationId: orgA,
+        personId: subject,
+        kind: "baptized_member_enrolled",
+        effectiveDate: "2026-03-01",
+        resultingRoll: "baptized",
+        approvalStatus: "approved",
+        approvedBy: proposerUserId2,
+        proposedBy: proposerUserId2,
+      });
+      const target = await mkPending({ personId: subject, effectiveDate: "2026-01-15" });
+      const result = await approveRollAction(approverPerson, orgA, approverUserId, target.id, {});
+      expect(result).toMatchObject({
+        kind: "ok",
+        shadowedBy: { kind: "baptized_member_enrolled", effectiveDate: "2026-03-01" },
+      });
+      const [audit] = await auditRowsFor(target.id);
+      expect((audit!.metadata as Record<string, unknown>).shadowedBy).toEqual({
+        kind: "baptized_member_enrolled",
+        effectiveDate: "2026-03-01",
+      });
+    });
+
+    it("already_decided on a second approval of the same row; one audit row, not two", async () => {
+      const target = await mkPending();
+      const first = await approveRollAction(approverPerson, orgA, approverUserId, target.id, {});
+      expect(first.kind).toBe("ok");
+      const second = await approveRollAction(approverPerson, orgA, approverUserId, target.id, {});
+      expect(second).toEqual({ kind: "refused", reason: "already_decided" });
+      expect((await auditRowsFor(target.id)).length).toBe(1);
+    });
+
+    it("bounds the minute reference at 200 characters after trimming (the database enforces it too)", async () => {
+      const target = await mkPending();
+      expect(
+        await approveRollAction(approverPerson, orgA, approverUserId, target.id, {
+          minuteReference: "m".repeat(201),
+        }),
+      ).toEqual({ kind: "refused", reason: "minute_reference_too_long" });
+      expect((await stateOf(target.id, target.personId)).status).toBe("pending");
+      // Exactly 200 (padded with spaces that trim away) is fine.
+      expect(
+        (
+          await approveRollAction(approverPerson, orgA, approverUserId, target.id, {
+            minuteReference: `  ${"m".repeat(200)}  `,
+          })
+        ).kind,
+      ).toBe("ok");
+    });
+
+    it.each([
+      ["a kind that is not approvable (a legacy pending participant row)", "not_approvable_kind"],
+      ["an ended membership", "membership_ended"],
+      ["a person recorded as deceased", "person_deceased"],
+      ["a gain the person already has", "already_on_roll"],
+    ] as const)(
+      "refuses %s with its own code, leaves the row pending and writes no audit row",
+      async (label, expected) => {
+        const platform = getPlatformDb();
+        let target: { id: string; personId: string };
+        if (expected === "not_approvable_kind") {
+          target = await mkPending({ kind: "other_participant_enrolled" });
+        } else if (expected === "membership_ended") {
+          target = await mkPending();
+          await platform
+            .update(memberships)
+            .set({ endedOn: "2026-02-01", endedReason: "moved" })
+            .where(and(eq(memberships.personId, target.personId), eq(memberships.organizationId, orgA)));
+        } else if (expected === "person_deceased") {
+          target = await mkPending();
+          await platform.update(people).set({ dateOfDeath: "2026-02-01" }).where(eq(people.id, target.personId));
+        } else {
+          const subject = await mkPerson("Already", "OnRoll");
+          await platform.insert(rollActions).values({
+            organizationId: orgA,
+            personId: subject,
+            kind: "profession_of_faith",
+            effectiveDate: "2025-01-01",
+            resultingRoll: "active",
+            approvalStatus: "approved",
+            approvedBy: proposerUserId2,
+            proposedBy: proposerUserId2,
+          });
+          target = await mkPending({ personId: subject, kind: "reaffirmation", effectiveDate: "2026-01-01" });
+        }
+        const result = await approveRollAction(approverPerson, orgA, approverUserId, target.id, {});
+        expect(result, label).toEqual({ kind: "refused", reason: expected });
+        const state = await stateOf(target.id, target.personId);
+        expect(state.status).toBe("pending");
+        expect(state.audits).toBe(0);
+        expect(state.decidedBy).toBeNull();
+      },
+    );
+
+    it("every refusal code the database can return is one the library recognises (no outcome is dropped or invented)", () => {
+      expect(ROLL_DECISION_REFUSALS).toContain("already_on_roll");
+      expect(ROLL_DECISION_REFUSALS).toContain("holds_pastoral_office");
+      expect(ROLL_DECISION_REFUSALS).toContain("active_elsewhere");
+    });
+
+    /**
+     * R13 / F180. The audit row shares the decision's transaction, so a failed
+     * audit insert fails the whole approval: the row stays pending, the cache
+     * is untouched, and there is no audit row. The old after-commit
+     * recordAudit() would have left an approved row with no audit trail.
+     */
+    it("a failed audit insert rolls the whole approval back: still pending, the cache untouched, no audit row", async () => {
+      const target = await mkPending();
+      auditControl.fail = true;
+      await expect(
+        approveRollAction(approverPerson, orgA, approverUserId, target.id, {}),
+      ).rejects.toThrow(/audit insert failed/);
+      expect(await stateOf(target.id, target.personId)).toEqual({
+        status: "pending",
+        decidedBy: null,
+        currentRoll: null,
+        audits: 0,
+      });
+      // And once the audit can be written, the same row approves cleanly.
+      auditControl.fail = false;
+      expect((await approveRollAction(approverPerson, orgA, approverUserId, target.id, {})).kind).toBe("ok");
+    });
+
+    /**
+     * Two approvers racing for the same row: exactly one wins, the other gets
+     * the typed already_decided, and exactly one audit row exists.
+     */
+    it("a race for the same row: one ok, one already_decided, one audit row", async () => {
+      const target = await mkPending();
+      const results = await Promise.all([
+        approveRollAction(approverPerson, orgA, approverUserId, target.id, {}),
+        approveRollAction(approverPerson, orgA, approverUserId, target.id, {}),
+      ]);
+      const kinds = results.map((r) => (r.kind === "ok" ? "ok" : r.kind === "refused" ? r.reason : r.kind));
+      expect(kinds.sort()).toEqual(["already_decided", "ok"]);
+      expect((await auditRowsFor(target.id)).length).toBe(1);
+    });
+
+    /**
+     * 0063 (F180): presby_app holds neither UPDATE nor DELETE on roll_actions,
+     * so no path other than the definers can move a row out of `pending`,
+     * edit a decided one, or delete one. These replace the pre-0063 tests that
+     * proved the freeze trigger and the pending-DELETE through presby_app.
+     */
+    it("0063: a plain UPDATE or DELETE of a roll action as presby_app is refused with SQLSTATE 42501 — pending, approved, denied and withdrawn alike", async () => {
+      const pending = await mkPending();
+      const approved = await mkPending();
+      await approveRollAction(approverPerson, orgA, approverUserId, approved.id, {});
+      const denied = await mkPending();
+      await denyRollAction(approverPerson, orgA, approverUserId, denied.id, { reason: "Duplicate" });
+      const withdrawn = await mkPending();
+      await withdrawRollAction(proposerPerson, orgA, proposerUserId2, withdrawn.id, { reason: "Typo" });
+
+      for (const [label, id] of [
+        ["pending", pending.id],
+        ["approved", approved.id],
+        ["denied", denied.id],
+        ["withdrawn", withdrawn.id],
+      ] as const) {
+        const update = await plainSqlOutcome(
+          sql`update roll_actions set approval_status = 'approved' where id = ${id}::uuid`,
+        );
+        expect(update, `UPDATE of a ${label} row`).toMatch(/42501.*permission denied/);
+        const del = await plainSqlOutcome(sql`delete from roll_actions where id = ${id}::uuid`);
+        expect(del, `DELETE of a ${label} row`).toMatch(/42501.*permission denied/);
+      }
+      const platform = getPlatformDb();
+      const rows = await platform
+        .select({ id: rollActions.id, status: rollActions.approvalStatus })
         .from(rollActions)
-        .where(eq(rollActions.id, approvedRow!.id));
-      expect(stillApproved?.approvalStatus).toBe("approved");
+        .where(eq(rollActions.organizationId, orgA));
+      const byId = new Map(rows.map((r) => [r.id, r.status]));
+      expect(byId.get(pending.id)).toBe("pending");
+      expect(byId.get(approved.id)).toBe("approved");
+      expect(byId.get(denied.id)).toBe("denied");
+      expect(byId.get(withdrawn.id)).toBe("withdrawn");
+    });
+
+    it("the freeze trigger still binds the OWNER: an approved, a denied and a withdrawn row cannot be updated or deleted even by the connection no grant binds", async () => {
+      const platform = getPlatformDb();
+      const approved = await mkPending();
+      await approveRollAction(approverPerson, orgA, approverUserId, approved.id, {});
+      const denied = await mkPending();
+      await denyRollAction(approverPerson, orgA, approverUserId, denied.id, { reason: "Duplicate" });
+      const withdrawn = await mkPending();
+      await withdrawRollAction(proposerPerson, orgA, proposerUserId2, withdrawn.id, { reason: "Typo" });
+      const chainOf = (err: unknown): string => {
+        const parts: string[] = [];
+        for (let cur = err as { message?: string; cause?: unknown } | undefined; cur; ) {
+          if (cur.message) parts.push(cur.message);
+          cur = cur.cause as typeof cur;
+        }
+        return parts.join(" :: ");
+      };
+      for (const id of [approved.id, denied.id, withdrawn.id]) {
+        const update = await platform
+          .execute(sql`update roll_actions set minute_reference = 'edit' where id = ${id}::uuid`)
+          .then(() => "NO ERROR", chainOf);
+        expect(update).toMatch(/immutable/i);
+        const del = await platform
+          .execute(sql`delete from roll_actions where id = ${id}::uuid`)
+          .then(() => "NO ERROR", chainOf);
+        expect(del).toMatch(/immutable/i);
+      }
     });
   });
 
@@ -649,65 +1067,805 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
   // ---------------------------------------------------------------------
 
   describe("denyRollAction", () => {
-    it("forbidden without roll.approve", async () => {
-      const result = await denyRollAction(outsiderPerson, orgA, denyTargetId, {
-        reason: "Not enough information",
+    afterEach(() => {
+      auditControl.fail = false;
+    });
+
+    it("forbidden without roll.approve, and for a roll.propose-only holder", async () => {
+      const target = await mkPending();
+      expect(
+        await denyRollAction(outsiderPerson, orgA, approverUserId, target.id, { reason: "No" }),
+      ).toEqual({ kind: "forbidden" });
+      expect(
+        await denyRollAction(proposerPerson, orgA, proposerUserId2, target.id, { reason: "No" }),
+      ).toEqual({ kind: "forbidden" });
+      expect((await stateOf(target.id, target.personId)).status).toBe("pending");
+    });
+
+    it("denies a pending action: stores the trimmed reason AND who decided and when (a denied row used to record no actor), audits in the same transaction", async () => {
+      const target = await mkPending();
+      const result = await denyRollAction(
+        approverPerson,
+        orgA,
+        approverUserId,
+        target.id,
+        { reason: "  Duplicate entry  " },
+        { actingUserEmail: "approver@example.invalid" },
+      );
+      expect(result).toEqual({ kind: "ok", rollActionId: target.id, personId: target.personId });
+
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, target.id));
+      expect(row).toMatchObject({
+        approvalStatus: "denied",
+        denialReason: "Duplicate entry",
+        decidedBy: approverUserId,
+        approvedBy: null,
       });
-      expect(result).toEqual({ kind: "forbidden" });
+      expect(row?.decidedAt).toBeInstanceOf(Date);
+      // A denied action never projects into the cache.
+      expect((await stateOf(target.id, target.personId)).currentRoll).toBeNull();
+
+      const audits = await auditRowsFor(target.id);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: AUDIT_ACTIONS.ROLL_ACTION_DENIED,
+        actor_user_id: approverUserId,
+        actor_email: "approver@example.invalid",
+      });
+      expect(audits[0]!.metadata).toEqual({
+        organizationId: orgA,
+        rollActionId: target.id,
+        personId: target.personId,
+        reason: "Duplicate entry",
+      });
       expect(mockRecordAudit).not.toHaveBeenCalled();
     });
 
-    it("denies a pending action and audits", async () => {
-      const result = await denyRollAction(approverPerson, orgA, denyTargetId, {
-        reason: "Duplicate entry",
-      });
-      expect(result).toEqual({ kind: "ok" });
-      expect(mockRecordAudit).toHaveBeenCalledTimes(1);
-      expect(mockRecordAudit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: AUDIT_ACTIONS.ROLL_ACTION_DENIED,
-          resourceId: denyTargetId,
-        }),
-      );
+    it("requires a reason of 1 to 500 characters after trimming (F184); nothing is written on a refusal", async () => {
+      const target = await mkPending();
+      for (const reason of ["", "   ", undefined as unknown as string, 42 as unknown as string]) {
+        expect(
+          await denyRollAction(approverPerson, orgA, approverUserId, target.id, { reason }),
+        ).toEqual({ kind: "refused", reason: "reason_required" });
+      }
+      expect(
+        await denyRollAction(approverPerson, orgA, approverUserId, target.id, { reason: "r".repeat(501) }),
+      ).toEqual({ kind: "refused", reason: "reason_too_long" });
+      expect((await stateOf(target.id, target.personId)).status).toBe("pending");
+      expect(
+        (await denyRollAction(approverPerson, orgA, approverUserId, target.id, { reason: "r".repeat(500) })).kind,
+      ).toBe("ok");
+    });
 
+    it("always denies, whatever the person's state: an ended membership, a deceased person and a non-approvable kind can be denied", async () => {
       const platform = getPlatformDb();
-      const [row] = await platform
-        .select()
-        .from(rollActions)
-        .where(eq(rollActions.id, denyTargetId));
-      expect(row?.approvalStatus).toBe("denied");
-      expect(row?.denialReason).toBe("Duplicate entry");
+      const ended = await mkPending();
+      await platform
+        .update(memberships)
+        .set({ endedOn: "2026-02-01", endedReason: "moved" })
+        .where(and(eq(memberships.personId, ended.personId), eq(memberships.organizationId, orgA)));
+      const dead = await mkPending();
+      await platform.update(people).set({ dateOfDeath: "2026-02-01" }).where(eq(people.id, dead.personId));
+      const legacy = await mkPending({ kind: "other_participant_enrolled" });
+      for (const t of [ended, dead, legacy]) {
+        expect(
+          (await denyRollAction(approverPerson, orgA, approverUserId, t.id, { reason: "Cannot approve" })).kind,
+        ).toBe("ok");
+      }
+    });
+
+    it("not_found for a malformed id and another organization's row; already_decided on a second deny and on an approved row", async () => {
+      expect(
+        await denyRollAction(approverPerson, orgA, approverUserId, "nope", { reason: "x" }),
+      ).toEqual({ kind: "refused", reason: "not_found" });
+      expect(
+        await denyRollAction(approverPerson, orgA, approverUserId, bPendingId, { reason: "x" }),
+      ).toEqual({ kind: "refused", reason: "not_found" });
+      const target = await mkPending();
+      expect((await denyRollAction(approverPerson, orgA, approverUserId, target.id, { reason: "x" })).kind).toBe("ok");
+      expect(
+        await denyRollAction(approverPerson, orgA, approverUserId, target.id, { reason: "x" }),
+      ).toEqual({ kind: "refused", reason: "already_decided" });
+      const approved = await mkPending();
+      await approveRollAction(approverPerson, orgA, approverUserId, approved.id, {});
+      expect(
+        await denyRollAction(approverPerson, orgA, approverUserId, approved.id, { reason: "x" }),
+      ).toEqual({ kind: "refused", reason: "already_decided" });
+    });
+
+    it("a denied row is terminal: it can never be approved afterwards", async () => {
+      const target = await mkPending();
+      await denyRollAction(approverPerson, orgA, approverUserId, target.id, { reason: "Duplicate" });
+      expect(await approveRollAction(approverPerson, orgA, approverUserId, target.id, {})).toEqual({
+        kind: "refused",
+        reason: "already_decided",
+      });
+      expect((await stateOf(target.id, target.personId)).status).toBe("denied");
+    });
+
+    it("a failed audit insert rolls the denial back: still pending, no audit row", async () => {
+      const target = await mkPending();
+      auditControl.fail = true;
+      await expect(
+        denyRollAction(approverPerson, orgA, approverUserId, target.id, { reason: "Duplicate" }),
+      ).rejects.toThrow(/audit insert failed/);
+      expect(await stateOf(target.id, target.personId)).toEqual({
+        status: "pending",
+        decidedBy: null,
+        currentRoll: null,
+        audits: 0,
+      });
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, target.id));
+      expect(row?.denialReason).toBeNull();
     });
   });
 
   // ---------------------------------------------------------------------
-  // listPendingRollActions
+  // withdrawRollAction (through presby_withdraw_roll_action)
+  // ---------------------------------------------------------------------
+
+  describe("withdrawRollAction", () => {
+    afterEach(() => {
+      auditControl.fail = false;
+    });
+
+    it("forbidden without roll.propose: an approve-only holder, an outsider, and a users.id that is not the acting person's", async () => {
+      const target = await mkPending();
+      expect(
+        await withdrawRollAction(approverPerson, orgA, approverUserId, target.id, { reason: "Typo" }),
+      ).toEqual({ kind: "forbidden" });
+      expect(
+        await withdrawRollAction(outsiderPerson, orgA, approverUserId, target.id, { reason: "Typo" }),
+      ).toEqual({ kind: "forbidden" });
+      // proposerPerson holds roll.propose, but approverUserId is not their user.
+      expect(
+        await withdrawRollAction(proposerPerson, orgA, approverUserId, target.id, { reason: "Typo" }),
+      ).toEqual({ kind: "forbidden" });
+      expect(await stateOf(target.id, target.personId)).toEqual({
+        status: "pending",
+        decidedBy: null,
+        currentRoll: null,
+        audits: 0,
+      });
+    });
+
+    it("withdraws a proposal anyone proposed (the clerk keeps the register): its own status, the reason, the actor, an audit row with selfProposed", async () => {
+      const others = await mkPending({ proposedBy: otherProposerUserId });
+      const result = await withdrawRollAction(
+        proposerPerson,
+        orgA,
+        proposerUserId2,
+        others.id,
+        { reason: "  Entered against the wrong person.  " },
+        { actingUserEmail: "recorder@example.invalid" },
+      );
+      expect(result).toEqual({
+        kind: "ok",
+        rollActionId: others.id,
+        personId: others.personId,
+        selfProposed: false,
+      });
+      const platform = getPlatformDb();
+      const [row] = await platform.select().from(rollActions).where(eq(rollActions.id, others.id));
+      expect(row).toMatchObject({
+        approvalStatus: "withdrawn",
+        withdrawalReason: "Entered against the wrong person.",
+        denialReason: null,
+        decidedBy: proposerUserId2,
+      });
+      expect(row?.decidedAt).toBeInstanceOf(Date);
+      const [audit] = await auditRowsFor(others.id);
+      expect(audit).toMatchObject({
+        action: AUDIT_ACTIONS.ROLL_ACTION_WITHDRAWN,
+        actor_user_id: proposerUserId2,
+        actor_email: "recorder@example.invalid",
+      });
+      expect(audit!.metadata).toEqual({
+        organizationId: orgA,
+        rollActionId: others.id,
+        personId: others.personId,
+        reason: "Entered against the wrong person.",
+        selfProposed: false,
+      });
+      expect(audit!.action).not.toBe(AUDIT_ACTIONS.ROLL_ACTION_DENIED);
+
+      const mine = await mkPending({ proposedBy: proposerUserId2 });
+      expect(
+        await withdrawRollAction(proposerPerson, orgA, proposerUserId2, mine.id, { reason: "My typo" }),
+      ).toMatchObject({ kind: "ok", selfProposed: true });
+    });
+
+    it("requires a reason of 1 to 500 characters after trimming; nothing is written on a refusal", async () => {
+      const target = await mkPending();
+      for (const reason of ["", "  ", undefined as unknown as string]) {
+        expect(
+          await withdrawRollAction(proposerPerson, orgA, proposerUserId2, target.id, { reason }),
+        ).toEqual({ kind: "refused", reason: "reason_required" });
+      }
+      expect(
+        await withdrawRollAction(proposerPerson, orgA, proposerUserId2, target.id, { reason: "r".repeat(501) }),
+      ).toEqual({ kind: "refused", reason: "reason_too_long" });
+      expect((await stateOf(target.id, target.personId)).status).toBe("pending");
+    });
+
+    it("not_found for a malformed id and another organization's row; already_decided once the Session has decided (approved or denied) or it was withdrawn", async () => {
+      expect(
+        await withdrawRollAction(proposerPerson, orgA, proposerUserId2, "nope", { reason: "x" }),
+      ).toEqual({ kind: "refused", reason: "not_found" });
+      expect(
+        await withdrawRollAction(proposerPerson, orgA, proposerUserId2, bPendingId, { reason: "x" }),
+      ).toEqual({ kind: "refused", reason: "not_found" });
+
+      const approved = await mkPending();
+      await approveRollAction(approverPerson, orgA, approverUserId, approved.id, {});
+      const denied = await mkPending();
+      await denyRollAction(approverPerson, orgA, approverUserId, denied.id, { reason: "No" });
+      const withdrawn = await mkPending();
+      await withdrawRollAction(proposerPerson, orgA, proposerUserId2, withdrawn.id, { reason: "Typo" });
+      for (const t of [approved, denied, withdrawn]) {
+        expect(
+          await withdrawRollAction(proposerPerson, orgA, proposerUserId2, t.id, { reason: "Too late" }),
+        ).toEqual({ kind: "refused", reason: "already_decided" });
+      }
+      expect((await stateOf(approved.id, approved.personId)).status).toBe("approved");
+    });
+
+    it("has no state checks: a proposal for an ended membership, a deceased person or a legacy non-approvable kind can be withdrawn", async () => {
+      const platform = getPlatformDb();
+      const ended = await mkPending();
+      await platform
+        .update(memberships)
+        .set({ endedOn: "2026-02-01", endedReason: "moved" })
+        .where(and(eq(memberships.personId, ended.personId), eq(memberships.organizationId, orgA)));
+      const dead = await mkPending();
+      await platform.update(people).set({ dateOfDeath: "2026-02-01" }).where(eq(people.id, dead.personId));
+      const legacy = await mkPending({ kind: "other_participant_enrolled" });
+      for (const t of [ended, dead, legacy]) {
+        expect(
+          (await withdrawRollAction(proposerPerson, orgA, proposerUserId2, t.id, { reason: "Cleaning up" })).kind,
+        ).toBe("ok");
+      }
+    });
+
+    it("releases the person: a withdrawn row never enters replay, and the clerk can propose again (R7 allows one PENDING row)", async () => {
+      const subject = await mkPerson("Release", "Me", { dob: "1990-05-05" });
+      const first = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-03-03",
+      });
+      if (first.kind !== "ok") throw new Error("fixture proposal failed");
+      // While it waits, a second proposal is refused (pending_exists).
+      expect(
+        await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: "reaffirmation",
+          effectiveDate: "2026-03-04",
+        }),
+      ).toEqual({ kind: "proposal_refused", reason: "pending_exists" });
+      expect(
+        (await withdrawRollAction(proposerPerson, orgA, proposerUserId2, first.rollActionId, { reason: "Wrong kind" })).kind,
+      ).toBe("ok");
+      // Replay never saw it.
+      const platform = getPlatformDb();
+      const replay = await platform.execute(sql`
+        select count(*)::int as n from presby_effective_roll_actions
+         where person_id = ${subject}::uuid and organization_id = ${orgA}::uuid
+      `);
+      expect((replay as unknown as { rows: Array<{ n: number }> }).rows[0]!.n).toBe(0);
+      // And the person can be proposed again.
+      expect(
+        await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: "reaffirmation",
+          effectiveDate: "2026-03-04",
+        }),
+      ).toMatchObject({ kind: "ok", effect: "pending" });
+    });
+
+    it("a failed audit insert rolls the withdrawal back: still pending, no audit row", async () => {
+      const target = await mkPending();
+      auditControl.fail = true;
+      await expect(
+        withdrawRollAction(proposerPerson, orgA, proposerUserId2, target.id, { reason: "Typo" }),
+      ).rejects.toThrow(/audit insert failed/);
+      expect(await stateOf(target.id, target.personId)).toEqual({
+        status: "pending",
+        decidedBy: null,
+        currentRoll: null,
+        audits: 0,
+      });
+    });
+
+    it("withdraw against approve: exactly one decision wins and the loser is already_decided", async () => {
+      const target = await mkPending();
+      const [approved, withdrawn] = await Promise.all([
+        approveRollAction(approverPerson, orgA, approverUserId, target.id, {}),
+        withdrawRollAction(proposerPerson, orgA, proposerUserId2, target.id, { reason: "Typo" }),
+      ]);
+      const outcomes = [approved.kind === "ok", withdrawn.kind === "ok"];
+      expect(outcomes.filter(Boolean)).toHaveLength(1);
+      const loser = approved.kind === "ok" ? withdrawn : approved;
+      expect(loser).toEqual({ kind: "refused", reason: "already_decided" });
+      expect((await auditRowsFor(target.id)).length).toBe(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // approveRollActions (bulk, R18)
+  // ---------------------------------------------------------------------
+
+  describe("approveRollActions (bulk)", () => {
+    afterEach(() => {
+      auditControl.fail = false;
+    });
+
+    it("approves each row in its own transaction with one shared minute reference, and audits each row individually", async () => {
+      const a = await mkPending();
+      const b = await mkPending();
+      const c = await mkPending();
+      const result = await approveRollActions(
+        approverPerson,
+        orgA,
+        approverUserId,
+        { rollActionIds: [a.id, b.id, c.id], minuteReference: "Session 2026-01-01, items 6-8" },
+        { actingUserEmail: "approver@example.invalid" },
+      );
+      expect(result).toMatchObject({ kind: "ok", approved: 3, needAttention: 0 });
+      if (result.kind !== "ok") return;
+      expect(result.results.map((r) => r.rollActionId)).toEqual([a.id, b.id, c.id]);
+      for (const t of [a, b, c]) {
+        const audits = await auditRowsFor(t.id);
+        expect(audits).toHaveLength(1);
+        expect(audits[0]).toMatchObject({
+          action: AUDIT_ACTIONS.ROLL_ACTION_APPROVED,
+          actor_email: "approver@example.invalid",
+        });
+        expect((audits[0]!.metadata as Record<string, unknown>).minuteReference).toBe(
+          "Session 2026-01-01, items 6-8",
+        );
+        expect((await stateOf(t.id, t.personId)).currentRoll).toBe("active");
+      }
+    });
+
+    it("is per row, not atomic: a row decided in the meantime (a stale selection) or refused is reported, and the rest still approve", async () => {
+      const ok1 = await mkPending();
+      const stale = await mkPending();
+      const dead = await mkPending();
+      const ok2 = await mkPending();
+      const platform = getPlatformDb();
+      await platform.update(people).set({ dateOfDeath: "2026-02-01" }).where(eq(people.id, dead.personId));
+      // Another approver decided `stale` between the page load and the submit.
+      await denyRollAction(approverPerson, orgA, approverUserId, stale.id, { reason: "Decided first" });
+
+      const result = await approveRollActions(approverPerson, orgA, approverUserId, {
+        rollActionIds: [ok1.id, stale.id, dead.id, ok2.id],
+      });
+      expect(result).toMatchObject({ kind: "ok", approved: 2, needAttention: 2 });
+      if (result.kind !== "ok") return;
+      const byId = new Map(result.results.map((r) => [r.rollActionId, r.result]));
+      expect(byId.get(ok1.id)!.kind).toBe("ok");
+      expect(byId.get(stale.id)).toEqual({ kind: "refused", reason: "already_decided" });
+      expect(byId.get(dead.id)).toEqual({ kind: "refused", reason: "person_deceased" });
+      expect(byId.get(ok2.id)!.kind).toBe("ok");
+      // The refused rows are exactly as they were.
+      expect((await stateOf(stale.id, stale.personId)).status).toBe("denied");
+      expect((await stateOf(dead.id, dead.personId)).status).toBe("pending");
+    });
+
+    it("deduplicates ids, treats a malformed id as that row's not_found, and caps the request at 50 unique ids", async () => {
+      const a = await mkPending();
+      const result = await approveRollActions(approverPerson, orgA, approverUserId, {
+        rollActionIds: [a.id, a.id, "not-a-uuid"],
+      });
+      expect(result).toMatchObject({ kind: "ok", approved: 1, needAttention: 1 });
+      if (result.kind !== "ok") return;
+      expect(result.results).toHaveLength(2);
+      expect(result.results[1]).toEqual({
+        rollActionId: "not-a-uuid",
+        result: { kind: "refused", reason: "not_found" },
+      });
+      expect((await auditRowsFor(a.id)).length).toBe(1);
+
+      const fiftyOne = Array.from({ length: BULK_APPROVE_MAX + 1 }, (_, i) =>
+        `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      );
+      expect(
+        await approveRollActions(approverPerson, orgA, approverUserId, { rollActionIds: fiftyOne }),
+      ).toEqual({ kind: "too_many" });
+      // 51 copies of one id are one unique id, not too many.
+      expect(
+        (await approveRollActions(approverPerson, orgA, approverUserId, {
+          rollActionIds: Array.from({ length: 60 }, () => a.id),
+        })).kind,
+      ).toBe("ok");
+    });
+
+    it("empty, non-array and non-string input are the empty result; nothing is called", async () => {
+      expect(await approveRollActions(approverPerson, orgA, approverUserId, { rollActionIds: [] })).toEqual({
+        kind: "empty",
+      });
+      expect(
+        await approveRollActions(approverPerson, orgA, approverUserId, {
+          rollActionIds: "x" as unknown as string[],
+        }),
+      ).toEqual({ kind: "empty" });
+      expect(
+        await approveRollActions(approverPerson, orgA, approverUserId, {
+          rollActionIds: [1, null, {}] as unknown as string[],
+        }),
+      ).toEqual({ kind: "empty" });
+    });
+
+    it("forbidden on the first row is the whole result and nothing is decided: an outsider, and a roll.propose-only holder", async () => {
+      const a = await mkPending();
+      const b = await mkPending();
+      expect(
+        await approveRollActions(outsiderPerson, orgA, approverUserId, { rollActionIds: [a.id, b.id] }),
+      ).toEqual({ kind: "forbidden" });
+      expect(
+        await approveRollActions(proposerPerson, orgA, proposerUserId2, { rollActionIds: [a.id, b.id] }),
+      ).toEqual({ kind: "forbidden" });
+      expect((await stateOf(a.id, a.personId)).status).toBe("pending");
+      expect((await stateOf(b.id, b.personId)).status).toBe("pending");
+    });
+
+    it("a failed audit insert on one row rolls back that row only: earlier rows stay approved, the error surfaces", async () => {
+      const first = await mkPending();
+      const second = await mkPending();
+      // Approve `first` for real, then make the NEXT audit insert fail.
+      expect((await approveRollActions(approverPerson, orgA, approverUserId, { rollActionIds: [first.id] })).kind).toBe("ok");
+      auditControl.fail = true;
+      await expect(
+        approveRollActions(approverPerson, orgA, approverUserId, { rollActionIds: [second.id] }),
+      ).rejects.toThrow(/audit insert failed/);
+      expect((await stateOf(first.id, first.personId)).status).toBe("approved");
+      expect((await stateOf(second.id, second.personId)).status).toBe("pending");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // The queue reads (F179, R17, DECISION-204)
   // ---------------------------------------------------------------------
 
   describe("listPendingRollActions", () => {
-    it("forbidden without roll.approve", async () => {
-      const result = await listPendingRollActions(outsiderPerson, orgA);
-      expect(result).toEqual({ kind: "forbidden" });
+    it("forbidden without roll.approve or roll.propose", async () => {
+      expect(await listPendingRollActions(outsiderPerson, orgA)).toEqual({ kind: "forbidden" });
     });
 
-    it("lists pending actions and flags the viewer's own proposal", async () => {
+    it("an approver gets decide mode with the viewer flags; the viewer's own proposal is flagged and nobody else's is", async () => {
+      const own = await mkPending({ proposedBy: approverUserId, minuteReference: "Proposed minute" });
+      const theirs = await mkPending({ proposedBy: otherProposerUserId });
       const result = await listPendingRollActions(approverPerson, orgA);
       expect(result.kind).toBe("ok");
       if (result.kind !== "ok") return;
-
-      const own = result.actions.find((a) => a.id === ownProposalTargetId);
-      expect(own).toBeDefined();
-      expect(own!.proposedByIsViewer).toBe(true);
-
-      // approveTargetId/denyTargetId/raceTargetId were already decided by
-      // the earlier describe blocks (this file runs its tests in
-      // declaration order) — only ownProposalTargetId is still pending by
-      // this point, and it must NOT be flagged as the viewer's own for any
-      // OTHER row that happens to still be pending.
-      const others = result.actions.filter((a) => a.id !== ownProposalTargetId);
-      for (const entry of others) {
-        expect(entry.proposedByIsViewer).toBe(false);
+      expect(result.mode).toBe("decide");
+      expect(result.viewer).toEqual({ canApprove: true, canPropose: false, canManagePeople: false });
+      const ownRow = result.actions.find((a) => a.id === own.id)!;
+      expect(ownRow).toMatchObject({
+        personId: own.personId,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-01-01",
+        minuteReference: "Proposed minute",
+        proposedByIsViewer: true,
+        membershipEnded: false,
+        personDeceased: false,
+      });
+      expect(ownRow.proposedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(result.actions.find((a) => a.id === theirs.id)!.proposedByIsViewer).toBe(false);
+      for (const entry of result.actions) {
+        if (entry.id !== own.id) expect(entry.proposedByIsViewer).toBe(false);
       }
+      expect(result.pagination.total).toBeGreaterThanOrEqual(2);
+    });
+
+    it("a roll.propose-only holder gets READ mode and the whole queue (the clerk keeps the register), with no approve flag", async () => {
+      const target = await mkPending();
+      const result = await listPendingRollActions(proposerPerson, orgA);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(result.mode).toBe("read");
+      expect(result.viewer).toMatchObject({ canApprove: false, canPropose: true });
+      expect(result.actions.some((a) => a.id === target.id)).toBe(true);
+    });
+
+    it("flags a person whose connection ended or who is recorded as deceased (approval would be refused)", async () => {
+      const platform = getPlatformDb();
+      const ended = await mkPending();
+      await platform
+        .update(memberships)
+        .set({ endedOn: "2026-02-01", endedReason: "moved" })
+        .where(and(eq(memberships.personId, ended.personId), eq(memberships.organizationId, orgA)));
+      const dead = await mkPending();
+      await platform.update(people).set({ dateOfDeath: "2026-02-01" }).where(eq(people.id, dead.personId));
+      const result = await listPendingRollActions(approverPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.actions.find((a) => a.id === ended.id)).toMatchObject({
+        membershipEnded: true,
+        personDeceased: false,
+      });
+      expect(result.actions.find((a) => a.id === dead.id)).toMatchObject({
+        membershipEnded: false,
+        personDeceased: true,
+      });
+    });
+
+    it("never lists another organization's rows, nor decided or withdrawn rows", async () => {
+      const decided = await mkPending();
+      await denyRollAction(approverPerson, orgA, approverUserId, decided.id, { reason: "No" });
+      const gone = await mkPending();
+      await withdrawRollAction(proposerPerson, orgA, proposerUserId2, gone.id, { reason: "Typo" });
+      const result = await listPendingRollActions(approverPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const ids = result.actions.map((a) => a.id);
+      expect(ids).not.toContain(bPendingId);
+      expect(ids).not.toContain(decided.id);
+      expect(ids).not.toContain(gone.id);
+    });
+
+    it("paginates: the page size is clamped to the bulk cap and pages are clamped into range", async () => {
+      await mkPending();
+      await mkPending();
+      await mkPending();
+      const small = await listPendingRollActions(approverPerson, orgA, { pageSize: 2 });
+      if (small.kind !== "ok") throw new Error("expected ok");
+      expect(small.actions).toHaveLength(2);
+      expect(small.pagination.pageSize).toBe(2);
+      expect(small.pagination.total).toBeGreaterThanOrEqual(3);
+      expect(small.pagination.totalPages).toBe(Math.ceil(small.pagination.total / 2));
+      const last = await listPendingRollActions(approverPerson, orgA, { pageSize: 2, page: 999 });
+      if (last.kind !== "ok") throw new Error("expected ok");
+      expect(last.pagination.page).toBe(small.pagination.totalPages);
+      expect(last.actions.length).toBeGreaterThan(0);
+      const huge = await listPendingRollActions(approverPerson, orgA, { pageSize: 10_000, page: -4 });
+      if (huge.kind !== "ok") throw new Error("expected ok");
+      expect(huge.pagination.pageSize).toBe(BULK_APPROVE_MAX);
+      expect(huge.pagination.page).toBe(1);
+    });
+  });
+
+  describe("listRecentlyDecidedRollActions", () => {
+    it("forbidden without either roll key", async () => {
+      expect(await listRecentlyDecidedRollActions(outsiderPerson, orgA)).toEqual({ kind: "forbidden" });
+    });
+
+    it("shows approvals of the approvable kinds, denials and withdrawals with their reasons, newest first, to BOTH key holders", async () => {
+      const approved = await mkPending();
+      await approveRollAction(approverPerson, orgA, approverUserId, approved.id, { minuteReference: "Item 1" });
+      const denied = await mkPending({ proposedBy: approverUserId });
+      await denyRollAction(approverPerson, orgA, approverUserId, denied.id, { reason: "Duplicate entry" });
+      const withdrawn = await mkPending();
+      await withdrawRollAction(proposerPerson, orgA, proposerUserId2, withdrawn.id, { reason: "Typo in the date" });
+
+      for (const viewer of [approverPerson, proposerPerson]) {
+        const result = await listRecentlyDecidedRollActions(viewer, orgA, { limit: 100 });
+        if (result.kind !== "ok") throw new Error("expected ok");
+        const byId = new Map(result.actions.map((a) => [a.id, a]));
+        expect(byId.get(approved.id)).toMatchObject({
+          status: "approved",
+          reason: null,
+          minuteReference: "Item 1",
+          kind: "profession_of_faith",
+          personId: approved.personId,
+          selfDecided: false,
+        });
+        expect(byId.get(denied.id)).toMatchObject({
+          status: "denied",
+          reason: "Duplicate entry",
+          selfDecided: true, // the proposer decided their own row
+        });
+        expect(byId.get(withdrawn.id)).toMatchObject({
+          status: "withdrawn",
+          reason: "Typo in the date",
+          selfDecided: false,
+        });
+        for (const entry of result.actions) {
+          expect(entry.decidedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        }
+      }
+    });
+
+    it("never shows on-record participant rows, opening balances, voids or pending rows", async () => {
+      const subject = await mkPerson("Hidden", "Entry");
+      const enrol = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "other_participant_enrolled",
+        effectiveDate: "2026-03-02",
+      });
+      if (enrol.kind !== "ok") throw new Error("fixture enrolment failed");
+      const platform = getPlatformDb();
+      const [opening] = await platform
+        .insert(rollActions)
+        .values({
+          organizationId: orgA,
+          personId: subject,
+          kind: "opening_balance",
+          effectiveDate: "2020-01-01",
+          resultingRoll: "other_participant",
+          approvalStatus: "approved",
+        })
+        .returning({ id: rollActions.id });
+      const pending = await mkPending();
+      const result = await listRecentlyDecidedRollActions(approverPerson, orgA, { limit: 100 });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const ids = result.actions.map((a) => a.id);
+      expect(ids).not.toContain(enrol.rollActionId);
+      expect(ids).not.toContain(opening!.id);
+      expect(ids).not.toContain(pending.id);
+      // Only approvable kinds are ever shown as approved.
+      for (const entry of result.actions.filter((a) => a.status === "approved")) {
+        expect(APPROVABLE_ROLL_ACTION_KINDS as readonly string[]).toContain(entry.kind);
+      }
+    });
+
+    it("is scoped to the viewer's organization and honours the limit", async () => {
+      const bDecided = await mkPending({ orgId: orgB });
+      const platform = getPlatformDb();
+      // Decide orgB's row through the owner path (fixture only).
+      await platform.execute(sql`
+        alter table roll_actions disable trigger roll_actions_freeze
+      `);
+      try {
+        await platform.execute(sql`
+          update roll_actions set approval_status = 'denied', denial_reason = 'fixture',
+                 decided_by = ${bProposerUserId}::uuid, decided_at = now()
+           where id = ${bDecided.id}::uuid
+        `);
+      } finally {
+        await platform.execute(sql`alter table roll_actions enable trigger roll_actions_freeze`);
+      }
+      const result = await listRecentlyDecidedRollActions(approverPerson, orgA, { limit: 2 });
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.actions.length).toBeLessThanOrEqual(2);
+      expect(result.actions.map((a) => a.id)).not.toContain(bDecided.id);
+    });
+  });
+
+  describe("countPendingRollActions", () => {
+    it("forbidden without either key; counts only pending rows of the viewer's organization", async () => {
+      expect(await countPendingRollActions(outsiderPerson, orgA)).toEqual({ kind: "forbidden" });
+      const before = await countPendingRollActions(approverPerson, orgA);
+      if (before.kind !== "ok") throw new Error("expected ok");
+      const a = await mkPending();
+      await mkPending({ orgId: orgB });
+      const afterOne = await countPendingRollActions(proposerPerson, orgA);
+      expect(afterOne).toEqual({ kind: "ok", count: before.count + 1 });
+      await denyRollAction(approverPerson, orgA, approverUserId, a.id, { reason: "x" });
+      expect(await countPendingRollActions(approverPerson, orgA)).toEqual({ kind: "ok", count: before.count });
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // getSessionApprovalState (Flow 7, S4)
+  // ---------------------------------------------------------------------
+
+  describe("getSessionApprovalState", () => {
+    async function seatElder(
+      orgId: string,
+      personId: string,
+      office: string,
+      startsOn: string,
+    ): Promise<void> {
+      const platform = getPlatformDb();
+      await platform.execute(sql`
+        insert into officer_terms (organization_id, person_id, office, starts_on)
+        values (${orgId}::uuid, ${personId}::uuid, ${office}, ${startsOn}::date)
+      `);
+    }
+
+    it("forbidden without either roll key", async () => {
+      expect(await getSessionApprovalState(outsiderPerson, orgA)).toEqual({ kind: "forbidden" });
+    });
+
+    it("no_session: an organization with no derived Session group (a presbytery), told to a propose-only holder", async () => {
+      const result = await getSessionApprovalState(bProposer, orgB);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.state).toMatchObject({
+        kind: "no_session",
+        recorded: 0,
+        withAccount: 0,
+        canApprove: 0,
+        viewer: { canApprove: false, canManageOfficers: false },
+      });
+    });
+
+    it("walks empty -> terms_not_started (seats start later, with and without accounts) -> no_sign_in (a seat in effect, no account) -> no_permission -> ready, with counts only", async () => {
+      const orgC = await mkOrg("c", { session: true });
+      const viewer = await mkMemberAt(orgC, "Vera", "Viewer", { withUser: true });
+      await mkRoleGrant(orgC, "roll_proposer", ["roll.propose", "officers.manage"], {
+        personId: viewer.personId,
+      });
+
+      // empty: a Session group with nobody seated.
+      let state = await getSessionApprovalState(viewer.personId, orgC);
+      if (state.kind !== "ok") throw new Error("expected ok");
+      expect(state.state).toMatchObject({
+        kind: "empty",
+        recorded: 0,
+        startingLater: 0,
+        nextStart: null,
+        viewer: { canApprove: false, canManageOfficers: true },
+      });
+
+      // A seat that starts later is "terms_not_started" with the date, not empty.
+      const later = await mkMemberAt(orgC, "Lena", "Later");
+      await seatElder(orgC, later.personId, "ruling_elder", "2999-01-01");
+      state = await getSessionApprovalState(viewer.personId, orgC);
+      if (state.kind !== "ok") throw new Error("expected ok");
+      expect(state.state).toMatchObject({
+        kind: "terms_not_started",
+        recorded: 0,
+        startingLater: 1,
+        nextStart: "2999-01-01",
+      });
+
+      // A future-dated holder who HAS an account (user_id set) is still
+      // terms_not_started: the state makes no claim about accounts.
+      const laterWithAccount = await mkMemberAt(orgC, "Lyra", "LaterAcct", { withUser: true });
+      await seatElder(orgC, laterWithAccount.personId, "ruling_elder", "2999-06-01");
+      state = await getSessionApprovalState(viewer.personId, orgC);
+      if (state.kind !== "ok") throw new Error("expected ok");
+      expect(state.state).toMatchObject({
+        kind: "terms_not_started",
+        recorded: 0,
+        startingLater: 2,
+        nextStart: "2999-01-01",
+      });
+
+      // A seat in effect held by someone with no account: still no_sign_in.
+      const noAccount = await mkMemberAt(orgC, "Nora", "NoLogin");
+      await seatElder(orgC, noAccount.personId, "ruling_elder", "2020-01-01");
+      state = await getSessionApprovalState(viewer.personId, orgC);
+      if (state.kind !== "ok") throw new Error("expected ok");
+      expect(state.state).toMatchObject({
+        kind: "no_sign_in",
+        recorded: 1,
+        withAccount: 0,
+        canApprove: 0,
+        startingLater: 2,
+      });
+
+      // An installed pastor with an account is a Session seat too (DECISION-206),
+      // but nothing grants the Session group roll.approve yet: no_permission.
+      const pastor = await mkMemberAt(orgC, "Percival", "Pastor", { withUser: true, engagement: "regular" });
+      await seatElder(orgC, pastor.personId, "installed_pastor", "2020-01-01");
+      state = await getSessionApprovalState(viewer.personId, orgC);
+      if (state.kind !== "ok") throw new Error("expected ok");
+      expect(state.state).toMatchObject({
+        kind: "no_permission",
+        recorded: 2,
+        withAccount: 1,
+        canApprove: 0,
+      });
+
+      // Bind a roll.approve role to the Session group: the pastor can approve.
+      await mkRoleGrant(orgC, "session_member", ["roll.approve"], {
+        groupId: await sessionGroupId(orgC),
+      });
+      state = await getSessionApprovalState(viewer.personId, orgC);
+      if (state.kind !== "ok") throw new Error("expected ok");
+      expect(state.state).toMatchObject({ kind: "ready", recorded: 2, withAccount: 1, canApprove: 1 });
+      // Counts only: no names or ids anywhere in the result.
+      expect(JSON.stringify(state.state)).not.toMatch(
+        /Percival|Nora|NoLogin|Lena|Lyra|Vera|[0-9a-f]{8}-[0-9a-f]{4}-/,
+      );
+    });
+
+    it("an ended term is not a seat: a Session whose only term ended is empty", async () => {
+      const orgD = await mkOrg("d", { session: true });
+      const viewer = await mkMemberAt(orgD, "Dara", "Viewer", { withUser: true });
+      await mkRoleGrant(orgD, "roll_proposer", ["roll.propose"], { personId: viewer.personId });
+      const platform = getPlatformDb();
+      const past = await mkMemberAt(orgD, "Pia", "Past", { withUser: true });
+      await platform.execute(sql`
+        insert into officer_terms (organization_id, person_id, office, starts_on, ends_on)
+        values (${orgD}::uuid, ${past.personId}::uuid, 'ruling_elder', '2015-01-01', '2018-01-01')
+      `);
+      const result = await getSessionApprovalState(viewer.personId, orgD);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.state).toMatchObject({ kind: "empty", recorded: 0, startingLater: 0 });
     });
   });
 
@@ -873,13 +2031,14 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     });
 
     it("FORGERY: no membership kind can ever take effect on record — every other edit-time kind is a pending proposal with its derived roll", async () => {
-      const subject = await mkPerson("Ottilie", "Brackwater", { dob: "1990-01-20" });
       const platform = getPlatformDb();
       const kinds = EDIT_TIME_ROLL_ACTION_KINDS.filter(
         (kind) => kind !== "other_participant_enrolled",
       );
       expect(kinds.length).toBeGreaterThan(0);
+      // One person per kind: R7 allows a single pending proposal per person.
       for (const kind of kinds) {
+        const subject = await mkPerson("Ottilie", "Brackwater", { dob: "1990-01-20" });
         const result = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
           personId: subject,
           kind,
@@ -896,12 +2055,12 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         expect(row?.resultingRoll, kind).toBe(ROLL_ACTION_KIND_TO_ROLL[kind]);
         expect(row?.ageAtAction, kind).toBe(36);
         expect((await auditRowsFor(result.rollActionId)).length, kind).toBe(0);
+        const [m] = await platform
+          .select({ currentRoll: memberships.currentRoll })
+          .from(memberships)
+          .where(and(eq(memberships.personId, subject), eq(memberships.organizationId, orgA)));
+        expect(m?.currentRoll, kind).toBeNull();
       }
-      const [m] = await platform
-        .select({ currentRoll: memberships.currentRoll })
-        .from(memberships)
-        .where(and(eq(memberships.personId, subject), eq(memberships.organizationId, orgA)));
-      expect(m?.currentRoll).toBeNull();
     });
 
     it("a removal kind or a void through the edit path is invalid_kind and writes nothing", async () => {
@@ -920,21 +2079,25 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
     });
 
     it("S1: a proposal dated before the person's latest effective action is allowed, with shadowedBy naming it", async () => {
-      const subject = await mkPerson("Rowan", "Ellsworth");
       const platform = getPlatformDb();
       // An approved action dated 2026-02-01, inserted by the owner (fixture).
-      await platform.insert(rollActions).values({
-        organizationId: orgA,
-        personId: subject,
-        kind: "baptized_member_enrolled",
-        effectiveDate: "2026-02-01",
-        resultingRoll: "baptized",
-        approvalStatus: "approved",
-        approvedBy: proposerUserId2,
-        proposedBy: proposerUserId2,
-      });
+      // One subject per proposal: R7 allows a single pending proposal each.
+      async function subjectWithBaptism(first: string): Promise<string> {
+        const subject = await mkPerson(first, "Ellsworth");
+        await platform.insert(rollActions).values({
+          organizationId: orgA,
+          personId: subject,
+          kind: "baptized_member_enrolled",
+          effectiveDate: "2026-02-01",
+          resultingRoll: "baptized",
+          approvalStatus: "approved",
+          approvedBy: proposerUserId2,
+          proposedBy: proposerUserId2,
+        });
+        return subject;
+      }
       const shadowed = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
-        personId: subject,
+        personId: await subjectWithBaptism("Rowan"),
         kind: "profession_of_faith",
         effectiveDate: "2026-01-15",
       });
@@ -944,17 +2107,96 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         shadowedBy: { kind: "baptized_member_enrolled", effectiveDate: "2026-02-01" },
       });
       const same = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
-        personId: subject,
+        personId: await subjectWithBaptism("Rhys"),
         kind: "profession_of_faith",
         effectiveDate: "2026-02-01",
       });
       expect(same).toMatchObject({ kind: "ok", shadowedBy: null });
       const later = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
-        personId: subject,
+        personId: await subjectWithBaptism("Rosalind"),
         kind: "profession_of_faith",
         effectiveDate: "2026-04-01",
       });
       expect(later).toMatchObject({ kind: "ok", shadowedBy: null });
+    });
+
+    // R7 and R15 (docs/work-log/2026-10-22-founding-admin-directory.md,
+    // Increment 2): one pending proposal per person, and a membership proposal
+    // needs a Session to approve it.
+    it("R7: a second proposal for a person who already has one waiting is proposal_refused pending_exists, and writes nothing", async () => {
+      const subject = await mkPerson("Dupe", "Proposal", { dob: "1980-01-01" });
+      const first = await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+        personId: subject,
+        kind: "profession_of_faith",
+        effectiveDate: "2026-03-03",
+      });
+      expect(first.kind).toBe("ok");
+      for (const kind of ["profession_of_faith", "reaffirmation", "baptized_member_enrolled"] as const) {
+        expect(
+          await recordRollAction(proposerPerson, orgA, proposerUserId2, {
+            personId: subject,
+            kind,
+            effectiveDate: "2026-03-04",
+          }),
+          kind,
+        ).toEqual({ kind: "proposal_refused", reason: "pending_exists" });
+      }
+      const platform = getPlatformDb();
+      const rows = await platform.select().from(rollActions).where(eq(rollActions.personId, subject));
+      expect(rows).toHaveLength(1);
+    });
+
+    it("R7: two proposals racing for the same person give exactly one ok and one pending_exists (the unique index is the backstop)", async () => {
+      const subject = await mkPerson("Racing", "Proposal");
+      const results = await Promise.all([
+        recordRollAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: "profession_of_faith",
+          effectiveDate: "2026-03-03",
+        }),
+        recordRollAction(proposerPerson, orgA, proposerUserId2, {
+          personId: subject,
+          kind: "reaffirmation",
+          effectiveDate: "2026-03-03",
+        }),
+      ]);
+      const kinds = results.map((r) =>
+        r.kind === "ok" ? "ok" : r.kind === "proposal_refused" ? r.reason : r.kind,
+      );
+      expect(kinds.sort()).toEqual(["ok", "pending_exists"]);
+      const platform = getPlatformDb();
+      const rows = await platform.select().from(rollActions).where(eq(rollActions.personId, subject));
+      expect(rows).toHaveLength(1);
+    });
+
+    it("R15: an organization with no Session refuses a membership proposal (no_session) and writes nothing — but a participant enrolment on record is unaffected", async () => {
+      expect(
+        await recordRollAction(bProposer, orgB, bProposerUserId, {
+          personId: bSubject,
+          kind: "profession_of_faith",
+          effectiveDate: "2026-03-03",
+        }),
+      ).toEqual({ kind: "proposal_refused", reason: "no_session" });
+      for (const kind of ["reaffirmation", "baptized_member_enrolled", "affiliate_received"] as const) {
+        expect(
+          await recordRollAction(bProposer, orgB, bProposerUserId, {
+            personId: bSubject,
+            kind,
+            effectiveDate: "2026-03-03",
+          }),
+          kind,
+        ).toEqual({ kind: "proposal_refused", reason: "no_session" });
+      }
+      const platform = getPlatformDb();
+      const none = await platform.select().from(rollActions).where(eq(rollActions.personId, bSubject));
+      expect(none).toHaveLength(0);
+
+      const enrolled = await recordRollAction(bProposer, orgB, bProposerUserId, {
+        personId: bSubject,
+        kind: "other_participant_enrolled",
+        effectiveDate: "2026-03-03",
+      });
+      expect(enrolled).toMatchObject({ kind: "ok", effect: "recorded" });
     });
 
     it("an enrolment refused by the database function comes back as a typed refusal and leaves no row", async () => {

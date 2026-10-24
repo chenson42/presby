@@ -39,6 +39,9 @@ function today(): string {
 interface EndTermDialogProps {
   slug: string;
   termId: string;
+  /** No longer sent to the action: the lib reads the person and office from
+   * the term's own row for the audit metadata (Increment 2, R13). Kept so
+   * existing callers compile; the UI batch may drop it. */
   personId: string;
   office: OfficerOffice;
   personName: string;
@@ -67,7 +70,6 @@ interface EndTermDialogProps {
 export function EndTermDialog({
   slug,
   termId,
-  personId,
   office,
   personName,
   startsOn,
@@ -87,8 +89,6 @@ export function EndTermDialog({
       termId,
       endsOn,
       endReason,
-      personId,
-      office,
     });
     setPending(false);
     if (result.ok) {

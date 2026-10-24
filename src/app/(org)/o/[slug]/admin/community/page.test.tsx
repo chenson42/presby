@@ -59,6 +59,11 @@ vi.mock("@/lib/community", () => ({
   getCommunityBadges: (...args: unknown[]) => getCommunityBadges(...args),
 }));
 
+const countPendingRollActions = vi.fn();
+vi.mock("@/lib/roll", () => ({
+  countPendingRollActions: (...args: unknown[]) => countPendingRollActions(...args),
+}));
+
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
 });
@@ -88,6 +93,7 @@ afterEach(() => {
   listFormerParticipants.mockReset();
   getCommunityBadges.mockReset().mockResolvedValue({});
   hasPermission.mockReset();
+  countPendingRollActions.mockReset().mockResolvedValue({ kind: "forbidden" });
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -579,5 +585,48 @@ describe("MembersPage — Increment 5: searchParams parsing (search/view/page)",
       "org-1",
       expect.objectContaining({ page: 3 }),
     );
+  });
+});
+
+describe("MembersPage — the Pending approvals link (Increment 2, F179)", () => {
+  function allOn() {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [], pagination: PAGINATION });
+    hasPermission.mockResolvedValue(true);
+  }
+
+  it("no link for a viewer with neither roll key (the count read is forbidden)", async () => {
+    allOn();
+    countPendingRollActions.mockResolvedValue({ kind: "forbidden" });
+    render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams() }));
+    expect(screen.queryByRole("link", { name: /pending approvals/i })).toBeNull();
+  });
+
+  it("a link with '3 waiting' and the accessible name 'Pending approvals, 3 waiting'", async () => {
+    allOn();
+    countPendingRollActions.mockResolvedValue({ kind: "ok", count: 3 });
+    render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams() }));
+    const link = screen.getByRole("link", { name: "Pending approvals, 3 waiting" });
+    expect(link.getAttribute("href")).toBe("/o/alder-creek/admin/community/pending");
+    expect(link.textContent).toMatch(/3 waiting/);
+  });
+
+  it("zero waiting: the link stays, with no count", async () => {
+    allOn();
+    countPendingRollActions.mockResolvedValue({ kind: "ok", count: 0 });
+    render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams() }));
+    const link = screen.getByRole("link", { name: "Pending approvals" });
+    expect(link.textContent).not.toMatch(/waiting/);
+  });
+
+  it("a failed count hides the count, never the page", async () => {
+    allOn();
+    countPendingRollActions.mockRejectedValue(new Error("boom"));
+    render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams() }));
+    expect(screen.getByRole("heading", { name: /^community$/i })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /pending approvals/i })).toBeNull();
   });
 });

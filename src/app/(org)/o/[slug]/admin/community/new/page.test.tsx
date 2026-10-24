@@ -47,6 +47,11 @@ vi.mock("@/lib/directory", () => ({
   getHouseholds: (...args: unknown[]) => getHouseholds(...args),
 }));
 
+const getSessionApprovalState = vi.fn();
+vi.mock("@/lib/roll", () => ({
+  getSessionApprovalState: (...args: unknown[]) => getSessionApprovalState(...args),
+}));
+
 vi.mock("./actions", () => ({
   matchPersonAction: vi.fn(),
   createPersonAction: vi.fn(),
@@ -80,6 +85,9 @@ afterEach(() => {
   isFlagEnabled.mockReset();
   isOrgFeatureEnabled.mockReset();
   getHouseholds.mockReset();
+  getSessionApprovalState
+    .mockReset()
+    .mockResolvedValue({ kind: "ok", state: { kind: "ready" } });
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -169,6 +177,55 @@ describe("NewMemberPage — the roll-bearing choices follow roll.propose (DECISI
     await renderWith(false);
     expect(screen.getByRole("heading", { name: /add a person/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^search$/i })).toBeTruthy();
+  });
+});
+
+describe("NewMemberPage — the Session decides whether Member is offered (R15, F185)", () => {
+  function setup(canPropose: boolean) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    hasPermission.mockImplementation(
+      async (_p: string, _o: string, key: string) =>
+        key === "roll.propose" ? canPropose : true,
+    );
+  }
+
+  it("reads the Session state only for a roll.propose holder", async () => {
+    setup(false);
+    render(await NewMemberPage({ params: makeParams() }));
+    expect(getSessionApprovalState).not.toHaveBeenCalled();
+    cleanup();
+    setup(true);
+    render(await NewMemberPage({ params: makeParams() }));
+    expect(getSessionApprovalState).toHaveBeenCalledWith("person-1", "org-1");
+  });
+
+  it("a terms_not_started Session sets sessionWaits (the review note shows), like every can't-act kind", async () => {
+    for (const [kind, waits] of [
+      ["terms_not_started", true],
+      ["empty", true],
+      ["no_sign_in", true],
+      ["no_permission", true],
+      ["ready", false],
+    ] as const) {
+      setup(true);
+      getSessionApprovalState.mockResolvedValue({ kind: "ok", state: { kind } });
+      const el = (await NewMemberPage({ params: makeParams() })) as {
+        props: { children: { props: { sessionWaits?: boolean } }[] };
+      };
+      const wizard = el.props.children.find((c) => c?.props && "sessionWaits" in c.props);
+      expect(wizard?.props.sessionWaits, kind).toBe(waits);
+    }
+  });
+
+  it("a failed read still renders the wizard (the server refuses no_session regardless)", async () => {
+    setup(true);
+    getSessionApprovalState.mockRejectedValue(new Error("boom"));
+    render(await NewMemberPage({ params: makeParams() }));
+    expect(screen.getByRole("heading", { name: /add a person/i })).toBeTruthy();
   });
 });
 

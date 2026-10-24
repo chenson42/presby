@@ -4,6 +4,61 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-206 — Installed pastors, co-pastors and associate pastors are members of the Session, through `officer_terms` at the congregation.**
+
+**Status:** Resolved (operator confirmed, "Yes, include them") · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (R10-R12, S1)
+
+- The PC(USA) Book of Order composes the session of the ruling elders in active service together with all installed pastors and associate pastors (G-3.0201) and has the session keep the register of installed pastors (G-3.0204). Temporary relationships (stated supply, interim, temporary supply), parish associates and a designated moderator are not in that composition and are not mapped; `moderator` stays unmapped.
+- The carrier is `officer_terms` at the congregation, and the roster stays materialised from it by trigger (The Court Is Not a Group). `appointments` is deliberately not the source: it is presbytery-owned, and a presbytery row writing a congregation's Session roster would be authority flowing down by inheritance. `staff_positions` grants nothing by design, and the `installed_pastor` role is a permission set, not court composition.
+- No congregation membership is invented: the `memberships` row is the link, the roll is `current_roll` and `roll_actions`, and the pastor's link carries none, so no SASR count and no Directory listing. A database guard (`officer_terms_pastor_no_roll`) refuses an open pastor-office term for a person on the roll. The guard also fires on `ends_on`, so it blocks re-opening a closed pastor term or moving an open one onto a rolled person; ending, shortening or extending an already-open term never fails (Batch A deviation 1). Approval refuses a member-roll gain for a pastor-office holder (`holds_pastoral_office`).
+- Any role a tenant has bound to its Session group now reaches installed pastors too, which is correct polity. Pastor offices are congregation-only and recorded with `officers.manage`. A pastor already on the platform at the presbytery cannot yet be linked (the claim function does not exist; a known limit).
+- One pure `officer-offices.ts` is now the single home of the office vocabulary (nine values, `officer_terms_office_allowed`).
+
+---
+
+**DECISION-205 — The Session roster is constituted by `officers.manage`; self-recording and self-approval are permitted and stamped; the Session's inability to act is told in six states.**
+
+**Status:** Resolved · **Date:** 2026-10-22 (six-state amendment 2026-10-23, after QA run 1) · **Feature:** `2026-10-22-founding-admin-directory` (F182, operator ruling Q1)
+
+- The authority comes from the congregation's own officer record entered by a tenant permission; no platform predicate takes part in any check. A block would deadlock a one-person start, so the founding administrator may record themselves as a ruling elder or pastor and then approve their own proposals. Officer-term start and end are audited in the same transaction with `selfRecorded`; approval with `selfApproved` and `selfTarget`; the queue and roster show "Self-approved" and "Self-recorded".
+- **Accepted residual, `paper`:** the chain platform designation, then `officers.manage`, then a self-recorded Session seat, then `roll.approve` is the one DECISION-155 refused to bundle. It is detected by audit and not prevented. The CLAUDE.md Two Hierarchies section states it.
+- Approval does not require two-step sign-in unless `require_two_factor` is on (default false). Not changed here.
+- **Six states** (checked in this order): `no_session`; `empty` (no seat recorded and none starting later); `terms_not_started` (seats are recorded, none is in effect yet; shows the earliest start date and says nothing about accounts); `no_sign_in`; `no_permission`; `ready`. **`no_sign_in` means exactly: at least one seat is in effect today and none of the people in effect today has an account.** QA run 1 found that the first design reached `no_sign_in` for a roster whose seats all start later, claiming "none has an account" about people whose accounts the query never looked at; `terms_not_started` is the fix. Member is offered only where a Session exists (F185). Elders without an account cannot approve until Increment 2b; the copy says so.
+
+---
+
+**DECISION-204 — The pending queue is visible to roll proposers and approvers; decided history shows reasons to the same holders; bulk approve is capped and per-row.**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (F179, R17, R18)
+
+- `roll.approve` or `roll.propose` reads the queue (decide mode for approvers, read mode for proposers) and a "Recently decided" history of approvals, denials and withdrawals. Denial and withdrawal reasons are free text about a person, so the library returns them only to holders of those two keys. Names of `directory_hidden` people appear to these holders by design: approvers need identity to decide and proposers typed the person in.
+- Entry points are the Community header link and the person's edit page; no admin-hub tile (the hub is permission-blind). The queue rides `org_portal.members_create`, so turning the Community toggle off also hides it.
+- Bulk approve is at most 50 per submit, one transaction per row, each its own definer call and audit row; the result is "N approved, M need attention" and no cross-row atomicity is claimed.
+
+---
+
+**DECISION-203 — Approve, deny and withdraw go through two `SECURITY DEFINER` functions; decided rows are terminal; `presby_app` loses `UPDATE` and `DELETE` on `roll_actions`; audit is written in the same transaction.**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (R1-R8, R13, R16, F180, F181, F184, F191)
+
+- `presby_decide_roll_action` and `presby_withdraw_roll_action`: org from `presby_current_org()`, a bounded `users.id` actor claim checked for `roll.approve` or `roll.propose` in the caller's own transaction, uniform identity literal, typed outcomes, exactly one row. Lock order membership then roll action.
+- Approval refuses a non-approvable kind (the seven gain kinds; participant enrolment is on-record only), a deceased or merged person, an ended membership, a pastor-office holder, a gain that would put someone on a roll they are already on (checked in both directions so `presby_roll_changes` cannot double-count), and maps the global active-roll collision to `active_elsewhere` without naming the other organization. A later-dated effective row is a warning, never a refusal. One pending proposal per person (R7). Input bounds are enforced in the database too.
+- A `withdrawn` status, distinct from `denied`, with `decided_by` and `decided_at` on every new decision. Denied, withdrawn and approved rows are terminal for the owner as well as the application. Approved rows predating this are not backfilled (the append-only trigger is not disabled by a migration); readers coalesce.
+- 0062 is additive; 0063 revokes `UPDATE` and `DELETE` from `presby_app` and from `presby_platform` (which cannot log in; the revoke documents intent and binds the day a real login exists) and narrows the insert policy to the approvable kinds; the order is 0062, code, 0063. The audit rows (`approved`, `denied`, new `withdrawn`) use `insertAuditRow` in the same transaction, replacing the after-commit `recordAudit` that swallowed failures. A filed return is never altered; `affects_filed_period` warns.
+- **Accepted residuals.** (1) On the owner connection (`neondb_owner`, `getPlatformDb()`) the freeze is **trigger-only**: ownership keeps every privilege, and `roll_actions_freeze` (which fires on the owner path too, F44) is the sole backstop. Platform maintenance that works directly in the database is stopped by that rule, not by a removed permission. (2) A direct SQL caller of the functions would skip the audit row (`paper`, pinned by a source scan that only `roll.ts` names them).
+
+---
+
+**DECISION-202 — Every congregation gets a baseline `session_member` role carrying `roll.approve` only, bound to its derived Session group.**
+
+**Status:** Resolved · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (R9; revisits DECISION-100)
+
+- DECISION-100's comment anticipated this: the plan "is ready to branch the day a genuinely type-varying baseline role is proposed". `baselineRoleSeedPlan("congregation")` now also returns `session_member` (constitutional, protected), and `boundToDerivedFrom` widens to `session`. Other organization types are unchanged.
+- 0062 backfills congregations that have a Session group and no org-owned `session_member` (the role key is the discriminator, never a reason text), never modifies an existing one, and first seeds the missing Session and Board of Deacons groups (an empty derived group grants nothing). The fixture's extra `directory.view` is not copied; the baseline `member` grant already covers it.
+- No role carries both roll keys, as a bundle or a template. The roster is constituted by `officers.manage` (DECISION-205), not by the roll.
+
+---
+
 **DECISION-222 — `getPortalMenu()` skips the administer-tile read when `org_portal.admin_hub` is off, and adds no `cache()` of its own.**
 
 **Status:** Resolved · **Date:** 2026-10-23 · **Feature:** `2026-10-23-portal-sitemap-footer` (Phase 3; integrated 2026-10-23)

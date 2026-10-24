@@ -18,10 +18,14 @@
  *   3. Every `OfficersResult` kind maps to the correct `ActionResult` shape,
  *      including the `overlap`/`invalid_input` copy this file is responsible
  *      for composing (per Phase 3's API-contract table).
- *   4. `recordAudit()` fires ONLY on `{ kind: "ok" }` — with
- *      `AUDIT_ACTIONS.OFFICER_TERM_STARTED`/`OFFICER_TERM_ENDED` — never on a
- *      denial, and never before the mutation succeeds.
- *   5. `revalidatePath` fires only after a successful mutation.
+ *   4. These actions call `recordAudit()` NEVER (Increment 2, R13): the
+ *      `tenant.officer_term.started`/`ended` rows are written by the lib in the
+ *      same transaction as the term, with `selfRecorded`. The tests below
+ *      assert zero `recordAudit` calls on every path; the in-transaction audit
+ *      itself is proven by `officers.test.ts`.
+ *   5. `endOfficerTermAction`'s input is the term id, date and reason ONLY: a
+ *      forged `personId` or `office` in the payload never reaches the lib.
+ *   6. `revalidatePath` fires only after a successful mutation.
  *
  * vi.mock() calls are hoisted before imports by Vitest's transform; every
  * mock factory referencing an outer `vi.fn()` uses `vi.hoisted()`.
@@ -168,12 +172,13 @@ describe("identity resolution — organizationId never comes from client input",
     };
     await startOfficerTermAction("alder-creek", input);
 
-    // (personId, organizationId, actingUserId, input)
+    // (personId, organizationId, actingUserId, input, opts)
     expect(mockStartOfficerTerm).toHaveBeenCalledWith(
       "person-1", // resolved.org.personId — a people.id
       "org-1", // resolved.org.organizationId
       "user-platform-id-1", // session.user.id — a users.id, NEVER personId
       input,
+      { actingUserEmail: "clerk@example.invalid" },
     );
   });
 
@@ -187,11 +192,34 @@ describe("identity resolution — organizationId never comes from client input",
 
     await endOfficerTermAction("alder-creek", endInput());
 
-    expect(mockEndOfficerTerm).toHaveBeenCalledWith("person-1", "org-1", {
-      termId: "term-1",
-      endsOn: "2026-06-01",
-      endReason: "resigned",
+    expect(mockEndOfficerTerm).toHaveBeenCalledWith(
+      "person-1",
+      "org-1",
+      "user-platform-id-1", // the acting users.id, new in Increment 2
+      {
+        termId: "term-1",
+        endsOn: "2026-06-01",
+        endReason: "resigned",
+      },
+      { actingUserEmail: "clerk@example.invalid" },
+    );
+  });
+
+  it("endOfficerTermAction: a forged personId/office in the payload never reaches endOfficerTerm", async () => {
+    mockAuth.mockResolvedValueOnce(SESSION);
+    mockResolveOrgContext.mockResolvedValueOnce(RESOLVED_OK);
+    mockEndOfficerTerm.mockResolvedValueOnce({
+      kind: "ok",
+      data: { termId: "term-1" },
     });
+
+    await endOfficerTermAction("alder-creek", {
+      ...endInput(),
+      ...({ personId: "forged-person", office: "ruling_elder" } as object),
+    });
+
+    const passed = mockEndOfficerTerm.mock.calls[0]![3] as Record<string, unknown>;
+    expect(Object.keys(passed).sort()).toEqual(["endReason", "endsOn", "termId"]);
   });
 });
 
@@ -252,7 +280,59 @@ describe("startOfficerTermAction — OfficersResult → ActionResult mapping", (
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
-  it("ok → returns ok:true with termId, records audit with full metadata, revalidates", async () => {
+  it("on_roll → the pastor-and-roll copy naming the person, no audit", async () => {
+    mockStartOfficerTerm.mockResolvedValueOnce({
+      kind: "on_roll",
+      personName: "Saoirse Kalantzis",
+    });
+    const result = await startOfficerTermAction("alder-creek", startInput());
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Saoirse Kalantzis is on this congregation's roll. A pastor's membership is held by the presbytery, so a pastor can't also be recorded on the roll here.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("invalid_office_for_org → names the office and says it belongs to congregations", async () => {
+    mockStartOfficerTerm.mockResolvedValueOnce({
+      kind: "invalid_office_for_org",
+      officeLabel: "Installed Pastor",
+    });
+    const result = await startOfficerTermAction("alder-creek", startInput());
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Installed Pastor isn't available for this kind of organization. Session and Board of Deacons offices belong to congregations.",
+    });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("an unknown office is a message, never the lib's throw", async () => {
+    const result = await startOfficerTermAction("alder-creek", {
+      ...startInput(),
+      office: "bishop" as never,
+    });
+    expect(result).toEqual({ ok: false, error: "That office isn't available." });
+    expect(mockStartOfficerTerm).not.toHaveBeenCalled();
+  });
+
+  it("each of the three new pastor offices is accepted by the action (the vocabulary is shared)", async () => {
+    for (const office of ["installed_pastor", "co_pastor", "associate_pastor"] as const) {
+      mockStartOfficerTerm.mockResolvedValueOnce({
+        kind: "ok",
+        data: { termId: "term-p" },
+      });
+      const result = await startOfficerTermAction("alder-creek", {
+        ...startInput(),
+        office,
+      });
+      expect(result.ok).toBe(true);
+    }
+  });
+
+  it("ok → returns ok:true with termId and revalidates; the action writes NO audit row (the lib did, in the term's transaction)", async () => {
     mockStartOfficerTerm.mockResolvedValueOnce({
       kind: "ok",
       data: { termId: "term-99" },
@@ -267,35 +347,9 @@ describe("startOfficerTermAction — OfficersResult → ActionResult mapping", (
     const result = await startOfficerTermAction("alder-creek", input);
 
     expect(result).toEqual({ ok: true, data: { termId: "term-99" } });
-    expect(mockRecordAudit).toHaveBeenCalledWith({
-      action: "tenant.officer_term.started",
-      resourceType: "officer_term",
-      resourceId: "term-99",
-      metadata: {
-        organizationId: "org-1",
-        personId: "target-1",
-        office: "deacon",
-        startsOn: "2026-01-01",
-        orgUnitId: "unit-1",
-      },
-    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
     expect(mockRevalidatePath).toHaveBeenCalledWith(
       "/o/alder-creek/admin/officers",
-    );
-  });
-
-  it("ok, no org_unit → metadata.orgUnitId is null, not undefined", async () => {
-    mockStartOfficerTerm.mockResolvedValueOnce({
-      kind: "ok",
-      data: { termId: "term-100" },
-    });
-
-    await startOfficerTermAction("alder-creek", startInput());
-
-    expect(mockRecordAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: expect.objectContaining({ orgUnitId: null }),
-      }),
     );
   });
 });
@@ -340,28 +394,16 @@ describe("endOfficerTermAction — OfficersResult → ActionResult mapping", () 
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 
-  it("ok → returns ok:true, records audit with caller-supplied metadata, revalidates", async () => {
+  it("ok → returns ok:true and revalidates; the action writes NO audit row (the lib did, from the term's own row)", async () => {
     mockEndOfficerTerm.mockResolvedValueOnce({
       kind: "ok",
       data: { termId: "term-1" },
     });
-    const input = endInput();
 
-    const result = await endOfficerTermAction("alder-creek", input);
+    const result = await endOfficerTermAction("alder-creek", endInput());
 
     expect(result).toEqual({ ok: true, data: { termId: "term-1" } });
-    expect(mockRecordAudit).toHaveBeenCalledWith({
-      action: "tenant.officer_term.ended",
-      resourceType: "officer_term",
-      resourceId: input.termId,
-      metadata: {
-        organizationId: "org-1",
-        personId: input.personId,
-        office: input.office,
-        endsOn: input.endsOn,
-        endReason: input.endReason,
-      },
-    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
     expect(mockRevalidatePath).toHaveBeenCalledWith(
       "/o/alder-creek/admin/officers",
     );
@@ -621,7 +663,5 @@ function endInput() {
     termId: "term-1",
     endsOn: "2026-06-01",
     endReason: "resigned",
-    personId: "target-1",
-    office: "trustee" as const,
   };
 }

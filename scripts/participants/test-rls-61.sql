@@ -55,8 +55,11 @@ begin;
   select assert_eq(
     (select count(*) from pg_policies where tablename = 'roll_actions' and policyname = 'roll_actions_insert_pending_only'
         and permissive = 'RESTRICTIVE' and cmd = 'INSERT' and roles = '{presby_app}'
-        and with_check = '(approval_status = ''pending''::text)'),
-    1, '61a (R5): roll_actions_insert_pending_only is RESTRICTIVE, FOR INSERT, TO presby_app, WITH CHECK approval_status = pending');
+        -- drizzle/0063 narrows the same policy to pending AND an approvable
+        -- kind (F191; exact text pinned in section 62a). 0061's half holds in
+        -- both states.
+        and with_check like '%(approval_status = ''pending''::text)%'),
+    1, '61a (R5): roll_actions_insert_pending_only is RESTRICTIVE, FOR INSERT, TO presby_app, WITH CHECK requires approval_status = pending');
   select assert_eq(
     (select count(*) from pg_policies where tablename = 'roll_actions'),
     2, '61a: and the only other policy is tenant_isolation');
@@ -121,8 +124,10 @@ begin;
   exception when insufficient_privilege then
     raise notice 'pass  61b (R5): nor a denied one - pending only';
   end $$;
+  -- A gain kind: drizzle/0063 refuses a pending participant enrolment at
+  -- insert (F191; section 62b), and participants are on record anyway.
   insert into roll_actions (organization_id, person_id, kind, effective_date, resulting_roll, approval_status)
-  values (:P61_ALDER, :P61_ROWAN, 'other_participant_enrolled', '2025-01-01', 'other_participant', 'pending');
+  values (:P61_ALDER, :P61_ROWAN, 'profession_of_faith', '2025-01-01', 'active', 'pending');
   select assert_eq(
     (select count(*) from roll_actions where person_id = :P61_ROWAN and approval_status = 'pending'),
     1, '61b (R5): a PENDING insert still succeeds (positive control - the policy is not a blanket refusal)');

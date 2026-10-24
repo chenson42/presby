@@ -429,6 +429,18 @@ describe("FoundingAdministratorSection — Batch 3 states", () => {
     expect(screen.getByText(/^an invitation is open\. nobody holds this role until it is accepted\./i)).toBeTruthy();
   });
 
+  it("an expired invitation with no name still says expired, never 'open'", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "expired", inviteeDisplayName: null })]}
+      />,
+    );
+    expect(screen.getByText(expiredInvitationLine("founding_administrator", null))).toBeTruthy();
+    expect(screen.getByText(/^the invitation has expired\. nobody holds this role\. resend it or revoke it to invite someone else\./i)).toBeTruthy();
+    expect(screen.queryByText(/an invitation is open/i)).toBeNull();
+  });
+
   it("an expired invitation still holds the slot and offers Resend", () => {
     render(
       <FoundingAdministratorSection

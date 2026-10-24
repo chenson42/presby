@@ -78,8 +78,14 @@ describe("open and expired section lines", () => {
       "The invitation for Perpetua has expired. Nobody holds this access. Resend it or revoke it to invite someone else.",
     );
   });
-  it("expired, no name: falls back to the current text", () => {
-    expect(expiredInvitationLine("treasurer", null)).toBe(openInvitationLine("treasurer", null));
+  it("expired, no name: the same line minus the name, never 'open'", () => {
+    expect(expiredInvitationLine("treasurer", null)).toBe(
+      "The invitation has expired. Nobody holds this access. Resend it or revoke it to invite someone else.",
+    );
+    expect(expiredInvitationLine("founding_administrator", "  ")).toBe(
+      "The invitation has expired. Nobody holds this role. Resend it or revoke it to invite someone else.",
+    );
+    expect(expiredInvitationLine("treasurer", undefined)).not.toMatch(/open/i);
   });
 });
 

@@ -104,13 +104,12 @@ export function openInvitationLine(purpose: InvitationCopyPurpose, name: string 
 
 /**
  * The section's standing line while the open invitation has EXPIRED (it still
- * holds the slot until it is resent or revoked). Without a name it falls back to
- * the pre-existing "open" wording, which the Phase 1 review recorded as a small
- * untruth for an expired row; a name is always present in practice (a founding
- * administrator's is typed, a treasurer's comes from the roster).
+ * holds the slot until it is resent or revoked). Never says "open": an expired
+ * row is not open (the small untruth the Phase 1 review asked to remove). With
+ * no derivable name it is the same line minus the name.
  */
 export function expiredInvitationLine(purpose: InvitationCopyPurpose, name: string | null | undefined): string {
   const n = typeof name === "string" ? name.trim() : "";
-  if (!n) return openInvitationLine(purpose, null);
-  return `The invitation for ${n} has expired. Nobody holds this ${INVITATION_ROLE_WORD[purpose]}. Resend it or revoke it to invite someone else.`;
+  const subject = n ? `The invitation for ${n}` : "The invitation";
+  return `${subject} has expired. Nobody holds this ${INVITATION_ROLE_WORD[purpose]}. Resend it or revoke it to invite someone else.`;
 }

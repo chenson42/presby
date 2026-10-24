@@ -184,7 +184,7 @@ No schema changes required. The treasurer's name is read from `people.first_name
 
 - **Treasurer name: first name only** (orchestrator default). Derived by `deriveInviteeDisplayName` in the plain module, the one place the rule lives; the founding administrator's name is the typed first + last already stored on the row.
 - **Fallbacks:** name, then "the person at {address}", then "the invitee".
-- **"Open" lines included**, with the expired-row correction. Without a name the expired line falls back to the pre-existing "open" wording (per the brief); a name is always present in practice.
+- **"Open" lines included**, with the expired-row correction. An expired row never says "open": with no derivable name the expired line is the named line minus the name (coordinator ruling after the first Phase 4 commit; the earlier fallback to the "open" wording kept the Phase 1 untruth).
 - **Address on first send:** each section keeps the submitted address in state (set in `onSent`, because the field clears on success) and passes it to the notice, so the lead line reads "Invitation sent to {address}." on first send as it already did on resend.
 - **Warning text** moves from `actions.ts` to the module as `INVITATION_WARNING_COPY`; the action still maps the code to the sentence server-side; the notice test and the action test import it rather than copy it.
 - **Bidi residual: stripped, not accepted.** `normalizePersonName` now also removes U+202A-U+202E and U+2066-U+2069 (test added). It is shared with the accept path (`accept.ts`), so an invitee's own name is cleaned the same way; no existing test signalled intent to keep those characters.
@@ -199,7 +199,7 @@ No schema changes required. The treasurer's name is read from `people.first_name
 - The e2e "same screen whether or not the address has an account" check compared two notices byte for byte; the notice now carries the typed address and name, so the spec masks those two values before comparing (the enumeration property it guards is unchanged: nothing in the notice depends on account existence).
 - A very long name wraps (`break-words`) in the notice and the list "For" line.
 - Self-addressed send: the existing dialog sentence and audit flag are untouched; "takes effect when {name} accepts" stays true.
-- Residual: an invitation row whose treasurer person is missing or has an empty first name yields a null name and falls back to the address wording.
+- Residual: an invitation row whose treasurer person is missing or has an empty first name yields a null name; the notice falls back to the address wording and the pending section line to the unnamed text (the expired line is unnamed but still says "expired").
 
 ## Copy
 
@@ -211,7 +211,8 @@ No schema changes required. The treasurer's name is read from `people.first_name
 | No name, no address | "... takes effect when the invitee accepts it from the email. Until then nobody holds this {role}." |
 | Section, pending, name | "An invitation is open for {name}. Nobody holds this {role} until {name} accepts it. Resend it if the email went astray, or revoke it to invite someone else." |
 | Section, expired, name | "The invitation for {name} has expired. Nobody holds this {role}. Resend it or revoke it to invite someone else." |
-| Section, no name | the previous unnamed "An invitation is open. ..." text, unchanged |
+| Section, pending, no name | the previous unnamed "An invitation is open. ..." text, unchanged |
+| Section, expired, no name | "The invitation has expired. Nobody holds this {role}. Resend it or revoke it to invite someone else." |
 
 The expiry sentence stays before the acceptance sentence; the lead line (sent / queued) is unchanged. The copy claims only "from the email", never delivery or opening, and describes no account or roster fact beyond the first name already used in the email greeting.
 
@@ -255,7 +256,7 @@ full-stack-developer (this agent).
 - Not run, need a database: `issue.db.test.ts` (new display-name assertions), the other `*.db.test.ts` files, and the e2e spec. No browser check was possible (no database); QA runs e2e.
 - The treasurer function-level derivation is unit-tested in `invitation-copy.test.ts` (pure); its use inside `issue.ts` is covered only by the unrun DB test.
 - Deviation from the brief: `InvitationSentNotice` and `InvitationList` take `purpose` instead of `role` (the role word is derived, so the two cannot disagree).
-- Residual (recorded in Phase 3): expired row with no derivable name falls back to the old "open" wording.
+- Follow-up commit (`fix(admin)`, Caught-By agent-review, Discovered-In Phase-4): an expired row with no derivable name now gets "The invitation has expired. Nobody holds this {role}. ..." instead of falling back to the "open" wording; `invitation-copy.ts` changed, both sections already routed expired rows through it; tests added for the module and both sections.
 
 # Phase 5 — Verification (qa)
 

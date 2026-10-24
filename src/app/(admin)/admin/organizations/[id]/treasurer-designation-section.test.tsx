@@ -236,6 +236,18 @@ describe("TreasurerDesignationSection — Batch 3 states", () => {
     expect(screen.queryByText(/an invitation is open/i)).toBeNull();
   });
 
+  it("an expired invitation with no name still says expired, never 'open'", () => {
+    render(
+      <TreasurerDesignationSection
+        {...PROPS}
+        invitations={[invitationRow({ purpose: "treasurer", status: "expired", inviteeDisplayName: null })]}
+      />,
+    );
+    expect(screen.getByText(expiredInvitationLine("treasurer", null))).toBeTruthy();
+    expect(screen.getByText(/^the invitation has expired\. nobody holds this access\./i)).toBeTruthy();
+    expect(screen.queryByText(/an invitation is open/i)).toBeNull();
+  });
+
   it("with no name the open line falls back to the unnamed wording", () => {
     render(
       <TreasurerDesignationSection

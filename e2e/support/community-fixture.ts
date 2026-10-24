@@ -195,12 +195,20 @@ export interface SqlParticipant {
   lastName: string;
 }
 
+/** Enforces the disjoint person-id ranges documented below: n is 0..99. */
+function assertFixtureIndex(n: number): void {
+  if (!Number.isInteger(n) || n < 0 || n >= 100) {
+    throw new Error(`fixture index n must be an integer in 0..99, got ${n}`);
+  }
+}
+
 /**
  * A current participant written on the owner connection (an approved
  * enrolment, with the cache the sync trigger writes), for specs that need one
  * without walking the wizard. The id carries the fixture prefix.
  */
 export async function createParticipantViaSql(sql: Sql, n: number, lastName: string): Promise<SqlParticipant> {
+  assertFixtureIndex(n);
   const personId = `${SQL_PERSON_PREFIX}${String(100 + n).padStart(12, "0")}`;
   assertSqlPersonId(personId);
   const firstName = FIXTURE_FIRST_NAME;
@@ -241,6 +249,7 @@ export async function createParticipantViaSql(sql: Sql, n: number, lastName: str
  * The id carries the fixture prefix, so the sweep removes it.
  */
 export async function createStaffAnchorViaSql(sql: Sql, n: number, lastName: string): Promise<SqlParticipant> {
+  assertFixtureIndex(n);
   const personId = `${SQL_PERSON_PREFIX}${String(200 + n).padStart(12, "0")}`;
   assertSqlPersonId(personId);
   const firstName = FIXTURE_FIRST_NAME;
@@ -271,6 +280,7 @@ export async function createProposalViaSql(
   lastName: string,
   effectiveDate = "2026-06-01",
 ): Promise<SqlParticipant & { rollActionId: string }> {
+  assertFixtureIndex(n);
   const personId = `${SQL_PERSON_PREFIX}${String(300 + n).padStart(12, "0")}`;
   assertSqlPersonId(personId);
   const firstName = FIXTURE_FIRST_NAME;

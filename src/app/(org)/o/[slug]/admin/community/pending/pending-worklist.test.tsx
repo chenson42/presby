@@ -261,6 +261,32 @@ describe("PendingWorklist — selection and the bulk bar", () => {
     );
   });
 
+  it("the partial-result panel is the title plus each name and reason, with no instruction sentence", async () => {
+    mockApproveMany.mockResolvedValue({
+      ok: true,
+      data: {
+        approved: 1,
+        failed: [{ rollActionId: "ra-2", error: "Someone already decided this one. Refresh to see the current status." }],
+        affectsFiledPeriod: false,
+        shadowedCount: 0,
+      },
+    });
+    renderList([ACTION, SECOND]);
+    fireEvent.click(screen.getByRole("button", { name: /select all on this page/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve 2 selected" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve 2" }),
+    );
+    const panel = await screen.findByTestId("bulk-attention");
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("1 approved, 1 need attention")).toBeTruthy();
+    expect(panel.textContent).toBe(
+      "Owen Pell: Someone already decided this one. Refresh to see the current status.",
+    );
+    expect(dialog.textContent).not.toMatch(/withdraw/i);
+    expect(dialog.textContent).not.toMatch(/open each one/i);
+  });
+
   it("a request-level refusal is an error toast and the dialog stays open", async () => {
     mockApproveMany.mockResolvedValue({
       ok: false,

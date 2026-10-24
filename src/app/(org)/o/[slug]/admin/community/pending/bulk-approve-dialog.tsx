@@ -103,7 +103,10 @@ export function BulkApproveDialog({
           Approve {count} selected
         </Button>
       </AlertDialogTrigger>
-      <AlertDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+      <AlertDialogContent
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+        {...(result ? { "aria-describedby": undefined } : {})}
+      >
         {result ? (
           <>
             <AlertDialogHeader>
@@ -111,10 +114,6 @@ export function BulkApproveDialog({
                 {result.data.approved} approved, {result.data.failed.length}{" "}
                 need attention
               </AlertDialogTitle>
-              <AlertDialogDescription>
-                These were not approved. Open each one to approve, deny or
-                withdraw it.
-              </AlertDialogDescription>
             </AlertDialogHeader>
             <ul className="space-y-2 text-sm" data-testid="bulk-attention">
               {result.data.failed.map((f) => (

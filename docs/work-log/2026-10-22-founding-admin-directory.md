@@ -26,7 +26,7 @@
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
 | Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23; Batch B (server: library, actions, in-transaction audit; 0063 applied to the pipeline branch, twice, so the branch is in the lockdown state) complete 2026-10-23; Batches C and D (UI, e2e, hydration, 360px pass) complete 2026-10-23 — Phase 4 Complete for Increment 2 | — | — |
-| Inc 2 · 5 — Verification | qa | Run 1 FAIL on copy truthfulness only (`session-state-banner.tsx:79-98` with `session-approval-state.ts:45`; `participant-copy.ts:37-38`); tests, probes, fresh install and e2e 27/27 green. Next: tech-lead copy ruling, then ux-developer | FAIL (run 1) | 2026-10-23 |
+| Inc 2 · 5 — Verification | qa | Run 1 FAIL (2 copy defects) → ruling + fix 0e88167; Run 2 FAIL on one new copy defect (`bulk-approve-dialog.tsx:115-116` tells an approve-only viewer to withdraw); all tests green, merge sound, `terms_not_started` banner verified at 360px. Next: ux-developer removes the sentence (Phase 3 specifies none), then scoped re-check | FAIL (run 2) | 2026-10-23 |
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
@@ -5261,3 +5261,212 @@ Implements the Phase 3 copy ruling after QA run 1. Copy, state-model and test ch
 - `src/lib/roll.test.ts` (DB-backed, `--no-file-parallelism`): 95/95 with `--testTimeout/--hookTimeout=180000`. At the default timeouts two untouched `voidParticipantAction` tests failed with dropped Neon connections (the latency QA recorded); rerunning with long timeouts passed all.
 - E2E from a scratch copy in `/private/tmp`, own server on :3350: `community-approval` 13/13 (desktop and 360px), `community-participants` 10/10, `community-redirect` 3/3, `hydration/community-approval-controls` 1/1, `hydration/community-participant-dialogs` 1/1. Two intermediate runs lost individual tests to `NeonDbError: fetch failed` from the Playwright process; those tests passed on rerun. Not run: `test:e2e:prod` lane.
 - Not examined: the plural-with-date `terms_not_started` banner at 360px by eye (no e2e seeds that state); Batch D should look at it once.
+
+---
+
+# Increment 2 — Phase 5: Verification (qa), run 2
+
+## Run 2: FAIL
+
+**Date:** 2026-10-23
+**Verified by:** qa
+**Worktree / branch:** `/Users/cshenso/git/presby-platform/presby-fadir`, `pipeline/session-approval` at 0e88167 (confirmed). Neon branch `pipeline-session-approval` only. No connection string or env value was printed in this run.
+
+**Verdict: FAIL, for one copy defect.** Both Run 1 findings are fixed exactly as tech-lead ruled. Every test is green once the Neon drops are re-run. The fixture merge is sound. The fail comes from the re-scan you asked for: the bulk-approve result panel tells an approver to "withdraw" a roll action, and the default approver role can't withdraw.
+
+### Scope run
+
+- **Ran in full:** typecheck, lint, `npm run check` (all eight), the unit suite.
+- **Ran, targeted:**
+  - `npm run test:db` on `src/lib/roll.test.ts` and `src/lib/session-approval-state.test.ts`. The fix touched no other DB test.
+  - e2e on my own server (:3360) from a scratch copy in `/private/tmp`: `community-approval`, `community-participants` (whole file), `community-redirect`, and the two `hydration/community-*` specs.
+  - A throwaway `terms_not_started` spec, in the scratch copy only.
+  - A negative control of the fix, also in the scratch copy.
+- **The `e2e/support/` scope trigger:** the diff touches `e2e/support/community-fixture.ts`, which normally calls for the full chromium suite. Only the four community and hydration specs import that file, and all four ran. The PR's CI covers the rest.
+- **Not re-run (Run 1 stands):** the whole DB-backed set, `test-rls-61/62` and the integration patch, live-catalog probes, fresh install, and the `test:e2e:prod` lane. The fix commit touches no SQL, action, route, migration or `src/lib/db/` file.
+
+### Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint` (`--max-warnings=0`): PASS
+- `npm run check`: all eight tripwires pass (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
+
+### Unit Tests
+
+Total: 10064 | Passed: 7778 | Failed: 0 | Skipped: 2286 (the DB-gated tests, which skip without `.env.local`) | Files: 511 passed, 74 skipped | Duration: 26s
+
+**DB-backed (`npm run test:db`, serial, 180s timeouts):** `roll.test.ts` and `session-approval-state.test.ts` passed 104/104 on the first try in 278s. No connection dropped, so nothing needed a re-run.
+
+### End-to-End Tests
+
+Scratch copy in `/private/tmp`, own dev server on :3360, `--project=chromium`.
+
+**Run A (all five specs):** 17 passed, 3 failed, 9 did not run.
+- All three failures were Neon `fetch failed`:
+  - `community-participants.spec.ts:171`: "removal undone" never appeared, then the `afterAll` sweep at `community-fixture.ts:302` failed with `NeonDbError: fetch failed`.
+  - `community-participants.spec.ts:185`: the `beforeAll` sweep at `:81` hit the same error, so the rest of the file did not run.
+  - `community-redirect.spec.ts:42`: Auth.js `JWTSessionError` (a failed `users` query) sent the browser to `/signin`.
+- `community-approval` 13/13 and both hydration specs (1/1 each) passed.
+
+**Run B (the two failing files, re-run once):** 14/14 in 4.0 min. `community-participants` passed 11/11 at desktop and 360px, including the staff-anchor test at `:256` with the `level: 1` change. `community-redirect` passed 3/3.
+
+**Combined:** 30/30 green, which is 28 distinct tests plus the throwaway below.
+- `community-approval` 13/13 and `community-participants` 11/11, each at both widths.
+- `community-redirect` 3/3. It only checks HTTP redirects, so a 360px pass would prove nothing extra.
+- Hydration 1/1 + 1/1.
+
+**Throwaway `terms_not_started` check** (scratch only, now deleted):
+- **Setup:** two fixture elders (first name `E2ECommunity`, `deletable_until` = now + 2h) with future `ruling_elder` terms starting 2027-01-10 and 2027-03-01, one SQL proposal, and the clerk in read mode.
+- **Rendered text at 360px:**
+  - "No one can approve yet"
+  - "2 members of the Session are recorded, but their terms haven't begun. The first term begins 1/10/2027, and no member of the Session can approve before then."
+  - "To approve, a member of the Session also needs a PresbyPortal account."
+- **Checks:** no link, no button, no "support ticket", no "none has an account". Page overflow was 0, no child element overflowed, and the banner box ended at x = 336 of 360.
+- **Also checked at 320px and desktop:** same result. The date shows as the ISO `2027-01-10` before hydration and as `1/10/2027` after. That is `FormattedDate`'s designed server-then-client swap.
+- **Screenshots:** they read correctly and the banner wraps cleanly.
+  - `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/shots/tns-banner-360.png`
+  - `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/shots/tns-page-360.png`
+  - `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/6e3e960d-cf0c-43df-b4c9-d41f1a6a4811/scratchpad/shots/tns-banner-320.png`
+- **Dev overlay "1 Issue":** I captured the console. It is React's server-side "empty buffer / ArrayBuffer.prototype.detached" warning, which appears because this machine runs Node v20.20.2 and `.nvmrc` pins 22. It is not a hydration error and not part of this change.
+
+### Regression Tests Added
+
+All six ruled tests exist and pass. I verified them by reading and running them.
+
+1. `src/lib/session-approval-state.test.ts` — guards against future-dated seats reaching `no_sign_in`, and pins the state order.
+   - `:32`: all seats start later gives `terms_not_started`.
+   - `:38`: future holders give `terms_not_started` with and without accounts, including `withAccount: 1, canApprove: 1`.
+   - `:49`: `no_session` beats `terms_not_started`; `empty` only when both counts are 0.
+   - `:57` and `:74` (existing): `recorded: 4, withAccount: 0` gives `no_sign_in`; the mixed roster stays `ready`.
+2. `src/lib/roll.test.ts:1774` (DB walk) — guards against the derivation depending on whether future holders have accounts.
+   - A future seat without an account gives `terms_not_started`.
+   - A second future holder *with* `user_id` still gives `terms_not_started`, with `startingLater: 2` and `nextStart` the earliest date.
+   - A seat in effect with no account stays `no_sign_in`.
+   - The old version of this test asserted `no_sign_in` for an account-holding future seat; it encoded the bug.
+3. `pending/session-state-banner.test.tsx` — guards against `terms_not_started` drifting from the ruled copy or claiming anything about accounts, and against the date clause returning to `no_sign_in`.
+   - `:97`, `:112`, `:125`: the four paragraph-1 variants and paragraph 2, verbatim (whole text at `:97`).
+   - `:149`: no account claim, no invite line, no support ticket, no link, no button.
+   - `:67`: `no_sign_in` with `startingLater: 2` renders no date clause and counts `recorded` only.
+4. `community/participant-copy.test.ts:48` — guards against the Increment 1 "wait" wording returning. It asserts the exact new `pending_action` string, matches `/withdrawn/`, and asserts the string does not contain `Wait for the Session`.
+5. `community/new/page.test.tsx:206` — guards against a can't-act kind being left out of `sessionWaits`. It checks every kind, `terms_not_started` included.
+6. `community/[id]/edit/page.test.tsx:756` — guards against any non-ready kind skipping the can't-approve notice on the edit page.
+
+**Failing-first, my own negative control in the scratch copy:**
+- I put the 60f5343 (pre-fix) versions of the four changed source files back and kept the new tests: `session-approval-state.ts`, `session-state-banner.tsx`, `new/page.tsx` and `participant-copy.ts`.
+- **8 tests failed**: `:32`, `:38`, `participant-copy :48`, `new/page :206`, and banner `:97`, `:112`, `:125`, `:149`.
+- After restoring (byte-identical to the worktree, checked with `cmp`), all passed.
+- `edit/page :756`, the order test `:49` and banner `:67` also pass on the pre-fix code. That is expected: they pin behaviour the fix didn't need to change.
+- I did not negative-control the DB walk at `roll.test.ts:1774`.
+
+**Copy truthfulness (the Run 1 findings)**
+
+The implemented strings match the ruling verbatim:
+
+| Variant | Implementation |
+|---|---|
+| Plural with date | `session-state-banner.tsx:84-94` |
+| Singular with date ("The term begins") | `:84-94` |
+| Plural, no date | `:96-99` |
+| Singular, no date | `:96-99` |
+| Paragraph 2 | `:101` |
+| Trimmed `no_sign_in` (counts `recorded` only, no date clause, invite-line constant unchanged) | `:105-117` |
+| New `pending_action` | `participant-copy.ts:37-38`, exact match |
+
+- The state derivation (`session-approval-state.ts:46-51`) checks `terms_not_started` right after `empty` and before `no_sign_in`.
+- `no_sign_in` is now reached only when `recorded > 0`, meaning a seat is in effect and none of those in-effect holders has an account. `withAccount` counts live seats only (`roll.ts:1066-1068`), and the derivation never looks at the accounts of future holders.
+- `sessionWaits` includes the new kind (`new/page.tsx:107`). The edit page uses `kind !== "ready"`, so it needs no change.
+- The banner renders only in read mode, or for `no_session` (`pending/page.tsx:157-158`).
+
+**Re-scan: one new defect (the fail reason)**
+
+`src/app/(org)/o/[slug]/admin/community/pending/bulk-approve-dialog.tsx:115-116`:
+
+> These were not approved. Open each one to approve, deny or withdraw it.
+
+- **Who sees it:** the panel exists only in decide mode, so only `roll.approve` holders see it.
+- **Why they can't withdraw:** the baseline `session_member` role carries `roll.approve` only (`drizzle/0062_presby_session_approval.sql:282`). The Withdraw button renders only for `viewer.canPropose` (`pending-row.tsx:121`). The definer refuses a withdraw without `roll.propose` (`0062:753`; Run 1 probe 5).
+- **Effect:** a seated elder with the default role is told to withdraw something with no Withdraw button anywhere, the same pattern the Finding 2 ruling rejected. "Open each one" is also inaccurate: queue rows have inline buttons and nothing to open.
+- **Origin:** this isn't Phase 3 copy. The Phase 3 bulk result panel (work-log `:3256`) is "{m} need attention" plus each name and reason, with no instruction sentence.
+- **Missing test:** no test pins this string.
+
+**Re-scan: nothing else promises an action the viewer can't take.**
+- `DECISION_COPY` lines `:39`–`:53` offer Deny, which an approver can do, or a support ticket.
+- `PROPOSAL_COPY.pending_exists` is addressed to a proposer, which the ruling accepts.
+- `self_target` and `empty` say "Ask an administrator".
+
+### Coverage on Critical Modules
+
+Not re-measured. The change doesn't touch `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+### Feature-Gate Audit
+
+**Unchanged from Run 1.** The fix commit 0e88167 adds or changes no `route.ts`, no `"use server"` action and no `src/proxy.ts`. Its source changes are one page's `sessionWaits` list, two copy files, the banner and the pure state derivation. Merge 60f5343 brings in only code that is already on `main` (PRs #43–#45).
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| No route or action changed since Run 1 (Run 1 table stands) | n/a | n/a | n/a |
+
+**Merge review (`git diff c561ca1 0e88167 -- e2e/support/community-fixture.ts`)**
+
+- **Id ranges are disjoint:**
+
+  | Range | Helper | Line | Current callers' `n` |
+  |---|---|---|---|
+  | `100 + n` | `createParticipantViaSql` | `:204` | 1 |
+  | `200 + n` | `createStaffAnchorViaSql` | `:244` | 1, 2 |
+  | `300 + n` | `createProposalViaSql` | `:274` | 1–8, 11–18, 30–35, 90 |
+
+  So the ids in use are 101, 201–202 and 301–390. No current caller overlaps another range.
+- `sweepCommunityPeople` matches on first name, not on id range, so it covers all three ranges.
+- Role ids `…0001` and `…0002` live in `app_roles`, a different table.
+- **Caveat:** "n under 100" is only a comment. No runtime check stops a future caller passing `n ≥ 100`. Hand-off below.
+- **`level: 1` at `community-participants.spec.ts:270` is sound.**
+  - The page's own heading is `<h1>Community</h1>` (`community/page.tsx:60, :223`). The footer's column heading is an `<h2>` (`portal-footer.tsx:139`).
+  - Scoping to level 1 asserts the thing the test means ("we're on the Community page") and is strictly narrower than before.
+  - `main`'s CI E2E at 4cdd5ab was green, so the duplicate heading probably depends on data or flags rather than showing everywhere. Either way the scoped assertion is correct. I couldn't retrieve the CI log to confirm.
+  - Pre-existing weakness, not from this pipeline: the flag-off and forbidden pages also render an h1 "Community", so the `toHaveCount(0)` that follows could pass without the list rendering. The Staff-view half of the test proves access.
+
+### Verdict
+
+**FAIL.** Run 1's two copy findings are fixed exactly as ruled, and all six ruled tests exist, pass, and (except the pins) fail against the pre-fix code. Typecheck, lint, check, unit, the DB files and the targeted e2e (after one Neon-drop re-run) are green. The merge is sound. The required copy-truthfulness re-scan found one string that promises an action the viewer can't take: `bulk-approve-dialog.tsx:115-116`.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2 · 5 — Verification (run 2) | qa | Complete. Scoped re-run at 0e88167. Typecheck, lint, check 8/8 and unit 7778/0 green. DB `roll` + `session-approval-state` 104/104. E2E on :3360: 17/20 in run A (3 Neon `fetch failed`, 9 not run), then a re-run of those files 14/14; 28/28 distinct tests green. Throwaway `terms_not_started` banner verified at 360/320/desktop by screenshot, no overflow. Negative control: 8 new tests red on pre-fix code. Fixture ranges disjoint; `level: 1` sound. Run 1 copy findings fixed verbatim. Gate audit unchanged. New copy defect found | **FAIL** (copy truthfulness: `bulk-approve-dialog.tsx:115-116` tells a `roll.approve`-only viewer to withdraw) | 2026-10-23 |
+
+### Handoff
+
+**Next agent: ux-developer (Phase 4, Batch C)** to fix `bulk-approve-dialog.tsx:115-116` and add a test that pins the result-panel copy.
+- The simplest fix that matches Phase 3 is to delete the sentence. Phase 3 specifies only the title and the list of names and reasons.
+- Any replacement wording needs a tech-lead copy ruling first. If "withdraw" is kept, it must render only when `viewer.canPropose` is true, which means passing it into the dialog.
+- After that, a short Phase 5 re-check: unit tests and `community-approval` e2e.
+
+**For the orchestrator (not fail reasons):**
+1. **Global flags.** `org_portal.members_create` and `org_portal.members_roll_action_edit` are both ON on the pipeline branch after my run. The seed default is OFF.
+   - My pre-run baseline didn't capture flags, so I can't prove they were ON before.
+   - In run A, one `afterAll` teardown died on a Neon drop before it restored the flags. The fixtures that ran afterwards restore whatever value they found when they started.
+   - Every other fixture artifact is clean: no alpha toggle row, no alpha Session group, and no fixture roles, grants or permissions.
+   - Please confirm the intended flag state on this branch.
+2. **Residue: none.**
+   - 0 `E2ECommunity` people and 0 `e2ce1000-` people.
+   - 0 rows of each kind keyed to fixture persons: memberships, officer terms, group memberships, roll actions.
+   - 0 people with `deletable_until` set, so the 25 leaked rows Run 1 reported are also gone.
+   - `roll_actions_freeze` and `group_memberships_reject_derived` are both enabled.
+   - `/private/tmp/qa-session-approval-run2` is deleted, nothing listens on :3360, and the worktree is clean at 0e88167.
+3. **Follow-up for `docs/TODO.md` (tech-lead to triage, outside this fix):** `roll.ts:781` computes `proposed_on` as `(recorded_at at time zone 'UTC')::date` and renders it as a calendar date. A US-evening proposal shows tomorrow's date; I saw "Proposed 10/24/2026" at 19:02 PDT on 10/23.
+4. **Hardening suggestion:** have `createProposalViaSql` and its siblings throw on `n < 0 || n >= 100`, so the disjoint ranges are enforced rather than only written in a comment.
+5. **`no_permission` banner ("Check Roles, or send us a support ticket"):**
+   - The Roles page needs `roles.manage`, which a read-mode proposer may lack.
+   - Left as is because tech-lead's ruling explicitly kept this string and the support ticket is something the viewer can do. Worth revisiting in 2b.
+6. **DECISION-205 six-state amendment** isn't in `docs/decisions.md` yet. That file is a Rule 16 integration file, so it's yours at integration.
+7. **Local Node** is v20.20.2 against `.nvmrc` 22. That causes the dev overlay's React "empty buffer" warning.
+
+### Increment 2 — Batch C bulk-panel fix
+
+Fixes the Phase 5 run 2 FAIL (ux-developer, Phase 4).
+- `bulk-approve-dialog.tsx`: deleted the "Open each one to approve, deny or withdraw it." sentence from the partial-result panel; no replacement wording. The result view now sets `aria-describedby` undefined so Radix does not warn about a missing description.
+- `pending-worklist.test.tsx`: new test pins the panel (title, per-row name and reason; no "withdraw", no "Open each one").
+- `e2e/support/community-fixture.ts`: `createParticipantViaSql`, `createStaffAnchorViaSql` and `createProposalViaSql` now throw unless `n` is an integer in 0..99, enforcing the disjoint ranges.
+- Next agent: qa (scoped re-check).

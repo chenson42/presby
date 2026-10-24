@@ -8,6 +8,7 @@ export function invitationRow(overrides: Partial<InvitationListRow> = {}): Invit
     email: "clerk@example.invalid",
     inviteeFirstName: "Marisol",
     inviteeLastName: "Quenby",
+    inviteeDisplayName: "Marisol Quenby",
     personId: null,
     status: "pending",
     delivery: "sent",

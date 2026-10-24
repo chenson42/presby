@@ -225,6 +225,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       if (result.kind !== "ok") return;
       expect(result.delivery).toBe("sent");
       expect(result.selfAddressed).toBe(false);
+      expect(result.inviteeDisplayName).toBe("Marisol Quenby");
 
       const [inv] = await invitationsOf(orgId);
       expect(inv).toMatchObject({
@@ -380,6 +381,10 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
         organizationId: orgId, purpose: "treasurer", email: address, inviter: actor(),
       });
       expect(result.kind).toBe("ok");
+      // The roster person's FIRST NAME only is what the operator's notice names.
+      expect(result).toMatchObject({ inviteeDisplayName: "Odalys" });
+      const [listed] = await issue.listInvitationsForOrg(orgId);
+      expect(listed).toMatchObject({ purpose: "treasurer", inviteeDisplayName: "Odalys", inviteeFirstName: null });
       const [inv] = await invitationsOf(orgId);
       expect(inv).toMatchObject({
         purpose: "treasurer", person_id: person, invitee_first_name: null, invitee_last_name: null,
@@ -831,6 +836,25 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       return { orgId, address, queueId, old };
     }
 
+    it("a treasurer resend carries the roster person's FIRST NAME as inviteeDisplayName, never the last name", async () => {
+      sendMock.mockRejectedValue(new Error("provider down"));
+      const orgId = await org();
+      const address = fx.email("rs-tr");
+      const person = await member(orgId, address, "Odalys"); // the helper's last name is "Pennick"
+      const queueId = await seedQueueRow(address, "queued");
+      const old = await fx.insertInvitation({
+        organizationId: orgId, purpose: "treasurer", email: address, createdByUserId: operator,
+        personId: person, emailQueueId: queueId,
+        createdAt: sql.raw(`now() - interval '10 minutes'`),
+        expiresAt: sql.raw(`now() + interval '2 days'`),
+      });
+      const r = await issue.resendInvitation({ organizationId: orgId, invitationId: old.id, actor: actor() });
+      expect(r.kind).toBe("ok");
+      if (r.kind !== "ok") return;
+      expect(r.inviteeDisplayName).toBe("Odalys");
+      expect(r.inviteeDisplayName).not.toContain("Pennick");
+    });
+
     it("supersedes the old row FIRST, inserts the successor with lineage, cancels the unsent old email, audits - one commit", async () => {
       sendMock.mockRejectedValue(new Error("provider down"));
       const s = await seed();
@@ -838,6 +862,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       expect(r.kind).toBe("ok");
       if (r.kind !== "ok") return;
       expect(r.delivery).toBe("queued");
+      expect(r.inviteeDisplayName).toBe("Marisol Quenby");
 
       const rows = await invitationsOf(s.orgId);
       expect(rows).toHaveLength(2);

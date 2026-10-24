@@ -35,6 +35,7 @@ import {
   type InvitationWarning,
   type ResendInvitationResult,
 } from "@/lib/onboarding/issue";
+import { INVITATION_WARNING_COPY } from "@/lib/onboarding/invitation-copy";
 import { INVITATION_RATE_LIMIT_COPY } from "@/lib/onboarding/labels";
 import { revokeDesignationHolder } from "@/lib/onboarding/designation-holders";
 import {
@@ -725,6 +726,11 @@ export type InvitationActionResult =
       delivery?: "sent" | "queued";
       selfAddressed?: boolean;
       /**
+       * Who must accept, derived on the server (founding administrator: the typed
+       * name; treasurer: the roster person's first name only). Absent when unknown.
+       */
+      inviteeDisplayName?: string;
+      /**
        * Non-blocking notes on a SENT invitation (operator ruling 2026-10-23).
        * Present only when non-empty. The invitation was created; these tell the
        * operator what may go wrong at acceptance. `message` is the sentence to show.
@@ -733,14 +739,9 @@ export type InvitationActionResult =
     }
   | { ok: false; error: string; needsAcknowledgement?: "do_not_contact" };
 
-/**
- * The copy for each warning. Describes this organization's roster only, never
- * whether the address has an account anywhere (`users` is not read).
- */
-const INVITATION_WARNING_COPY: Record<InvitationWarning, string> = {
-  address_on_signed_in_person:
-    "That address is already on file for a person here who signs in. The invitation was sent, but it will be refused unless the invitee accepts while signed in to that person's own account.",
-};
+function inviteeNameFor(name: string | null): { inviteeDisplayName: string } | Record<string, never> {
+  return name ? { inviteeDisplayName: name } : {};
+}
 
 function warningsFor(
   warnings: InvitationWarning[] | undefined,
@@ -887,6 +888,7 @@ export async function inviteFoundingAdministratorAction(
     expiresAt: result.expiresAt.toISOString(),
     delivery: result.delivery,
     selfAddressed: result.selfAddressed,
+    ...inviteeNameFor(result.inviteeDisplayName),
     ...warningsFor(result.warnings),
   };
 }
@@ -927,6 +929,7 @@ export async function inviteTreasurerAction(
     expiresAt: result.expiresAt.toISOString(),
     delivery: result.delivery,
     selfAddressed: result.selfAddressed,
+    ...inviteeNameFor(result.inviteeDisplayName),
     ...warningsFor(result.warnings),
   };
 }
@@ -983,6 +986,7 @@ export async function resendInvitationAction(
     invitationId: result.invitationId,
     expiresAt: result.expiresAt.toISOString(),
     delivery: result.delivery,
+    ...inviteeNameFor(result.inviteeDisplayName),
   };
 }
 

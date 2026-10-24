@@ -27,6 +27,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { InvitationActionResult } from "./actions";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
 import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
+import { expiredInvitationLine, openInvitationLine } from "@/lib/onboarding/invitation-copy";
 import { invitationRow } from "./invitation-row.fixture";
 import { derivedGroupHolderRow, groupHolderRow, holderRow } from "./holder-row.fixture";
 
@@ -335,8 +336,14 @@ describe("FoundingAdministratorSection — every result variant's copy", () => {
     },
     {
       name: "ok",
-      result: { ok: true, invitationId: "inv-1", expiresAt: "2026-10-28T12:00:00.000Z", delivery: "sent" },
-      expected: /invitation sent\. it expires on .* nobody holds this role until it is accepted/i,
+      result: {
+        ok: true,
+        invitationId: "inv-1",
+        expiresAt: "2026-10-28T12:00:00.000Z",
+        delivery: "sent",
+        inviteeDisplayName: "Marisol Quenby",
+      },
+      expected: /invitation sent to clerk@example\.invalid\. it expires on .* the founding administrator designation takes effect when marisol quenby accepts it from the email\. until then nobody holds this role\./i,
     },
   ];
 
@@ -384,6 +391,54 @@ describe("FoundingAdministratorSection — Batch 3 states", () => {
     expect(screen.getByText(/an invitation is open/i)).toBeTruthy();
     expect(screen.getByTestId("invitation-row")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^resend$/i })).toBeTruthy();
+  });
+
+  it("the open line names the person; the expired line says it has expired (not 'open')", () => {
+    const { unmount } = render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "pending" })]}
+      />,
+    );
+    expect(
+      screen.getByText(openInvitationLine("founding_administrator", "Marisol Quenby")),
+    ).toBeTruthy();
+    expect(screen.getByText(/an invitation is open for marisol quenby\. nobody holds this role until marisol quenby accepts it\./i)).toBeTruthy();
+    unmount();
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "expired" })]}
+      />,
+    );
+    expect(
+      screen.getByText(expiredInvitationLine("founding_administrator", "Marisol Quenby")),
+    ).toBeTruthy();
+    expect(screen.getByText(/the invitation for marisol quenby has expired\. nobody holds this role\. resend it or revoke it to invite someone else\./i)).toBeTruthy();
+    expect(screen.queryByText(/an invitation is open/i)).toBeNull();
+  });
+
+  it("with no name the open line falls back to the unnamed wording", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "pending", inviteeDisplayName: null })]}
+      />,
+    );
+    expect(screen.getByText(openInvitationLine("founding_administrator", null))).toBeTruthy();
+    expect(screen.getByText(/^an invitation is open\. nobody holds this role until it is accepted\./i)).toBeTruthy();
+  });
+
+  it("an expired invitation with no name still says expired, never 'open'", () => {
+    render(
+      <FoundingAdministratorSection
+        {...BASE_PROPS}
+        invitations={[invitationRow({ status: "expired", inviteeDisplayName: null })]}
+      />,
+    );
+    expect(screen.getByText(expiredInvitationLine("founding_administrator", null))).toBeTruthy();
+    expect(screen.getByText(/^the invitation has expired\. nobody holds this role\. resend it or revoke it to invite someone else\./i)).toBeTruthy();
+    expect(screen.queryByText(/an invitation is open/i)).toBeNull();
   });
 
   it("an expired invitation still holds the slot and offers Resend", () => {
@@ -476,6 +531,7 @@ describe("FoundingAdministratorSection — Batch 3 states", () => {
       invitationId: "inv-1",
       expiresAt: "2026-10-28T12:00:00.000Z",
       delivery: "queued",
+      inviteeDisplayName: "Marisol Quenby",
     });
     render(<FoundingAdministratorSection {...BASE_PROPS} />);
     fillForm();
@@ -484,6 +540,8 @@ describe("FoundingAdministratorSection — Batch 3 states", () => {
       fireEvent.click(screen.getByRole("button", { name: /yes, send invitation/i }));
     });
     expect(screen.getByText(/email delivery is delayed/i)).toBeTruthy();
+    // The lead line names the submitted address even after the form has cleared.
+    expect(screen.getByText(/invitation created for clerk@example\.invalid\./i)).toBeTruthy();
   });
 
   it("the holders state still lists history rows (an accepted invitation)", () => {

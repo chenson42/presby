@@ -30,12 +30,14 @@ export function normalizeInvitationEmail(value: unknown): string | null {
 }
 
 /**
- * A person's name as stored: NFC, control characters removed, trimmed,
- * 1-100 characters. Null when it does not fit.
+ * A person's name as stored: NFC, control characters removed (C0/C1 and the
+ * bidirectional embedding, override and isolate controls U+202A-U+202E and
+ * U+2066-U+2069, which could visually reorder the sentence a name is shown in),
+ * trimmed, 1-100 characters. Null when it does not fit.
  */
 export function normalizePersonName(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const name = value.normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
+  const name = value.normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "").trim();
   if (name.length < NAME_MIN || name.length > NAME_MAX) return null;
   return name;
 }

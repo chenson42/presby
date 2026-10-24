@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Flow 7: the five Session states and their honest copy (DECISION-205). Exact
+ * Flow 7: the six Session states and their honest copy (DECISION-205). Exact
  * strings: the `no_sign_in` swap-me sentence is the one Increment 2b replaces.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -64,7 +64,7 @@ describe("SessionStateBanner", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
-  it("no_sign_in: plural, singular, and the future-start sentence", () => {
+  it("no_sign_in: plural, singular, and no future-start clause", () => {
     const { unmount } = render(
       <SessionStateBanner slug="s" state={state({ kind: "no_sign_in", recorded: 3 })} />,
     );
@@ -84,11 +84,81 @@ describe("SessionStateBanner", () => {
     render(
       <SessionStateBanner
         slug="s"
-        state={state({ kind: "no_sign_in", recorded: 0, startingLater: 2, nextStart: "2027-01-10" })}
+        state={state({ kind: "no_sign_in", recorded: 2, startingLater: 2, nextStart: "2027-01-10" })}
       />,
     );
-    expect(text()).toContain("2 members of the Session are recorded");
-    expect(text()).toContain("The first term begins");
+    expect(text()).toContain("2 members of the Session are recorded, but none has");
+    expect(text()).not.toMatch(/term begins|terms haven't/);
+  });
+
+  describe("terms_not_started", () => {
+    const P2 = "To approve, a member of the Session also needs a PresbyPortal account.";
+
+    it("plural with a date, whole text", () => {
+      render(
+        <SessionStateBanner
+          slug="s"
+          state={state({ kind: "terms_not_started", startingLater: 3, nextStart: "2027-01-10" })}
+        />,
+      );
+      const t = text();
+      expect(t).toMatch(
+        /^No one can approve yet3 members of the Session are recorded, but their terms haven't begun\. The first term begins .*2027.*, and no member of the Session can approve before then\./,
+      );
+      expect(t).toContain(P2);
+      expect(t.endsWith(P2)).toBe(true);
+    });
+
+    it("singular with a date", () => {
+      render(
+        <SessionStateBanner
+          slug="s"
+          state={state({ kind: "terms_not_started", startingLater: 1, nextStart: "2027-01-10" })}
+        />,
+      );
+      expect(text()).toMatch(
+        /1 member of the Session is recorded, but their term hasn't begun\. The term begins .*2027.*, and no member of the Session can approve before then\./,
+      );
+      expect(text()).toContain(P2);
+    });
+
+    it("plural and singular with no date", () => {
+      const { unmount } = render(
+        <SessionStateBanner
+          slug="s"
+          state={state({ kind: "terms_not_started", startingLater: 2, nextStart: null })}
+        />,
+      );
+      expect(text()).toContain(
+        "2 members of the Session are recorded, but their terms haven't begun, so no member of the Session can approve yet.",
+      );
+      expect(text()).toContain(P2);
+      unmount();
+      render(
+        <SessionStateBanner
+          slug="s"
+          state={state({ kind: "terms_not_started", startingLater: 1, nextStart: null })}
+        />,
+      );
+      expect(text()).toContain(
+        "1 member of the Session is recorded, but their term hasn't begun, so no member of the Session can approve yet.",
+      );
+      expect(text()).toContain(P2);
+    });
+
+    it("claims nothing about accounts and offers no action", () => {
+      render(
+        <SessionStateBanner
+          slug="s"
+          state={state({ kind: "terms_not_started", startingLater: 2, nextStart: "2027-01-10" })}
+        />,
+      );
+      expect(text()).not.toContain("none has a PresbyPortal account");
+      expect(text()).not.toContain(NO_SIGN_IN_INVITE_LINE);
+      expect(text()).not.toMatch(/support ticket/i);
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(screen.queryByRole("button")).toBeNull();
+    });
   });
 
   it("no_sign_in says inviting isn't available yet (the constant 2b replaces)", () => {

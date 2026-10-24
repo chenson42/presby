@@ -1771,7 +1771,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       });
     });
 
-    it("walks empty -> no_sign_in (seat starts later, then a seat with no account) -> no_permission -> ready, with counts only", async () => {
+    it("walks empty -> terms_not_started (seats start later, with and without accounts) -> no_sign_in (a seat in effect, no account) -> no_permission -> ready, with counts only", async () => {
       const orgC = await mkOrg("c", { session: true });
       const viewer = await mkMemberAt(orgC, "Vera", "Viewer", { withUser: true });
       await mkRoleGrant(orgC, "roll_proposer", ["roll.propose", "officers.manage"], {
@@ -1789,15 +1789,28 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         viewer: { canApprove: false, canManageOfficers: true },
       });
 
-      // A seat that starts later is "no_sign_in" with the date, not empty.
-      const later = await mkMemberAt(orgC, "Lena", "Later", { withUser: true });
+      // A seat that starts later is "terms_not_started" with the date, not empty.
+      const later = await mkMemberAt(orgC, "Lena", "Later");
       await seatElder(orgC, later.personId, "ruling_elder", "2999-01-01");
       state = await getSessionApprovalState(viewer.personId, orgC);
       if (state.kind !== "ok") throw new Error("expected ok");
       expect(state.state).toMatchObject({
-        kind: "no_sign_in",
+        kind: "terms_not_started",
         recorded: 0,
         startingLater: 1,
+        nextStart: "2999-01-01",
+      });
+
+      // A future-dated holder who HAS an account (user_id set) is still
+      // terms_not_started: the state makes no claim about accounts.
+      const laterWithAccount = await mkMemberAt(orgC, "Lyra", "LaterAcct", { withUser: true });
+      await seatElder(orgC, laterWithAccount.personId, "ruling_elder", "2999-06-01");
+      state = await getSessionApprovalState(viewer.personId, orgC);
+      if (state.kind !== "ok") throw new Error("expected ok");
+      expect(state.state).toMatchObject({
+        kind: "terms_not_started",
+        recorded: 0,
+        startingLater: 2,
         nextStart: "2999-01-01",
       });
 
@@ -1811,7 +1824,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
         recorded: 1,
         withAccount: 0,
         canApprove: 0,
-        startingLater: 1,
+        startingLater: 2,
       });
 
       // An installed pastor with an account is a Session seat too (DECISION-206),
@@ -1836,7 +1849,7 @@ describe.skipIf(!hasDb)("roll.ts (Postgres-backed, real dev database)", () => {
       expect(state.state).toMatchObject({ kind: "ready", recorded: 2, withAccount: 1, canApprove: 1 });
       // Counts only: no names or ids anywhere in the result.
       expect(JSON.stringify(state.state)).not.toMatch(
-        /Percival|Nora|NoLogin|Lena|Vera|[0-9a-f]{8}-[0-9a-f]{4}-/,
+        /Percival|Nora|NoLogin|Lena|Lyra|Vera|[0-9a-f]{8}-[0-9a-f]{4}-/,
       );
     });
 

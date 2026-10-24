@@ -3,7 +3,7 @@ import { FormattedDate } from "@/components/shared/formatted-date";
 import type { SessionApprovalState } from "@/lib/roll";
 
 /**
- * Flow 7: why the Session cannot act yet, in the five states (DECISION-205),
+ * Flow 7: why the Session cannot act yet, in the six states (DECISION-205),
  * `ready` rendering nothing. Counts only, never names. The `no_sign_in`
  * "inviting someone isn't available yet" sentence is the single constant
  * Increment 2b replaces with a link to the invite card.
@@ -76,8 +76,34 @@ export function SessionStateBanner({
           )}
         </Banner>
       );
+    case "terms_not_started": {
+      // Counts seats recorded but not yet in effect; says nothing about
+      // accounts (the query never looked at them) and offers no action.
+      const n = state.startingLater;
+      const one = n === 1;
+      const members = one ? "1 member of the Session is" : `${n} members of the Session are`;
+      const their = one ? "their term hasn't" : "their terms haven't";
+      return (
+        <Banner title="No one can approve yet">
+          {state.nextStart ? (
+            <p>
+              {members} recorded, but {their} begun. The{" "}
+              {one ? "term begins" : "first term begins"}{" "}
+              <FormattedDate value={state.nextStart} mode="date" />, and no
+              member of the Session can approve before then.
+            </p>
+          ) : (
+            <p>
+              {members} recorded, but {their} begun, so no member of the
+              Session can approve yet.
+            </p>
+          )}
+          <p>To approve, a member of the Session also needs a PresbyPortal account.</p>
+        </Banner>
+      );
+    }
     case "no_sign_in": {
-      const seated = state.recorded + (state.recorded === 0 ? state.startingLater : 0);
+      const seated = state.recorded;
       const plural = seated !== 1;
       return (
         <Banner title="No one can approve yet">
@@ -85,13 +111,6 @@ export function SessionStateBanner({
             {seated} {plural ? "members" : "member"} of the Session{" "}
             {plural ? "are" : "is"} recorded, but none has a PresbyPortal
             account yet, so no one can approve.
-            {state.recorded === 0 && state.nextStart && (
-              <>
-                {" "}
-                The first term begins{" "}
-                <FormattedDate value={state.nextStart} mode="date" />.
-              </>
-            )}
           </p>
           <p>{NO_SIGN_IN_INVITE_LINE}</p>
         </Banner>

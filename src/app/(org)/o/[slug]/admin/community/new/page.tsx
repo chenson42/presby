@@ -104,7 +104,7 @@ export default async function NewMemberPage({
       );
       if (stateResult.kind === "ok") {
         memberAvailable = stateResult.state.kind !== "no_session";
-        sessionWaits = ["empty", "no_sign_in", "no_permission"].includes(
+        sessionWaits = ["empty", "terms_not_started", "no_sign_in", "no_permission"].includes(
           stateResult.state.kind,
         );
       }

@@ -267,7 +267,7 @@ test.describe("Community", () => {
 
         // DECISION-129: the member Directory and Everyone still exclude the anchor.
         await page.goto(BASE);
-        await expect(page.getByRole("heading", { name: "Community", exact: true })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "Community", exact: true, level: 1 })).toBeVisible();
         await expect(page.getByRole("listitem").filter({ hasText: full })).toHaveCount(0);
       });
 

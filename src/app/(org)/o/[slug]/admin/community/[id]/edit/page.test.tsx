@@ -753,6 +753,15 @@ describe("EditMemberPage — the Connection card and participant controls (DECIS
     expect(link.getAttribute("href")).toBe("/o/alder-creek/admin/community/pending");
   });
 
+  it("terms_not_started also shows the can't-approve notice (only ready is skipped)", async () => {
+    getSessionApprovalState.mockResolvedValue({ kind: "ok", state: { kind: "terms_not_started" } });
+    await renderWith({ connection: "listed", pending: PENDING });
+    expect(screen.getByText(/no one can approve yet/i)).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /see why on the pending approvals page/i }),
+    ).toBeTruthy();
+  });
+
   it("does not read the Session state when nothing is pending", async () => {
     await renderWith({ connection: "listed", pending: [] });
     expect(getSessionApprovalState).not.toHaveBeenCalled();

@@ -35,7 +35,7 @@ export const PARTICIPANT_COPY: Record<ParticipantCopyCode, string> = {
   membership_ended:
     "This person's connection to this organization has ended, so this can't be recorded.",
   pending_action:
-    "This person has a roll action waiting for the Session. Wait for the Session to decide it, then try again.",
+    "This person has a roll action waiting for the Session, so this can't be recorded yet. Try again once the Session has decided it or it has been withdrawn. Withdrawing is done from Pending approvals, by someone who can propose roll actions.",
   already_participant: "This person is already recorded as a participant.",
   on_member_roll:
     "This person is on the member roll. Moving someone off the member roll is a Session decision and can't be recorded here.",

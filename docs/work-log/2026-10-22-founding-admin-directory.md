@@ -26,6 +26,7 @@
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
 | Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23; Batch B (server: library, actions, in-transaction audit; 0063 applied to the pipeline branch, twice, so the branch is in the lockdown state) complete 2026-10-23; Batches C and D (UI, e2e, hydration, 360px pass) complete 2026-10-23 — Phase 4 Complete for Increment 2 | — | — |
+| Inc 2 · 5 — Verification | qa | Run 1 FAIL on copy truthfulness only (`session-state-banner.tsx:79-98` with `session-approval-state.ts:45`; `participant-copy.ts:37-38`); tests, probes, fresh install and e2e 27/27 green. Next: tech-lead copy ruling, then ux-developer | FAIL (run 1) | 2026-10-23 |
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
@@ -4932,3 +4933,331 @@ typecheck, lint and `npm run check` clean; unit suite green; real-browser pass a
 - **Not run:** the whole e2e suite beyond the community, hydration and prod-lane specs; QA should run it, because the shared fixture file changed.
 - **Next:** qa (Phase 5). Rule 16 files untouched; AGENTS.md was not regenerated in the worktree.
 
+---
+
+# Increment 2 — Phase 5: Verification (qa)
+
+## Run 1 — FAIL
+
+**Date:** 2026-10-23
+**Verified by:** qa
+**Worktree / branch:** `/Users/cshenso/git/presby-platform/presby-fadir`, `pipeline/session-approval` at c561ca1. Neon branch `pipeline-session-approval`, which stays in the lockdown state (0062 and 0063 applied; nothing reverted).
+
+**Verdict: FAIL.** The code, the database protections and the tests all hold. The FAIL comes from the copy-truthfulness check you made required: two pieces of copy tell the clerk something untrue or misleading. Both are small, wording-level fixes. One sentence was specified word for word in Phase 3, so it goes to tech-lead first.
+
+## Scope run
+
+- **Ran in full:**
+  - typecheck, lint, `npm run check`, the unit suite;
+  - the whole DB-backed set (`npm run test:db`), serially;
+  - `test-rls-61.sql` and `test-rls-62.sql` as `presby_app`;
+  - `git apply --check` of the integration patch;
+  - live-catalog probes;
+  - a fresh install;
+  - the targeted e2e set at desktop and 360px.
+- **Not re-run:**
+  - the full `scripts/test-rls.sql`. Batch A's patched run stands (1192 passes, 4 failures that already existed). The post-merge run on `development` is still the gate.
+  - the e2e suite beyond the community specs, which the PR's CI covers;
+  - the `test:e2e:prod` lane. Batches C and D report it green.
+- **Officers e2e:** no spec exists. Phase 3 Test Plan 4 says none asserts on `admin/officers`, so none was run.
+
+**Discarded run.** My first e2e run (27 tests, 26 passed, 1 failed at `community-participants.spec.ts:96` at 360px, a `page.goto` timeout) used port 3000, the port your heads-up names. I can't rule out that another QA's Playwright shared that server, so I discarded the whole run. It also overlapped my DB suite run. Every e2e number below is from the re-run on my own port, 3330.
+
+## Type Check
+
+`npm run typecheck`: **PASS**. Lint (`--max-warnings=0`): PASS. `npm run check`: all eight tripwires pass.
+
+## Unit Tests
+
+Total: 10023 | Passed: 7740 | Failed: 0 | Skipped: 2283 (the DB-gated tests, which skip without `.env.local`) | Files: 509 passed, 74 skipped | Duration: 24s
+
+## DB-backed Tests (`npm run test:db`, serial, pipeline branch)
+
+**Run 1 (full):** 583 files, 10023 tests. 9964 passed, 13 failed, 46 skipped. Duration 94 min.
+- **11 of the 13 failures were timeouts or a dropped Neon connection.** Five were 20s test timeouts, one a 60s timeout, four were 30s hook timeouts, and one run hit `ENOSPC` on the machine's temp directory (the disk is at 100%).
+- 45 of the 46 skips came from three giving suites whose `beforeAll` failed this way. The other skip is the intentional `skipIf` in `render-pdf.test.ts:152`.
+- The diff touches only one of the failing files, `officers.test.ts`.
+
+**Run 2 (the 10 failing files, alone):**
+- `officers`, `presbytery`, `giving-ingest-health`, `platform-read`, `donors`, `funds` and `domains`: all green, no skips.
+- `org-features.test.ts` and `giving/ingest/process.db.test.ts`: 30s hook timeouts again.
+
+**Run 3 (those two files, one at a time, `--hookTimeout/--testTimeout=180000`):** `org-features` 29/29 and `process.db` 27/27. Remote latency, not a regression; the diff touches neither file.
+
+**Still red: `src/lib/db/fixture-deletable.test.ts:199, :224, :271`.** This is the canary for leaked fixture rows, and it reports branch state, not a code defect:
+- **23 rows with closed windows.** All closed before my first run started (latest close 22:05 UTC), so they predate this phase. Nine carry the `Inc2-<timestamp>` last name from `src/lib/officers.test.ts:1116`, so they leaked during Phase 4 runs. My two runs of `officers.test.ts` (one with a timed-out test) leaked nothing, so I can't reproduce a teardown defect. These rows are now permanent on this branch only; CI uses an ephemeral branch.
+- **2 rows with open windows, caused by my run 1.** Two giving fixture people, left when `donors`/`funds` lost their `beforeAll` connection. **Their window closes 2026-10-24 01:39 UTC.** Before then, someone with write access should run, on the owner connection: `delete from people where deletable_until is not null and deletable_until > now();`. I am read-only and did not.
+
+## Isolation suites as `presby_app` (`rolbypassrls = f` confirmed)
+
+- `scripts/participants/test-rls-61.sql`: exit 0, 34 passes, 0 failures.
+- `scripts/session-approval/test-rls-62.sql`: exit 0, 53 passes, 0 failures.
+- `git apply --check scripts/session-approval/test-rls.sql.integration.patch` against the current `scripts/test-rls.sql`: **clean**. That file matches current `origin/main`.
+
+## Live-catalog probes (pipeline branch)
+
+- **Catalog**, read as `presby_app`:
+  - `roll_actions` is FORCE RLS (and so are `officer_terms`, `groups`, `group_memberships`, `app_roles`, `role_grants`);
+  - `aclexplode`: `presby_app` and `presby_platform` hold only `INSERT` and `SELECT`;
+  - the policies are the RESTRICTIVE `roll_actions_insert_pending_only` with the seven gain kinds, plus `tenant_isolation`;
+  - all six CHECKs are present, and `officer_terms_office_allowed` is validated;
+  - both partial unique indexes are present;
+  - the triggers are `roll_actions_freeze` and `officer_terms_pastor_no_roll` (BEFORE INSERT/UPDATE OF person_id, office, ends_on);
+  - the two decision functions are `prosecdef` with `search_path=public, pg_temp` and execute granted to `presby_app`;
+  - `presby_roll__actor_holds` and `presby_guard_pastor_no_roll` are executable by the owner only.
+- **Behaviour:** every write probe ran inside `BEGIN … ROLLBACK`.
+
+| # | Probe (as `presby_app` unless noted) | Result | Layer that refuses |
+|---|---|---|---|
+| 1 | UPDATE a pending row, UPDATE pending→approved (forged approval), DELETE pending, DELETE approved | 42501 "permission denied for table roll_actions" | **Grant** (0063 revoke) |
+| 2 | INSERT a pending `void` (valid `voids_action_id`), pending loss, pending `opening_balance`, pending `other_participant_enrolled`, and approved, denied or withdrawn at insert | 42501, error names `roll_actions_insert_pending_only` | **Restrictive RLS policy** |
+| 2+ | Positive control: a pending `profession_of_faith` | Accepted (so probe 2 was the policy, not a CHECK) | — |
+| 2j | A pending row for another org while in this org's context | 42501, unnamed policy | `tenant_isolation` |
+| 3 | UPDATE or DELETE of a just-approved, just-denied or just-withdrawn row | 42501 | **Grant.** The trigger is never reached on this connection |
+| 3o | **Owner** (`neondb_owner`): UPDATE or DELETE of approved, denied and withdrawn rows, including denied→pending | 23514 "approved/decided actions are immutable" | **Trigger** `roll_actions_freeze`. This is the only layer on the owner path |
+| 3s | Owner: insert a denied row with no stamps | 23514 | CHECK `roll_actions_terminal_decision_stamps` |
+| 4 | A second pending row for one person | 23505 | **Unique index** `roll_actions_one_pending_per_person_idx` |
+| 5 | Decide with no org context, a null actor, a `users.id` with no person; withdraw as an approve-only elder; decide (approve and deny) as a **propose-only** actor (built inside the rolled-back transaction) | 42501, the uniform literal `roll_actions: this roll decision is not permitted` | **Definer identity check** (`presby_roll__actor_holds`) |
+| 5 | `presby_app` calls `presby_roll__actor_holds` directly | "permission denied for function" | Function grant |
+| 5 | Another org's roll-action id from this org | `not_found` | Definer's explicit org predicate |
+| 5 | Sanctioned path: the seated elder approves, then approves again | `ok`, then `current_roll` projected to `active` and `decided_by`/`approved_by` stamped; second call `already_decided` | — |
+| 5 | Deny: blank reason, 501 characters, decision `maybe`, then a valid deny | `reason_required`, `reason_too_long`, `invalid_decision`, `ok` (reason and stamps stored) | Definer (R4 bounds) |
+| 5 | Withdraw as the propose-only actor, then again | `ok` (`withdrawn`, reason and stamps), then `already_decided` | — |
+| 6 | Seeded installed pastor | Derived Session row from the term, `current_roll` null, 0 roll rows, replay null, holds `roll.approve` (and not `roll.propose`), not counted in `presby_roll_counts_as_of` | Trigger `presby_sync_derived_group` (seating) |
+| 7 | Open pastor-office term for someone on the baptized or active roll; re-open a closed term; move an open term onto a person with a roll | 23514, constraint `officer_terms_pastor_no_roll` | **Trigger** S1 |
+| 7 | A closed historical pastor term; ending the pastor's open term | Allowed | — |
+| 7 | Office `bishop` | 23514 | CHECK `officer_terms_office_allowed` |
+| 7 | Approve a gain for the pastor | `holds_pastoral_office`, row stays pending | Definer (R12) |
+| 8a | R6 direction a: a reaffirmation in 2024 for someone active since 2020 | `already_on_roll`; `presby_roll_changes` unchanged | Definer |
+| 8b | R6 direction b: approve a later profession (ok), then an earlier reaffirmation before it | `already_on_roll`; the profession gain count stays at 1 | Definer |
+| 8c | Control: a 2018 profession before a 2020 `opening_balance` | `ok`, shadowed by `opening_balance` 2020-01-01; counted once | — |
+
+Every protection the design credits refuses at the layer it names, with one clarification: on `presby_app`, decided rows are frozen by the **grant**, which refuses first. The freeze **trigger** is what binds the owner connection, and both were probed.
+
+## Fresh install
+
+- I created a throwaway database inside the pipeline branch and applied `drizzle/` from a scratch copy, adding the two journal entries that integration will add.
+- **Migrations:** `drizzle-kit migrate` applied all 63 migrations (0000–0063, with 0058 reserved). None failed.
+- **Catalog:** every 0062/0063 object is present: 5 functions, 6 constraints (validated), both indexes, the trigger, the narrowed policy, FORCE RLS, and `presby_app` with only INSERT and SELECT.
+- **Parity:** `check:schema-parity` compared 85 tables, 0 failing (7 differences, all allowlisted).
+- **Seed:** `db:seed` exited 0 (39 flags, 6 group types, 3 roles).
+- **Cleanup:** the database was dropped (`with (force)`), and none remains.
+
+## End-to-End Tests (scratch copy outside `~/git/presby-platform`, own dev server on :3330, pipeline branch)
+
+Total: 27 | Passed: 27 | Failed: 0 | Skipped: 0 | Duration: 9.4 min
+- `community-approval.spec.ts`: 13/13 (items 1–6 at desktop and 360px, plus the sticky-bar check at 360px).
+- `community-participants.spec.ts`: 9/9, including the 360px lifecycle test that timed out in the discarded run.
+- `community-redirect.spec.ts`: 3/3.
+- `hydration/community-approval-controls.spec.ts`: 1/1.
+- `hydration/community-participant-dialogs.spec.ts`: 1/1.
+
+## Regression Tests Added (implementer-written; verified present and green)
+
+- `session-approval.db.test.ts`:
+  - `:593` (freeze on the owner path), `:627` (R7), `:705` and `:725` (identity refusals), `:876`, `:890` and `:899` (R6 both directions, plus the opening-balance control);
+  - `:1039` and `:1275` (pastor seated and inheriting the Session role), `:1297` and `:1331` (S1), `:1156` (backfill), `:1368`–`:1408` (vocabulary pins).
+- `roll-decide-lockdown.db.test.ts`: `:216`, `:294`, `:307` and `:325` (the 0063 privileges and policy, behavioural half included).
+- `src/lib/decide-boundaries.test.ts`: source scans (only `roll.ts` names the definers; no `update(rollActions)`; the right key is pre-checked).
+- `e2e/community-approval.spec.ts` and `e2e/hydration/community-approval-controls.spec.ts`.
+- **Failing-first:** I can't independently confirm that every test failed before its fix; Batches A and B list their proofs. I re-ran two negative controls in my scratch copy (never the worktree, which stays clean):
+  - pre-checking `roll.approve` instead of `roll.propose` made `decide-boundaries.test.ts` "each decision pre-checks the right key" fail. My substitution also hit the two other `roll.propose` pre-checks in `roll.ts`, not only withdraw. The original passed 21/21 after restore.
+  - suppressing the read-mode banner made `pending/page.test.tsx` "read mode … the banner show" fail. The original passed 12/12 after restore.
+
+## Coverage on Critical Modules
+
+Not re-measured. The diff doesn't touch `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+
+Verified by reading the action bodies. The diff adds or changes no `route.ts` and doesn't touch `src/proxy.ts`. These are tenant actions, so the gate is a tenant permission through `presby_has_permission`, not `FEATURES.*`.
+
+| Action | `auth()` present? | Permission gate | Key |
+|---|---|---|---|
+| `approveRollActionAction` (`community/pending/actions.ts`) | yes (in the body), `resolveOrgContext` re-run | lib pre-check, then the definer re-checks by the session's `users.id` | `roll.approve` (n/a for FEATURES) |
+| `approveRollActionsAction` | yes | the same, per row; capped at 50 | `roll.approve` |
+| `denyRollActionAction` | yes | the same | `roll.approve` |
+| `withdrawRollActionAction` | yes | lib pre-check plus definer | `roll.propose` |
+| `startOfficerTermAction` / `endOfficerTermAction` (`officers/actions.ts`) | yes | `hasOfficersManage` in the lib | `officers.manage` |
+| `createPersonAction` / `recordRollActionAction` | yes | unchanged; adds only the `proposal_refused` mapping | `roll.propose` |
+| `staff/actions.ts` | n/a | exhaustiveness change only | — |
+
+- **In-transaction audit:** approve, deny, withdraw and officer start and end use `insertAuditRow(tx, …)` inside the same `withOrgContext` transaction. `roll.ts` no longer imports `recordAudit`, and `officers/actions.ts` calls none for start or end.
+- **Stamps:**
+  - `selfApproved` and `selfTarget` on approve (`roll.ts:360-371`);
+  - `selfProposed` on withdraw (`:570`);
+  - `selfRecorded` on start and end (`officers.ts:700-707`, `:804-811`). The end metadata is read from the term row, not client input.
+- **No names in the metadata:** ids, kind, dates and booleans only. The free-text `reason`, `minuteReference` and `endReason` are free text by design (Phase 3).
+- **Read mode:** a propose-only holder gets `mode: "read"` (`roll.ts:802`). The page hides checkboxes, Approve and Deny (`pending-row.tsx:49`, `:115`; `pending-worklist.tsx:88`, `:123`) and shows the subtitle and banner. E2E test 5/11 confirms it at both widths.
+- **Observation (existing pattern, not a regression):** the actions don't re-check the `org_portal.members_create` flag or toggle; only the pages do. That matches Increment 1's Community actions.
+
+## Copy truthfulness — FAIL (2 findings)
+
+1. **The Flow 7 `no_sign_in` banner can state something false.**
+   - `src/lib/session-approval-state.ts:45` returns `no_sign_in` whenever `recorded === 0`, that is, whenever every seat starts later.
+   - `withAccount` counts only live seats (`src/lib/roll.ts:1059-1061`).
+   - The banner (`community/pending/session-state-banner.tsx:79-98`) then says "{n} member(s) of the Session {is/are} recorded, but none has a PresbyPortal account yet", plus the support-ticket line.
+   - If those future-dated seat holders do have accounts, the sentence is false and sends the clerk to file a support ticket for nothing. The real reason is "the first term begins {date}". This is realistic: elders elected in the autumn with terms from January, or a founding administrator recording themselves with a future start.
+   - The wording is Phase 3's verbatim copy, so this goes to **tech-lead** for a copy ruling. A suggested shape: when `recorded === 0`, a "terms haven't started yet" variant that drops the claim about accounts.
+   - Missing test: no test covers future seats held by people who have accounts.
+2. **Increment 1's `pending_action` copy is now misleading.**
+   - `community/participant-copy.ts:37-38` still says "This person has a roll action waiting for the Session. **Wait for the Session to decide it**, then try again."
+   - Increment 2 makes withdrawal the fix for F183, and at a congregation where nobody can approve, waiting never resolves. The new `PROPOSAL_COPY.pending_exists` already points at Withdraw, so the two disagree.
+   - Phase 3's Copy section didn't revisit this string. Ruling: tech-lead; fix: implementer.
+
+Nothing else claims approval works when no Session can act:
+- the review step switches to "No one on your Session can approve yet" (`new/review-step.tsx:120`);
+- the edit page shows "No one can approve yet. See why…";
+- the `empty`, `no_permission` and `no_session` banners are accurate;
+- "Member" is hidden where no Session exists, and the server refuses it regardless.
+
+## Hand-offs and notes (not FAIL reasons)
+
+- **The branch no longer merges cleanly with `main`.** `git merge-tree` reports a conflict in `e2e/support/community-fixture.ts`, against PR #43 (`e4190b4`, `createStaffAnchorViaSql`).
+  - That helper and this branch's `createProposalViaSql` both mint ids as `SQL_PERSON_PREFIX + (200 + n)`, and both use `on conflict do nothing` / `where not exists`. Overlapping `n` values would silently reuse a staff-anchor person as a proposal subject.
+  - Whoever resolves the conflict should give them separate ranges and re-run `community-participants` and `community-approval`. CI can't run on the PR until the conflict is resolved.
+- **The 2 open-window leaked fixture rows** (see DB-backed Tests) must be swept before 01:39 UTC on 2026-10-24.
+- **Credentials appeared in my tool output.** While setting up the fresh install, a verification `echo` printed the pipeline branch's dev-only connection strings into this agent transcript. Nothing was written to the repo, a log, or this section. If the transcript is shared, rotate the `pipeline-session-approval` role passwords.
+- **Disk:** the volume is at 100% (about 6.6 GiB free). One DB suite hit `ENOSPC`. My scratch copy has been removed.
+
+## Verdict
+
+**FAIL.** Every required test check is green or has a reproduced environmental cause, as detailed above. The required copy-truthfulness check fails on findings 1 and 2. Since finding 1 is Phase 3's own copy, it goes to tech-lead for a ruling first, then to the implementer.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2 · 5 — Verification | qa | Complete. Typecheck, lint, check and unit green. `test:db` 9964/10023 in run 1; the 13 failures were timeouts that passed on re-run, apart from the fixture-leak canary (branch state, 23 rows predating this phase). Sections 61/62 at 34/53 passes. Patch applies. All live probes refuse at the expected layer. Fresh install 0000–0063 plus seed clean. E2E 27/27 on :3330 (the port-3000 run was discarded). Gate audit clean. Copy: 2 defects | **FAIL** (copy truthfulness: `session-state-banner.tsx:79-98` with `session-approval-state.ts:45`; `participant-copy.ts:37-38`) | 2026-10-23 |
+
+## Handoff
+
+Next agent: **tech-lead (Phase 3 copy ruling)** on finding 1, and on whether `pending_action` should point at Withdraw. Then **ux-developer (Phase 4, Batch C)** to change both strings and add a test covering future-dated seat holders who have accounts. After that, a short Phase 5 re-check: unit tests, the banner test, `community-approval` e2e.
+
+The orchestrator should also:
+- sweep the two open-window fixture rows before 01:39 UTC;
+- resolve the `community-fixture.ts` conflict with `main` and separate the id ranges;
+- decide whether the credential exposure in this transcript warrants rotation.
+
+## Increment 2 — Phase 3 amendment: copy ruling after QA run 1 (tech-lead)
+
+Rules on the two "Copy truthfulness" findings in Run 1 (FAIL). Both are copy and state-model defects; no schema, SQL, permission, flag, route or audit change. Implementer: **ux-developer** (Batch C), with a one-line derivation change in `src/lib/session-approval-state.ts` (pure, no SQL change: `roll.ts` already returns `startingLater` and `nextStart`). Then QA's short re-check.
+
+### Finding 1: the `no_sign_in` banner claimed something it did not know
+
+**Root cause.** `deriveSessionApprovalKind()` returned `no_sign_in` for `recorded === 0 || withAccount === 0`. `withAccount` counts live seats only, so a roster whose every seat starts later reached `no_sign_in` with `withAccount = 0` by construction, not by fact. The banner then said "none has a PresbyPortal account yet" about people whose accounts the query never looked at.
+
+**Ruling: a sixth state, `terms_not_started`, that carries the earliest start date and makes no claim about accounts. `no_sign_in` is shown only when it is true.** Not a flag on `no_sign_in`: the two states have different causes, different next steps and (in 2b) different hand-offs, and a state that says nothing it cannot know is simpler to keep honest than a branch inside one that does.
+
+State model (Phase 3's five states become six; DECISION-205's list is amended, not reversed):
+
+| Condition (checked in this order) | Kind |
+|---|---|
+| no `session` group | `no_session` |
+| `recorded = 0` and `startingLater = 0` | `empty` |
+| `recorded = 0` (so `startingLater > 0`) | **`terms_not_started`** (new) |
+| `withAccount = 0` (so `recorded > 0`) | `no_sign_in` |
+| `canApprove = 0` | `no_permission` |
+| else | `ready` |
+
+Consequences, so the implementer does not have to infer them:
+- **`no_sign_in` now means exactly: at least one seat is in effect today and none of the people in effect today has an account.** Its `recorded` count is the count of seats in effect, which is the thing the sentence is about. The `startingLater` addition to the count and the "The first term begins" clause leave this branch (they are dead there once `recorded > 0`).
+- `terms_not_started` is the only state that shows a date. It takes the earliest start from `nextStart` (the SQL already returns `min(starts_on)` over seats not yet in effect; with `recorded = 0` that is the first term). It does not look at, and must not mention, accounts, invitations, support tickets or an invite. Accounts of future-dated holders are not computed and no new count is added.
+- A mixed roster (some seats in effect with accounts, some not yet started) is unchanged: `ready` or `no_permission` by the live seats, as before. A mixed roster with live seats all without accounts is `no_sign_in`, and the sentence is true of those live seats.
+- Everything that treats the Session as "can't act" must include the new kind:
+  - `src/app/(org)/o/[slug]/admin/community/new/page.tsx:107`: add `"terms_not_started"` to the `sessionWaits` list (the wizard review note "This person's roll action will wait. No one on your Session can approve yet." is true in this state, and unchanged).
+  - the edit page uses `kind !== "ready"` (`[id]/edit/page.tsx:195`) and its notice "No one can approve yet. See why on the Pending approvals page." is true here; no change.
+  - `SessionApprovalStateKind` in `src/lib/session-approval-state.ts` and its re-export in `roll.ts` gain the member.
+  - Update the doc comments that say "five states" (`session-approval-state.ts` header, `session-state-banner.tsx` header) to six.
+- **Increment 2b is unaffected and must stay anchored to `no_sign_in`.** The 2b "Session hand-off" (rows, "Invite" links, "Invitations sent to {n} of the {m} members of the Session") appears only in `no_sign_in`. In `terms_not_started` there is nothing to invite for yet and no claim to correct; 2b must not add the hand-off there. If 2b's e2e (10) seeds a future-dated seat to reach the banner, it must seed an in-effect seat instead.
+
+**Verbatim copy, `terms_not_started`** (title and the two paragraphs, in a `<p>` each, counts use "member of the Session" and "members of the Session"; the date is the existing `<FormattedDate mode="date">`; no link, no button):
+
+- Title: `No one can approve yet`
+- Paragraph 1, more than one person, date known:
+  `{n} members of the Session are recorded, but their terms haven't begun. The first term begins {date}, and no member of the Session can approve before then.`
+- Paragraph 1, exactly one person, date known:
+  `1 member of the Session is recorded, but their term hasn't begun. The term begins {date}, and no member of the Session can approve before then.`
+- Paragraph 1, date null (defensive; the SQL cannot produce it with `startingLater > 0`), plural:
+  `{n} members of the Session are recorded, but their terms haven't begun, so no member of the Session can approve yet.`
+- Paragraph 1, date null, singular:
+  `1 member of the Session is recorded, but their term hasn't begun, so no member of the Session can approve yet.`
+- Paragraph 2 (all variants):
+  `To approve, a member of the Session also needs a PresbyPortal account.`
+
+**Why this wording passes the read-against-residuals check.**
+- It states only what the query knows: seats are recorded, none is in effect, the earliest start date. It denies no residual: it does not say the people have no account (they may), does not say they have one, and does not promise that they will be able to approve on the date (an account, or the Session role, may still be missing; paragraph 2 says so in general terms, as a fact about approving, not a promise or a to-do for anyone).
+- "No member of the Session can approve" rather than "no one": the banner counts Session seats only, and a custom role could in principle carry `roll.approve`. The existing `no_sign_in` and `no_permission` sentences keep their wording (not in the findings, same family of claim, left unchanged to avoid churn; the implementer must not edit them).
+- It promises nothing the product cannot keep: no "an administrator will...", no "we will...", no invitation, no support ticket. A support ticket here would be the exact false direction the finding named.
+- Read mode: this banner renders only to a viewer who cannot approve (`mode: "read"`), so the copy offers the viewer no action at all. Decide mode shows no banner except `no_session`, which is unchanged. The no-Session case never reaches this state (checked first).
+- Dates: the term start is an effective date, rendered by `FormattedDate` like every other date; the sentence is true on the day shown and the state clears itself at the next read after the start date (a seat is "in effect" when `starts_on <= current_date`).
+
+**`no_sign_in` copy is unchanged and is now only true-by-construction.** The strings stay exactly as shipped:
+`{n} members of the Session are recorded, but none has a PresbyPortal account yet, so no one can approve.` / `1 member of the Session is recorded, but none has a PresbyPortal account yet, so no one can approve.` followed by the `NO_SIGN_IN_INVITE_LINE` constant (2b's swap point). Removed from the branch: the `startingLater` term in the count and the `The first term begins {date}.` clause. `no_sign_in` renders no date.
+
+### Finding 2: `pending_action` and withdrawal
+
+**Root cause.** The Increment 1 string told the viewer the only way forward was to wait. After Increment 2 there are two ways out (the Session decides it, or someone withdraws it), and at a congregation where nobody can approve, waiting never resolves. The new `PROPOSAL_COPY.pending_exists` already says "Withdraw it first".
+
+**Ruling: replace the string. It names both exits, says where withdrawal happens and who can do it, and does not promise the viewer can.** The refusal is shown to anyone who can record participant actions, who may or may not hold `roll.propose`, so "Withdraw it" as an instruction would promise an action some viewers cannot take. The Pending approvals page is readable by `roll.approve` or `roll.propose` holders, and withdrawal is gated on `roll.propose` (`withdrawRollAction()`), so the sentence names that standing. The string is also true when nobody can approve (it does not say the Session will decide) and for both enrolment and removal (it says "this", not "this enrolment").
+
+`PARTICIPANT_COPY.pending_action`, verbatim:
+
+`This person has a roll action waiting for the Session, so this can't be recorded yet. Try again once the Session has decided it or it has been withdrawn. Withdrawing is done from Pending approvals, by someone who can propose roll actions.`
+
+It contains no underscore, `presby_`, `roll_actions` or SQLSTATE text (the copy test's tripwire). `PROPOSAL_COPY.pending_exists` is unchanged: its "Withdraw it first if it was a mistake" is addressed to a person who is proposing, who holds `roll.propose` by definition, so it promises nothing the viewer cannot do.
+
+**Release-note line to carry forward (for `/release-notes`, tech-lead):** Increment 1's required limit ("a person with a waiting entry can't be removed as a participant") is retired by Increment 2's withdrawal; the Increment 2 note should say a waiting entry can now be withdrawn from Pending approvals by someone who can propose roll actions, and must not say the Session will always be able to decide it.
+
+### Tests the implementer must add or change (Batch C)
+
+1. `src/lib/session-approval-state.test.ts`:
+   - replace the case at `:32-33`: `counts({ recorded: 0, startingLater: 2 })` is **`terms_not_started`**, not `no_sign_in`;
+   - **future-dated seat holders who have accounts must not reach `no_sign_in`**: `counts({ recorded: 0, startingLater: 1, withAccount: 0 })` and `counts({ recorded: 0, startingLater: 1, withAccount: 1, canApprove: 1 })` both give `terms_not_started` (the second is the case the account-holder shape produces if the SQL ever counted future seats; the derivation must not depend on it);
+   - `counts({ recorded: 4, withAccount: 0 })` is `no_sign_in`; `counts({ recorded: 1, startingLater: 1, withAccount: 1, canApprove: 1 })` stays `ready` (existing `:55`);
+   - order: `no_session` beats `terms_not_started`; `empty` is only `recorded = 0 and startingLater = 0`.
+2. `src/lib/roll.test.ts:1774` (the walk): the step at `:1792-1800` becomes `terms_not_started` with `nextStart`; add a step where the future-dated holder has `user_id` set (an account) and the kind is still `terms_not_started`; the step at `:1804-1814` (a seat in effect, no account) stays `no_sign_in`. Counts only, no names, as before.
+3. `src/app/(org)/o/[slug]/admin/community/pending/session-state-banner.test.tsx`:
+   - `terms_not_started`: the four paragraph-1 variants and paragraph 2 asserted verbatim (plural with date, singular with date, plural and singular with `nextStart: null`), the whole text for one of them;
+   - for `terms_not_started`: `not.toContain("none has a PresbyPortal account")`, `not.toContain(NO_SIGN_IN_INVITE_LINE)`, `not.toMatch(/support ticket/i)`, no link, no button;
+   - `no_sign_in`: remove the `recorded: 0, startingLater: 2` assertions at `:86-92`; assert `no_sign_in` with `startingLater: 2, nextStart: "2027-01-10"` still renders no "first term begins" and counts only `recorded`.
+4. `src/app/(org)/o/[slug]/admin/community/participant-copy.test.ts:49`: assert the exact new `pending_action` string, `toMatch(/withdrawn/)`, and `not.toMatch(/Wait for the Session/)` so the Increment 1 wording cannot return.
+5. `src/app/(org)/o/[slug]/admin/community/new/page.test.tsx` (or `connection-step.test.tsx`, wherever `sessionWaits` is asserted): a `terms_not_started` state sets `sessionWaits` true (the review note shows "This person's roll action will wait. No one on your Session can approve yet.").
+6. Edit page test (`[id]/edit/page.test.tsx:750` area): a `terms_not_started` state shows the "No one can approve yet" notice (it is `kind !== "ready"`; one case pins that no kind is skipped).
+
+**E2E blast radius.** None of the existing specs asserts a changed string: `e2e/community-approval.spec.ts:260` matches `/no one can approve yet/i`, which every non-ready banner title and the edit notice still contain, and `:312-314` asserts the `empty` banner, unchanged. No e2e spec asserts `Wait for the Session`. No new e2e is required; the 360px pass (Batch D) should look at the longest new variant (plural with a date) once.
+
+### Out of scope (non-goals)
+
+Computing the accounts of future-dated holders; an "invite early" action in `terms_not_started`; changing the `no_permission`, `empty` or live `no_sign_in` strings; reconciling "no one can approve" against roles other than the Session role (the banner counts Session seats only, as DECISION-205 states); any SQL change.
+
+### Handoff
+
+Next: **ux-developer** (Batch C) for the two strings, the sixth state and the tests above, then QA's short re-check (unit tests, banner test, `community-approval` e2e), per Run 1's hand-off. The orchestrator records the DECISION-205 amendment (six states) and the Per-Phase Status row.
+
+## Increment 2 — Batch C copy fix pass (ux-developer)
+
+Implements the Phase 3 copy ruling after QA run 1. Copy, state-model and test changes only; no SQL, permission, flag, route or audit change.
+
+**Merge with `origin/main`** (merge commit 60f5343). One conflict, `e2e/support/community-fixture.ts`, against PR #43's `createStaffAnchorViaSql`. Both helpers are kept, with disjoint fixture person-id ranges (`SQL_PERSON_PREFIX + n`), documented in a comment above them:
+
+| Range | Helper |
+|---|---|
+| `100 + n` | `createParticipantViaSql` (unchanged) |
+| `200 + n` | `createStaffAnchorViaSql` (main's, unchanged) |
+| `300 + n` | `createProposalViaSql` (moved from 200; callers pass n under 100) |
+
+**Changed**
+- `src/lib/session-approval-state.ts`: sixth kind `terms_not_started` (checked after `empty`, before `no_sign_in`); header and doc comment say six.
+- `.../community/pending/session-state-banner.tsx`: the four `terms_not_started` variants and paragraph 2 verbatim, no link or button; `no_sign_in` trimmed to count `recorded` only with no date clause.
+- `.../community/new/page.tsx`: `sessionWaits` includes `terms_not_started`. No other exhaustive switch needed a change (the edit page uses `kind !== "ready"`).
+- `.../community/participant-copy.ts`: `pending_action` verbatim.
+- Tests (all six from the ruling): `session-approval-state.test.ts`, `roll.test.ts` walk (future-dated holder without and with an account, both `terms_not_started`; the in-effect no-account seat stays `no_sign_in`), `session-state-banner.test.tsx`, `participant-copy.test.ts`, `new/page.test.tsx` (`sessionWaits` per kind), `[id]/edit/page.test.tsx` (`terms_not_started` notice).
+- `e2e/community-participants.spec.ts:270`: the staff-anchor spec (PR #43) asserted a heading named "Community" exactly, which since PR #44's footer site map matches two headings (strict-mode violation, desktop and 360px). Added `level: 1`. This is a main-side interaction between two merged PRs, fixed here because it blocked the run.
+
+**Results**
+- `npm run typecheck`, `npm run lint` (max-warnings 0): clean. `npm run check`: all eight pass.
+- `npm test`: 511 files passed, 74 skipped; 7778 passed, 2286 skipped (DB-gated), 0 failed.
+- `src/lib/roll.test.ts` (DB-backed, `--no-file-parallelism`): 95/95 with `--testTimeout/--hookTimeout=180000`. At the default timeouts two untouched `voidParticipantAction` tests failed with dropped Neon connections (the latency QA recorded); rerunning with long timeouts passed all.
+- E2E from a scratch copy in `/private/tmp`, own server on :3350: `community-approval` 13/13 (desktop and 360px), `community-participants` 10/10, `community-redirect` 3/3, `hydration/community-approval-controls` 1/1, `hydration/community-participant-dialogs` 1/1. Two intermediate runs lost individual tests to `NeonDbError: fetch failed` from the Playwright process; those tests passed on rerun. Not run: `test:e2e:prod` lane.
+- Not examined: the plural-with-date `terms_not_started` banner at 360px by eye (no e2e seeds that state); Batch D should look at it once.

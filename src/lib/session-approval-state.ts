@@ -1,5 +1,5 @@
 /**
- * The five states in which a congregation's Session can or cannot act on the
+ * The six states in which a congregation's Session can or cannot act on the
  * roll actions waiting for it (docs/work-log/2026-10-22-founding-admin-
  * directory.md, Increment 2 Flow 7, S4, DECISION-205).
  *
@@ -13,6 +13,7 @@
 export type SessionApprovalStateKind =
   | "no_session"
   | "empty"
+  | "terms_not_started"
   | "no_sign_in"
   | "no_permission"
   | "ready";
@@ -33,8 +34,10 @@ export interface SessionApprovalCounts {
 
 /**
  * Order matters. No Session group first (F185). Then an empty roster: nobody
- * is seated now or later. Then "seated but nobody can sign in", which
- * includes a roster whose every seat starts later. Then "has accounts but none
+ * is seated now or later. Then "terms not started": seats are recorded but
+ * none is in effect yet, which says nothing about accounts (the counts below
+ * cover live seats only). Then "a seat is in effect but nobody in effect can
+ * sign in" (true by construction, `recorded > 0`). Then "has accounts but none
  * holds the key" (the Session role was changed). Else ready.
  */
 export function deriveSessionApprovalKind(
@@ -42,7 +45,8 @@ export function deriveSessionApprovalKind(
 ): SessionApprovalStateKind {
   if (!counts.hasSessionGroup) return "no_session";
   if (counts.recorded === 0 && counts.startingLater === 0) return "empty";
-  if (counts.recorded === 0 || counts.withAccount === 0) return "no_sign_in";
+  if (counts.recorded === 0) return "terms_not_started";
+  if (counts.withAccount === 0) return "no_sign_in";
   if (counts.canApprove === 0) return "no_permission";
   return "ready";
 }

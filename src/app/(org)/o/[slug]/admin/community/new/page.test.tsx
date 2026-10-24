@@ -203,6 +203,24 @@ describe("NewMemberPage — the Session decides whether Member is offered (R15, 
     expect(getSessionApprovalState).toHaveBeenCalledWith("person-1", "org-1");
   });
 
+  it("a terms_not_started Session sets sessionWaits (the review note shows), like every can't-act kind", async () => {
+    for (const [kind, waits] of [
+      ["terms_not_started", true],
+      ["empty", true],
+      ["no_sign_in", true],
+      ["no_permission", true],
+      ["ready", false],
+    ] as const) {
+      setup(true);
+      getSessionApprovalState.mockResolvedValue({ kind: "ok", state: { kind } });
+      const el = (await NewMemberPage({ params: makeParams() })) as {
+        props: { children: { props: { sessionWaits?: boolean } }[] };
+      };
+      const wizard = el.props.children.find((c) => c?.props && "sessionWaits" in c.props);
+      expect(wizard?.props.sessionWaits, kind).toBe(waits);
+    }
+  });
+
   it("a failed read still renders the wizard (the server refuses no_session regardless)", async () => {
     setup(true);
     getSessionApprovalState.mockRejectedValue(new Error("boom"));

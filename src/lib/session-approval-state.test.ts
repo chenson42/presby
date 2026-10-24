@@ -29,8 +29,29 @@ describe("deriveSessionApprovalKind (Flow 7)", () => {
     expect(deriveSessionApprovalKind(counts())).toBe("empty");
   });
 
-  it("seats that all start later are no_sign_in, not empty", () => {
-    expect(deriveSessionApprovalKind(counts({ startingLater: 2 }))).toBe("no_sign_in");
+  it("seats that all start later are terms_not_started, not empty and not no_sign_in", () => {
+    expect(deriveSessionApprovalKind(counts({ recorded: 0, startingLater: 2 }))).toBe(
+      "terms_not_started",
+    );
+  });
+
+  it("future-dated seat holders never reach no_sign_in, whether or not they have accounts", () => {
+    expect(
+      deriveSessionApprovalKind(counts({ recorded: 0, startingLater: 1, withAccount: 0 })),
+    ).toBe("terms_not_started");
+    expect(
+      deriveSessionApprovalKind(
+        counts({ recorded: 0, startingLater: 1, withAccount: 1, canApprove: 1 }),
+      ),
+    ).toBe("terms_not_started");
+  });
+
+  it("order: no_session beats terms_not_started; empty is only recorded 0 and startingLater 0", () => {
+    expect(
+      deriveSessionApprovalKind(counts({ hasSessionGroup: false, startingLater: 2 })),
+    ).toBe("no_session");
+    expect(deriveSessionApprovalKind(counts({ recorded: 0, startingLater: 0 }))).toBe("empty");
+    expect(deriveSessionApprovalKind(counts({ recorded: 0, startingLater: 1 }))).not.toBe("empty");
   });
 
   it("seated members with no account are no_sign_in", () => {

@@ -14,7 +14,7 @@ import { newStaffPersonSchema, staffPositionSchema } from "./position-schema";
 const LENGTH_200 = "String must contain at most 200 character(s)";
 
 describe("newStaffPersonSchema", () => {
-  const person = { firstName: "Imogen", lastName: "Thackeray", email: "", phone: "" };
+  const person = { firstName: "Imogen", lastName: "Thackeray", phone: "", contact: { emails: [] } };
 
   it("accepts exactly 200 characters of first and last name", async () => {
     const out = await resolveForm(newStaffPersonSchema, {
@@ -56,31 +56,28 @@ describe("newStaffPersonSchema", () => {
     const out = await resolveForm(newStaffPersonSchema, {
       firstName: "  Imogen ",
       lastName: " Thackeray  ",
-      email: " i@example.invalid ",
       phone: " 555-0100 ",
+      contact: { emails: [] },
     });
     expect(out.values).toEqual({
       firstName: "Imogen",
       lastName: "Thackeray",
-      email: "i@example.invalid",
       phone: "555-0100",
+      contact: { emails: [] },
     });
   });
 
-  it("accepts email and phone absent", async () => {
-    const out = await resolveForm(newStaffPersonSchema, { firstName: "A", lastName: "B" });
+  it("accepts phone absent", async () => {
+    const out = await resolveForm(newStaffPersonSchema, { firstName: "A", lastName: "B", contact: { emails: [] } });
     expect(out.failed).toBe(false);
-    expect(out.values).toEqual({ firstName: "A", lastName: "B" });
+    expect(out.values).toEqual({ firstName: "A", lastName: "B", contact: { emails: [] } });
   });
 
-  it("fails (path only: no error line is rendered) at 321-character email and 41-character phone", async () => {
-    expect(Object.keys((await resolveForm(newStaffPersonSchema, { ...person, email: "e".repeat(321) })).errors)).toEqual([
-      "email",
-    ]);
+  it("fails (path only: no error line is rendered) at a 41-character phone", async () => {
     expect(Object.keys((await resolveForm(newStaffPersonSchema, { ...person, phone: "5".repeat(41) })).errors)).toEqual([
       "phone",
     ]);
-    expect((await resolveForm(newStaffPersonSchema, { ...person, email: "e".repeat(320), phone: "5".repeat(40) })).failed).toBe(
+    expect((await resolveForm(newStaffPersonSchema, { ...person, phone: "5".repeat(40) })).failed).toBe(
       false,
     );
   });

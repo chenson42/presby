@@ -9,7 +9,7 @@ import { editPersonSchema } from "./edit-person-schema";
 
 const valid = {
   identity: { firstName: "Imogen", lastName: "Thackeray" },
-  contact: {},
+  contact: { emails: [] },
   address: {},
   household: { mode: "none" },
 };
@@ -22,7 +22,7 @@ describe("editPersonSchema", () => {
   it("returns every optional value when given", async () => {
     const full = {
       identity: { firstName: "Imogen", lastName: "Thackeray", middleName: "R", preferredName: "Immy", suffix: "Jr" },
-      contact: { email: "i@example.invalid", phone: "555-0100" },
+      contact: { emails: [], phone: "555-0100" },
       address: { line1: "1 Mill Rd", city: "Dover", region: "DE", postalCode: "19901" },
       household: { mode: "existing", householdId: "d9100000-0000-0000-0000-000000000010" },
     };

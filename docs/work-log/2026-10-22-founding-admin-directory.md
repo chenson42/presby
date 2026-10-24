@@ -26,7 +26,7 @@
 | Inc 2 · 2 — Architectural review | architect | Complete. R1–R18; invites split to Increment 2b (R19–R26); migrations 0062/0063/0064; DECISION-202–208; F179–F191 | Approved with suggestions | 2026-10-22 |
 | Inc 2 · 3 — Technical design | tech-lead | Complete (design to R1-R18; S1-S5 ruled; ten refinements named; DECISION-206 pending operator confirmation, pastor artifacts isolated). Batches A database-admin (0062, 0063), B api-developer, C+D ux-developer; Phase 4 waits for Increment 1 to merge | Design complete; implementers named | 2026-10-22 |
 | Inc 2 · 4 — Implementation | A database-admin, B api-developer, C+D ux-developer (serial) | In progress: Batch A (0062 applied to the pipeline branch, twice; 0063 authored, rehearsed and reverted, for Batch B to apply) complete 2026-10-23; Batch B (server: library, actions, in-transaction audit; 0063 applied to the pipeline branch, twice, so the branch is in the lockdown state) complete 2026-10-23; Batches C and D (UI, e2e, hydration, 360px pass) complete 2026-10-23 — Phase 4 Complete for Increment 2 | — | — |
-| Inc 2 · 5 — Verification | qa | Run 1 FAIL (2 copy defects) → ruling + fix 0e88167; Run 2 FAIL on one new copy defect (`bulk-approve-dialog.tsx:115-116` tells an approve-only viewer to withdraw); all tests green, merge sound, `terms_not_started` banner verified at 360px. Next: ux-developer removes the sentence (Phase 3 specifies none), then scoped re-check | FAIL (run 2) | 2026-10-23 |
+| Inc 2 · 5 — Verification | qa | Run 1 FAIL (2 copy defects) → ruling + fix 0e88167; Run 2 FAIL (bulk panel sentence) → fix 3dab58c; Run 3 (scoped) green: check 8/8, unit 7779/0, new pinning test fails on old dialog, community-approval 13/13 both widths after one Neon-drop re-run | PASS (run 3) | 2026-10-23 |
 | Inc 2b · 1 — Phase 1 addendum (sign-in invites) | analyst | Complete; operator rulings recorded (invite anyone recorded, incl. visitors; no disconnect; one at a time) | READY WITH NOTES | 2026-10-22 |
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
@@ -5470,3 +5470,150 @@ Fixes the Phase 5 run 2 FAIL (ux-developer, Phase 4).
 - `pending-worklist.test.tsx`: new test pins the panel (title, per-row name and reason; no "withdraw", no "Open each one").
 - `e2e/support/community-fixture.ts`: `createParticipantViaSql`, `createStaffAnchorViaSql` and `createProposalViaSql` now throw unless `n` is an integer in 0..99, enforcing the disjoint ranges.
 - Next agent: qa (scoped re-check).
+
+---
+
+# Increment 2 — Phase 5: Verification (qa), run 3
+
+## Run 3: PASS
+
+**Date:** 2026-10-23
+**Verified by:** qa
+**Worktree / branch:** `/Users/cshenso/git/presby-platform/presby-fadir`, `pipeline/session-approval` at 3dab58c (confirmed). The worktree was clean before and after. Neon branch `pipeline-session-approval` only. No connection string or env value was printed.
+
+**Verdict: PASS.** The run 2 defect is gone and nothing replaces it. A new test pins the panel, and that test fails when the old sentence is put back. The copy has no remaining promise an approve-only viewer can't keep. Every required check is green; one Neon connection drop passed on its single re-run.
+
+### Scope run
+
+- **Ran in full:** typecheck, lint, `npm run check` (all eight), the unit suite.
+- **Ran, targeted:** each on my own dev server on :3380, from a scratch copy in `/private/tmp`:
+  - `e2e/community-approval.spec.ts` at desktop and 360px
+  - `e2e/hydration/community-approval-controls.spec.ts`
+  - `e2e/community-participants.spec.ts` at desktop (the fixture-guard check)
+- **Negative control** of the new test, in the scratch copy.
+- **The `e2e/support/` scope trigger:** the diff touches `community-fixture.ts`. The only change there is a range assertion on `n`. All 12 call sites, in four specs, pass in-range values by reading. Literal or computed values: 1, 1–8, 11–18, `30 + i` for `i < 6`, and 90. Three of those four specs ran this round, and run 2 already ran `hydration/community-participant-dialogs.spec.ts`. The PR's CI covers the rest.
+- **Not re-run (runs 1 and 2 stand):** the DB-backed suites, `test-rls-61/62`, live-catalog probes, `community-redirect`, the participants spec at 360px, and the `test:e2e:prod` lane. 3dab58c touches no SQL, action, route, migration, `src/lib/db/` or `src/proxy.ts` file.
+
+### Diff review (`git diff 0e88167 3dab58c`)
+
+- **Files touched:** exactly four.
+  - `bulk-approve-dialog.tsx` (+4/-5)
+  - `pending-worklist.test.tsx` (+26)
+  - `e2e/support/community-fixture.ts` (+10)
+  - the work-log
+- **The sentence:** the whole `AlertDialogDescription` ("These were not approved. Open each one to approve, deny or withdraw it.") is deleted. Nothing replaces it. `AlertDialogDescription` is still imported because the confirm view uses it (`:138-141`), and lint is clean.
+- **The `aria-describedby` change is correct but has no effect.** On the installed `@radix-ui/react-dialog` 1.1.23, `DialogContentImpl` sets `aria-describedby` only when a `Description` is mounted (`context.descriptionPresent`). `WarningProvider` is a no-op, so this version never warns about a missing description. I checked it in the scratch copy:
+
+  | Dialog version | `aria-describedby` | Title labels the dialog | `console.warn` / `console.error` |
+  |---|---|---|---|
+  | HEAD | none | yes | none |
+  | Override deleted | none | yes | none |
+
+  So there is no dangling id and no Radix warning either way. The line is redundant, and the work-log's reason for it ("so Radix does not warn") doesn't apply to this version. It does no harm. It isn't a fail reason.
+- **Fixture guard:** `assertFixtureIndex(n)` throws unless `n` is an integer in 0..99. It is called first in `createParticipantViaSql`, `createStaffAnchorViaSql` and `createProposalViaSql`. This puts the run 2 hardening suggestion into code.
+
+### Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint` (`--max-warnings=0`): PASS
+- `npm run check`: all eight tripwires passed:
+  - Audit-coverage
+  - `sql<Date>` guard
+  - Dependency-drift
+  - Brand-scope
+  - Secrets & PII
+  - Hydration-gate
+  - Giving-boundaries
+  - Proxy-imports
+
+### Unit Tests
+
+Total: 10065 | Passed: 7779 | Failed: 0 | Skipped: 2286 | Files: 511 passed, 74 skipped | Duration: 25.6s
+
+- The 2286 skipped are the same DB-gated set as run 2, which skip by design under `npm run test`.
+- Passed is 7779 against run 2's 7778. The extra one is the new test.
+
+### End-to-End Tests
+
+Scratch copy `/private/tmp/qa-session-approval-run3`, own dev server on :3380 (`PORT=3380`, `E2E_BASE_URL=http://localhost:3380`), `--project=chromium`.
+
+- **Run A: `community-approval` + the hydration spec.** 13 passed, 1 failed.
+  - **The failure:** `community-approval.spec.ts:318` at 360px ("the Community header shows the waiting count…"). The org page rendered its "We couldn't open this organization" error boundary. The server log shows `Error: Connection terminated unexpectedly` and `Failed query: begin`, which is a Neon connection drop.
+  - Every other test passed: all 6 at desktop, 5 of 6 at 360px, the sticky-bar test at `:342`, and the hydration spec at `:66`.
+- **Run B: `community-approval.spec.ts` re-run once.** 13/13 passed in 3.6 min, with no connection errors in the log.
+- **Run C: `community-participants.spec.ts` at desktop** (`--grep-invert 360px`). 6/6 passed, with no guard throw and no connection errors.
+  - This includes the staff-anchor regression at `:256` and the degrade test at `:305`.
+- **Combined:** `community-approval` 13/13 at both widths, the hydration spec 1/1, and `community-participants` 6/6 at desktop.
+
+### Regression Tests Added
+
+`pending-worklist.test.tsx:264`, "the partial-result panel is the title plus each name and reason, with no instruction sentence". It exists and passes.
+
+What it asserts:
+- The title is "1 approved, 1 need attention".
+- The `bulk-attention` list's text is exactly the name and reason.
+- The dialog text matches neither `/withdraw/i` nor `/open each one/i`.
+
+**Negative control, in the scratch copy only:**
+1. I put back the 0e88167 dialog, which has the old sentence. The new test **failed** at `:286`, with dialog text "…These were not approved. Open each one to approve, deny or withdraw it.…". The other 24 tests passed.
+2. I replaced the sentence with a neutral "These were not approved." The test **passed**. So the test catches the old sentence and any wording with "withdraw" or "open each one". It does not catch every possible replacement description, because only the list is pinned exactly, not the whole dialog. That's acceptable for this defect. A follow-up below suggests tightening it.
+3. I restored the scratch files. `diff -rq` against the worktree came back clean, and then I deleted the scratch copy.
+
+### Copy truthfulness: final re-scan of the bulk dialog
+
+**All approved** (`failed.length === 0`). The dialog closes (`:81-83`) and only toasts appear (`decision-toasts.tsx:37-50`):
+- `bulkApproved`: "N roll action(s) approved."
+- Possibly `bulkShadowed`, which is informational.
+- Possibly `filedPeriod`, which says "If it needs correcting, file a correcting return." This is conditional and is ruled Phase 3 copy. Filing a return is not a roll-action control.
+
+None of these offers a withdraw or edit action.
+
+**Some need attention.** The dialog shows the title "{a} approved, {m} need attention", one list item per failure ("{name}: {reason}") and a Close button. If `approved > 0`, the `bulkPartial` toast also appears. The per-row reasons come only from `DECISION_COPY` (`actions.ts:195-197`):
+- **`forbidden`:** a statement. It offers no action.
+- **`already_decided`:** "Refresh", which anyone can do.
+- **`not_approvable_kind`:** "Deny it, or ask the person who proposed it to withdraw it." The approver can do both: deny, or ask someone else. This is Phase 3 copy (work-log `:3241`).
+- **`person_deceased`:** "Deny this action or correct the record first." Deny is open to the approver. This is Phase 3 copy (`:3242`).
+- **`person_merged`, `membership_ended`, `holds_pastoral_office`, `already_on_roll`:** each tells the approver to deny.
+- **`active_elsewhere`, `provisioning_incomplete`:** a support ticket.
+
+**Result:** nothing in either result shape promises an action a `roll.approve`-only viewer can't take.
+
+### Coverage on Critical Modules
+
+Not re-measured. The change doesn't touch `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+### Feature-Gate Audit
+
+**Unchanged from run 1.** 3dab58c adds or changes no `route.ts`, no `"use server"` action and no `src/proxy.ts`. It changes one client component, one test, one e2e fixture and the work-log.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| No route or action changed since run 1 (run 1 table stands) | n/a | n/a | n/a |
+
+### Verdict
+
+**PASS.** The run 2 fail reason (`bulk-approve-dialog.tsx:115-116`) is gone and nothing replaces it. The new pinning test fails when that sentence is put back. Typecheck, lint, all eight tripwires and the unit suite (7779/0) are green. The targeted e2e is green at desktop and 360px after one Neon-drop re-run, and the fixture guard breaks nothing.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2 · 5 — Verification (run 3) | qa | Complete. Scoped re-check at 3dab58c. Diff is the dialog, its test, the fixture guard and the work-log. The sentence is gone with no replacement; the `aria-describedby` override is correct but redundant on Radix 1.1.23 (no dangling id, no warning, with or without it). Typecheck, lint, check 8/8, unit 7779/0. New test `pending-worklist.test.tsx:264` fails on the old dialog. E2E on :3380: `community-approval` 12/13 + hydration 1/1 in run A (1 Neon `Connection terminated`), re-run 13/13; `community-participants` desktop 6/6. Copy re-scan clean in both result shapes. Gate audit unchanged | **PASS** | 2026-10-23 |
+
+### Handoff
+
+**Next agent: analyst (Phase 6, Increment 2).**
+
+**For the orchestrator (not fail reasons):**
+
+1. **Redundant line (optional cleanup):** `bulk-approve-dialog.tsx:108`. The `aria-describedby: undefined` spread does nothing on `@radix-ui/react-dialog` 1.1.23, and its stated reason ("so Radix does not warn") doesn't hold. Keeping it does no harm. If kept, the work-log's reason should be corrected.
+2. **Test-tightening suggestion:** `pending-worklist.test.tsx:264` could assert the dialog's whole `textContent` rather than keyword negatives. As written, a neutral replacement `AlertDialogDescription` would pass.
+3. **Global flags:** `org_portal.members_create` and `org_portal.members_roll_action_edit` are both still ON on the pipeline branch. That matches what run 2 found. My fixtures restore the value they find, so this run didn't change them. Please confirm the intended state (the seed default is OFF).
+4. **Residue:**
+   - My run left none of its own: 0 `E2ECommunity` people and 0 `e2ce1000-` people.
+   - `roll_actions_freeze` and `group_memberships_reject_derived` are both enabled.
+   - The scratch copy `/private/tmp/qa-session-approval-run3` is deleted, nothing is listening on :3380, and the worktree is clean at 3dab58c.
+5. **Expired fixture rows from other runs:** there are 25 people with `deletable_until` set, all expired. Their first names are DB-suite fixtures such as `Pastor-installed_pastor`, `Replayed` and `Bclerka`. They were created between 19:09 and 23:39 UTC on 10/23, before this run started (02:25 UTC 10/24), so they aren't from this run.
+   - Run 2 reported 0 such rows. Run 2 ran at about 02:00 UTC 10/24, after these rows already existed, so its count was probably taken on a connection that RLS filters.
+   - Worth one sweep before integration.
+6. **Local Node:** still v20.20.2 against `.nvmrc` 22. Unchanged from run 2.

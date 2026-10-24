@@ -5872,3 +5872,23 @@ After that:
 - **deployment-engineer** carries the runbook note.
 - **Increment 2b** starts from follow-up 4's constraints.
 - The operator reads the `CLAUDE.md` sentence and the release note in the diff.
+
+---
+
+## Increment 2 — Integration
+
+Integration for Increment 2 (acting for the orchestrator, 2026-10-23), carrying out Phase 6's ship conditions on `pipeline/session-approval`. The pipeline stays open for Increments 2b and 3.
+
+- **Merge:** `git fetch origin && git merge origin/main` was "Already up to date" (HEAD d2601bb on top of `main` 4cdd5ab). No conflicts.
+- **Condition 1, journal:** idx 62 `0062_presby_session_approval` and idx 63 `0063_presby_roll_decide_lockdown` added to `drizzle/meta/_journal.json`, `when` 1787273573186 and 1787359973186 (idx 61 is 1787187173186; one day apart, the journal's existing spacing). 58 and 64 stay reserved.
+- **Condition 2, `scripts/test-rls.sql`:** `git apply --check` was clean, then `scripts/session-approval/test-rls.sql.integration.patch` applied (the section 5, 20d and later roll_actions assertions move to `insufficient_privilege`; `\ir session-approval/test-rls-62.sql` appended). No staged `seed-dev.sql` patch exists for this increment (F190 is recorded, not fixed), and `scripts/participants/` holds only the already-integrated `test-rls-61.sql`. **Not run:** the full file as `presby_app` on merged `development`; no DB-mutating command was run here.
+- **Condition 3, `docs/decisions.md`:** DECISION-202–206 inserted above DECISION-222. DECISION-205 is "six states" with `terms_not_started` and the `no_sign_in` definition; DECISION-206 is Resolved with the S1 `ends_on` correction; DECISION-203 records the owner-path trigger-only residual and the `presby_platform` revoke.
+- **Condition 4, `docs/schema-design-2.md`:** new section 2v (F179–F185, F188–F191). F182 is an open `paper` residual, F190 is recorded not fixed, F186, F187 and F192–F199 are untouched. The F175 and P5 lines in 2u gained a pointer to 2v.
+- **Condition 5, `CLAUDE.md`:** one sentence added at the end of Two Hierarchies (shipped wording, ruling elder, installed pastor, co-pastor or associate pastor; `selfRecorded` and `selfApproved`; `paper`; cites DECISION-205). `AGENTS.md` is a static portability shim that quotes none of `CLAUDE.md`, so there is nothing to regenerate.
+- **Condition 6, functionality map:** the Community bullet and the org-portal sentence rewritten; the Index authorization and roll lines updated; version stamp 0.41.0.
+- **Condition 7, `docs/TODO.md`:** Increment 2 moved to Done (2026-10-23); the Increments 2b and 3 line kept open; F183 and P5 removed from open (closed in the Done line); the F111/F118 line amended; F177 and F176 kept open; follow-ups 1–11 added, plus the manual bootstrap walk (condition 10), a what's-new hold line (condition 13) and the pipeline-branch cleanup (condition 11).
+- **Condition 8, release:** `docs/release-notes/v0.41.md` (0.41.0), `v0.40.md` linked forward, `package.json` and the two top-level `package-lock.json` fields bumped to 0.41.0. The operator runbook is `docs/deployment.md` → "Session approval (Community Increment 2)", following the 0057 and 0059 precedent. `docs/STATE.md` has a new RESUME block.
+- **Condition 11, aria-describedby correction:** verified present at the QA run 3 Batch C note ("orchestrator correction after QA run 3: Radix 1.1.23 does not warn; the line is a no-op, kept to avoid a re-test"). The per-phase row for Phase 6 is already recorded.
+- **Conditions 9 and 12:** no `architecture.md` change; Rule 12 not applicable.
+- **Verification:** `npm run typecheck`, `npm run lint` (max-warnings 0), `npm run check` (all tripwires) clean; `npm test` 7779 passed, 2286 skipped (DB-backed), 0 failed. No test reads the journal or the docs.
+- **Still owed, needs a person or a database:** condition 2's full `test-rls.sql` run on merged `development` (expect four pre-existing failures; section 62 = 53, section 61 = 34), condition 10's manual bootstrap walk at 360px, and condition 11's branch cleanup (role passwords, two global flags, 25 expired fixture rows). Nothing is pushed.

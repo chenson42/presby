@@ -3,11 +3,38 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-23.
+Updated 2026-10-23 (Community Increment 2 integrated).
 
 ---
 
-## RESUME HERE — 2026-10-23 (late): the portal site-map footer is integrated at v0.40.0, PR pending
+## RESUME HERE — 2026-10-23 (night): Community Increment 2 is integrated at v0.41.0, PR pending
+
+`pipeline/session-approval` (worktree `presby-fadir`, Neon `pipeline-session-approval`) is merged up to `main` (v0.40.0, workflow
+efficiency) and integrated as **v0.41.0**, **Community Increment 2**: a congregation's Session can approve, deny and bulk-approve
+proposed members from Pending approvals, a clerk can see the queue and withdraw a mistake, and every "can't act yet" state is told
+in six states (`terms_not_started` added after QA run 1). Approve, deny and withdraw go through two `SECURITY DEFINER` functions;
+`presby_app` lost UPDATE and DELETE on `roll_actions` (P5 closed, the `roll_actions` part of F176 closed; the owner path is
+trigger-only). The baseline `session_member` role carries `roll.approve` only; installed pastors, co-pastors and associate pastors
+count as Session members (DECISION-206, operator confirmed). Migrations `0062` and `0063`, DECISION-202–206, F179–F185 and
+F188–F191 (`docs/schema-design-2.md` §2v). QA PASS (run 3), Phase 6 SHIP WITH NOTES; every note is a `docs/TODO.md` line. One
+CLAUDE.md sentence (Two Hierarchies) records the self-recorded, self-approved Session member as `paper`: read it in the diff.
+
+**What is and is not true of it.** An elder recorded on the Session still needs a PresbyPortal account to approve; Increment 2b
+(sign-in invitations, migration `0064`) delivers that, and until then the queue banner says so. F182 stays an open `paper`
+residual; F177 and F176 (other tables) stay open. The what's-new entry is held until 2b ships.
+
+**Deploy order: apply `0062`, deploy the code, then apply `0063`** (snapshot first; pre-flight counts and the duplicate-pending
+case are in `docs/deployment.md` → "Session approval (Community Increment 2)"). Not done here, owed before release: the manual
+bootstrap walk on `development` at 360px (ship condition 10), re-running `scripts/test-rls.sql` as `presby_app` on merged
+`development` with both migrations applied (expect the four pre-existing failures; section 62 = 53, section 61 = 34), and the
+pipeline-branch cleanup (role passwords, two global flags, 25 expired fixture rows).
+
+**Next:** merge this PR through `/merge-pr`, apply the migrations in the order above, then Community Increment 2b, then 3; then the
+list in the handoffs below (F166 bug-fix pipeline, fpcw parity tracks, overdue reviews).
+
+---
+
+## Previous handoff — 2026-10-23 (late): the portal site-map footer is integrated at v0.40.0 (merged to main, PR #44)
 
 `pipeline/portal-sitemap-footer` (worktree `presby-nav`, no schema change, no migration) is merged up to `main` at v0.39.2 and
 integrated as **v0.40.0**. The portal nav and the footer now render one pure structure (`buildPortalMenu()` in

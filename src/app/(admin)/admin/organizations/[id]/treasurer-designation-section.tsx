@@ -150,7 +150,7 @@ export function TreasurerDesignationSection({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Treasurer
         </h2>
-        <p className="mt-1 text-sm text-foreground">
+        <p className="mt-1 text-sm text-foreground [overflow-wrap:anywhere]">
           {openInvitation?.status === "expired"
             ? expiredInvitationLine("treasurer", openInvitation.inviteeDisplayName)
             : openInvitationLine("treasurer", openInvitation?.inviteeDisplayName)}

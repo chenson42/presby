@@ -121,11 +121,14 @@ export function InvitationList({
                 </Badge>
                 {invitation.selfDesignated && <Badge variant="secondary">Self-designated</Badge>}
               </div>
-              <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+              <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
                 {name && (
-                  <div className="flex gap-1">
+                  // min-w-0 on the grid item and on the flex child: both default to
+                  // min-width:auto, so a long unbroken name would otherwise size the row
+                  // to its own min-content and run off a 360 px screen.
+                  <div className="flex min-w-0 gap-1">
                     <dt className="text-muted-foreground">For</dt>
-                    <dd className="break-words">{name}</dd>
+                    <dd className="min-w-0 [overflow-wrap:anywhere]">{name}</dd>
                   </div>
                 )}
                 <div className="flex gap-1">

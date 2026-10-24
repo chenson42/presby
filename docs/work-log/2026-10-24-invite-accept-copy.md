@@ -19,7 +19,7 @@
 | 2 — Architectural review | architect | Skipped — no new dependency, directory, schema or API surface (result shapes in issue.ts grow a display-name field only) | — | 2026-10-24 |
 | 3 — Technical design | tech-lead (folded into the implementer, accelerated) | Complete | Design note recorded | 2026-10-24 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green (DB-backed tests and e2e not run) | 2026-10-24 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 FAIL: long unbroken name overflows the section line and the list For row at 360px; treasurer resend name lacks a DB test | FAIL (run 1) | 2026-10-24 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -258,48 +258,167 @@ full-stack-developer (this agent).
 - Deviation from the brief: `InvitationSentNotice` and `InvitationList` take `purpose` instead of `role` (the role word is derived, so the two cannot disagree).
 - Follow-up commit (`fix(admin)`, Caught-By agent-review, Discovered-In Phase-4): an expired row with no derivable name now gets "The invitation has expired. Nobody holds this {role}. ..." instead of falling back to the "open" wording; `invitation-copy.ts` changed, both sections already routed expired rows through it; tests added for the module and both sections.
 
+## Phase 4 — QA fix pass (after Run 1 FAIL)
+
+- **Overflow at 360px, items 1 and 2.** A 100 + 100 character unbroken name ran off the screen in the standing open/expired line and in the list "For" row. Causes and fixes:
+  - The open/expired `<p>` in both sections had no wrap rule: added `[overflow-wrap:anywhere]` (`founding-administrator-section.tsx`, `treasurer-designation-section.tsx`).
+  - The list `<dl>` was a one-column grid whose implicit track is `auto`, and its grid item and the `<dd>` flex child both default to `min-width: auto`, so the long name sized the row to its own min-content (`break-words` alone does not help there). Fixed in `invitation-list.tsx` with `grid-cols-1` on the `<dl>`, `min-w-0` on the "For" grid item and its `<dd>`, and `[overflow-wrap:anywhere]` on the `<dd>`. The address row already uses `break-all` and is unchanged; it passed the new check.
+- **Test first.** A new e2e case (`e2e/admin-organizations.spec.ts`, "long unbroken name at 360 px", own throwaway org) sends a founding-administrator invitation with 100 + 100 unbroken characters, then asserts that no element in the section has its right edge past the viewport, no element's content is wider than its box (text that overflows its own box does not move the box's edge, so the first version of the check missed the `<p>`), and the document has no horizontal scroll. It failed on the unfixed code (section, `p`, `ul`, `li`, `dl`, `dd` all flagged) and passes after the fix.
+- **Item 3.** `issue.db.test.ts`: a treasurer resend returns `inviteeDisplayName` equal to the roster first name ("Odalys"), asserted not to contain the last name ("Pennick").
+- **Gates:** typecheck, lint and all eight `npm run check` tripwires pass; `npm test` 8031 passed, 2442 skipped (the DB-backed files), 0 failed; `npm run test:db -- src/lib/onboarding/issue.db.test.ts` 63/63 passed; e2e from a scratch copy on port 3430: the whole `admin-organizations.spec.ts` 25/25 passed (including the new case). Scratch copy and dev server removed afterwards.
+- The treasurer's long-first-name case is not separately asserted in e2e; it renders through the same two components and the same classes.
+
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+## Run 1 — FAIL
+
+**Date:** 2026-10-24
 **Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-invite-copy`, `pipeline/invite-accept-copy` at `dbd1d8f` (feat `e4452d8` + fix `dbd1d8f`). DB and e2e ran against the worktree's own `.env.local` (Neon branch `pipeline-invite-copy`; its host differs from the main checkout's). No values were printed and no repo file was edited.
+
+**Scope run:**
+- **In full:** typecheck, lint, `npm run check` (all eight tripwires), the unit suite, `npm run build`.
+- **DB:** `npm run test:db -- src/lib/onboarding` (all 16 files).
+- **e2e (dev server on port 3420, run from a scratch copy in /private/tmp that was deleted afterwards):** the four named specs in full, which include their 360px tests. Also a QA-only long-name spec at 360px, scratch-only and never committed.
+- **Not run:** `test:e2e:prod`. No `e2e/hydration/` spec renders the notice or the two sections. The full e2e suite was also not run: the diff touches no proxy, auth, layout, `e2e/support/` or shared component.
+- **Not auth-touching.** The stricter gate does not apply.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: PASS
+
+Also passed:
+- `npm run lint`
+- `npm run check`: all eight tripwires pass (`check:audit`, `check:sql-date`, `check:deps-drift`, `check:brand-scope`, `check:secrets`, `check:hydration-gate`, `check:giving-boundaries`, `check:proxy-imports`).
+- `npm run build`
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Total: 10472 | Passed: 8031 | Failed: 0 | Skipped: 2441 (77 files) | Duration: 23.8s**
+
+- The 77 skipped files are the database-backed set, which skips without a database in `npm run test`. The implementer's run reported the same 77, and the diff adds no `.skip`, `skipIf`, `.only` or `fixme`.
+- 8031 is 2 more than the implementer's 8029, from the follow-up fix commit.
+
+**DB-backed, `npm run test:db -- src/lib/onboarding`:**
+- **Run 1:** all 269 tests passed (16 files). The file `issue.db.test.ts` was still reported failed, because its `afterAll` teardown hit the 30s hook timeout (`src/lib/onboarding/issue.db.test.ts:194`).
+- **Run 2, that file alone:** 62/62 passed and teardown completed.
+- This is a cold-compute teardown timeout, not a test failure. The other 15 files passed: `accept.db`, `designation-holders.db`, `designation-parity.db`, `invitations.db` and the pure onboarding tests.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+**Total: 37 | Passed: 37 (after one re-run) | Failed: 0 | Duration: 4.1m**
+
+- **Specs:** `e2e/admin-organizations.spec.ts` (whole file), `e2e/invitation-new-account.spec.ts`, `e2e/invitation-existing-account.spec.ts` and `e2e/designation-revoke.spec.ts`, all on `--project=chromium`.
+- **360px tests in these specs:** `admin-organizations.spec.ts:197` and `:886`, and `designation-revoke.spec.ts:317`. All passed.
+- **Run 1:** 36 passed, 1 failed at `e2e/admin-organizations.spec.ts:582` (service times and office hours: the "Office hours saved." status was not visible within 15s). The diff does not touch service times.
+- **Run 2, that test alone:** passed. Not a regression and not a FAIL of this pipeline.
+- Both changed assertions pass: the treasurer notice and open line (`:777`, `:779`), and the founding-administrator notice comparison with the address and name masked (`:981`, `:1048`).
+
+**QA long-name check at 360px (scratch spec, deleted afterwards):**
+
+| Case | Notice | Section open line | List "For" row | Page sideways scroll |
+|---|---|---|---|---|
+| Founding admin, long names with spaces (51 + 49 chars) | wraps | wraps | wraps | none |
+| Treasurer, long first name with spaces | wraps | — | — | none |
+| Founding admin, unbroken 100 + 100 chars (passes validation) | **wraps** | **overflows** | **overflows (right edge 1501px)** | **yes, document 1501px wide** |
+| Treasurer, unbroken 100-char first name | wraps | not measured (screenshot taken mid-render) | not measured | none at capture |
+
+The notice itself is correct in every case. The overflow is in the two surfaces next to it, which this diff also changed (see Verdict, items 1 and 2).
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+The fix commit's 3 tests were checked on a scratch export of `dbd1d8f` with the pre-fix `invitation-copy.ts` from `e4452d8`. All 3 fail there and pass at HEAD.
+- **`expired, no name: the same line minus the name, never 'open'`** (`src/lib/onboarding/invitation-copy.test.ts:81`) guards against an expired row with no name falling back to the "An invitation is open" wording.
+- **`an expired invitation with no name still says expired, never 'open'`** (`src/app/(admin)/admin/organizations/[id]/founding-administrator-section.test.tsx:432`): same guard, founding-administrator section.
+- **Same test name** (`src/app/(admin)/admin/organizations/[id]/treasurer-designation-section.test.tsx:239`): same guard, treasurer section.
+- **`strips bidirectional override, embedding and isolate controls …`** (`src/lib/onboarding/input.test.ts:33`): fails against `origin/main`'s `input.ts`, passes at HEAD.
+- **Style only:** none of these carry the `— regression for [bug]` suffix.
+
+## Copy Truthfulness and Bidi Audit
+
+- **No delivery claim.**
+  - Every string in `src/lib/onboarding/invitation-copy.ts` claims only "from the email".
+  - The lead line is unchanged: "sent" means handed to the provider; "queued" says delivery is delayed.
+  - Nothing says delivered, opened or "check your inbox". `invitation-copy.test.ts:43` asserts this.
+- **Expired lines never say "open".** Verified in `expiredInvitationLine` and in both sections' `status === "expired"` branch, and by the 3 regression tests above.
+- **Fallback chain works.** It goes name, then "the person at {address}", then "the invitee" (`inviteeReference`). It is covered in the module test and in the notice test for all four rows of the copy table. Both sections now pass the submitted address, so a first send reads "Invitation sent to {address}."
+- **Treasurer shows the first name only.**
+  - `deriveInviteeDisplayName` returns only `rosterFirstName` for a treasurer.
+  - The DB test pins `inviteeDisplayName: "Odalys"` with `inviteeFirstName: null` on both the create result and the list row (`issue.db.test.ts:385-387`).
+  - In the scratch e2e, a treasurer with last name "Roster" never showed "Roster".
+  - The shipped e2e assertion at `admin-organizations.spec.ts:777` uses `.+`, so it would not catch a full name. The DB test is what pins this.
+- **The warning is imported, not copied.**
+  - `invitation-sent-notice.test.tsx:4-7` and `actions.test.ts:152` import `INVITATION_WARNING_COPY`.
+  - A grep finds the literal only in `invitation-copy.ts`.
+  - `actions.ts` imports it and keeps no local copy.
+- **Bidi strip blast radius.**
+  - `normalizePersonName` is called only by `issue.ts` (founding create) and `accept.ts:169-172` (new-account first and last name).
+  - Names are never used to match or compare: acceptance matches by token hash, address and `person_id` in `presby_accept_invitation`.
+  - Existing stored names are never re-normalized.
+  - Stripping happens before trimming, and a name made only of bidi characters becomes null and is refused as `invalid_input`.
+  - So no existing invitation can stop matching.
+- **Bidi residuals, non-blocking:**
+  - LRM, RLM and ALM (U+200E, U+200F, U+061C) are not stripped. The test comment says "benign marks are untouched" but no test covers them.
+  - The zod `inviteeNameSchema` checks `.max(100)` before the strip, so 100 characters plus a bidi character is refused rather than cleaned.
+  - The SQL `[[:cntrl:]]` check does not cover these format characters. The protection is application-level only.
+- **Wording note for Phase 6, not a defect.** "Takes effect when {name} accepts it" is conditional in practice. Acceptance can still be blocked at accept time (`has_holders`, `membership_ended`, `person_merged`). The existing "Note." warning already qualifies the self-addressed case. Phase 1 approved this wording.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.3% statements (lines 35-39 uncovered; target 90%+, met)
+- `src/lib/flags.ts`: 100%
+- Changed pure modules: `src/lib/onboarding/invitation-copy.ts` 100%, `src/lib/onboarding/input.ts` 100%
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
-
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
 |-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| `inviteFoundingAdministratorAction` (`actions.ts:850`) | yes (`:853`) | yes (`:855`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `inviteTreasurerAction` (`actions.ts:897`) | yes (`:900`) | yes (`:902`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `resendInvitationAction` (`actions.ts:958`) | yes (`:961`) | yes (`:963`) | `FEATURES.ADMIN_ORGANIZATIONS` |
+
+- No route handler was added or changed.
+- The new `inviteeNameFor` helper is a sync function that is not exported, which a `"use server"` file allows. The build confirms it.
+- The treasurer name read stays on the `getPlatformDb()` path inside `issue.ts`; there is no RLS change.
+- Schema/RLS audit: not applicable. No schema change.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** Hand back to **full-stack-developer** (Phase 4). This is not a design problem, so no Phase 3 escalation.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+1. **The section's open and expired line overflows at 360px with a long unbroken name. This is new in this diff.**
+   - Where: `src/app/(admin)/admin/organizations/[id]/founding-administrator-section.tsx:215` and `src/app/(admin)/admin/organizations/[id]/treasurer-designation-section.tsx:153`.
+   - The `<p className="mt-1 text-sm text-foreground">` now contains the name, twice in the open line, with no wrap rule.
+   - Result: an unbroken 100 + 100 character name (which validation accepts) made the document 1501px wide at 360px.
+   - Phase 1 Gap 5 asked for the name to wrap wherever it appears.
+2. **The "For" row in the list still overflows, despite `break-words`.**
+   - Where: `src/app/(admin)/admin/organizations/[id]/invitation-list.tsx:126-128`.
+   - `<dd className="break-words">` sits inside `<div className="flex gap-1">`. A flex child keeps `min-width: auto`, so `overflow-wrap` never takes effect. It needs `min-w-0` (or `[overflow-wrap:anywhere]`).
+   - The Phase 3 edge case ("a very long name wraps (`break-words`) in … the list 'For' line") is therefore false.
+   - It already overflowed before this diff for founding names, but this diff claims to fix it and now also shows treasurer names there.
+   - The founding-name case was measured. The treasurer list and open line were not (the screenshot was mid-render), but they use the same markup.
+3. **No DB-backed test for the treasurer resend name.**
+   - `resendInvitation`'s treasurer branch (`src/lib/onboarding/issue.ts:739-746`, `:807-817`) is new code with no DB test. `issue.db.test.ts:825` seeds only a founding-administrator row.
+   - Its only coverage is `invitation-list.test.tsx:148`, which mocks the action to return the very value it then asserts.
+   - Phase 1 Gap 1 named this path. It needs one `issue.db` case: resend a treasurer invitation and expect `inviteeDisplayName` to be the roster first name.
+
+To close items 1 and 2, add a 360px assertion with a long unbroken name to `e2e/admin-organizations.spec.ts`: no element in the section past 360px after a send. Write it before the fix and watch it fail. The existing `:886` test only measures the treasurer form state.
+
+**Non-blocking notes for Phase 6:**
+- The bidi residuals listed above.
+- The conditional "takes effect when … accepts" wording.
+- The treasurer e2e regex `.+` does not pin first-name-only (the DB test does).
+- The regression tests lack the `— regression for` suffix.
+- Treasurer list rows now show the live roster first name on every row, including ended and redacted ones. This fits the 0059 "names retained after redaction" residual, but it is new for treasurer rows.
+
+---
+
+**Per-Phase Status row:**
+
+| 5 — Verification | qa | Complete | FAIL (narrow-viewport overflow ×2; treasurer resend name has no DB test) | 2026-10-24 |
+
+**Handoff:** next agent is **full-stack-developer** (Phase 4 fix pass), with items 1-3 above. QA re-runs the changed tests, the 360px check and `test:db -- src/lib/onboarding/issue.db.test.ts`. Typecheck, lint, check and the unit suite run in full again; everything else that passed here stands.
 
 ---
 

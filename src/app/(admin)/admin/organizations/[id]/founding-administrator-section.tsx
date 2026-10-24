@@ -212,7 +212,7 @@ export function FoundingAdministratorSection({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Founding administrator
         </h2>
-        <p className="mt-1 text-sm text-foreground">
+        <p className="mt-1 text-sm text-foreground [overflow-wrap:anywhere]">
           {openInvitation?.status === "expired"
             ? expiredInvitationLine("founding_administrator", openInvitation.inviteeDisplayName)
             : openInvitationLine("founding_administrator", openInvitation?.inviteeDisplayName)}

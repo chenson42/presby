@@ -23,8 +23,8 @@
 | 2 — Architectural review | architect | Complete. ER1–ER24; migration 0064 (2b moves to 0065); new module `src/lib/contact-methods/`; DECISION-215–218; F210–F214 | Approved with suggestions | 2026-10-23 |
 | 3 — Technical design | tech-lead | Complete. Designed to ER1–ER3b and ER11–ER23b (the text has no ER4–ER10 or ER24); S1–S4 ruled; Note 1 measured (0 CHECK violations; `seed-dev.sql` writes no contact rows; `invitations.db.test.ts:644` and `seed-dev-invitations.sql` need changes); D1–D15 additions, none needing a Phase 2 loop-back; F215–F217; DECISION-219 drafted; giving left unwired (D7, operator to be told) | Design complete; implementers named | 2026-10-23 |
 | 4 — Implementation | database-admin (Batch 1), api-developer (Batch 2), ux-developer (Batch 3) | In progress: Batch A (0064, Drizzle mirror, DB tests, staged section 64 and seed patches) complete 2026-10-23; Batch 2 (server: `contact-methods/` module, `updatePerson`/`createPerson` rewired, readers, audit keys, actions, scans, signed-in-address warning) complete 2026-10-23; Batch 3 (UI: editor, three hosts, directory Work line, invitation notice, e2e and hydration specs) complete 2026-10-23 | — | 2026-10-23 |
-| 5 — Verification | qa | Run 1 FAIL: `check:secrets` flags `email-addresses-form.test.ts:67`; `person-emails.spec.ts` audit rows survive the crash sweep. Back to ux-developer (Batch 3 fix pass), then scoped re-run | FAIL (run 1) | 2026-10-23 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Run 1 FAIL (check:secrets fixture literal; e2e audit-row independence); fix pass `92a7832`; Run 2 (scoped) green: all eight tripwires, touched units 22/22, person-emails e2e 10/10 twice plus independence across skipped-afterAll cycles and a real crash | PASS (run 2) | 2026-10-23 |
+| 6 — Shipped vs intent | analyst | Complete. All send paths registered and wired, classified or tracked; three release-note lines corrected; 14 follow-ups for TODO; ship conditions listed | SHIP WITH NOTES | 2026-10-23 |
 
 ---
 
@@ -1483,36 +1483,334 @@ I read the action bodies directly. No `route.ts`, no `proxy.ts` and no auth file
 
 ---
 
+## Run 2 — PASS
+
+**Date:** 2026-10-23
+**Verified by:** qa. This role is read-only: I wrote no tests and edited no repo file.
+
+**What I ran.**
+- **Code:** worktree `/Users/cshenso/git/presby-platform/presby-emails`, HEAD `92a7832`, against Neon branch `pipeline-person-emails` (endpoint `ep-winter-leaf`).
+- **Static gates:** typecheck, lint and `npm run check`, run in the worktree.
+- **E2E:** from a scratch copy, `/private/tmp/presby-emails-qa2`. It is `git archive 92a7832` plus `.env.local` plus an APFS-cloned `node_modules`, and is byte-identical to the worktree's `e2e/` and `src/`.
+- **Own server:** each run started its own dev server on `PORT=3340` with `E2E_BASE_URL=http://localhost:3340`. Nothing else was listening there and nothing was reused.
+- **Worktree afterwards:** `git status` is clean and HEAD is still `92a7832`. No server is left on :3340, and the fixture residue query returns 0/0/0.
+
+**What I did not re-run.** These rest on Run 1:
+- the full unit suite;
+- the DB-backed Vitest set and `test-rls-64.sql`;
+- the live-catalog Schema/RLS audit and the fresh install;
+- the blast-radius e2e specs at desktop and 360px;
+- the production-build lane.
+
+Nothing in the diff touches any of them (see the diff review below).
+
+### Type Check
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | **PASS** (exit 0) |
+| `npm run lint` (`eslint --max-warnings=0`) | **PASS** (exit 0) |
+| `npm run check` | **PASS**, all eight tripwires: audit, sql-date, deps-drift, brand-scope, **secrets** ("Secrets & PII guard passed."), hydration-gate, giving-boundaries, proxy-imports |
+
+**Diff review, `683b01f..92a7832`.** One commit, six files:
+- the work-log;
+- `e2e/person-emails.spec.ts`;
+- `e2e/support/person-emails-fixture.ts`;
+- `e2e/support/community-fixture.ts` (the only change is exporting `FIXTURE_FIRST_NAME`);
+- `src/components/org-portal/email-addresses-form.test.ts`;
+- `src/app/(admin)/admin/organizations/[id]/invitation-sent-notice.test.tsx`.
+
+No production source changed. Every email-shaped literal on an added line is at `.invalid`: `a@b.invalid`, `a.b+c@d.e.invalid`, `b@c.invalid`. Nothing outside `.invalid` or example domains was introduced. The work-log additions add no address literal.
+
+### Unit Tests
+
+**Touched files.** `email-addresses-form.test.ts` and `invitation-sent-notice.test.tsx`: 2 files, **22/22 passed**, 0 skipped.
+
+**The notice test matches the shipped string.** `WARNING` at `invitation-sent-notice.test.tsx:9` is byte-identical (184/184 characters) to the string in `src/app/(admin)/admin/organizations/[id]/actions.ts:738`, the "…was sent, **but** it will be refused…" wording. It also asserts the rendered `Note. ${WARNING}` text exactly.
+- **Residual (non-blocking):** the match is a copied literal, not an import, because a `"use server"` file can export only async functions. If someone later edits `actions.ts:738`, this test will not fail. Moving the string into a shared copy module would make the test catch that.
+
+### End-to-End Tests
+
+All runs below are `e2e/person-emails.spec.ts` under `--project=chromium`. The spec loops over desktop and 360px itself.
+
+| Run | Condition | Result |
+|---|---|---|
+| A | normal | **10/10** (3.4 min) |
+| B | normal, straight after A | **10/10** (6.3 min) |
+| C | `afterAll` skipped (scratch edit, below) | 10/10. Left behind: 12 fixture people, 2 `staff_positions`, 4 audit rows on each fixed id (`…0140`, `…0150`) |
+| D | normal, from C's dirty state | 9/10. Failure below |
+| E | re-run of D, normal | **10/10** (3.1 min) |
+| F | `afterAll` skipped again | 10/10. Left behind: 12 people, 2 `staff_positions`, 8 audit rows on the fixed ids |
+| G | normal, from F's dirty state | 2 failed, 8 did not run. Neon link drop, below |
+| H | normal, from G's crashed state (1 person, 2 stale audit rows on `…0140`) | **10/10** (2.8 min) |
+
+**How `afterAll` was skipped.** Only in the scratch copy: I replaced its body with `return;`, then restored it from a saved original. Each time I confirmed `diff -q` against the worktree file showed no difference before the following normal run. I checked residue with a read-only transaction on the owner connection.
+
+**Both independence defects are fixed.**
+1. **The `staff_positions` blocker.** `beforeAll` succeeded every time it started from leftover staff positions (D and G). The new `sweepEmailExtras()` clears them before `sweepCommunityPeople`, so `staff_positions_person_fk` no longer stops the sweep.
+2. **The audit-row poisoning from Run 1.** The exact-set assertion at `person-emails.spec.ts:173–174` passed at both viewports after a skipped `afterAll` (D desktop, E, H).
+   - In these runs the stale rows were already removed by `sweepEmailExtras()` in `beforeAll`, so the new `since` bound never got a run to itself. My runs could not leave audit rows with no matching person, and I cannot write them myself.
+   - The bound is correct by reading. `dbNow()` takes `clock_timestamp()` from the same database before the person is created, and the server's `created_at` comes from a later transaction on that same clock, so there is no skew.
+
+**Failures, both the Neon link (re-run per the timeout rule).**
+- **D, `person-emails.spec.ts:92` at 360px.** It failed in `openEdit` at `:61`: the Save button was not found within 45 s.
+  - At the same moment the dev-server log shows `Error: Connection terminated unexpectedly` (uncaughtException).
+  - The screenshot shows the edit page's caught DB error, i.e. `MembersLoadError` ("We couldn't load this right now").
+  - Re-run E passed 10/10.
+- **G, `:92` desktop.** The save hung on "Saving…" until the toast assertion at `:162` timed out. The fixture's own calls then failed with `NeonDbError: … fetch failed` in `afterAll` (`removeEmailExtras`, fixture `:81`) and in the next `beforeAll` (`sweepEmailExtras`, `:94`), and the other 8 tests did not run.
+  - Afterwards the network and Neon both responded (ping fine, `select 1` in 0.76 s).
+  - H, from G's real crashed state, passed 10/10.
+
+**Watching the directory test (`:270`).** It passed in every run that reached it: A, B, C, D (both viewports), E, F and H, which is 14 executions. It did not run in G. **No recurrence** of the failure the implementer saw.
+
+**`e2e/hydration/person-emails-editor.spec.ts`** (`:64`, chromium, :3340): **1/1 passed** (24.5 s).
+
+**Observation (pre-existing, not this diff).** When the edit page fails to load, it shows the heading "Add a person". `community/[id]/edit/page.tsx:209` calls `MembersLoadError` without a `heading`, so it gets the default "Add a person" from `members-states.tsx:62`. It is the same on `origin/main`. It is a candidate copy line for `docs/TODO.md`.
+
+### Regression Tests Added
+
+The fix pass adds none, and needs none: the Run 1 items were a fixture literal and test independence, not product defects.
+- The independence fix was shown by behaviour, with two skip-then-normal cycles (C→D/E and F→G/H), the second ending in a genuine crash.
+- Run 1's record of regression coverage (F216 at `src/lib/people-update.test.ts:449`, and the F211/F212/F214 mechanism tests) is unchanged.
+
+### Feature-Gate Audit
+
+Unchanged from Run 1: the diff touches no route, no server action, no `proxy.ts` and no auth file. The stricter auth gate does not apply.
+
+### Verdict
+
+**PASS.** Both Run 1 FAIL items are resolved:
+1. **`npm run check` is green**, including `check:secrets`.
+2. **`person-emails.spec.ts` is independent of earlier runs.** It passes twice in a row, passes after a deliberately skipped `afterAll`, and passes after a real crash that the Neon link caused mid-run.
+
+The D and G failures were both Neon link drops, each shown in the server or fixture logs, and each passed on re-run.
+
+**Non-blocking:**
+- the literal-copy residual in `invitation-sent-notice.test.tsx`;
+- the pre-existing "Add a person" heading on the edit page's load error.
+
+Run 1's integration notes still stand:
+- the base is behind `origin/main`;
+- `community.ts` will conflict;
+- the `_journal.json` entry is required;
+- the false release-note line;
+- the `admin-organizations.spec.ts:433` service-times residue.
+
+The scratch copy `/private/tmp/presby-emails-qa2` is left for trace inspection. It is safe to delete.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Run 2 (scoped): typecheck, lint and `npm run check` (all eight, incl. secrets) green; the 2 touched unit files 22/22, the notice test byte-identical to `actions.ts:738`; diff `683b01f..92a7832` touches only test, fixture and work-log files, `.invalid` literals only; `person-emails.spec.ts` 10/10 twice, then independence shown across two skipped-`afterAll` cycles and one real crash (2 Neon-drop failures, each passed on re-run); `:270` no recurrence in 14 runs; hydration editor spec 1/1. Run 1 stands for everything else. | PASS | 2026-10-23 |
+
+**Handoff:** next agent is **analyst** (Phase 6, Shipped vs Intent).
+
+---
+
 # Phase 6 — Shipped vs Intent (analyst)
+
+*Recorded verbatim by the orchestrator from the analyst's returned text. I edited nothing, wrote no files and used no write path.*
+
+Pipeline `2026-10-23-person-emails`, worktree `/Users/cshenso/git/presby-platform/presby-emails`, HEAD `92a7832`.
+
+I re-read the work-log and walked what shipped against Phase 1 and the operator rulings. The work-log was the main source for the operator rulings, Phases 2 and 3, the Phase 4 batches and QA Runs 1 and 2. I read the code directly in these places:
+- `src/lib/contact-methods/email-audience.ts`
+- `src/lib/onboarding/issue.ts` (`resolveTreasurerPerson`, `hasDoNotContact`, `addressOnSignedInPerson`)
+- `src/app/(admin)/admin/organizations/[id]/actions.ts` and `invitation-sent-notice.tsx`
+- `drizzle/0064_presby_person_emails.sql` (the preview and accept bodies)
+- `docs/TODO.md`, to confirm none of the follow-ups below are in it yet.
+
+I did not re-run anything. I rest on QA's Run 1 and Run 2 for suites, live catalog and e2e.
 
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.**
+
+Everything the operator asked for is delivered or tracked, and nothing needs to go back to Phase 3 or 4. The notes are of two kinds:
+- Follow-ups that must become `docs/TODO.md` lines in the ship commit (Rule 10). None are in TODO yet.
+- Ship-time gates the orchestrator owes: release notes, decisions, journal and patches, docs, and telling the operator about D7.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A person can now hold up to 10 labelled addresses with one main, removal is soft and audited, and the directory, search, invitations and database rules all agree on which address is "the" address. The per-purpose routing rule is built and tested but no sender calls it yet, and giving is deliberately left unwired.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The data rules Phase 1 asked for are database properties, not just form behaviour.**
+  - Where I checked the live catalog through QA's probes, each rule was refused by the layer I expected: the grant, the guard trigger, the partial unique index, the CHECK and the deferred trigger.
+  - This covers exactly one active main whenever any address exists, no delete, an immutable value, and `verified_at` writable only by the acceptance definer.
+  - The four 0059 reader sites are fixed forward in 0064. The diff is exactly four lines, and the parity golden is byte-identical.
+  - This closes the regression Phase 1 predicted: a removed address could otherwise still resolve an invitation acceptance and receive `verified_at`.
+- **The operator's four rulings are honoured as written.**
+  - Main plus a staff member's Work address in the directory, with `hide_email` hiding both.
+  - Per-purpose rules built now.
+  - Removing the Main address auto-promotes the oldest address, audited with `automatic: true`.
+  - The save toast names the new main address ("Now the main address: …").
+  - A shared address is allowed with a same-organization-only "Also on file for {Name}" note.
+- **"Which address does this send use?" is now asked mechanically.** `email-audience.ts` is a closed registry, and a source scan fails CI on any unclassified `templateKey`. That is the strongest available answer to the operator's "record the fact that thought needs to go into that", because it makes the thought a build requirement for the next sender.
+- **Phase 1's adversarial findings are closed and tested.**
+  - The oracle in Find-a-person and directory search is closed (F212).
+  - Audit metadata carries no address value.
+  - Auth paths are scan-proven never to read contact emails.
+  - The stale-form guard and the person lock stop concurrent saves from silently ending each other's rows.
+  - The partial-commit bug in `updatePerson` (F216) is fixed.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Phase 1 send-path inventory (10 rows).**
+
+| # | Path | Shipped | Verdict |
+|---|---|---|---|
+| 1 | Password reset, email-change and email verification | Registry `account`; scan proves auth paths never read contact emails | matches |
+| 2 | Feedback, ticket and domain notices | `account` | matches |
+| 3 | Ticket confirmation and reply | `account` | matches |
+| 4 | Designation invitations (founding administrator, treasurer) | Registry `typed`; the match uses active addresses only (`issue.ts` and the 0064 definers) | matches |
+| 5 | 2b sign-in invitation | Not built here. `presby_person_email(…, 'credential')` and `reader.ts` are ready; 2b's Phase 3 carries the handoff (ER13). | matches (deferred to 2b by design) |
+| 6 | Giving statement notice | Registry `donor`; **not wired** (D7) | **deferred: needs a TODO and operator acknowledgement** |
+| 7 | Statistics submission grant | `typed` | matches |
+| 8 | Event notices, newsletters, RSVP reminders | The `role` and `personal` classes exist and are tested, but nothing consumes them. The registry forces the choice on the first sender. | matches (nothing to wire) |
+| 9 | Hard-bounce handling | Not built | **tracked follow-up** |
+| 10 | Directory `mailto:` link | The Main address, deterministic; the staff Work line is added | matches |
+
+- **Operator Q2, "build per-purpose rules now… every existing send path wired".**
+  - Shipped: the rule is one pure function plus one SQL reader, with a matrix test pinning TypeScript to SQL. Every existing path is classified.
+  - Honest framing: of the existing paths, only giving would change behaviour if wired. All other paths use account, typed or donor addresses and never read `contact_methods`, so "wiring" them is classification.
+  - Giving is the one place the operator's "every existing send path" is not met.
+  - Phase 3 D7 and ER14 permit this, because a new recipient for a tier-2 financial notice needs a functional spec and copy.
+  - But the operator ruled "wire every path". **The operator has not yet been told, as far as the work-log shows.** That acknowledgement is a ship condition.
+  - Verdict: **acceptable drift, with a required TODO and operator notice.**
+- **Phase 1 Flow 3, "removing the main requires choosing a new one" (no silent auto-promotion).** Shipped: automatic promotion of the oldest, as the operator overrode. **Matches the operator ruling.**
+  - One residual: a typo fix creates a new row, so a corrected address counts as "oldest" from the day it was corrected. The release line must not call it "on file the longest" without that qualifier (see the corrected lines).
+- **Phase 1 verb, "see all of a person's addresses on the Community card".**
+  - Shipped: all addresses and badges appear in the edit page's editor only. The Community list shows the Main address. No read-only address card exists (Phase 3 S3).
+  - An administrator must open Edit to see the labels and flags.
+  - Verdict: **acceptable drift**, but the read-only card must be a tracked follow-up.
+- **Phase 1 Q1, "a staff member's Work address shows in the member directory".**
+  - Shipped: it shows for a staff member who is listed in the member directory.
+  - Staff anchors are not in the member directory (DECISION-129). A person who is only staff therefore shows no Work address to members.
+  - Honest tension: the operator may have pictured "staff" more broadly than this. The public staff directory is unchanged (0041 requires its own pipeline).
+  - Verdict: **acceptable drift, to be put to the operator explicitly**, not discovered later.
+- **Phase 1 gap 11 / Flow 4, "wizard passes all addresses to the duplicate match".**
+  - Shipped: it passes the search-step address only (D6). `presby_match_person()` reads identifiers, which this feature deliberately does not write (ER22), so contact rows could not match anyway.
+  - Verdict: **acceptable drift, tracked** (the Phase 3 TODO list).
+- **Phase 1 gap 10 (global-table visibility residual) and gap 11 (`person_identifiers` separate).** Shipped as the accepted `paper` residuals ER21 and ER22. Recorded in the draft DECISION-218, and release copy states it ("one set of addresses, shared by those congregations"). Verdict: **matches, once DECISION-218 and the TODO lines land.**
+- **Phase 1 gap 9, "`do_not_contact` has no way to be set".** Shipped: a per-address checkbox with honest hint copy. Matches.
+- **Phase 1 gap 13 (no importer), gap 12 (kind CHECK), gaps 1–6 and 8.** Shipped and covered by tests. Matches.
+- **Operator-added signed-in-address warning (platform invitations).** Shipped, non-blocking and scoped to this organization's roster. It does not read `users`. The invitation, queue row and audit row are unchanged. Verdict: **matches the operator's addition**, with one wrinkle noted under QA's notes.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** pass. The editor shows "No email address on file." with an Add button. The wizard and the existing `community-participants` spec walk the contact step with one blank row and pass unchanged (9/9).
+- **Failure microcopy:** pass.
+  - "We couldn't save. Nothing was changed. Try again." keeps the form values.
+  - `emails_changed` has its own human string.
+  - No raw database error reaches the page, per the e2e and action tests.
+  - QA saw the caught database error render as a human load failure ("We couldn't load this right now").
+  - The heading on that screen is wrong (see the follow-ups).
+- **Permission gate:** pass. `people.manage` is checked in the library before any write, the actor comes from the session, and `updatePersonAction` rebuilds its input so a stray property cannot reach the library. QA's feature-gate audit found no route, proxy or auth file in the diff.
+- **Audit event:** pass. Four `tenant.person_email.*` keys, written in the save transaction. `tenant.person.updated` moved in-transaction, which closes F199 for `updatePerson`. No address, fragment or domain in any metadata (scan, DB test and e2e all assert it).
+- **Mobile (360px):** pass. Stacked cards, 44px targets and an in-viewport dialog were checked in a real browser. `person-emails.spec.ts` ran 10/10 at desktop and 360px. The hydration spec passes in both lanes, with a negative control.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Release-Note Truth
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+The Phase 3 line is false, as QA found. Only Visitors, Staff and Former use the admin reader (`listCommunity` with `anyActiveEmailLikeSql`) that matches every active address. Members, Everyone and Participants go through `getDirectory` and match only displayed addresses.
 
-## Red Flags (if NEEDS REWORK)
+I read the other Phase 3 lines against the accepted residuals. **Three lines need changing.** The rest stand.
 
-- [Specific. What has to change before this ships.]
+**1. Replace the "Search shows only what the card shows" line with:**
+
+> **Search matches only what is shown.** Searching the member directory or Find a person now matches only the details a person's card shows, so a hidden email or phone no longer turns up. In Community, the Members, Everyone and Participants lists work the same way. The Visitors, Staff and Former lists match every address on file for a person.
+
+**2. Replace the "Removing an address" line with** (qualifies "on file the longest", which a typo fix makes untrue):
+
+> **Removing an address keeps a record.** A removed address stops being used and no longer shows, and a record of the change is kept. If you remove the main address, the oldest remaining address becomes the main one, and you are told which. An address you corrected counts from the day you corrected it.
+
+**3. Replace the "What members see" line with** (states the staff-anchor limit the operator should know about):
+
+> **What members see.** The member directory shows each person's main address. A staff member who is also listed in the member directory also shows their Work address. Both stay hidden if the person hides their email.
+
+**Lines that stand unchanged:**
+- More than one address per person
+- Shared addresses
+- "Don't send mail to this address"
+- People in more than one congregation
+- What did not change (the giving and account-email line)
+
+**The optional deploy-window line.** Keep it only if the migration-first window (0064 applied before the code deploy) is actually observed.
+
+**Do not add any claim that nothing is ever deleted.** F176 stays open for `addresses` and other tables.
+
+## Orchestrator's Owed Platform-Invite Copy
+
+"…takes effect when <name> accepts it from the email" is a **follow-up, not part of this ship.**
+- It lives in a different surface and a different pipeline's requirement (invitations; the 2026-10-21 operator ruling Q1).
+- The notice does not receive the invitee's name today, only `address`, so this is plumbing plus copy, not a string edit.
+- What shipped is already truthful: "Nobody holds this {role} until it is accepted," plus the new warning.
+- QA's PASS covers the notice component as it stands. Changing it now would need a re-run, and the change has no dependency on this pipeline's data rules.
+- The requirement was recorded for "the emails release", meaning the release vehicle, not this pipeline. It can ride the same release as a separate polish commit with its own work-log entry (Rule 8). Land it **before 2b**, because 2b's sign-in invitation notices will reuse this component.
+
+## QA's Non-Blocking Notes
+
+| Note | Class | Reason |
+|---|---|---|
+| Literal copy in `invitation-sent-notice.test.tsx:9` | **Follow-up (low)** | The test passes today and pins the shipped string. It can silently go stale if someone edits `actions.ts:738`. Fix by moving the strings into a shared copy module, not exporting from the `"use server"` file. Fold into the same polish commit as the owed invite copy, since both touch this component. |
+| Edit page load error shows "Add a person" | **Follow-up** | Pre-existing, same on `origin/main`. A user whose edit page fails to load sees the wrong page title. Pass `heading` to `MembersLoadError` at `community/[id]/edit/page.tsx:209`. |
+| `addressOnSignedInPerson` does not filter ended memberships | **Follow-up** | Not harmless. For a former member the warning says acceptance is refused unless the invitee signs in as that person. But 0064's treasurer accept path refuses an ended membership first, with `membership_ended`, whatever account is used. So the warning is misleading (wrong remedy) for a former member. It can only mislead when the address belongs to a signed-in former member, which is rare. Fix by joining on `m.ended_on is null` and adding a DB test. |
+
+## Ship Conditions (the orchestrator owes these in the ship commit or integration)
+
+These are gates, not follow-ups.
+
+1. **Tell the operator about D7**, and put the exact question in front of them: should giving stay wired to the donor record only?
+2. **Tell the operator about the staff-anchor limit** on the Work address (see the Phase 1 Q1 drift above).
+3. Land every item below in the ship commit(s). QA also noted the base is behind `origin/main` (0.40.0) and `community.ts` will conflict on rebase.
+   - The `_journal.json` entry (QA: without it a fresh install stops at 0061).
+   - The three staged patches from `scripts/person-emails/*.patch`.
+   - The ER2a function-definition diff on `development` before 0064 runs there.
+   - DECISION-215 to 219 and F210 to F217 (F216 closed, F210 to F214 closed by the migration).
+   - `schema-design-2.md`.
+   - The CLAUDE.md edit, for operator review.
+   - The `deployment.md` runbook (0064 before the code deploy).
+   - The functionality-map update (Rule 14).
+   - The release notes with the corrected lines above.
+   - The `docs/TODO.md` lines below (Rule 10).
+4. **Rule 13 (what's-new):** advisory, member-visible. Consider one short entry saying the member directory can now show a staff member's Work address, and that search matches only what a card shows. The rest is admin-facing.
+5. **Rule 12:** not applicable. The Source block names no feedback row; this originated from the operator.
+6. QA residue notes still stand and are the orchestrator's: `organization_service_times` fixture rows blocking `admin-organizations.spec.ts:433`; and parallel pipelines should use their own e2e port (the fadir run attached to this pipeline's dev server).
+
+## Follow-Ups
+
+Each is a TODO-ready line for `docs/TODO.md`. Source for all: `docs/work-log/2026-10-23-person-emails.md`.
+
+- [ ] **Giving: statement notice for a linked donor with no donor email.** Use the person's `personal` address at statement-snapshot time, through `contact-methods/reader.ts` only (never by naming `contact_methods` inside `src/lib/giving`), never a Work address. Needs the analyst's functional spec and copy first; giving is tier 2. Left unwired by D7; `giving.statement.notice` is registered as `donor`. Operator Q2 asked for every path to be wired. — Phase 6 (Phase 3 D7)
+- [ ] **Hard-bounce handling.** Mark the bounced address's `do_not_contact` from the Resend webhook so no later sender uses it. — Phase 1 inventory row 9
+- [ ] **2b: the sign-in invitation reads the address through `presby_person_email(…, 'credential')`.** Add `account_sign_in_invitation` to `EMAIL_AUDIENCE` as `person:credential`, drop `address_ambiguous`, and give every `contact_methods` predicate `ended_at is null`. The migration moves to 0065 and `test-rls-65.sql`. F199 is closed for `updatePerson`. — ER13, Phase 3 handoff to 2b
+- [ ] **Per-organization scoping of contact data.** `contact_methods` is global: another congregation's `people.manage` can see, end, relabel or re-main an address for a person who belongs to both, which can also change routing. Accepted `paper` residual (ER21, DECISION-218), bounded for credentials by R31, detected by audit. A D-level redesign. — Phase 1 gap 10
+- [ ] **`person_identifiers`.** Unverify or flag a verified identifier whose address has been ended everywhere. Giving link proposals do not see contact addresses. Add a second duplicate-match pass for addresses typed after the wizard's search step (D6). — ER22, Phase 1 gap 11
+- [ ] **F215: the wizard drops typed contact details for a confirmed existing person** (`createPerson` ignores them; the contact and review steps still show). Pre-existing. — Phase 3 D15
+- [ ] **F217: directory search does not escape `%` and `_`** (Community does). Pre-existing. — Phase 3
+- [ ] **A read-only address card on Community.** An administrator can see a person's addresses, labels and flags only by opening Edit. Phase 1 asked for the card; S3 narrowed to the editor. — Phase 1 verb 7 / Phase 3 S3
+- [ ] **Confirm the staff Work address is enough for the operator's intent.** Staff who are anchors only (not in the member directory, DECISION-129) show no Work address to members. Decide whether a staff listing, or the public staff directory (0041, its own pipeline), should show it. — Phase 6
+- [ ] **Self-service address editing; per-address directory privacy; a multi-phone editor.** Out of scope here. — Phase 1 out of scope
+- [ ] **A future importer must write through `contact-methods/store.ts`.** No importer exists. The single-writer scan will fail otherwise. — Phase 1 gap 13
+- [ ] **Platform invite success copy: "takes effect when <name> accepts it from the email".** Needs the invitee's name passed to `InvitationSentNotice`. Land as a polish commit with its own work-log before 2b, and move the notice strings into a shared copy module so the test imports the real text. Fold in the low-priority literal-copy residual in `invitation-sent-notice.test.tsx:9`. — Phase 6; the 2026-10-21 invitations Q1 ruling
+- [ ] **Edit page load error shows the wrong heading "Add a person".** Pass `heading` to `MembersLoadError` at `community/[id]/edit/page.tsx:209`. Pre-existing. — QA Run 2
+- [ ] **Signed-in-address warning counts former members.** Join `addressOnSignedInPerson` on `m.ended_on is null`, or it points a former member's invitee at the wrong remedy. Add a DB test. — QA Run 1 note, Phase 6
+- [ ] **F176 stays open** for `addresses` (`people.ts`) and the other tables it lists. The `contact_methods` arm is closed here. Release notes must not say nothing is ever deleted. — ER1e, Phase 3
+
+## Red Flags
+
+None. Nothing blocks the ship.
+
+The two things closest to one, if the operator or orchestrator skips them:
+- The operator is not told about D7 (giving unwired) and the staff-anchor limit.
+- The Phase 3 release-note line ships uncorrected.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. Every Phase 1 send path is registered and either wired, classified, or tracked (giving: D7, bounce handling and 2b: TODO). All 14 Phase 1 gaps addressed in code, as a recorded accepted residual, or as a tracked follow-up. Three Phase 3 release-note lines corrected (search, removal, staff display). The owed platform invite copy classified as a separate polish commit before 2b. QA's three non-blocking notes classified as follow-ups. 14 TODO-ready lines supplied. Ship conditions listed for the orchestrator (the operator told about D7 and the staff-anchor limit; journal, patches, ER2a diff, decisions, docs, map and TODO in the ship commit; what's-new advisory). | SHIP WITH NOTES | 2026-10-23 |
+
+**Next agent:** none. This verdict closes the entry once the orchestrator lands the ship conditions and TODO lines. The orchestrator also tells the operator about D7 and the staff-anchor limit. The next pipeline work is the owed invite-copy polish, then Increment 2b.

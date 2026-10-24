@@ -195,3 +195,45 @@ describe("the link actions", () => {
     expect(JSON.stringify(recordAudit.mock.calls)).not.toContain("Rene");
   });
 });
+
+// ---------------------------------------------------------------------------
+// zod 4 characterization (docs/work-log/2026-10-23-zod-4.md, Phase 3 "Tests" 2):
+// the id schemas accept the project's non-RFC ids (the built-in role ids in
+// shipped migrations and the seeded fixtures) and reject a malformed one. The
+// per-field zod text for an id is tamper-only, so a rejection pins the fixed
+// action copy and the failing paths only.
+// ---------------------------------------------------------------------------
+describe("id inputs accept non-RFC ids and refuse malformed ones", () => {
+  const ROLE = "00000000-0000-0000-0000-000000000005";
+  const FIXTURE = "d9100000-0000-0000-0000-000000000010";
+  const INVALID = "Check the highlighted fields and try again.";
+
+  it.each([ROLE, FIXTURE])("link, merge and donor-id actions reach the library with %s", async (id) => {
+    gate.mockResolvedValue(IDENTITY);
+    lib.confirmLink.mockResolvedValue({ kind: "ok", personName: "Constance Hale" });
+    lib.mergeDonors.mockResolvedValue({ kind: "ok", repointedCount: 0, inheritedLink: false });
+    lib.removeLink.mockResolvedValue({ kind: "ok", membershipId: id, personName: "Rene Removed" });
+    expect(await confirmLinkAction("s", { donorId: id, membershipId: id })).toMatchObject({ ok: true });
+    expect(await mergeDonorsAction("s", { sourceId: id, targetId: FIXTURE })).toMatchObject({ ok: true });
+    expect(await removeLinkAction("s", { donorId: id })).toEqual({ ok: true });
+    expect(lib.confirmLink).toHaveBeenCalledWith("person-1", "org-1", "user-1", id, id);
+    expect(lib.mergeDonors).toHaveBeenCalledWith("person-1", "org-1", "user-1", id, FIXTURE);
+    expect(lib.removeLink).toHaveBeenCalledWith("person-1", "org-1", "user-1", id);
+  });
+
+  it("refuses a malformed id before the library runs, naming the failing paths", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    const link = await confirmLinkAction("s", { donorId: "not-a-uuid", membershipId: "also-bad" });
+    expect(link).toMatchObject({ ok: false, error: INVALID });
+    expect(Object.keys((link as { fieldErrors: object }).fieldErrors).sort()).toEqual(["donorId", "membershipId"]);
+    const merge = await mergeDonorsAction("s", { sourceId: D1, targetId: "not-a-uuid" });
+    expect(merge).toMatchObject({ ok: false, error: INVALID });
+    expect(Object.keys((merge as { fieldErrors: object }).fieldErrors)).toEqual(["targetId"]);
+    const remove = await removeLinkAction("s", { donorId: "not-a-uuid" });
+    expect(remove).toMatchObject({ ok: false, error: INVALID });
+    expect(Object.keys((remove as { fieldErrors: object }).fieldErrors)).toEqual(["donorId"]);
+    expect(lib.confirmLink).not.toHaveBeenCalled();
+    expect(lib.mergeDonors).not.toHaveBeenCalled();
+    expect(lib.removeLink).not.toHaveBeenCalled();
+  });
+});

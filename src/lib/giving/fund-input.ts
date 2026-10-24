@@ -61,4 +61,4 @@ export const fundSchema = z
 export type FundInput = z.input<typeof fundSchema>;
 export type FundValues = z.output<typeof fundSchema>;
 
-export const updateFundSchema = z.object({ fundId: z.string().uuid() }).and(fundSchema);
+export const updateFundSchema = z.object({ fundId: z.guid() }).and(fundSchema);

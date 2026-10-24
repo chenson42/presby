@@ -13,14 +13,15 @@ import type { EmailRowInput } from "./types";
  *     the headroom is for blank rows a form leaves behind)
  *   - `value` at most 1000 raw characters, so a megabyte string never reaches
  *     the normalizer
- *   - ids are UUIDs, the subtype is one of the three labels or null
+ *   - ids are GUID-shaped (`z.guid()`, never `.uuid()`: not every id is RFC 9562),
+ *     the subtype is one of the three labels or null
  */
 export const MAX_RAW_EMAIL_ROWS = 20;
 export const MAX_RAW_EMAIL_VALUE = 1000;
 
 export const emailRowSchema = z
   .object({
-    id: z.string().uuid().optional(),
+    id: z.guid().optional(),
     value: z.string().max(MAX_RAW_EMAIL_VALUE),
     subtype: z.enum(EMAIL_SUBTYPES).nullable(),
     isPrimary: z.boolean(),
@@ -31,7 +32,7 @@ export const emailRowSchema = z
 export const emailRowsSchema = z
   .object({
     rows: z.array(emailRowSchema).max(MAX_RAW_EMAIL_ROWS),
-    knownIds: z.array(z.string().uuid()).max(MAX_RAW_EMAIL_ROWS),
+    knownIds: z.array(z.guid()).max(MAX_RAW_EMAIL_ROWS),
   })
   .strict();
 

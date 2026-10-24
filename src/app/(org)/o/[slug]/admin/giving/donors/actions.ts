@@ -27,9 +27,9 @@ import { createDonorSchema, updateDonorContactSchema } from "@/lib/giving/donor-
  * or the member's name (the link events name the membership id).
  */
 
-const linkSchema = z.object({ donorId: z.string().uuid(), membershipId: z.string().uuid() });
-const donorIdSchema = z.object({ donorId: z.string().uuid() });
-const mergeSchema = z.object({ sourceId: z.string().uuid(), targetId: z.string().uuid() });
+const linkSchema = z.object({ donorId: z.guid(), membershipId: z.guid() });
+const donorIdSchema = z.object({ donorId: z.guid() });
+const mergeSchema = z.object({ sourceId: z.guid(), targetId: z.guid() });
 
 function revalidateDonor(slug: string, donorId: string) {
   revalidatePath(`/o/${slug}/admin/giving/donors`);

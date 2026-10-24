@@ -72,7 +72,7 @@ export type CreateDonorValues = z.output<typeof createDonorSchema>;
 
 /** Editing a donor's name and contact detail (giving.manage). */
 export const updateDonorContactSchema = z.object({
-  donorId: z.string().uuid(),
+  donorId: z.guid(),
   displayName: donorDisplayNameSchema,
   ...donorContactFields,
 });

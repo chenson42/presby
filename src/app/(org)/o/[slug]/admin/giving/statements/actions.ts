@@ -27,7 +27,7 @@ import {
  * email, and never an amount (a statement's contents stay out of every log).
  */
 
-const uuid = z.string().uuid();
+const uuid = z.guid();
 const yearSchema = z.number().int().min(2000).max(2100);
 
 const issueInput = z.object({ year: yearSchema, cursor: uuid.nullish() });

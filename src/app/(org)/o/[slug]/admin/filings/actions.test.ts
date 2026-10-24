@@ -358,3 +358,46 @@ describe("withdrawFilingAction — success", () => {
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// zod 4 characterization (docs/work-log/2026-10-23-zod-4.md, Phase 3 "Tests" 2):
+// the publication id accepts the project's non-RFC ids and rejects a malformed
+// one (its zod text is tamper-only: failure only). The minute-reference
+// messages are what a user can reach through issues[0]?.message, so they are
+// pinned exactly.
+// ---------------------------------------------------------------------------
+describe("withdrawFilingAction — ids and the messages a user can reach", () => {
+  it.each(["00000000-0000-0000-0000-000000000005", "d9100000-0000-0000-0000-000000000010", PUBLICATION_ID])(
+    "accepts the non-RFC publication id %s",
+    async (publicationId) => {
+      const result = await withdrawFilingAction(SLUG, { ...VALID_INPUT, publicationId });
+      expect(result.ok).toBe(true);
+      expect(mockWithdrawFiling).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("refuses a malformed or missing publication id without calling the library", async () => {
+    for (const publicationId of ["not-a-uuid", "", undefined, 5]) {
+      // A tampered request is not bound by the action's TypeScript signature.
+      const result = await withdrawFilingAction(SLUG, { ...VALID_INPUT, publicationId } as unknown as typeof VALID_INPUT);
+      expect(result.ok).toBe(false);
+    }
+    expect(mockWithdrawFiling).not.toHaveBeenCalled();
+  });
+
+  it("pins the minute-reference messages exactly", async () => {
+    expect(await withdrawFilingAction(SLUG, { ...VALID_INPUT, minuteReference: "   " })).toEqual({
+      ok: false,
+      error: "Enter a minute reference.",
+    });
+    expect(await withdrawFilingAction(SLUG, { ...VALID_INPUT, minuteReference: "" })).toEqual({
+      ok: false,
+      error: "Enter a minute reference.",
+    });
+    expect(await withdrawFilingAction(SLUG, { ...VALID_INPUT, minuteReference: "x".repeat(501) })).toEqual({
+      ok: false,
+      error: "Minute reference must be 500 characters or fewer.",
+    });
+    expect(mockWithdrawFiling).not.toHaveBeenCalled();
+  });
+});

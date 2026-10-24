@@ -3,11 +3,27 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-24 (person emails integrated at v0.42.0; Community Increment 2 live at v0.41.0).
+Updated 2026-10-24 (zod 4 integrated at v0.42.2; v0.41.0, v0.42.0 and v0.42.1 are live).
 
 ---
 
-## RESUME HERE — 2026-10-24: v0.41.0 is live; person emails is integrated at v0.42.0, PR pending
+## RESUME HERE — 2026-10-24: v0.41.0, v0.42.0 and v0.42.1 are live; zod 4 is integrated at v0.42.2, PR pending
+
+**Live in production:** v0.41.0 (Community Increment 2), v0.42.0 (several email addresses per person) and v0.42.1 (the invitation screens say
+who has to accept; PR #48).
+
+`pipeline/zod-4` (worktree `presby-zod`, Neon `pipeline-zod-4`, no migration) is merged up to `main` at v0.42.1 and integrated as **v0.42.2**,
+a security patch: zod 3 to 4.6.7 closes high advisory GHSA-mrhx-c7xc-m3w5 and the `scripts/ci/audit-prod.mjs` exception is gone
+(`ACCEPTED = []`, expiry mechanism kept). Ids go through `z.guid()` (shipped role ids and fixtures are not RFC 9562, F225); the `zod/v3`
+subpath is rejected (F226); 16 golden files pin every message a user can see; a guard test bans `.uuid()` and the subpaths. No
+user-visible change except on hand-built requests. DECISION-223/224, F225-F229 (`docs/schema-design-2.md` §2x). QA PASS, Phase 6 SHIP WITH
+NOTES; the three notes are `docs/TODO.md` lines. **No production action**; after merge confirm CI's `audit-prod` job is green on `main`.
+
+**Next:** merge this PR through `/merge-pr` and check `npm ls zod` shows one copy; then the open items below (Community Increment 2b on migration `0065`, the F166 bug-fix pipeline, overdue reviews).
+
+---
+
+## Previous handoff — 2026-10-24 (earlier): v0.41.0 is live; person emails is integrated at v0.42.0
 
 **v0.41.0 (Community Increment 2) is live in production as of 2026-10-24 UTC.** `0062` was applied, then the code deployed, then `0063`, with a
 Neon snapshot taken first. The full `scripts/test-rls.sql` on `development` ran 1193 passes with three pre-existing data-drift failures.

@@ -45,14 +45,14 @@ export const reasonSchema = z
   .trim()
   .superRefine((value, ctx) => {
     if (CONTROL_RE.test(value)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: REASON_COPY.control });
+      ctx.addIssue({ code: "custom", message: REASON_COPY.control });
       return;
     }
     const length = codePointLength(value);
     if (length < REASON_MIN) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: REASON_COPY.short });
+      ctx.addIssue({ code: "custom", message: REASON_COPY.short });
     } else if (length > REASON_MAX) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: REASON_COPY.long });
+      ctx.addIssue({ code: "custom", message: REASON_COPY.long });
     }
   });
 
@@ -63,6 +63,22 @@ export function parseReason(raw: unknown): ReasonResult {
   if (parsed.success) return { ok: true, reason: parsed.data };
   return { ok: false, message: parsed.error.issues[0]?.message ?? REASON_COPY.short };
 }
+
+// ---------------------------------------------------------------------------
+// The revoke action's form fields. Lives here (not in the "use server" actions
+// file, which can export only async functions) so a test can reach it. Size
+// checks come first on the array, before any refinement.
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const revokeHolderFieldsSchema = z.object({
+  organizationId: z.string().regex(UUID_RE),
+  slot: z.enum(["founding_administrator", "treasurer"]),
+  subjectKind: z.enum(["person", "group"]),
+  subjectId: z.string().regex(UUID_RE),
+  expectedGrantIds: z.array(z.string().regex(UUID_RE)).min(1).max(20),
+});
 
 // ---------------------------------------------------------------------------
 // Outcomes (the action's `error` / the toast). The database-error sentence is

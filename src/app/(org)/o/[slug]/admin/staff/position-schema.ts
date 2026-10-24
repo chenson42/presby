@@ -38,8 +38,20 @@ export type StaffPositionFormValues = z.infer<typeof staffPositionSchema>;
  * enough to call `createStaffPersonAction()`.
  */
 export const newStaffPersonSchema = z.object({
-  firstName: z.string().trim().min(1, "First name is required").max(200),
-  lastName: z.string().trim().min(1, "Last name is required").max(200),
+  // The 200-character message is pinned to the string zod 3 showed by default:
+  // it is the one zod default a user can reach (the inputs have no maxLength),
+  // and the zod 4 upgrade must not change the copy. Reads awkwardly; improving
+  // it is a separate follow-up.
+  firstName: z
+    .string()
+    .trim()
+    .min(1, "First name is required")
+    .max(200, "String must contain at most 200 character(s)"),
+  lastName: z
+    .string()
+    .trim()
+    .min(1, "Last name is required")
+    .max(200, "String must contain at most 200 character(s)"),
   phone: z.string().trim().max(40).optional(),
   // The shared address list editor's field (the person's own edit page is where
   // the rest of a record is kept). Its path is `contact.emails` because the

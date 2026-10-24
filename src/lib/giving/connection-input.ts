@@ -17,8 +17,16 @@ import { z } from "zod";
 
 const whole = (label: string, min: number, max: number) =>
   z
-    .number({ invalid_type_error: `${label} must be a whole number.`, required_error: `${label} is required.` })
-    .int({ message: `${label} must be a whole number.` })
+    .number({
+      // `undefined` (a missing key) is "required"; every other type failure -
+      // NaN from an emptied number input, null, a string - is "whole number".
+      error: (iss) =>
+        iss.input === undefined ? `${label} is required.` : `${label} must be a whole number.`,
+    })
+    // Not `.int()`: zod 4's `.int()` also rejects integers beyond +/-2^53 as a
+    // type failure, which would put "whole number" ahead of "between ..." for a
+    // huge value. This keeps zod 3's first message (DECISION-224, F229).
+    .refine((n) => Number.isInteger(n), { message: `${label} must be a whole number.` })
     .min(min, { message: `${label} must be between ${min} and ${max}.` })
     .max(max, { message: `${label} must be between ${min} and ${max}.` });
 

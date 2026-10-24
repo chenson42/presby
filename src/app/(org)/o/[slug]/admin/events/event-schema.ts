@@ -47,7 +47,7 @@ function refineTimes(
 ) {
   if (values.endsAt && values.endsAt < values.startsAt) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: "custom",
       path: ["endsAt"],
       message: "End time can't be before the start time.",
     });
@@ -73,14 +73,14 @@ export const createEventSchema = z
 
     if (values.patternType === "simple" && !values.simplePattern) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["simplePattern"],
         message: "Choose a repeat pattern.",
       });
     }
     if (values.patternType === "dayofweek" && (!values.ordinal || !values.dayOfWeek)) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["dayOfWeek"],
         message: "Choose which day of the month this repeats on.",
       });
@@ -89,7 +89,7 @@ export const createEventSchema = z
     const count = Number(values.count);
     if (!values.count || !Number.isInteger(count) || count < 1 || count > MAX_SERIES_TOTAL) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["count"],
         message: `Enter a number of occurrences from 1 to ${MAX_SERIES_TOTAL}.`,
       });
@@ -114,14 +114,14 @@ export const extendSeriesSchema = z
   .superRefine((values, ctx) => {
     if (values.patternType === "simple" && !values.simplePattern) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["simplePattern"],
         message: "Choose a repeat pattern.",
       });
     }
     if (values.patternType === "dayofweek" && (!values.ordinal || !values.dayOfWeek)) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["dayOfWeek"],
         message: "Choose which day of the month this repeats on.",
       });
@@ -129,7 +129,7 @@ export const extendSeriesSchema = z
     const additionalCount = Number(values.additionalCount);
     if (!Number.isInteger(additionalCount) || additionalCount < 1) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["additionalCount"],
         message: "Enter at least 1 additional occurrence.",
       });

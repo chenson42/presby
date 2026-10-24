@@ -51,7 +51,7 @@ function summarizePermissions(keys: string[]): string {
 }
 
 // Simple client-side shape check only — the server action's zod schema
-// (`z.string().trim().toLowerCase().email().max(320)`) is the actual gate.
+// (`z.string().trim().toLowerCase().pipe(z.email().max(320))`) is the actual gate.
 // This exists only to keep the confirm dialog from opening on obvious
 // garbage, not to replace server-side validation.
 const EMAIL_SHAPE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

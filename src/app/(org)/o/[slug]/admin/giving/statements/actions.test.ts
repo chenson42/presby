@@ -221,3 +221,67 @@ describe("sendStatementNoticesAction", () => {
     expect(recordAudit).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// zod 4 characterization (docs/work-log/2026-10-23-zod-4.md, Phase 3 "Tests" 2):
+// the id schemas accept the project's non-RFC ids and reject a malformed one.
+// Where the action returns fixed copy for a bad id, that string is pinned
+// exactly; the per-field zod text (cursor, year) is tamper-only, so those pin
+// the action's fixed copy and the failing path only.
+// ---------------------------------------------------------------------------
+describe("id inputs accept non-RFC ids and refuse malformed ones", () => {
+  const NON_RFC = ["00000000-0000-0000-0000-000000000005", "d9100000-0000-0000-0000-000000000010"];
+  const GONE = "That statement no longer exists.";
+
+  it.each(NON_RFC)("reissue and record-delivery reach the library with statement id %s", async (id) => {
+    gate.mockResolvedValue(IDENTITY);
+    lib.reissueStatement.mockResolvedValue({ kind: "ok", statementId: id, version: 2 });
+    lib.recordDelivery.mockResolvedValue({ kind: "ok", alreadyRecorded: true });
+    expect(await reissueStatementAction("s", id)).toMatchObject({ ok: true });
+    expect(await recordDeliveryAction("s", id)).toEqual({ ok: true });
+    expect(lib.reissueStatement).toHaveBeenCalledWith("person-1", "org-1", "user-1", id);
+    expect(lib.recordDelivery).toHaveBeenCalledWith("person-1", "org-1", "user-1", id);
+  });
+
+  it("refuses a malformed statement id with the fixed copy and no library call", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    expect(await reissueStatementAction("s", "not-a-uuid")).toEqual({ ok: false, error: GONE });
+    expect(await recordDeliveryAction("s", "not-a-uuid")).toEqual({ ok: false, error: GONE });
+    expect(await reissueStatementAction("s", undefined)).toEqual({ ok: false, error: GONE });
+    expect(lib.reissueStatement).not.toHaveBeenCalled();
+    expect(lib.recordDelivery).not.toHaveBeenCalled();
+  });
+
+  it.each(NON_RFC)("issue and notices accept the cursor %s, and null or absent", async (cursor) => {
+    gate.mockResolvedValue(IDENTITY);
+    lib.issueStatementBatch.mockResolvedValue({ kind: "ok", issued: 0, skipped: 0, failed: [], nextCursor: null, issuedStatements: [] });
+    lib.sendStatementNotices.mockResolvedValue({ kind: "ok", sent: 0, skipped: 0, failed: 0, nextCursor: null, sentStatements: [] });
+    await issueStatementBatchAction("s", { year: 2027, cursor });
+    await sendStatementNoticesAction("s", { year: 2027, cursor });
+    expect(lib.issueStatementBatch).toHaveBeenLastCalledWith("person-1", "org-1", "user-1", { year: 2027, cursor });
+    expect(lib.sendStatementNotices).toHaveBeenLastCalledWith("person-1", "org-1", "user-1", { year: 2027, cursor });
+    await issueStatementBatchAction("s", { year: 2027, cursor: null });
+    await issueStatementBatchAction("s", { year: 2027 });
+    expect(lib.issueStatementBatch).toHaveBeenLastCalledWith("person-1", "org-1", "user-1", { year: 2027, cursor: null });
+  });
+
+  it("refuses a malformed cursor or an out-of-range year at the right path", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    const INVALID = "Check the highlighted fields and try again.";
+    for (const [input, path] of [
+      [{ year: 2027, cursor: "not-a-uuid" }, "cursor"],
+      [{ year: 1999 }, "year"],
+      [{ year: 2101 }, "year"],
+      [{ year: 2027.5 }, "year"],
+      [{ year: "2027" }, "year"],
+    ] as const) {
+      for (const action of [issueStatementBatchAction, sendStatementNoticesAction]) {
+        const refused = await action("s", input);
+        expect(refused).toMatchObject({ ok: false, error: INVALID });
+        expect(Object.keys((refused as { fieldErrors: object }).fieldErrors)).toEqual([path]);
+      }
+    }
+    expect(lib.issueStatementBatch).not.toHaveBeenCalled();
+    expect(lib.sendStatementNotices).not.toHaveBeenCalled();
+  });
+});

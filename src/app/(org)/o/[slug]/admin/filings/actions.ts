@@ -31,7 +31,7 @@ const FILINGS_FLAG = "org_portal.filings";
 const FILINGS_ORG_TYPES: readonly OrganizationType[] = ["congregation"];
 
 const withdrawFilingSchema = z.object({
-  publicationId: z.string().uuid(),
+  publicationId: z.guid(),
   minuteReference: z
     .string()
     .trim()

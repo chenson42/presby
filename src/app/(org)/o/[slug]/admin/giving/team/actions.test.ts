@@ -145,3 +145,49 @@ describe("ensureGivingRoleAction", () => {
     expect(((await ensureGivingRoleAction("s", { templateKey: "giving_recorder" })) as { error: string }).error).toMatch(pattern);
   });
 });
+
+// ---------------------------------------------------------------------------
+// zod 4 characterization (docs/work-log/2026-10-23-zod-4.md, Phase 3 "Tests" 2):
+// the id schemas accept the project's non-RFC ids (the built-in role ids in
+// shipped migrations are 00000000-...-00000000000N) and reject a malformed one.
+// The per-field zod text for an id is tamper-only, so a rejection pins the
+// fixed action copy and the failing paths only.
+// ---------------------------------------------------------------------------
+describe("id inputs accept non-RFC ids and refuse malformed ones", () => {
+  const NON_RFC = ["00000000-0000-0000-0000-000000000005", "d9100000-0000-0000-0000-000000000010"];
+  const INVALID = "Check the highlighted fields and try again.";
+
+  it.each(NON_RFC)("grant accepts %s as the role id and as the person id", async (id) => {
+    gate.mockResolvedValue(IDENTITY);
+    lib.grantGivingRole.mockResolvedValue({ kind: "ok", grantId: GRANT, roleKey: "giving_recorder", roleName: "Giving Recorder" });
+    expect(await grantGivingRoleAction("s", { roleId: id, personId: id })).toEqual({ ok: true, data: { grantId: GRANT } });
+    expect(lib.grantGivingRole).toHaveBeenCalledWith("person-1", "org-1", "user-1", { roleId: id, personId: id });
+  });
+
+  it.each(NON_RFC)("revoke accepts %s as the grant id", async (id) => {
+    gate.mockResolvedValue(IDENTITY);
+    lib.revokeGivingRole.mockResolvedValue({ kind: "ok", roleId: ROLE, roleKey: "giving_recorder", personId: PERSON });
+    expect(await revokeGivingRoleAction("s", { grantId: id })).toEqual({ ok: true });
+    expect(lib.revokeGivingRole).toHaveBeenCalledWith("person-1", "org-1", { grantId: id });
+  });
+
+  it("refuses a malformed id before the library runs, naming the failing paths", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    const grant = await grantGivingRoleAction("s", { roleId: "not-a-uuid", personId: "also-bad" });
+    expect(grant).toMatchObject({ ok: false, error: INVALID });
+    expect(Object.keys((grant as { fieldErrors: object }).fieldErrors).sort()).toEqual(["personId", "roleId"]);
+    const revoke = await revokeGivingRoleAction("s", { grantId: "not-a-uuid" });
+    expect(revoke).toMatchObject({ ok: false, error: INVALID });
+    expect(Object.keys((revoke as { fieldErrors: object }).fieldErrors)).toEqual(["grantId"]);
+    expect(lib.grantGivingRole).not.toHaveBeenCalled();
+    expect(lib.revokeGivingRole).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown template key at its path (the enum text is tamper-only)", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    const refused = await ensureGivingRoleAction("s", { templateKey: "owner" });
+    expect(refused).toMatchObject({ ok: false, error: INVALID });
+    expect(Object.keys((refused as { fieldErrors: object }).fieldErrors)).toEqual(["templateKey"]);
+    expect(lib.ensureGivingRole).not.toHaveBeenCalled();
+  });
+});

@@ -175,3 +175,50 @@ describe("reactivateFundAction", () => {
     expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "tenant.giving_fund.reactivated" }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// zod 4 characterization (docs/work-log/2026-10-23-zod-4.md, Phase 3 "Tests" 2):
+// the id schemas accept the project's non-RFC ids and reject a malformed one.
+// The per-field zod text for an id is tamper-only, so a rejection pins the
+// fixed action copy and the failing path only.
+// ---------------------------------------------------------------------------
+describe("id inputs accept non-RFC ids and refuse malformed ones", () => {
+  const INVALID = "Check the highlighted fields and try again.";
+
+  it.each(["00000000-0000-0000-0000-000000000005", "d9100000-0000-0000-0000-000000000010"])(
+    "retire and reactivate reach the library with %s",
+    async (id) => {
+      gate.mockResolvedValue(IDENTITY);
+      lib.retireFund.mockResolvedValue({ kind: "ok" });
+      lib.reactivateFund.mockResolvedValue({ kind: "ok" });
+      expect(await retireFundAction("s", { fundId: id })).toMatchObject({ ok: true });
+      expect(await reactivateFundAction("s", { fundId: id })).toMatchObject({ ok: true });
+      expect(lib.retireFund.mock.calls[0]!.slice(0, 4)).toEqual(["person-1", "org-1", "user-1", id]);
+      expect(lib.reactivateFund.mock.calls[0]!.slice(0, 4)).toEqual(["person-1", "org-1", "user-1", id]);
+    },
+  );
+
+  it("updateFundAction accepts a non-RFC fund id and refuses a malformed one", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    lib.updateFund.mockResolvedValue({ kind: "ok", changedFields: [] });
+    await updateFundAction("s", { ...valid, fundId: "d9100000-0000-0000-0000-000000000010" });
+    expect(lib.updateFund).toHaveBeenCalledTimes(1);
+    expect(lib.updateFund.mock.calls[0]![3]).toBe("d9100000-0000-0000-0000-000000000010");
+    lib.updateFund.mockClear();
+    const refused = await updateFundAction("s", { ...valid, fundId: "not-a-uuid" });
+    expect(refused).toMatchObject({ ok: false, error: INVALID });
+    expect(Object.keys((refused as { fieldErrors: object }).fieldErrors)).toEqual(["fundId"]);
+    expect(lib.updateFund).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed id on retire and reactivate with the failing path", async () => {
+    gate.mockResolvedValue(IDENTITY);
+    for (const call of [retireFundAction, reactivateFundAction]) {
+      const refused = await call("s", { fundId: "not-a-uuid" });
+      expect(refused).toMatchObject({ ok: false, error: INVALID });
+      expect(Object.keys((refused as { fieldErrors: object }).fieldErrors)).toEqual(["fundId"]);
+    }
+    expect(lib.retireFund).not.toHaveBeenCalled();
+    expect(lib.reactivateFund).not.toHaveBeenCalled();
+  });
+});

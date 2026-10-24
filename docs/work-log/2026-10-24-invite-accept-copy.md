@@ -19,7 +19,7 @@
 | 2 — Architectural review | architect | Skipped — no new dependency, directory, schema or API surface (result shapes in issue.ts grow a display-name field only) | — | 2026-10-24 |
 | 3 — Technical design | tech-lead (folded into the implementer, accelerated) | Complete | Design note recorded | 2026-10-24 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green (DB-backed tests and e2e not run) | 2026-10-24 |
-| 5 — Verification | qa | Run 1 FAIL: long unbroken name overflows the section line and the list For row at 360px; treasurer resend name lacks a DB test | FAIL (run 1) | 2026-10-24 |
+| 5 — Verification | qa | Run 1 FAIL (360px overflow ×2; treasurer resend DB test) → fix 14671d0; Run 2 PASS: overflow fixed on both paths at 360px and desktop, DB test with mutation control | PASS (run 2) | 2026-10-24 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -419,6 +419,111 @@ To close items 1 and 2, add a 360px assertion with a long unbroken name to `e2e/
 | 5 — Verification | qa | Complete | FAIL (narrow-viewport overflow ×2; treasurer resend name has no DB test) | 2026-10-24 |
 
 **Handoff:** next agent is **full-stack-developer** (Phase 4 fix pass), with items 1-3 above. QA re-runs the changed tests, the 360px check and `test:db -- src/lib/onboarding/issue.db.test.ts`. Typecheck, lint, check and the unit suite run in full again; everything else that passed here stands.
+
+---
+
+## Run 2: PASS
+
+**Date:** 2026-10-24
+**Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-invite-copy`, `pipeline/invite-accept-copy` at `14671d0` (the fix pass on top of `dbd1d8f`). The DB tests and e2e ran against the worktree's `.env.local` (Neon branch `pipeline-invite-copy`). No values were printed. No repo file was edited, and `git status` is clean at the end.
+
+**Scope run (scoped re-check, as Run 1's handoff set out):**
+- **In full:** typecheck, lint, `npm run check` (all eight tripwires), the unit suite.
+- **DB:** `npm run test:db -- src/lib/onboarding/issue.db.test.ts`. I also ran one mutation control in a scratch copy.
+- **e2e:** run from a scratch copy at `/private/tmp/qa-invite-r2`, deleted afterwards, with a dev server on port 3440 and `E2E_BASE_URL=http://localhost:3440`:
+  - a negative control of the new 360px test against `dbd1d8f`'s three components;
+  - the whole `e2e/admin-organizations.spec.ts` at HEAD;
+  - a QA-only scratch spec for the treasurer long-name path at 360px and 1280px, plus a desktop layout check. It was never committed and was deleted with the copy.
+- **Not re-run, Run 1 stands:** `npm run build`, the other 15 `src/lib/onboarding` DB files, `invitation-new-account.spec.ts`, `invitation-existing-account.spec.ts`, `designation-revoke.spec.ts`, the coverage figures, the copy-truthfulness and bidi audit, and the feature-gate audit. The fix pass touches no action, route, copy module or `issue.ts` logic, so none of those can have changed.
+- **Not auth-touching.** The stricter gate does not apply.
+
+**Diff scope (`git diff dbd1d8f 14671d0`):** 6 files, exactly the expected set: `founding-administrator-section.tsx` (+1/-1), `treasurer-designation-section.tsx` (+1/-1), `invitation-list.tsx` (+6/-3), `src/lib/onboarding/issue.db.test.ts` (+19), `e2e/admin-organizations.spec.ts` (+72) and the work-log. It adds no `.skip`, `.only`, `skipIf` or `fixme`.
+
+### Type Check
+
+`npm run typecheck`: PASS
+
+Also passed:
+- `npm run lint` (`--max-warnings=0`)
+- `npm run check`: all eight pass by name. These are `check:audit`, `check:sql-date`, `check:deps-drift`, `check:brand-scope`, `check:secrets`, `check:hydration-gate`, `check:giving-boundaries` and `check:proxy-imports`.
+
+### Unit Tests
+
+**Total: 10473 | Passed: 8031 | Failed: 0 | Skipped: 2442 (77 files) | Duration: 25.5s**
+
+- The skips are the same 77 DB-backed files as in Run 1.
+- The extra skip (2441 → 2442) is the new `issue.db.test.ts` case, which skips without a database in `npm run test`.
+
+**DB-backed, `npm run test:db -- src/lib/onboarding/issue.db.test.ts`:** 63/63 passed (Run 1 had 62) on the first run. There was no dropped connection, so no re-run was needed.
+
+- **The new case exists and pins first name only.** `issue.db.test.ts:839`, "a treasurer resend carries the roster person's FIRST NAME as inviteeDisplayName, never the last name":
+  - It seeds a treasurer invitation with `personId` set. The `member()` helper at `:80-81` creates "Odalys Pennick".
+  - It calls `issue.resendInvitation` against the real schema.
+  - It asserts `toBe("Odalys")` and `not.toContain("Pennick")`.
+- **Mutation control (scratch copy only):** I changed the resend query at `issue.ts:743` to return `first_name || ' ' || last_name`. The case fails with `Expected: "Odalys" / Received: "Odalys Pennick"`, so it can catch the defect it names.
+
+### End-to-End Tests
+
+**Whole `e2e/admin-organizations.spec.ts` at HEAD: Total 25 | Passed 25 | Failed 0 | Skipped 0 | 1.9m**, on the first run with no retries.
+
+**The new 360px test** (`e2e/admin-organizations.spec.ts:1093`, describe "long unbroken name at 360 px"):
+- It sends a founding-administrator invitation with a 100 + 100 character unbroken name at a 360×740 viewport. It then walks the section and every element inside it, and asserts three things:
+  - no element's right edge is past the viewport;
+  - no element's content is wider than its box (`scrollWidth > clientWidth`);
+  - the document is no wider than the viewport.
+- **Negative control:** with `dbd1d8f`'s three components restored, it fails with 13 offenders. The section content is 1468px in a 294px box, the `p` is 1413/262, the `ul`, `li[invitation-row]` and `dl` all overflow, and the `dd` right edge is at 1501px.
+- **At HEAD it passes.**
+
+**QA treasurer long-name check (scratch spec).** The roster person has a first name of 100 unbroken "Q" characters and the last name "Lastnameqa". Each case was measured after the send and again after a fresh load:
+
+| Case | Notice | Section open line | List "For" row | Page sideways scroll |
+|---|---|---|---|---|
+| Treasurer, 360px, `dbd1d8f` components | wraps | overflows (`p` 1074/262) | overflows (right edge 1158px) | **yes**, document 1158px wide |
+| Treasurer, 360px, HEAD | wraps | wraps | wraps (For item 236×120) | none (document 360px) |
+| Treasurer, 1280px, `dbd1d8f` components | wraps | overflows (`p` 1074/862) | overflows (`dd` right edge 1378px) | **yes**, document 1378px wide |
+| Treasurer, 1280px, HEAD | wraps | wraps | wraps inside its 406px column | none (document 1280px) |
+
+- At every width the last name never appeared in the section, so first name only holds in the browser too. I checked the screenshots by eye.
+- The pre-fix overflow also existed at desktop width, so the fix closes that as well.
+
+**Desktop list layout (item 5).** I sent a founding-administrator invitation with an ordinary name ("Rosalind Thistlewood") at 1280px and compared the row's `<dl>` against the `dbd1d8f` components:
+- Before and after are identical: `grid-template-columns: 406px 406px`, `dl` 836×44.
+- All four items (For, Sent, Expires, Email) sit at the same x, y and size, 406×20 each. The screenshot looks the same.
+- The `grid-cols-1` change is overridden by `sm:grid-cols-2` at desktop as intended. `min-w-0` changes nothing for a name that fits.
+
+### Regression Tests Added
+
+- **Overflow:** "the notice, the open line and the For row wrap; no element passes the viewport and the page does not scroll sideways — regression for long-name overflow" (`e2e/admin-organizations.spec.ts:1093`).
+  - It guards the section line and the list "For" row overflowing at 360px with a long unbroken name.
+  - I watched it fail against the pre-fix components and pass at HEAD. It carries the `— regression for` suffix.
+- **Treasurer resend name:** "a treasurer resend carries the roster person's FIRST NAME as inviteeDisplayName, never the last name" (`src/lib/onboarding/issue.db.test.ts:839`).
+  - It closes the Run 1 coverage gap (item 3). It is a coverage addition, not a bug-fix regression, because the code under test was already correct.
+  - The mutation control above shows it fails when the last name leaks.
+
+### Coverage on Critical Modules
+
+Not re-run. Run 1's figures stand: `permissions.ts` 100%, `two-factor.ts` 91.3%, `flags.ts` 100%, `invitation-copy.ts` 100%, `input.ts` 100%. The fix pass changes no pure module.
+
+### Feature-Gate Audit
+
+No protected routes touched in this fix pass. It changes three client components (class names only), one DB test and one e2e spec. Run 1's table stands for the three invitation actions, all of which pass `auth()` + `hasFeature(…, FEATURES.ADMIN_ORGANIZATIONS)`. Schema/RLS audit: not applicable.
+
+### Verdict
+
+**PASS.** All three Run 1 items are closed:
+
+1. **Section open/expired line at 360px:** fixed. `[overflow-wrap:anywhere]` was added at `founding-administrator-section.tsx:215` and `treasurer-designation-section.tsx:153`. I verified it on both the founding-administrator path (shipped e2e) and the treasurer path (QA scratch).
+2. **List "For" row:** fixed. `invitation-list.tsx:124-131` now has `grid-cols-1`, `min-w-0` on the grid item and the `dd`, and `[overflow-wrap:anywhere]`. I verified it on both paths, at 360px and 1280px, and the desktop layout with an ordinary name is unchanged.
+3. **Treasurer resend name:** covered by a real-schema DB test that pins first name only and fails under mutation.
+
+**Non-blocking notes carried to Phase 6** (from Run 1, unchanged):
+- **Bidi residuals:** LRM, RLM and ALM are not stripped, the 100-character limit is checked before the strip, and the protection is application-level only.
+- **Wording:** "takes effect when … accepts" is conditional in practice, since acceptance can still be blocked at accept time.
+- **Treasurer e2e regex:** the `.+` at `:777` does not pin first-name-only. The DB test pins it, and the QA scratch check showed it holds in the browser.
+- **Earlier regression tests:** Run 1's regression tests still lack the `— regression for` suffix. The new e2e test has it.
+- **Treasurer list rows** now show the live roster first name on every row, including ended and redacted rows. This fits the 0059 "names retained after redaction" residual, but it is new for treasurer rows.
+- **New, cosmetic:** at 360px the success toast overlays the top of the section for a moment after a send. Nothing overflows. It is the existing toast behaviour, not this diff.
 
 ---
 

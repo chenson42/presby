@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HydrationGate } from "@/components/shared/hydration-gate";
 import { sectionLead } from "@/lib/onboarding/designation-holder-copy";
+import { expiredInvitationLine, openInvitationLine } from "@/lib/onboarding/invitation-copy";
 import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
 import { inviteTreasurerAction } from "./actions";
@@ -79,6 +80,8 @@ export function TreasurerDesignationSection({
   // re-reads and the section outlives every branch below.
   const [revokeNotice, setRevokeNotice] = useState<string | null>(null);
   const [email, setEmail] = useState("");
+  // The address of the last send, kept after the form clears so the notice can name it.
+  const [sentAddress, setSentAddress] = useState<string | undefined>(undefined);
   const trimmedEmail = email.trim();
   const emailLooksValid = EMAIL_SHAPE_RE.test(trimmedEmail);
   const selfAddressed =
@@ -93,15 +96,19 @@ export function TreasurerDesignationSection({
       return inviteTreasurerAction(fd);
     },
     successToast: `Invitation to ${trimmedEmail} sent.`,
-    onSent: () => setEmail(""),
+    onSent: () => {
+      setSentAddress(trimmedEmail);
+      setEmail("");
+    },
   });
 
-  const hasOpen = invitations.some((i) => i.status === "pending" || i.status === "expired");
+  const openInvitation = invitations.find((i) => i.status === "pending" || i.status === "expired");
+  const hasOpen = openInvitation !== undefined;
   const list = (
-    <InvitationList organizationId={organizationId} invitations={invitations} role="access" />
+    <InvitationList organizationId={organizationId} invitations={invitations} purpose="treasurer" />
   );
   const sentNotice = flow.result ? (
-    <InvitationSentNotice result={flow.result} role="access" />
+    <InvitationSentNotice result={flow.result} address={sentAddress} purpose="treasurer" />
   ) : null;
   const revokeStatus = revokeNotice ? (
     <p role="status" className="mt-3 rounded-md border border-border bg-muted p-3 text-sm">
@@ -144,8 +151,9 @@ export function TreasurerDesignationSection({
           Treasurer
         </h2>
         <p className="mt-1 text-sm text-foreground">
-          An invitation is open. Nobody holds this access until it is accepted. Resend it if the email
-          went astray, or revoke it to invite someone else.
+          {openInvitation?.status === "expired"
+            ? expiredInvitationLine("treasurer", openInvitation.inviteeDisplayName)
+            : openInvitationLine("treasurer", openInvitation?.inviteeDisplayName)}
         </p>
         {revokeStatus}
         {sentNotice}

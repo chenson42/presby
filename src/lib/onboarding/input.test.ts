@@ -30,6 +30,14 @@ describe("normalizePersonName", () => {
     expect(normalizePersonName("José")).toBe("José"); // e + combining acute -> precomposed
     expect(normalizePersonName("A\nB")).toBe("AB");
   });
+  it("strips bidirectional override, embedding and isolate controls (they could reorder a sentence that shows the name)", () => {
+    expect(normalizePersonName("Marie\u202eDoe")).toBe("MarieDoe");
+    expect(normalizePersonName("\u202aMarie\u202c")).toBe("Marie");
+    expect(normalizePersonName("\u2066Marie\u2069 Doe")).toBe("Marie Doe");
+    expect(normalizePersonName("\u202e\u2066")).toBeNull();
+    // Ordinary right-to-left letters and the benign marks are untouched.
+    expect(normalizePersonName("שלום")).toBe("שלום");
+  });
   it("rejects empty, whitespace-only, control-only and over-100 names", () => {
     expect(normalizePersonName("")).toBeNull();
     expect(normalizePersonName("   ")).toBeNull();

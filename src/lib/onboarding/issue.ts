@@ -2,6 +2,7 @@ import "server-only";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { getPlatformDb } from "@/lib/db";
 import { emailQueue } from "@/lib/db/schema";
+import { people } from "@/lib/db/domain/people";
 import { accountInvitations, type AccountInvitationPurpose } from "@/lib/db/domain/invitations";
 import { AUDIT_ACTIONS, insertAuditRow, type AuditActor } from "@/lib/audit-tx";
 import { attemptQueuedSend, cancelQueuedEmail, insertQueueRowInTx } from "@/lib/email/queue";
@@ -14,6 +15,7 @@ import {
   renderInvitationEmail,
 } from "./invitation-email";
 import { deriveInvitationStatus, deliveryState, type DeliveryState, type InvitationStatus } from "./status";
+import { deriveInviteeDisplayName, type InvitationWarningCode } from "./invitation-copy";
 import {
   UUID_RE,
   normalizeInvitationEmail,
@@ -114,7 +116,7 @@ export interface InvitationActor {
 }
 
 /** A non-blocking note on a created invitation. */
-export type InvitationWarning = "address_on_signed_in_person";
+export type InvitationWarning = InvitationWarningCode;
 
 export interface CreateInvitationInput {
   organizationId: string;
@@ -134,6 +136,12 @@ export type CreateInvitationResult =
       expiresAt: Date;
       delivery: "sent" | "queued";
       selfAddressed: boolean;
+      /**
+       * Who must accept, for the operator's success notice: the founding
+       * administrator's typed name, or the treasurer's roster FIRST NAME only.
+       * Null only if the data to derive it is missing.
+       */
+      inviteeDisplayName: string | null;
       /** Present only when non-empty. The invitation WAS created and sent. */
       warnings?: InvitationWarning[];
     }
@@ -157,6 +165,8 @@ export type ResendInvitationResult =
       invitationId: string;
       expiresAt: Date;
       delivery: "sent" | "queued";
+      /** As on a create: the founding administrator's name, or the treasurer's first name. */
+      inviteeDisplayName: string | null;
     }
   | { kind: "not_found" }
   | { kind: "not_open" }
@@ -180,6 +190,11 @@ export interface InvitationListRow {
   email: string | null;
   inviteeFirstName: string | null;
   inviteeLastName: string | null;
+  /**
+   * Who the invitation is for: the founding administrator's typed name, or the
+   * treasurer's roster FIRST NAME only. Server-derived; null when unavailable.
+   */
+  inviteeDisplayName: string | null;
   personId: string | null;
   status: InvitationStatus;
   delivery: DeliveryState;
@@ -447,6 +462,7 @@ type CreateTxOutcome =
       invitationId: string;
       queueId: string;
       expiresAt: Date;
+      inviteeDisplayName: string | null;
       selfAddressed: boolean;
       warnings: InvitationWarning[];
     }
@@ -603,6 +619,12 @@ export async function createInvitation(
         expiresAt,
         selfAddressed,
         warnings,
+        inviteeDisplayName: deriveInviteeDisplayName({
+          purpose: input.purpose,
+          firstName,
+          lastName,
+          rosterFirstName: input.purpose === "treasurer" ? greetingName : null,
+        }),
       };
     });
 
@@ -616,6 +638,7 @@ export async function createInvitation(
       expiresAt: outcome.expiresAt,
       delivery,
       selfAddressed: outcome.selfAddressed,
+      inviteeDisplayName: outcome.inviteeDisplayName,
       ...(outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
     };
   } catch (err) {
@@ -649,7 +672,13 @@ type OpenRow = {
 };
 
 type ResendTxOutcome =
-  | { kind: "created"; invitationId: string; queueId: string; expiresAt: Date }
+  | {
+      kind: "created";
+      invitationId: string;
+      queueId: string;
+      expiresAt: Date;
+      inviteeDisplayName: string | null;
+    }
   | Exclude<ResendInvitationResult, { kind: "ok" } | { kind: "db_error" } | { kind: "link_origin_unavailable" }>;
 
 export async function resendInvitation(input: {
@@ -708,11 +737,13 @@ export async function resendInvitation(input: {
       // The greeting name: the invitee's own name (founding administrator), or
       // the roster person's first name (treasurer).
       let greetingName = found.invitee_first_name;
+      let rosterFirstName: string | null = null;
       if (found.purpose === "treasurer" && found.person_id) {
         const person = rowsOf<{ first_name: string }>(
           await tx.execute(sql`select first_name from people where id = ${found.person_id}::uuid`),
         )[0];
         greetingName = person?.first_name ?? null;
+        rosterFirstName = greetingName;
       }
 
       const rendered = renderInvitationEmail({
@@ -773,12 +804,29 @@ export async function resendInvitation(input: {
         },
       });
 
-      return { kind: "created", invitationId: created!.id, queueId: queued.id, expiresAt };
+      return {
+        kind: "created",
+        invitationId: created!.id,
+        queueId: queued.id,
+        expiresAt,
+        inviteeDisplayName: deriveInviteeDisplayName({
+          purpose: found.purpose,
+          firstName: found.invitee_first_name,
+          lastName: found.invitee_last_name,
+          rosterFirstName,
+        }),
+      };
     });
 
     if (outcome.kind !== "created") return outcome;
     const delivery = await sendAfterCommit(outcome.queueId);
-    return { kind: "ok", invitationId: outcome.invitationId, expiresAt: outcome.expiresAt, delivery };
+    return {
+      kind: "ok",
+      invitationId: outcome.invitationId,
+      expiresAt: outcome.expiresAt,
+      delivery,
+      inviteeDisplayName: outcome.inviteeDisplayName,
+    };
   } catch (err) {
     if (isOpenDesignationViolation(err)) return { kind: "not_open" };
     console.error("[invitations] resend failed:", errorClass(err));
@@ -902,6 +950,9 @@ export async function listInvitationsForOrg(organizationId: string): Promise<Inv
   const rows = await getPlatformDb()
     .select({
       inv: accountInvitations,
+      // The treasurer's invitation stores only `personId`; the roster person's
+      // first name is what the list and the notice show. Platform connection.
+      rosterFirstName: people.firstName,
       queueStatus: emailQueue.status,
       deliveredAt: emailQueue.deliveredAt,
       bouncedAt: emailQueue.bouncedAt,
@@ -909,12 +960,13 @@ export async function listInvitationsForOrg(organizationId: string): Promise<Inv
     })
     .from(accountInvitations)
     .leftJoin(emailQueue, eq(emailQueue.id, accountInvitations.emailQueueId))
+    .leftJoin(people, eq(people.id, accountInvitations.personId))
     .where(
       and(eq(accountInvitations.organizationId, organizationId), isNull(accountInvitations.supersededAt)),
     )
     .orderBy(desc(accountInvitations.createdAt));
 
-  return rows.map(({ inv, queueStatus, deliveredAt, bouncedAt, complainedAt }) => {
+  return rows.map(({ inv, rosterFirstName, queueStatus, deliveredAt, bouncedAt, complainedAt }) => {
     const status = deriveInvitationStatus(inv, now) as InvitationStatus;
     const open = status === "pending" || status === "expired";
     return {
@@ -923,6 +975,12 @@ export async function listInvitationsForOrg(organizationId: string): Promise<Inv
       email: inv.redactedAt ? null : inv.emailNormalized,
       inviteeFirstName: inv.inviteeFirstName,
       inviteeLastName: inv.inviteeLastName,
+      inviteeDisplayName: deriveInviteeDisplayName({
+        purpose: inv.purpose,
+        firstName: inv.inviteeFirstName,
+        lastName: inv.inviteeLastName,
+        rosterFirstName,
+      }),
       personId: inv.personId,
       status,
       delivery: deliveryState(

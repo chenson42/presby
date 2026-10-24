@@ -14,6 +14,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
+import { expiredInvitationLine, openInvitationLine } from "@/lib/onboarding/invitation-copy";
 import { invitationRow } from "./invitation-row.fixture";
 import { derivedGroupHolderRow, groupHolderRow, holderRow } from "./holder-row.fixture";
 import type { HolderRow } from "@/lib/onboarding/designation-holder-types";
@@ -142,7 +143,13 @@ describe("TreasurerDesignationSection — the control", () => {
   });
 
   it("confirms in an AlertDialog that names the person and the organization, then calls the action with the org id and the trimmed email", async () => {
-    mockDesignate.mockResolvedValue({ ok: true, invitationId: "inv-1", delivery: "sent", expiresAt: "2026-10-28T12:00:00.000Z" });
+    mockDesignate.mockResolvedValue({
+      ok: true,
+      invitationId: "inv-1",
+      delivery: "sent",
+      expiresAt: "2026-10-28T12:00:00.000Z",
+      inviteeDisplayName: "Perpetua",
+    });
     render(<TreasurerDesignationSection {...PROPS} />);
     typeEmail("  treasurer@example.invalid ");
     fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
@@ -157,7 +164,11 @@ describe("TreasurerDesignationSection — the control", () => {
     expect(fd.get("organizationId")).toBe("org-1");
     expect(fd.get("email")).toBe("treasurer@example.invalid");
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
-    expect(await screen.findByText(/invitation sent\. it expires on .* nobody holds this access until it is accepted/i)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        /invitation sent to treasurer@example\.invalid\. it expires on .* the treasurer designation takes effect when perpetua accepts it from the email\. until then nobody holds this access\./i,
+      ),
+    ).toBeTruthy();
   });
 
   it("renders the action's error copy inline, verbatim, and toasts it", async () => {
@@ -200,6 +211,39 @@ describe("TreasurerDesignationSection — Batch 3 states", () => {
     expect(screen.getByText(/an invitation is open/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /^resend$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^revoke$/i })).toBeTruthy();
+  });
+
+  it("the open line names the roster first name; the expired line says it has expired", () => {
+    const { unmount } = render(
+      <TreasurerDesignationSection
+        {...PROPS}
+        invitations={[invitationRow({ purpose: "treasurer", status: "pending", inviteeFirstName: null, inviteeLastName: null, inviteeDisplayName: "Perpetua" })]}
+      />,
+    );
+    expect(screen.getByText(openInvitationLine("treasurer", "Perpetua"))).toBeTruthy();
+    expect(screen.getByText(/an invitation is open for perpetua\. nobody holds this access until perpetua accepts it\./i)).toBeTruthy();
+    // The treasurer's row shows the same first name as its "For" line.
+    expect(screen.getByText("For")).toBeTruthy();
+    unmount();
+    render(
+      <TreasurerDesignationSection
+        {...PROPS}
+        invitations={[invitationRow({ purpose: "treasurer", status: "expired", inviteeFirstName: null, inviteeLastName: null, inviteeDisplayName: "Perpetua" })]}
+      />,
+    );
+    expect(screen.getByText(expiredInvitationLine("treasurer", "Perpetua"))).toBeTruthy();
+    expect(screen.getByText(/the invitation for perpetua has expired\. nobody holds this access\. resend it or revoke it/i)).toBeTruthy();
+    expect(screen.queryByText(/an invitation is open/i)).toBeNull();
+  });
+
+  it("with no name the open line falls back to the unnamed wording", () => {
+    render(
+      <TreasurerDesignationSection
+        {...PROPS}
+        invitations={[invitationRow({ purpose: "treasurer", status: "pending", inviteeDisplayName: null })]}
+      />,
+    );
+    expect(screen.getByText(openInvitationLine("treasurer", null))).toBeTruthy();
   });
 
   it("adds the self-address sentence only for the operator's own address", () => {

@@ -24,6 +24,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormattedDate } from "@/components/shared/formatted-date";
+import type { InvitationCopyPurpose } from "@/lib/onboarding/invitation-copy";
 import type { InvitationListRow } from "@/lib/onboarding/issue";
 import {
   BLOCKED_REASON_OPERATOR_COPY,
@@ -61,11 +62,11 @@ const STATUS_ICON: Record<InvitationStatus, LucideIcon> = {
 export function InvitationList({
   organizationId,
   invitations,
-  role,
+  purpose,
 }: {
   organizationId: string;
   invitations: InvitationListRow[];
-  role: string;
+  purpose: InvitationCopyPurpose;
 }) {
   const [notice, setNotice] = useState<{ result: InvitationActionResult; address?: string } | null>(
     null,
@@ -100,9 +101,9 @@ export function InvitationList({
         {invitations.map((invitation) => {
           const Icon = STATUS_ICON[invitation.status];
           const open = invitation.status === "pending" || invitation.status === "expired";
-          const name = [invitation.inviteeFirstName, invitation.inviteeLastName]
-            .filter(Boolean)
-            .join(" ");
+          // Server-derived: the founding administrator's typed name, or the
+          // treasurer's roster first name only.
+          const name = invitation.inviteeDisplayName;
           const rowBusy = isPending && busyId === invitation.id;
           return (
             <li
@@ -124,7 +125,7 @@ export function InvitationList({
                 {name && (
                   <div className="flex gap-1">
                     <dt className="text-muted-foreground">For</dt>
-                    <dd>{name}</dd>
+                    <dd className="break-words">{name}</dd>
                   </div>
                 )}
                 <div className="flex gap-1">
@@ -219,7 +220,7 @@ export function InvitationList({
         })}
       </ul>
       {notice && (
-        <InvitationSentNotice result={notice.result} address={notice.address} role={role} />
+        <InvitationSentNotice result={notice.result} address={notice.address} purpose={purpose} />
       )}
     </div>
   );

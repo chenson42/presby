@@ -773,7 +773,10 @@ test.describe("Admin — treasurer invitation (online giving)", () => {
 
     const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
     await expect(notice).toBeVisible({ timeout: 20_000 });
-    await expect(notice).toContainText(/Nobody holds this access until it is accepted/);
+    await expect(notice).toContainText(`Invitation sent to ${treasurerEmail}.`);
+    await expect(notice).toContainText(/The treasurer designation takes effect when .+ accepts it from the email\. Until then nobody holds this access\./);
+    // The open line replaces "nobody holds ... until it is accepted" with the named person.
+    await expect(section).toContainText(/An invitation is open for .+\. Nobody holds this access until .+ accepts it\./);
     // The pending row replaces the form: the control is gone, the row shows the address and its state.
     await expect(section.getByLabel(/treasurer.s email address/i)).toHaveCount(0);
     const row = section.getByTestId("invitation-row");
@@ -974,7 +977,13 @@ test.describe("Admin — founding administrator invitation", () => {
     const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
     await expect(notice).toBeVisible({ timeout: 20_000 });
     noticeForNewAddress = ((await notice.textContent()) ?? "").replace(/\s+/g, " ").trim();
-    expect(noticeForNewAddress).toMatch(/Nobody holds this role until it is accepted/);
+    expect(noticeForNewAddress).toContain(
+      `The founding administrator designation takes effect when ${INVITE_NAMES.first} ${INVITE_NAMES.last} accepts it from the email. Until then nobody holds this role.`,
+    );
+    expect(noticeForNewAddress).toContain(`Invitation sent to ${address}.`);
+    // The notice names the typed address and name; mask them so the second send's screen can be
+    // compared on everything else (the account-existence property must not change it).
+    noticeForNewAddress = noticeForNewAddress.split(address).join("<address>").split(`${INVITE_NAMES.first} ${INVITE_NAMES.last}`).join("<name>");
     const row = section.getByTestId("invitation-row");
     await expect(row).toContainText(address);
     await expect(row).toContainText(`${INVITE_NAMES.first} ${INVITE_NAMES.last}`);
@@ -1039,7 +1048,13 @@ test.describe("Admin — founding administrator invitation", () => {
 
     const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
     await expect(notice).toBeVisible({ timeout: 20_000 });
-    const noticeForExisting = ((await notice.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    const noticeForExisting = ((await notice.textContent()) ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(E2E_USERS.member.email)
+      .join("<address>")
+      .split("Operator Selfaddress")
+      .join("<name>");
     expect(noticeForExisting, "the sender's screen is the same whether or not the address has an account").toBe(noticeForNewAddress);
     await expect(section.getByTestId("invitation-row")).toContainText("Pending");
 

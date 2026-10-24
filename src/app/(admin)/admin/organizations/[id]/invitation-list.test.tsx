@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { acceptanceSentence } from "@/lib/onboarding/invitation-copy";
 import { invitationRow } from "./invitation-row.fixture";
 
 const mockResend = vi.hoisted(() => vi.fn());
@@ -39,13 +40,13 @@ const accepted = (overrides = {}) =>
 
 describe("InvitationList", () => {
   it("renders nothing for no invitations", () => {
-    const { container } = render(<InvitationList organizationId="org-1" invitations={[]} role="role" />);
+    const { container } = render(<InvitationList organizationId="org-1" invitations={[]} purpose="founding_administrator" />);
     expect(container.textContent).toBe("");
   });
 
   it("shows address, status word, sent and expiry, and the delivery state for an open row", () => {
     render(
-      <InvitationList organizationId="org-1" invitations={[invitationRow({ delivery: "bounced" })]} role="role" />,
+      <InvitationList organizationId="org-1" invitations={[invitationRow({ delivery: "bounced" })]} purpose="founding_administrator" />,
     );
     const row = screen.getByTestId("invitation-row");
     expect(within(row).getByText("clerk@example.invalid")).toBeTruthy();
@@ -59,7 +60,7 @@ describe("InvitationList", () => {
     render(
       <InvitationList
         organizationId="org-1"
-        role="role"
+        purpose="founding_administrator"
         invitations={[
           invitationRow({ id: "1", status: "pending" }),
           accepted({ id: "2" }),
@@ -80,7 +81,7 @@ describe("InvitationList", () => {
     render(
       <InvitationList
         organizationId="org-1"
-        role="role"
+        purpose="founding_administrator"
         invitations={[
           accepted({ id: "1" }),
           invitationRow({ id: "2", status: "revoked" }),
@@ -96,7 +97,7 @@ describe("InvitationList", () => {
     render(
       <InvitationList
         organizationId="org-1"
-        role="role"
+        purpose="founding_administrator"
         invitations={[accepted({ id: "1", selfDesignated: true }), accepted({ id: "2", selfDesignated: false })]}
       />,
     );
@@ -104,8 +105,14 @@ describe("InvitationList", () => {
   });
 
   it("Resend is one click, sends org and invitation ids, and announces the result inline", async () => {
-    mockResend.mockResolvedValue({ ok: true, invitationId: "inv-2", expiresAt: "2026-10-29T12:00:00.000Z", delivery: "sent" });
-    render(<InvitationList organizationId="org-1" invitations={[invitationRow({ id: "inv-1" })]} role="role" />);
+    mockResend.mockResolvedValue({
+      ok: true,
+      invitationId: "inv-2",
+      expiresAt: "2026-10-29T12:00:00.000Z",
+      delivery: "sent",
+      inviteeDisplayName: "Marisol Quenby",
+    });
+    render(<InvitationList organizationId="org-1" invitations={[invitationRow({ id: "inv-1" })]} purpose="founding_administrator" />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /^resend$/i }));
     });
@@ -116,9 +123,70 @@ describe("InvitationList", () => {
     expect(toastSuccess).toHaveBeenCalled();
   });
 
+  it("a Resend names who must accept, in the shared copy (founding administrator)", async () => {
+    mockResend.mockResolvedValue({
+      ok: true,
+      invitationId: "inv-2",
+      expiresAt: "2026-10-29T12:00:00.000Z",
+      delivery: "sent",
+      inviteeDisplayName: "Marisol Quenby",
+    });
+    render(<InvitationList organizationId="org-1" invitations={[invitationRow({ id: "inv-1" })]} purpose="founding_administrator" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^resend$/i }));
+    });
+    const expected = acceptanceSentence({
+      purpose: "founding_administrator",
+      name: "Marisol Quenby",
+      address: "clerk@example.invalid",
+    });
+    expect(screen.getByRole("status").textContent).toContain(expected);
+    expect(screen.getByRole("status").textContent).toContain("Marisol Quenby accepts it from the email");
+    expect(screen.getByRole("status").textContent).not.toContain("Nobody holds this role until it is accepted");
+  });
+
+  it("a Resend on a treasurer row names the roster first name only", async () => {
+    mockResend.mockResolvedValue({
+      ok: true,
+      invitationId: "inv-2",
+      expiresAt: "2026-10-29T12:00:00.000Z",
+      delivery: "queued",
+      inviteeDisplayName: "Perpetua",
+    });
+    render(
+      <InvitationList
+        organizationId="org-1"
+        purpose="treasurer"
+        invitations={[invitationRow({ id: "inv-1", purpose: "treasurer", inviteeFirstName: null, inviteeLastName: null, inviteeDisplayName: "Perpetua" })]}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^resend$/i }));
+    });
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toContain("The treasurer designation takes effect when Perpetua accepts it from the email. Until then nobody holds this access.");
+  });
+
+  it("shows the server-derived name as the For line for both purposes, and no For line when there is none", () => {
+    render(
+      <InvitationList
+        organizationId="org-1"
+        purpose="treasurer"
+        invitations={[
+          invitationRow({ id: "1", purpose: "treasurer", inviteeFirstName: null, inviteeLastName: null, inviteeDisplayName: "Perpetua" }),
+          invitationRow({ id: "2", inviteeDisplayName: null, inviteeFirstName: null, inviteeLastName: null }),
+        ]}
+      />,
+    );
+    const [first, second] = screen.getAllByTestId("invitation-row");
+    expect(within(first).getByText("For")).toBeTruthy();
+    expect(within(first).getByText("Perpetua")).toBeTruthy();
+    expect(within(second).queryByText("For")).toBeNull();
+  });
+
   it("a Resend refusal (the cooldown) renders verbatim in an alert", async () => {
     mockResend.mockResolvedValue({ ok: false, error: "Too many invitations right now. Try again later." });
-    render(<InvitationList organizationId="org-1" invitations={[invitationRow()]} role="role" />);
+    render(<InvitationList organizationId="org-1" invitations={[invitationRow()]} purpose="founding_administrator" />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /^resend$/i }));
     });
@@ -128,7 +196,7 @@ describe("InvitationList", () => {
 
   it("Revoke opens an AlertDialog and does nothing until confirmed; never a native confirm", async () => {
     mockRevoke.mockResolvedValue({ ok: true, invitationId: "inv-1" });
-    render(<InvitationList organizationId="org-1" invitations={[invitationRow({ id: "inv-1" })]} role="role" />);
+    render(<InvitationList organizationId="org-1" invitations={[invitationRow({ id: "inv-1" })]} purpose="founding_administrator" />);
     fireEvent.click(screen.getByRole("button", { name: /^revoke$/i }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toMatch(/stops working immediately/i);
@@ -143,7 +211,7 @@ describe("InvitationList", () => {
   });
 
   it("Keep it closes the Revoke dialog without calling the action", async () => {
-    render(<InvitationList organizationId="org-1" invitations={[invitationRow()]} role="role" />);
+    render(<InvitationList organizationId="org-1" invitations={[invitationRow()]} purpose="founding_administrator" />);
     fireEvent.click(screen.getByRole("button", { name: /^revoke$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /keep it/i }));
     expect(mockRevoke).not.toHaveBeenCalled();

@@ -225,6 +225,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       if (result.kind !== "ok") return;
       expect(result.delivery).toBe("sent");
       expect(result.selfAddressed).toBe(false);
+      expect(result.inviteeDisplayName).toBe("Marisol Quenby");
 
       const [inv] = await invitationsOf(orgId);
       expect(inv).toMatchObject({
@@ -380,6 +381,10 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
         organizationId: orgId, purpose: "treasurer", email: address, inviter: actor(),
       });
       expect(result.kind).toBe("ok");
+      // The roster person's FIRST NAME only is what the operator's notice names.
+      expect(result).toMatchObject({ inviteeDisplayName: "Odalys" });
+      const [listed] = await issue.listInvitationsForOrg(orgId);
+      expect(listed).toMatchObject({ purpose: "treasurer", inviteeDisplayName: "Odalys", inviteeFirstName: null });
       const [inv] = await invitationsOf(orgId);
       expect(inv).toMatchObject({
         purpose: "treasurer", person_id: person, invitee_first_name: null, invitee_last_name: null,
@@ -838,6 +843,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       expect(r.kind).toBe("ok");
       if (r.kind !== "ok") return;
       expect(r.delivery).toBe("queued");
+      expect(r.inviteeDisplayName).toBe("Marisol Quenby");
 
       const rows = await invitationsOf(s.orgId);
       expect(rows).toHaveLength(2);

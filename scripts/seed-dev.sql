@@ -1954,3 +1954,9 @@ commit;
 -- organization, person, membership and user it references exists (so last);
 -- idempotent, synthetic tokens only. scripts/invitations/test-rls-59.sql needs it.
 \ir invitations/seed-dev-invitations.sql
+
+-- Person-emails fixture (drizzle/0064). Its own file and transaction, run
+-- AFTER the invitations include (it needs Alder Creek's people, memberships
+-- and staff position); contact rows only, idempotent.
+-- scripts/person-emails/test-rls-64.sql needs it.
+\ir person-emails/seed-dev-person-emails.sql

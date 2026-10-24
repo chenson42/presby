@@ -1872,6 +1872,28 @@ Pipeline `2026-10-22-founding-admin-directory`, Increment 2 (v0.41.0, migrations
 
 **F191 — the 0061 insert policy let `presby_app` insert a pending void, loss or opening-balance row that no definer will ever approve, and with one pending row per person it would block every proposal for that person.** **Closed** by 0063's narrowed policy (the seven approvable kinds).
 
+## 2w. Person emails — findings (F210–F217)
+
+Pipeline `2026-10-23-person-emails` (v0.42.0, migration 0064; DECISION-215–219). F218 and F219 are unused. F210–F214 are closed by the migration, F216 is closed in application code, F215 and F217 are open and pre-existing. The contact table stays global; the accepted residuals are recorded in DECISION-218.
+
+**F210 — `contact_methods` had no creation time.** "First" and "oldest" were decided by a random UUID, so the directory showed an arbitrary address for a person with several and none primary, and "promote the oldest on removal" could not be built. **Closed (0064):** `created_at`, defaulting to `clock_timestamp()` (not `now()`, which ties within a transaction), forced for every non-owner insert by the guard so no one can backdate a row to win a promotion. One shared order everywhere: `is_primary desc, created_at, id`.
+
+**F211 — the four 0059 reader sites, and the treasurer match and `do_not_contact` warning in `issue.ts`, would have treated an ended address as on file.** Latent until `ended_at` exists, so fixed in the same migration or a removed address could still resolve a founding-administrator or treasurer acceptance and receive `verified_at`. **Closed (0064):** `presby_preview_invitation` and `presby_accept_invitation` re-created from the live definitions with `ended_at is null` at the four sites and nothing else; the parity golden is byte-identical.
+
+**F212 — Find a person and directory search matched hidden and undisplayed addresses and phones.** An oracle for a hidden email or phone that widens with several addresses per person. **Closed:** search matches only what the card shows (a hidden email or phone never matches; ended rows never match). Admin Community search may match every active address, because the card shows them all (DECISION-217).
+
+**F213 — no database constraint on `kind`, `subtype`, value shape, a single primary, or uniqueness within a person.** **Closed (0064):** four validated CHECKs, a partial unique index for one active primary per person and kind, one for a unique active address within a person, and a deferred, definer constraint trigger that refuses a person with active emails and no active primary. Values are normalized on write (lower, trimmed, at most 254 characters, one `@`, no whitespace or commas).
+
+**F214 — `verified_at` was not bound to the mailbox it proved.** `updatePerson()` edited the value in place, so the proof carried to a different address, and `presby_app` could set `verified_at` directly. **Closed (0064):** the guard trigger makes `value`, `kind`, `person_id` and `created_at` immutable, freezes an ended row, and lets only the owner (the acceptance definer) set `verified_at`; an edited address is ended and replaced and the replacement starts unverified. `DELETE` is revoked from `presby_app` and `presby_platform` (the `contact_methods` arm of F176; F176 stays open for `addresses` and the other tables).
+
+**F215 — the wizard drops typed contact details for a confirmed existing person.** `createPerson()` ignores `contact` when `identity.mode` is `existing`, yet the contact and review steps still show them. Pre-existing, not made worse. **Open:** a `docs/TODO.md` line.
+
+**F216 — `updatePerson()` committed partial writes on a refused household.** It returned `invalid_household` from inside the transaction after the name, contact and address writes; an early return commits, so a refused save persisted part of the change while telling the user it failed. **Closed in this pipeline (Discovered-In Phase 3):** the household is validated before any write and every refusal aborts by sentinel throw, the `CreatePersonAbort` precedent.
+
+**F217 — directory search does not escape `%` and `_`.** Community's search does. Pre-existing. **Open:** a `docs/TODO.md` line.
+
+**Accepted residuals (`paper`, DECISION-218).** `contact_methods` is a global person child: another congregation's `people.manage` can see, end, relabel or re-main an address for a person who belongs to both, and that can change routing. Bounded for credentials by the sign-in invitation rule that refuses anyone with a membership elsewhere; detected by `tenant.person_email.*` audit rows carrying the acting organization. Scoping contact data per organization is a D-level redesign (TODO). `person_identifiers` stays separate and is never written by the form (a typed address is not proof of control). The owner connection keeps `DELETE` on `contact_methods`; its mitigation is a source scan, not a trigger.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

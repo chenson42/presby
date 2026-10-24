@@ -3,11 +3,43 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-23 (Community Increment 2 integrated).
+Updated 2026-10-24 (person emails integrated at v0.42.0; Community Increment 2 live at v0.41.0).
 
 ---
 
-## RESUME HERE — 2026-10-23 (night): Community Increment 2 is integrated at v0.41.0, PR pending
+## RESUME HERE — 2026-10-24: v0.41.0 is live; person emails is integrated at v0.42.0, PR pending
+
+**v0.41.0 (Community Increment 2) is live in production as of 2026-10-24 UTC.** `0062` was applied, then the code deployed, then `0063`, with a
+Neon snapshot taken first. The full `scripts/test-rls.sql` on `development` ran 1193 passes with three pre-existing data-drift failures.
+Increment 2b (sign-in invitations) has not started; it now takes migration **0065**, not 0064.
+
+`pipeline/person-emails` (worktree `presby-emails`, Neon `pipeline-person-emails`) is merged up to `main` at v0.41.0 and integrated as
+**v0.42.0**: a person can hold up to 10 labelled email addresses with one Main and a per-address "Don't send mail to this address" flag;
+removal is soft (`created_at`, `ended_at`, `DELETE` revoked, immutable value, one active Main as a database property; the `contact_methods`
+arm of F176 closed); removing the Main promotes the oldest remaining address, audited; the four 0059 reader sites ignore ended addresses
+(F211); the member directory shows the Main plus an open staff member's Work address and search matches only what a card shows (F212);
+`src/lib/contact-methods/` is the single writer, the `presby_person_email` credential reader and a closed registry of every send template
+key; the platform invitation screen warns when the address is on a signed-in person. Migration `0064`, DECISION-215–219, F210–F217
+(`docs/schema-design-2.md` §2w). QA PASS (run 2), Phase 6 SHIP WITH NOTES; every note is a `docs/TODO.md` line. Two CLAUDE.md edits are
+for operator review in the diff (a Project Layout line for `src/lib/contact-methods/` and one sentence under Permissions vs Flags: a contact
+email authenticates nothing).
+
+**What is and is not true of it.** Giving statement notices stay on the donor record (operator, 2026-10-23: "keep giving on the donor record
+for now"); the personal-address fallback is a TODO. A staff member who is only a staff anchor shows no Work address to members (told to the
+operator, no change asked). The wizard's duplicate match uses the search-step address only (F215 and `person_identifiers` stay open).
+
+**Deploy order: apply `0064` BEFORE the code** (snapshot first; runbook in `docs/deployment.md` -> "Person emails"). Owed before release: the
+ER2a check on `development` (diff `pg_get_functiondef` of `presby_preview_invitation` and `presby_accept_invitation` against the branch
+before `0064` runs there), then `0064`, the person-emails seed and `scripts/test-rls.sql` as `presby_app` on merged `development` (section 64
+is new), and the Phase 6 what's-new advisory (member-visible: the directory can show a staff Work address, search matches only what a card
+shows).
+
+**Next:** merge this PR through `/merge-pr`, apply `0064`, then the owed invite-copy polish (TODO), Community Increment 2b (migration 0065,
+which reads addresses through `presby_person_email`), then 3; then the list in the handoffs below.
+
+---
+
+## Previous handoff — 2026-10-23 (night): Community Increment 2 is integrated at v0.41.0 (now live)
 
 `pipeline/session-approval` (worktree `presby-fadir`, Neon `pipeline-session-approval`) is merged up to `main` (v0.40.0, workflow
 efficiency) and integrated as **v0.41.0**, **Community Increment 2**: a congregation's Session can approve, deny and bulk-approve
@@ -20,7 +52,7 @@ F188–F191 (`docs/schema-design-2.md` §2v). QA PASS (run 3), Phase 6 SHIP WITH
 CLAUDE.md sentence (Two Hierarchies) records the self-recorded, self-approved Session member as `paper`: read it in the diff.
 
 **What is and is not true of it.** An elder recorded on the Session still needs a PresbyPortal account to approve; Increment 2b
-(sign-in invitations, migration `0064`) delivers that, and until then the queue banner says so. F182 stays an open `paper`
+(sign-in invitations, migration `0065`) delivers that, and until then the queue banner says so. F182 stays an open `paper`
 residual; F177 and F176 (other tables) stay open. The what's-new entry is held until 2b ships.
 
 **Deploy order: apply `0062`, deploy the code, then apply `0063`** (snapshot first; pre-flight counts and the duplicate-pending
@@ -73,7 +105,7 @@ can sign in), F176 (hard-delete paths remain). "Participants on record" is a dec
 when recorded, because participants are not members.
 
 **Designed, not built (same work-log):** Increment 2 (Session approval, pending queue, withdrawal; migrations 0062 and 0063,
-DECISION-202–206, F179–F185 and F188–F191), Increment 2b (elder and member sign-in invitations; migration 0064, DECISION-207–208,
+DECISION-202–206, F179–F185 and F188–F191), Increment 2b (elder and member sign-in invitations; migration 0065 after person emails took 0064, DECISION-207–208,
 F186–F187 and F192–F199, closes F177 by acknowledgement), Increment 3 (visitor follow-ups; scoping note only, starts at F200 and
 DECISION-209). Increment 2 needs the operator to confirm the pastors-as-Session-approvers ruling (DECISION-206) and to read its
 copy. Increment 2 adds one CLAUDE.md sentence (self-recorded, self-approved Session members) for the operator to review in that diff.

@@ -1821,3 +1821,24 @@ The two things closest to one, if the operator or orchestrator skips them:
 
 - **D7 acknowledged:** "keep giving on the donor record for now, go". Giving statement notices stay addressed to the donor record only; the personal-address fallback remains a tracked follow-up, not a defect.
 - **Staff-anchor Work-address limit:** told to the operator at Phase 6; no change requested. Stays a tracked follow-up.
+
+---
+
+## Integration (2026-10-23, acting for the orchestrator)
+
+Merged `origin/main` (v0.41.0, PR #46) into `pipeline/person-emails` and landed the Phase 6 ship conditions. Nothing was pushed and no database was touched.
+
+**Merge conflicts (two, both keep-both):**
+- `src/lib/people.ts`, `createPerson()`: this branch's `storeContext` and `insertedAddresses` declarations and Increment 2's `organizationHasSession` R15 refusal (`proposal_refused` / `no_session`). Both kept; the refusal runs first, so no person row is written for a refused proposal.
+- `community/new/actions.ts`, the result switch: this branch's `email_refused` case and Increment 2's `proposal_refused` case. Both kept.
+- Shared docs (`_journal.json`, `TODO.md`, `STATE.md`, `decisions.md`, `functionality-map.md`, `package.json`) did not conflict: this branch had not edited them mid-pipeline (Rule 16).
+
+**One post-merge fix:** Increment 2's new `people.test.ts` case (`createPerson` membership proposals, F185) passed `contact: { email: ... }`, a shape this branch removed in favour of `contact.emails`. Typecheck caught it; changed to one main `emails` row. No behaviour change.
+
+**Ship condition 3, done:**
+- `drizzle/meta/_journal.json`: idx 64 `0064_presby_person_emails`, `when` 1787446373186 (idx 63 is 1787359973186).
+- `seed-dev.sql` and `seed-dev-invitations.sql` patches applied with `git apply` (clean). The `test-rls.sql` patch no longer applied (Increment 2 appended section 62 at the same place); the equivalent section 64 `\ir person-emails/test-rls-64.sql` block was appended by hand after section 62. The three `.patch` files stay in `scripts/person-emails/` like Increment 2's.
+- `docs/decisions.md` DECISION-215–219 at the top (219 records the operator's giving acknowledgement); `docs/schema-design-2.md` §2w (F210–F217, numbers verified free); `docs/deployment.md` "Person emails" runbook (also corrected the Increment 2 section's stale "0064 is reserved for 2b" to 0065); `docs/product/functionality-map.md` (Directory and Community bullets, version line); `docs/TODO.md` (emails Done line, 14 follow-ups plus one QA-residue line, the three superseded Next Up lines removed, 2b renumbered to 0065, F176 annotated); `docs/STATE.md`; the CLAUDE.md edits for operator review (Project Layout line, one sentence under Permissions vs Flags).
+- Release notes `docs/release-notes/v0.42.md` with the three Phase 6 corrected lines; `package.json` and `package-lock.json` at 0.42.0; v0.41 links forward.
+
+**Not done here (needs a database or the operator):** the ER2a function-definition diff on `development`, applying `0064` and the seed there, and re-running `scripts/test-rls.sql` as `presby_app` (section 64 expected to pass; section 62 and 61 counts should be unchanged); the what's-new entry (Rule 13); the optional "saving could fail for a few minutes" end-user line was left out of the release note and carried in the operator paragraph instead.

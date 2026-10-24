@@ -8644,3 +8644,12 @@ rollback;
 --     production.
 -- ===========================================================================
 \ir session-approval/test-rls-62.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/person-emails (integration).
+-- 64. Person emails (drizzle/0064_presby_person_emails.sql).
+--     Its own file, as 46, 47, 59, 60, 61 and 62 above; \ir resolves relative
+--     to this script. It needs the test helpers and the seed's person-emails
+--     fixture, so it is never run against production.
+-- ===========================================================================
+\ir person-emails/test-rls-64.sql

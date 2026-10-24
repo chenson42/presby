@@ -1459,7 +1459,7 @@ describe.skipIf(!hasDb)("people.ts (Postgres-backed, real dev database)", () => 
     it("an organization with no Session refuses a member proposal as proposal_refused no_session, and the person, membership and roll rows are all rolled back", async () => {
       const result = await createPerson(noSessionManager, orgNoSession, noSessionUserId, {
         identity: { mode: "new", firstName: "Noor", lastName: `NoSessionArm${stamp}`, dateOfBirth: "1990-01-01" },
-        contact: { email: "noor@example.invalid" },
+        contact: { emails: [{ value: "noor@example.invalid", subtype: null, isPrimary: true, doNotContact: false }] },
         household: { mode: "new", name: "Noor household" },
         rollAction: { kind: "profession_of_faith", effectiveDate: "2026-03-10" },
       });

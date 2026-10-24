@@ -57,13 +57,19 @@ not to repeat CI. Default scope:
   implementer's run.
 - **A timeout is not a failure until it repeats.** Pipeline Neon computes
   cold-start. Re-run the single file once before reporting it as FAIL, and
-  report both runs.
+  report both runs. Check `df -h /System/Volumes/Data` before blaming Neon: ENOSPC preceded `fetch failed` twice this period.
 - **Pre-existing failures:** check a failing spec the diff does not touch
   against `origin/main` before calling it a regression. Report it as
   pre-existing, with evidence, rather than as a FAIL of this pipeline.
+- **Flag state.** A pipeline branch inherits `development`'s flags plus whatever earlier runs left, and `captureFlags()` restores what it found, so a polluted branch passes specs CI's fresh database fails. Before the e2e run, reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`) and say in the verdict that you did.
+- **Never echo environment values.** Verify that an env var is set with `test -n "$VAR"` or by length. Never `echo` or print a connection string, token or password, including in a verification step (Increment 2 QA run 1).
 
 State the scope you ran in the verdict, so anyone reading it can see what
 was not re-run.
+
+## Copy truthfulness (every run whose diff adds or changes a user-facing string)
+
+Read every added or changed string (`git diff -U0 origin/main... | grep '^+'` over `.tsx`, `*-copy.ts`, email templates, release-note lines). For each: (1) it is in the design's Copy table, and one that isn't is a finding whoever wrote it; (2) open the query behind each claim about a person, account, date or state and ask what it does not read; (3) for each instruction, find the role that sees it and prove, from the control's render gate and the action's permission check, that the role can do it; (4) grep for older strings about the same subject the diff makes false. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role. A fixed string gets an exact-text test that fails on the old text.
 
 ## What to Test
 
@@ -83,6 +89,8 @@ Arrange / Act / Assert with whitespace between sections. Names are read aloud si
 - Bad: `permissions work`, `test 1`
 
 **Regression discipline** (you verify it; the implementer performs it): the failing test is written *before* the fix, watched failing, then the fix lands and it is watched passing. Skipping the failing step is guessing. The name is suffixed `— regression for [bug short title]`. If you cannot confirm the test failed before the fix, say so in the verdict rather than assuming.
+
+A regression test that encodes the fix's own logic (a literal prefix list, a specific column set) rather than the property the fix guarantees (spec conformance, a closed threat class) guards less than it looks. Ask what a slightly different bypass in the same class would do before accepting it.
 
 ## Feature-Gate Audit (mandatory before PASS)
 

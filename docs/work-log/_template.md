@@ -5,7 +5,7 @@
 > **Permission(s):** [new key(s), or "existing X covers this"]
 > **Flag(s):** [new key, or "not needed"]
 > **Estimated complexity:** [small | medium | large]
-> **Pipeline mode:** [Full | Accelerated — Phase 2 skipped (rationale) | Bug-fix variant]
+> **Pipeline mode:** [Full | Accelerated Feature (CLAUDE.md → Classification; Phase 2 skipped with rationale) | Bug-fix variant]
 > **Source — member feedback:** `feedback-row-id: <UUID>` — member said: "[verbatim quote]"
 > *(omit this block entirely if the work did not originate from in-app feedback)*
 
@@ -126,9 +126,15 @@
 5. Audit events for security-sensitive paths
 6. Release notes entry
 
+## Carry-forward
+
+| Phase 1 gap / Phase 2 ruling | Addressed here (where), or *deferred* (who accepted) |
+|---|---|
+| [gap or ruling] | [section, or deferred + who accepted] |
+
 ## Edge Cases & Risks
 
-- [Thing that could fail or that needs special handling]
+- [Thing that could fail or that needs special handling; each claim cites the test that pins it or says "unverified"]
 
 ## Copy
 
@@ -162,6 +168,8 @@
 ## Implementer Notes
 
 [Tradeoffs taken, anything that diverged from the design and why.]
+
+Strings added or changed: [file:line each, or "none"]
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how
@@ -206,6 +214,15 @@ Failures: [...]
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
 |-----------------|-------------------|----------------------------|----------------------------|
 | [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+
+## Copy Truthfulness
+
+*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+
+- [ ] Every added or changed string is in the design's Copy table
+- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
+- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
+- [ ] Older strings about the same subject were grepped for and none is made false
 
 ## Verdict
 

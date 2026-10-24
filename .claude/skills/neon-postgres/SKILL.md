@@ -18,6 +18,8 @@ This skill captures the patterns most relevant to working in *this* codebase. Fo
 
 Drizzle Kit (`npm run db:push`, `npm run db:generate`) needs a direct connection because it runs DDL. The app at runtime uses the pooled connection because serverless functions burst.
 
+Verify that an env var is set with `test -n "$VAR"` or by length. Never `echo` or print a connection string, token or password, including in a verification step (Increment 2 QA run 1).
+
 ## Drizzle Kit Usage
 
 The starter ships two commands:

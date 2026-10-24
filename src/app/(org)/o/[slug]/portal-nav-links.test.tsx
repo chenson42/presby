@@ -215,7 +215,7 @@ describe("PortalNavLinks — active state", () => {
 describe("PortalNavLinks — domain-anchor hash-stripping (commit 2, docs/work-log/2026-08-27-product-ia-scaffold.md Phase 3 §5, DECISION-117)", () => {
   const ANCHOR_ENTRIES: PortalNavEntry[] = [
     { label: "Home", href: "/o/acme", exact: true },
-    { label: "People & Membership", href: "/o/acme#domain-people", exact: true },
+    { label: "Community", href: "/o/acme#domain-people", exact: true },
     { label: "Worship & Events", href: "/o/acme#domain-worship", exact: true },
   ];
 
@@ -229,7 +229,7 @@ describe("PortalNavLinks — domain-anchor hash-stripping (commit 2, docs/work-l
 
     expect(
       screen
-        .getByRole("link", { name: "People & Membership" })
+        .getByRole("link", { name: "Community" })
         .getAttribute("aria-current"),
     ).toBeNull();
     expect(
@@ -249,7 +249,7 @@ describe("PortalNavLinks — domain-anchor hash-stripping (commit 2, docs/work-l
     ).toBe("page");
     expect(
       screen
-        .getByRole("link", { name: "People & Membership" })
+        .getByRole("link", { name: "Community" })
         .getAttribute("aria-current"),
     ).toBeNull();
     expect(
@@ -266,7 +266,7 @@ describe("PortalNavLinks — domain-anchor hash-stripping (commit 2, docs/work-l
 
     expect(
       screen
-        .getByRole("link", { name: "People & Membership" })
+        .getByRole("link", { name: "Community" })
         .getAttribute("aria-current"),
     ).toBeNull();
   });
@@ -278,7 +278,7 @@ describe("PortalNavLinks — domain-anchor hash-stripping (commit 2, docs/work-l
 
     expect(
       screen
-        .getByRole("link", { name: "People & Membership" })
+        .getByRole("link", { name: "Community" })
         .getAttribute("href"),
     ).toBe("/o/acme#domain-people");
     expect(

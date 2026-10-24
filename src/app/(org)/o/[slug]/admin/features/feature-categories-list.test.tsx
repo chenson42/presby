@@ -39,7 +39,7 @@ import type { FeatureCategoryEntry } from "@/lib/org-feature-categories";
 
 const PEOPLE: FeatureCategoryEntry = {
   category: "people",
-  label: "People & Membership",
+  label: "Community",
   enabled: true,
   updatedAt: null,
   updatedByEmail: null,
@@ -116,7 +116,7 @@ describe("FeatureCategoriesList — toggling", () => {
       />,
     );
     expect(screen.getAllByRole("switch")).toHaveLength(2);
-    expect(screen.getByText("People & Membership")).toBeTruthy();
+    expect(screen.getByText("Community")).toBeTruthy();
     expect(screen.getByText("Worship & Events")).toBeTruthy();
   });
 });

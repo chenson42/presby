@@ -31,6 +31,40 @@ Both runners ship pre-configured. You run them; the implementer writes them:
 - **A skipped spec is not a passing spec.** The suite used to exit 0 having run 6 of 48. If a run reports skips, that is a finding, not a pass.
 - **`npm run typecheck`** — treat a failed typecheck as a failed test.
 
+## Run Scope — verify what changed, not everything again
+
+CI runs the full DB-backed suite (four shards plus `test-rls.sql` as
+`presby_app`) and the full e2e suite (dev and production-build lanes) on every
+pull request (`db.yml`, `e2e.yml`; green since 2026-10-23, PR #41). So the full
+suites already run before every merge, and your job is to verify the change,
+not to repeat CI. Default scope:
+
+- **Always, in full:** typecheck, lint, `npm run check`, the unit suite. They
+  are fast.
+- **DB-backed suites:** the files the diff added or changed, plus any file
+  the tech-lead's design names in its e2e/DB blast radius. Run the whole
+  DB-backed set only when the diff touches a migration, `src/lib/authz.ts`,
+  `src/lib/db/`, or a shared fixture.
+- **e2e:** the specs the diff added or changed, plus the blast-radius specs,
+  at desktop and 360px. Run the full `--project=chromium` suite only when
+  the diff touches `src/proxy.ts`, `src/auth.ts`, a layout, `e2e/support/`,
+  `playwright.config.ts`, or a shared component under `src/components/`.
+  Otherwise the PR's own CI run covers the rest. The auth-touching gate below
+  still applies in full.
+- **Implementer evidence:** if Phase 4 already reported a full run with
+  counts, do not repeat it to re-confirm the same result. Re-run only the
+  failures it reported, and say in the verdict that the rest rests on the
+  implementer's run.
+- **A timeout is not a failure until it repeats.** Pipeline Neon computes
+  cold-start. Re-run the single file once before reporting it as FAIL, and
+  report both runs.
+- **Pre-existing failures:** check a failing spec the diff does not touch
+  against `origin/main` before calling it a regression. Report it as
+  pre-existing, with evidence, rather than as a FAIL of this pipeline.
+
+State the scope you ran in the verdict, so anyone reading it can see what
+was not re-run.
+
 ## What to Test
 
 **High-value pure-TS targets** (deterministic, fast, central): `src/lib/permissions.ts` (`hasFeature()` on empty array / missing key / present key), `src/lib/two-factor.ts` (encrypt→decrypt round-trip; valid vs expired codes with pinned time), `src/lib/flags.ts` (missing / enabled / rollout), and every branch of any future pure module.

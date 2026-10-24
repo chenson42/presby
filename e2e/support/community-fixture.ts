@@ -227,6 +227,39 @@ export async function createParticipantViaSql(sql: Sql, n: number, lastName: str
 }
 
 /**
+ * Fixture person id ranges (SQL_PERSON_PREFIX + n), kept disjoint so one helper
+ * can never silently reuse another's row through `on conflict do nothing`:
+ *   100 + n  createParticipantViaSql
+ *   200 + n  createStaffAnchorViaSql (PR #43)
+ *   300 + n  createProposalViaSql    (this pipeline; n stays under 100)
+ */
+
+/**
+ * A staff anchor written on the owner connection: a live membership with
+ * engagement 'staff', no roll and no staff position, the exact shape
+ * `presby_accept_invitation` writes for an invited administrator or treasurer.
+ * The id carries the fixture prefix, so the sweep removes it.
+ */
+export async function createStaffAnchorViaSql(sql: Sql, n: number, lastName: string): Promise<SqlParticipant> {
+  const personId = `${SQL_PERSON_PREFIX}${String(200 + n).padStart(12, "0")}`;
+  assertSqlPersonId(personId);
+  const firstName = FIXTURE_FIRST_NAME;
+  await sql`
+    insert into people (id, first_name, last_name, deletable_until)
+    values (${personId}::uuid, ${firstName}, ${lastName}, now() + interval '2 hours')
+    on conflict (id) do nothing
+  `;
+  await sql`
+    insert into memberships (person_id, organization_id, engagement_status)
+    select ${personId}::uuid, ${COMMUNITY_ORG.id}::uuid, 'staff'
+     where not exists (
+       select 1 from memberships where person_id = ${personId}::uuid and organization_id = ${COMMUNITY_ORG.id}::uuid
+     )
+  `;
+  return { personId, firstName, lastName };
+}
+
+/**
  * A member proposal waiting for the Session, written on the owner connection
  * (a pending profession of faith for a new person with a regular membership
  * and no roll), for specs that need queue rows without walking the wizard. The
@@ -238,7 +271,7 @@ export async function createProposalViaSql(
   lastName: string,
   effectiveDate = "2026-06-01",
 ): Promise<SqlParticipant & { rollActionId: string }> {
-  const personId = `${SQL_PERSON_PREFIX}${String(200 + n).padStart(12, "0")}`;
+  const personId = `${SQL_PERSON_PREFIX}${String(300 + n).padStart(12, "0")}`;
   assertSqlPersonId(personId);
   const firstName = FIXTURE_FIRST_NAME;
   await sql`

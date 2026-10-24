@@ -152,6 +152,30 @@ describe("MembersList — admin rows (Visitors, Staff, Former)", () => {
     expect(screen.getByText("Organist, Sexton")).toBeTruthy();
   });
 
+  it("Staff: an anchor with no position reads 'No position yet' and links to the Staff page only when canStaffLink", () => {
+    const anchor = { ...ROW, positions: [] };
+    const { rerender } = render(
+      <MembersList {...BASE} view="staff" rows={[anchor]} canStaffLink={true} />,
+    );
+    expect(screen.getByText(/no position yet/i)).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /add a position/i }).getAttribute("href"),
+    ).toBe("/o/alder-creek/admin/staff");
+    // The row still links to the edit page.
+    expect(
+      screen.getByRole("link", { name: /^edit/i }).getAttribute("href"),
+    ).toBe("/o/alder-creek/admin/community/p-9/edit");
+    rerender(<MembersList {...BASE} view="staff" rows={[anchor]} canStaffLink={false} />);
+    expect(screen.getByText(/no position yet/i)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /add a position/i })).toBeNull();
+  });
+
+  it("Staff: a row with a position never shows the 'No position yet' note", () => {
+    render(<MembersList {...BASE} view="staff" rows={[ROW]} canStaffLink={true} />);
+    expect(screen.queryByText(/no position yet/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: /add a position/i })).toBeNull();
+  });
+
   it("Former: shows the removal date", () => {
     render(<MembersList {...BASE} view="former" rows={[ROW]} />);
     expect(screen.getByText(/removed/i)).toBeTruthy();

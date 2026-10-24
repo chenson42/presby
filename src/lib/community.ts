@@ -63,7 +63,8 @@ export interface CommunityRow {
   email: string | null;
   /** 'YYYY-MM-DD'. */
   firstVisitDate: string | null;
-  /** Titles of the person's OPEN staff positions, oldest first. */
+  /** Titles of the person's OPEN staff positions, oldest first. Empty on a
+   * Staff-view row means a staff anchor with no position yet. */
   positions: string[];
   /** 'YYYY-MM-DD'; set only on the Former participants list. */
   endedOn: string | null;
@@ -116,16 +117,23 @@ function listPredicate(kind: ListKind) {
         and p.merged_into_id is null
         and p.date_of_death is null`;
     case "staff":
-      // Staff is a POSITION (DECISION-200): an open staff_positions row,
-      // whatever the engagement. engagement 'staff' alone does not list.
+      // Staff is an open position OR the staff anchor (DECISION-200, and the
+      // founding-administrator and treasurer shape from DECISION-128/183): a
+      // live membership with engagement 'staff' lists even with no position
+      // yet, so a person who joins by invitation is not invisible. The anchor
+      // row carries no positions; the page says "No position yet". The
+      // Directory still excludes the anchor (DECISION-129).
       return sql`m.ended_on is null
         and p.merged_into_id is null
         and p.date_of_death is null
-        and exists (
-          select 1 from staff_positions sp
-           where sp.person_id = m.person_id
-             and sp.organization_id = m.organization_id
-             and ${OPEN_POSITION_SQL}
+        and (
+          m.engagement_status = 'staff'
+          or exists (
+            select 1 from staff_positions sp
+             where sp.person_id = m.person_id
+               and sp.organization_id = m.organization_id
+               and ${OPEN_POSITION_SQL}
+          )
         )`;
     case "former":
       // The removal's own fixed marker (a constant, not user input).
@@ -225,7 +233,8 @@ export function listVisitors(
 }
 
 /** Staff: people with an open `staff_positions` row, whatever their
- * engagement. `people.manage`-gated. */
+ * engagement, plus live engagement-`staff` anchors with no position yet
+ * (`positions` is `[]` for those). `people.manage`-gated. */
 export function listStaff(
   viewerPersonId: string,
   organizationId: string,

@@ -5892,3 +5892,54 @@ Integration for Increment 2 (acting for the orchestrator, 2026-10-23), carrying 
 - **Conditions 9 and 12:** no `architecture.md` change; Rule 12 not applicable.
 - **Verification:** `npm run typecheck`, `npm run lint` (max-warnings 0), `npm run check` (all tripwires) clean; `npm test` 7779 passed, 2286 skipped (DB-backed), 0 failed. No test reads the journal or the docs.
 - **Still owed, needs a person or a database:** condition 2's full `test-rls.sql` run on merged `development` (expect four pre-existing failures; section 62 = 53, section 61 = 34), condition 10's manual bootstrap walk at 360px, and condition 11's branch cleanup (role passwords, two global flags, 25 expired fixture rows). Nothing is pushed.
+
+---
+
+# Increment 2 — Manual bootstrap walk (ship condition 10)
+
+*Run by a general-purpose agent for the orchestrator on Neon branch `pipeline-session-approval`, 360x740, synthetic data; returned text recorded verbatim. Screenshots kept in the session scratchpad, not the repo.*
+
+The founding-administrator bootstrap works end to end and every step passed: read mode, self-recording as an elder, the flip to decide mode, self-approval, both audit rows, and the clerk's read-only view. I changed no repo file, and the database is back to its prior state. It ran on Neon branch `pipeline-session-approval` (0062 and 0063 confirmed present), with a dev server on port 3390, Chromium at 360x740, and synthetic data only.
+
+**Setup.** The founder is a new user `e2e-walk-founder@presby.invalid`, person "E2EWalk Founder", with a staff membership at e2e-alpha. Their roles came from the real `presby_apply_founding_administrator()`, which created the Founding Administrator and Stated Clerk roles at alpha. Their effective permissions included `people.manage`, `officers.manage` and `roll.propose`, but not `roll.approve`. The clerk (Ottoline) used the community fixture with `setRollApprove(false)`, so she was propose-only. alpha already had a Session group (empty roster) and a `session_member` role. The flags and toggle were all already on, so nothing had to be flipped.
+
+| Step | Result | What I observed |
+|---|---|---|
+| 1. Landing | PASS | `/launch` sent the founder straight to `/o/e2e-alpha`. |
+| 2. Propose and read mode | PASS | Proposed "E2ECommunity WalkProposal" through the wizard as "Member: profession of faith (needs Session approval)". The review step said "This person's roll action will wait. No one on your Session can approve yet." On Pending approvals: 0 Approve, 0 Deny, 0 checkboxes, 1 Withdraw, no horizontal overflow. |
+| 3. Officers | PASS, with a lag | Recorded themselves as Ruling Elder from 10/23/2026. Self note and toast appeared, and the roster showed "Ruling Elder **Self-recorded** · E2EWalk Founder · 10/23/2026". |
+| 4. Decide and approve | PASS, with a lag | Same page, now with no banner, plus "Select all on this page", a checkbox, Approve, Deny and Withdraw. The dialog fit the screen. After a reload the row sat under Recently decided with "Self-approved". The database shows approved, the minute reference saved, decided by the proposer, roll now active. |
+| 5. Audit | PASS | Both rows found (below). |
+| 6. Propose-only clerk | PASS | Read mode, 0 Approve/Deny/checkboxes, Withdraw only on her own proposal. She was refused the Officers page. |
+
+Exact text for each step:
+- **Step 2 subtitle:** "You can see what's waiting for the Session. Only members of the Session can approve."
+- **Step 2 banner:** "Your Session roster is empty — Member proposals wait until your Session can approve them. Record your ruling elders, installed pastors and associate pastors under Officers. Open Officers" ("Open Officers" is a link).
+- **Step 3 self note:** "You're recording yourself as a member of the Session. That's allowed, and the record will show it as self-recorded."
+- **Step 3 toast:** "Officer term recorded."
+- **Step 3 Session note:** "Members of the Session decide who is received onto the roll. Recording a ruling elder, installed pastor, co-pastor or associate pastor here seats them on the Session. They can approve only once they have a PresbyPortal account."
+- **Step 4 dialog:** "Approve E2ECommunity WalkProposal's roll action? This records profession of faith on the roll, effective 10/23/2026. Minute reference (optional)". I entered "E2EWalk Session minutes 2026-10-23".
+- **Step 4 toast:** "E2ECommunity WalkProposal's roll action approved."
+- **Step 6:** she saw the same subtitle and no banner, since the Session was no longer empty at that point. Her Officers refusal read: "You don't have permission to manage officer terms at Wrenfield Presbyterian Church. If you think this is a mistake, ask your stated clerk or another administrator there."
+
+**Audit metadata (step 5), ids removed:**
+- `tenant.officer_term.started`: `{"office":"ruling_elder","startsOn":"2026-10-23","orgUnitId":null,"selfRecorded":true}`
+- `tenant.roll_action.approved`: `{"kind":"profession_of_faith","selfTarget":false,"shadowedBy":null,"selfApproved":true,"effectiveDate":"2026-10-23","minuteReference":"E2EWalk Session minutes 2026-10-23","affectsFiledPeriod":false}`
+
+The wizard wrote no audit row when it created the person and proposal. A comment in `community/new/actions.ts` says that is deliberate.
+
+**Things that would confuse a real clerk at 360px:**
+1. **Dates show tomorrow in the evening (a real bug).** "Proposed 10/24/2026" and "Approved 10/24/2026" appeared while it was still 10/23 at 8pm in Pacific time. `src/lib/roll.ts:781` takes the date in UTC (`(ra.recorded_at at time zone 'UTC')::date`). The decided date looks like it comes from the same kind of conversion. A US clerk working in the evening sees the proposal dated the day after its effective date.
+2. **The Officers page contradicts itself.** The form says "recording someone here does not, by itself, change what they can do in the app". The note right above it says recording an elder seats them on the Session so they can approve.
+3. **The officer roster is cut off at 360px.** The table scrolls sideways inside its box, so "End term" is off screen. The "Self-recorded" badge runs into the wrapped name "E2EWalk Founder".
+4. **The screen doesn't update after saving.** After both "Add officer term" and "Approve", the roster and queue still looked unchanged 2.5–3 seconds after the success toast; a reload showed the change. The refresh calls are in the code, and the spec itself allows 30 seconds for this on a dev server, so it may be dev-only. I can't rule out that users see it.
+5. **Minor:** the clerk is told only Session members can approve, but nothing says who is on the Session. Her Officers refusal says to "ask your stated clerk", though she is effectively the clerk. The Next.js dev "N" badge overlaps content in the screenshots, but that is dev-only.
+
+**Cleanup and residue: none.** I ended and removed the officer term, removed the fixture people with `sweepCommunityPeople` (through `removeCommunityFixture`, which also restored the flags and toggle by SELECT and removed the approver role), and removed the founder's grants, the two founding roles, the founder's membership, person and user. A final check matched the prior state exactly: alpha has its original 3 roles, an empty Session roster, 0 officer terms, 0 roll actions, 0 walk audit rows, 0 founding-admin holders, flags and toggle on as before, and no disabled triggers. The dev server is stopped and `/private/tmp/inc2-walk` and my helper scripts are deleted. One thing to know: `git status` in presby-fadir showed `drizzle/meta/_journal.json` and `scripts/test-rls.sql` modified at the start and clean at the end. I never touched that worktree, so something else changed it during the walk.
+
+## Orchestrator disposition (2026-10-23)
+
+- **Fixed before ship:** finding 2 (the Officers form hint contradicted the Session note). New hint, pinned by `officers/page.test.tsx`: "This records who holds the office. Apart from seating the Session (see above), recording someone here does not change what they can do in the app. Other access is granted under Administration → Roles." The Staff page keeps its hint, which stays true there.
+- **Already tracked:** finding 1 (UTC dates) is Phase 6 follow-up 1.
+- **New TODO lines:** finding 3 (officer roster at 360px: End term off-screen inside a sideways-scrolling table, the Self-recorded badge collides with a wrapped name); finding 4 (roster and queue lag a reload after a success toast on the dev server; confirm on production); finding 5 (the propose-only clerk is not told who sits on the Session; the Officers refusal tells a clerk to "ask your stated clerk").
+

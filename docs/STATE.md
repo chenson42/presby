@@ -3,11 +3,48 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-25 (v0.42.3, session handling hardening, is live as of its 2026-10-25 deploy; v0.42.4, the provider-email check, is integrated on its branch; retro workflow-efficiency is merged to `main` with no version bump).
+Updated 2026-10-25 (v0.42.5 is live; platform admin redesign Increment 1 is integrated on its branch as v0.43.0).
 
 ---
 
-## RESUME HERE — 2026-10-25: v0.42.4 (sign-in provider email check, F231) is integrated; v0.42.3 is live; five other pipelines are open
+## RESUME HERE — 2026-10-25 (late): v0.42.5 is live; platform admin redesign Increment 1 is integrated as v0.43.0
+
+**Live in production:** v0.42.3 (session handling hardening; the production sign-in smoke passed 2026-10-25 22:49 UTC, `totp.verify_succeeded`,
+no failures), v0.42.4 (a non-credentials sign-in must carry `email_verified === true`, F231, DECISION-246) and v0.42.5 (the new-organization form
+waits until the page is ready, F275(a)). The retro workflow-efficiency guardrails (DECISION-231) are merged with no version bump.
+
+`pipeline/platform-admin-redesign` (worktree `presby-padmin`, no migration) is merged up to `main` (`b903154`, 0.42.5) and integrated as **v0.43.0**,
+Increment 1 of 4: `/admin` is a dashboard (nine count cards in three zones plus "Recent operator changes"), behind a grouped, permission-filtered
+nav with a phone menu and the shared avatar menu; `error.tsx` is added and no `loading.tsx` may exist under `(admin)` (CLAUDE.md now says so).
+DECISION-251, 252, 253, 255; F274, F276, F281 in `docs/schema-design-2.md` §2aa (F275 is recorded there too: (a) closed by 0.42.5, (b)
+permanence of type and slug open for Increment 3). QA PASS on run 5 after four loop-backs, all on the dashboard boundaries scan; Phase 6 SHIP
+WITH NOTES, the notes are `docs/TODO.md` lines. **The limit to remember (DECISION-252):** the scan guards against a careless reader, not a
+deliberately evasive one, and the two-factor card is the recorded exception that reads through people and memberships. Next: `/pre-push`, then
+`/merge-pr`, then deploy; then Increment 2's Phase 3 (the organization workspace and the first-administrator cards, carrying R3, R8 and the
+deferred R1a, R1b, R1e, R1f, R7c and R7d).
+
+**Open pipelines (each has its own worktree and Neon branch; numbers are pre-assigned in the work-log headers):**
+
+| Pipeline | Worktree | Phase | Numbers | Next |
+|---|---|---|---|---|
+| Platform admin redesign, Increment 1 (`2026-10-25-platform-admin-redesign-inc1`) | `presby-padmin` | Integrated on its branch as **0.43.0** (Phase 6 SHIP WITH NOTES) | DECISION-251/252/253/255; F274/F276/F281; no migration; port 3530 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
+| Platform admin redesign, Increments 2 to 4 (`-inc2`, `-inc3`, `-inc4`) | `presby-padmin` | Not started | DECISION-254, 256; F277-F280; migration 0070 only if S3 is adopted | Increment 2 Phase 3 |
+| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 5, QA run 2 | migration 0067; DECISION-238-241; F250-F257; port 3500 | QA run 2 |
+| Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Phase 5, QA | migration 0068; DECISION-242-245; F258-F265; port 3510 | QA |
+| Community Increment 2b, sign-in invitations (`2026-10-22-founding-admin-directory`) | `presby-2b` | Phase 4, Batch A1 | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Batch A1 |
+| TOTP auto-submit | not recorded here | Phase 3 | see its work-log | Phase 3 |
+| Developer portal | not recorded here | Phase 1 | see its work-log | Phase 1 |
+| Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Waits on 2b | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | after 2b |
+
+**Next free numbers:** DECISION-**262**, F**289**, migration **0071**. Findings subsection `2aa` is taken (platform admin redesign), so the next
+is `2ab`. Integration is serialized one PR at a time through `/merge-pr` (Workflow Rule 16).
+
+**Not forgotten:** the F166 bug-fix pipeline, the operator questions in `docs/TODO.md`, the sibling hand-off for the 0.42.3 session fix, and the
+overdue periodic reviews.
+
+---
+
+## Previous handoff — 2026-10-25 (earlier): v0.42.4 integrated; v0.42.3 live; five other pipelines open (superseded by the block above)
 
 `pipeline/google-email-verified` (worktree `presby-gauth`, no migration) is merged up to `main` (`77be511`: 0.42.3 plus PR #52 workflow-efficiency)
 and integrated as **v0.42.4**, F231 **closed in code and tests**. `evaluateSignIn()` now refuses every non-credentials sign-in unless the provider

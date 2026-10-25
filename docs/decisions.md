@@ -4,6 +4,55 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-255 — Status treatment is staged: existing tokens with an icon and text in Increments 1–3; the reserved semantic slice lands in Increment 4.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (stage one shipped in v0.43.0; no migration)
+
+- **Stage one.** Failure is `text-destructive` with `CircleAlert` and a label; needs attention is `text-foreground` on `border-foreground` with `TriangleAlert` and the words "Needs attention"; all-clear is `text-muted-foreground` with `CircleCheck`. No palette literal in any new file, no new token. Status is never carried by colour alone.
+- **Stage two (Increment 4, short Phase 2 addendum).** Declare `--success`, `--warning`, `--info` (and foregrounds) for both schemes, drop `reserved`, add contrast proofs, add `Badge` variants with a header-commented divergence, convert the 43 existing palette literals.
+- **Revisit if** the contrast proofs for the three families cannot be met in both schemes.
+
+---
+
+**DECISION-253 — `src/components/admin-portal/` is the home for admin-only composition; the nav registry replaces the tile registry; the admin shell mounts `AvatarMenu`; one copy-only change to frozen `permissions.ts`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0; no migration)
+
+- **Placement.** Admin-only composition (`AdminNav`, `AdminNavLinks`, `AdminMobileMenu`, `AdminHeader`, `AdminForbidden`) lives in `src/components/admin-portal/`, parallel to `org-portal/`. Generic pieces (`LoadError`, `EmptyState`, `CountCard`) live in `shared/`. The forbidden state stays admin-only so it cannot become the byte-identical `(org)` miss response of DECISION-040.
+- **Registry.** `src/lib/admin-portal/nav.ts` replaces `ADMIN_TILES` (`tiles.ts`, `visible-tiles.ts` and `tile-icons.ts` are deleted) under DECISION-123's constraints: pure synchronous data, filtering in a co-located helper. `DomainTileSections` and `TileGrid` remain for `(org)`.
+- **Shell.** The header mounts `AvatarMenu`, not `GlobalNav` (whose `OrgSwitcher` would put `/o/` links and a tenant read in admin chrome). The inline sign-out is removed; there is one sign-out path.
+- **Frozen file.** The `name` and `description` of `FEATURES.ADMIN_ORGANIZATIONS` may be corrected as copy; keys, map and order are untouched, pinned by a test. Deployed `features` rows keep the old text and nothing displays it.
+- **Layout.** `<main>` is `p-4 sm:p-8` with `min-w-0`, noted in `docs/ui-standards.md`.
+- **Revisit if** a second consumer appears for a collapsing-nav primitive (then promote it to `shared/`).
+
+---
+
+**DECISION-252 — The platform tier shows only platform-axis data; dashboard readers are held to an allow-list of tables by a source-scan test; the 2FA predicate is the one recorded exception.**
+
+**Status:** Resolved (architect, Phase 2; operator ruling Q8; tech-lead, Phase 3; scan scope ruled by the orchestrator after QA runs 1–5) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0; no migration)
+
+- **Rule.** The dashboard may show counts, ages and links for organizations, accounts, invitations, queue rows, tickets and feedback (as counts), domains, sites, flags and audit rows. It never shows a count or content derived from people, the roll, gifts, events or attendance. No names beyond the public `organizations.name`, no amounts, no ticket or feedback text.
+- **Enforcement.** Readers live in `src/lib/admin-portal/dashboard/`. `boundaries.test.ts` reads the source of every non-test file in that directory and allows only listed tables (by import, and as a closed set of table names in any string or template literal), listed modules and one `presby_*` function. It reports a tenant table written as an import or as a name until someone edits the list on purpose, in review. It covers only files in that directory. The audit reader never selects `metadata` whole.
+- **The exception.** "Required but not enrolled" resolves through `people` and `memberships`. It lives in `src/lib/admin/two-factor-stranded.ts`, outside the scanned directory on purpose, and returns accounts or a count. `/admin/2fa`'s per-organization `member_count` stays page-local and is never extracted. If the card is read as extending the exception, drop the card.
+- **Sub-panels** in the Increment 2 workspace check their own keys inside a page gated by `ADMIN_ORGANIZATIONS`.
+- **Accepted residual (`paper`).** The boundaries scan guards against a careless reader written in this directory's idioms, not a deliberately evasive one: it reads source text and cannot see (1) a computed property access (`db[key]`); (2) a table name assembled at runtime rather than written in a literal, whether in JavaScript (concatenation into a variable that reaches `execute`) or in SQL (`format()`, `||` on string pieces, a `U&"…"` escape); (3) a helper module outside the directory, including any allow-listed `@/lib/*` module, that itself reads a tenant table; or (4) a reader written to evade a source-text scan, such as an escape trick the decoder does not model, a shadowed helper, or an expression that misleads the scanner's own tokenizer. These are `paper`; review and the retrospective are the control for all four, as for readers outside the directory.
+- **Revisit if** the operator wants a members-per-organization figure on the platform tier (a Two Hierarchies decision, not a card).
+
+---
+
+**DECISION-251 — The platform console is two tiers in the existing `(admin)/admin` tree; every section page gates before it parses; no `loading.tsx` exists under `(admin)/admin`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0 carries the shell; Increment 2 the workspace; no migration)
+
+- **Tiers.** Tier 1 is `/admin` and the cross-organization lists under one persistent platform nav. Tier 2 is the organization workspace, real section routes under `/admin/organizations/[id]/**`, under the same nav.
+- **Order.** Every workspace page calls `requireWorkspaceOrg(params)` first: permission, then UUID, then one `cache()`d organization read. There is no data-reading `[id]` layout, because a layout renders concurrently with its page and cannot stop the page's reads.
+- **No `loading.tsx` under `(admin)/admin`, including at `/admin` itself.** A `loading.tsx` wraps every descendant route in Suspense, so the four `notFound()` routes (`organizations/[id]`, `users/[id]`, `tickets/[id]`, `whats-new/[id]`) would answer their 404s with HTTP 200 (the (org) contract's 2026-08-18 measurement). Loading feedback is per-card `Suspense`. A source-scan test (`shell-boundaries.test.ts`) pins the absence.
+- **Error boundary.** `(admin)/admin/error.tsx` renders calm copy and never `error.message`. It does not catch its own layout, so the layout wraps the live `isPlatformAdmin` read in a `catch`.
+- **No proxy rule and no link into `/o/<slug>`.** Pages own per-feature checks; nothing under the console links into a tenant route, pinned by a scan.
+- **Revisit if** a console route needs a streaming skeleton badly enough to justify a route group whose descendants never call `notFound()`.
+
+---
+
 **DECISION-246 — A non-credentials sign-in must carry `email_verified === true`; the gate refuses before any user lookup. Amends DECISION-015 point 2; fulfils the `evaluateSignIn()` clause of DECISION-187.**
 
 **Status:** Resolved (operator-visible finding F231, architect ruling in the 2b addendum 2, R38) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-google-email-verified` (v0.42.4; no migration)

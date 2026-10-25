@@ -1,7 +1,7 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.42.4` · surveyed 2026-10-25.**
+knows what exists without re-reconning. **Version `0.43.0` · surveyed 2026-10-25.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
 a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries
@@ -33,7 +33,7 @@ inherited from the starter.
 - **presby: post-login router** — `/launch` decides and redirects (nine-row matrix as a pure function), `/home` chooser (org cards + Platform block, never auto-forwards; `/orgs` is a permanent redirect to it), `/no-organization` zero-org funnel, `/o/<slug>` org landing stub in the new `(org)` group with the four-way miss response (enter / ended / denied / 404).
 - **Member** — `/home` is the post-login destination again (merged with the former chooser, 2026-08-27): greeting, "Your organizations" cards, Platform block, roles/features, what's-new card, daily feedback prompt, `/whats-new` full list, feedback submit/snooze/opt-out actions.
 - **Account (self-serve)** — profile name, email change + re-verification, password change, per-user TOTP enrolment/manage at `/account/2fa`, delete-account skeleton, permanent feedback form.
-- **Admin (`/admin`)** — redesigned 2026-08-27 as a domain-sectioned tile grid mirroring the org portal's own design language (`src/lib/admin-portal/tiles.ts`, DECISION-123): tiles are hidden, not shown-then-denied, when the viewer lacks the held `FEATURES.*` key (a pure synchronous registry — no session/query inside it, filtering happens once at the page) — this also fixed two real defects found in the redesign: every card used to render for any `ADMIN_DASHBOARD` holder regardless of what they actually held, and `FEATURES.ADMIN_TICKETS` had no tile at all. Users + roles (+ lock badge/unlock, 2FA reset), feature flags, release-notes docs viewer, per-congregation 2FA policy, audit viewer, feedback triage, what's-new CRUD, email-queue viewer + retry, tickets. `docs/work-log/2026-08-27-platform-home-and-portal.md`
+- **Admin (`/admin`)** — the platform console (v0.43.0, DECISION-251/252/253/255): a dashboard of what needs attention, not a tile grid. A find-an-organization box and "New organization" first, then nine count cards in three zones (Organizations, Support, Access and settings) plus "Recent operator changes" (audit rows, closed action list). Each card is its own `Suspense` and mounts only for a holder of its `FEATURES.*` key; a failed read shows "We can't load this right now" with Try again, never zero. Behind it a grouped, permission-filtered nav (`src/lib/admin-portal/nav.ts`; a Reference footer for Release notes and Design system) with an active state, a phone Sheet menu, skip link, and the shared avatar menu (the one sign-out). `error.tsx` is the calm failure boundary; **no `loading.tsx` may exist under `(admin)`** (it would 200 the `notFound()` routes). Dashboard readers are held to platform-axis tables by a source-scan test (`boundaries.test.ts`), a guard against careless readers rather than a proof; the 2FA card is the recorded exception (it resolves through people and memberships). Users + roles (+ lock badge/unlock, 2FA reset), feature flags, release-notes viewer (page-gated by `ADMIN_RELEASE_NOTES`), per-congregation 2FA policy, audit viewer, feedback triage, what's-new CRUD, email-queue viewer + retry, tickets, sites. The organization workspace and first-administrator cards are Increments 2 to 4. `docs/work-log/2026-10-25-platform-admin-redesign-inc1.md`
 - **Auth backend** — NextAuth 5 config, cached session, safe callbackUrl, lockout, sign-in gate, local-login flag, session projection; the proxy `src/proxy.ts` (admin + 2FA, and the custom-host rewrite).
 - **Platform lib** — permissions (`FEATURES` + `hasFeature`), flags (`isFlagEnabled`, cached), `recordAudit()`, TOTP crypto + pending enrolment, rate limiting, request-ip, Turnstile, email queue (persist-first + retry + Resend webhook) that accepts only a `RenderedEmail` built by the pure `renderEmail()` layout (v0.36.0, DECISION-191).
 - **API / Cron** — NextAuth routes, Resend delivery webhook, `CRON_SECRET`-gated email-queue worker + daily maintenance (token GC), giving worker and domains sweep.
@@ -118,10 +118,10 @@ inherited from the starter.
 
 ## Admin (`src/app/(admin)/admin/`)
 
-- Dashboard — domain-sectioned tile grid, permission-filtered (see the redesign note above). `admin/page.tsx`
+- Dashboard — count cards in three zones plus Recent operator changes, find-an-organization box, grouped permission-filtered nav and phone menu (see the Admin index entry). `admin/page.tsx`, `admin/layout.tsx`, `admin/_dashboard/`, `src/lib/admin-portal/{nav.ts,dashboard/}`, `src/components/admin-portal/`
 - Users — list + role assignment, lock badge + unlock (audited). `admin/users/page.tsx`, `users/[id]/page.tsx`, both `actions.ts`
 - Feature flags — toggle + rollout percent. `admin/flags/page.tsx`, `actions.ts`
-- Docs — release-notes markdown viewer (`docs/release-notes/vX.Y.md`). `admin/docs/page.tsx`
+- Docs — release-notes markdown viewer (`docs/release-notes/vX.Y.md`), page-gated by `ADMIN_RELEASE_NOTES` as well as the proxy. `admin/docs/page.tsx`
 - 2FA policy — per-congregation `require_two_factor` toggles + "required but not enrolled" list; platform connection (RLS hides orgs from the tenant connection); gated on `admin.two_factor` (DECISION-033). `admin/2fa/page.tsx`, `actions.ts`, `policy-toggle.tsx`
 - Audit viewer — filter by action/actor, pure RSC. `admin/audit/page.tsx`; helpers `src/lib/audit-page-helpers.ts`
 - Feedback triage — status new→triaged→done/declined; renders bodies as plain text (hostile-content invariant). `admin/feedback/page.tsx`, `actions.ts`

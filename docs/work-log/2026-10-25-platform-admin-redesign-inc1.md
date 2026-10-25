@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Shared; recorded in the parent | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); S1–S5 ruled; copy table and carry-forward below; two operator questions | Design complete | 2026-10-25 |
-| 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Batch B complete (2 commits); Batches A and C see their own sections | — | 2026-10-25 |
+| 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Batches A and B complete (A: 3 commits, B: 2 commits); Batch C pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -702,6 +702,33 @@ E5 (each reader's rejecting-execute test, and `read-card.test.ts`), E6 (class-on
 - Statement bounds: every reader is an aggregate or `limit 10`; no `statement_timeout` is set (it would be a second statement per read, contradicting E22). The Neon pool default (`max` 10) matches the design's E22 note.
 - Unverified for Phase 5 (unchanged from the design): E27, `EXPLAIN` of the recent-changes statement at production volume.
 - Hand-off: Batch C (ux-developer) writes `_dashboard/present.ts` against the table above. QA next after Batches A and C.
+
+## Phase 4 — Batch A (ux-developer): the shell
+
+**Status:** complete. Commits on `pipeline/platform-admin-redesign` (not pushed): `feat(admin): grouped permission-filtered nav, header with the avatar menu, and an error boundary`; `fix(admin): gate /admin/docs at the page as well as the proxy`; `fix(admin): correct the ADMIN_ORGANIZATIONS catalog text`.
+
+### What shipped
+
+- **Registry.** `src/lib/admin-portal/nav.ts` (pure data) and `(admin)/admin/visible-nav.ts` replace `ADMIN_TILES`, `visible-tiles.ts` and `tile-icons.ts` (all deleted with their tests; `domain-tile-sections.test.tsx` already used local fixtures, only its stale header comment was fixed).
+- **Shell.** `AdminNav` (server sidebar, internal scroll, "Version {APP_VERSION}"), `AdminNavLinks` (client leaf, longest-href active state, `aria-current`, 44px), `AdminMobileMenu` (visible "Menu" button, left `Sheet`, closes on route change by a pathname-keyed remount plus `onNavigate`), `AdminHeader` (skip link, `/home` back link, "Platform admin" label from `sm`, shared `AvatarMenu`; sign-out exists once), and the layout rewrite. The two redirects are byte-identical and pinned; the live `isPlatformAdmin` read is wrapped in `.catch(() => false)`.
+- **Shared and admin components.** `LoadError`, `EmptyState`, `CountCard`/`CountCardSkeleton` in `shared/`; `AdminForbidden` in `admin-portal/`; `(admin)/admin/error.tsx` (never renders `error.message`); no `loading.tsx` under the console (pinned by `shell-boundaries.test.ts`, together with: no `/o/` literal, no `BrandTokens`/`getPlatformDb` in `components/admin-portal/`).
+- **`ui:add sheet`** reported no unvetted package and left `package.json` and the lockfile untouched. Divergences recorded in the file header: `cn` import fixed to `@/lib/utils` (the generator emitted a bare `"cn"` specifier), 44px close control with ring offset, `w-[85vw] max-w-xs` instead of `w-3/4`.
+- **Docs.** `docs/ui-standards.md`: `p-4 sm:p-8` with the reason and `min-w-0`; the Loading & Error States section rewritten (worked example moved to a non-admin illustration, the `notFound()`-becomes-200 exception stated, pointer to `LoadError`/`EmptyState`/`CountCardSkeleton`); checklist lines at the end updated.
+- **Fixes.** `/admin/docs` page gate with a failing-first test (fails before, passes after); `permissions.ts` copy-only change plus a key/map/order/category snapshot test.
+- **Interim `/admin` page.** The page no longer imports the tile files (it could not, they are deleted). It renders `GreetingBand` (testid kept) and the door-only `EmptyState` with the byte-identical strings; Batch C replaces everything below the greeting. The tile-specific page tests were removed; Batch C re-pins E1 to E4.
+
+### Verification
+
+`npm run typecheck`, `npm run lint`, `npm run check` (all eight tripwires), plain `npm test` (574 files passed, 80 skipped) and `npm run build` pass. Real browser on :3530 (own dev server, started with the e2e cron and domain-fake env, stopped by PID) at 360x740 and 1280x800: no horizontal overflow on `/admin` or `/admin/organizations`; the Menu button is 94x44; all 15 menu links are 44px; the Sheet opens, Escape closes it and returns focus to the Menu button, a link click navigates and closes it; the avatar menu shows Account, Platform admin, Sign out (the e2e admin is not `is_platform_admin`, so no Developer) and sign-out lands on `/` with a "Sign in" link; `/admin/organizations/<unknown uuid>` answers HTTP 404; at desktop `/admin/organizations/domains` lights Domains only. The throwaway spec used for this was deleted, not committed (Batch C owns `e2e/admin-shell.spec.ts`).
+
+### Implementer notes
+
+- **For Batch C's e2e: select the phone menu with `getByRole("button", { name: "Menu", exact: true })`.** The avatar trigger's accessible name is "Account menu for {name}", which contains "menu" and makes a bare `{ name: "Menu" }` a strict-mode violation (it hit me).
+- Sign-out is a `menuitem`, not a `button`, in the avatar menu; `e2e/admin-login.spec.ts:68/77` clicks the button on `/` (the public front page), not on an admin page, so no spec depended on the old admin "Sign out (email)" button (grep over `e2e/` and `src/` found none besides the layout and `(account)/layout.tsx`, which is untouched).
+- Deviation, minor: `LoadError` carries `role="alert"` and takes a `children` slot (for the console's "Back to the dashboard"); the design listed neither. `CountCard` takes the destination as both a `href` prop and an optional `state.href` override, as designed.
+- Not done in this batch, still on the design's Fixes list: the organizations list description, the three organization forbidden blocks (`AdminForbidden`), and the `/home` Admin card description (Group H). The stale `admin-login.spec.ts` comment is Batch C's.
+- Unverified (Phase 5 owns them): E28 (long name wrapping in the recent-changes card, not built yet), E30 (release-notes markdown at 328px; the page's `grid-cols-[200px_1fr]` is unchanged and is likely to be tight at 360px, pre-existing, recorded for Increment 4).
+- Hand-off: Batch C (ux-developer) next, then QA.
 
 ## Files Created
 

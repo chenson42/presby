@@ -1984,3 +1984,20 @@ Files read:
 - **D4 calendar baseline backfill: approved as designed** — every live membership gets `calendar_viewer` (events.view only), including the 9 F133-state orgs on development; no `member` grant is created; P5 read before production apply; release note states the widening.
 - **Archive scope (R57): approved** — visitors, Inactive, Moved away and unclassified; not rolled members, participants or staff anchors.
 - **F245 confirmed free and assigned** (orchestrator) to the derived-group identity-column gap; folds into DECISION-236.
+
+## Phase 4 — Batch 0 (ux-developer, 2026-10-25)
+
+**Scope:** the 360px `ButtonGroup` fix only (section 7.1). The seventh `Inactive` segment is not part of this batch; it lands with the standing work, so the nav still has six segments here and the spec reads its counts from the DOM.
+
+**Files**
+- Create `src/components/shared/button-group-scroll.tsx` (client; `centredScrollLeft`, `fadeState`, `ButtonGroupScroll`). It guards `ResizeObserver` (absent in jsdom, which the five page tests render through), so no existing test needed a stub.
+- Modify `src/components/shared/button-group.tsx` (mounts the scroller; fade mask classes on `data-fade-left` / `data-fade-right`, plus a both-sides combination).
+- Tests: `src/components/shared/button-group.test.tsx` (4 `centredScrollLeft`, 4 `fadeState`, one mount check); new `e2e/community-nav-scroll.spec.ts` (3 tests at 360x740).
+
+**Gates:** typecheck, lint, `npm run check` (all eight) clean; plain `npm test` 8331 passed, 0 failed.
+
+**360px evidence** (own server on :3490, Playwright, clerk at e2e-alpha): the e2e spec passes (landing on every segment leaves it fully inside the tray, fade attributes match scroll position, no page overflow, last segment reachable and clickable). Measured computed state: `?view=visitors` scrollLeft 276 of 359 max, mask both sides; Everyone: right fade only; Former: left fade only (`to left` gradient). Directory nav (Members, Households, Parishes) is 261px wide at 360px, so it does not overflow: no fade, no scroll, unchanged.
+
+**Residual:** screenshots were not retained (a scratch filename bug); the numeric computed-style readings above stand in. The e2e spec was run before the final `ResizeObserver` guard edit; the guard is a no-op in browsers.
+
+**Next agent:** the orchestrator; Batch A1 waits on 2b.

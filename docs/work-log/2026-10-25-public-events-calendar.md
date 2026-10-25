@@ -19,9 +19,10 @@
 | 3 — Technical design | tech-lead | Complete; names, 0067 + definer, reader, slot/island, series action, Copy, T1–T20; F254–F256, DECISION-241 drafted; G9 deferred (operator to confirm) | Design complete, implementers named | 2026-10-25 |
 | 4 — Implementation | database-admin (Batch 1: 0067, definer, RLS suite), then full-stack-developer (Batches 2–4) | Batch 1 complete (0067 applied and re-applied, section 67 58/58 as presby_app, DB suite 13/13, from-empty green); Batches 2–4 complete (lib, catalog, audit, editor surface, public slot and island, unit/DB/e2e/hydration specs; all gates green); port 3500 | — | 2026-10-25 |
 | 5 — Verification | qa | Run 1: all suites green; FAIL-1 360px overflow on event detail; FAIL-2 false audit row when websiteListed omitted; copy + payload notes to tech-lead | FAIL | 2026-10-25 |
+| 5 — Verification (run 2) | qa | Complete; FAIL-1/FAIL-2 closed with mutation-proven regressions; chromium 432/432; 360px clean | PASS | 2026-10-25 |
 | 4 — Implementation (loop-back 1) | full-stack-developer | Complete; FAIL-1 (360px buttons) and FAIL-2 (boolean narrowing, false audit row) fixed failing-first; amendment 1 strings, N3 gate, size ceiling (321,865 B measured, 410,000 ceiling), N4 placeholder filled; all gates green; awaiting QA re-run | Ready for QA re-run | 2026-10-25 |
 | 3 — Technical design (amendment 1) | tech-lead | Complete; QA run 1 rulings: put/take toasts and E8 reworded to "marked" (state the row knows), P2 reworded (no "yet"), payload claim corrected and accepted with a size-ceiling test, N3 gated, N7 TODO text; Phase 4 additions for the implementer; QA re-run scope named | Amendment complete | 2026-10-25 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete; iOS + FPCW integration step + custom-host check open; apply 0067 before merge | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -1374,48 +1375,284 @@ Files referenced:
 
 # Phase 6 — Shipped vs Intent (analyst)
 
-## VERDICT
+**Pipeline:** `2026-10-25-public-events-calendar` · HEAD `1360f76` (plus the uncommitted QA run 2 text) · Date 2026-10-25
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+### VERDICT
 
-## ONE-LINE TAKE
+**SHIP WITH NOTES.** The code delivers what Phase 1 promised, and merging it exposes nothing. No toggle row exists in any organization, no event has the new box ticked, and no site carries the marker. It is not SHIP IT for three reasons:
+- iOS `<details>` has never run on a real device.
+- The operator's own definition of done, the public-site integration step, comes after this verdict and cannot run today (see below).
+- The custom-host check has only been simulated with `*.invalid` hosts.
 
-> [The shipped feature in one honest sentence.]
+None of these needs a code change. The iOS check gates turning the toggle on for a congregation, not merging.
 
-## What's Working
+### ONE-LINE TAKE
 
-- [Specific. The flow that works well and why.]
+> An anonymous visitor to a congregation's public site sees a month grid, or a list on a phone, of exactly the events an editor deliberately ticked "Show on our website's public calendar". Members-only, unticked and cancelled events cannot reach the page, and everything starts off.
 
-## Intent-vs-Shipped Diff
+### What I verified myself, and what I did not
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+**Verified myself:**
+- Read the whole work-log: Phase 1 (G1–G14, Q1–Q10), operator rulings, Phases 2 and 3, amendment 1, Phase 4 batches and loop-back, and QA runs 1 and 2.
+- Read `drizzle/0067_presby_public_events_calendar.sql` in full, and the slot and panel source.
+- Re-ran 6 unit files with no database (71 tests, all green): mapper, contract, listing rules, slot, size ceiling and island.
+- Grepped the writers of `website_listed`. There are exactly four code paths, all audited.
+- Grepped the old strings ("Visible on the public calendar", "put on the website", "No events have been posted"). They survive only in a negative test assertion and one test title that names the act.
+- Looked at QA's 360px screenshots:
+  - the public page on the platform host;
+  - the custom-host simulation;
+  - the new-event form and the event detail page.
+- Read `site-fpcw` (README, `content/upcoming-events.json`, `deploy.yml`) and site-kit's `ingest.yml`, `renderLiveSlotBlock` and `build-bundle.mjs`.
+- Ran `gh variable list` and `gh run list` on `site-fpcw` and `site-pasturechurch`, and `vercel env ls production` (names only).
+- Built a bundle in the scratchpad from a copy of `site-fpcw` with my proposed edit. It builds: 14 pages, and `/upcoming-events` carries the `eventsCalendar` marker.
 
-## Edge Cases
+**Not verified myself:**
+- I did not drive a browser.
+- I did not read any database or production state.
+- I did not re-run e2e or the DB-backed suites.
+- Everything about the visitor and editor walks below comes from QA's runs and screenshots, which I read.
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+### The anonymous-visitor walk, from QA evidence and the code
 
-## Follow-Ups (if SHIP WITH NOTES)
+- **Calendar on, events marked:**
+  - At 360px the page shows a list: month heading, Previous, Today and Next (at least 44px), an "Event types" legend, and day sections.
+  - Tapping an event opens its details in place (Where, Event type, description).
+  - `scrollWidth` is 360, including with a 200-character unbroken title.
+  - The same holds on the simulated custom host.
+  - At 1280px it is a seven-column grid with today ringed and a card over neighbouring cells.
+- **Toggle off, category off, site not live, or read failed:** one sentence, "Our events calendar isn't available right now. Please check back soon." A suspended site is a 404 for the whole site.
+- **Toggle on, nothing in the window:** "No events are on this calendar right now. Please check back soon." The phone line appears only if the profile has a phone.
+- **Member prompt:** it appears only when the member-calendar toggle is on. The button is an absolute platform-host URL with no `callbackUrl`.
+- **Freshness:** `Cache-Control` is `no-store` on dev and `private, no-cache, no-store, max-age=0, must-revalidate` on `next start`. The unmark-then-reload spec passes.
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+### The editor walk (`events.manage`), from QA evidence
 
-## Red Flags (if NEEDS REWORK)
+- **New-event form at 360px:** the box "Show on our website's public calendar" is unticked by default. Its hint says anyone on the internet can read title, description, location and type, and that search engines and archives may keep copies.
+- **Open-to-everyone unticked:** the website box is disabled and unticked, with "Only events open to everyone can be shown on the website."
+- **Event detail:** it reads "Open to everyone · Marked for the website" with the conditional sentence about the toggle and the page. The Website listing buttons are full width and wrap, so `scrollWidth` is 360 (it was 374 in run 1).
+- **Dialogs and toasts:** the dialogs fit. The toast reads "4 events no longer marked for the website."
+- **Extend line:** "New events will be marked for the website, like the latest one in this series."
 
-- [Specific. What has to change before this ships.]
+### Can a members-only, unlisted or cancelled event reach the public page?
 
-## Operator rulings (2026-10-25)
+No. Four independent layers hold, and I checked each myself or through QA's live probes:
+- **Per-event predicate:** the definer requires `website_listed and is_public and cancelled_at is null` (I read the SQL).
+- **CHECK `events_website_requires_public`:** it refuses the combination on the app role and on the owner role. QA probed both.
+- **Read-time `is_public` re-filter:** it holds even with the CHECK dropped (test T2).
+- **Fail-closed gates:** the toggle, site-live and category-axis checks sit inside the definer. Every non-serving cause returns one byte-identical row, and a read failure maps to the same notice, never to "no events".
 
-- **Q1: a new per-event website switch**, off by default, with `is_public` as the veto (the analyst's default; the architect's R1 shape stands).
-- **Q3: self-service.** The congregation's `org_features.manage` holder turns the toggle on (`operatorEnabled: false`).
-- Q2, Q4–Q10 proceed on the analyst's defaults.
-- **G9 status line: deferred** (operator, 2026-10-25), with a TODO line.
+QA's raw HTML and flight-data curl found no members-only, unlisted, cancelled or out-of-window title, and no uuid-shaped string. The projection is an allow-list of seven named keys with no id.
 
-## Public-site integration step (operator, 2026-10-25)
+Residuals, all accepted:
+- F254: a cancelled event keeps the flag true, but the read filters it. *paper*
+- F256: the table has no length CHECK, so the definer clips instead. *paper*
+- A published event's free text is public and may be archived. The form and release note say so.
 
-Added to this pipeline's definition of done: after Phase 6 and the merge, place the `eventsCalendar` liveSlot on the congregation's **upcoming-events page** in the site-content repo (`../site-fpcw/content/upcoming-events.json`), replacing the external calendar link, publish the site bundle per that repo's README, turn `org_portal.public_calendar` on for that congregation only as part of this step, list at least one test event, and verify at 360px on the platform host (and the custom host where one is live). The operator tests after this step.
+### iOS `<details>` and how the integration step closes it
+
+By code review, the summary has no `display` override. Layout lives on an inner `<span>`, and the native marker is hidden with `list-none` plus `[&::-webkit-details-marker]:hidden`. That is the right shape, but it is unverified.
+
+Close it as part of the integration step, on a real iPhone in Safari, before the toggle is announced to anyone. Open `https://www.presbyportal.org/site/fpcw/upcoming-events` with a test event in the current month, and check:
+1. Tapping an event row opens its details in place, and a second tap closes it.
+2. The chevron rotates.
+3. No native disclosure triangle shows.
+4. Previous, Next and Today work after load, and Today lands on the current month.
+5. Rotating the phone to landscape keeps the layout intact.
+6. Nothing scrolls sideways.
+7. The "Member sign-in" label is readable (the label-colour trap found in the browser).
+
+Record the device and iOS version in a work-log addendum. A failure is fixed forward, and the immediate rollback is the toggle off.
+
+### Intent-vs-Shipped Diff
+
+- **G1/Q1, "published" undefined.** Phase 1 said a separate, default-off switch with `is_public` as the veto. Shipped: `events.website_listed`, the CHECK and the read-time filter. Verdict: matches.
+- **G2, copy that lies.** Phase 1 said replace the five strings. Shipped: replaced, and the old strings are gone (my grep). Verdict: matches.
+- **G3/Q8, series switch.** Phase 1 said a scope choice inside one form. Shipped: a separate "Website listing" section with counted confirmations on the event page, plus extend-inherits-from-latest. Verdict: acceptable drift. It was disclosed in Phase 3 and gives the same capability on two surfaces. The F251 and F252 regressions are proven red-then-green.
+- **Badge wording.** Phase 1 proposed "On the website". Shipped: "For website" and "Marked for the website", and the toasts say "marked". Verdict: acceptable drift, and an improvement, because the row cannot know the toggle or the page.
+- **G4/Q7, time zones.** Phase 1 said server-side "today" in the org zone and no zone label. Shipped: the definer computes it and no label shows. Verdict: matches.
+- **G5/G6, allow-list and plain text.** Phase 1 said named keys, no ids, and plain-text rendering. Shipped: seven keys, `PublicCalendarEvent` has no id, hostile strings render as text, and the hint states the residual. Verdict: matches.
+- **G7, member prompt.** Phase 1 said show it only when the member calendar is on. Shipped: gated on `member_calendar_on` with hedged wording. Verdict: matches.
+- **G8, empty versus failed.** Phase 1 said distinct states. Shipped: failure and "off" are the same notice, and an empty list needs a successful read. Verdict: matches.
+- **G9, "where does the calendar appear" line.** Phase 1 asked for it. Shipped: deferred by operator ruling, with a TODO line. Verdict: acceptable drift. Placing the marker is a manual step, so a mistyped slot name renders nothing silently. The integration step's visual check covers it for FPCW.
+- **G10/Q5, month navigation.** Phase 1 said a bounded window switched in a client island. Shipped: 14 months, 400-row cap, no `?month=`, no endpoint, redline unamended. Verdict: matches. The costs are no deep link and a heavy payload (see Follow-Ups).
+- **G11, freshness.** Phase 1 said the next load reflects an unpublish. Shipped: `no-store`, and QA confirmed it. Verdict: matches.
+- **G12, cancelled events.** Phase 1 said hide them. Shipped: hidden. Verdict: matches.
+- **G13, mobile.** Phase 1 said a list under 640px, at least 44px targets, platform-fixed colours. Shipped: a list below `md` (768px, matching the member calendar), 44px targets, a legend. Verdict: matches, with the breakpoint at 768px.
+- **G14, Track K line.** Phase 1 said amend the line in the same commit. Shipped: the exact replacement text is drafted, but `docs/TODO.md` is a shared file and has not been edited. Verdict: owed at integration (below).
+- **Q9, iCal.** Phase 1 said defer it. Shipped: deferred, with a TODO line. Verdict: parity loss accepted.
+- **Audit (DECISION-240).** Phase 1 said audit publish and unpublish. Shipped: in-transaction `insertAuditRow` on all four writers, none for a no-op or a cancel. Verdict: matches.
+- **Q1/Q3 (operator rulings).** Shipped as ruled: a new switch, and a self-service toggle with `operatorEnabled: false`. Verdict: matches.
+
+### Edge Cases
+
+- **Empty state:** pass.
+- **Failure microcopy:** pass. It is human, one string, and never "no events" when the read failed.
+- **Permission gate:** pass.
+  - `events.manage` is checked first in the lib transaction on all writers.
+  - The organization id never comes from the form.
+  - The anonymous read takes no permission.
+  - The toggle needs `org_features.manage`.
+- **Audit event:** pass. Four writers, one row each when the column changes.
+- **Mobile (360px):** pass on the platform host and the simulated custom host, and on the editor surfaces. iOS is not verified.
+- **2FA mid-enrolment:** not applicable. The editor is under `/o/*`, which the proxy already gates, and the public surface has no session.
+- **Redirect and enumeration:** pass. The one outbound link is built from `SiteUrls` with no visitor input, and the unavailable row is identical for every cause.
+- **Founding-administrator walk (Phase 6 rule):** not applicable. This change grants no role, changes no connection to an organization, and changes nothing a new account can reach.
+- **Practical dependency (existing, unchanged):** `events.manage` has no default role binding. A freshly founded congregation's administrator cannot publish an event until a role carrying it is granted.
+
+### Public-site integration step, specified
+
+**Current facts**
+- **Production tenants:** `fpcw` and `presbytery-of-scioto-valley` (`docs/deployment.md:36`).
+- **FPCW's site has never been ingested.** Every `Deploy site content` run on `site-fpcw` failed (the five newest are 2026-08-26 to 08-28, the last on 08-28).
+- **No repository variables on `site-fpcw`.** `PRESBY_INGEST_URL` and `PRESBY_OIDC_AUDIENCE` are unset there. `site-pasturechurch` has both, set 2026-10-20. The failed logs have expired, so "failed because of the missing variables" is an inference.
+- **Production env:** `SITES_INGEST_OIDC_AUDIENCE` and `GITHUB_SITES_ORG` exist in Production (created about 6 days ago). `docs/TODO.md:100`, `docs/deployment.md:227` and `docs/deployment.md:826` still say they are unset and are stale.
+- **First customer:** pasturechurch.org is the go-live customer. FPCW is a pre-cutover tenant, a hard January 1 cutover with `fpcw-directory` still its system of record for events until then.
+- **Custom host for FPCW:** none is live. `DOMAINS_PROVIDER` is unset in production, so the real-provider acceptance pass has not run.
+
+**The edit (safe to do now, publishes nothing)**
+
+In `/Users/cshenso/git/presby-platform/site-fpcw/content/upcoming-events.json`, keep `frontMatter` and the `hero`. Replace the `prose` block (the Google Calendar link) with:
+
+```json
+{ "type": "liveSlot", "props": { "slot": "eventsCalendar" } }
+```
+
+- The slot name is case-sensitive, and a typo renders nothing silently.
+- `filter` is optional. `{"view":"list"}` would force the list layout, and `view: "month"` is the default.
+- The page is `/upcoming-events`, so it appears at `/site/fpcw/upcoming-events` on the platform host. The `navLabel` "Events" is unchanged.
+- Commit it on a branch, not `main`. A push to `main` runs `deploy.yml`, which is a publish once the variables exist and a red run until then. Before publishing, run `node ../presby-site-kit/scripts/build-bundle.mjs <repo> <out>` and confirm 14 pages and that the page carries the marker.
+
+**What must be true in production first**
+1. Migration 0067 is applied to production (see Deploy order) and the release is deployed.
+2. `sites.public_render` is on. The ingest route returns 503 otherwise, and the site does not render.
+3. Both `site-fpcw` repository variables are set. `PRESBY_OIDC_AUDIENCE` must equal the Production `SITES_INGEST_OIDC_AUDIENCE` exactly. `site-pasturechurch` carries `presbyportal-sites-ingest`, which is probably the same value, but compare it; I cannot read the encrypted env value.
+4. `organization_sites.repo` for `fpcw` equals `chenson42/site-fpcw`. Otherwise the ingest answers 404.
+5. `org_portal.events` is on in production, or the event editor is unreachable.
+6. A person in `fpcw` holds `events.manage` and `org_features.manage`. This needs a role grant through the normal admin UI by the founding administrator. Do not use SQL, which would skip the audit. A platform admin's role confers nothing here (DECISION-183).
+7. The operator's explicit go for FPCW's first real ingest. Publishing the bundle puts the whole migrated 14-page site, 78 images and the real staff contact details already public on the church's current site, live at `presbyportal.org/site/fpcw`, replacing whatever placeholder bundle is there. It is crawlable before the church's own domain exists. The calendar edit alone is not the decision; the first ingest is.
+
+**Order of the publish-and-verify steps**
+1. Toggle `org_portal.public_calendar` on for `fpcw` at `/o/fpcw/admin/features`. This is the only toggle, for this congregation only.
+2. List a clearly labelled test event with the box ticked, inside the 14-month window, for example "Calendar test (please ignore)".
+3. Then publish the bundle (merge the branch to `main`, or re-run the workflow). The reverse order shows visitors the "isn't available" notice for a moment in place of the old link.
+4. Check `https://www.presbyportal.org/site/fpcw/upcoming-events` at 360px: the list, an event opens, Previous/Next/Today work, no sideways scroll. Then check 1280px. Do the real-iPhone check above.
+5. Confirm the negatives with test rows: a members-only event, an unticked event and a cancelled event do not appear.
+6. Remove the test event: untick it (audited, and it leaves the page), then cancel it. There is no hard delete, so the row remains, inert.
+
+**Can it run now?**
+- The edit and local bundle build can run now.
+- The publish, toggle, test event and iOS check must wait for 0067 to be applied, the release deployed and the variables set, then for the operator's go on the first ingest.
+- The custom-host check cannot run for FPCW until Track F's real-domain acceptance pass and attachment (cutover). Today it is covered only by the simulated-host e2e on `*.invalid`. Add it to the cutover checklist.
+- The cutover also has a content dependency. After the switch, FPCW's Events page shows "No events are on this calendar right now" until the Track K event import has run with the G14 mapping (`publish_to_google_calendar AND is_public AND NOT members_only` feeds `website_listed`). The import must land before DNS moves.
+
+### Deploy order
+
+**Apply 0067 to production BEFORE merging.** Every merge to `main` auto-deploys production.
+1. Take a Neon snapshot of production.
+2. Run `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0067_presby_public_events_calendar.sql` as the owner.
+3. Re-read `proacl` (owner and `presby_app` only), the CHECK, `prosecdef`, and `relforcerowsecurity` on `events`, and diff against `development`.
+4. Then merge, deploy, and smoke the events admin page and an anonymous public-site page.
+
+The migration is additive, a default-false column plus one definer function. Old code against the new schema is unaffected (it never names the column, and nothing can set it). New code against the old schema breaks, because `EVENT_COLUMNS` selects `website_listed`, so the events admin pages would error until the migration lands. Code rollback is safe.
+
+Also apply it to the shared `development` branch, with the `scripts/public-calendar/seed-dev-public-calendar.sql` fixture. Run the full `scripts/test-rls.sql` as `presby_app` on merged `development` after the integration patch. Section 67 adds 58 passes, and the three known drift failures at lines 217, 516 and 7927 are pre-existing.
+
+### Follow-Ups (SHIP WITH NOTES)
+
+For the orchestrator, per Rule 10, in the same commit:
+
+**Edits**
+- Move line 51 (the public event calendar) to Done, 2026-10-25, with this verdict.
+- Amend line 54 (Track K event import traps, item 1, G14) with the replacement text drafted in Phase 3. `is_public` comes from `is_public AND NOT members_only`, `website_listed` from `publish_to_google_calendar AND is_public AND NOT members_only`, and only `kind = 'event'` rows are imported.
+- Correct line 100 (and the matching text in `docs/deployment.md`). The Production ingest env vars now exist. What is missing is `site-fpcw`'s repository variables, and the run history shows every ingest attempt failed.
+
+**New lines**
+- **F250:** `presby_public_giving_config` ignores the category axis (bug-fix pipeline). Phase 3 drafted the text.
+- **F253:** `presby_app` and `presby_platform` hold DELETE on `events`. *paper*
+- **Q9:** iCal or "add to my calendar".
+- **G9:** the "where does the calendar appear" status line, reusing `PUBLIC_CALENDAR_SLOT`.
+- **F255:** an "N events go live" confirmation when the toggle is turned on.
+- **N7:** `turbopack.root` spans the shared parent directory and breaks parallel dev servers.
+- **Payload lightening:** about 0.75 MB of uncompressed HTML for 2 events (about 29 KB gzip), and 4.1 MB at the 400-event maximum. The cheap fix is to render an event-less day as one `aria-hidden` cell. Revisit trigger: more than 1.5 s at 4x throttle at the maximum, or a church complaint.
+- **R2-N1:** `e2e/public-calendar.spec.ts:414` should wait for the child page's own heading or URL change, then drop the retry and fix its comment. The retry hides a test race, not a defect.
+- **Public-site integration, FPCW** (an operator-facing line carrying the preconditions above).
+- **Real-iPhone `<details>` check** (owner: operator, part of the integration step).
+- **FPCW custom-host check at cutover**, and the **event import before DNS moves** (day-one empty calendar).
+- **Owed what's-new post**, under "Owed what's-new posts", deferred until FPCW's toggle is on.
+
+**Housekeeping at integration:**
+- DECISION-238, 239, 240 and 241 written to `docs/decisions.md`.
+- F250–F256 folded into `docs/schema-design-2.md` §2aa.
+- The 0067 journal entry and the RLS patch applied. The journal `when` must stay in idx order relative to 0065 and 0066, and `db:migrate` can silently skip an entry with an earlier `when`.
+- `docs/STATE.md` updated.
+
+### Release note (minor)
+
+It is a Feature, so it is a minor release. I would not fix the number now: `presby-padmin` already carries 0.43.0 on its branch. It is **0.43.0 if this merges first, 0.44.0 if padmin's does**. Assign it at integration, as a new `v0.4x.md` file linked back to the previous minor.
+
+Draft entry:
+
+> **Feature: your congregation's website can show an events calendar.**
+>
+> **Value:** Visitors to your public website can see your upcoming events as a month calendar on a computer and a simple list on a phone, kept up to date from the events your team already enters.
+>
+> #### What's New
+> - **Nothing is public until someone chooses it.** Every event, old or new, starts with the new box "Show on our website's public calendar" unchecked. An administrator must also turn on the "Public events calendar" feature, which starts off.
+> - **It appears where your website's maintainer puts it.** Whoever maintains your website adds the calendar to a page, for example the events page.
+> - **Members-only and cancelled events are never shown.**
+> - **What visitors can read.** Anyone on the internet can read a shown event's title, description, location and event type. Search engines and web archives may keep copies, so taking an event off the website does not remove copies already made. Please leave private details out of these fields.
+> - **Repeating events.** A new "Website listing" section puts an event and all later ones on the website, or marks them off, in one step. Other edits to a repeating event still apply to one event at a time.
+> - **A box has changed.** "Visible on the public calendar" now reads "Open to everyone, not only members". Before this release it did not control anything on the website.
+> - **Not included yet:** subscribing from a phone or Google Calendar, and a separate page for each event.
+
+### What's-new advisory (Rule 13)
+
+Yes, but deferred, following the "Owed what's-new posts" precedent. An entry on `/home` reaches every member, and only `events.manage` and `org_features.manage` holders can use this, and only where the toggle is on. Publish it when the first congregation's toggle goes on, addressed to church administrators. Draft:
+
+> **Show your events on your website**
+>
+> Your church's website can now show an events calendar. To use it, an administrator turns on "Public events calendar" under Features. Your website editor then places the calendar on a page. Finally, tick "Show on our website's public calendar" on each event you want visitors to see. Nothing appears until you do all three. Events marked "Members only" never appear. Remember that anyone on the internet can read what you put in a shown event.
+
+### Docs
+
+- **`docs/product/functionality-map.md` (Rule 14):** edit the events bullet at line 23 and the admin bullet at line 79. Both currently say `is_public` is "inert until Increment 4" or that Increment 4 "reads `is_public`", which this change makes false. Describe the `eventsCalendar` liveSlot, `events.website_listed`, `org_portal.public_calendar`, `presby_public_events_calendar`, migration 0067, DECISION-238–241, the relabelled checkbox and the series "Website listing". The short Index entry needs the same shift if it names the public calendar.
+- **`docs/architecture.md` (Rule 15):** no change. A fifth live slot on an existing mechanism is not architectural.
+
+### Red Flags
+
+None. No NEEDS REWORK conditions.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. Code matches Phase 1 with disclosed drift (series listing as its own section, "marked" wording). Nothing members-only, unlisted or cancelled reaches the page. Open: iOS real-device check, the FPCW public-site integration step (blocked on 0067 in production, the release deployed, `site-fpcw`'s repository variables unset, and the operator's go on the first ingest), and the custom-host check at cutover. Deploy: apply 0067 before merging. | SHIP WITH NOTES | 2026-10-25 |
+
+### Handoff
+
+**Next: the orchestrator, then tech-lead.**
+- The orchestrator does the integration items: the journal entry, the RLS patch, decisions, TODO lines and edits, STATE, merging `main` again, the PR, and the 0067 apply and snapshot before merge.
+- Tech-lead does the Phase 6 housekeeping: the release-notes entry, the functionality map, and the owed what's-new line.
+- The integration step then runs with the operator, who owns the repository variables, the first-ingest go, the role grants and the real-iPhone check. When it closes, append an addendum to this work-log with the screenshots, device and version, and the cleanup confirmation.
+- Workflow Rule 12 does not apply, because this did not originate from in-app feedback.
+
+### Files read and referenced
+
+- `/Users/cshenso/git/presby-platform/presby-cal/docs/work-log/2026-10-25-public-events-calendar.md`
+- `/Users/cshenso/git/presby-platform/presby-cal/drizzle/0067_presby_public_events_calendar.sql`
+- `/Users/cshenso/git/presby-platform/presby-cal/src/app/(public)/site/[slug]/public-events-calendar-slot.tsx`
+- `/Users/cshenso/git/presby-platform/presby-cal/src/app/(public)/site/[slug]/events-calendar-panel.tsx`
+- `/Users/cshenso/git/presby-platform/presby-cal/src/app/(public)/site/[slug]/render-site-page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-cal/src/lib/events.ts`
+- `/Users/cshenso/git/presby-platform/site-fpcw/content/upcoming-events.json`
+- `/Users/cshenso/git/presby-platform/site-fpcw/README.md`
+- `/Users/cshenso/git/presby-platform/site-fpcw/.github/workflows/deploy.yml`
+- `/Users/cshenso/git/presby-platform/presby-site-kit/.github/workflows/ingest.yml`
+- `/Users/cshenso/git/presby-platform/presby/docs/deployment.md`
+- `/Users/cshenso/git/presby-platform/presby/docs/TODO.md`
+- `/Users/cshenso/git/presby-platform/presby/docs/product/functionality-map.md`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6/content/upcoming-events.json` (my scratch edit)
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6/bundle.json` (my scratch bundle)
 
 ---
 
@@ -1565,3 +1802,193 @@ Not re-run (no migration, definer, window, panel structure or island change): th
 ## For QA re-run
 
 Re-run the scope listed in "QA re-run scope" in amendment 1. The new tests: `events.test.ts` (the FAIL-2 block), `series-website-listing.test.tsx` ("before hydration"), `public-events-calendar-size.test.tsx`, and the FAIL-1 case in `e2e/public-calendar.spec.ts`. Use an isolated server if another pipeline is active (N7). The new `fix(events)` commits all carry `Caught-By: agent-review` / `Discovered-In: Phase-5`.
+
+---
+
+# Phase 5: Verification, run 2 (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**HEAD:** `1360f76` on `pipeline/public-events-calendar`. This includes `3db60f2`, which merged main at `3af650a`.
+
+**Main has moved since that merge.** `origin/main` is now 8 commits ahead (PR #54, the create-organization hydration gate, admin only). None of those files overlap this pipeline. The PR's CI run on the merge result is the authority for the combined tree.
+
+**Auth gate does not apply.** `git diff origin/main...HEAD` touches no auth, proxy or layout file, and no shared component. The `src/auth.ts` changes in `8a56f06..HEAD` come from main, not from this pipeline. So the stricter auth gate is not triggered.
+
+**Scope run**, following amendment 1's "QA re-run scope" plus the coordinator's request:
+- **Gates:** typecheck, lint, `npm run check` and plain `npm test`.
+- **DB-backed:** `src/lib/events.test.ts` in full.
+- **Failing-first by mutation:** FAIL-2 (unit, in a scratch copy), FAIL-1 (its e2e, in the isolated copy) and the size ceiling.
+- **Full `--project=chromium` e2e**, which includes `public-calendar`, `hydration/public-events-calendar` and `member-calendar`.
+- **`custom-domains/public-calendar.spec.ts`** on the custom-hosts project.
+- **Every calendar spec forced to 360px**, plus my 360px editor walk with screenshots.
+- **A click-timing investigation** of the series retry.
+- **The copy re-grep.**
+
+**Not re-run:**
+- The full DB-backed set, RLS section 67, the custom-hosts project apart from the calendar spec, and the production lane. Nothing they cover changed: no migration, definer, window or panel change, and the island, panel and model files are unchanged since `8a56f06` (`git diff` is empty).
+- The payload measurement. Ruling 3 stands on run 1's figures.
+
+All of that rests on QA run 1 and the implementer's loop-back gates.
+
+**Isolation (N7):**
+- The e2e ran against my own `next dev` on :3500.
+- That server was started from a byte-identical `git archive HEAD` copy, kept in a directory with no sibling projects, with the same `.env.local` and the same `DOMAINS_*`, `RATE_LIMIT_DISABLED` and `CRON_SECRET` environment as run 1. A probe of `/signin` showed no reload loop.
+- I stopped the server by PID and deleted the copy.
+
+**Flag state:**
+- Before e2e I reset the global flags with `psql "$PLATFORM_DATABASE_URL" -v ON_ERROR_STOP=1 -v pipeline_branch=1 -f scripts/ci/e2e-reset-flags.sql`, using the branch's copy, which is main's, against this branch's database only.
+- 39 seeded flags were set. The state was already at the baseline (no diff).
+- The flags were still at the baseline at the end.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**.
+- `npm run lint`: PASS.
+- `npm run check`: PASS, all 8 tripwires.
+- `node_modules/node_modules` is absent.
+
+## Unit Tests
+
+- **Plain `npm test`:** 562 files passed and 78 skipped (the DB-backed files, by design); 8753 tests passed, 0 failed.
+- **Affected files, run by themselves:** `series-website-listing.test.tsx`, `extend-series-form.test.tsx`, `public-events-calendar-slot.test.tsx` and `public-events-calendar-size.test.tsx`. 4 files, 43 of 43 passed, including:
+  - "before hydration: renders both trigger buttons disabled in the server HTML";
+  - "enables them once mounted";
+  - the size ceiling.
+- **`src/lib/events.test.ts`, DB-backed:** 85 of 85 passed.
+
+## End-to-End Tests
+
+| Run | Total | Passed | Failed | Skipped | Duration |
+|---|---|---|---|---|---|
+| `--project=chromium`, isolated :3500 | 432 | 432 | 0 | 0 | 18.5m |
+| `custom-hosts` (`custom-domains/public-calendar.spec.ts`) | 8 | 8 | 0 | 0 | 17s |
+| Calendar specs forced to 360px (platform and custom host) | 25 | 25 | 0 | 0 | 59s |
+
+**Real-browser look at 360px** (QA scratch editor walk, Chromium mobile emulation, screenshots read):
+
+| Screen | `scrollWidth` |
+|---|---|
+| New-event form | 360 |
+| Event detail page with Website listing | 360 (was 374 in run 1) |
+| Take dialog | 360 |
+| Put dialog | 360 |
+| Events list | 360 |
+
+- **Detail page:** an element scan found nothing past 360px. Each trigger button is full width with a wrapped two-line label, at least 44px tall, and reads cleanly.
+- **Dialogs:** they fit the screen. The toast reads "4 events no longer marked for the website."
+- **Extend line:** reads "New events will be marked for the website, like the latest one in this series."
+- **iOS Safari is still not verified.** That stays with the Phase 6 walk.
+
+## Regression Tests Added
+
+Failing-first was verified by mutation in scratch copies; the worktree was not touched.
+
+- **FAIL-2 block:** `src/lib/events.test.ts:1278`, "regression for a payload that omits or mistypes the website switch (Phase 5 FAIL-2)". It guards both writers against an omitted, string, number or `null` `websiteListed`, and against an omitted or string `isPublic`.
+  - **Mutation:** `switchesAreBooleans` forced to `return true` (the pre-fix behaviour).
+  - **Result:** **12 failed** (all 12 FAIL-2 cases). Restored: **85 of 85 pass**.
+  - **What it asserts:** the property, not just the fix: `invalid_input`, the column unchanged, and no extra audit row. It also covers the "omitted while unticking Open to everyone" case, which threw `23514` before the fix.
+- **FAIL-1:** `e2e/public-calendar.spec.ts:442`, "the event detail page does not scroll sideways at 360px with the Website listing section showing - regression for Phase 5 FAIL-1".
+  - **Mutation:** `TRIGGER_CLASS` set back to `"min-h-11"` in the isolated copy.
+  - **Result:** red, "Expected: <= 360, Received: 374". Restored: green.
+- **Size ceiling:** `src/app/(public)/site/[slug]/public-events-calendar-size.test.tsx`.
+  - **Mutation:** about 300 bytes of attribute padding added to every day `<section>`.
+  - **Result:** red, "expected 457333 to be less than 410000". Restored: green.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100% (unchanged; run 1).
+- `src/lib/two-factor.ts`: 91.3% (unchanged; run 1).
+- `src/lib/flags.ts`: 100% (unchanged; run 1).
+- Not re-measured: the loop-back changed only `events.ts` (DB-backed), one client component and copy.
+
+## Feature-Gate Audit
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| `createEventAction` / `updateEventAction` (lib changed by FAIL-2) | yes (`resolveActingIdentity`) | n/a (tenant) | `events.manage` is checked first (`events.ts:517`, `676`). The new boolean check runs after the permission check and before any read or write, so a forbidden caller still gets `forbidden`. |
+| `setSeriesWebsiteListingAction` | yes | n/a | Unchanged since run 1. |
+
+No other protected routes were touched.
+
+## Copy Truthfulness
+
+- [x] **Every changed string matches amendment 1, Rulings 1 and 2, word for word.**
+  - `series-website-listing.tsx:38` "{n} event(s) marked for the website." (+ " {s} left out.")
+  - `:43` "… no longer marked for the website."
+  - `website-listing-copy.ts:60,62` E8, "… will be marked for the website, like the latest one in this series."
+  - `public-events-calendar-slot.tsx:81` "No events are on this calendar right now. Please check back soon."
+- [x] **The source behind each claim was opened.**
+  - The toasts are built from the action's **returned** `SeriesListingOutcome` (`series-website-listing.tsx:87`, `putToast(result.data!)` / `takeToast(result.data!)`). "Marked" is exactly what the write established.
+  - E8 comes from `inheritedListing` ANDed with the parent's `isPublic`, the same rule the extend write uses.
+  - P2 is reachable only through a successful read with an empty 14-month window. "Right now" claims nothing about history.
+- [x] **Roles.**
+  - Toasts and E8 are read by an `events.manage` holder (the page requires it). They contain no instruction.
+  - P2 is read by an anonymous visitor. "Check back" and "call us" are things a visitor can do.
+- [x] **Re-grep for the old strings** ("put on the website", "taken off the website", "No events have been posted", "posted on this calendar", and "yet" in the calendar trees) over `src`, `e2e`, `scripts`, `docs/release-notes` and `docs/product`. Only one survivor remains: the test title at `e2e/public-calendar.spec.ts:473`, "cannot be put on the website from the form". It names the act, as Ruling 1 allows. The E7 button and dialog wordings that remain are the act strings Ruling 1 deliberately left alone. Nothing stale is left.
+
+**copy truthfulness: PASS**
+
+## The kept click-retry: does it hide a real defect?
+
+**No. It hides a test race, not a product defect.** The work-log's explanation is wrong, though: "the page re-renders once more under the click".
+
+**What actually happens:**
+- After `children.first().click()`, the spec waits with `page.waitForURL(/\/admin\/events\/[0-9a-f-]{36}$/)` (`e2e/public-calendar.spec.ts:414`).
+- That pattern **already matches the parent event's URL**, so the wait returns before the client-side navigation commits.
+- The parent page also shows "Website listing" and an enabled "Take this and later events off the website" button.
+- So the first click lands on the **parent's** button. Its dialog ("Take 4 …") opens, and then disappears when the child page replaces it.
+- The retry then clicks the child's button ("Take 3 …").
+
+**Evidence:** a QA scratch harness that creates the series exactly as the spec does, with a single click and no retry.
+
+| Harness variant | Where the click landed | Dialog shown | Dialog stays open |
+|---|---|---|---|
+| The spec's wait (5 trials) | the parent URL, 5/5 | "Take 4 events off the website?" | no, it closes on its own, 5/5 |
+| Waiting for the URL to change from the parent (5 trials, including 0ms delay) | the child | "Take 3 events off the website?" | yes, 5/5 |
+
+- A single tap on the **child's** enabled button opened the dialog and kept it open in **every** trial: 5/5 after creation, 6/6 after a client-side navigation from a freshly loaded parent at delays of 0–1000ms, and 3/3 after a full page load.
+- **What a real user sees:** someone who taps the old page's button during a navigation that is still pending gets that page's dialog, and it vanishes when the new page lands. Nothing is written unless they confirm, and a confirm acts on the event that was on screen. That is ordinary client-side navigation behaviour, not a lost tap.
+- The same wait pattern at `:458` (the FAIL-1 test) is harmless. Both pages carry both buttons in that fixture, so the 360px assertion is valid on either.
+
+## Verdict
+
+**PASS.**
+- FAIL-1 is closed: 374 → 360, with a regression test proven to fail before the fix.
+- FAIL-2 is closed: 12 regressions proven to fail before the fix, now 85 of 85 green.
+- The amendment's strings, the N3 gate and the size ceiling are verified.
+- Every suite in scope is green, including the full chromium run on the merged-main tree (432 of 432).
+
+**Non-blocking notes:**
+- **R2-N1 (cleanup for the implementer at the next touch; not a defect).** At `e2e/public-calendar.spec.ts:414`, wait for the URL to differ from the parent's, or for the child's own heading, instead of the generic event-URL pattern. Then drop the retry and correct the comment above it. As written, the retry would also hide a genuinely lost tap on the child page. My harness shows there is none today.
+- **R2-N2.** The work-log's suggestion that this is a "possible dev-mode double-request" is not the cause. The double RSC request to the parent route is the create action's revalidation, and it is unrelated.
+- **Carried forward from run 1:** iOS `<details>` stays with the Phase 6 walk (N2). The N7 and payload TODO lines are for the orchestrator (amendment 1, Ruling 5).
+
+**Clean-up:**
+- The worktree's `git status` is clean.
+- Ports 3500 and 3501 are free.
+- No `E2E Editor flow*` events, `e2e-pubcal*` organizations or `*pubcal*` site rows are left behind.
+- Flags are at the baseline.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2) | qa | Complete. FAIL-1 and FAIL-2 closed; failing-first proven by mutation, including the size ceiling. Chromium 432/432 (isolated server, merged main); custom-host calendar 8/8; forced 360px 25/25; editor at 360px `scrollWidth` 360. Unit 8753; events.test.ts 85/85. Copy checks pass. The click-retry hides a test race (`spec:414` waits on a URL pattern the parent page already matches), not a user defect. Flags reset to the CI baseline. | PASS | 2026-10-25 |
+
+## Handoff
+
+**Next: analyst (Phase 6).** Carry into the walk:
+- iOS `<details>` (N2);
+- the 360px walk on both host modes;
+- R2-N1 as an optional spec cleanup for the implementer.
+
+The orchestrator still holds the integration items: the RLS patch, the journal entry, decisions, TODO lines including N7 and the payload line, and a main re-merge before the PR.
+
+Files referenced:
+- /Users/cshenso/git/presby-platform/presby-cal/e2e/public-calendar.spec.ts
+- /Users/cshenso/git/presby-platform/presby-cal/src/lib/events.ts
+- /Users/cshenso/git/presby-platform/presby-cal/src/app/(org)/o/[slug]/admin/events/series-website-listing.tsx
+- /Users/cshenso/git/presby-platform/presby-cal/src/app/(public)/site/[slug]/public-events-calendar-size.test.tsx
+- /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa/run2/logs/click-ac-dev2.txt
+- /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa/run2/logs/editor-360/3-detail-parent.png

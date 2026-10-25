@@ -897,6 +897,9 @@ Every string below is written here, not in Phase 4. An implementer who needs a s
 - All hidden: "Every group is hidden. Show a group to see its households." Zero: "Every household is in a district." with link "Back to Parishes".
 - No active districts to assign to: "There are no districts to assign to yet." plus, for `canDefine`, link "Add a district"; otherwise "Ask your congregation's administrator to add them."
 - Masked person: "Private".
+- **Added at Phase 4 by orchestrator ruling (2026-10-25):** some groups hidden and the groups still shown empty (never blank): "No households in the groups shown." plus a link "Show all groups" to the fixed same-origin Unassigned URL with no `?hide=`. Nothing hidden and zero everywhere stays "Every household is in a district."
+
+**C3b District page, archived, no active district to move to (added at Phase 4, orchestrator-accepted 2026-10-25):** "There are no active districts to move them to." (shown in place of the bulk control).
 
 **C7 Officers**
 - Label: "Moderator of the Board of Deacons" (`moderator` stays "Moderator").
@@ -1244,10 +1247,10 @@ None in this batch (0068 is Batch A's). No env var. No `FEATURES` entry. One `OR
 7. **`failureWantsRefresh` was written and removed**: `RowAssign` refreshes on every refusal, which is simpler and harmless.
 8. **`listOfficerRoster` still returns `selfRecorded` computed in SQL for every office**; the TypeScript gate is `isAuthorityOffice`, so the badge shows for the seat and the Session offices only.
 
-### Strings not in the Copy table (stopped-for-ruling candidates; shipped as the narrowest honest wording)
+### Strings not in the Copy table (rulings 2026-10-25, both now in the Copy table above)
 
-- District page, archived, no active district to move to: "There are no active districts to move them to." (in `[orgUnitId]/page.tsx`).
-- Unassigned page where some but not all groups are hidden and the shown groups are empty: **no text** (the toggles and counts still render). The design has copy for "every group hidden" and "zero" only; analyst/tech-lead to rule whether that case needs a line.
+- District page, archived, no active district to move to: "There are no active districts to move them to." Accepted as written (C3b).
+- Unassigned page, some groups hidden and the groups shown empty: "No households in the groups shown." with a "Show all groups" link (fixed href, clears `?hide=`). Built in the fix commit; pinned by two page tests (the new text and link for hidden-plus-empty, and "Every household is in a district." unchanged for nothing-hidden-plus-empty). The first was proven failing against the previous blank render.
 - `same_unit` and a campus target map to the generic "Could not move..." line (neither is reachable from the UI).
 
 ### Tests (written by this implementer)
@@ -1260,7 +1263,7 @@ None in this batch (0068 is Batch A's). No env var. No `FEATURES` entry. One `OR
 
 ### Gates
 
-`npm run typecheck` pass; `npm run lint` pass (0 warnings); `npm run check` 8 of 8; plain `npm test` 560 files, 8551 tests pass, 79 skipped; `npm run build` pass; DB-backed suites against the pipeline branch serial: `parishes.test.ts`, `parishes.db.test.ts`, `officers`, `directory`, `role-grants`, `role-definitions`, `org-provisioning`, `groups`, `my-groups`, `imports`, `invitations.db`, `designation-parity.db`, `designation-revoke.db`, `session-approval.db` all pass (390 + 262). Not run: the full 34-minute `npm run test:db`, and the `npm run test:e2e:prod` production-build lane (it needs `next build && next start` on :3800; the hydration spec ran on the dev server).
+`npm run typecheck` pass; `npm run lint` pass (0 warnings); `npm run check` 8 of 8; plain `npm test` 560 files, 8551 tests pass, 79 skipped; `npm run build` pass; DB-backed suites against the pipeline branch serial: `parishes.test.ts`, `parishes.db.test.ts`, `officers`, `directory`, `role-grants`, `role-definitions`, `org-provisioning`, `groups`, `my-groups`, `imports`, `invitations.db`, `designation-parity.db`, `designation-revoke.db`, `session-approval.db` all pass (390 + 262). Production-build lane: `PW_PROD_PORT=3511 npm run test:e2e:prod -- e2e/hydration/parishes-controls.spec.ts` 3/3 passed (prod-build project, own `next build && next start`). `e2e/totp-full-login.spec.ts` passed (re-run with `parishes.spec.ts`, 11/11, on :3510). Not run: the full 34-minute `npm run test:db`.
 
 ### Handoff
 

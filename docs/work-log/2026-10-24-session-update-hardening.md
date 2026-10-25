@@ -19,8 +19,8 @@
 | 2 — Architectural review | architect | Complete; request-scoped grant + route 405 + update branch reads nothing; HMAC fallback | Approved with suggestions | 2026-10-24 |
 | 3 — Technical design | tech-lead | Skipped (bug-fix variant): the Phase 2 ruling is the design; root cause recorded | — | 2026-10-24 |
 | 4 — Implementation | api-developer | Complete; grant propagates through `unstable_update` (no HMAC fallback needed); all gates green | — | 2026-10-24 |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete (run 2 after disk freed); failing-first reproduced; auth e2e + prod-lane hydration green; test:db 10,784 passed, 3 canary failures = Phase 4 leftover fixtures | PASS | 2026-10-25 |
+| 6 — Shipped vs intent | analyst | Complete; defect no longer manifests; preserve-items hold; 8 follow-ups, release note drafted | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -344,79 +344,312 @@ After the change all of the above pass (24 tests across the four new unit files)
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+**Date:** 2026-10-25
+**Verified by:** qa (run 1 was blocked by host disk space; run 2 completed the outstanding checks after the disk was freed)
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-sess`, `pipeline/session-update-hardening` @ `4a3396f`. Neon branch `pipeline-session-update`. `git status` is clean at the end.
 
-## Type Check
+**Verdict: PASS.** Every required check is green. The only red result is the fixture-leak canary in `test:db`, which reports leftover rows from Phase 4's interrupted run and has nothing to do with this diff.
 
-`npm run typecheck`: PASS / FAIL
+**What I ran:**
+- **Static gates:** typecheck, lint, `npm run check`, plain unit suite, `npm run build` (twice).
+- **New tests:** the four new unit files, verbosely.
+- **Failing-first:** the new unit files against main's source.
+- **`npm run test:db`:** the full set.
+- **Dev lane:** the seven auth e2e specs against my own dev server on :3470.
+- **Prod lane:** `e2e/hydration/totp-challenge.spec.ts` on :3471.
+- **Path probes:** the session endpoint against both the dev server and `next start`.
 
-## Unit Tests
+**Not run:**
+- the full chromium e2e suite (the diff touches none of the full-suite triggers; CI runs it on the PR)
+- `scripts/test-rls.sql` (no schema or RLS change)
+- 360px (no UI change)
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Flag state:** before the e2e runs I reset this branch's global flags to the CI baseline: seeded defaults from `scripts/seed.ts`, then `scripts/ci/e2e-baseline-flags.sql`. The branch had been carrying about 25 extra flags that are on in development and off in CI. The pre-reset state is saved at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/flags-before.txt`. The branch is still at the baseline.
 
-## End-to-End Tests
+**Env values:** never printed; checked with `test -n` and by length only.
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+### Type Check
 
-## Regression Tests Added
+`npm run typecheck`: PASS. `npm run lint`: PASS (0 warnings). `npm run check`: PASS, all eight tripwires (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports). `npm run build`: PASS in run 1 and again, fresh, in run 2.
 
-- [test name — file:line — guards against: brief description]
+### Unit Tests
 
-## Coverage on Critical Modules
+**Plain `npm test`:** 8346 tests passed, 0 failed, 2442 skipped, in 546 files passed and 77 skipped (26.1 s). This matches Phase 4. The skips are the DB-backed files, which skip without `.env.local`, and all of them ran under `test:db` below. The four new files: 24 of 24 pass.
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+**Failing-first, verified by running:**
+- **Method:** I extracted HEAD into a throwaway scratch copy (since deleted) and overlaid main's `src/auth.ts`, `src/app/(auth)/totp/actions.ts` and `src/app/api/auth/[...nextauth]/route.ts`. The worktree itself was never modified.
+- **Result:** 8 failed and 16 passed, exactly as Phase 4 recorded:
+  - `route.test.ts`: 2 failed (`expected 200 to be 405`)
+  - `auth.session-update.test.ts`: 4 failed, cases (a), (b), (d), (f)
+  - `totp/actions.test.ts`: 2 failed, the two success paths
+  - Case (c) and case (e) pass on the old code, as designed.
 
-## Feature-Gate Audit
+**`npm run test:db` (`--no-file-parallelism`):** 10,784 tests passed, 3 failed, 1 skipped, in 622 files passed and 1 failed (2001.8 s).
+- **Timeouts:** none anywhere. Calendar, filings, org-features and org-provisioning all passed on the first run, so no retry was needed. Phase 4's timeouts did not reproduce: queries on the branch took about 0.3 s today.
+- **The 3 failures are pre-existing branch data, not a regression.** They are the leak canary in `src/lib/db/fixture-deletable.test.ts` (`:199`, `:224`, `:271`). It found 7 people rows and 3 organization rows whose deletion window has closed.
+  - **Origin:** all 10 come from `src/lib/role-definitions.test.ts`. The slug epoch `1792848969576` decodes to 2026-10-24T13:36Z, and the rows' `deletable_until` values fall between 15:36:09Z and 15:36:13Z that day. That is Phase 4's `test:db` run, which the work-log records as stopped partway, so its `afterAll` never ran.
+  - **Today's run leaked nothing:** `role-definitions.test.ts` passed, and the branch has no other stamped rows.
+  - **Effect:** these rows exist only on the pipeline Neon branch. They are permanent there by design (the delete guard) and disappear when the branch is deleted at cleanup. A retry would fail identically, because the canary reads data, not timing.
+  - **Diff:** touches no DB code or fixtures.
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+### End-to-End Tests
+
+**Dev lane:** my own `next dev -p 3470`, started with the `playwright.config.ts` webServer env, with `E2E_BASE_URL=http://localhost:3470` and `--project=chromium`.
+
+**Run 1:** 38 tests, 37 passed, 1 failed, 0 skipped (3.1 m). Per spec:
+
+| Spec | Tests |
+|---|---|
+| session-claim-integrity | 1 |
+| totp-full-login | 1 |
+| totp-callback-bypass | 7 |
+| totp-recovery-code | 2 |
+| totp-code-entry | 11 |
+| post-login-routing | 12 |
+| invitation-existing-account | 4 |
+
+The full login path for the MFA-enrolled seeded user (password → TOTP → landing) and the recovery-code path both passed.
+
+**The one failure was environmental:** `e2e/invitation-existing-account.spec.ts:80` ("Case A, no MFA") timed out at `:103`.
+- **What the log shows:** 751 `✓ Compiled` events and 786 identical `GET /invite` requests inside that one test. That is a hot-reload loop driven by the file watcher.
+- **Host cause:** it happened during the disk-fill episode, with `fseventsd` at about 170% CPU.
+- **Not this change:** the failing step is the anonymous view of `/invite`, before any session update.
+- **Rerun of that file:** 4 passed, 0 failed (23.0 s), with no recompile events.
+
+**Prod lane:** `PW_PROD_PORT=3471 npm run test:e2e:prod -- e2e/hydration/totp-challenge.spec.ts` passed, 1 of 1 (13.6 s).
+- The first attempt failed before any test ran: `browserType.launch: Executable doesn't exist` (`chromium_headless_shell-1223`). The disk cleanup had removed the Playwright browser cache.
+- I reinstalled the pinned build with `npx playwright install chromium` (Playwright 1.60.0). That writes only to `~/Library/Caches/ms-playwright`, not the repo. Then I re-ran.
+
+**Path variants of POST `/api/auth/session`** (no session cookie, real CSRF pair). The production server (`next start -p 3471`) and the dev server gave identical results:
+
+| Path | Result |
+|---|---|
+| `/api/auth/session` | 405, `Allow: GET`, empty body |
+| `/api/auth/session?x=1` | 405 |
+| `/api/auth/./session` | 405 |
+| `/api/auth/session/` | 308 to the canonical path |
+| `/api/auth//session` | 308 to the canonical path |
+| `/api//auth/session` | 308 to the canonical path |
+| `%73ession`, `Session`, `session/extra`, `session;x`, `session%2F`, `%2Fsession` | 400 (Auth.js unknown action) |
+
+- Following the 308s with `-L` ends at 405.
+- No variant set a session cookie.
+- `GET /api/auth/session` still answers 200.
+- **Note for the record:** Auth.js drops empty path segments (`@auth/core/lib/utils/web.js`, `parseActionAndProviderId`, `filter(Boolean)`). The route's exact-match check is therefore complete only because Next normalises slashes first; `next.config.ts` sets no `trailingSlash` or `skipTrailingSlashRedirect`. If either setting is ever added, this check should be revisited. The jwt-callback layer doesn't depend on it: case (a) passes against the real handlers with the route wrapper bypassed.
+
+### Regression Tests Added
+
+The implementer wrote these; I wrote none.
+
+- `(a) a payload asserting the 2FA claim, with no grant, leaves it false`, `src/auth.session-update.test.ts:123`. Guards against the update payload setting the claim. Drives the real Auth.js handlers and bypasses the route wrapper. Watched failing on main.
+- `(b) … false never un-verifies a verified token`, `:129`. Guards against the payload changing the claim in the other direction. Watched failing.
+- `(c) payload roles and features never reach the token`, `:135`. Locks in the deleted merges. Passes on old code by design.
+- `(d) inside a verification grant for the same user, the claim is set`, `:144`. Guards against a fail-closed regression if async context stops propagating. Watched failing.
+- `(e) a grant for a different user does not set the claim`, `:152`. Covers user binding.
+- `(f) a grant is single-use within its scope`, `:160`. Watched failing.
+- Session-endpoint 405, `src/app/api/auth/[...nextauth]/route.test.ts:26` and `:35`. Watched failing. Pass-through of the other POST paths is covered at `:41`.
+- Success paths update the session inside a grant with an empty payload, `src/app/(auth)/totp/actions.test.ts:92` and `:100`. Watched failing. The refusal paths at `:108–:130` guard against an update on a wrong, malformed, rate-limited or session-less attempt.
+- `src/lib/auth/two-factor-grant.test.ts:10–:31`: absent outside a scope, single-use, user-bound, isolated between concurrent scopes.
+- `e2e/session-claim-integrity.spec.ts:18`. Its failing-first is accepted from the Phase 4 record, not re-run: on main it stops at its first assertion (405), so its later "gate unmoved" assertions never ran against the old code. The live-handler proof of the callback layer comes from case (a), and I re-ran that against main.
+- **Property, not implementation:** case (a), case (c) and the e2e's three payloads assert that the claim and the gate don't move, rather than checking a key list.
+- **Naming:** none of these names carries the `— regression for …` suffix. That is consistent with the neutral naming the pipeline asked for until deploy, and it can be added afterwards.
+
+### Coverage on Critical Modules
+
+Not re-measured. The diff touches none of `permissions.ts`, `two-factor.ts` or `flags.ts`, so their last-review figures stand. Every branch of the new `src/lib/auth/two-factor-grant.ts` is exercised by its own test: no store, consumed, wrong user, and success.
+
+### Adversarial reading
+
+- **Who can open a grant:** only the two success paths at `src/app/(auth)/totp/actions.ts:86` and `:132`.
+  - Both sit after the TOTP or recovery-code check and after the audit row.
+  - `redirect()` sits outside the grant.
+  - The grant helper is not exported from any `'use server'` module.
+  - `src/lib/auth/config.ts`, and therefore the proxy, does not import it.
+  - `handlers` is exposed by one route only.
+- **Single-use and user-bound:** yes. The callback calls `takeTwoFactorGrant(userId)` only when `trigger === "update"` (short-circuit) and after the active-user check (`src/auth.ts:292`).
+- **Other `unstable_update` callers:** behaviour is unchanged. `(invite)/actions.ts:252` (`{user:{}}` to `{}`) and `(admin)/admin/users/actions.ts:26` only ever wanted the refresh, which `trigger === "update"` still forces. `invitation-existing-account` passed 4 of 4.
+- **Sign-in reset:** still present at `src/auth.ts:244`.
+- **Session projection:** `projectJWTOntoSession` reads only the token.
+
+### Feature-Gate Audit
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| `POST /api/auth/[...nextauth]` (`route.ts`) | n/a: public Auth.js endpoint by design; the change narrows it (405 on `/session`) | n/a | n/a |
+| `GET /api/auth/[...nextauth]` | unchanged (`handlers.GET`) | n/a | n/a |
+| `verifyTotpAction` (`(auth)/totp/actions.ts`) | yes (`:29`); plus enrolment check and per-user rate limit | n/a: first-factor session action, not a feature surface | n/a |
+| `acceptSignedInAction` (`(invite)/actions.ts`) | yes (`:219`); 2FA gate at `:225` unchanged | n/a: authority comes from the invitation credential (DECISION-183) | n/a |
+| `forceResetTwoFactor` (`(admin)/admin/users/[id]/actions.ts`) | comment-only change; gating not altered | — | — |
 
-## Verdict
+No protected platform route was added or loosened.
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+### Verdict
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+**PASS.** This is an auth-touching diff and the stricter gate is met. The auth e2e set ran against a real dev server with the MFA-enrolled seeded user and the full password → TOTP → landing path passed, and so did the prod-lane hydration spec. Every spec passed, the one case after its single environmental rerun. Everything else is green: the static gates, the build, the unit suite, the failing-first reproduction and the 405 matrix on both servers. The `test:db` canary result is pre-existing branch data with the evidence above.
+
+**Notes for the orchestrator (not defects in this diff):**
+- **The canary will keep failing on this branch.** The leaked rows from Phase 4's interrupted run can't be removed, by design. Deleting the branch at cleanup clears them (standing authorization; never `development` or `production`). An interrupted `test:db` leaves permanent rows on any branch it runs against, so a stopped run is worth treating as a cleanup event.
+- **`AGENTS.md` gets rewritten by `next dev`.** In run 1, Next 16's agent-rules generator rewrote one heading in the tracked `AGENTS.md` (`#` to `##`). I restored it with `git checkout -- AGENTS.md`, the only file operation I made in the worktree. `next start` did not rewrite it. Every dev-server run will hit this. It's a Trivial fix: commit the generator's form, or set `agentRules: false`.
+- **The qa agent file names the wrong script.** It refers to `scripts/ci/e2e-reset-flags.sql`, but the file is `scripts/ci/e2e-baseline-flags.sql`, and the real CI baseline is seeded defaults plus that script.
+- **Optional tidy in `src/auth.ts:239`.** The jwt callback still destructures `session`, which nothing reads. Removing it would make "reads nothing from the payload" visible from the code itself.
+- **Servers and ports.** I stopped every server I started by PID (6916/6932/6933/6947 and 7846/7849 on :3470; 15418 on :3471). The prod lane's own :3471 server was stopped by Playwright. I never touched :3000 or :3100.
+
+**Per-Phase Status row:**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Failing-first reproduced (8 of 24 fail on main). Auth e2e (38, one environmental rerun) and the prod-lane hydration spec green. `test:db` 10,784 passed; the 3 canary failures are leftover fixtures from Phase 4's interrupted run. 405 matrix verified on dev and `next start`. | PASS | 2026-10-25 |
+
+**Handoff:** to **analyst** for Phase 6 (shipped vs intent). Keep the commit, PR and release-note wording neutral until deploy.
 
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+Bug-fix variant. Reviewed at HEAD `4a3396f` plus the uncommitted Phase 5 work-log update. I read the diff (`git diff main...HEAD`), the Phase 1, 2, 4 and 5 text, `docs/TODO.md`, and the e2e spec headers. I ran nothing and wrote nothing. The 360px and browser evidence below is QA's, not mine; see Edge Cases.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.** The defect no longer manifests and every Phase 1 "must preserve" item holds. The notes are follow-ups that need TODO lines and a few things to do at integration and after deploy. None of them is a defect in this diff.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A session that has passed only the first factor can no longer set its own "second factor verified" claim by any client path, the real TOTP and recovery-code paths still reach the destination, and members see no difference.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The root cause is removed at the callback, not just hidden at the route.**
+  - The update branch in `src/auth.ts` no longer reads anything from the payload. The three merges (`twoFactorVerified`, `roles`, `features`) are deleted.
+  - `twoFactorVerified = true` is set only when `trigger === "update" && takeTwoFactorGrant(userId)`, after the active-user check.
+  - Nothing sets the claim to `false` except the sign-in reset at `:244`, which is kept.
+  - The 405 at `POST /api/auth/session` is defence in depth. QA's case (a) drives the real handlers with the route wrapper bypassed and still leaves the claim `false`.
+- **Both client-reachable paths are closed.**
+  - Browser POST to the session route: 405, `Allow: GET`, no body, no cookie. Every path variant QA probed on dev and on `next start` either returned 405, redirected to it, or returned 400. None set a cookie.
+  - Server actions that call `unstable_update` without a grant (invite accept, self role change) now only refresh the cookie and cannot set the claim.
+- **The grant is a capability, not data.**
+  - It lives in `AsyncLocalStorage` in a `server-only` module, is single-use, and is bound to the token's `sub`. Nothing is serialized, so there is nothing to replay.
+  - I confirmed in the diff that `withTwoFactorGrant` is imported by the `'use server'` file but not exported from it. `src/lib/auth/config.ts` and the proxy do not import it.
+  - It opens in exactly two places, after the code check and the audit row: `totp/actions.ts` for TOTP and for recovery. `redirect()` is outside the grant.
+- **A prod-lane run proves the legitimate path.** `e2e/hydration/totp-challenge.spec.ts` ran against `next build && next start` and completed a real code to `/admin`, with `totp.verify_succeeded` written once and no failed rows. That shows async context reaches the jwt callback in a production build, which was the one mechanism risk in Phase 2. If context ever stopped propagating, the failure is fail-closed (the user loops on `/totp`) and the e2e specs catch it.
+- **The tests fail first and assert the property.**
+  - 8 of 24 new tests fail on main's source.
+  - Cases (a), (b) and (c) and the e2e assert that the claim and the gate don't move. They don't assert a list of keys, which meets the retro lesson on testing the property rather than the fix's shape.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Phase 1:** the claim must be writable only by the server-side TOTP and recovery paths. **Shipped:** a request-scoped, single-use grant checked in the callback, plus the route 405. **Verdict:** matches.
+- **Phase 1:** TOTP verify and recovery verify still reach `callbackUrl` (behaviour 1). **Shipped:** both wrapped in the grant. Auth e2e `totp-full-login` (1), `totp-recovery-code` (2) and `totp-code-entry` (11) passed with the MFA-enrolled user. **Verdict:** matches.
+- **Phase 1:** enrolment must not set the claim (behaviour 2). **Shipped:** `completeEnrollment` is untouched, so enrolment still hands off to `/totp`. **Verdict:** matches.
+- **Phase 1:** already-verified sessions stay verified, with no rotation and no forced sign-out (behaviour 3). **Shipped:** the claim name and token shape are unchanged, and nothing is rotated. **Verdict:** matches. The security consequence is in Follow-Up 3.
+- **Phase 1:** refresh-only updates keep re-issuing the cookie (behaviour 4). **Shipped:** invite accept and self role change now send `{}`, and `trigger === "update"` still forces the role and feature refresh. `invitation-existing-account` passed 4 of 4. **Verdict:** matches.
+- **Phase 1:** deactivation, stale-JWT and role-refresh behaviour unchanged (behaviour 5). **Shipped:** the active-user check and `needsRoleRefresh` are untouched. **Verdict:** matches.
+- **Phase 1:** no new failure modes at sign-in (behaviour 6). **Shipped:** the sign-in path is untouched, and `post-login-routing` (12) passed. **Verdict:** matches.
+- **Phase 1:** no user-visible change. **Shipped:** no UI file is touched. The only browser-facing change is that `POST /api/auth/session` returns 405, and nothing in the app calls it. There is no `next-auth/react` use, and the only HTTP consumer is a `GET` in `e2e/support/global-setup.ts`. **Verdict:** matches.
+- **Phase 1:** dead-code and stale-comment cleanup (gaps 5 and 6). **Shipped:** the merges are removed and the comments are rewritten at `src/auth.ts` and `(admin)/admin/users/[id]/actions.ts`. **Verdict:** matches.
+- **Phase 1:** consider a `warn` log for a rejected claim write (gap 4). **Shipped:** none. The architect did not adopt it, and the 405 returns no body. **Verdict:** acceptable drift. A blocked probe leaves no trace, so Follow-Up 7 asks whether a one-line warn is wanted.
+- **Phase 2:** the grant module, the request-scoped design, the callback change, the route wrapper and the failing-first tests as specified. **Shipped:** as ruled. The HMAC fallback was not needed. **Verdict:** matches.
+- **Phase 2:** the optional `{ user: {} }` to `{}` change. **Shipped:** done. **Verdict:** matches.
+- **Beyond the ruling:** `vitest.config.ts` gains `server.deps.inline: [/next-auth/]` so tests can drive the real handlers. The Phase 4 note says the full suite is unaffected, and plain `npm test` stayed at 8346 passed. **Verdict:** acceptable drift, test-only.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: not applicable (no new surface).
+- Failure microcopy: pass.
+  - The wrong-code, malformed-input and rate-limited paths still produce the existing `?error=` redirects, and `totp/actions.test.ts` confirms they never update the session.
+  - The 405 for a browser POST is an empty response. No member reaches it, and nothing leaks existence.
+- Permission gate: pass. Every 2FA gate that reads the claim (the proxy on `/admin*` and `/o/*`, the admin layout, invite accept and its page, and the giving access gate) now trusts a claim that only the server-side verification can set. The e2e shows the gate unmoved after an attempted client update. No new `FEATURES.*` key, and the grant is not mapped into the resolver or into any other claim.
+- Audit event: pass. No new action. `TOTP_VERIFY_SUCCEEDED` and `TOTP_RECOVERY_SUCCEEDED` are still written before the update, and `check:audit` is clean. The server-side flow keeps a record. A rejected browser probe does not, by design (see Follow-Up 7).
+- Mobile (360px): not applicable. Phase 5 reports no UI change and no changed page. `/totp` is not modified, and `totp-challenge` is exercised in the prod lane. I did not browse at 360px myself, because this phase is read-only.
+- Phase 6 walk as the created person: not triggered. The change doesn't alter how an account joins an organization, how a role is granted, or what a new account reaches. It only narrows what an un-verified session can reach. The relevant person is the MFA-enrolled member, and QA walked that path end to end against a real dev server and the prod build.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+Each line is written as a TODO entry for `docs/TODO.md` (Workflow Rule 10), to be added in the integration commit.
 
-## Red Flags (if NEEDS REWORK)
+1. `- [ ] **Revocation of a verified 2FA claim** after an admin TOTP reset or sign-out elsewhere: the target's session keeps \`twoFactorVerified: true\` until its JWT expires (about 30 days). The proper fix is a per-session server record, not a per-user column (Phase 2 rejected \`users.two_factor_verified_at\` because one device's verification would vouch for another device's session). Needs its own Phase 1 and a schema decision. — \`docs/work-log/2026-10-24-session-update-hardening.md\` Phase 2; \`src/app/(admin)/admin/users/[id]/actions.ts\` known-gap comment`
+2. `- [ ] **F237 (low): recovery-code consumption and TOTP reuse.** \`totp/actions.ts\` reads a recovery code then writes \`used_at\` unconditionally. It should be one conditional \`UPDATE … WHERE used_at IS NULL RETURNING\`. Separately, a TOTP code can be reused inside its time window because no last-used step is recorded. A bug-fix pipeline, not part of the hardening fix. — \`docs/work-log/2026-10-24-session-update-hardening.md\` Phase 2 follow-ups`
+3. `- [ ] **Operator ruling to record in DECISION-230: existing sessions are not rotated.** The fix stops new misuse but cannot show whether any session already carries an unearned verified claim, because a forged claim leaves no audit mark, and such a session stays verified for up to 30 days. Phase 1's default was "do not rotate" so no member is forced to re-verify. The operator should confirm that, or order a one-time claim-version rotation that forces a re-verify after deploy. Decide before or at deploy. — \`docs/work-log/2026-10-24-session-update-hardening.md\` Phase 1 gap 2`
+4. `- [ ] **After 0.42.3 is deployed: disclosure and sibling hand-off.** (a) Commit the test-coverage review file \`docs/reviews/2026-10-24-test-coverage.md\` (finding C-1) and update the log line. (b) Run \`/downstream-sync\` for this change and give the owners of the repos seeded from the same starter a neutral heads-up that they likely inherit the same session-update path. (c) The PR and commit titles stay neutral until then. — \`docs/work-log/2026-10-24-session-update-hardening.md\``
+5. `- [ ] **Post-deploy smoke of the 0.42.3 sign-in path on production:** an MFA-enrolled account signs in, enters a TOTP code and reaches its destination. The grant relies on async context reaching the jwt callback, which was proven on \`next start\` but not on the Vercel runtime. If it fails, it fails closed (a loop on \`/totp\`), and the approved fallback is the HMAC proof. — \`docs/work-log/2026-10-24-session-update-hardening.md\` Phase 2`
+6. `- [ ] **Update the test-coverage punch-list item (7) at TODO.md:211** (\`src/auth.test.ts\` for the jwt callback): \`src/auth.session-update.test.ts\` now covers the update branch against the real handlers. The sign-in, stale-JWT and role-refresh branches are still untested, so reword the item rather than closing it. Also record the route check's dependency: \`/api/auth/session\` is matched exactly, which is complete only while \`next.config.ts\` sets no \`trailingSlash\` or \`skipTrailingSlashRedirect\` (Auth.js drops empty segments). Revisit if either is added. The jwt-callback layer does not depend on it. — Phase 5 notes`
+7. `- [ ] **Decide whether a refused browser POST to \`/api/auth/session\` should log a warn line.** Phase 1 suggested a \`warn\` without a new audit action, but the 405 currently leaves no trace, so probing is invisible. Low priority; a log line only, never an audit row. — Phase 1 gap 4`
+8. **QA's `qa` agent script name** (`scripts/ci/e2e-reset-flags.sql` should read `e2e-baseline-flags.sql`, with seeded defaults first): `- [ ] **Fix the qa agent's e2e flag-reset script name** in \`.claude/agents/qa.md\` (\`e2e-baseline-flags.sql\`, after the seeded defaults from \`scripts/seed.ts\`). Fold into \`retro-workflow-efficiency\` if it covers \`qa.md\`; otherwise a Trivial fix. — Phase 5 notes`
 
-- [Specific. What has to change before this ships.]
+**Explicitly no action, with reasons:**
+
+- **`AGENTS.md` rewritten by `next dev`.** Already owned by the `retro-workflow-efficiency` pipeline. No separate line unless that pipeline closes without covering it.
+- **The unused `session` destructure at `src/auth.ts:239`.** Harmless, since lint passes, and the comment above the update branch already says the payload is ignored. Fold the deletion into the next touch of that callback if wanted.
+- **Leaked fixtures on the Neon branch `pipeline-session-update`.** Permanent by design (delete guard) and cleared when the branch is deleted at cleanup under the standing authorization. The 3 `test:db` canary failures are those rows, not a regression. Treat an interrupted `test:db` as a cleanup event.
+
+**For the orchestrator at integration (not TODO lines):**
+
+- **Record DECISION-230** as the architect proposed, with the Follow-Up 3 operator ruling on rotation included.
+- **CLAUDE.md:** the architect's one sentence under *The Proxy Does Not Reach the Database* needs the operator's explicit approval. I do not author it.
+- **Functionality map and `docs/architecture.md`:** no update (Rules 14 and 15). This is neither a surface change nor architectural.
+- **Feedback row (Rule 12):** none. This did not originate from member feedback.
+- **Commit and PR:** keep titles neutral. The work-log's wording describes the defect only at the level the architect approved.
+
+## Release Note Draft for 0.42.3 (patch)
+
+For `docs/release-notes/v0.42.md`, in the table and the entry. The wording describes no mechanism.
+
+Table row:
+`| [0.42.3](#0.42.3) | 2026-10-25 | Security | A security update to how sign-in sessions are handled |`
+
+Entry:
+
+```
+<a name="0.42.3"></a>
+## 0.42.3 — 2026-10-25
+
+**Security: a security update to how sign-in sessions are handled.**
+
+**Value:** We hardened how the platform keeps track of a sign-in session, so a step that checks who you are can only be completed in the places meant to complete it.
+
+#### What's New
+
+- **Nothing should look different.** Signing in, entering your authenticator code, and using a recovery code all work as before, and you land where you did before.
+- **You do not need to do anything.** You will not be signed out, and you will not be asked for a code again because of this update.
+- **What changed behind the scenes.** The platform now accepts that a sign-in step is complete only from its own verification screens. Other requests to change a session's state are refused.
+- **If anything looks off,** such as being sent back to the code screen after entering a correct code, please tell us with the feedback button.
+```
+
+Notes on the wording:
+
+- It does not claim that existing sessions were re-checked or that nothing could have happened before. That fits the record, which admits that past misuse is undetectable and that sessions are not rotated (Follow-Up 3). If the operator chooses to rotate sessions, the "you will not be asked for a code again" line must change.
+- The type is Security, matching 0.42.2.
+
+**What's-new entry (Rule 13): not warranted.** There is no member-visible behaviour change, and a public what's-new note would only point attention at the change. The release note is enough.
+
+## Red Flags
+
+None.
+
+---
+
+**Per-Phase Status row:**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. The defect no longer manifests by any client path. Legitimate TOTP and recovery verification reach the destination (dev e2e and prod-lane). All six Phase 1 preserve-items hold and there is no user-visible change. The Phase 2 ruling is honoured with no deviation. Eight follow-ups for TODO lines, three explicit no-actions, and the 0.42.3 release-note draft are above. A what's-new entry is not warranted. | SHIP WITH NOTES | 2026-10-25 |
+
+**Handoff:** to the orchestrator for integration, in this order:
+
+1. Get the operator's ruling on session rotation (Follow-Up 3) and on the CLAUDE.md sentence.
+2. Record the Phase 6 section above, the Phase 1 section and the Per-Phase Status row in the work-log.
+3. Add the TODO lines, DECISION-230 and the F237 finding.
+4. Add the release note and bump to 0.42.3, then run `/pre-push` with neutral commit and PR titles and the `Work-Log: 2026-10-24-session-update-hardening` trailer.
+5. After deploy, run Follow-Up 5 (the production smoke) and Follow-Up 4 (the disclosure and sibling hand-off).
+6. Delete the Neon branch `pipeline-session-update` (`br-gentle-firefly-axtka600`) and the worktree at cleanup, which also clears the leaked canary rows.
+
+Files read:
+
+- `/Users/cshenso/git/presby-platform/presby-sess/docs/work-log/2026-10-24-session-update-hardening.md`
+- `/Users/cshenso/git/presby-platform/presby-sess/src/auth.ts`
+- `/Users/cshenso/git/presby-platform/presby-sess/src/lib/auth/two-factor-grant.ts`
+- `/Users/cshenso/git/presby-platform/presby-sess/src/app/(auth)/totp/actions.ts`
+- `/Users/cshenso/git/presby-platform/presby-sess/src/app/api/auth/[...nextauth]/route.ts`
+- `/Users/cshenso/git/presby-platform/presby-sess/e2e/hydration/totp-challenge.spec.ts`
+- `/Users/cshenso/git/presby-platform/presby-sess/docs/release-notes/v0.42.md`
+- `/Users/cshenso/git/presby-platform/presby-sess/docs/TODO.md`
+

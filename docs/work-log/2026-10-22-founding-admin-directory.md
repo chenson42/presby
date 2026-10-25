@@ -36,6 +36,7 @@
 | Inc 2b · 1b — Phase 1 addendum 2 (auto-connect, accept in place, reconciliation with v0.41–v0.42.2) | analyst | Complete; G10–G22; four operator questions with defaults; architect addendum needed (G10, G11, G13, G14, G15) | READY WITH NOTES | 2026-10-24 |
 | Inc 2b · 2b — Architect addendum 2 (auto-connect, accept in place) | architect | Complete. R37–R47; F230–F233; DECISION-225–228; 207/208 amended; 0065. Depends on DECISION-230 (v0.42.3). F234–F236 returned unused. | Approved with suggestions | 2026-10-25 |
 | Inc 2b · 3b — Technical design amendment 2 (auto-connect, accept in place, reconciliation with v0.41-v0.42.2) | tech-lead | Complete. Folds R37-R47 and the reconciliation table: migration 0065 (A1 proof, user-link guard, constraints; A2 standing core, bind helper, connect, accept core with in-place presentation, listing, issue/resend/revoke/reader), toggle `org_portal.sign_in_connect`, TypeScript files and scans, copy groups A-I with the four checks, 40 edge cases each pinned or marked unverified, `test-rls-65.sql` outline, batches A1/A2/B1/B2/C/D, release-note do-not-write list, kickoff checklist. S13 accepted, S11 declined, `address_invalid` also deleted. Development counts recorded; production SQL listed for the orchestrator. One CLAUDE.md sentence awaits the operator | Design complete; implementers named | 2026-10-25 |
+| Inc 2b · 4 — Implementation | A1+A2 database-admin, B1+B2 api-developer, C+D ux-developer (serial) | In progress: kickoff steps 3, 6, 7, 8 recorded 2026-10-25 (no contradiction; one design gap: `scripts/seed.ts` stamps proof as `presby_app`); **Batch A1 complete 2026-10-25** (0065 sections 1-10 applied twice to the pipeline branch, digests identical; T-2/T-3/T-4-A1/T-8-A1; failing-first proven; E-33 Vitest identical to baseline, SQL fails only at the 12 predicted F186 lines that A2 converts) | — | — |
 
 ---
 
@@ -7517,3 +7518,183 @@ Re-run P1, P2 and P8 just before deploy. Also fixed per the tech-lead's note: th
 
 - **CLAUDE.md edit 3 (§11.4): approved** as the tech-lead wrote it. All three edits land in 2b's diff.
 - **R55 (Increment 3 architect): approved** — auto-connect requires member standing (listed or staff anchor); lands in 3a (0066). 2b keeps `standing = 'visitor'` until then.
+
+## Operator: Copy read (kickoff step 5), 2026-10-25
+
+> "i'm fine with the copy. it can be adjusted later if need be"
+
+§10 Copy approved as written, including "two-step" → "two-factor". Kickoff step 5 is complete; Batch C may proceed when its turn comes.
+
+---
+
+# Increment 2b — Phase 4
+
+## Phase 4 — kickoff (database-admin, 2026-10-25)
+
+*Worktree `presby-2b`, branch `pipeline/signin-invites` at `f752160` (main `3af650a` merged: v0.42.3, v0.42.4, workflow-efficiency). `.env.local` → Neon branch `pipeline-signin-invites` (endpoint `ep-delicate-tree-axem9ol6`; `MIGRATE_DATABASE_URL`/`DATABASE_URL` direct, `PLATFORM_DATABASE_URL` pooler; `APP_DATABASE_URL` connects as `presby_app`, `rolbypassrls = f`). Steps 1, 2, 4 and the merge are the orchestrator's (recorded above); step 5 (operator reads the Copy) is in progress and does not block A1. Every database read below was catalog or counts only.*
+
+### Step 3: numbers on `main` (`3af650a`)
+
+| Number | Result |
+|---|---|
+| Migration 0065 | Free. `drizzle/` on main ends at `0064_presby_person_emails.sql`; `_journal.json` ends at `idx 64` / `0064_presby_person_emails`. |
+| DECISION-207, -208 | Unused (no heading, no mention). |
+| DECISION-225 to -228 | Free. The only mention is DECISION-229's note "225 to 228 are reserved for Community Increment 2b". Main now has DECISION-229, -230, -231 and -246 (all other pipelines'). |
+| F186, F187, F192-F199, F230, F232, F233 | Free: no `### F…` heading in `schema-design.md` or `schema-design-2.md`. |
+| F231 | Used **as intended**: the split-out F231 pipeline (DECISION-246, v0.42.4) cites it in `decisions.md`, `STATE.md` and `TODO.md` (Done, 2026-10-25), but no `schema-design-2.md` entry exists. Not a collision: the architect assigned F231 to this finding and the operator split it out. At integration, 2b's lettered findings subsection should record F231 as **closed by DECISION-246** rather than re-close it. |
+| F234-F236, F238 | Unassigned (F238 was returned unused by the session-hardening pipeline, `schema-design-2.md` §2y). |
+| F237, F239 | Present on main (§2y, §2z), not used by 2b. |
+
+No contradiction with the design.
+
+### Step 6: live definitions against 0064, and the dependency check
+
+`pg_get_functiondef` / `prosrc` on the pipeline branch, diffed against the dollar-quoted bodies in `drizzle/0064_presby_person_emails.sql`:
+
+| Function | Live body vs 0064 text | Body md5 (live) | Attributes |
+|---|---|---|---|
+| `presby_preview_invitation(text, uuid)` | **Identical** | `43dbf9d3…` | definer, `search_path=public, pg_temp`, EXECUTE `presby_app` |
+| `presby_accept_invitation(text, uuid, text, text, text)` | **Identical** | `bd936e5b…` | definer, same `search_path`, EXECUTE `presby_app` |
+| `presby_contact_methods_guard_write()` | **Identical** | `6ffbf549…` | invoker, same `search_path`, owner-only EXECUTE |
+
+`presby_account_invitations_guard_insert()` (re-created in section 5) was read from the catalog; it is 0059's text. Existing non-internal triggers on the four touched tables: `contact_methods_guard_write`, `contact_methods_primary_required`, `people_guard_delete`, `account_invitations_guard_{insert,update,delete}`, all enabled (`O`); none on `users`.
+
+**Dependency check** (`select proname from pg_proc where prosrc ~* '<name>'`, public schema), for every dropped, replaced or newly named object:
+
+| Name searched | Function bodies naming it |
+|---|---|
+| `open_address_uq`, `purpose_allowed`, `origin_allowed`, `names_by_purpose`, `blocked_reason_allowed`, `purpose_origin_tie`, `sign_in_has_person`, `open_sign_in_person_uq`, `person_created_ix` | none |
+| `presby_account_invitations_guard_insert`, `presby_contact_methods_guard_write`, `presby_preview_invitation` | none |
+| `presby_accept_invitation` | itself; `presby_account_invitations_guard_update` (two refusal **messages**: "accepted/blocked only through presby_accept_invitation()"); `presby_contact_methods_guard_write` (message, replaced in section 7) |
+| `users_email_unique` | `presby_accept_invitation` (the step 5 exception mapping; E1 extends it in A2) |
+| `users_email_lower_uq`, `people_guard_user_link`, `users_guard_email_proof` | none |
+| `verified_at is set only by` | `presby_contact_methods_guard_write` (replaced in section 7) |
+| `email_verified` | `presby_accept_invitation` (the new-account `insert into users (email, email_verified, …)`; runs as the owner, so section 3 passes it) |
+| `update people set user_id` | `presby_accept_invitation` only (as §5.7 says; A2 moves it into the bind helper) |
+
+Nothing in A1 breaks a body. **For A2:** `presby_account_invitations_guard_update`'s two messages name `presby_accept_invitation()`; once the body moves into `presby__accept_invitation_core` the marker is armed there, and the messages stay true only loosely. Not a defect (the guard keys on the marker, not the name); A2 may restate the two messages.
+
+### Step 7: G22, Increment 2's components, `test-rls.sql` anchors
+
+- **G22 on the pipeline branch** (read-only): active users not linked to a live person whose address matches **any** person's active email: **0**. Also: 30 users, 30 stamped, 0 case-duplicate groups, 0 stale stamps, 6 invitations (0 tie violations), 19 toggle rows over 15 organizations, `user_totp` present. Same as the design's `development` figures (the branch is a fresh child).
+- **`pending/session-state-banner.tsx`** (131 lines, last `0e88167`): `NO_SIGN_IN_INVITE_LINE` is the exported constant §10 replaces; `no_sign_in` says "none has a PresbyPortal account yet"; `terms_not_started` ends "To approve, a member of the Session also needs a PresbyPortal account."; `no_permission` says "…recorded and have accounts…". All four match §1.1's "fixed in the same pass" list. Its `state` prop picks `kind | recorded | startingLater | nextStart | viewer` from `SessionApprovalState`; Batch C reads that type before adding the hand-off rows.
+- **`[id]/edit/connection-card.tsx`** (107 lines, last `12bc703`): a server component rendering `status`, pending notices and the participant note; it has no sign-in content, so the sign-in card is a sibling below it, as the design says.
+- **Anchors re-derived** (`scripts/test-rls.sql`, 8655 lines): section 44 starts at `:7975`; the `presby_app` inserts that set `user_id` are still at **`:8036`, `:8235`, `:8239`** (44d(iv) is the "two live people share one user" demonstration at `:8244`). `scripts/giving/test-rls-46.sql`: the nine `update people set user_id` lines are still at **`:646, :957, :989, :1402, :1509, :1549, :1567, :1628, :1685`**. Unchanged from the design.
+
+### Step 8: `src/auth.ts` since the design
+
+`git log main -- src/auth.ts src/lib/auth/` since 2026-10-20: `4a3396f` (DECISION-230, session update hardening), `9e75953` (DECISION-246, F231 gate), `d390f4e` (comment only). What **B1** must account for:
+
+1. **`jwt` does not receive `account` or `profile`.** Its signature is `jwt({ token, user, trigger, session })` (`src/auth.ts:258`). §7.1's sketch reads `account?.provider` and `profile?.email_verified`; B1 must add both to the destructured parameters (Auth.js passes them on sign-in only).
+2. **Use `isEmailClaimVerified(profile?.email_verified)`** from `src/lib/auth/sign-in-gate.ts` (exported, `claim === true`) for the defensive re-check, rather than an inline comparison, so the two places cannot drift.
+3. **Placement:** the sign-in branch is `if (user?.id)` at `:262`; `ensureDefaultRole` at `:271`, the `lastLoginAt` update at `:273-275`; `token.twoFactorRequired` is computed at `:320`. §7.1's "after `ensureDefaultRole`, before `lastLoginAt`" still lands before the requirement is computed.
+4. **The `signIn` callback** now refuses a non-credentials sign-in unless `profile.email_verified === true` and logs a PII-free `console.warn` (`:230-254`); 2b neither adds nor changes the gate.
+5. **`takeTwoFactorGrant`** is imported at `:34` and consumed at `:311` only when `trigger === "update"`; no 2b file may import `two-factor-grant.ts` (E-39).
+6. Tests B1 extends, not weakens: `src/auth.session-update.test.ts` (DECISION-230) and `src/auth.sign-in.test.ts` (DECISION-246, 199 lines, mocks `@/lib/db`); the new `jwt` calls must be mockable in both.
+
+### A design gap found while checking §4(b) (for tech-lead; does not change A1's DDL)
+
+§4(b) lists every writer of `users` and concludes "Nothing existing breaks". It misses **`scripts/seed.ts`**: `seedLocalAdmin` / the local member / the local MFA admin insert a user with `emailVerified: new Date()` (`:943`, `:1004`, `:1065`) on `db`, which is `DATABASE_URL` = **`presby_app`** (checked: `select current_user` on that URL). After section 3, `npm run db:seed` with `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` (or the member / MFA variants) set raises `users: email_verified is recorded only on the owner path…` the first time it **creates** that user (the update branch, which omits the stamp, is unaffected). CI is unaffected (`e2e.yml` sets no `SEED_*`; production deliberately leaves them unset, `docs/deployment.md:226`); a developer following `.env.example` is affected. The fix is TypeScript, outside A1: either create those three users through `platformDb` (owner, the "proof writes are owner-only" shape) or drop the stamp. Proposed owner: B1 (it already edits the auth-adjacent files). Needs a tech-lead ruling; not improvised here.
+
+## Phase 4 — Batch A1 (database-admin, 2026-10-25)
+
+**Commit:** `9e51b21` `feat(db): address proof, the user-link guard and sign-in invitation constraints (0065, part 1)` (by explicit path; not pushed).
+
+**Scope delivered (§13.2 A1):** `drizzle/0065_presby_sign_in_and_connect.sql` sections 1-10; the `invitations.ts` and `schema.ts` mirrors (plus the `people.ts` `user_id` comment, since section 6 lands here); T-2, T-3, the A1 part of T-4 and of T-8; the `contact-methods.db.test.ts:50` pin; the dependency-check results (kickoff step 6 above).
+
+### Migration mode
+
+**Hand-written**, `drizzle/0065_presby_sign_in_and_connect.sql` (sections 1-10; A2 appends 11-15 to the same file). Applied to the pipeline branch `pipeline-signin-invites` with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0065_presby_sign_in_and_connect.sql`. `neonctl` prompts interactively for an organization here (as in Increment 2 Batch A), so the design's fallback was used: **apply twice on the pipeline branch**, itself a disposable child of `development`. **`drizzle/meta/_journal.json` is not edited** (Rule 16): the integration hand-off (§16) adds `{ idx: 65, tag: "0065_presby_sign_in_and_connect" }`.
+
+**Whole-file idempotence proof** (row count | md5 of every row, ordered by key):
+
+| Table | Before (pre-migration) | After apply 1 | After apply 2 |
+|---|---|---|---|
+| `users` | 30 \| `0f567ac1…` | 30 \| `0f567ac1…` | 30 \| `0f567ac1…` |
+| `account_invitations` | 6 \| `d055017c…` | 6 \| `d055017c…` | 6 \| `d055017c…` |
+| `people` | 685 \| `b695184b…` | 690 \| `9db94a46…` | 690 \| `9db94a46…` |
+| `contact_methods` | 40 \| `afece812…` | 46 \| `6c068e34…` | 46 \| `6c068e34…` |
+| `organization_feature_toggles` | 19 \| `2c1dd8c0…` | **34** \| `d6c759e4…` | 34 \| `d6c759e4…` |
+| `audit_events` | 827 \| `701e46ad…` | 831 \| `01f208b6…` | 831 \| `01f208b6…` |
+
+Both applies exit 0; the second changes nothing in any table. The first apply's only write is section 8: +15 toggle rows, one per organization (15 organizations, 15 rows `enabled`). Section 2 cleared **0** stale stamps (notice). The `people`, `contact_methods` and `audit_events` moves between "before" and "after apply 1" are **not** the migration's: the pre-migration digest was taken before the 34-minute baseline Vitest run, which left 5 people (none with `deletable_until`), 6 contact rows and 4 audit rows behind on the branch (pre-existing suite leakage, not 2b's). 0065 contains no statement that writes those tables. Apply 2's notices are the `if not exists` skips only. The file was applied twice more during the failing-first proofs below (exit 0 both times), and `sign-in-invitations.db.test.ts` re-applies it twice inside a rolled-back transaction and asserts the second run changes no digest.
+
+### What 0065 sections 1-10 contain (as built)
+
+1. **Stop-blocks**, counts only: case-duplicate `lower(users.email)` groups, purpose/origin tie violations, `user_totp` present.
+2. **Stale-proof clean-up**: clears a stamp only when a `user.email_changed` audit row exists for that user; idempotent.
+3. **`users_guard_email_proof`** (`presby_users_guard_email_proof()`, invoker, pinned `search_path`, owner = `pg_class.relowner` vs `current_user`, no role named): a non-owner may not set or change `email_verified` (clearing allowed); for every role, a `lower(email)` change clears an unchanged stamp; a case-only change keeps it. Message: `users: email_verified is recorded only on the owner path, by presby_accept_invitation, presby_record_google_email_proof or presby_complete_email_change`, 42501.
+4. **`users_email_lower_uq`** on `lower(email)`.
+5. **`account_invitations`**: `purpose_allowed` + `sign_in`; `origin_allowed` + `org`; new `purpose_origin_tie`; `names_by_purpose` + the sign-in clause; new `sign_in_has_person`; `blocked_reason_allowed` + `person_deceased`; `open_address_uq` dropped and re-created under the same name with `purpose <> 'sign_in'` and the live open predicate; new `open_sign_in_person_uq`, `person_created_ix`; `presby_account_invitations_guard_insert` re-created from the live 0059 body with the sign-in branch (person required; lineage compares organization, purpose, origin, person and count, not the address) and every other purpose verbatim.
+6. **`people_guard_user_link`** (`presby_guard_people_user_link()`, BEFORE INSERT OR UPDATE OF `user_id`): refuses an insert with a non-null `user_id` or any change of `user_id` by a non-owner role.
+7. **`presby_contact_methods_guard_write`** re-created from the live text, two message strings changed (below); function and column comments follow.
+8. **Toggle seed** `org_portal.sign_in_connect`, `on conflict do nothing`.
+9. **`audit_events_sign_in_connected_ix`**, partial on `tenant.person.sign_in_connected`.
+10. **`presby_record_google_email_proof(uuid, text) returns boolean`** and **`presby_complete_email_change(text) returns table (outcome, user_id, old_email, new_email)`**: definers, `#variable_conflict use_column`, revoke from `public, presby_app, presby_platform`, EXECUTE to `presby_app` only. Outcomes `invalid | expired | email_taken | ok`; lock order token then user; `unique_violation` mapped by constraint name (`users_email_unique`, `users_email_lower_uq`) to `email_taken`, anything else re-raised.
+
+Comments sit with each section's objects, so A1's file is complete; A2's section 15 restates ACLs and comments for the whole file as §5.1 says.
+
+### Restating the new triggers in English (self-verification)
+
+- **`users_guard_email_proof`:** "Unless you own the `users` table, you can never put a proof stamp on an account or swap one stamp for another; you may only remove it. And no matter who you are, if you change an account's address to a different address (ignoring letter case) without also writing a new stamp in the same statement, the old stamp is wiped." This matches R37 / §5.2: owner-only stamps, address change clears, case-only change keeps, clearing allowed.
+- **`people_guard_user_link`:** "Unless you own `people`, you cannot create a person already linked to a login, and you cannot change which login (if any) a person is linked to, including unlinking." This matches F186 / A1 (Phase 3 Test Plan 3: "inserts a non-null `user_id` or changes `user_id` at all").
+- **`purpose_origin_tie`:** "A row is a sign-in invitation exactly when the organization sent it." This matches §5.1 `(purpose = 'sign_in') = (origin = 'org')`.
+- **`sign_in_has_person` / the guard's sign-in branch:** "A sign-in invitation must name its person from the start; a sign-in resend must follow a superseded sign-in invitation for the same organization, origin and person, one count higher, and it may go to a different address." This matches R33/R34/F197.
+
+### Tests (implementer-written)
+
+| File | Batch scope | Cases | Result on the migrated branch |
+|---|---|---|---|
+| `src/lib/db/domain/email-proof.db.test.ts` (new) | T-2, T-3, F187/E1 case-variant | 20 | 20 passed |
+| `src/lib/db/domain/sign-in-invitations.db.test.ts` (new; A2 extends it) | A1 part of T-4: CHECKs and indexes from the catalog, vocabulary and shape, open-row uniqueness (incl. expired-still-blocks, R28 shared address, other purposes still address-unique), R33 lineage both ways, F186 (presby_app link / relink / unlink, insert with and without `user_id`, a throwaway second non-owner role, the owner path unbound, a `users` delete as `presby_app` nulling the FK as the owner), section 8 seed semantics, the audit index, whole-file re-apply idempotence | 26 | 26 passed |
+| `src/lib/db/domain/invitations.schema.test.ts` (edited, T-8 A1 part) | names 0059 **and** 0065 create equal what `accountInvitations` declares; 0065 CHECK lists equal the `*_ALLOWED` vocabularies; the open-address predicate; the designation index untouched and pinned to `ACCOUNT_INVITATION_DESIGNATION_PURPOSES`; 0065 structural pins (no begin/commit; only EXECUTE grants, only to `presby_app`; revoke-then-grant for the proof writers; the two guards read `pg_class.relowner` and name no role; definer + pinned `search_path` + `#variable_conflict use_column`; no proof writer reads `contact_methods` or `verified_at`) | 21 | 21 passed |
+| `src/lib/db/domain/contact-methods.db.test.ts:50` (edited) | `GUARD_VERIFIED` now matches the 0065 message | 45 | 45 passed |
+
+Final combined run (restored tree, migrated branch): those four plus `invitations.db.test.ts`, `designation-parity.db.test.ts`, `accept.db.test.ts`, `issue.db.test.ts`, `designation-holders.db.test.ts`: **9 files, 299 passed**; `git diff --exit-code src/lib/onboarding/designation-parity.golden.json` clean.
+
+**The second non-owner role** is a throwaway `NOLOGIN` role created inside the rolled-back test transaction (`grant <role> to current_user with set true`, then `set local role`), because `neondb_owner` has ADMIN but not SET on `presby_platform` (catalog, `pg_auth_members`). For `people` the role is `BYPASSRLS` so its UPDATE reaches the row and the trigger, not RLS, is what refuses.
+
+### Failing-first proofs (pipeline branch; each mechanism removed, suite run, mechanism restored by re-applying the whole file)
+
+1. **Triggers and index removed** (`alter table users disable trigger users_guard_email_proof`, `alter table people disable trigger people_guard_user_link`, `drop index users_email_lower_uq`): **12 failed** of 46 in `email-proof.db.test.ts` and `sign-in-invitations.db.test.ts`: the users trigger structure test; presby_app stamp insert; stamp from null / change; address change clears (presby_app and owner); the second-role case; case-variant duplicate both orders; `email_taken` in a different case; the two-connection race; the people trigger structure test; presby_app link / relink / unlink; presby_app insert carrying `user_id`; the second-role people case.
+2. **0059's insert guard restored** (the body without the sign-in branch): **3 failed**: "a sign_in row with no person is refused" (the CHECK answered 23514 instead of the guard's 42501), "R33: a sign_in resend may change the address", and "a sign_in resend that changes the person, skips a count or follows an open parent is refused". The other-purposes-verbatim case passes under both bodies, as it should.
+3. **Proof writers weakened** (Google writer without `is_active and email_verified is null`; email change writing the address without the stamp): **3 failed**: both Google-writer cases and the email-change `ok` case (the R37 trigger then clears the stamp, which is the proof that the definer's explicit re-stamp is what keeps it).
+4. **Section 7 message:** the pre-migration baseline run (below) shows `contact-methods.db.test.ts` "verified_at write refused…" failing against 0064's message with the new pin, and passing after 0065.
+
+After each removal, the whole file was re-applied (exit 0) and the catalog was confirmed restored: both triggers enabled (`O`), `users_email_lower_uq` present, the guard body containing the sign-in branch. Re-run: 46/46 and T-3 8/8 green.
+
+### E-33: the existing suites, unedited, against the migrated database
+
+- **Vitest, the whole `npm run test:db`** on the **pre-A1 tree** (all of A1's edits stashed, so old code ran against the new schema): **630 files passed, 1 failed; 11064 passed, 1 failed, 1 skipped.** That is identical to the pre-migration baseline (11064 / 1 / 1). The one failure is `contact-methods.db.test.ts` "verified_at write refused as presby_app…", which is the `GUARD_VERIFIED` pin A1 updates, as §4(d) predicts. (In the baseline run it failed for the mirror reason: my edit to the pin landed mid-run before that file executed.) Everything else holds, including `designation-parity`, `accept`, `issue`, `designation-holders`, `invitations.db`, `people*` and the verify-email-adjacent tests, so old code against 0065 behaves as §4 says.
+- **SQL, standalone, unedited, as `presby_app` with `ON_ERROR_STOP`:** `test-rls-59` 36 passed, `-60` 19, `-61` 34, `-62` 53, `-64` 47, `-47` 114. All exit 0.
+- **SQL, the full `scripts/test-rls.sql`** (scratch copy, stop-on-error off, the Increment 2 precedent): baseline before 0065 **1240 passed, 3 failed** (the three pre-existing: presbytery members 3≠2 `:217`, 2fa definer `:516`, DECISION-152 count `:7927`). After 0065: **1161 passed**, the same 3 pre-existing failures, and the **F186 refusal** (`people: user_id is bound only on the owner path…`) at exactly the design-predicted lines: `test-rls.sql:8036` and `:8235` (`:8239` is in the same aborted block), and `giving/test-rls-46.sql:646, 957, 989, 1402, 1509, 1549, 1567, 1628, 1685`. Every other error in the run is a cascade from those blocks (`current transaction is aborted`, and `syntax error at or near ":"` where a `\gset` inside an aborted block left a variable unset; `test-rls-46-issue.sql` is `\ir`-included inside one of them). 79 passes are lost inside those blocks.
+
+### Deviations from the design text (each small; flagged for review)
+
+1. **The TypeScript vocabulary unions are not widened in A1.** Widening `ACCOUNT_INVITATION_PURPOSES` / `_ORIGINS` / `_BLOCKED_REASONS` (and so `AccountInvitationPurpose` etc.) breaks typecheck in eight places that need B2/C copy or routing: `invitation-email.ts:54,59` (`ROLE_PHRASE`/`ROLE_GRANTS`), `labels.ts:37,55` (`person_deceased` copy, which §10 does not give for the operator table), `issue.ts:623,813,979` (`InvitationCopyPurpose`) and `invite-summary.tsx:20`. Measured, then reverted. A1 instead mirrors the database's truth in **`ACCOUNT_INVITATION_PURPOSES_ALLOWED`, `ACCOUNT_INVITATION_ORIGINS_ALLOWED`, `ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED`** (used by the Drizzle `check()` declarations and pinned to 0065 by the schema test), and adds **`ACCOUNT_INVITATION_DESIGNATION_PURPOSES`** so the D-2 index predicate cannot widen by accident. **B2 widens the three application unions in the same commit as their exhaustive consumers.** It can then fold the `*_ALLOWED` lists back into the originals or keep them; the schema test pins both.
+2. **The F186 message** is `people: user_id is bound only on the owner path, by invitation acceptance or by sign-in connection` rather than Phase 3's `…bound only by the invitation acceptance function`, which R44 made false (connect is the second writer). The wording parallels §5.4's. `test-rls-65.sql` (A2) asserts this literal.
+3. **Section 7's insert message keeps its 0064 suffix**: `…by invitation acceptance or by sign-in connection; a new address starts unverified`. The update message is exactly §5.4's literal. Both match the new `GUARD_VERIFIED`.
+4. The `people.ts` `user_id` comment (listed in §5.12 without a batch) lands in A1 with the trigger it documents.
+
+### Findings for tech-lead (no DDL change in A1 depends on them)
+
+1. **E-33 cannot hold for `test-rls.sql` / `test-rls-46.sql` between A1 and A2.** §13.2 puts F186's trigger in A1 and the conversion of the twelve `presby_app` link writes in A2, yet asks A1's gate to run the existing SQL suites unedited. The result above shows exactly the predicted lines failing and nothing else. This is consistent with §4(c), so it is not a schema defect, but the A1 gate text overstates it. Proposed ruling: accept for A1 as recorded, and A2's gate re-runs the full file with the staged patch plus the edited `test-rls-46.sql` (already in A2's gate).
+2. **`scripts/seed.ts` stamps proof as `presby_app`** (kickoff, above). `npm run db:seed` with `SEED_*` set fails on first create after 0065. Needs a ruling and an owner (proposed: B1).
+3. **`presby_complete_email_change`'s residual should be named alongside the Google writer's.** `presby_app` holds DML on `email_verification_tokens`, so any `presby_app` statement can mint a token row for any user and address and then call the definer to get a **stamped** address. Same F187 class as the Google writer (the database cannot tell a real verification from a forged one). Recorded in the function's header comment. Suggest DECISION-225 and the F187 "narrowed" text name both writers' residual, not only Google's. Mitigation available later: route token issuance through a definer too (the TODO "definer-izing email change beyond the verified-address case").
+4. **For A2:** `presby_account_invitations_guard_update`'s two refusal messages name `presby_accept_invitation()`. After the move into `presby__accept_invitation_core` they are only loosely true (the marker, not the name, is what the guard checks). A2 may restate them; the parity golden does not read them.
+
+### Other gates
+
+- `npm run check:schema-parity`: 85 domain tables, 7 differences, 7 allowlisted, **0 failing**.
+- `npx tsc --noEmit`: **0 errors**. `eslint` on every touched file: clean.
+- `npm run check`: all eight tripwires pass.
+
+### Files
+
+- New: `drizzle/0065_presby_sign_in_and_connect.sql`, `src/lib/db/domain/email-proof.db.test.ts`, `src/lib/db/domain/sign-in-invitations.db.test.ts`.
+- Edited: `src/lib/db/domain/invitations.ts`, `src/lib/db/schema.ts`, `src/lib/db/domain/people.ts`, `src/lib/db/domain/invitations.schema.test.ts`, `src/lib/db/domain/contact-methods.db.test.ts`.
+- **No Rule 16 file edited** (`_journal.json`, `test-rls.sql`, `seed-dev.sql`, `domain/index.ts`, `decisions.md`, `TODO.md`, `STATE.md` untouched).
+
+### Handoff
+
+**Next: Batch A2 (database-admin)**, sections 11-15 appended to the same file, then T-1, the rest of T-4, T-5 to T-8, `test-rls-65.sql`, `seed-dev-sign-in.sql`, the `test-rls.sql` patch, the `test-rls-46.sql` conversions, `docs/schema-design.md`, `docs:erd`. Available to it now on the pipeline branch: the `sign_in` / `org` / `person_deceased` vocabulary and every CHECK and index for sign-in rows; `users_email_lower_uq` (E1's mapping arm in the accept core must name it); the F186 trigger (every non-owner link write refused, literal above); the R37 trigger (an owner-path definer that changes an address must re-stamp in the same statement); the toggle rows; the audit index; the two proof writers. Local apply: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0065_presby_sign_in_and_connect.sql` (owner, direct endpoint). No seed changed in A1. `test-rls.sql` sections: none added or touched (A2 stages `test-rls-65.sql` and the patch).

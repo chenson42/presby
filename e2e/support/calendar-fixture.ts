@@ -17,7 +17,7 @@
  * on the last evening of one.
  */
 
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 import { E2E_ORGS } from "./seed-orgs";
 import { E2E_USERS } from "./users";
 
@@ -72,7 +72,7 @@ export interface CalendarFixtureState {
 }
 
 async function adminUserId(sql: Sql): Promise<string> {
-  const rows = (await sql`select id from users where email = ${E2E_USERS.admin.email}`) as { id: string }[];
+  const rows = (await withDbRetry("calendar admin user id", () => sql`select id from users where email = ${E2E_USERS.admin.email}`)) as { id: string }[];
   if (!rows[0]) throw new Error("[calendar-fixture] the admin fixture user does not exist");
   return rows[0].id;
 }
@@ -153,18 +153,21 @@ export async function setupCalendarFixture(sql: Sql): Promise<CalendarFixtureSta
 async function ensureRole(sql: Sql, roleId: string, key: string, name: string, perms: string[]) {
   assertFixtureId(roleId);
   if (!key.startsWith("e2e_calendar_")) throw new Error(`[calendar-fixture] bad role key "${key}"`);
-  await sql`
-    insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
-    values (${roleId}::uuid, ${CAL_ORG.id}::uuid, ${key}, ${name}, 'custom', false)
-    on conflict (id) do nothing
-  `;
-  for (const permission of perms) {
+  // Every insert is `on conflict ... do nothing`: a repeat after a lost reply ends the same.
+  await withDbRetry(`ensure role ${key}`, async () => {
     await sql`
-      insert into app_role_permissions (role_id, permission_key)
-      values (${roleId}::uuid, ${permission})
-      on conflict do nothing
+      insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
+      values (${roleId}::uuid, ${CAL_ORG.id}::uuid, ${key}, ${name}, 'custom', false)
+      on conflict (id) do nothing
     `;
-  }
+    for (const permission of perms) {
+      await sql`
+        insert into app_role_permissions (role_id, permission_key)
+        values (${roleId}::uuid, ${permission})
+        on conflict do nothing
+      `;
+    }
+  });
 }
 
 export type CalendarRole = "viewer" | "manager";
@@ -181,32 +184,32 @@ export async function grantCalendarRole(sql: Sql, role: CalendarRole, personId: 
     ]);
   }
   const admin = await adminUserId(sql);
-  await sql`
+  await withDbRetry("grant calendar role", () => sql`
     insert into role_grants (organization_id, role_id, person_id, starts_on, granted_by)
     select ${CAL_ORG.id}::uuid, ${roleId}::uuid, ${personId}::uuid, date '2020-01-01', ${admin}::uuid
      where not exists (
        select 1 from role_grants
         where person_id = ${personId}::uuid and organization_id = ${CAL_ORG.id}::uuid
           and role_id = ${roleId}::uuid)
-  `;
+  `);
 }
 
 export async function revokeCalendarRole(sql: Sql, role: CalendarRole, personId: string) {
   const roleId = role === "viewer" ? CAL_IDS.roleViewer : CAL_IDS.roleManager;
   assertFixtureId(roleId);
-  await sql`
+  await withDbRetry("revoke calendar role", () => sql`
     delete from role_grants
      where organization_id = ${CAL_ORG.id}::uuid and role_id = ${roleId}::uuid
        and person_id = ${personId}::uuid
-  `;
+  `);
 }
 
 export async function setCalendarToggle(sql: Sql, enabled: boolean) {
-  await sql`
+  await withDbRetry("set calendar toggle", () => sql`
     insert into organization_feature_toggles (organization_id, feature_key, enabled)
     values (${CAL_ORG.id}::uuid, ${CAL_FEATURE_KEY}, ${enabled})
     on conflict (organization_id, feature_key) do update set enabled = ${enabled}
-  `;
+  `);
 }
 
 /** Removes exactly what `setup`/`grant` created, then verifies nothing is left. */
@@ -216,24 +219,27 @@ export async function removeCalendarFixture(sql: Sql, state: CalendarFixtureStat
   const roleIds = [CAL_IDS.roleViewer, CAL_IDS.roleManager];
   roleIds.forEach(assertFixtureId);
 
-  await sql`delete from role_grants where organization_id = ${org}::uuid and role_id = any(${roleIds}::uuid[])`;
-  await sql`delete from app_role_permissions where role_id = any(${roleIds}::uuid[])`;
-  await sql`delete from app_roles where id = any(${roleIds}::uuid[])`;
-  await sql`delete from events where id::text like ${ID_PREFIX + "%"}`;
-  // Types created by the manager spec through the UI carry the "E2E " prefix too.
-  await sql`delete from event_types where organization_id = ${org}::uuid and (id::text like ${ID_PREFIX + "%"} or name like 'E2E %')`;
-  if (state?.priorToggle === null) {
-    await sql`delete from organization_feature_toggles where organization_id = ${org}::uuid and feature_key = ${CAL_FEATURE_KEY}`;
-  } else if (state) {
-    await setCalendarToggle(sql, state.priorToggle);
-  }
+  // Deletes, a constant update/upsert and a confirming read: repeating the whole unit ends the same.
+  await withDbRetry("remove calendar fixture", async () => {
+    await sql`delete from role_grants where organization_id = ${org}::uuid and role_id = any(${roleIds}::uuid[])`;
+    await sql`delete from app_role_permissions where role_id = any(${roleIds}::uuid[])`;
+    await sql`delete from app_roles where id = any(${roleIds}::uuid[])`;
+    await sql`delete from events where id::text like ${ID_PREFIX + "%"}`;
+    // Types created by the manager spec through the UI carry the "E2E " prefix too.
+    await sql`delete from event_types where organization_id = ${org}::uuid and (id::text like ${ID_PREFIX + "%"} or name like 'E2E %')`;
+    if (state?.priorToggle === null) {
+      await sql`delete from organization_feature_toggles where organization_id = ${org}::uuid and feature_key = ${CAL_FEATURE_KEY}`;
+    } else if (state) {
+      await setCalendarToggle(sql, state.priorToggle);
+    }
 
-  const left = (await sql`
-    select (select count(*) from events where id::text like ${ID_PREFIX + "%"})
-         + (select count(*) from event_types where id::text like ${ID_PREFIX + "%"} or name like 'E2E %')
-         + (select count(*) from app_roles where key like 'e2e_calendar_%') as n
-  `) as { n: string }[];
-  if (Number(left[0].n) !== 0) {
-    throw new Error(`[calendar-fixture] teardown left ${left[0].n} fixture rows behind`);
-  }
+    const left = (await sql`
+      select (select count(*) from events where id::text like ${ID_PREFIX + "%"})
+           + (select count(*) from event_types where id::text like ${ID_PREFIX + "%"} or name like 'E2E %')
+           + (select count(*) from app_roles where key like 'e2e_calendar_%') as n
+    `) as { n: string }[];
+    if (Number(left[0].n) !== 0) {
+      throw new Error(`[calendar-fixture] teardown left ${left[0].n} fixture rows behind`);
+    }
+  });
 }

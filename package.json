@@ -30,6 +30,7 @@
     "visual:check": "PW_VISUAL=1 playwright test --project=visual",
     "prepare": "node -e \"if(require('fs').existsSync('.git'))require('child_process').execSync('bash scripts/install-hooks.sh',{stdio:'inherit'})\"",
     "stats:escape": "node scripts/stats-escape.mjs",
+    "worktrees:report": "node scripts/worktree-report.mjs",
     "ui:add": "node scripts/ui-add.mjs",
     "check:audit": "node scripts/check-audit-coverage.mjs",
     "check:sql-date": "node scripts/check-sql-date.mjs",

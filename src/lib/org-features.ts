@@ -138,6 +138,24 @@ export const ORG_FEATURE_CATALOG = [
     orgTypes: ["congregation", "new_worshiping_community"] as const,
     operatorEnabled: false as const,
   },
+  // Parish management (docs/work-log/2026-10-25-parish-management.md, Phase 3
+  // "Permissions & Flags"; DECISION-242 to 245). TOGGLE-ONLY (`flag: null`):
+  // the operator's standing rule is a per-org toggle, not a new global flag,
+  // before go-live. Provisioned OFF: a congregation's `org_features.manage`
+  // holder turns it on. Congregations only - presbyteries and synods have no
+  // Board of Deacons. Turning it off hides the new pages and refuses the
+  // actions; data are untouched, and the legacy Parishes read is unchanged.
+  {
+    key: "org_portal.parishes",
+    name: "Parish management",
+    description:
+      "Deacon districts for this congregation: set them up, put households in them, and let the Moderator of the Board of Deacons (once recorded as an officer) assign households. Administrators can assign too. Turning this off hides the pages and refuses changes; nothing already assigned is removed.",
+    category: "people" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: ["congregation"] as const,
+    operatorEnabled: false as const,
+  },
   // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3
   // "Permissions & Flags"; T9; DECISION-180; operator ruling Q1, 2026-10-19:
   // "platform admin only, for now"). TOGGLE-ONLY (`flag: null`): the operator's

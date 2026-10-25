@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
 import type { db } from "@/lib/db";
 import { isExclusionViolation, isPgError, pgErrorMessages } from "@/lib/db/errors";
@@ -13,10 +13,13 @@ import { isUuid } from "@/lib/is-uuid";
 import {
   OFFICER_OFFICES,
   OFFICE_LABELS,
+  isAuthorityOffice,
   isPastorOffice,
   isSessionOffice,
   type OfficerOffice,
 } from "@/lib/officer-offices";
+import { isCategoryAxisOn, orgFeatureEnabledInTx } from "@/lib/org-features";
+import { MANAGEABLE_UNIT_TYPES, PARISHES_FEATURE_KEY } from "@/lib/parishes-pure";
 import { todayUtcYmd } from "@/lib/ymd";
 
 /**
@@ -147,6 +150,9 @@ export interface OfficerRosterEntry {
   endsOn: string | null;
   orgUnitId: string | null;
   orgUnitName: string | null;
+  /** The term's district has been archived (`org_units.archived_at`); shown
+   * as "{name} (archived)" in the District column. */
+  orgUnitArchived: boolean;
   /** Public staff-directory opt-in (docs/work-log/
    * 2026-08-27-public-staff-directory.md) — additive field, same query. */
   publicListed: boolean;
@@ -154,9 +160,10 @@ export interface OfficerRosterEntry {
    * 2026-08-28-public-directory-primitives.md) — additive field, same
    * query. `null` = no curation set, alphabetical-by-name ordering. */
   publicDisplayOrder: number | null;
-  /** Session-bearing offices only: the term was recorded by the person it
-   * seats (`recorded_by` equals the person's `user_id`), shown as
-   * "Self-recorded" (S2, DECISION-205). Always false for other offices. */
+  /** Authority-bearing offices only (`AUTHORITY_OFFICES`: the Session offices
+   * and the Moderator of the Board of Deacons seat): the term was recorded by
+   * the person it seats (`recorded_by` equals the person's `user_id`), shown as
+   * "Self-recorded" (S2, DECISION-205, F264). Always false for other offices. */
   selfRecorded: boolean;
 }
 
@@ -172,7 +179,12 @@ export interface OfficerHistoryEntry {
 
 export interface OfficerFormOptions {
   people: Array<{ personId: string; displayName: string }>;
+  /** ACTIVE districts and parishes only - an archived one cannot take a new
+   * deacon term (drizzle/0068). */
   orgUnits: Array<{ orgUnitId: string; name: string }>;
+  /** The per-org `org_portal.parishes` toggle is on (the "no districts" copy
+   * differs: add them on the Parishes page, or turn the toggle on). */
+  parishesEnabled: boolean;
 }
 
 export type OfficersResult<T> =
@@ -189,7 +201,11 @@ export type OfficersResult<T> =
   /** A Session, pastor or diaconate office at an organization with no matching
    * derived group (only congregations have them). Used to be a raw foreign-key
    * error (F189). */
-  | { kind: "invalid_office_for_org"; officeLabel: string };
+  | { kind: "invalid_office_for_org"; officeLabel: string }
+  /** A deacon term pointed at an archived district or a campus. Pre-checked
+   * here and backstopped by the `officer_terms_org_unit_target_guard` trigger
+   * (drizzle/0068). */
+  | { kind: "district_unavailable" };
 
 // ---------------------------------------------------------------------------
 // listOfficerRoster
@@ -207,6 +223,7 @@ interface RosterRow {
   ends_on: string | null;
   org_unit_id: string | null;
   org_unit_name: string | null;
+  org_unit_archived: boolean;
   public_listed: boolean;
   public_display_order: number | null;
   self_recorded: boolean;
@@ -258,6 +275,7 @@ export async function listOfficerRoster(
         roster.ends_on::text    as ends_on,
         ot.org_unit_id          as org_unit_id,
         ou.name                 as org_unit_name,
+        (ou.archived_at is not null) as org_unit_archived,
         ot.public_listed        as public_listed,
         ot.public_display_order as public_display_order,
         (ot.recorded_by is not null and ot.recorded_by = p.user_id) as self_recorded
@@ -279,9 +297,10 @@ export async function listOfficerRoster(
       endsOn: row.ends_on,
       orgUnitId: row.org_unit_id,
       orgUnitName: row.org_unit_name,
+      orgUnitArchived: row.org_unit_archived === true,
       publicListed: row.public_listed,
       publicDisplayOrder: row.public_display_order,
-      selfRecorded: isSessionOffice(row.office) && row.self_recorded === true,
+      selfRecorded: isAuthorityOffice(row.office) && row.self_recorded === true,
     }));
 
     return { kind: "ok", data };
@@ -375,6 +394,7 @@ export async function getOfficerFormOptions(
   viewerPersonId: string,
   organizationId: string,
 ): Promise<OfficersResult<OfficerFormOptions>> {
+  const categoryAxisOn = await isCategoryAxisOn();
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasOfficersManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
@@ -397,11 +417,26 @@ export async function getOfficerFormOptions(
       )
       .orderBy(people.lastName, people.firstName);
 
+    // Active districts and parishes only: an archived district cannot take a
+    // new deacon term, and a campus is not deacon care (drizzle/0068, G7).
     const orgUnitRows = await tx
       .select({ id: orgUnits.id, name: orgUnits.name })
       .from(orgUnits)
-      .where(eq(orgUnits.organizationId, organizationId))
+      .where(
+        and(
+          eq(orgUnits.organizationId, organizationId),
+          isNull(orgUnits.archivedAt),
+          inArray(orgUnits.unitType, [...MANAGEABLE_UNIT_TYPES]),
+        ),
+      )
       .orderBy(orgUnits.name);
+
+    const parishesEnabled = await orgFeatureEnabledInTx(
+      tx,
+      organizationId,
+      PARISHES_FEATURE_KEY,
+      categoryAxisOn,
+    );
 
     return {
       kind: "ok",
@@ -414,6 +449,7 @@ export async function getOfficerFormOptions(
           orgUnitId: row.id,
           name: row.name,
         })),
+        parishesEnabled,
       },
     };
   });
@@ -493,7 +529,9 @@ async function hasDerivedGroup(
  *   3. Validate `personId` is a CURRENT member of this org (F21 shape) —
  *      `invalid_target`.
  *   4. Validate `orgUnitId`, when supplied, belongs to THIS org —
- *      `invalid_target`. Closes the composite-tenant-key gap (F2/F21): an
+ *      `invalid_target` - and is an ACTIVE district or parish
+ *      (`district_unavailable` for an archived district or a campus, with
+ *      the drizzle/0068 trigger as the backstop for the archive race). Closes the composite-tenant-key gap (F2/F21): an
  *      `org_unit` id from another organization can never be attached to a
  *      term here.
  *   5. Resolve the person's display name and `user_id` BEFORE the insert, so
@@ -598,7 +636,11 @@ export async function startOfficerTerm(
         return { kind: "invalid_target" };
       }
       const [orgUnit] = await tx
-        .select({ id: orgUnits.id })
+        .select({
+          id: orgUnits.id,
+          unitType: orgUnits.unitType,
+          archivedAt: orgUnits.archivedAt,
+        })
         .from(orgUnits)
         .where(
           and(
@@ -609,6 +651,12 @@ export async function startOfficerTerm(
         .limit(1);
       if (!orgUnit) {
         return { kind: "invalid_target" };
+      }
+      // An archived district or a campus cannot take a new deacon term. The
+      // `officer_terms_org_unit_target_guard` trigger is the backstop for the
+      // race with a concurrent archive.
+      if (orgUnit.archivedAt !== null || orgUnit.unitType === "campus") {
+        return { kind: "district_unavailable" };
       }
       orgUnitId = orgUnit.id;
     }
@@ -683,6 +731,12 @@ export async function startOfficerTerm(
       // message is parsed), or the derived group vanished.
       if (isPgError(err, "23514", "officer_terms_pastor_no_roll")) {
         return { kind: "on_roll", personName };
+      }
+      if (
+        isPgError(err, "23514", "org_unit_target_archived") ||
+        isPgError(err, "23514", "org_unit_target_campus")
+      ) {
+        return { kind: "district_unavailable" };
       }
       if (
         isPgError(err, "23503") &&

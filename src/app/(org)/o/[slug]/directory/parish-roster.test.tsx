@@ -8,22 +8,26 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ParishRoster } from "./parish-roster";
-import type { ParishRosterEntry } from "@/lib/directory";
+import type { ParishUnitEntry } from "@/lib/parishes";
 
 afterEach(() => {
   cleanup();
 });
 
-const PARISHES: ParishRosterEntry[] = [
+const PARISHES: ParishUnitEntry[] = [
   {
     orgUnitId: "u1",
-    orgUnitName: "Creekside District",
+    name: "Creekside District",
+    unitType: "district",
+    archived: false,
     deaconName: "Priya Balakrishnan",
     householdCount: 3,
   },
   {
     orgUnitId: "u2",
-    orgUnitName: "Uptown District",
+    name: "Uptown District",
+    unitType: "district",
+    archived: false,
     deaconName: null,
     householdCount: 1,
   },

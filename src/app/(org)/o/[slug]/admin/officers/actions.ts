@@ -140,6 +140,8 @@ function describeOfficersFailure(
       return `${result.personName} is on this congregation's roll. A pastor's membership is held by the presbytery, so a pastor can't also be recorded on the roll here.`;
     case "invalid_office_for_org":
       return `${result.officeLabel} isn't available for this kind of organization. Session and Board of Deacons offices belong to congregations.`;
+    case "district_unavailable":
+      return "That district is archived. Choose an active district.";
   }
 }
 

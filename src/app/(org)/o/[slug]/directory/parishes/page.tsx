@@ -5,7 +5,7 @@ import {
   OrgAccessError,
   resolveOrgContext,
 } from "@/lib/authz";
-import { getParishRoster } from "@/lib/directory";
+import { getParishesOverview } from "@/lib/parishes";
 import { isFlagEnabled } from "@/lib/flags";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import {
@@ -24,12 +24,12 @@ import { ParishRoster } from "../parish-roster";
  *
  * REACHABILITY rides on `org_portal.directory_v2` alone (no new flag — the
  * Phase 3 design's own text: "reachability rides on `org_portal.
- * directory_v2` (already on)"). The ACTUAL gate is `getParishRoster()`'s own
+ * directory_v2` (already on)"). The ACTUAL gate is `getParishesOverview()`'s own
  * `directory.view_hidden` re-check, one layer down — this page never
  * second-guesses it with its own `hasPermission()` call; `DirectoryNav`
  * (rendered by `directory/page.tsx`) already only offers this route's link
  * to a viewer who holds the permission, but a deep link bypasses that, so
- * `getParishRoster()` returning `{ kind: "forbidden" }` is what actually
+ * `getParishesOverview()` returning `{ kind: "forbidden" }` is what actually
  * protects this page — mapped to the SAME `DirectoryForbidden`-shaped state
  * every other permission denial in this tree uses (Phase 3 design: "renders
  * the existing `DirectoryForbidden`-shaped state, not a 404").
@@ -87,7 +87,7 @@ export default async function ParishesPage({
 
   let result;
   try {
-    result = await getParishRoster(
+    result = await getParishesOverview(
       resolved.org.personId,
       resolved.org.organizationId,
     );
@@ -114,7 +114,7 @@ export default async function ParishesPage({
         search=""
         canViewHidden
       />
-      <ParishRoster parishes={result.parishes} orgName={resolved.org.name} />
+      <ParishRoster parishes={result.districts} orgName={resolved.org.name} />
     </section>
   );
 }

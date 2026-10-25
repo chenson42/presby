@@ -82,6 +82,29 @@ export const PASTOR_OFFICES = [
 
 export type PastorOffice = (typeof PASTOR_OFFICES)[number];
 
+/**
+ * The offices whose recording confers authority through the resolver: the
+ * Session offices (DECISION-205) and the Moderator of the Board of Deacons seat
+ * (`parishes.assign`, DECISION-242). Used for the `selfRecorded` stamp on the
+ * audit row and the roster badge (F264) - one list, so a new authority-bearing
+ * office is added in exactly one place. `SESSION_OFFICES` stays the Session
+ * list: the derived-group CASE pin reads it, and the seat is not a Session
+ * office.
+ */
+export const AUTHORITY_OFFICES = [
+  ...SESSION_OFFICES,
+  "deacons_moderator",
+] as const satisfies readonly OfficerOffice[];
+
+export type AuthorityOffice = (typeof AUTHORITY_OFFICES)[number];
+
+export function isAuthorityOffice(value: unknown): value is AuthorityOffice {
+  return (
+    typeof value === "string" &&
+    (AUTHORITY_OFFICES as readonly string[]).includes(value)
+  );
+}
+
 export function isSessionOffice(value: unknown): value is SessionOffice {
   return (
     typeof value === "string" &&

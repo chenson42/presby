@@ -23,12 +23,20 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/authz", () => ({ withOrgContext: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ AUDIT_ACTIONS: {}, recordAudit: vi.fn() }));
 vi.mock("@/lib/audit-tx", () => ({ insertAuditRow: vi.fn() }));
+// `officers.ts` reads the per-org parishes toggle through `org-features.ts`,
+// which reaches the flag reader and so the connection pool at module scope.
+vi.mock("@/lib/org-features", () => ({
+  isCategoryAxisOn: vi.fn(),
+  orgFeatureEnabledInTx: vi.fn(),
+}));
 
 import {
+  AUTHORITY_OFFICES,
   OFFICER_OFFICES,
   OFFICE_LABELS,
   PASTOR_OFFICES,
   SESSION_OFFICES,
+  isAuthorityOffice,
   isPastorOffice,
   isSessionOffice,
 } from "./officer-offices";
@@ -169,6 +177,26 @@ describe("SESSION_OFFICES", () => {
   });
 });
 
+describe("AUTHORITY_OFFICES (F264, DECISION-242)", () => {
+  it("is the Session offices plus the Board of Deacons Moderator seat, and nothing else", () => {
+    expect([...AUTHORITY_OFFICES]).toEqual([...SESSION_OFFICES, "deacons_moderator"]);
+    for (const office of AUTHORITY_OFFICES) expect(OFFICER_OFFICES).toContain(office);
+  });
+
+  it("recognises the seat and the Session offices; never moderator, deacon or the unmapped offices", () => {
+    expect(isAuthorityOffice("deacons_moderator")).toBe(true);
+    expect(isAuthorityOffice("ruling_elder")).toBe(true);
+    for (const office of ["moderator", "deacon", "clerk_of_session", "treasurer", "trustee"]) {
+      expect(isAuthorityOffice(office), office).toBe(false);
+    }
+    expect(isAuthorityOffice(undefined)).toBe(false);
+  });
+
+  it("SESSION_OFFICES does not include the seat (the derived-group CASE pin reads that list)", () => {
+    expect(isSessionOffice("deacons_moderator")).toBe(false);
+  });
+});
+
 describe("one list, re-exported", () => {
   it("officers.ts and the UI office-labels file re-export the very same arrays and labels", () => {
     expect(officersLib.OFFICER_OFFICES).toBe(OFFICER_OFFICES);
@@ -176,6 +204,7 @@ describe("one list, re-exported", () => {
     expect(officeLabelsUi.OFFICER_OFFICES).toBe(OFFICER_OFFICES);
     expect(officeLabelsUi.OFFICE_LABELS).toBe(OFFICE_LABELS);
     expect(officeLabelsUi.SESSION_OFFICES).toBe(SESSION_OFFICES);
+    expect(officeLabelsUi.AUTHORITY_OFFICES).toBe(AUTHORITY_OFFICES);
   });
 
   it("officers.ts no longer declares its own list", () => {

@@ -67,6 +67,7 @@ const OPTIONS: OfficerFormOptions = {
     { personId: "person-2", displayName: "Marguerite Ashcombe" },
   ],
   orgUnits: [{ orgUnitId: "org-unit-1", name: "North District" }],
+  parishesEnabled: true,
 };
 
 describe("AddOfficerTermForm — zero-people state", () => {
@@ -74,7 +75,7 @@ describe("AddOfficerTermForm — zero-people state", () => {
     render(
       <AddOfficerTermForm
         slug="alder-creek"
-        options={{ people: [], orgUnits: [] }}
+        options={{ people: [], orgUnits: [], parishesEnabled: true }}
       />,
     );
     expect(

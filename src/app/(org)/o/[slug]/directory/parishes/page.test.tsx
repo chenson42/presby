@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
  * Orchestration tests for `/o/<slug>/directory/parishes`'s page.tsx.
- * Mirrors `directory/page.tsx`'s own test style. `getParishRoster()`'s own
+ * Mirrors `directory/page.tsx`'s own test style. `getParishesOverview()`'s own
  * SQL (permission re-check, derivation, household counts) is exercised for
  * real in `directory.test.ts`; this file pins the page-level flag-gating and
  * result-branch contract, and what renders from an already-resolved
- * `ParishRosterEntry[]`.
+ * overview.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -36,9 +36,9 @@ vi.mock("@/lib/flags", () => ({
   isFlagEnabled: (...args: unknown[]) => isFlagEnabled(...args),
 }));
 
-const getParishRoster = vi.fn();
-vi.mock("@/lib/directory", () => ({
-  getParishRoster: (...args: unknown[]) => getParishRoster(...args),
+const getParishesOverview = vi.fn();
+vi.mock("@/lib/parishes", () => ({
+  getParishesOverview: (...args: unknown[]) => getParishesOverview(...args),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -61,7 +61,7 @@ afterEach(() => {
   resolveOrgContext.mockReset();
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
-  getParishRoster.mockReset();
+  getParishesOverview.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -91,7 +91,7 @@ function mockFlagsOn() {
 }
 
 describe("ParishesPage — flag gating", () => {
-  it("renders flag-off and never calls getParishRoster() when org_portal.directory is off", async () => {
+  it("renders flag-off and never calls getParishesOverview() when org_portal.directory is off", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     isFlagEnabled.mockResolvedValue(false);
@@ -99,7 +99,7 @@ describe("ParishesPage — flag gating", () => {
     const el = await ParishesPage({ params: makeParams() });
     render(el);
 
-    expect(getParishRoster).not.toHaveBeenCalled();
+    expect(getParishesOverview).not.toHaveBeenCalled();
     expect(screen.getByText(/isn.t available for Alder Creek/i)).toBeTruthy();
   });
 
@@ -113,16 +113,16 @@ describe("ParishesPage — flag gating", () => {
     const el = await ParishesPage({ params: makeParams() });
     render(el);
 
-    expect(getParishRoster).not.toHaveBeenCalled();
+    expect(getParishesOverview).not.toHaveBeenCalled();
   });
 });
 
-describe("ParishesPage — getParishRoster() result branches", () => {
+describe("ParishesPage — getParishesOverview() result branches", () => {
   it("re-throws OrgAccessError rather than rendering the load-error state", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     mockFlagsOn();
-    getParishRoster.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
+    getParishesOverview.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
 
     await expect(
       ParishesPage({ params: makeParams() }),
@@ -133,7 +133,7 @@ describe("ParishesPage — getParishRoster() result branches", () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     mockFlagsOn();
-    getParishRoster.mockRejectedValue(new Error("connection reset"));
+    getParishesOverview.mockRejectedValue(new Error("connection reset"));
 
     const el = await ParishesPage({ params: makeParams() });
     render(el);
@@ -143,11 +143,11 @@ describe("ParishesPage — getParishRoster() result branches", () => {
     ).toBeTruthy();
   });
 
-  it("renders the existing DirectoryForbidden-shaped state (not a 404) for { kind: 'forbidden' } — a deep link without directory.view_hidden", async () => {
+  it("renders the existing DirectoryForbidden-shaped state (not a 404) for { kind: 'forbidden' } — a deep link without any parishes authority", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     mockFlagsOn();
-    getParishRoster.mockResolvedValue({ kind: "forbidden" });
+    getParishesOverview.mockResolvedValue({ kind: "forbidden" });
 
     const el = await ParishesPage({ params: makeParams() });
     render(el);
@@ -162,18 +162,23 @@ describe("ParishesPage — the ok path", () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     mockFlagsOn();
-    getParishRoster.mockResolvedValue({
+    getParishesOverview.mockResolvedValue({
       kind: "ok",
-      parishes: [
+      managed: false,
+      districts: [
         {
           orgUnitId: "u1",
-          orgUnitName: "North District",
+          name: "North District",
+          unitType: "district",
+          archived: false,
           deaconName: "Priya Balakrishnan",
           householdCount: 3,
         },
         {
           orgUnitId: "u2",
-          orgUnitName: "South District",
+          name: "South District",
+          unitType: "district",
+          archived: false,
           deaconName: null,
           householdCount: 1,
         },
@@ -195,7 +200,7 @@ describe("ParishesPage — the ok path", () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     mockFlagsOn();
-    getParishRoster.mockResolvedValue({ kind: "ok", parishes: [] });
+    getParishesOverview.mockResolvedValue({ kind: "ok", managed: false, districts: [] });
 
     const el = await ParishesPage({ params: makeParams() });
     render(el);
@@ -209,7 +214,7 @@ describe("ParishesPage — the ok path", () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
     mockFlagsOn();
-    getParishRoster.mockResolvedValue({ kind: "ok", parishes: [] });
+    getParishesOverview.mockResolvedValue({ kind: "ok", managed: false, districts: [] });
 
     const el = await ParishesPage({ params: makeParams() });
     render(el);
@@ -256,7 +261,7 @@ describe("ParishesPage — the shared four-way miss response", () => {
     expect(
       screen.getByText(/you don.t have access to Bramblewood/i),
     ).toBeTruthy();
-    expect(getParishRoster).not.toHaveBeenCalled();
+    expect(getParishesOverview).not.toHaveBeenCalled();
   });
 
   it("renders the shared ended-relationship copy for an ended relationship", async () => {

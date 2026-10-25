@@ -1,11 +1,11 @@
 import { Badge } from "@/components/ui/badge";
-import type { ParishRosterEntry } from "@/lib/directory";
+import type { ParishUnitEntry } from "@/lib/parishes";
 
 /**
  * The Parishes / deacon-roster view (Increment 4). One panel per org unit —
  * district name, its deacon (or "Vacant"), and how many eligible households
  * it covers. `householdCount` and `deaconName` both come straight off
- * `getParishRoster()`'s own `ParishRosterEntry` — no re-derivation here, so
+ * `getParishesOverview()`'s own `ParishUnitEntry` — no re-derivation here, so
  * this view can never disagree with the Households tab about who's assigned
  * where (Phase 2 note 4 / Phase 3's own edge-case note).
  *
@@ -13,7 +13,7 @@ import type { ParishRosterEntry } from "@/lib/directory";
  * names no search box for Parishes): zero org units at all, which is true of
  * every congregation until district-shaped org units are created.
  *
- * NOT A `<Card>` (portal UX review 2026-08-26, H4): `getParishRoster()`
+ * NOT A `<Card>` (portal UX review 2026-08-26, H4): `getParishesOverview()`
  * returns only per-district aggregates (name, deacon, a household count) —
  * there is no per-parish member/roster reader to drill into, so these
  * summaries have nowhere honest to link. Wired up as `<Card>`s (the same
@@ -31,7 +31,7 @@ export function ParishRoster({
   parishes,
   orgName,
 }: {
-  parishes: ParishRosterEntry[];
+  parishes: ParishUnitEntry[];
   orgName: string;
 }) {
   if (parishes.length === 0) {
@@ -50,7 +50,7 @@ export function ParishRoster({
           className="rounded-lg border border-border bg-muted/40 p-4"
         >
           <h3 className="text-base font-semibold break-words">
-            {parish.orgUnitName}
+            {parish.name}
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
             {parish.deaconName ? (

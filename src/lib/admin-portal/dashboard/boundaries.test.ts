@@ -23,6 +23,21 @@
  *   4. MODULES. The only `@/` modules imported are the allow-listed ones below.
  *   5. METADATA. `metadata` appears only as a `metadata->>'path'` extraction
  *      (E17): an audit row's metadata is never selected whole.
+ *   6. HOW A READER TOUCHES THE DATABASE IS ALLOW-ONLY (loop-back 2: the deny
+ *      patterns above were beaten three more ways, so the property is now stated
+ *      as the forms that are permitted, and everything else is an offender):
+ *        - a relative import must be a `./` sibling; any path that leaves the
+ *          directory (or climbs with `..`) is an offender, as is any bare module
+ *          other than `server-only` and `drizzle-orm`;
+ *        - `.query.` / `["query"]` access is an offender: readers use the query
+ *          builder or `sql` only, because `getPlatformDb()` carries the whole
+ *          schema (`schema.ts` re-exports `./domain`) on its relational API;
+ *        - the first argument of `.from(` and of every `...Join(` / `.join(` must
+ *          be an identifier bound directly by an allow-listed table import; a
+ *          `sql` fragment, member expression, call or local alias is an offender
+ *          (`sql.join(` builds a fragment list, not a table, and is exempt);
+ *        - a db handle comes from `getPlatformDb` in `@/lib/db` and nowhere else:
+ *          `drizzle(`, `neon(`, `new Pool(` and `new Client(` are offenders.
  * The allow-list covers the Increment 2 cards as well as Increment 1's subset,
  * because they share this directory (the Phase 2 list, not Increment 1's).
  *
@@ -34,6 +49,11 @@
  * pinned below (E20). Accepted residual (`paper`): nothing prevents a future
  * reader from reading a tenant table outside this directory; this scan, review
  * and the retrospective are the controls.
+ *
+ * ACCEPTED RESIDUAL OF THE SCAN ITSELF (`paper`): it reads source text. It cannot
+ * see a computed property access (`db[key]`), a table reached through a value
+ * produced elsewhere, or an allow-listed module (`@/lib/sites`, `@/lib/flags`,
+ * ...) that itself reaches a tenant table.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -136,15 +156,19 @@ function importStatements(code: string): ImportStatement[] {
   return out;
 }
 
-/** The names a `{ ... }` clause imports (before any `as`). */
-function namedImports(clause: string): string[] {
+/** The `{ imported as local }` pairs of a clause. `local` is the identifier the file then uses. */
+function namedBindings(clause: string): { imported: string; local: string }[] {
   const braces = clause.match(/\{([^}]*)\}/);
   if (!braces) return [];
   return braces[1]!
     .split(",")
-    .map((part) => part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]!.trim())
-    .filter(Boolean);
+    .map((part) => part.trim().replace(/^type\s+/, "").split(/\s+as\s+/).map((n) => n.trim()))
+    .filter((names) => names[0])
+    .map((names) => ({ imported: names[0]!, local: names[1] ?? names[0]! }));
 }
+
+/** The names a `{ ... }` clause imports (before any `as`). */
+const namedImports = (clause: string): string[] => namedBindings(clause).map((b) => b.imported);
 
 /**
  * Everything wrong with how the code reaches `@/lib/db/**`: a namespace, default,
@@ -215,6 +239,70 @@ function sqlTables(code: string): string[] {
   return tables;
 }
 
+/** The only bare (package) modules a reader may import. A driver, a pool or a second client is not on this list. */
+const ALLOWED_BARE_MODULES = ["server-only", "drizzle-orm"] as const;
+
+/**
+ * Every import whose path is relative and is not a `./name` sibling, and every bare
+ * module that is not allow-listed. `@/` paths are `aliasImports`' job. A relative
+ * path out of the directory reaches `src/lib/db/**` with no `@/` for anything to see.
+ */
+function moduleSpecOffenders(code: string): string[] {
+  const out: string[] = [];
+  for (const { spec } of importStatements(code)) {
+    if (spec.startsWith(".")) {
+      if (!/^\.\/[\w$.-]+$/.test(spec) || spec.includes("..")) out.push(`relative import ${spec}`);
+    } else if (!spec.startsWith("@/") && !(ALLOWED_BARE_MODULES as readonly string[]).includes(spec)) {
+      out.push(`bare module ${spec}`);
+    }
+  }
+  return out;
+}
+
+/** `.query` as a property, by dot, optional chain or a literal bracket key: the relational API reaches every table in the schema. */
+function queryApiAccess(code: string): string[] {
+  const dotted = [...code.matchAll(/(?:\?\.|\.)\s*query\b/g)];
+  const bracketed = [...code.matchAll(/\[\s*["'`]query["'`]\s*\]/g)];
+  return [...dotted, ...bracketed].map(() => ".query access");
+}
+
+/** The local identifiers a file has bound, by import, to an allow-listed table. */
+function tableBindings(code: string): Set<string> {
+  const bound = new Set<string>();
+  for (const { clause, spec, dynamic } of importStatements(code)) {
+    if (dynamic || !isTableModule(spec)) continue;
+    for (const { imported, local } of namedBindings(clause)) {
+      if ((ALLOWED_TABLES_IMPORT as readonly string[]).includes(imported)) bound.add(local);
+    }
+  }
+  return bound;
+}
+
+const BUILDER_TABLE_CALL = /\??\.\s*(from|join|[a-z]*Join[A-Za-z]*)\s*\(\s*/g;
+
+/**
+ * Every `.from(` / `.xxxJoin(` / `.join(` whose first argument is not a bare
+ * identifier bound by an allow-listed table import. `sql.join(` is the one
+ * exemption: it joins fragments in a list, it is not a table position.
+ */
+function builderTableOffenders(code: string): string[] {
+  const bound = tableBindings(code);
+  const out: string[] = [];
+  for (const m of code.matchAll(BUILDER_TABLE_CALL)) {
+    const receiver = code.slice(0, m.index!).match(/([\w$]*)\s*$/)![1];
+    if (m[1] === "join" && receiver === "sql") continue;
+    const rest = code.slice(m.index! + m[0].length);
+    const arg = rest.match(/^([\w$]+)\s*(?=[,)])/);
+    if (!arg || !bound.has(arg[1]!)) out.push(`builder table argument .${m[1]}(${rest.slice(0, 24).replace(/\s+/g, " ")}`);
+  }
+  return out;
+}
+
+/** A db handle built in the reader rather than taken from `getPlatformDb`. */
+function dbHandleOffenders(code: string): string[] {
+  return [...code.matchAll(/\b(?:drizzle|neon)\s*\(|\bnew\s+(?:Pool|Client)\s*\(/g)].map((m) => `db handle ${m[0].replace(/\s+/g, " ")}`);
+}
+
 function presbyFunctions(code: string): string[] {
   return [...code.matchAll(/\bpresby_[a-z0-9_]+/g)].map((m) => m[0]);
 }
@@ -243,6 +331,10 @@ function offenders(code: string): string[] {
     ...presbyFunctions(code).filter((f) => !(ALLOWED_FUNCTIONS as readonly string[]).includes(f)).map((f) => `function ${f}`),
     ...aliasImports(code).filter((s) => !moduleAllowed(s)).map((s) => `module ${s}`),
     ...bareMetadata(code).map(() => "metadata"),
+    ...moduleSpecOffenders(code),
+    ...queryApiAccess(code),
+    ...builderTableOffenders(code),
+    ...dbHandleOffenders(code),
   ];
 }
 
@@ -297,11 +389,82 @@ describe("the scan is not vacuous", () => {
     expect(offenders(code).some((o) => /officer_terms|officerTerms|@\/lib\/db|\$\{\}/.test(o))).toBe(true);
   });
 
+  // QA's run-2 mutation table (M6-M8) and further evasions of the same class. These
+  // are not table names or import shapes the scan could list: they are other ways to
+  // hand the platform connection a tenant table. The scan is ALLOW-ONLY for how a
+  // reader touches the database, so each must be reported by the rule that names the
+  // allowed form, with the label asserted so it is not caught by accident of another.
+  it.each([
+    [
+      "M6: a relative import that leaves the directory",
+      `import { getPlatformDb } from "@/lib/db";\nimport { officerTerms } from "../../db/domain/officers";\nexport const r = () => getPlatformDb().select().from(officerTerms);`,
+      /^relative import \.\.\/\.\.\/db\/domain\/officers/,
+    ],
+    [
+      "M7: the relational query API, no import and no SQL text",
+      `import { getPlatformDb } from "@/lib/db";\nexport const r = () => getPlatformDb().query.officerTerms.findMany({ columns: { id: true } });`,
+      /^\.query access/,
+    ],
+    [
+      "M8: a sql fragment as the query builder's table",
+      "import { getPlatformDb } from \"@/lib/db\";\nimport { sql } from \"drizzle-orm\";\nexport const r = () => getPlatformDb().select({ n: count() }).from(sql`officer_terms`);",
+      /^builder table argument \.from\(sql`/,
+    ],
+    [
+      "a sql fragment as a joined table",
+      "export const r = () => getPlatformDb().select().from(organizations).leftJoin(sql`officer_terms`, sql`true`);",
+      /^builder table argument \.leftJoin\(sql`/,
+    ],
+    [
+      "a local alias of an allowed table (the binding is no longer an import)",
+      `import { organizations } from "@/lib/db/schema";\nconst t = pick() ?? organizations;\nexport const r = () => getPlatformDb().select().from(t);`,
+      /^builder table argument \.from\(t\)/,
+    ],
+    [
+      "a member expression as the builder's table",
+      `import { organizations } from "@/lib/db/schema";\nexport const r = () => getPlatformDb().select().from(tables.officerTerms);`,
+      /^builder table argument \.from\(tables\.officerTerms/,
+    ],
+    ["bracket access to the relational query API", `export const r = () => getPlatformDb()["query"].officerTerms.findFirst();`, /^\.query access/],
+    ["optional-chained .query access", `export const r = () => getPlatformDb()?.query.officerTerms.findFirst();`, /^\.query access/],
+    [
+      "a dynamic relative require",
+      `export const load = () => require("../../db/domain/officers");`,
+      /^relative import \.\.\/\.\.\/db\/domain\/officers/,
+    ],
+    [
+      "a sibling-looking relative path that climbs out and back in",
+      `import { x } from "./../read-card";`,
+      /^relative import \.\/\.\.\/read-card/,
+    ],
+    [
+      "a second connection built from a driver import",
+      `import { Pool } from "@neondatabase/serverless";\nexport const pool = new Pool({ connectionString: "x" });`,
+      /^bare module @neondatabase\/serverless/,
+    ],
+    [
+      "a drizzle() handle built in the reader",
+      `import { drizzle } from "drizzle-orm/neon-serverless";\nexport const d = drizzle(somePool);`,
+      /^db handle drizzle\(/,
+    ],
+    ["a drizzle() handle with no import in view", `export const d = drizzle(somePool);`, /^db handle drizzle\(/],
+  ])("reports %s", (_form, code, label) => {
+    expect(offenders(code).some((o) => label.test(o))).toBe(true);
+  });
+
   it("does not report the idioms the real readers use", () => {
     expect(
       offenders(
         `import { getPlatformDb } from "@/lib/db";\nimport { organizations } from "@/lib/db/schema";\nimport { sql } from "drizzle-orm";\n` +
-          "export const q = sql`select 1 from organizations o left join audit_events a on a.resource_id = o.id`;",
+          "export const q = sql`select 1 from organizations o left join audit_events a on a.resource_id = o.id`;\n" +
+          "export const j = sql.join([sql`a`, sql`b`], sql`, `);",
+      ),
+    ).toEqual([]);
+    // The query builder is allowed when its tables are imported allow-listed tables, aliased or not.
+    expect(
+      offenders(
+        `import { organizations, auditEvents as events } from "@/lib/db/schema";\nimport { read } from "./read-card";\nimport "server-only";\n` +
+          `export const r = () => getPlatformDb().select().from(organizations).leftJoin(\n  events,\n  eq(events.resourceId, organizations.id),\n);`,
       ),
     ).toEqual([]);
   });
@@ -338,6 +501,22 @@ describe("R7b: dashboard readers reach platform-axis tables only", () => {
         .map((spec) => `${rel(f)}: ${spec}`),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("imports are `./` siblings, `@/` allow-listed modules, or server-only and drizzle-orm", () => {
+    expect(FILES.flatMap((f) => moduleSpecOffenders(read(f)).map((o) => `${rel(f)}: ${o}`))).toEqual([]);
+  });
+
+  it("no reader uses the relational query API", () => {
+    expect(FILES.flatMap((f) => queryApiAccess(read(f)).map((o) => `${rel(f)}: ${o}`))).toEqual([]);
+  });
+
+  it("every query-builder table argument is an identifier bound by an allow-listed table import", () => {
+    expect(FILES.flatMap((f) => builderTableOffenders(read(f)).map((o) => `${rel(f)}: ${o}`))).toEqual([]);
+  });
+
+  it("no reader builds its own db handle", () => {
+    expect(FILES.flatMap((f) => dbHandleOffenders(read(f)).map((o) => `${rel(f)}: ${o}`))).toEqual([]);
   });
 
   it("metadata appears only as a metadata->>'path' extraction (E17)", () => {

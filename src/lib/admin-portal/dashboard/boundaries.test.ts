@@ -41,15 +41,17 @@
  *   7. RAW SQL IS ALLOW-ONLY OVER A CLOSED NAME SET (loop-back 3: a parser of table
  *      positions was beaten four ways, N02 and N05-N07). The set is every
  *      `pgTable("...")` in `src/lib/db/schema.ts` and `src/lib/db/domain/**`, read
- *      at test time. In the UNSTRIPPED text of every string and template literal
- *      (any `sql` alias, any string handed to `execute`; only the `readCard("key"`
- *      key is exempt), any identifier token that is a real table name outside the
- *      allow-list is an offender, wherever it sits: after `from`, `join`, `table`, a
- *      comma, a parenthesis, a comment, a cast, quoted or not, any case. It fails
- *      closed: a column sharing a tenant table's name is reported too. `.raw(` is
- *      allowed only with a single string literal (no `+`, no interpolation).
- * The allow-list covers the Increment 2 cards as well as Increment 1's subset,
- * because they share this directory (the Phase 2 list, not Increment 1's).
+ *      at test time. In every string and template literal, as JavaScript reads it
+ *      (escapes decoded; regex-classified text included), any identifier token that
+ *      is a real table name outside the allow-list is an offender, wherever it sits:
+ *      after `from`, `join`, `table`, a comma, a parenthesis, a comment, a cast,
+ *      quoted or not, any case. It fails closed: a column sharing a tenant table's
+ *      name is reported too. `.raw(` and `.identifier(` are allowed only with a
+ *      single string literal (no `+`, no interpolation, no variable). The one
+ *      exempt literal is the key in `readCard("key", ...)`, and only in a file that
+ *      imports `readCard` from `./read-card` and binds the name nowhere else
+ *      (loop-back 4: P08b escapes, P09/P10 a shadowed `readCard` reaching
+ *      `sql.identifier(name)`, P11 a slash after `n++` read as a regex).
  *
  * THE ONE RECORDED EXCEPTION (DECISION-252, F276, operator ruling Q8). "Required
  * but not enrolled" resolves through `people` and `memberships`. That predicate
@@ -60,12 +62,17 @@
  * reader from reading a tenant table outside this directory; this scan, review
  * and the retrospective are the controls.
  *
- * ACCEPTED RESIDUAL OF THE SCAN ITSELF (`paper`): it reads source text. It cannot
- * see a computed property access (`db[key]`), a table name assembled at runtime
- * instead of written in a literal (JS concatenation into a variable that reaches
- * `execute`, or SQL-side assembly such as `format()`, `||` on string pieces or a
- * `U&"..."` escape), or an allow-listed module (`@/lib/sites`, `@/lib/flags`, ...)
- * or a helper outside the directory that itself reaches a tenant table.
+ * ACCEPTED RESIDUAL OF THE SCAN ITSELF (`paper`). This scan guards against a
+ * CARELESS reader written in this directory's idioms, not a deliberately evasive
+ * one; it reads source text and cannot see: (1) a computed property access
+ * (`db[key]`); (2) a table name assembled at runtime rather than written in a
+ * literal, in JavaScript (concatenation into a variable that reaches `execute`) or
+ * in SQL (`format()`, `||` on string pieces, a `U&"..."` escape); (3) a helper
+ * module outside the directory, including any allow-listed `@/lib/*` module, that
+ * itself reads a tenant table; (4) a reader written to evade a source-text scan:
+ * an escape trick the decoder does not model, a shadowed helper, or an expression
+ * that misleads the scanner's own tokenizer. Review and the retrospective are the
+ * control for all four, as for readers outside the directory.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -266,23 +273,63 @@ const REAL_TABLES = realTableNames();
 /** Real tables a dashboard reader may not name in any literal. Position, quoting, case and comments do not matter. */
 const FORBIDDEN_TABLES: ReadonlySet<string> = new Set([...REAL_TABLES].filter((t) => !(ALLOWED_TABLES_SQL as readonly string[]).includes(t)));
 
+/** What JavaScript makes of a literal's source text: `\xHH`, `\uHHHH`, `\u{H+}`, `\n`-style and `\c` escapes, line continuations. */
+function decodeJsEscapes(text: string): string {
+  const simple: Record<string, string> = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0" };
+  return text.replace(/\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|(\r\n|[\s\S]))/g, (_m, x, braced, u, c) => {
+    const hex: string | undefined = x ?? braced ?? u;
+    if (hex !== undefined) {
+      const cp = parseInt(hex, 16);
+      return cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+    }
+    if (c === "\n" || c === "\r\n" || c === "\r") return "";
+    return simple[c] ?? c;
+  });
+}
+
+/**
+ * True only when the file imports `readCard` from `./read-card` and nothing else binds
+ * the name: every other occurrence is a plain call `readCard(`, none is a declaration
+ * (`function readCard`, `const readCard = ...`), a member (`x.readCard`) or text in a
+ * literal. Fails closed (a doubtful file loses the exemption, never gains it).
+ */
+function readCardKeysExempt(src: string): boolean {
+  const clean = stripComments(src);
+  const bound = importStatements(clean)
+    .filter((st) => !st.dynamic)
+    .flatMap((st) => namedBindings(st.clause).filter((b) => b.local === "readCard").map((b) => ({ ...b, spec: st.spec })));
+  if (bound.length !== 1 || bound[0]!.spec !== "./read-card" || bound[0]!.imported !== "readCard") return false;
+  const body = clean.replace(new RegExp(String.raw`\b(?:import|export)\s+(?:type\s+)?(?:${CLAUSE})\s*from\s*["'][^"']+["']`, "g"), "");
+  for (const m of body.matchAll(/\breadCard\b/g)) {
+    const before = body.slice(0, m.index!);
+    const after = body.slice(m.index! + m[0].length);
+    if (!/^\s*\(/.test(after) || /(?:\bfunction\s+|[.\w$])$/.test(before)) return false;
+  }
+  return true;
+}
+
 /**
  * Splits TypeScript source into (a) `code`: comments removed, every string and
  * template literal replaced by a placeholder (`"STR"` for a literal with no
  * interpolation, `` `TPL` `` otherwise), and (b) `literals`: the UNSTRIPPED text of
- * every string and template literal, interpolations marked `${}`. Comments are
- * skipped by the scanner, so a `/* ... *\/` inside SQL text is kept. EVERY literal is
- * SQL text for this purpose (an alias of `sql`, a string handed to `execute`, a
- * variable later passed on), except the first argument of `readCard(`. A quote that
- * is not closed on its own line is code (JSX text), not a literal.
+ * every string and template literal AS JAVASCRIPT READS IT (escapes decoded),
+ * interpolations marked `${}`. Comments are skipped by the scanner, so a
+ * `/* ... *\/` inside SQL text is kept. EVERY literal is SQL text for this purpose
+ * (an alias of `sql`, a string handed to `execute`, a variable later passed on),
+ * except the first argument of `readCard(` in a file where that is the real
+ * `./read-card` import. The text of anything classed as a regex literal is a
+ * literal too, so a misread slash can never hide a name. A quote that is not
+ * closed on its own line is code (JSX text), not a literal.
  */
 function scanSource(src: string): { code: string; literals: string[] } {
   const literals: string[] = [];
+  const keysExempt = readCardKeysExempt(src);
   let code = "";
   let i = 0;
 
   const regexAllowed = () => {
     const tail = code.trimEnd();
+    if (/(?:\+\+|--)$/.test(tail)) return false; // `n++ / 2` is a division
     return tail === "" || /[(,=:[!&|?{};+\-*%<>~^]$/.test(tail) || /\breturn$/.test(tail);
   };
 
@@ -302,7 +349,7 @@ function scanSource(src: string): { code: string; literals: string[] } {
       } else text += src[i++];
     }
     i++;
-    literals.push(text);
+    literals.push(decodeJsEscapes(text));
     return interpolated ? "`TPL`" : '"STR"';
   }
 
@@ -323,12 +370,14 @@ function scanSource(src: string): { code: string; literals: string[] } {
         while (j < src.length && src[j] !== c && src[j] !== "\n") j += src[j] === "\\" ? 2 : 1;
         if (src[j] === c) {
           // The one literal that is not SQL text is a card key: `readCard("accounts", ...)`.
-          if (!/\breadCard\s*\(\s*$/.test(code)) literals.push(src.slice(i + 1, j));
+          if (!(keysExempt && /\breadCard\s*\(\s*$/.test(code))) literals.push(decodeJsEscapes(src.slice(i + 1, j)));
           code += '"STR"';
           i = j + 1;
         } else code += src[i++];
       } else if (c === "`") {
-        code += readTemplate();
+        // Not `code += readTemplate()`: that reads `code` first and would drop what the interpolations append.
+        const placeholder = readTemplate();
+        code += placeholder;
       } else if (c === "/" && regexAllowed()) {
         let j = i + 1;
         let inClass = false;
@@ -338,7 +387,9 @@ function scanSource(src: string): { code: string; literals: string[] } {
           else if (src[j] === "]") inClass = false;
           j++;
         }
-        if (src[j] === "/") {
+        // A "regex" holding a quote or backtick is a misread division: rescan it as code.
+        if (src[j] === "/" && !/["'`]/.test(src.slice(i + 1, j))) {
+          literals.push(src.slice(i + 1, j));
           j++;
           while (/[a-z]/.test(src[j] ?? "")) j++;
           code += "/RE/";
@@ -382,11 +433,16 @@ function closedNameOffenders(src: string): string[] {
   return out;
 }
 
-/** `.raw` is allowed only as `.raw("a single string literal")`; `sql[...]` is not a way around it. */
+/**
+ * `.raw` and `.identifier` (the two drizzle calls that turn a string into SQL text or a
+ * name) are allowed only with a single string literal, so the literal is what the
+ * closed-name rule reads. `sql[...]` is not a way around it.
+ */
 function rawCallOffenders(src: string): string[] {
   const { code } = scanSource(src);
   return [
     ...[...code.matchAll(/\.\s*raw\b(?!\s*\(\s*"STR"\s*\))/g)].map(() => "sql.raw argument is not a single string literal"),
+    ...[...code.matchAll(/\.\s*identifier\b(?!\s*\(\s*"STR"\s*\))/g)].map(() => "sql.identifier argument is not a single string literal"),
     ...[...code.matchAll(/\bsql\s*\[/g)].map(() => "sql.raw argument via bracket access"),
   ];
 }
@@ -508,8 +564,18 @@ describe("the scan is not vacuous", () => {
     expect(FORBIDDEN_TABLES.has("officer_terms")).toBe(true);
     expect(FORBIDDEN_TABLES.has("audit_events")).toBe(false);
     // The scanner skips comments and regex literals but keeps SQL-comment text inside a literal.
-    expect(scanSource("a /* c */ // d\nb('x' + `y${z('w')}`, /'/.test(q), `from/**/t`)").literals).toEqual(["x", "w", "y ${} ", "from/**/t"]);
-    expect(scanSource(`readCard("accounts", async () => 1); const k = "feedback";`).literals).toEqual(["feedback"]);
+    expect(scanSource("a /* c */ // d\nb('x' + `y${z('w')}`, /q/.test(q), `from/**/t`)").literals).toEqual(["x", "w", "y ${} ", "q", "from/**/t"]);
+    const exempt = (body: string) => `import { readCard } from "./read-card";\n${body}`;
+    // (the import's own specifier is the first literal)
+    expect(scanSource(exempt(`readCard("accounts", async () => 1); const k = "feedback";`)).literals).toEqual(["./read-card", "feedback"]);
+    expect(scanSource(`readCard("accounts", async () => 1);`).literals).toEqual(["accounts"]);
+    expect(scanSource(exempt(`const readCard = run; readCard("accounts");`)).literals).toEqual(["./read-card", "accounts"]);
+    // Code inside a template interpolation is part of the code the call rules see.
+    expect(scanSource("sql`a ${sql.identifier(n)} b`").code).toContain("sql.identifier(n)");
+    expect(scanSource(exempt(`x.readCard("accounts");`)).literals).toEqual(["./read-card", "accounts"]);
+    expect(scanSource('const a = "officer\\u005fterms", b = "\\x6f\\u{6f}";').literals).toEqual(["officer_terms", "oo"]);
+    // A slash after ++ or -- divides; a "regex" holding a quote is rescanned as code.
+    expect(scanSource("const z = n++ / 2; const s = `table t`; const w = z / 1;").literals).toEqual(["table t"]);
     expect(dbImportOffenders(`import { people, users as u, type Foo } from "@/lib/db/domain/people";`)).toEqual([
       "@/lib/db/domain/people: people",
       "@/lib/db/domain/people: Foo",
@@ -639,6 +705,57 @@ describe("the scan is not vacuous", () => {
     expect(offenders(code).some((o) => label.test(o))).toBe(true);
   });
 
+  // QA run 4 (P08b-P11): the table's name is written in a literal, but the scan was
+  // looking at the wrong text (an escape not yet decoded), trusting a name (`readCard`),
+  // accepting an unchecked name-maker (`sql.identifier(name)`), or mis-tokenising.
+  it.each([
+    [
+      "P08b: a JavaScript escape inside a literal",
+      "export const q = sql.raw('select count(*) from (officer\\u005fterms t cross join organizations o)');",
+      /^table name officer_terms/,
+    ],
+    ["a \\x escape inside a literal", "export const q = sql`select count(*) from officer\\x5fterms`;", /^table name officer_terms/],
+    ["a \\u{...} escape inside a literal", "export const q = sql`table officer\\u{5f}terms`;", /^table name officer_terms/],
+    [
+      "P09: a local readCard that takes a table name (its key is no longer exempt)",
+      'function readCard(name) { return sql`select count(*) as n from `.append(sql`${sql.identifier(name)}`); }\nexport const c = readCard("officer_terms");',
+      /^table name officer_terms/,
+    ],
+    [
+      "P09: the same local readCard reaches sql.identifier(name)",
+      'function readCard(name) { return sql`select count(*) as n from `.append(sql`${sql.identifier(name)}`); }\nexport const c = readCard("officer_terms");',
+      /^sql\.identifier argument/,
+    ],
+    [
+      "P10: readCard rebound to another function",
+      'import { sql } from "drizzle-orm";\nconst readCard = run;\nexport const c = readCard("officer_terms");',
+      /^table name officer_terms/,
+    ],
+    [
+      "P10: sql.identifier(name) inside sql.join",
+      "export const q = sql.join([sql`select count(*) as n from`, sql.identifier(name)], sql` `);",
+      /^sql\.identifier argument/,
+    ],
+    [
+      "readCard imported from somewhere other than ./read-card",
+      'import { readCard } from "./elsewhere";\nexport const c = readCard("officer_terms");',
+      /^table name officer_terms/,
+    ],
+    [
+      "P11: a slash after n++ is division, not a regex",
+      "const z = n++ / 2; export const q = () => getPlatformDb().execute(sql`table officer_terms`); export const w = z / 1;",
+      /^table name officer_terms/,
+    ],
+    [
+      "P11b: a slash after n-- is division, not a regex",
+      "const z = n-- / 2; export const q = () => getPlatformDb().execute(sql`table officer_terms`); export const w = z / 1;",
+      /^table name officer_terms/,
+    ],
+    ["a regex literal that spells the table", "export const re = /officer_terms/;", /^table name officer_terms/],
+  ])("reports %s", (_form, code, label) => {
+    expect(offenders(code).some((o) => label.test(o))).toBe(true);
+  });
+
   it("does not report the idioms the real readers use", () => {
     expect(
       offenders(
@@ -647,6 +764,9 @@ describe("the scan is not vacuous", () => {
           "export const j = sql.join([sql`a`, sql`b`], sql`, `);",
       ),
     ).toEqual([]);
+    // A card key is exempt only in a file that imports readCard from ./read-card and binds it nowhere else.
+    expect(offenders(`import { readCard } from "./read-card";\nexport const c = () => readCard("accounts", async () => 1);`)).toEqual([]);
+    expect(offenders("export const i = sql.identifier(\"organizations\");")).toEqual([]);
     // The query builder is allowed when its tables are imported allow-listed tables, aliased or not.
     expect(
       offenders(
